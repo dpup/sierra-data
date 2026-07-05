@@ -22,12 +22,12 @@ type Cache struct {
 // CacheEntry represents a cached item with metadata
 // Structure per data-model.md lines 227-241
 type CacheEntry struct {
-	Key             string    `json:"key"`
-	Data            []byte    `json:"data"`
-	CreatedAt       time.Time `json:"created_at"`
-	ExpiresAt       time.Time `json:"expires_at"`
+	Key             string        `json:"key"`
+	Data            []byte        `json:"data"`
+	CreatedAt       time.Time     `json:"created_at"`
+	ExpiresAt       time.Time     `json:"expires_at"`
 	RefreshInterval time.Duration `json:"refresh_interval"`
-	Source          string    `json:"source"`
+	Source          string        `json:"source"`
 }
 
 // NewCache creates a new in-memory cache
@@ -57,7 +57,7 @@ func (c *Cache) Set(key string, data interface{}, refreshInterval time.Duration,
 
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-	
+
 	c.entries[key] = entry
 	return nil
 }
@@ -137,7 +137,7 @@ func (c *Cache) GetWithMetadata(key string, result interface{}) (*CacheEntry, bo
 func (c *Cache) Delete(key string) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-	
+
 	delete(c.entries, key)
 }
 
@@ -145,7 +145,7 @@ func (c *Cache) Delete(key string) {
 func (c *Cache) Clear() {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-	
+
 	c.entries = make(map[string]*CacheEntry)
 }
 
@@ -177,7 +177,7 @@ func (c *Cache) Stats() CacheStats {
 		} else {
 			stats.FreshEntries++
 		}
-		
+
 		// Update oldest/newest
 		if stats.OldestEntry.IsZero() || entry.CreatedAt.Before(stats.OldestEntry) {
 			stats.OldestEntry = entry.CreatedAt
@@ -190,7 +190,10 @@ func (c *Cache) Stats() CacheStats {
 	return stats
 }
 
-// CleanupStale removes all stale entries from cache
+// CleanupStale removes entries that are past the very-stale threshold
+// (2x refresh interval). Merely-stale entries are kept: services serve them as
+// a fallback when an upstream refresh fails, so removing at ExpiresAt would
+// silently break that fallback window.
 func (c *Cache) CleanupStale() int {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
@@ -199,7 +202,7 @@ func (c *Cache) CleanupStale() int {
 	var removed int
 
 	for key, entry := range c.entries {
-		if now.After(entry.ExpiresAt) {
+		if now.After(entry.CreatedAt.Add(entry.RefreshInterval * 2)) {
 			delete(c.entries, key)
 			removed++
 		}
@@ -208,7 +211,9 @@ func (c *Cache) CleanupStale() int {
 	return removed
 }
 
-// StartPeriodicCleanup starts a goroutine that periodically cleans up stale entries
+// StartPeriodicCleanup starts a goroutine that periodically evicts very-stale
+// entries, bounding memory for keys that are never overwritten (e.g. the
+// content-hash AI-enhancement entries). Stops when ctx is cancelled.
 func (c *Cache) StartPeriodicCleanup(ctx context.Context, interval time.Duration) {
 	go func() {
 		defer func() {
@@ -225,25 +230,40 @@ func (c *Cache) StartPeriodicCleanup(ctx context.Context, interval time.Duration
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
-		for range ticker.C {
-			removed := c.CleanupStale()
-			if removed > 0 {
-				// Log cleanup activity (placeholder)
-				_ = removed
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if removed := c.CleanupStale(); removed > 0 {
+					logging.Infow(ctx, "Cache cleanup removed very-stale entries", "removed", removed)
+				}
 			}
 		}
 	}()
 }
 
-// CacheStats provides cache usage statistics
-type CacheStats struct {
-	TotalEntries  int
-	FreshEntries  int
-	StaleEntries  int
-	OldestEntry   time.Time
-	NewestEntry   time.Time
+// Backdate shifts an entry's timestamps into the past by d, as if it had been
+// written that long ago. Test helper for exercising stale/very-stale paths
+// deterministically; not for production use.
+func (c *Cache) Backdate(key string, d time.Duration) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	if entry, ok := c.entries[key]; ok {
+		entry.CreatedAt = entry.CreatedAt.Add(-d)
+		entry.ExpiresAt = entry.ExpiresAt.Add(-d)
+	}
 }
 
+// CacheStats provides cache usage statistics
+type CacheStats struct {
+	TotalEntries int
+	FreshEntries int
+	StaleEntries int
+	OldestEntry  time.Time
+	NewestEntry  time.Time
+}
 
 // Simplified Content-Based Caching Methods
 // These replace the complex incident processing infrastructure
@@ -257,13 +277,13 @@ func (c *Cache) SetEnhancedAlert(contentHash string, enhanced interface{}, ttl t
 // GetEnhancedAlert retrieves a cached enhanced alert by content hash
 func (c *Cache) GetEnhancedAlert(contentHash string) (interface{}, bool, error) {
 	key := fmt.Sprintf("enhanced_alert:%s", contentHash)
-	
+
 	var enhanced interface{}
 	found, err := c.Get(key, &enhanced)
 	if err != nil {
 		return nil, false, err
 	}
-	
+
 	return enhanced, found, nil
 }
 

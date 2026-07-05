@@ -50,12 +50,6 @@ type ScannerFeed struct {
 	Agency       string `koanf:"agency"`
 }
 
-// RefreshConfig holds common refresh timing settings
-type RefreshConfig struct {
-	RefreshInterval time.Duration `koanf:"refreshInterval"`
-	StaleThreshold  time.Duration `koanf:"staleThreshold"`
-}
-
 // Client configurations - moved to top level
 type GoogleRoutesClient struct {
 	APIKey string `koanf:"apiKey"`
@@ -78,7 +72,6 @@ type RoadsConfig struct {
 	MonitoredRoads  []MonitoredRoad `koanf:"monitoredRoads"`
 	IncidentAreas   []IncidentArea  `koanf:"incidentAreas"`
 	RefreshInterval time.Duration   `koanf:"refreshInterval"`
-	StaleThreshold  time.Duration   `koanf:"staleThreshold"`
 }
 
 // IncidentArea defines a named geographic region for the region-wide incidents
@@ -129,10 +122,11 @@ type MonitoredRoad struct {
 
 // WeatherConfig holds weather monitoring configuration
 type WeatherConfig struct {
-	Locations       []WeatherLocation `koanf:"locations"`
-	NWS             NWSConfig         `koanf:"nws"`
-	RefreshInterval time.Duration     `koanf:"refreshInterval"`
-	StaleThreshold  time.Duration     `koanf:"staleThreshold"`
+	Locations []WeatherLocation `koanf:"locations"`
+	NWS       NWSConfig         `koanf:"nws"`
+	// RefreshInterval is the cache TTL; entries are servable-stale until 2x
+	// this value (the "very stale" bound), then eligible for eviction.
+	RefreshInterval time.Duration `koanf:"refreshInterval"`
 }
 
 // NWSConfig holds National Weather Service (api.weather.gov) settings used for
@@ -150,6 +144,10 @@ type WeatherLocation struct {
 	ID          string      `koanf:"id"`
 	Name        string      `koanf:"name"`
 	Coordinates Coordinates `koanf:"coordinates"`
+	// Zone is the NWS forecast zone containing this location (e.g. CAZ065).
+	// Per-location alerts are the NWS alerts active in this zone, so it must be
+	// one of the zones listed in weather.nws.zones or no alerts will attach.
+	Zone string `koanf:"zone"`
 }
 
 // Coordinates represents lat/lon coordinates - unified structure

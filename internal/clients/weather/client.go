@@ -93,8 +93,13 @@ func (c *Client) GetCurrentWeather(ctx context.Context, coordinates *api.Coordin
 	return c.processCurrentWeatherResponse(response)
 }
 
-// GetWeatherAlerts retrieves weather alerts using One Call API 3.0
-// Endpoint per research.md line 93
+// GetWeatherAlerts retrieves weather alerts using One Call API 3.0.
+//
+// NOT used by the server: One Call 3.0 has a 1,000 calls/day free cap, and for
+// US locations its alerts are relabeled NWS data — the server sources alerts
+// from api.weather.gov directly (see internal/services/weather_nws.go). This
+// method is kept only for the cmd/test-weather diagnostic CLI; do not wire it
+// back into a refresh path.
 func (c *Client) GetWeatherAlerts(ctx context.Context, coordinates *api.Coordinates) ([]*api.WeatherAlert, error) {
 	// Build URL for One Call API with alerts
 	params := url.Values{}

@@ -8,7 +8,7 @@ enhancement live in `internal/services`, not here.
 |------------|-----------------------|-------------------------------|-------|
 | `google`   | Google Routes API     | `PF__GOOGLE_ROUTES__API_KEY`  | Travel time + polyline. Rate-limited; callers cache aggressively (10k/mo budget). |
 | `caltrans` | quickmap.dot.ca.gov KML | none                        | Lane closures, CHP incidents, chain control. |
-| `weather`  | OpenWeatherMap        | `PF__OPENWEATHER__API_KEY`    | Current conditions + One Call alerts. |
+| `weather`  | OpenWeatherMap        | `PF__OPENWEATHER__API_KEY`    | Current conditions only. `GetWeatherAlerts` (One Call 3.0, 1,000/day cap) is CLI-diagnostic only — the server sources alerts from `nws`. |
 | `nws`      | api.weather.gov       | none (User-Agent required)    | Authoritative zone alerts + fire-weather products. |
 
 All clients accept an `HTTPDoer` interface and expose a `NewClientWithHTTPDoer`

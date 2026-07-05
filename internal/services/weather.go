@@ -2,10 +2,8 @@ package services
 
 import (
 	"context"
-	"crypto/sha256"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/dpup/prefab/logging"
 	"google.golang.org/grpc/codes"
@@ -17,7 +15,6 @@ import (
 	"github.com/dpup/info.ersn.net/server/internal/clients/nws"
 	"github.com/dpup/info.ersn.net/server/internal/clients/weather"
 	"github.com/dpup/info.ersn.net/server/internal/config"
-	"github.com/dpup/info.ersn.net/server/internal/lib/alerts"
 )
 
 // WeatherService implements the gRPC WeatherService
@@ -28,17 +25,15 @@ type WeatherService struct {
 	nwsClient     *nws.Client
 	cache         *cache.Cache
 	config        *config.Config
-	alertEnhancer alerts.WeatherAlertEnhancer
 }
 
 // NewWeatherService creates a new WeatherService
-func NewWeatherService(weatherClient *weather.Client, nwsClient *nws.Client, cache *cache.Cache, config *config.Config, alertEnhancer alerts.WeatherAlertEnhancer) *WeatherService {
+func NewWeatherService(weatherClient *weather.Client, nwsClient *nws.Client, cache *cache.Cache, config *config.Config) *WeatherService {
 	return &WeatherService{
 		weatherClient: weatherClient,
 		nwsClient:     nwsClient,
 		cache:         cache,
 		config:        config,
-		alertEnhancer: alertEnhancer,
 	}
 }
 
@@ -76,18 +71,16 @@ func (s *WeatherService) ListWeather(ctx context.Context, req *api.ListWeatherRe
 	logging.Info(ctx, "Refreshing weather data from OpenWeatherMap API")
 	weatherData, err := s.refreshWeatherData(ctx)
 	if err != nil {
-		// If refresh fails but we have stale cached data, return it
-		if found && !s.cache.IsVeryStale(cacheKey) {
+		// Refresh failed - serve stale data if it's within the very-stale bound.
+		// Get filters stale entries, so re-read with GetWithMetadata (which
+		// returns them and lets the caller decide).
+		var staleData []*api.WeatherData
+		entry, foundStale, _ := s.cache.GetWithMetadata(cacheKey, &staleData)
+		if foundStale && len(staleData) > 0 && !s.cache.IsVeryStale(cacheKey) {
 			logging.Errorw(ctx, "Refresh failed, returning stale cached weather data", "error", err)
-			entry, _, _ := s.cache.GetWithMetadata(cacheKey, nil)
-			var lastUpdated *timestamppb.Timestamp
-			if entry != nil {
-				lastUpdated = timestamppb.New(entry.CreatedAt)
-			}
-
 			return &api.ListWeatherResponse{
-				WeatherData: cachedWeatherData,
-				LastUpdated: lastUpdated,
+				WeatherData: staleData,
+				LastUpdated: timestamppb.New(entry.CreatedAt),
 				FireWeather: s.computeRegionFireWeather(ctx),
 			}, nil
 		}
@@ -159,21 +152,18 @@ func (s *WeatherService) ListWeatherAlerts(ctx context.Context, req *api.ListWea
 	}
 
 	// Cache miss or stale - refresh alerts from external API
-	logging.Info(ctx, "Refreshing weather alerts (NWS zone alerts + OpenWeatherMap)")
+	logging.Info(ctx, "Refreshing weather alerts (NWS zone alerts)")
 	alerts, err := s.refreshWeatherAlerts(ctx)
 	if err != nil {
-		// If refresh fails but we have stale cached data, return it
-		if found && !s.cache.IsVeryStale(cacheKey) {
+		// Refresh failed - serve stale alerts if within the very-stale bound.
+		// Get filters stale entries, so re-read with GetWithMetadata.
+		var staleAlerts []*api.WeatherAlert
+		entry, foundStale, _ := s.cache.GetWithMetadata(cacheKey, &staleAlerts)
+		if foundStale && !s.cache.IsVeryStale(cacheKey) {
 			logging.Errorw(ctx, "Refresh failed, returning stale cached alerts", "error", err)
-			entry, _, _ := s.cache.GetWithMetadata(cacheKey, nil)
-			var lastUpdated *timestamppb.Timestamp
-			if entry != nil {
-				lastUpdated = timestamppb.New(entry.CreatedAt)
-			}
-
 			return &api.ListWeatherAlertsResponse{
-				Alerts:      filterAlertsByZones(cachedAlerts, req.Zones),
-				LastUpdated: lastUpdated,
+				Alerts:      filterAlertsByZones(staleAlerts, req.Zones),
+				LastUpdated: timestamppb.New(entry.CreatedAt),
 			}, nil
 		}
 		return nil, fmt.Errorf("failed to refresh weather alerts: %w", err)
@@ -194,11 +184,13 @@ func (s *WeatherService) ListWeatherAlerts(ctx context.Context, req *api.ListWea
 func (s *WeatherService) refreshWeatherData(ctx context.Context) ([]*api.WeatherData, error) {
 	var weatherDataList []*api.WeatherData
 
-	// Get existing cached data to preserve on per-location failures
+	// Get existing cached data to preserve on per-location failures. The cache
+	// entry is stale by the time a refresh runs (that's what triggered it), so
+	// read via GetWithMetadata — Get filters stale entries out.
 	var existingData []*api.WeatherData
 	existingDataMap := make(map[string]*api.WeatherData)
 	cacheKey := "weather:all"
-	if found, _ := s.cache.Get(cacheKey, &existingData); found {
+	if _, found, _ := s.cache.GetWithMetadata(cacheKey, &existingData); found {
 		for _, wd := range existingData {
 			existingDataMap[wd.LocationId] = wd
 		}
@@ -238,7 +230,12 @@ func (s *WeatherService) refreshWeatherData(ctx context.Context) ([]*api.Weather
 	return weatherDataList, nil
 }
 
-// processWeatherLocation fetches weather data for a single location
+// processWeatherLocation fetches weather data for a single location.
+// Current conditions come from OpenWeatherMap; per-location alerts are the NWS
+// alerts active in the location's configured forecast zone. (OpenWeather One
+// Call alerts were dropped deliberately — for US locations they are relabeled
+// NWS data, and the One Call 3.0 endpoint's 1,000 calls/day free cap was being
+// exceeded. Don't reintroduce per-location One Call fetches.)
 func (s *WeatherService) processWeatherLocation(ctx context.Context, location config.WeatherLocation) (*api.WeatherData, error) {
 	logging.Infow(ctx, "Processing weather for location", "location_id", location.ID)
 
@@ -256,61 +253,24 @@ func (s *WeatherService) processWeatherLocation(ctx context.Context, location co
 	weatherData.LocationId = location.ID
 	weatherData.LocationName = location.Name
 
-	// Get weather alerts for this location
-	locationAlerts, err := s.weatherClient.GetWeatherAlerts(ctx, location.ToProto())
-	if err != nil {
-		logging.Errorw(ctx, "Failed to get weather alerts", "location_id", location.ID, "error", err)
-		// Continue without alerts rather than failing
-		locationAlerts = nil
-	}
-
-	// Enhance alerts with AI if enhancer is available
-	for _, alert := range locationAlerts {
-		alert.Id = fmt.Sprintf("%s_%s", location.ID, alert.Id)
-		if s.alertEnhancer != nil {
-			s.enhanceWeatherAlert(ctx, alert)
-		}
-	}
-
-	weatherData.Alerts = locationAlerts
+	// Attach the NWS alerts for this location's forecast zone. The shared NWS
+	// fetch is cached, so this is free per additional location; a transient NWS
+	// failure leaves alerts empty rather than failing current conditions.
+	weatherData.Alerts = s.nwsAlertsForZone(ctx, location.Zone)
 
 	return weatherData, nil
 }
 
-// refreshWeatherAlerts builds the combined weather-alerts list. Authoritative
-// NWS zone alerts (issue #4) are listed first, followed by OpenWeatherMap
-// per-location alerts. Each alert is tagged with its source so consumers can
-// prefer NWS.
+// refreshWeatherAlerts builds the weather-alerts list from authoritative NWS
+// zone alerts (issue #4). A NWS failure propagates as an error — callers fall
+// back to their stale cache or fail loud — rather than caching an empty list
+// that would read as "no alerts".
 func (s *WeatherService) refreshWeatherAlerts(ctx context.Context) ([]*api.WeatherAlert, error) {
-	var allAlerts []*api.WeatherAlert
-
-	// Authoritative NWS zone alerts for the service area.
-	allAlerts = append(allAlerts, nwsAlertsToProto(s.getNWSAlerts(ctx))...)
-
-	// OpenWeatherMap per-location alerts (AI-enhanced, tagged as such).
-	for _, location := range s.config.Weather.Locations {
-		locationAlerts, err := s.weatherClient.GetWeatherAlerts(ctx, location.ToProto())
-		if err != nil {
-			logging.Errorw(ctx, "Failed to get weather alerts for location", "location_id", location.ID, "error", err)
-			// Continue processing other locations even if one fails
-			continue
-		}
-
-		// Add location context to alert IDs and enhance each alert
-		for _, alert := range locationAlerts {
-			alert.Id = fmt.Sprintf("%s_%s", location.ID, alert.Id)
-			alert.Source = api.AlertSource_OPENWEATHERMAP
-
-			// Enhance the alert with AI if enhancer is available
-			if s.alertEnhancer != nil {
-				s.enhanceWeatherAlert(ctx, alert)
-			}
-		}
-
-		allAlerts = append(allAlerts, locationAlerts...)
+	nwsAlerts, err := s.fetchNWSAlerts(ctx)
+	if err != nil {
+		return nil, err
 	}
-
-	return allAlerts, nil
+	return nwsAlertsToProto(nwsAlerts), nil
 }
 
 // filterAlertsByZones constrains zone-scoped (NWS) alerts to the requested
@@ -348,85 +308,4 @@ func filterAlertsByZones(alerts []*api.WeatherAlert, zones []string) []*api.Weat
 		}
 	}
 	return out
-}
-
-// enhanceWeatherAlert enhances a single weather alert with AI-generated content
-// Uses content-based caching to avoid duplicate OpenAI calls
-func (s *WeatherService) enhanceWeatherAlert(ctx context.Context, alert *api.WeatherAlert) {
-	// Generate content hash for cache key
-	contentHash := s.hashWeatherAlertContent(alert)
-	cacheKey := fmt.Sprintf("weather_alert_enhanced:%s", contentHash)
-
-	// Check cache first
-	var cachedEnhancement alerts.EnhancedWeatherAlert
-	if found, err := s.cache.Get(cacheKey, &cachedEnhancement); err == nil && found {
-		logging.Infow(ctx, "Using cached weather alert enhancement", "hash", contentHash[:8])
-		alert.Headline = cachedEnhancement.Headline
-		alert.Summary = cachedEnhancement.Summary
-		alert.Details = cachedEnhancement.Details
-		return
-	}
-
-	// Cache miss - call OpenAI enhancement
-	logging.Infow(ctx, "Enhancing weather alert with AI", "event", alert.Event, "hash", contentHash[:8])
-
-	rawAlert := alerts.RawWeatherAlert{
-		ID:          alert.Id,
-		Event:       alert.Event,
-		SenderName:  alert.SenderName,
-		Description: alert.Description,
-		Tags:        alert.Tags,
-		Start:       unixOrZero(alert.StartTime),
-		End:         unixOrZero(alert.EndTime),
-	}
-
-	enhanced, err := s.alertEnhancer.EnhanceWeatherAlert(ctx, rawAlert)
-	if err != nil {
-		logging.Errorw(ctx, "Weather alert enhancement failed, using original", "error", err)
-		// Fall back to using original description for all fields
-		alert.Headline = alert.Event
-		alert.Summary = s.truncateText(alert.Description, 200)
-		alert.Details = alert.Description
-		return
-	}
-
-	// Apply enhancement to alert
-	alert.Headline = enhanced.Headline
-	alert.Summary = enhanced.Summary
-	alert.Details = enhanced.Details
-
-	// Cache the enhancement with 24-hour TTL
-	if err := s.cache.Set(cacheKey, enhanced, 24*time.Hour, "weather_alert_enhanced"); err != nil {
-		logging.Errorw(ctx, "Failed to cache weather alert enhancement", "error", err)
-	}
-}
-
-// hashWeatherAlertContent creates a content hash for weather alert deduplication
-func (s *WeatherService) hashWeatherAlertContent(alert *api.WeatherAlert) string {
-	// Weather alerts are identified by event type + description content
-	// Timestamps change but content stays the same for the same alert
-	contentSignature := fmt.Sprintf("%s|%s|%s",
-		alert.Event,
-		alert.SenderName,
-		alert.Description,
-	)
-	hash := sha256.Sum256([]byte(contentSignature))
-	return fmt.Sprintf("%x", hash)
-}
-
-// unixOrZero returns the unix seconds for a timestamp, or 0 if nil. Used to
-// bridge to the AI enhancer's raw-alert struct (which still uses unix seconds).
-func unixOrZero(ts *timestamppb.Timestamp) int64 {
-	if ts == nil {
-		return 0
-	}
-	return ts.AsTime().Unix()
-}
-
-// truncateText truncates text to a maximum length with ellipsis
-func (s *WeatherService) truncateText(text string, maxLen int) string {
-	if len(text) <= maxLen {
-		return text
-	}
-	return text[:maxLen-3] + "..."
 }

@@ -139,3 +139,7 @@ $RECYCLE.BIN/
 # API keys and secrets (even though they should be in env vars)
 secrets.yaml
 api-keys.yaml
+# Local dev artifacts
+server.log
+server.pid
+.claude/settings.local.json

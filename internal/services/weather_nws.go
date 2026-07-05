@@ -12,35 +12,72 @@ import (
 	"github.com/dpup/info.ersn.net/server/internal/clients/nws"
 )
 
-// getNWSAlerts returns the active NWS alerts for the configured service-area
+// fetchNWSAlerts returns the active NWS alerts for the configured service-area
 // zones, caching the raw alert list so it is fetched at most once per weather
-// refresh and shared between zone-alert listing and fire-weather classification.
-func (s *WeatherService) getNWSAlerts(ctx context.Context) []nws.Alert {
+// refresh and shared between zone-alert listing, per-location alerts, and
+// fire-weather classification. A fetch failure with no usable cache returns an
+// error so callers on the alerts path stay fail-loud (the hazards layer maps
+// that to source_status UNAVAILABLE rather than a fabricated clear state).
+func (s *WeatherService) fetchNWSAlerts(ctx context.Context) ([]nws.Alert, error) {
 	if s.nwsClient == nil || len(s.config.Weather.NWS.Zones) == 0 {
-		return nil
+		return nil, nil
 	}
 
-	cacheKey := "nws:alerts"
 	var cached []nws.Alert
-	if found, _ := s.cache.Get(cacheKey, &cached); found && !s.cache.IsStale(cacheKey) {
-		return cached
+	if found, _ := s.cache.Get(nwsAlertsCacheKey, &cached); found {
+		return cached, nil
 	}
 
 	alerts, err := s.nwsClient.GetActiveZoneAlerts(ctx, s.config.Weather.NWS.Zones)
 	if err != nil {
 		logging.Errorw(ctx, "Failed to fetch NWS zone alerts", "error", err)
-		// Fall back to stale cache rather than dropping alerts on a transient error.
-		if cached != nil {
-			return cached
-		}
-		return nil
+		return nil, fmt.Errorf("failed to fetch NWS zone alerts: %w", err)
 	}
 
-	if err := s.cache.Set(cacheKey, alerts, s.config.Weather.RefreshInterval, "nws_alerts"); err != nil {
+	if err := s.cache.Set(nwsAlertsCacheKey, alerts, s.config.Weather.RefreshInterval, "nws_alerts"); err != nil {
 		logging.Errorw(ctx, "Failed to cache NWS alerts", "error", err)
 	}
 	logging.Infow(ctx, "Fetched NWS zone alerts", "zones", s.config.Weather.NWS.Zones, "count", len(alerts))
-	return alerts
+	return alerts, nil
+}
+
+const nwsAlertsCacheKey = "nws:alerts"
+
+// getNWSAlerts is fetchNWSAlerts for consumers where alerts are supplementary
+// (fire-weather classification, per-location alerts on the current-conditions
+// path): a transient NWS failure falls back to the last-good list while it is
+// within the very-stale bound (2x refresh interval), and otherwise yields no
+// alerts rather than failing the whole response.
+func (s *WeatherService) getNWSAlerts(ctx context.Context) []nws.Alert {
+	alerts, err := s.fetchNWSAlerts(ctx)
+	if err == nil {
+		return alerts
+	}
+	var cached []nws.Alert
+	if _, found, _ := s.cache.GetWithMetadata(nwsAlertsCacheKey, &cached); found && !s.cache.IsVeryStale(nwsAlertsCacheKey) {
+		return cached
+	}
+	return nil
+}
+
+// nwsAlertsForZone filters the shared NWS alert list down to alerts active in a
+// single forecast zone, for attaching to the weather location in that zone.
+// An empty zone returns nothing (an unzoned location gets no alerts).
+func (s *WeatherService) nwsAlertsForZone(ctx context.Context, zone string) []*api.WeatherAlert {
+	zone = strings.TrimSpace(zone)
+	if zone == "" {
+		return nil
+	}
+	var out []*api.WeatherAlert
+	for _, a := range nwsAlertsToProto(s.getNWSAlerts(ctx)) {
+		for _, z := range a.Zones {
+			if strings.EqualFold(strings.TrimSpace(z), zone) {
+				out = append(out, a)
+				break
+			}
+		}
+	}
+	return out
 }
 
 // nwsAlertsToProto converts NWS alerts into API WeatherAlerts tagged with the

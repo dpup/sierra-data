@@ -6,6 +6,7 @@ import (
 	"log"
 	"log/slog"
 	"net/http"
+	"time"
 	_ "time/tzdata" // Embed the IANA tz database so America/Los_Angeles resolves in minimal containers
 
 	"github.com/dpup/prefab"
@@ -33,8 +34,11 @@ func main() {
 	// Load configuration using Prefab's config system
 	appConfig := config.LoadConfig()
 
-	// Initialize cache
+	// Initialize cache. Periodic cleanup evicts very-stale entries so keys that
+	// are never overwritten (content-hash AI-enhancement entries) don't
+	// accumulate forever.
 	cacheInstance := cache.NewCache()
+	cacheInstance.StartPeriodicCleanup(ctx, time.Hour)
 
 	// Initialize external API clients using top-level client configurations
 	googleClient := google.NewClient(appConfig.GoogleRoutes.APIKey)
@@ -50,15 +54,16 @@ func main() {
 
 	model := appConfig.OpenAI.Model
 
-	// Create OpenAI enhancers (caching is integrated directly in services)
+	// Create OpenAI enhancer (caching is integrated directly in services).
+	// Weather alerts are NWS-sourced with authoritative wording and are not
+	// AI-enhanced; only road alerts use the enhancer.
 	alertEnhancer := alerts.NewAlertEnhancer(appConfig.OpenAI.APIKey, model)
-	weatherAlertEnhancer := alerts.NewWeatherAlertEnhancer(appConfig.OpenAI.APIKey, model)
 
 	logging.Infow(ctx, "OpenAI enhancement enabled", "model", model, "caching", "content-based")
 
 	// Initialize gRPC services
 	roadsService := services.NewRoadsService(googleClient, caltransClient, cacheInstance, appConfig, alertEnhancer)
-	weatherService := services.NewWeatherService(weatherClient, nwsClient, cacheInstance, appConfig, weatherAlertEnhancer)
+	weatherService := services.NewWeatherService(weatherClient, nwsClient, cacheInstance, appConfig)
 
 	// Unified hazard/situation GeoJSON feed (re-projects the feeds above).
 	hazardsService := hazards.NewService(appConfig, roadsService, weatherService, caltransClient, cacheInstance)
@@ -169,7 +174,7 @@ for the Ebbett's Pass / Highway 4 corridor.
 
   Weather API:
     <a href="/api/v1/weather">GET /api/v1/weather</a>             - Current weather + fire-weather state
-    <a href="/api/v1/weather/alerts">GET /api/v1/weather/alerts</a>      - NWS zone alerts + OpenWeatherMap alerts
+    <a href="/api/v1/weather/alerts">GET /api/v1/weather/alerts</a>      - Active NWS zone alerts
     <a href="/api/v1/weather/alerts?zones=CAZ064,CAZ065,CAZ258,CAZ259">GET /api/v1/weather/alerts?zones=...</a> - Filter to NWS forecast zones
 
   Hazards API (unified GeoJSON for map clients):
@@ -185,7 +190,7 @@ for the Ebbett's Pass / Highway 4 corridor.
 <span class="header">Data Sources:</span>
   • Google Routes API               - Traffic conditions and travel times
   • Caltrans KML Feeds              - Lane closures, CHP incidents, chain control
-  • OpenWeatherMap API              - Weather conditions and alerts
+  • OpenWeatherMap API              - Current weather conditions
   • National Weather Service        - Zone alerts and fire-weather products
   • USGS (FDSN)                     - Earthquakes
   • CAL FIRE + NIFC WFIGS           - Active wildfires and perimeters

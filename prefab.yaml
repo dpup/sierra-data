@@ -54,8 +54,7 @@ roads:
   # Google Routes calls are gated by a 45m per-road cache (see roads.go), not this
   # interval, to stay under the Compute Routes Pro free tier (5,000/month). The
   # request uses TRAFFIC_AWARE_OPTIMAL (Pro) but NOT traffic-on-polyline (Enterprise).
-  refreshInterval: "15m"
-  staleThreshold: "30m"   # Increased to accept slightly stale data
+  refreshInterval: "15m"  # Cache TTL; stale data is servable until 2x this, then evicted.
   
   caltransFeeds:
     laneClosures:
@@ -138,8 +137,11 @@ roads:
     #     longitude: -122.262866
 
 weather:
-  refreshInterval: "5m"
-  staleThreshold: "10m"
+  # OpenWeather budget: current conditions only (/data/2.5/weather), one call
+  # per location per refresh, request-driven. 7 locations at 15m ≈ 672 calls/day
+  # worst case. Alerts come from NWS (free) — the One Call 3.0 endpoint
+  # (1,000/day cap) is deliberately unused; see internal/clients/weather.
+  refreshInterval: "15m"  # Cache TTL; stale data is servable until 2x this, then evicted.
 
   # National Weather Service zone alerts (issue #4) + fire-weather
   # classification (issue #5). These foothill/mountain zones cover the
@@ -153,41 +155,55 @@ weather:
       - CAZ258   # Tuolumne foothills
       - CAZ259   # Tuolumne mountains
 
+  # Each location costs one /data/2.5/weather call per refresh interval (see
+  # budget note above) — adding locations scales API usage linearly.
+  # `zone` is the NWS forecast zone containing the location (must be listed in
+  # nws.zones above); it scopes which NWS alerts attach to the location.
+  # Assignments are elevation-based: foothill towns → CAZ064/258, mountain
+  # towns → CAZ065/259.
   locations:
     - id: "murphys"
       name: "Murphys, CA"
+      zone: "CAZ064"
       coordinates:
         latitude: 38.139117
         longitude: -120.456111
-    - id: "arnold"  
+    - id: "arnold"
       name: "Arnold, CA"
+      zone: "CAZ065"
       coordinates:
         latitude: 38.265006
         longitude: -120.333654
     - id: "bearvalley"
       name: "Bear Valley, CA"
+      # Bear Valley sits just over the Alpine County line; CAZ065 (Calaveras
+      # mountains) is the nearest configured zone and shares its weather.
+      zone: "CAZ065"
       coordinates:
         latitude: 38.461045
         longitude: -120.042368
-    # Hwy 49 / Tuolumne corridor towns (issue #6). OpenWeather is well within
-    # its free-tier rate limit so adding locations here is cheap.
+    # Hwy 49 / Tuolumne corridor towns (issue #6).
     - id: "sonora"
       name: "Sonora, CA"
+      zone: "CAZ258"
       coordinates:
         latitude: 37.984100
         longitude: -120.382700
     - id: "columbia"
       name: "Columbia, CA"
+      zone: "CAZ258"
       coordinates:
         latitude: 38.034900
         longitude: -120.401600
     - id: "twainharte"
       name: "Twain Harte, CA"
+      zone: "CAZ259"
       coordinates:
         latitude: 38.038300
         longitude: -120.229400
     - id: "dorrington"
       name: "Dorrington, CA"
+      zone: "CAZ065"
       coordinates:
         latitude: 38.333800
         longitude: -120.271300
