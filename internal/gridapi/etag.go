@@ -71,6 +71,13 @@ func writeJSON(w http.ResponseWriter, r *http.Request, body []byte, contentType 
 	etag := `"` + hex.EncodeToString(h.Sum(nil)[:16]) + `"`
 
 	w.Header().Set("ETag", etag)
+	// The body is content-negotiated on Accept (protojson vs binary proto),
+	// and Cache-Control is public: without Vary a shared cache would serve
+	// one rendering to a client that asked for the other within max-age (the
+	// content-type-salted ETag can't help — caches don't revalidate while
+	// fresh). Add, not Set: prefab's middleware sets a static Vary: Origin
+	// that must be merged, never clobbered.
+	w.Header().Add("Vary", "Accept")
 	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", maxAge))
 	if inmMatches(r.Header.Get("If-None-Match"), etag) {
 		w.WriteHeader(http.StatusNotModified)

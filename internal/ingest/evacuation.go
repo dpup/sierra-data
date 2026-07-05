@@ -50,7 +50,7 @@ type evacCand struct {
 func (n *EvacuationNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult, error) {
 	minLat, minLng, maxLat, maxLng, ok := unionBounds(n.cfg.Hazards.Areas)
 	if !ok {
-		return &PollResult{}, nil
+		return nil, errEmptyScope("hazard areas")
 	}
 	zones, err := n.caloes.GetActiveEvacuations(ctx, caloes.Bounds{
 		MinLatitude:  minLat,

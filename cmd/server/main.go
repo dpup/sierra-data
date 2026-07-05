@@ -2,9 +2,7 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
-	"log/slog"
 	"net/http"
 	"sort"
 	"time"
@@ -18,12 +16,14 @@ import (
 	"github.com/dpup/info.ersn.net/server/internal/clients/calfire"
 	"github.com/dpup/info.ersn.net/server/internal/clients/caloes"
 	"github.com/dpup/info.ersn.net/server/internal/clients/caltrans"
+	"github.com/dpup/info.ersn.net/server/internal/clients/census"
 	"github.com/dpup/info.ersn.net/server/internal/clients/google"
 	"github.com/dpup/info.ersn.net/server/internal/clients/nws"
 	"github.com/dpup/info.ersn.net/server/internal/clients/usgs"
 	"github.com/dpup/info.ersn.net/server/internal/clients/weather"
 	"github.com/dpup/info.ersn.net/server/internal/clients/wfigs"
 	"github.com/dpup/info.ersn.net/server/internal/config"
+	"github.com/dpup/info.ersn.net/server/internal/gridapi"
 	"github.com/dpup/info.ersn.net/server/internal/hazards"
 	"github.com/dpup/info.ersn.net/server/internal/ingest"
 	"github.com/dpup/info.ersn.net/server/internal/lib/alerts"
@@ -73,9 +73,6 @@ func main() {
 	roadsService := services.NewRoadsService(googleClient, caltransClient, cacheInstance, appConfig, alertEnhancer)
 	weatherService := services.NewWeatherService(weatherClient, nwsClient, cacheInstance, appConfig)
 
-	// Unified hazard/situation GeoJSON feed (re-projects the feeds above).
-	hazardsService := hazards.NewService(appConfig, roadsService, weatherService, caltransClient, cacheInstance)
-
 	logging.Infow(ctx, "Live Data API Server starting",
 		"roads_monitored", len(appConfig.Roads.MonitoredRoads),
 		"weather_locations", len(appConfig.Weather.Locations))
@@ -109,6 +106,12 @@ func main() {
 		log.Fatalf("Failed to seed grid places: %v", err)
 	}
 
+	// Unified hazard/situation GeoJSON feed (re-projects the feeds above).
+	// The store backend re-backs the five event-backed layers (wildfire,
+	// evacuation, weather_alert, earthquake, road_incident) onto the grid
+	// event store (plan T14); conditions layers stay live projections.
+	hazardsService := hazards.NewServiceWithAPIs(appConfig, roadsService, weatherService, caltransClient, cacheInstance, newGridStoreBackend(gridStore))
+
 	// NWS weather-alert enhancement is optional: nil when disabled or keyless
 	// (the scheduler then serves raw alerts — enhancement never gates ingest).
 	var nwsEnhancer ingest.NWSEnhancer
@@ -133,6 +136,12 @@ func main() {
 	})
 	scheduler.Start(ctx)
 
+	// /v1 entity + map API over the grid store (hand-built handlers; the
+	// census geocoder backs /v1/places/resolve?address=). Mounted at /v1/ —
+	// longest-prefix wins, so /api/ (gateway) and / (site) are unaffected.
+	censusClient := census.NewClient()
+	gridapiService := gridapi.NewService(gridStore, roadsService, weatherService, censusClient, appConfig, hazardsService)
+
 	// Create Prefab server with GRPC reflection enabled
 	// Server configuration (port, etc.) will be loaded from prefab.yaml/env vars
 	server := prefab.New(
@@ -142,7 +151,8 @@ func main() {
 		prefab.WithHTTPHandler(hazards.HandlerPrefix, hazardsService),
 		prefab.WithHTTPHandlerFunc(hazards.ScannersPrefix, hazardsService.ServeScanners),
 		prefab.WithHTTPHandlerFunc(hazards.SituationPrefix, hazardsService.ServeSituation),
-		prefab.WithHTTPHandlerFunc("/", homepageHandler),
+		prefab.WithHTTPHandler(gridapi.HandlerPrefix, gridapiService),
+		prefab.WithHTTPHandlerFunc("/", siteHandler),
 		prefab.WithHTTPHandlerFunc("/api/docs/roads.swagger.json", openAPIHandler("api/v1/roads.swagger.json")),
 		prefab.WithHTTPHandlerFunc("/api/docs/weather.swagger.json", openAPIHandler("api/v1/weather.swagger.json")),
 		prefab.WithHTTPHandlerFunc("/api/docs/common.swagger.json", openAPIHandler("api/v1/common.swagger.json")),
@@ -169,102 +179,6 @@ func main() {
 	if err := server.Start(); err != nil {
 		logging.Errorw(ctx, "Server failed", "error", err)
 		log.Fatalf("Server failed: %v", err)
-	}
-}
-
-// homepageHandler serves a simple HTML homepage at the server root
-func homepageHandler(w http.ResponseWriter, r *http.Request) {
-	// Only handle the root path
-	if r.URL.Path != "/" {
-		http.NotFound(w, r)
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-
-	html := `<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <title>info.ersn.net</title>
-    <style>
-        body { 
-            font-family: 'Courier New', Consolas, monospace; 
-            background: #000; 
-            color: #0f0; 
-            padding: 20px; 
-            line-height: 1.4; 
-        }
-        a { color: #0ff; text-decoration: none; }
-        a:hover { text-decoration: underline; }
-        pre { margin: 0; }
-        .header { color: #ff0; }
-        .section { margin: 20px 0; }
-    </style>
-</head>
-<body>
-<pre>
-<span class="header"> ___ ___  ___ _  _ 
-| __| _ \/ __| \| |
-| _||   /\__ \ .' |
-|___|_|_\|___/_|\_|</span>
-
-<span class="header">info.ersn.net</span>
-
-Real-time API server providing road, weather, and hazard information
-for the Ebbett's Pass / Highway 4 corridor.
-
-<span class="header">Repository:</span>
-<a href="https://github.com/dpup/info.ersn.net">https://github.com/dpup/info.ersn.net</a>
-
-<span class="header">Website:</span>
-<a href="https://ersn.net">https://ersn.net</a>
-
-<span class="header">API Endpoints:</span>
-
-  Roads API:
-    <a href="/api/v1/roads">GET /api/v1/roads</a>               - List all monitored roads
-    <a href="/api/v1/roads/hwy4-angels-murphys">GET /api/v1/roads/{road_id}</a>     - Get specific road details
-    <a href="/api/v1/incidents/mother-lode">GET /api/v1/incidents/{area}</a>    - Region-wide CHP/Caltrans incidents
-
-  Weather API:
-    <a href="/api/v1/weather">GET /api/v1/weather</a>             - Current weather + fire-weather state
-    <a href="/api/v1/weather/alerts">GET /api/v1/weather/alerts</a>      - Active NWS zone alerts
-    <a href="/api/v1/weather/alerts?zones=CAZ064,CAZ065,CAZ258,CAZ259">GET /api/v1/weather/alerts?zones=...</a> - Filter to NWS forecast zones
-
-  Hazards API (unified GeoJSON for map clients):
-    <a href="/api/v1/hazards/calaveras/road_incident.geojson">GET /api/v1/hazards/{area}/{layer}.geojson</a> - road_incident, chain_control, road_segment, weather_alert, fire_weather, earthquake, wildfire, evacuation
-    <a href="/api/v1/situation/calaveras">GET /api/v1/situation/{area}</a>     - One-call rollup: per-layer status + severity summary (evac unknown-aware)
-    <a href="/api/v1/scanners/calaveras">GET /api/v1/scanners/{area}</a>      - Broadcastify scanner feeds for the area
-
-<span class="header">API Documentation:</span>
-  <a href="/api/docs/roads.swagger.json">Roads API OpenAPI Spec</a>            - Machine-readable API docs (Roads)
-  <a href="/api/docs/weather.swagger.json">Weather API OpenAPI Spec</a>          - Machine-readable API docs (Weather)
-  <a href="/api/docs/common.swagger.json">Common Types OpenAPI Spec</a>         - Shared message definitions
-
-<span class="header">Data Sources:</span>
-  • Google Routes API               - Traffic conditions and travel times
-  • Caltrans KML Feeds              - Lane closures, CHP incidents, chain control
-  • OpenWeatherMap API              - Current weather conditions
-  • National Weather Service        - Zone alerts and fire-weather products
-  • USGS (FDSN)                     - Earthquakes
-  • CAL FIRE + NIFC WFIGS           - Active wildfires and perimeters
-  • Cal OES (Genasys)               - Evacuation zones (reference only)
-  • Broadcastify                    - Public-safety scanner feeds
-  • OpenAI                          - AI enhancement of road alerts
-
-<span class="header">Example Usage:</span>
-  curl <a href="/api/v1/roads">https://info.ersn.net/api/v1/roads</a>
-  curl <a href="/api/v1/weather">https://info.ersn.net/api/v1/weather</a>
-  curl <a href="/api/v1/situation/calaveras">https://info.ersn.net/api/v1/situation/calaveras</a>
-  curl <a href="/api/v1/hazards/calaveras/wildfire.geojson">https://info.ersn.net/api/v1/hazards/calaveras/wildfire.geojson</a>
-  curl <a href="/api/v1/weather/alerts?zones=CAZ064,CAZ065,CAZ258,CAZ259">https://info.ersn.net/api/v1/weather/alerts?zones=CAZ064,CAZ065</a>
-</pre>
-</body>
-</html>`
-
-	if _, err := fmt.Fprint(w, html); err != nil {
-		slog.Error("Failed to write homepage HTML", "error", err)
 	}
 }
 

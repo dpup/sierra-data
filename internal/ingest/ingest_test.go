@@ -13,6 +13,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	gridv1 "github.com/dpup/info.ersn.net/server/api/grid/v1"
+	"github.com/dpup/info.ersn.net/server/internal/clients/calfire"
+	"github.com/dpup/info.ersn.net/server/internal/clients/caloes"
+	"github.com/dpup/info.ersn.net/server/internal/clients/usgs"
+	"github.com/dpup/info.ersn.net/server/internal/clients/wfigs"
 	"github.com/dpup/info.ersn.net/server/internal/config"
 )
 
@@ -123,6 +127,34 @@ func TestTsProto(t *testing.T) {
 	at := time.Date(2026, 7, 4, 8, 0, 0, 0, time.UTC)
 	require.NotNil(t, tsProto(at))
 	assert.Equal(t, at, tsProto(at).AsTime())
+}
+
+// TestPollEmptyScopeIsError: a poller whose configured scope is empty must
+// hard-error WITHOUT fetching. A success-empty PollResult here would let the
+// scheduler's disappearance sweep RESOLVE every stored active event (e.g. a
+// live evacuation ORDER after a bad prefab.yaml refactor emptied the areas)
+// and mark the source healthy — a fabricated all-clear from a config mistake.
+func TestPollEmptyScopeIsError(t *testing.T) {
+	cfg := &config.Config{} // no hazard areas, no incident areas
+	doer := &fakeDoer{resp: "{}"}
+	roads := &fakeRoadsAPI{}
+	norms := map[string]Normalizer{
+		"evacuation": NewEvacuationNormalizer(cfg, caloes.NewClientWithHTTPDoer("https://caloes.test", doer)),
+		"earthquake": NewEarthquakeNormalizer(cfg, usgs.NewClientWithHTTPDoer("https://usgs.test", doer)),
+		"wildfire": NewWildfireNormalizer(cfg,
+			calfire.NewClientWithHTTPDoer("https://calfire.test", doer),
+			wfigs.NewClientWithHTTPDoer("https://wfigs.test", doer)),
+		"road_incident": NewRoadIncidentNormalizer(cfg, roads),
+	}
+	for name, n := range norms {
+		t.Run(name, func(t *testing.T) {
+			res, err := n.Poll(testCtx(), nil)
+			require.Error(t, err, "empty scope must fail loud, never a success-empty")
+			assert.Nil(t, res)
+		})
+	}
+	assert.Empty(t, doer.lastURL, "an empty scope must not fetch anything")
+	assert.Empty(t, roads.calls)
 }
 
 func TestUnionBounds(t *testing.T) {

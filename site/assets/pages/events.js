@@ -45,7 +45,7 @@ export const DEFAULT_STATUSES = ['ACTIVE', 'SCHEDULED'];
 export const SEVERITY_OPTIONS = ['INFO', 'MINOR', 'MODERATE', 'SEVERE', 'EXTREME'];
 
 /** Page sizes offered in the control. Empty string = server default. */
-export const PAGE_SIZES = ['', '25', '50', '100', '250'];
+export const PAGE_SIZES = ['', '25', '50', '100', '200']; // 200 is the API max (store maxPageSize); >200 is a 400
 
 /** PlaceKind display order for the grouped place select. */
 export const KIND_ORDER = ['AREA', 'COUNTY', 'TOWN', 'EVAC_ZONE', 'CORRIDOR', 'SITE'];

@@ -37,7 +37,7 @@ func (n *EarthquakeNormalizer) SourceIDs() []string { return []string{"usgs"} }
 func (n *EarthquakeNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult, error) {
 	minLat, minLng, maxLat, maxLng, ok := unionBounds(n.cfg.Hazards.Areas)
 	if !ok {
-		return &PollResult{}, nil
+		return nil, errEmptyScope("hazard areas")
 	}
 	quakes, err := n.client.GetEarthquakes(ctx, usgs.Bounds{
 		MinLatitude:  minLat,

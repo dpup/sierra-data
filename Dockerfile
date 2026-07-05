@@ -57,6 +57,13 @@ COPY --from=go-builder /app/prefab.yaml /app/prefab.yaml
 # Copy the generated OpenAPI specifications
 COPY --from=go-builder /app/api/v1/*.swagger.json /app/api/v1/
 
+# Persistent grid event store (SQLite). /data is a volume so events,
+# revisions, and source health survive container replacement; prod mounts
+# EBS here. Owned by ersn so the WAL sidecar files can be created.
+RUN mkdir -p /data && chown ersn:ersn /data
+VOLUME ["/data"]
+ENV PF__GRID__DBPATH=/data/grid.db
+
 # Set ownership to the non-root user
 RUN chown -R ersn:ersn /app
 

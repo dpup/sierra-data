@@ -54,7 +54,7 @@ func (n *RoadIncidentNormalizer) SourceIDs() []string { return []string{"chp", "
 func (n *RoadIncidentNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult, error) {
 	areas := n.cfg.Roads.IncidentAreas
 	if len(areas) == 0 {
-		return &PollResult{}, nil
+		return nil, errEmptyScope("incident areas")
 	}
 
 	var (

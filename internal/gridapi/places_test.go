@@ -155,6 +155,13 @@ func TestResolveValidation(t *testing.T) {
 		"/v1/places/resolve?lat=-91&lng=-120.3",       // lat out of range
 		"/v1/places/resolve?lat=38.2&lng=181",         // lng out of range
 		"/v1/places/resolve?lat=38.2&lng=1&address=x", // both modes
+		// ParseFloat accepts NaN/Inf spellings; these must be 400s, not the
+		// 500 a NaN used to cause when marshalling the query echo.
+		"/v1/places/resolve?lat=NaN&lng=-120.3",
+		"/v1/places/resolve?lat=38.2&lng=NaN",
+		"/v1/places/resolve?lat=nan&lng=nan",
+		"/v1/places/resolve?lat=Inf&lng=-120.3",
+		"/v1/places/resolve?lat=38.2&lng=-Inf",
 	} {
 		requireStatus(t, get(t, s, path), http.StatusBadRequest, 3)
 	}

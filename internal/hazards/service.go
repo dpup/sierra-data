@@ -36,6 +36,25 @@ type WeatherAPI interface {
 	ListWeatherAlerts(context.Context, *api.ListWeatherAlertsRequest) (*api.ListWeatherAlertsResponse, error)
 }
 
+// StoreBackend serves an event-backed layer's already-projected features from
+// the persistent grid event store (internal/store through the shared T13
+// projection — see cmd/server/gridadapter.go). It is the strangler seam of
+// docs/v2-implementation-plan.md T14: nil = live mode (builders + TTL cache,
+// the shipped behavior); non-nil re-backs the five event-backed layers
+// (wildfire, evacuation, weather_alert, earthquake, road_incident) onto the
+// store. Conditions layers (road_segment, chain_control, fire_weather) never
+// consult it.
+//
+// placeID is a place-directory id — configured hazard areas are seeded as
+// "area:{id}", so the event_places join gives per-area scoping. status is the
+// layer's source-registry health (OK | STALE | UNAVAILABLE); lastSourceUpdate
+// is the most recent successful source fetch (zero when OK, or when the
+// source never succeeded). features must be only ACTIVE/SCHEDULED events (the
+// live-map read); err is reserved for the store itself being unreadable.
+type StoreBackend interface {
+	QueryActive(ctx context.Context, placeID, layer string) (features []Feature, status string, lastSourceUpdate time.Time, err error)
+}
+
 // Service re-projects the service's existing feeds into the unified GeoJSON
 // hazard model and serves them at /api/v1/hazards/{area}/{layer}.geojson.
 type Service struct {
@@ -49,6 +68,10 @@ type Service struct {
 	caloes   *caloes.Client
 	cache    *cache.Cache
 
+	// storeBackend, when non-nil, re-backs the event-backed layers onto the
+	// grid event store (T14); nil keeps every layer on its live builder.
+	storeBackend StoreBackend
+
 	// layerBuilders and layerOrder are derived once from layerRegistry() so the
 	// dispatch map and the situation iteration order share one source of truth.
 	layerBuilders map[string]builder
@@ -59,6 +82,8 @@ type Service struct {
 // new-upstream clients (USGS, CAL FIRE, WFIGS, ...) are keyless and constructed
 // here. The shared cache is reused for stale-on-error resilience on the new
 // upstreams (see buildLayer); pass nil to disable hazard-layer caching.
+// No store backend is passed (nil = live mode); production wiring uses
+// NewServiceWithAPIs to re-back the event layers onto the grid store.
 func NewService(cfg *config.Config, roads *services.RoadsService, weather *services.WeatherService, ct *caltrans.FeedParser, c *cache.Cache) *Service {
 	return NewServiceWithAPIs(cfg, roads, weather, ct, c)
 }
@@ -66,7 +91,12 @@ func NewService(cfg *config.Config, roads *services.RoadsService, weather *servi
 // NewServiceWithAPIs is NewService with the roads/weather dependencies as
 // their narrow interfaces, so consumers outside this package (the /v1 grid
 // API, the byte-compat harness) can construct the service with fakes.
-func NewServiceWithAPIs(cfg *config.Config, roads RoadsAPI, weather WeatherAPI, ct *caltrans.FeedParser, c *cache.Cache) *Service {
+//
+// storeBackend is an optional trailing argument (at most one is used): a
+// non-nil backend serves the event-backed layers from the grid store instead
+// of their live builders (see buildLayerFromStore). Omitting it — every
+// pre-T14 call site — keeps live mode, byte-identical shipped behavior.
+func NewServiceWithAPIs(cfg *config.Config, roads RoadsAPI, weather WeatherAPI, ct *caltrans.FeedParser, c *cache.Cache, storeBackend ...StoreBackend) *Service {
 	s := &Service{
 		cfg:      cfg,
 		roads:    roads,
@@ -77,6 +107,9 @@ func NewServiceWithAPIs(cfg *config.Config, roads RoadsAPI, weather WeatherAPI, 
 		wfigs:    wfigs.NewClient(),
 		caloes:   caloes.NewClient(),
 		cache:    c,
+	}
+	if len(storeBackend) > 0 {
+		s.storeBackend = storeBackend[0]
 	}
 	reg := s.layerRegistry()
 	s.layerBuilders = make(map[string]builder, len(reg))
@@ -279,7 +312,11 @@ func layerTTL(layer string) time.Duration {
 // Both the single-layer endpoint and the situation aggregator go through here so
 // the "empty never means all-clear" semantics can't drift between them.
 //
-// Status resolution:
+// When a StoreBackend is configured, the event-backed layers short-circuit to
+// buildLayerFromStore — the store replaces both the live builder AND the TTL
+// cache for those layers (the store is the persisted last-good state).
+//
+// Live-mode status resolution:
 //   - fresh cache hit            -> OK (served from cache, no upstream call)
 //   - builder OK                 -> OK (and the non-empty result is cached)
 //   - builder partialData(err)   -> STALE, features kept (one source degraded)
@@ -294,6 +331,9 @@ func layerTTL(layer string) time.Duration {
 // source_url, never a guarantee). The two are deliberately distinguishable.
 func (s *Service) buildLayer(ctx context.Context, area config.HazardArea, layer string, build builder) layerResult {
 	meta := layerMeta(layer)
+	if s.storeBackend != nil && eventBackedLayer(layer) {
+		return s.buildLayerFromStore(ctx, area, layer, meta)
+	}
 	ttl := layerTTL(layer)
 	key := "hazard:" + area.ID + ":" + layer
 
@@ -334,9 +374,112 @@ func (s *Service) buildLayer(ctx context.Context, area config.HazardArea, layer 
 	return finalize(meta, features, "OK", time.Time{})
 }
 
+// eventBackedLayer reports whether a layer is served from the grid event
+// store when a StoreBackend is configured (plan decision 5: the conditions
+// layers — road_segment, chain_control, fire_weather — stay live projections
+// of the roads/weather services and never touch the store).
+func eventBackedLayer(layer string) bool {
+	switch layer {
+	case LayerWildfire, LayerEvacuation, LayerWeatherAlert, LayerEarthquake, LayerRoadIncident:
+		return true
+	}
+	return false
+}
+
+// buildLayerFromStore serves an event-backed layer from the grid event store
+// — the T14 strangler path replacing the live builder + TTL cache. The store
+// persists the last-good state (richer than the old 5m in-memory cache: it
+// survives restarts and never expires), and per-source registry health
+// replaces the live fetch error as the fail-loud signal. Status mapping,
+// implemented EXACTLY against the fail-loud table in CLAUDE.md:
+//
+//   - backend OK          -> OK. A clean empty is OK + 0 features (the
+//     caveated confirmed-empty — "no active zones per Cal OES"), never
+//     UNAVAILABLE. Mirrors "builder OK (incl. a clean empty) -> OK".
+//   - backend STALE       -> STALE + last_source_update (the last good source
+//     fetch). Mirrors "partialData / stale-on-error -> STALE, features kept".
+//   - backend UNAVAILABLE + stored features -> STALE + last_source_update:
+//     the store serves the persisted last-good data while the source is down.
+//     Mirrors "builder hard error WITH a cached value -> STALE, last-good
+//     features served" — the store IS that cache now.
+//   - backend UNAVAILABLE, no stored features -> UNAVAILABLE + empty. The
+//     source never succeeded, so nothing vouches for an empty feed. Mirrors
+//     "builder hard error, nothing cached -> UNAVAILABLE, empty".
+//   - backend error (store unreadable) -> UNAVAILABLE + empty (fail loud).
+//
+// This preserves "an error never becomes a 0": emptiness is only ever
+// OK-empty (clean fetch reporting nothing) or UNAVAILABLE-empty
+// (never-succeeded) — a source failure with stored data degrades to STALE
+// with its data intact instead of fabricating a clear state.
+func (s *Service) buildLayerFromStore(ctx context.Context, area config.HazardArea, layer string, meta layerMetadata) layerResult {
+	// Configured hazard areas are seeded into the place directory as
+	// "area:{id}" (plan decision 11: slug preserved), so the event_places
+	// join scopes the query to this area — a second area never inherits the
+	// first's events.
+	features, status, lastUpdate, err := s.storeBackend.QueryActive(ctx, "area:"+area.ID, layer)
+	if err != nil {
+		logging.Errorw(ctx, "Store-backed hazard layer query failed", "layer", layer, "area", area.ID, "error", err)
+		return finalize(meta, nil, "UNAVAILABLE", time.Time{})
+	}
+	mapped, mappedUpdate := DegradeStoreStatus(status, len(features) > 0, lastUpdate)
+	if mapped == "UNAVAILABLE" {
+		return finalize(meta, nil, "UNAVAILABLE", time.Time{})
+	}
+	if mapped == "STALE" && status != "STALE" {
+		logging.Warnw(ctx, "Serving stored last-good hazard layer; source unavailable",
+			"layer", layer, "area", area.ID, "last_source_update", tsOrEmpty(lastUpdate))
+	}
+	return finalize(meta, features, mapped, mappedUpdate)
+}
+
+// DegradeStoreStatus maps a store-derived source status onto the SERVED
+// envelope status — the fail-loud table buildLayerFromStore documents. It is
+// shared with the /v1 surface (internal/gridapi map layers and place summary)
+// so the two endpoints can never disagree about identical store state:
+//
+//	OK                    -> OK, zero lastUpdate (freshness needs no caveat)
+//	STALE                 -> STALE + lastUpdate
+//	UNAVAILABLE + hasData -> STALE + lastUpdate: the store IS the last-good
+//	                         cache, so a down source with stored data serves
+//	                         stale data — never UNAVAILABLE hiding live data
+//	UNAVAILABLE, no data  -> UNAVAILABLE, zero lastUpdate (the envelope never
+//	                         carries last_source_update in this state)
+//
+// Any unrecognized status ranks as UNAVAILABLE — health unknown is not OK.
+// The invariant preserved: UNAVAILABLE always means empty features, so a
+// client that draws nothing on UNAVAILABLE never hides data the server sent.
+func DegradeStoreStatus(status string, hasData bool, lastUpdate time.Time) (string, time.Time) {
+	switch status {
+	case "OK":
+		return "OK", time.Time{}
+	case "STALE":
+		return "STALE", lastUpdate
+	default:
+		if hasData {
+			return "STALE", lastUpdate
+		}
+		return "UNAVAILABLE", time.Time{}
+	}
+}
+
 // finalize packages a built layer's result.
 func finalize(meta layerMetadata, features []Feature, status string, lastUpdate time.Time) layerResult {
 	return layerResult{features: features, status: status, meta: meta, lastSourceUpdate: lastUpdate}
+}
+
+// BuildLayer builds one layer for an area through the same fail-loud path the
+// GeoJSON and /situation endpoints use (buildLayer + layerMeta), exported for
+// the /v1 grid API's condition-backed map layers (road_segment, chain_control,
+// fire_weather). ok is false for an unknown layer; every other return mirrors
+// the metadata block the shipped endpoints emit (status OK|STALE|UNAVAILABLE,
+// lastSourceUpdate zero unless serving stale, per-layer attribution/sourceURL).
+func (s *Service) BuildLayer(ctx context.Context, area config.HazardArea, layer string) (features []Feature, status string, lastSourceUpdate time.Time, attribution, sourceURL string, ok bool) {
+	build, found := s.layerBuilders[layer]
+	if !found {
+		return nil, "", time.Time{}, "", "", false
+	}
+	res := s.buildLayer(ctx, area, layer, build)
+	return res.features, res.status, res.lastSourceUpdate, res.meta.attribution, res.meta.sourceURL, true
 }
 
 func (s *Service) resolveArea(id string) (config.HazardArea, bool) {

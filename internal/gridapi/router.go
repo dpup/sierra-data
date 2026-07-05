@@ -2,26 +2,40 @@ package gridapi
 
 import (
 	"net/http"
+	"net/url"
 	"strings"
 )
 
-// ServeHTTP routes GET requests under /v1/ by path segments (the hazards
+// ServeHTTP routes GET/HEAD requests under /v1/ by path segments (the hazards
 // pattern — no ServeMux, so ".geojson" suffixes and colon-bearing event ids
 // route cleanly). Anything unmatched is a 404 google.rpc.Status body.
 func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", http.MethodGet)
+	// HEAD must be supported wherever GET is (RFC 9110 §9.1) — monitors and
+	// link checkers probe with it. net/http discards the body automatically,
+	// so HEAD simply runs the GET handlers.
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD")
 		methodNotAllowed(w, r.Method)
 		return
 	}
 
-	parts := strings.Split(strings.TrimPrefix(r.URL.Path, HandlerPrefix), "/")
+	// Split the ESCAPED path and unescape each segment afterwards: event ids
+	// can legitimately contain "/" (evac: ids embed upstream zone names
+	// verbatim), which reaches us as %2F and must not act as a separator —
+	// splitting the pre-decoded r.URL.Path would make such ids unroutable.
+	parts := strings.Split(strings.TrimPrefix(r.URL.EscapedPath(), HandlerPrefix), "/")
 	// Empty segments (trailing slash, "//", bare "/v1/") match nothing.
-	for _, p := range parts {
+	for i, p := range parts {
 		if p == "" {
 			notFound(w, "not found: "+r.URL.Path)
 			return
 		}
+		dec, err := url.PathUnescape(p)
+		if err != nil {
+			notFound(w, "not found: "+r.URL.Path)
+			return
+		}
+		parts[i] = dec
 	}
 
 	switch parts[0] {
@@ -98,22 +112,4 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	notFound(w, "not found: "+r.URL.Path)
-}
-
-// serveSummary handles GET /v1/places/{place}/summary.
-//
-// TODO(T12b): real implementation lands in summary.go (owned by the T12b
-// agent, which replaces this stub); routed here so the URL space is complete
-// and the package compiles standalone.
-func (s *Service) serveSummary(w http.ResponseWriter, r *http.Request, place string) {
-	notImplemented(w, "summary not implemented yet")
-}
-
-// serveMapLayer handles GET /v1/places/{place}/map/{layer}.geojson.
-//
-// TODO(T12b): real implementation lands in maplayers.go (store projection for
-// event layers, hazards delegation for condition layers); this stub keeps the
-// route wired until then.
-func (s *Service) serveMapLayer(w http.ResponseWriter, r *http.Request, place, layer string) {
-	notImplemented(w, "map layers not implemented yet")
 }

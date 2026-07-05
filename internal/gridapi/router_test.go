@@ -3,6 +3,7 @@ package gridapi
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -19,8 +20,50 @@ func TestRouterMethodNotAllowed(t *testing.T) {
 		rec := httptest.NewRecorder()
 		s.ServeHTTP(rec, req)
 		requireStatus(t, rec, http.StatusMethodNotAllowed, 12)
-		assert.Equal(t, "GET", rec.Header().Get("Allow"))
+		assert.Equal(t, "GET, HEAD", rec.Header().Get("Allow"))
 	}
+}
+
+// HEAD is mandatory wherever GET is supported (RFC 9110 §9.1): uptime
+// monitors and link checkers probe with it. net/http strips the body; the
+// handler must not 405.
+func TestRouterHead(t *testing.T) {
+	s := newTestService(t)
+
+	req := httptest.NewRequest(http.MethodHead, "/v1/events", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.NotEmpty(t, rec.Header().Get("ETag"))
+	assert.Equal(t, "application/json", rec.Header().Get("Content-Type"))
+
+	// Unknown paths still 404 on HEAD.
+	req = httptest.NewRequest(http.MethodHead, "/v1/nope", nil)
+	rec = httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+// Event ids may contain "/" (evac: ids embed upstream zone names verbatim).
+// The router must split the escaped path so %2F stays inside the id segment
+// — otherwise the event's detail and history are permanently unreachable.
+func TestRouterEscapedEventID(t *testing.T) {
+	s := newTestService(t)
+	seedSource(t, s.Store, "caloes") // FK for the event
+	upsert(t, s.Store, evacEvent("evac:Copperopolis / OByrnes Ferry", "ORDER", gridv1.EventStatus_ACTIVE))
+
+	escaped := url.PathEscape("evac:Copperopolis / OByrnes Ferry") // "/" -> %2F
+
+	rec := get(t, s, "/v1/events/"+escaped)
+	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+	var ev struct {
+		ID string `json:"id"`
+	}
+	decode(t, rec, &ev)
+	assert.Equal(t, "evac:Copperopolis / OByrnes Ferry", ev.ID)
+
+	rec = get(t, s, "/v1/events/"+escaped+"/history")
+	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
 }
 
 func TestRouterNotFound(t *testing.T) {
@@ -42,17 +85,6 @@ func TestRouterNotFound(t *testing.T) {
 		sb := requireStatus(t, rec, http.StatusNotFound, 5)
 		assert.NotEmpty(t, sb.Message, path)
 	}
-}
-
-// The T12b endpoints are routed but stubbed at 501 until summary.go /
-// maplayers.go land.
-func TestRouterT12bStubs(t *testing.T) {
-	s := newTestService(t)
-	rec := get(t, s, "/v1/places/calaveras/summary")
-	requireStatus(t, rec, http.StatusNotImplemented, 12)
-
-	rec = get(t, s, "/v1/places/calaveras/map/wildfire.geojson")
-	requireStatus(t, rec, http.StatusNotImplemented, 12)
 }
 
 // Error bodies are google.rpc.Status protojson and marked non-cacheable.
@@ -122,6 +154,12 @@ func TestEventsProtoContentNegotiation(t *testing.T) {
 	rec := get(t, s, "/v1/events", "Accept", "application/proto")
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, "application/proto", rec.Header().Get("Content-Type"))
+
+	// Cache-Control is public + max-age, so shared caches MUST key on Accept
+	// or they will serve the JSON body to a proto client (and vice versa)
+	// without ever revalidating the ETag.
+	assert.Contains(t, rec.Header().Values("Vary"), "Accept")
+	assert.Contains(t, jsonRec.Header().Values("Vary"), "Accept")
 
 	var list gridv1.EventList
 	require.NoError(t, proto.Unmarshal(rec.Body.Bytes(), &list))

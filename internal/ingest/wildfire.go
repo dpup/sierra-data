@@ -59,7 +59,7 @@ func priorForSource(p Prior, sourceID string) []*gridv1.Event {
 func (n *WildfireNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult, error) {
 	minLat, minLng, maxLat, maxLng, ok := unionBounds(n.cfg.Hazards.Areas)
 	if !ok {
-		return &PollResult{}, nil
+		return nil, errEmptyScope("hazard areas")
 	}
 
 	// The two sources are independent; fetch concurrently so their timeouts

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -98,11 +99,14 @@ func (s *Service) serveResolve(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, fmt.Sprintf("invalid lng: %q", lngS))
 			return
 		}
-		if lat < -90 || lat > 90 {
+		// ParseFloat accepts "NaN" and "Inf". Inf fails the range checks, but
+		// NaN passes every comparison — and json.Marshal of the query echo
+		// then fails, turning junk input into a 500. Reject it explicitly.
+		if math.IsNaN(lat) || lat < -90 || lat > 90 {
 			badRequest(w, fmt.Sprintf("lat out of range [-90, 90]: %v", lat))
 			return
 		}
-		if lng < -180 || lng > 180 {
+		if math.IsNaN(lng) || lng < -180 || lng > 180 {
 			badRequest(w, fmt.Sprintf("lng out of range [-180, 180]: %v", lng))
 			return
 		}

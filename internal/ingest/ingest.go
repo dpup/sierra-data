@@ -155,6 +155,16 @@ func NewProvenance(sourceID, sourceName, attribution, sourceURL string) *gridv1.
 	}
 }
 
+// errEmptyScope is what a poller returns when its configured scope is empty
+// (no hazard/incident areas). It MUST be a hard Poll error, never a
+// success-empty PollResult: a "successful" empty poll would let the
+// scheduler's disappearance sweep RESOLVE every stored active event (a
+// fabricated all-clear written into history) and RecordAttempt mark the
+// source healthy — all from a config regression, with no fetch ever made.
+func errEmptyScope(what string) error {
+	return fmt.Errorf("ingest: no %s configured; refusing to poll an empty scope", what)
+}
+
 // unionBounds is the union bbox of the configured hazard areas — the single
 // spatial scope ingest polls (per-area scoping happens at query time via the
 // store's place joins). ok is false when no areas are configured.
