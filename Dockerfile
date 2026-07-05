@@ -7,7 +7,7 @@
 # arch. Running an amd64 Go toolchain under QEMU emulation (e.g. building
 # --platform=linux/amd64 on an arm64 host) makes the Go runtime SIGSEGV in
 # netpoll, so we never emulate the toolchain - we cross-compile instead.
-FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS go-builder
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS go-builder
 
 WORKDIR /app
 

@@ -1,25 +1,26 @@
 # ERSN Info Server Development Guidelines
 
-Last updated: 2025-09-13
+Last updated: 2026-07-05
 
 ## Active Technologies
 
-**Language/Version**: Go 1.21+  
+**Language/Version**: Go 1.25+ (`go.mod` declares 1.25.0 — a transitive dep, `golang.org/x/sys`, requires it; the Dockerfile builds on `golang:1.25-alpine`)  
 **Primary Dependencies**: gRPC, gRPC Gateway, Prefab framework (github.com/dpup/prefab), Protocol Buffers  
-**Storage**: In-memory caching (no persistent storage required)  
+**Storage**: SQLite (pure-Go `modernc.org/sqlite`, WAL) is the grid event store's system of record — events, revision history, the place directory, and source health, persisted at `grid.dbPath` (`PF__GRID__DBPATH`). In-memory TTL caches remain on the read path for the roads/weather/hazards services.  
 **Testing**: Go testing framework with testify, contract tests for gRPC services  
 **Target Platform**: Linux/macOS server, containerizable
 
 ## Project Structure
 ```
 /
-├── api/v1/                     # Protocol Buffer definitions
+├── api/v1/                     # Protocol Buffer definitions (grpc-gateway services)
 │   ├── roads.proto            # gRPC service for road conditions
 │   ├── weather.proto          # gRPC service for weather data
 │   └── common.proto           # Shared proto definitions
+├── api/grid/v1/                # grid.v1 messages-only protos (no service) — the /v1 event model
 ├── bin/                        # Compiled binaries
 ├── cmd/                       # CLI applications
-│   ├── server/                # Main API server
+│   ├── server/                # Main API server (main.go, site.go, gridadapter.go)
 │   ├── test-google/           # Google Routes API testing tool
 │   ├── test-caltrans/         # Caltrans data testing tool
 │   └── test-weather/          # Weather API testing tool
@@ -28,10 +29,20 @@ Last updated: 2025-09-13
 │   ├── clients/               # External API clients
 │   ├── cache/                 # In-memory caching with TTL
 │   ├── config/                # Configuration management
-│   └── lib/                   # Shared libraries
+│   ├── hazards/               # /api/v1 unified GeoJSON hazard layers
+│   ├── store/                 # SQLite grid event store (events, revisions, places, sources)
+│   ├── ingest/                # Poller scheduler + per-source normalizers → the store
+│   ├── gridapi/               # Hand-built /v1 HTTP handlers + store→GeoJSON projection
+│   ├── places/                # Grid place directory seeder (areas/counties/towns/corridors)
+│   └── lib/                   # Shared libraries (incl. lib/geojson: geometry + PIP)
+├── data/places/               # Checked-in Census county polygons (counties.geojson)
+├── site/                      # Embedded data.sierragridteam.org static site (served at /)
 ├── tests/                     # Test files and test data
 └── Makefile                   # Build automation
 ```
+
+The runtime SQLite database lives under `data/` (`data/grid.db`), which is
+git-ignored; only `data/places/` is checked in.
 
 ## Commands
 
@@ -39,11 +50,15 @@ Whenever possible you MUST use a command provided by the makefile. If you need a
 discuss with the operator improvements to the makefile commands.
 
 **Toolchain note**: The sandbox does not ship Go or protoc preinstalled. To build
-or run tests you need Go 1.24+ on `PATH`. `make proto` additionally requires
+or run tests you need Go 1.25+ on `PATH`. `make proto` additionally requires
 `protoc` plus the plugins `protoc-gen-go`, `protoc-gen-go-grpc`,
 `protoc-gen-grpc-gateway`, and `protoc-gen-openapiv2` (install the plugins with
 `go install`). Proto generation is deterministic — regenerating unchanged protos
-produces no diff.
+produces no diff. `make proto` generates both `api/v1` (grpc-gateway services)
+and `api/grid/v1` (the `grid.v1` messages-only protos, no gateway/openapi).
+Generated `*.pb.go` are committed. The grid store uses the pure-Go SQLite driver
+`modernc.org/sqlite`, so the `CGO_ENABLED=0` cross-compile in the Dockerfile
+still works — do not introduce a cgo SQLite driver.
 
 ### Build & Development
 ```bash
@@ -140,10 +155,17 @@ export PF__OPENAI__API_KEY="your-openai-api-key"  # For AI-enhanced alerts
 
 # Optional Configuration (local dev defaults to 8181 via prefab.yaml)
 export PORT=8181
+
+# Grid event store database path (default ./data/grid.db via prefab.yaml).
+# Production points this at the EBS mount; the Dockerfile sets it and declares
+# a /data volume so events/revisions/source-health survive container replacement.
+export PF__GRID__DBPATH=/data/grid.db
 ```
 
 **Configuration Files**:
-- `prefab.yaml` - Application configuration (API refresh intervals, route definitions)
+- `prefab.yaml` - Application configuration (API refresh intervals, route
+  definitions, and the `grid` section: `dbPath`, per-source poll intervals +
+  disappearance policy, NWS-alert enhancement budget)
 - Environment variables override config file values for secrets
 - Use `.envrc` for local development (already in .gitignore)
 
@@ -239,6 +261,15 @@ hand-built GeoJSON/JSON (not grpc-gateway), so field names are `snake_case`.
   `wildfire`, `evacuation`. Every feature shares a `properties` envelope
   (`id, layer, kind, severity, severity_rank, headline, source, …`) on the unified
   severity scale `INFO..EXTREME` (rank 0–4). Coordinates are `[lng, lat]`.
+- **Event layers are store-backed.** The five event-backed layers (`wildfire`,
+  `evacuation`, `weather_alert`, `earthquake`, `road_incident`) are now projected
+  from the grid event store (`internal/gridapi.ProjectEvents`) — same envelope,
+  byte-compatible with the former live builders except the deliberate deviations
+  in the 2026-07-05 CHANGELOG (stabilized wfigs ids; NWS "Extreme" → `EXTREME`;
+  earthquake `updated_at` omit rule; outages serve `STALE` last-good, not
+  `UNAVAILABLE`-empty, when events are stored; enhancement no longer regenerated
+  per poll). The three condition layers (`road_segment`, `chain_control`,
+  `fire_weather`) stay live projections of the roads/weather services.
 - `GET /api/v1/situation/{area}` - one-call rollup: per-layer status +
   cross-layer `summary` (`highest_severity`, `severity_counts`, `top_headlines`,
   `active_evacuations`) + a `scanners` sidecar.
@@ -254,6 +285,57 @@ hand-built GeoJSON/JSON (not grpc-gateway), so field names are `snake_case`.
   caveated confirmed-empty, not a guarantee). `metadata.source_url` always links
   the authoritative Genasys viewer in every state. Areas are configured under
   `hazards.areas` in `prefab.yaml`.
+
+**Grid Info Service** (`/v1/...`): the v2 surface (see
+`docs/v2-implementation-plan.md` for the build, `docs/v2-api-spec.md` for the
+contract). Hand-built `net/http` handlers (`internal/gridapi`, mounted at `/v1/`,
+not grpc-gateway), so field names are `snake_case` (protojson `UseProtoNames`),
+timestamps RFC 3339, errors `google.rpc.Status`, ETags/`If-None-Match`
+everywhere. Everything is read from the grid event store.
+- `GET /v1/places/{place}/summary` - one-fetch place rollup: `mode`
+  (QUIET/WATCH/ACTIVE), a cross-layer `summary`, per-`domains[]` status
+  (`fire`/`evacuation`/`weather`/`roads`/`seismic`), `top_events`, and a
+  `sources[]` health sidecar. Replaces `/api/v1/situation/{area}`.
+- `GET /v1/places/{place}/map/{layer}.geojson` - per-layer FeatureCollection,
+  envelope identical to `/api/v1/hazards/{area}/{layer}.geojson` (event layers
+  from the store, condition layers live). Serves the place's ACTIVE+SCHEDULED
+  events.
+- `GET /v1/events` - cross-layer event query
+  (`place,layer,status,severity_min,since,page_token,page_size`; default status
+  `ACTIVE,SCHEDULED`; keyset pagination). Subsumes `/api/v1/incidents/{area}`
+  (`layer=road_incident`) and weather-alert listing (`layer=weather_alert`).
+- `GET /v1/events/{id}` / `GET /v1/events/{id}/history` - current revision /
+  revision timeline.
+- `GET /v1/history` - cross-event revision archive (`place,from,to,layer`).
+- `GET /v1/places` / `GET /v1/places/{place}` - directory (`kind`,`q`); places
+  addressable by slug (`calaveras`) or id (`county:calaveras`), slugs globally
+  unique.
+- `GET /v1/places/resolve?lat=&lng=` or `?address=` - point/address → containing
+  places, most-specific first (address path geocodes via the keyless Census
+  geocoder, `internal/clients/census`).
+- `GET /v1/roads` / `GET /v1/weather` - conditions passthrough with optional
+  `?place=` bbox filter. **`/v1/weather` drops per-location alerts** — alerts are
+  events (`/v1/events?layer=weather_alert`); `fire_weather` stays. (`/api/v1`
+  weather keeps its alerts, unchanged.)
+- `GET /v1/scanners?place=` - Broadcastify feed config.
+- `GET /v1/sources` - the source registry + per-source health
+  (`OK|STALE|UNAVAILABLE`, last success/attempt, poll interval, last error).
+- **Evacuation fail-loud on `/v1/places/{place}/summary`**: same life-safety
+  contract as `/api/v1/situation` — `summary.active_evacuations` is an explicit
+  JSON `null` (with `evacuation_status: UNAVAILABLE`) when Cal OES errored,
+  `0` when Cal OES is healthy with no active zones (`OK`), and `N>0` for active
+  zones. An error never becomes a `0`.
+
+**Persistence** (`internal/store`, SQLite at `grid.dbPath`, WAL mode): **the
+store is the system of record** for grid events. The canonical value is the proto
+blob (`grid.v1.Event`) — scalar columns exist only as query indexes and every
+read rehydrates from the blob. Writes are single-writer (the ingest scheduler,
+serialized through a mutex); reads run concurrently under WAL. Every content
+change or lifecycle transition is a revision snapshot in `event_revisions`, so a
+restart rehydrates events + history with no re-fetch. The in-memory TTL caches
+(`internal/cache`) remain on the read path for the roads/weather/hazards services
+— they are not the source of truth. See `internal/store/CLAUDE.md` and
+`internal/ingest/CLAUDE.md` before touching the store or a poller.
 
 ## Performance & Monitoring
 

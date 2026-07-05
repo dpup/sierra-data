@@ -5,7 +5,138 @@ to read before updating a consuming site (e.g. ersn.net, sierragridteam.org).
 
 There are no formal releases — the service deploys from `main`. Each entry below
 is timestamped; add a new dated section at the top when the API surface changes.
-The API is JSON over HTTP (`/api/v1/...`); field names are camelCase.
+The API is JSON over HTTP. The original surface is `/api/v1/...` (field names
+camelCase). As of 2026-07-05 there is a second, first-principles surface at
+`/v1/...` (field names snake_case — protojson `UseProtoNames`); both run on the
+same binary over the same store (see the 2026-07-05 entry and its migration plan).
+
+## 2026-07-05 18:00 UTC
+
+### Added — Grid Info Service v2: a `/v1` surface, a persistent event store, and a data site
+
+The service now normalizes every hazard source into a canonical **event** model
+persisted in SQLite with full revision history, and serves it through a new
+first-principles API at `/v1` alongside a public data site. `/api/v1` is
+untouched in shape (see the migration note below for behavior changes on the
+hazard layers). All `/v1` JSON is **snake_case** (proto field names on the wire);
+timestamps are RFC 3339; errors are `google.rpc.Status`; ETags/`If-None-Match`
+everywhere. Full reference: the site's `/docs.html` (when deployed) and
+`docs/v2-api-spec.md`; build/design notes in `docs/v2-implementation-plan.md`.
+
+**New `/v1` endpoints:**
+
+- `GET /v1/places/{place}/summary` — one-fetch place rollup: `mode`
+  (QUIET/WATCH/ACTIVE), a cross-layer `summary`, per-`domains[]` status, top
+  events, and a source-health sidecar. Carries the evacuation fail-loud invariant
+  (`active_evacuations: int|null` + `evacuation_status`). Replaces
+  `/api/v1/situation/{area}` (`layers[]` → `domains[]`, adds `mode`, scanners
+  moved out).
+- `GET /v1/places/{place}/map/{layer}.geojson` — RFC 7946 FeatureCollection per
+  layer, envelope byte-identical to `/api/v1/hazards/{area}/{layer}.geojson`
+  (map cutover is a source-URL swap).
+- `GET /v1/events` — cross-layer query with filters
+  `place,layer,status,severity_min,since,page_token,page_size` (default status
+  `ACTIVE,SCHEDULED`), keyset pagination. Subsumes `/api/v1/incidents/{area}`
+  (`layer=road_incident`) and weather-alert listing (`layer=weather_alert`).
+- `GET /v1/events/{id}` — current revision of one event.
+- `GET /v1/events/{id}/history` — that event's revision timeline.
+- `GET /v1/history` — cross-event revision archive (`place,from,to,layer`).
+- `GET /v1/places` / `GET /v1/places/{place}` — place directory (`kind`,`q`
+  filters); places addressable by slug (`calaveras`) or id (`county:calaveras`).
+- `GET /v1/places/resolve?lat=&lng=` or `?address=` — point/address → containing
+  places, most-specific first (address path geocodes via the keyless Census
+  geocoder).
+- `GET /v1/roads` / `GET /v1/roads/{id}` — road conditions passthrough with an
+  optional `?place=` bbox filter (alerts field retained).
+- `GET /v1/weather` / `GET /v1/weather/{location}` — weather conditions +
+  `fire_weather`, **minus per-location alerts** (alerts are events now — see
+  below).
+- `GET /v1/scanners?place=` — Broadcastify feed config (link-out only).
+- `GET /v1/sources` — the source registry with per-source health.
+
+**Persistence (SQLite + revision history).** Events, their full revision
+snapshots, the place directory, and source health live in a SQLite database
+(`grid.dbPath`, default `./data/grid.db`; production points at an EBS volume via
+`PF__GRID__DBPATH=/data/grid.db`, mounted at `/data` in the container). The store
+is the system of record: a restart **rehydrates** all events and revisions — no
+warm-up re-fetch needed. Every state transition (including the all-clear when an
+event leaves its feed) is written as a revision, so history is complete and
+replayable.
+
+**Sources registry + per-source health.** `/v1/sources` (and every
+`source_status` on the map/summary endpoints) is driven by a registry of the
+upstreams — `usgs, calfire, wfigs, caloes, nws, chp, caltrans` — each carrying
+`status` (`OK|STALE|UNAVAILABLE`), last success/attempt times, poll interval, and
+last error. A poll degrades a source `OK → STALE` (within 3× its poll interval of
+the last success) `→ UNAVAILABLE` as failures age.
+
+**Data site at `/`.** The homepage handler is replaced by an embedded static
+site (`data.sierragridteam.org`) served at `/`: a source-health board, an event
+explorer + detail/revision views, a place directory + zone resolver, a map layer
+previewer, a history browser, and the hand-authored `/v1` reference at
+`/docs.html`. Self-contained (MapLibre GL vendored, no CDN). The Docker
+healthcheck on `GET /` still works.
+
+### Changed — `/api/v1` hazard event layers are now store-backed (same envelope; behavior notes)
+
+The five **event-backed** `/api/v1/hazards/{area}/{layer}.geojson` layers
+(`wildfire`, `evacuation`, `weather_alert`, `earthquake`, `road_incident`) are
+re-backed by the grid event store through a projection that is byte-compatible
+with the previous live builders. The **conditions** layers (`road_segment`,
+`chain_control`, `fire_weather`) are unchanged live projections. The envelope,
+field names, and severity scale are identical; these are the deliberate behavior
+changes (each also applies to the new `/v1/.../map/{layer}.geojson`):
+
+- **`wfigs` standalone perimeter ids are stabilized.** A NIFC/WFIGS perimeter not
+  joined to a CAL FIRE incident now has id `wfigs:{normalized-name}` (with a
+  `-2`,`-3` centroid-ordered disambiguator for same-name perimeters), instead of
+  the previous slice-index id that changed across polls. Ids were never stable
+  before; treat this as an id-stability fix.
+- **NWS "Extreme" alerts now rank `EXTREME` (rank 4), not `SEVERE`.** The store
+  maps NWS severity directly; the old path collapsed "Extreme" into the API's
+  `CRITICAL`, which projected to `SEVERE`. Sort/color for the top of the scale
+  shifts up one rank. (`weather_alert` layer only.)
+- **`earthquake` `updated_at` is omitted when it equals the event time.** Matches
+  the prior omit-when-zero behavior; consumers already treated a missing
+  `updated_at` as "never revised".
+- **Upstream outages now serve `STALE` with the last-good stored data instead of
+  `UNAVAILABLE`-empty**, once a source has succeeded and still has active events
+  stored. The store *is* the last-good cache, so a transient source failure no
+  longer blanks a layer that has data to show; `UNAVAILABLE`-empty is reserved
+  for a source that failed with nothing stored to serve. The evacuation
+  life-safety invariant is preserved: `UNAVAILABLE` still means empty features and
+  `active_evacuations: null` — an error never becomes a `0`.
+- **Store-backed layers no longer regenerate AI enhancement every poll.**
+  Enhancement (and the summary text) is content-hash-gated and persisted with the
+  event, so an unchanged alert keeps its enhanced fields across polls instead of
+  being re-generated per refresh cycle — fewer OpenAI calls, stable output.
+
+### Changed — weather alerts removed from `/v1/weather` (still on `/api/v1`)
+
+On the new surface, `/v1/weather` and `/v1/weather/{location}` no longer carry
+per-location `alerts[]` — weather alerts are events, queryable at
+`/v1/events?layer=weather_alert` (and projected on the `weather_alert` map
+layer). `fire_weather` stays on `/v1/weather`. The legacy `/api/v1/weather*` and
+`/api/v1/weather/alerts` endpoints are **unchanged** — alerts remain there for
+existing consumers.
+
+### Deprecation plan — `/api/v1` (per `docs/v2-api-spec.md` §6)
+
+`/api/v1` and `/v1` run on the same binary over the same store; there is no
+compatibility shim to maintain. Frontends cut over per page: map layers first
+(URL swap, zero shape risk), then the Now page onto `/summary`, then
+incident/alert views onto `/events`. `/api/v1` will be **deleted after N quiet
+weeks** in the access logs — target weeks, not months. New pollers (PSPS, FIRMS,
+gauges, AQI) land on `/v1` only. Old → new mapping:
+
+| Current | New |
+|---|---|
+| `/api/v1/situation/{area}` | `/v1/places/{area}/summary` |
+| `/api/v1/hazards/{area}/{layer}.geojson` | `/v1/places/{area}/map/{layer}.geojson` |
+| `/api/v1/incidents/{area}` | `/v1/events?place={area}&layer=road_incident` |
+| WeatherService `/weather/alerts` | `/v1/events?layer=weather_alert` |
+| `/api/v1/roads*` / `/api/v1/weather*` | `/v1/roads*` / `/v1/weather*` (weather minus alerts) |
+| `/api/v1/scanners/{area}` | `/v1/scanners?place={area}` |
 
 ## 2026-07-04 21:00 UTC
 

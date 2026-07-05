@@ -20,6 +20,7 @@ The architecture is modular and location-agnostic, allowing easy adaptation to o
 - **AI-Enhanced Descriptions**: Automatic OpenAI conversion of technical alerts into clear, human-readable summaries
 - **Weather Information**: Current conditions from OpenWeatherMap plus authoritative NWS zone alerts for multiple locations
 - **Unified Hazard Layer**: Map-ready GeoJSON aggregating wildfires, earthquakes, evacuations, weather alerts, and road incidents into one standardized interface, with a fail-loud `source_status` and a life-safety evacuation contract
+- **Grid Event Store (v2)**: Every hazard source normalized into a canonical event model, persisted in SQLite with full revision history, and served through a new `/v1` API plus an embedded data site — see [Grid Info Service (v2)](#grid-info-service-v2)
 - **Stale-while-revalidate Caching**: Sub-100ms responses by serving cached data while refreshing in background
 - **REST API**: Clean HTTP endpoints with comprehensive JSON responses
 - **gRPC Support**: Native gRPC services with automatic HTTP gateway
@@ -410,11 +411,45 @@ Operator-configured Broadcastify public-safety scanner feeds for the area
 Areas (bounds, scanner feeds, incident region) are configured under
 `hazards.areas` in `prefab.yaml`.
 
+## Grid Info Service (v2)
+
+The v2 layer normalizes every hazard source into a canonical **event** model and
+persists it in SQLite (`grid.dbPath`) with full revision history — every state
+change, including the all-clear when an event leaves its feed, is a recorded
+revision, and a restart rehydrates from the store rather than re-fetching.
+Event-shaped sources (wildfire, evacuation, weather alert, earthquake, road
+incident) flow through an ingest scheduler into the store; the existing
+`/api/v1/hazards` event layers are re-backed by that store (same GeoJSON
+envelope). A new first-principles API is served at `/v1` (JSON is snake_case,
+timestamps RFC 3339, ETags everywhere), and an embedded data site at `/` provides
+a source-health board, event explorer, place directory + zone resolver, map
+previewer, and the live API reference. Full docs: the site's `/docs.html` (when
+deployed) and [`docs/v2-api-spec.md`](docs/v2-api-spec.md); implementation notes
+in [`docs/v2-implementation-plan.md`](docs/v2-implementation-plan.md).
+
+| Endpoint | Returns |
+|---|---|
+| `GET /v1/places/{place}/summary` | Place rollup: `mode`, per-domain status, top events, evac fail-loud invariant, source health |
+| `GET /v1/places/{place}/map/{layer}.geojson` | RFC 7946 FeatureCollection (envelope identical to `/api/v1/hazards`) |
+| `GET /v1/events?place=&layer=&status=&severity_min=&since=&page_token=` | Cross-layer event query (subsumes incidents + weather alerts) |
+| `GET /v1/events/{id}` / `GET /v1/events/{id}/history` | Current revision / revision timeline |
+| `GET /v1/history?place=&from=&to=&layer=` | Cross-event revision archive |
+| `GET /v1/places?kind=&q=` / `GET /v1/places/{place}` | Place directory |
+| `GET /v1/places/resolve?lat=&lng=` \| `?address=` | Point/address → containing places |
+| `GET /v1/roads?place=` / `GET /v1/weather?place=` | Conditions passthrough (weather minus alerts) |
+| `GET /v1/scanners?place=` | Broadcastify feed config |
+| `GET /v1/sources` | Source registry + per-source health |
+
+Weather alerts have moved off `/v1/weather` — they are events
+(`/v1/events?layer=weather_alert`). `/api/v1` is unchanged in shape and runs
+beside `/v1` on the same store; it will be retired after consumers cut over (see
+`docs/v2-api-spec.md` §6).
+
 ## Quick Start
 
 ### Prerequisites
 
-- Go 1.21+
+- Go 1.25+
 - Google Routes API key
 - OpenWeatherMap API key
 
