@@ -1,5 +1,6 @@
 name: motherlode
 agent: claude
+runtime: docker
 grants:
   - github
   - ssh:github
