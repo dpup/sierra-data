@@ -1,0 +1,461 @@
+package store
+
+import (
+	"context"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
+	"fmt"
+	"sort"
+	"time"
+
+	gridv1 "github.com/dpup/info.ersn.net/server/api/grid/v1"
+	"github.com/dpup/info.ersn.net/server/internal/lib/geojson"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
+)
+
+// UpsertResult reports what UpsertEvent did.
+type UpsertResult struct {
+	Changed  bool   // a row was written (new event or new revision)
+	Revision uint32 // current revision after the call
+}
+
+// ContentHash returns the SHA-256 hex of a deterministic marshal of ev with
+// volatile fields zeroed: revision, ingested_at, observed_at,
+// provenance.fetched_at, enhancement, summary, place_ids. Upstream re-stamps
+// without content change produce the same hash (no revision), and
+// enhancement output never causes hash churn — the scheduler decides whether
+// to spend enhancement budget via NeedsUpdate BEFORE enhancing.
+func ContentHash(ev *gridv1.Event) string {
+	c := proto.Clone(ev).(*gridv1.Event)
+	c.Revision = 0
+	c.IngestedAt = nil
+	c.ObservedAt = nil
+	if c.Provenance != nil {
+		c.Provenance.FetchedAt = nil
+	}
+	c.Enhancement = nil
+	c.Summary = ""
+	c.PlaceIds = nil
+	b, err := proto.MarshalOptions{Deterministic: true}.Marshal(c)
+	if err != nil {
+		// Marshal of a well-formed generated message cannot fail; a sentinel
+		// keyed by id keeps the failure visible without panicking ingest.
+		b = []byte("marshal-error:" + ev.GetId())
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
+// NeedsUpdate reports whether UpsertEvent(ev) would write: true when the
+// event is unknown or its normalized content hash differs from the stored
+// one. The scheduler pre-checks this before spending AI-enhancement budget.
+func (s *Store) NeedsUpdate(ctx context.Context, ev *gridv1.Event) (bool, error) {
+	var stored string
+	err := s.db.QueryRowContext(ctx, `SELECT content_hash FROM events WHERE id = ?`, ev.GetId()).Scan(&stored)
+	if err == sql.ErrNoRows {
+		return true, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("store: needs-update %s: %w", ev.GetId(), err)
+	}
+	return stored != ContentHash(ev), nil
+}
+
+// UpsertEvent inserts or revises an event, gated on ContentHash:
+//
+//   - no existing row: insert at revision 1;
+//   - hash equal to stored: NO writes at all, Changed=false;
+//   - hash differs: revision = old+1, row updated.
+//
+// Every write also inserts an event_revisions snapshot, recomputes
+// event_places, and refreshes the R*Tree bbox row. ingested_at is stamped
+// here; callers own observed_at (nil falls back to now for the NOT NULL
+// index column only).
+func (s *Store) UpsertEvent(ctx context.Context, ev *gridv1.Event) (UpsertResult, error) {
+	if ev.GetId() == "" {
+		return UpsertResult{}, fmt.Errorf("store: upsert event with empty id")
+	}
+	// Hash the event exactly as passed — before any store-side mutation — so
+	// the stored hash always matches what the next poll's ContentHash yields.
+	hash := ContentHash(ev)
+
+	var res UpsertResult
+	err := s.inTx(ctx, func(tx *sql.Tx) error {
+		var oldRev uint32
+		var oldHash string
+		err := tx.QueryRow(`SELECT revision, content_hash FROM events WHERE id = ?`, ev.GetId()).
+			Scan(&oldRev, &oldHash)
+		switch {
+		case err == sql.ErrNoRows:
+			res = UpsertResult{Changed: true, Revision: 1}
+		case err != nil:
+			return fmt.Errorf("store: upsert lookup %s: %w", ev.GetId(), err)
+		case oldHash == hash:
+			res = UpsertResult{Changed: false, Revision: oldRev}
+			return nil
+		default:
+			res = UpsertResult{Changed: true, Revision: oldRev + 1}
+		}
+
+		now := time.Now()
+		c := proto.Clone(ev).(*gridv1.Event)
+		c.Revision = res.Revision
+		c.IngestedAt = timestamppb.New(now)
+		ensureGeometryIndex(c)
+
+		placeIDs, err := s.matchPlaces(tx, c)
+		if err != nil {
+			return err
+		}
+		// UNION caller-preset place_ids (e.g. NWS zone->area mapping) with
+		// geometric matches — preset ids are never dropped.
+		c.PlaceIds = unionSorted(ev.GetPlaceIds(), placeIDs)
+
+		blob, err := proto.Marshal(c)
+		if err != nil {
+			return fmt.Errorf("store: marshal event %s: %w", c.GetId(), err)
+		}
+
+		observedAt := now.Unix() // NOT NULL index column fallback; blob keeps caller's value
+		if c.GetObservedAt() != nil {
+			observedAt = c.GetObservedAt().AsTime().Unix()
+		}
+		if _, err := tx.Exec(`
+			INSERT INTO events (id, layer, severity, status, source_id, effective, expires,
+			                    observed_at, ingested_at, revision, content_hash, proto)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(id) DO UPDATE SET
+			  layer = excluded.layer, severity = excluded.severity, status = excluded.status,
+			  source_id = excluded.source_id, effective = excluded.effective,
+			  expires = excluded.expires, observed_at = excluded.observed_at,
+			  ingested_at = excluded.ingested_at, revision = excluded.revision,
+			  content_hash = excluded.content_hash, proto = excluded.proto`,
+			c.GetId(), int32(c.GetLayer()), int32(c.GetSeverity()), int32(c.GetStatus()),
+			c.GetProvenance().GetSourceId(), unixOrNil(c.GetEffective()), unixOrNil(c.GetExpires()),
+			observedAt, now.Unix(), res.Revision, hash, blob,
+		); err != nil {
+			return fmt.Errorf("store: upsert event %s: %w", c.GetId(), err)
+		}
+		if err := insertRevision(tx, c.GetId(), res.Revision, observedAt, now.Unix(), blob); err != nil {
+			return err
+		}
+		if err := replaceEventPlaces(tx, c.GetId(), c.PlaceIds); err != nil {
+			return err
+		}
+		return upsertGeo(tx, c)
+	})
+	if err != nil {
+		return UpsertResult{}, err
+	}
+	return res, nil
+}
+
+// TransitionEvents moves each event to status `to`, bumping its revision and
+// writing a revision snapshot — the all-clear IS history. Events already in
+// that status (and unknown ids) are skipped, so lifecycle sweeps are
+// idempotent. observedAt is when the transition was observed (e.g. the poll
+// that noticed the disappearance).
+func (s *Store) TransitionEvents(ctx context.Context, ids []string, to gridv1.EventStatus, observedAt time.Time) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	return s.inTx(ctx, func(tx *sql.Tx) error {
+		for _, id := range ids {
+			var blob []byte
+			err := tx.QueryRow(`SELECT proto FROM events WHERE id = ?`, id).Scan(&blob)
+			if err == sql.ErrNoRows {
+				continue
+			}
+			if err != nil {
+				return fmt.Errorf("store: transition lookup %s: %w", id, err)
+			}
+			ev := &gridv1.Event{}
+			if err := proto.Unmarshal(blob, ev); err != nil {
+				return fmt.Errorf("store: transition unmarshal %s: %w", id, err)
+			}
+			if ev.GetStatus() == to {
+				continue
+			}
+			now := time.Now()
+			ev.Status = to
+			ev.ObservedAt = timestamppb.New(observedAt)
+			ev.IngestedAt = timestamppb.New(now)
+			ev.Revision++
+			newBlob, err := proto.Marshal(ev)
+			if err != nil {
+				return fmt.Errorf("store: transition marshal %s: %w", id, err)
+			}
+			// Status is hashed content: recompute so a later reappearance in
+			// the feed (status differs) correctly writes a revision.
+			if _, err := tx.Exec(`
+				UPDATE events SET status = ?, observed_at = ?, ingested_at = ?,
+				                  revision = ?, content_hash = ?, proto = ?
+				WHERE id = ?`,
+				int32(to), observedAt.Unix(), now.Unix(),
+				ev.GetRevision(), ContentHash(ev), newBlob, id,
+			); err != nil {
+				return fmt.Errorf("store: transition update %s: %w", id, err)
+			}
+			if err := insertRevision(tx, id, ev.GetRevision(), observedAt.Unix(), now.Unix(), newBlob); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// ActiveEventsBySource returns all ACTIVE and SCHEDULED events for a source.
+// The lifecycle sweep diffs this set against the latest poll to find
+// disappeared events.
+func (s *Store) ActiveEventsBySource(ctx context.Context, sourceID string) ([]*gridv1.Event, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT proto FROM events
+		WHERE source_id = ? AND status IN (?, ?)
+		ORDER BY id`,
+		sourceID, int32(gridv1.EventStatus_ACTIVE), int32(gridv1.EventStatus_SCHEDULED))
+	if err != nil {
+		return nil, fmt.Errorf("store: active by source %s: %w", sourceID, err)
+	}
+	defer rows.Close()
+	return scanEvents(rows)
+}
+
+// GetEvent returns the current revision of an event, or ErrNotFound.
+func (s *Store) GetEvent(ctx context.Context, id string) (*gridv1.Event, error) {
+	var blob []byte
+	err := s.db.QueryRowContext(ctx, `SELECT proto FROM events WHERE id = ?`, id).Scan(&blob)
+	if err == sql.ErrNoRows {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("store: get event %s: %w", id, err)
+	}
+	ev := &gridv1.Event{}
+	if err := proto.Unmarshal(blob, ev); err != nil {
+		return nil, fmt.Errorf("store: unmarshal event %s: %w", id, err)
+	}
+	return ev, nil
+}
+
+// --- internals ---
+
+func insertRevision(tx *sql.Tx, id string, rev uint32, observedAt, ingestedAt int64, blob []byte) error {
+	if _, err := tx.Exec(`
+		INSERT INTO event_revisions (event_id, revision, observed_at, ingested_at, proto)
+		VALUES (?, ?, ?, ?, ?)`,
+		id, rev, observedAt, ingestedAt, blob,
+	); err != nil {
+		return fmt.Errorf("store: insert revision %s@%d: %w", id, rev, err)
+	}
+	return nil
+}
+
+func replaceEventPlaces(tx *sql.Tx, id string, placeIDs []string) error {
+	if _, err := tx.Exec(`DELETE FROM event_places WHERE event_id = ?`, id); err != nil {
+		return fmt.Errorf("store: clear event_places %s: %w", id, err)
+	}
+	for _, pid := range placeIDs {
+		if _, err := tx.Exec(`INSERT INTO event_places (event_id, place_id) VALUES (?, ?)`, id, pid); err != nil {
+			return fmt.Errorf("store: insert event_places %s->%s: %w", id, pid, err)
+		}
+	}
+	return nil
+}
+
+// ensureGeometryIndex backfills bbox and centroid from the raw GeoJSON when
+// the normalizer left them unset. Geometry is hashed content, but the hash is
+// computed from the event as passed, so backfilling here cannot cause churn.
+func ensureGeometryIndex(ev *gridv1.Event) {
+	g := ev.GetGeometry()
+	if g == nil || len(g.GetGeojson()) == 0 {
+		return
+	}
+	if g.GetBbox() != nil && g.GetCentroid() != nil {
+		return
+	}
+	parsed, err := geojson.Parse(g.GetGeojson())
+	if err != nil {
+		return // columns are indexes only; bad geometry must not block ingest
+	}
+	if g.GetBbox() == nil {
+		minLat, minLng, maxLat, maxLng := parsed.Bbox()
+		g.Bbox = &gridv1.BoundingBox{MinLat: minLat, MinLng: minLng, MaxLat: maxLat, MaxLng: maxLng}
+	}
+	if g.GetCentroid() == nil {
+		lat, lng := parsed.Centroid()
+		g.Centroid = &gridv1.LatLng{Lat: lat, Lng: lng}
+	}
+}
+
+// upsertGeo keeps exactly one R*Tree row per event with geometry (via the
+// event_geo_map rowid indirection) and none for events without.
+func upsertGeo(tx *sql.Tx, ev *gridv1.Event) error {
+	bbox := ev.GetGeometry().GetBbox()
+	if bbox == nil {
+		if _, err := tx.Exec(`
+			DELETE FROM event_geo WHERE rowid = (SELECT rowid FROM event_geo_map WHERE event_id = ?)`,
+			ev.GetId()); err != nil {
+			return fmt.Errorf("store: clear event_geo %s: %w", ev.GetId(), err)
+		}
+		if _, err := tx.Exec(`DELETE FROM event_geo_map WHERE event_id = ?`, ev.GetId()); err != nil {
+			return fmt.Errorf("store: clear event_geo_map %s: %w", ev.GetId(), err)
+		}
+		return nil
+	}
+	var rowid int64
+	err := tx.QueryRow(`SELECT rowid FROM event_geo_map WHERE event_id = ?`, ev.GetId()).Scan(&rowid)
+	if err == sql.ErrNoRows {
+		r, err := tx.Exec(`INSERT INTO event_geo_map (event_id) VALUES (?)`, ev.GetId())
+		if err != nil {
+			return fmt.Errorf("store: insert event_geo_map %s: %w", ev.GetId(), err)
+		}
+		if rowid, err = r.LastInsertId(); err != nil {
+			return fmt.Errorf("store: event_geo_map rowid %s: %w", ev.GetId(), err)
+		}
+	} else if err != nil {
+		return fmt.Errorf("store: lookup event_geo_map %s: %w", ev.GetId(), err)
+	}
+	if _, err := tx.Exec(`
+		INSERT OR REPLACE INTO event_geo (rowid, min_lat, max_lat, min_lng, max_lng)
+		VALUES (?, ?, ?, ?, ?)`,
+		rowid, bbox.GetMinLat(), bbox.GetMaxLat(), bbox.GetMinLng(), bbox.GetMaxLng(),
+	); err != nil {
+		return fmt.Errorf("store: upsert event_geo %s: %w", ev.GetId(), err)
+	}
+	return nil
+}
+
+// matchPlaces computes the geometric event->place attachments.
+//
+// Rule (over-attach beats missing a perimeter that crosses a boundary):
+//   - point events (or events whose GeoJSON won't parse but carry a
+//     centroid): attach every place whose polygon contains the centroid;
+//   - polygon/multipolygon events: attach a place when the bboxes intersect
+//     AND (the event centroid is in the place, OR the place's bbox center is
+//     in the event geometry, OR both geometries are polygons — permissive
+//     bbox-overlap);
+//   - other event types (linestrings): bbox intersect AND centroid in place.
+//
+// Zone-carrying weather alerts are handled by the caller pre-setting
+// ev.place_ids; UpsertEvent unions those with these matches.
+func (s *Store) matchPlaces(tx *sql.Tx, ev *gridv1.Event) ([]string, error) {
+	g := ev.GetGeometry()
+	if g == nil {
+		return nil, nil
+	}
+	var evGeom *geojson.Geom
+	if len(g.GetGeojson()) > 0 {
+		if parsed, err := geojson.Parse(g.GetGeojson()); err == nil {
+			evGeom = parsed
+		}
+	}
+	centroid := g.GetCentroid()
+	if evGeom == nil && centroid == nil {
+		return nil, nil
+	}
+
+	var evMinLat, evMinLng, evMaxLat, evMaxLng float64
+	pointLike := evGeom == nil || evGeom.Type == "Point"
+	if evGeom != nil {
+		evMinLat, evMinLng, evMaxLat, evMaxLng = evGeom.Bbox()
+		if centroid == nil {
+			lat, lng := evGeom.Centroid()
+			centroid = &gridv1.LatLng{Lat: lat, Lng: lng}
+		}
+	} else {
+		evMinLat, evMinLng, evMaxLat, evMaxLng = centroid.GetLat(), centroid.GetLng(), centroid.GetLat(), centroid.GetLng()
+	}
+	evPolygonal := evGeom != nil && (evGeom.Type == "Polygon" || evGeom.Type == "MultiPolygon")
+
+	rows, err := tx.Query(`SELECT id, proto FROM places`)
+	if err != nil {
+		return nil, fmt.Errorf("store: load places: %w", err)
+	}
+	defer rows.Close()
+
+	var matched []string
+	for rows.Next() {
+		var id string
+		var blob []byte
+		if err := rows.Scan(&id, &blob); err != nil {
+			return nil, fmt.Errorf("store: scan place: %w", err)
+		}
+		place := &gridv1.Place{}
+		if err := proto.Unmarshal(blob, place); err != nil {
+			return nil, fmt.Errorf("store: unmarshal place %s: %w", id, err)
+		}
+		raw := place.GetGeometry().GetGeojson()
+		if len(raw) == 0 {
+			continue
+		}
+		plGeom, err := geojson.Parse(raw)
+		if err != nil {
+			continue
+		}
+		if pointLike {
+			if geojson.PointInGeometry(centroid.GetLat(), centroid.GetLng(), plGeom) {
+				matched = append(matched, id)
+			}
+			continue
+		}
+		plMinLat, plMinLng, plMaxLat, plMaxLng := plGeom.Bbox()
+		if !geojson.BboxIntersects(evMinLat, evMinLng, evMaxLat, evMaxLng,
+			plMinLat, plMinLng, plMaxLat, plMaxLng) {
+			continue
+		}
+		if geojson.PointInGeometry(centroid.GetLat(), centroid.GetLng(), plGeom) {
+			matched = append(matched, id)
+			continue
+		}
+		if !evPolygonal {
+			continue
+		}
+		plCenterLat, plCenterLng := plGeom.Centroid()
+		if geojson.PointInGeometry(plCenterLat, plCenterLng, evGeom) {
+			matched = append(matched, id)
+			continue
+		}
+		if plGeom.Type == "Polygon" || plGeom.Type == "MultiPolygon" {
+			matched = append(matched, id) // permissive polygon-polygon bbox overlap
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: iterate places: %w", err)
+	}
+	return matched, nil
+}
+
+// unionSorted merges two id lists, deduped and sorted for deterministic blobs.
+func unionSorted(a, b []string) []string {
+	seen := make(map[string]bool, len(a)+len(b))
+	var out []string
+	for _, list := range [][]string{a, b} {
+		for _, id := range list {
+			if id == "" || seen[id] {
+				continue
+			}
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func scanEvents(rows *sql.Rows) ([]*gridv1.Event, error) {
+	var out []*gridv1.Event
+	for rows.Next() {
+		var blob []byte
+		if err := rows.Scan(&blob); err != nil {
+			return nil, fmt.Errorf("store: scan event: %w", err)
+		}
+		ev := &gridv1.Event{}
+		if err := proto.Unmarshal(blob, ev); err != nil {
+			return nil, fmt.Errorf("store: unmarshal event: %w", err)
+		}
+		out = append(out, ev)
+	}
+	return out, rows.Err()
+}

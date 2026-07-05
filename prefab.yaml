@@ -234,3 +234,74 @@ hazards:
         - { feedId: "28469", channelLabel: "Fire / USFS", agency: "CAL FIRE / USFS" }
         - { feedId: "41042", channelLabel: "CAL FIRE TCU / USFS", agency: "CAL FIRE TCU" }
         - { feedId: "45443", channelLabel: "CHP — Stockton", agency: "CHP" }
+
+# Grid event store + ingest scheduler (docs/v2-implementation-plan.md). The
+# scheduler polls each upstream, persists events with revision history in
+# SQLite, and derives per-source health for /v1/sources.
+grid:
+  # SQLite database. Local dev writes under ./data (git-ignored); production
+  # points at the EBS mount via PF__GRID__DBPATH=/data/grid.db.
+  dbPath: "./data/grid.db"
+
+  # NWS weather-alert AI enhancement (condense + localize; spec §3.1 — the
+  # enhancer translates, never asserts). budgetPerTick caps OpenAI calls per
+  # scheduler tick: enhancement only triggers on content change, so cost
+  # scales with alert churn, not poll rate; alerts deferred by the budget are
+  # picked up on their next content change. Disabled automatically when no
+  # OpenAI key is configured.
+  enhancement:
+    enabled: true
+    budgetPerTick: 5
+
+  # Per-source poll cadence + lifecycle policy. A poller may update several
+  # source rows (wildfire tick -> calfire + wfigs; incidents tick -> chp +
+  # caltrans; the poller runs at the fastest of its sources' intervals).
+  #
+  # disappearance says what happens when an event vanishes from its feed:
+  #   resolve — the feed authoritatively lists everything active (Cal OES,
+  #             CAL FIRE, CHP, Caltrans), so missing IS the all-clear: the
+  #             event transitions to RESOLVED (a recorded revision — the
+  #             all-clear is part of history).
+  #   expire  — the feed going quiet proves nothing (an NWS alert drops out
+  #             at end-of-product, WFIGS perimeters lag): the event only
+  #             transitions to EXPIRED once past its own `expires` time or
+  #             the expireAfter grace; otherwise it stays active.
+  # Either way a failed poll NEVER transitions events — an error must never
+  # become an all-clear (the evac fail-loud invariant).
+  #
+  # staleAfter is omitted everywhere: the store defaults it to 3x the poll
+  # interval (health degrades OK -> STALE -> UNAVAILABLE as failures age).
+  sources:
+    usgs:
+      pollInterval: "5m"
+      # A quake aging out of the 7-day M2.5+ query window is its natural end
+      # of life; the window is authoritative for "current", so resolve.
+      disappearance: "resolve"
+    calfire:
+      pollInterval: "5m"
+      disappearance: "resolve"
+    wfigs:
+      pollInterval: "5m"
+      # Perimeter uploads lag the fire; a perimeter missing from one poll is
+      # not containment. Expire only after a day without reappearing.
+      disappearance: "expire"
+      expireAfter: "24h"
+    caloes:
+      # Life-safety layer: evacuation orders must appear (and clear) fast, so
+      # this polls at the shortest interval.
+      pollInterval: "2m"
+      disappearance: "resolve"
+    nws:
+      pollInterval: "5m"
+      # Alerts carry their own `expires`; the grace covers the rare product
+      # issued without one so it can't linger active forever.
+      disappearance: "expire"
+      expireAfter: "24h"
+    chp:
+      pollInterval: "5m"
+      disappearance: "resolve"
+    caltrans:
+      # Lane closures are scheduled operations; the upstream feed refreshes
+      # on a 10m cadence, so polling faster just re-reads the same data.
+      pollInterval: "10m"
+      disappearance: "resolve"

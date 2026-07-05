@@ -6,6 +6,7 @@ import (
 	"log"
 	"log/slog"
 	"net/http"
+	"sort"
 	"time"
 	_ "time/tzdata" // Embed the IANA tz database so America/Los_Angeles resolves in minimal containers
 
@@ -14,14 +15,21 @@ import (
 
 	api "github.com/dpup/info.ersn.net/server/api/v1"
 	"github.com/dpup/info.ersn.net/server/internal/cache"
+	"github.com/dpup/info.ersn.net/server/internal/clients/calfire"
+	"github.com/dpup/info.ersn.net/server/internal/clients/caloes"
 	"github.com/dpup/info.ersn.net/server/internal/clients/caltrans"
 	"github.com/dpup/info.ersn.net/server/internal/clients/google"
 	"github.com/dpup/info.ersn.net/server/internal/clients/nws"
+	"github.com/dpup/info.ersn.net/server/internal/clients/usgs"
 	"github.com/dpup/info.ersn.net/server/internal/clients/weather"
+	"github.com/dpup/info.ersn.net/server/internal/clients/wfigs"
 	"github.com/dpup/info.ersn.net/server/internal/config"
 	"github.com/dpup/info.ersn.net/server/internal/hazards"
+	"github.com/dpup/info.ersn.net/server/internal/ingest"
 	"github.com/dpup/info.ersn.net/server/internal/lib/alerts"
+	"github.com/dpup/info.ersn.net/server/internal/places"
 	"github.com/dpup/info.ersn.net/server/internal/services"
+	"github.com/dpup/info.ersn.net/server/internal/store"
 )
 
 func main() {
@@ -77,6 +85,53 @@ func main() {
 	if err := periodicRefresh.StartPeriodicRefresh(ctx); err != nil {
 		logging.Errorw(ctx, "Failed to start periodic refresh", "error", err)
 	}
+
+	// Grid event store + ingest scheduler (docs/v2-implementation-plan.md):
+	// normalized hazard events persisted with revision history, per-source
+	// health, and the place directory — the /v1 foundation.
+	if appConfig.Grid.DBPath == "" {
+		logging.Error(ctx, "grid.dbPath is required (default ./data/grid.db in prefab.yaml)")
+		log.Fatal("grid.dbPath is required (default ./data/grid.db in prefab.yaml)")
+	}
+	gridStore, err := store.Open(appConfig.Grid.DBPath)
+	if err != nil {
+		logging.Errorw(ctx, "Failed to open grid store", "path", appConfig.Grid.DBPath, "error", err)
+		log.Fatalf("Failed to open grid store: %v", err)
+	}
+	defer gridStore.Close()
+
+	if err := gridStore.SeedSources(ctx, gridSourceSeeds(appConfig)); err != nil {
+		logging.Errorw(ctx, "Failed to seed grid sources", "error", err)
+		log.Fatalf("Failed to seed grid sources: %v", err)
+	}
+	if err := places.Seed(ctx, gridStore, appConfig); err != nil {
+		logging.Errorw(ctx, "Failed to seed grid places", "error", err)
+		log.Fatalf("Failed to seed grid places: %v", err)
+	}
+
+	// NWS weather-alert enhancement is optional: nil when disabled or keyless
+	// (the scheduler then serves raw alerts — enhancement never gates ingest).
+	var nwsEnhancer ingest.NWSEnhancer
+	if appConfig.Grid.Enhancement.Enabled {
+		nwsEnhancer = ingest.NewNWSEnhancer(appConfig.OpenAI)
+	}
+
+	// One poller per upstream scope; weather_alert and road_incident reuse the
+	// services' cached, budgeted pipelines (plan decision 6).
+	scheduler := ingest.NewScheduler(gridStore, ingest.SchedulerConfig{
+		Pollers: []ingest.PollerSpec{
+			{Normalizer: ingest.NewEarthquakeNormalizer(appConfig, usgs.NewClient()), Interval: gridPollInterval(appConfig, "usgs")},
+			{Normalizer: ingest.NewWildfireNormalizer(appConfig, calfire.NewClient(), wfigs.NewClient()), Interval: gridPollInterval(appConfig, "calfire", "wfigs")},
+			{Normalizer: ingest.NewEvacuationNormalizer(appConfig, caloes.NewClient()), Interval: gridPollInterval(appConfig, "caloes")},
+			{Normalizer: ingest.NewWeatherAlertNormalizer(appConfig, weatherService), Interval: gridPollInterval(appConfig, "nws")},
+			{Normalizer: ingest.NewRoadIncidentNormalizer(appConfig, roadsService), Interval: gridPollInterval(appConfig, "chp", "caltrans")},
+		},
+		Tuning:        appConfig.Grid.Sources,
+		Enhancer:      nwsEnhancer,
+		EnhancerModel: model,
+		BudgetPerTick: appConfig.Grid.Enhancement.BudgetPerTick,
+	})
+	scheduler.Start(ctx)
 
 	// Create Prefab server with GRPC reflection enabled
 	// Server configuration (port, etc.) will be loaded from prefab.yaml/env vars
@@ -211,6 +266,69 @@ for the Ebbett's Pass / Highway 4 corridor.
 	if _, err := fmt.Fprint(w, html); err != nil {
 		slog.Error("Failed to write homepage HTML", "error", err)
 	}
+}
+
+// gridSourceInfo is the static registry of source display names and
+// attributions. It must match the normalizers' provenance constants (which
+// in turn match the shipped hazards Source blocks) so /v1/sources and event
+// provenance agree.
+var gridSourceInfo = map[string]struct{ name, attribution string }{
+	"usgs":     {"USGS", "U.S. Geological Survey"},
+	"calfire":  {"CAL FIRE", "CAL FIRE / WFIGS"},
+	"wfigs":    {"NIFC WFIGS", "NIFC / WFIGS"},
+	"caloes":   {"Cal OES", "Cal OES — reference only"},
+	"nws":      {"National Weather Service", "NOAA / National Weather Service"},
+	"chp":      {"CHP / Caltrans", "quickmap.dot.ca.gov"},
+	"caltrans": {"Caltrans", "quickmap.dot.ca.gov"},
+}
+
+// gridSourceSeeds builds the source registry rows: ids + tuning from
+// grid.sources config, names/attributions from the static registry (a
+// config id without a registry entry is seeded with its id as the name so it
+// still shows up in /v1/sources rather than failing silently).
+func gridSourceSeeds(cfg *config.Config) []store.SourceSeed {
+	ids := make([]string, 0, len(cfg.Grid.Sources))
+	for id := range cfg.Grid.Sources {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids) // deterministic seeding order
+
+	seeds := make([]store.SourceSeed, 0, len(ids))
+	for _, id := range ids {
+		tuning := cfg.Grid.Sources[id]
+		info, ok := gridSourceInfo[id]
+		if !ok {
+			info.name = id
+		}
+		seeds = append(seeds, store.SourceSeed{
+			ID:            id,
+			Name:          info.name,
+			Attribution:   info.attribution,
+			PollInterval:  tuning.PollInterval,
+			StaleAfter:    tuning.StaleAfter,
+			ExpireAfter:   tuning.ExpireAfter,
+			Disappearance: tuning.Disappearance,
+		})
+	}
+	return seeds
+}
+
+// gridPollInterval is a poller's cadence: the fastest configured interval
+// among the sources it covers (a poller may span several source rows),
+// defaulting to 5m when none is configured.
+func gridPollInterval(cfg *config.Config, sourceIDs ...string) time.Duration {
+	var best time.Duration
+	for _, id := range sourceIDs {
+		if t, ok := cfg.Grid.Sources[id]; ok && t.PollInterval > 0 {
+			if best == 0 || t.PollInterval < best {
+				best = t.PollInterval
+			}
+		}
+	}
+	if best == 0 {
+		return 5 * time.Minute
+	}
+	return best
 }
 
 // openAPIHandler serves OpenAPI specification files with proper headers

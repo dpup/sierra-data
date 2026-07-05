@@ -117,6 +117,10 @@ config.development.yaml
 *.sqlite
 *.sqlite3
 
+# Local grid SQLite store (data/places/ seed geometry stays checked in)
+data/*
+!data/places/
+
 # Cache directories
 .cache/
 *.cache

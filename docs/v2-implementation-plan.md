@@ -154,6 +154,21 @@ Conventions: RFC 3339 timestamps; errors as `google.rpc.Status` protojson
 (`{"code":5,"message":"..."}` + HTTP status); ETag = strong hash of body,
 If-None-Match → 304; CORS comes free from prefab middleware.
 
+### 2.4 Wire format details (locked)
+
+- **JSON casing: snake_case everywhere on `/v1`** — entity endpoints marshal
+  with `protojson.MarshalOptions{UseProtoNames: true}` so proto field names
+  (`severity_rank`-style) hit the wire as-is, matching the shipped GeoJSON
+  envelope and the hand-built summary. Query params snake_case
+  (`severity_min`, `page_token`, `page_size`). Enum values render as their proto
+  names (`WILDFIRE`, `ACTIVE`, `SEVERE`); query params accept them
+  case-insensitively and layer params also accept the shipped lowercase layer
+  slugs (`wildfire`).
+- **Severity color ramp** (canonical, from hazard-aggregation-design §4.2):
+  EXTREME `#7f1d1d`, SEVERE `#c2410c`, MODERATE `#b45309`, MINOR `#a16207`,
+  INFO `#6b7280`. Pair color with the label — color is never the only signal.
+- Canonical client sort: `severity_rank` desc, then `observed_at` desc.
+
 Mode rules (pure function, unit-tested):
 - ACTIVE: any active evacuation (ORDER/WARNING/SHELTER_IN_PLACE), or any active
   event EXTREME, or wildfire SEVERE.
@@ -165,6 +180,31 @@ Domains: `fire` (wildfire + fire_weather), `evacuation`, `weather`
 (weather_alert), `roads` (road_incident + chain_control + road_segment),
 `seismic` (earthquake). Each: `status` (worst source_status), `highest_severity`,
 `active_count`, `headlines` (top 3).
+
+Summary response shape (hand-built JSON, snake_case — the site codes against
+this):
+```json
+{
+  "place": "calaveras", "place_id": "area:calaveras",
+  "place_name": "Calaveras County", "generated_at": "RFC3339",
+  "mode": "QUIET|WATCH|ACTIVE",
+  "summary": {
+    "highest_severity": "SEVERE", "highest_severity_rank": 3,
+    "severity_counts": {"SEVERE": 1}, "total_active": 4,
+    "active_evacuations": null, "evacuation_status": "UNAVAILABLE",
+    "top_events": [{"id","layer","severity","severity_rank","headline","source"}]
+  },
+  "domains": [{"domain","status","highest_severity","active_count",
+               "headlines":[{"id","severity","headline"}]}],
+  "sources": [{"id","status","last_success_at"}]
+}
+```
+Other /v1 shapes are the protojson of the grid.v1 list messages (snake_case).
+Note `Event.geometry.geojson` is a proto `bytes` field ⇒ **base64 in protojson**;
+clients decode (`atob`) before `JSON.parse`. Map rendering should prefer the
+`.geojson` endpoints; the base64 field is for detail views. `/v1/places/resolve`
+returns places ordered most-specific-first: SITE, EVAC_ZONE, TOWN, CORRIDOR,
+COUNTY, AREA.
 
 ## 3. Task breakdown
 

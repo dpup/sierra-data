@@ -1,0 +1,239 @@
+syntax = "proto3";
+
+package grid.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/dpup/info.ersn.net/server/api/grid/v1;gridv1";
+
+// Canonical grid event model (docs/v2-api-spec.md §3). Messages only — every
+// /v1 endpoint is a hand-built net/http handler; entity responses marshal
+// these messages with protojson.
+
+message Event {
+  string id = 1;                    // "{source_id}:{native_id}" — matches shipped ids
+                                    // e.g. "calfire:2026-salt-springs"
+  Layer layer = 2;                  // shipped taxonomy + additions
+  string category = 3;              // source sub-type slug ("active", "order", ...)
+  Severity severity = 4;            // shipped 5-level scale
+  EventStatus status = 5;
+
+  string headline = 6;              // card-renderable without knowing the kind
+  string summary = 7;               // AI-enhanced 2–3 sentences where applicable
+  string description = 8;           // long form / original text
+  string area_label = 9;            // "Hathaway Pines & Avery"
+  string canonical_url = 10;        // scheme-validated (https/http only, per shipped rule)
+
+  Geometry geometry = 11;           // may be absent: county-wide advisories
+  repeated string place_ids = 12;   // precomputed intersections (spec §4)
+
+  Provenance provenance = 13;
+
+  google.protobuf.Timestamp effective = 14;
+  google.protobuf.Timestamp expires = 15;
+  google.protobuf.Timestamp observed_at = 16;   // upstream last-update
+  google.protobuf.Timestamp ingested_at = 17;
+  uint32 revision = 18;
+
+  Enhancement enhancement = 19;     // AI-enhancement provenance (spec §3.1)
+
+  oneof detail {                    // mirrors the namespaced per-kind blocks
+    WildfireDetail wildfire = 20;
+    EvacuationDetail evacuation = 21;
+    WeatherAlertDetail weather_alert = 22;
+    FireWeatherDetail fire_weather = 23;
+    EarthquakeDetail earthquake = 24;
+    RoadIncidentDetail road_incident = 25;
+  }
+
+  // Power/Gauge/AirQuality/Network/Announcement details — defined with their
+  // pollers.
+  reserved 26 to 30;
+}
+
+enum Layer {
+  LAYER_UNSPECIFIED = 0;
+  WILDFIRE = 1;
+  EVACUATION = 2;
+  WEATHER_ALERT = 3;
+  FIRE_WEATHER = 4;
+  EARTHQUAKE = 5;
+  ROAD_INCIDENT = 6;
+  // condition-backed layers (ROAD_SEGMENT, CHAIN_CONTROL) are projections, not events
+  POWER = 10;
+  GAUGE = 11;
+  AIR_QUALITY = 12;
+  NETWORK = 13;
+  ANNOUNCEMENT = 14;
+}
+
+// The shipped scale, unchanged. rank = enum value; INFO=0 ... EXTREME=4.
+enum Severity {
+  INFO = 0;
+  MINOR = 1;
+  MODERATE = 2;
+  SEVERE = 3;
+  EXTREME = 4;
+}
+
+enum EventStatus {
+  EVENT_STATUS_UNSPECIFIED = 0;
+  SCHEDULED = 1;   // planned PSPS, forecast closures
+  ACTIVE = 2;
+  RESOLVED = 3;    // upstream confirmed over
+  EXPIRED = 4;     // aged out per-source policy; upstream went quiet
+}
+
+message Geometry {
+  bytes geojson = 1;                // RFC 7946 geometry object, UTF-8
+  BoundingBox bbox = 2;             // always populated at ingest
+  LatLng centroid = 3;
+}
+
+message BoundingBox {
+  double min_lat = 1;
+  double min_lng = 2;
+  double max_lat = 3;
+  double max_lng = 4;
+}
+
+message LatLng {
+  double lat = 1;
+  double lng = 2;
+}
+
+message Provenance {
+  string source_id = 1;
+  string source_name = 2;           // denormalized: "CAL FIRE"
+  string attribution = 3;           // "CAL FIRE / WFIGS"
+  string source_url = 4;
+  google.protobuf.Timestamp fetched_at = 5;
+}
+
+// AI-enhancement provenance so clients can badge AI-summarized text
+// (spec §3.1: translate, never assert; originals preserved in description).
+message Enhancement {
+  string model = 1;                          // "gpt-4o-mini", "claude-haiku-4-5", ...
+  google.protobuf.Timestamp enhanced_at = 2;
+  repeated string fields = 3;                // which Event fields were generated
+}
+
+message Source {
+  string id = 1;
+  string name = 2;
+  string attribution = 3;
+  string homepage_url = 4;
+  uint32 poll_interval_seconds = 5;
+  uint32 stale_after_seconds = 10;   // per-source tunable; default 3x poll interval
+  uint32 expire_after_seconds = 11;  // per-source tunable; missing-from-feed → EXPIRED
+  google.protobuf.Timestamp last_success_at = 6;
+  google.protobuf.Timestamp last_attempt_at = 7;
+  string last_error = 8;
+  SourceStatus status = 9;          // shipped semantics, now per-source not per-layer
+}
+
+enum SourceStatus {
+  SOURCE_STATUS_UNSPECIFIED = 0;
+  OK = 1;
+  STALE = 2;
+  UNAVAILABLE = 3;
+}
+
+message Place {
+  string id = 1;        // "area:calaveras" — existing area ids preserved under a kind
+  PlaceKind kind = 2;
+  string name = 3;
+  string slug = 4;
+  Geometry geometry = 5;
+  string parent_id = 6;
+}
+
+enum PlaceKind {
+  PLACE_KIND_UNSPECIFIED = 0;
+  AREA = 1;             // existing configured areas; org footprints live here too
+  COUNTY = 2;
+  TOWN = 3;
+  EVAC_ZONE = 4;
+  CORRIDOR = 5;
+  SITE = 6;
+}
+
+// Per-kind detail blocks. Unit-in-name convention (depth_km) carries over.
+
+message WildfireDetail {
+  double acres = 1;
+  int32 containment = 2;            // percent contained, 0-100
+  string county = 3;
+  string cause = 4;
+  bool has_perimeter = 5;           // true when geometry is a WFIGS perimeter polygon
+}
+
+message EvacuationDetail {
+  string zone_id = 1;
+  string level = 2;                 // ORDER | WARNING | ADVISORY | SHELTER_IN_PLACE
+  string event_type = 3;
+  string county = 4;
+}
+
+message WeatherAlertDetail {
+  string event = 1;                 // NWS event name, e.g. "Red Flag Warning"
+  string nws_severity = 2;
+  string certainty = 3;
+  string urgency = 4;
+  string instruction = 5;
+  string sender_name = 6;
+  string area_desc = 7;
+  repeated string zones = 8;        // NWS forecast zones, e.g. "CAZ064"
+}
+
+// fire_weather is condition-backed (a live projection, not an event); this
+// message exists for the spec §3 oneof shape.
+message FireWeatherDetail {
+  string state = 1;                 // normal | elevated | red-flag
+  string source_event = 2;          // NWS product driving the state
+  repeated string zones = 3;
+}
+
+message EarthquakeDetail {
+  double magnitude = 1;
+  double depth_km = 2;
+  int32 felt = 3;                   // USGS DYFI felt-report count
+  string url = 4;
+}
+
+message RoadIncidentDetail {
+  string log_number = 1;
+  string incident_type = 2;
+  string location_description = 3;
+  string impact = 4;                // AI-assessed: none | light | moderate | severe
+  string duration = 5;              // AI-assessed: unknown | < 1 hour | several hours | ongoing
+  string condensed_summary = 6;
+  map<string, string> metadata = 7; // structured extras from AI analysis
+}
+
+// List / response wrappers for the hand-built /v1 handlers.
+
+message EventList {
+  repeated Event events = 1;
+  string next_page_token = 2;
+}
+
+message EventRevision {
+  uint32 revision = 1;
+  google.protobuf.Timestamp observed_at = 2;
+  google.protobuf.Timestamp ingested_at = 3;
+  Event event = 4;
+}
+
+message EventRevisionList {
+  repeated EventRevision revisions = 1;
+  string next_page_token = 2;
+}
+
+message PlaceList {
+  repeated Place places = 1;
+}
+
+message SourceList {
+  repeated Source sources = 1;
+}

@@ -13,6 +13,7 @@ GOFMT=$(GOCMD) fmt
 # Build directories
 BUILD_DIR=bin
 PROTO_DIR=api/v1
+GRID_PROTO_DIR=api/grid/v1
 CMD_DIR=cmd
 
 # Binary names
@@ -74,6 +75,9 @@ proto:
 		--grpc-gateway_out=$(PROTO_DIR) --grpc-gateway_opt=paths=source_relative \
 		--openapiv2_out=$(PROTO_DIR) --openapiv2_opt=logtostderr=true \
 		$(PROTO_DIR)/*.proto
+	@PATH="$(shell go env GOPATH)/bin:$(PATH)" protoc --proto_path=$(GRID_PROTO_DIR) \
+		--go_out=$(GRID_PROTO_DIR) --go_opt=paths=source_relative \
+		$(GRID_PROTO_DIR)/*.proto
 	@echo "Protobuf code generation completed."
 	@echo "OpenAPI specifications generated in $(PROTO_DIR)/"
 
@@ -84,6 +88,7 @@ clean:
 	rm -f $(PROTO_DIR)/*.pb.go
 	rm -f $(PROTO_DIR)/*_grpc.pb.go
 	rm -f $(PROTO_DIR)/*.swagger.json
+	rm -f $(GRID_PROTO_DIR)/*.pb.go
 
 ## Testing Targets
 
