@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dpup/prefab/logging"
@@ -35,6 +36,17 @@ type RoadsService struct {
 	routeMatcher   routing.RouteMatcher
 	geoUtils       geo.GeoUtils
 	contentHasher  *alerts.ContentHasher
+
+	// Per-feed outcome of the most recent incident refresh attempt
+	// (chp-only.kml / lcs2way.kml). refreshIncidents keeps serving the
+	// surviving feed when only one dies, so this is the only signal that
+	// distinguishes an upstream failure from a genuinely empty feed —
+	// without it a consumer would read a dead feed as an all-clear.
+	// Guarded by incidentFeedMu; see IncidentFeedHealth in incidents.go.
+	incidentFeedMu      sync.Mutex
+	incidentFeedChpErr  error
+	incidentFeedLaneErr error
+	incidentFeedAt      time.Time
 }
 
 // trafficData holds traffic information for a road

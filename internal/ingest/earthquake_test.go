@@ -45,7 +45,7 @@ func TestEarthquakePoll(t *testing.T) {
 	n := NewEarthquakeNormalizer(testConfig(), usgs.NewClientWithHTTPDoer("https://usgs.test", doer))
 	assert.Equal(t, []string{"usgs"}, n.SourceIDs())
 
-	res, err := n.Poll(testCtx())
+	res, err := n.Poll(testCtx(), nil)
 	require.NoError(t, err)
 	require.Len(t, res.Events, 2)
 	assert.Nil(t, res.PerSource)
@@ -102,6 +102,6 @@ func TestEarthquakePoll(t *testing.T) {
 
 func TestEarthquakePollError(t *testing.T) {
 	n := NewEarthquakeNormalizer(testConfig(), usgs.NewClientWithHTTPDoer("https://usgs.test", &fakeDoer{err: assert.AnError}))
-	_, err := n.Poll(testCtx())
+	_, err := n.Poll(testCtx(), nil)
 	assert.Error(t, err)
 }

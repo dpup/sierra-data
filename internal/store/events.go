@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"slices"
 	"sort"
 	"time"
 
@@ -66,13 +67,16 @@ func (s *Store) NeedsUpdate(ctx context.Context, ev *gridv1.Event) (bool, error)
 // UpsertEvent inserts or revises an event, gated on ContentHash:
 //
 //   - no existing row: insert at revision 1;
-//   - hash equal to stored: NO writes at all, Changed=false;
+//   - hash equal to stored: no revision and Changed=false, but the place
+//     attachments are still refreshed — place_ids are zeroed out of the
+//     hash, so a changed caller preset (e.g. a new zone->area mapping) or a
+//     place seeded after the event first arrived must still attach;
 //   - hash differs: revision = old+1, row updated.
 //
-// Every write also inserts an event_revisions snapshot, recomputes
-// event_places, and refreshes the R*Tree bbox row. ingested_at is stamped
-// here; callers own observed_at (nil falls back to now for the NOT NULL
-// index column only).
+// Every content write also inserts an event_revisions snapshot, recomputes
+// event_places, refreshes the R*Tree bbox row, and stamps last_seen_at.
+// ingested_at is stamped here; callers own observed_at (nil falls back to
+// now for the NOT NULL index column only).
 func (s *Store) UpsertEvent(ctx context.Context, ev *gridv1.Event) (UpsertResult, error) {
 	if ev.GetId() == "" {
 		return UpsertResult{}, fmt.Errorf("store: upsert event with empty id")
@@ -94,7 +98,9 @@ func (s *Store) UpsertEvent(ctx context.Context, ev *gridv1.Event) (UpsertResult
 			return fmt.Errorf("store: upsert lookup %s: %w", ev.GetId(), err)
 		case oldHash == hash:
 			res = UpsertResult{Changed: false, Revision: oldRev}
-			return nil
+			// Content unchanged, but the place set may not be: recompute and
+			// sync attachments without touching revision/hash/history.
+			return s.refreshEventPlaces(tx, ev)
 		default:
 			res = UpsertResult{Changed: true, Revision: oldRev + 1}
 		}
@@ -124,17 +130,18 @@ func (s *Store) UpsertEvent(ctx context.Context, ev *gridv1.Event) (UpsertResult
 		}
 		if _, err := tx.Exec(`
 			INSERT INTO events (id, layer, severity, status, source_id, effective, expires,
-			                    observed_at, ingested_at, revision, content_hash, proto)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			                    observed_at, ingested_at, revision, content_hash, proto, last_seen_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(id) DO UPDATE SET
 			  layer = excluded.layer, severity = excluded.severity, status = excluded.status,
 			  source_id = excluded.source_id, effective = excluded.effective,
 			  expires = excluded.expires, observed_at = excluded.observed_at,
 			  ingested_at = excluded.ingested_at, revision = excluded.revision,
-			  content_hash = excluded.content_hash, proto = excluded.proto`,
+			  content_hash = excluded.content_hash, proto = excluded.proto,
+			  last_seen_at = excluded.last_seen_at`,
 			c.GetId(), int32(c.GetLayer()), int32(c.GetSeverity()), int32(c.GetStatus()),
 			c.GetProvenance().GetSourceId(), unixOrNil(c.GetEffective()), unixOrNil(c.GetExpires()),
-			observedAt, now.Unix(), res.Revision, hash, blob,
+			observedAt, now.Unix(), res.Revision, hash, blob, now.Unix(),
 		); err != nil {
 			return fmt.Errorf("store: upsert event %s: %w", c.GetId(), err)
 		}
@@ -206,12 +213,47 @@ func (s *Store) TransitionEvents(ctx context.Context, ids []string, to gridv1.Ev
 	})
 }
 
-// ActiveEventsBySource returns all ACTIVE and SCHEDULED events for a source.
-// The lifecycle sweep diffs this set against the latest poll to find
-// disappeared events.
-func (s *Store) ActiveEventsBySource(ctx context.Context, sourceID string) ([]*gridv1.Event, error) {
+// TouchSeen stamps last_seen_at = t for every id, in one UPDATE. It writes
+// no revisions and never touches the content hash — "the source still lists
+// this event" is liveness metadata, not content. The scheduler calls it for
+// every id a successful poll returned, including hash-equal no-op upserts,
+// so the expire grace is anchored to the last successful appearance.
+func (s *Store) TouchSeen(ctx context.Context, ids []string, t time.Time) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	args := make([]any, 0, len(ids)+1)
+	args = append(args, t.Unix())
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	if _, err := s.db.ExecContext(ctx,
+		`UPDATE events SET last_seen_at = ? WHERE id IN (`+placeholders(len(ids))+`)`,
+		args...); err != nil {
+		return fmt.Errorf("store: touch seen: %w", err)
+	}
+	return nil
+}
+
+// StoredEvent pairs an event with store-side liveness metadata that is not
+// part of the proto blob.
+type StoredEvent struct {
+	Event *gridv1.Event
+	// LastSeenAt is when a successful poll last included this event (see
+	// TouchSeen). Zero for rows that predate last-seen tracking; callers
+	// fall back to observed/ingested times.
+	LastSeenAt time.Time
+}
+
+// ActiveEventsBySource returns all ACTIVE and SCHEDULED events for a source,
+// each with its last-seen time. The lifecycle sweep diffs this set against
+// the latest poll to find disappeared events and anchors the expire grace to
+// LastSeenAt.
+func (s *Store) ActiveEventsBySource(ctx context.Context, sourceID string) ([]StoredEvent, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT proto FROM events
+		SELECT proto, last_seen_at FROM events
 		WHERE source_id = ? AND status IN (?, ?)
 		ORDER BY id`,
 		sourceID, int32(gridv1.EventStatus_ACTIVE), int32(gridv1.EventStatus_SCHEDULED))
@@ -219,7 +261,25 @@ func (s *Store) ActiveEventsBySource(ctx context.Context, sourceID string) ([]*g
 		return nil, fmt.Errorf("store: active by source %s: %w", sourceID, err)
 	}
 	defer rows.Close()
-	return scanEvents(rows)
+
+	var out []StoredEvent
+	for rows.Next() {
+		var blob []byte
+		var lastSeen int64
+		if err := rows.Scan(&blob, &lastSeen); err != nil {
+			return nil, fmt.Errorf("store: scan event: %w", err)
+		}
+		ev := &gridv1.Event{}
+		if err := proto.Unmarshal(blob, ev); err != nil {
+			return nil, fmt.Errorf("store: unmarshal event: %w", err)
+		}
+		se := StoredEvent{Event: ev}
+		if lastSeen > 0 {
+			se.LastSeenAt = time.Unix(lastSeen, 0)
+		}
+		out = append(out, se)
+	}
+	return out, rows.Err()
 }
 
 // GetEvent returns the current revision of an event, or ErrNotFound.
@@ -248,6 +308,68 @@ func insertRevision(tx *sql.Tx, id string, rev uint32, observedAt, ingestedAt in
 		id, rev, observedAt, ingestedAt, blob,
 	); err != nil {
 		return fmt.Errorf("store: insert revision %s@%d: %w", id, rev, err)
+	}
+	return nil
+}
+
+// refreshEventPlaces syncs an existing event's place attachments on the
+// hash-equal upsert path. place_ids are zeroed out of the content hash, so
+// hash-equal does NOT mean place-set-equal: the caller's preset ids may have
+// changed (config edit) and places seeded after the event first arrived
+// (boot-order, new polygons) must still match geometrically. When the
+// recomputed set differs from the stored rows, event_places and the stored
+// blob's place_ids are updated in place — no new revision, hash and
+// revision untouched.
+func (s *Store) refreshEventPlaces(tx *sql.Tx, ev *gridv1.Event) error {
+	c := proto.Clone(ev).(*gridv1.Event)
+	ensureGeometryIndex(c)
+	matched, err := s.matchPlaces(tx, c)
+	if err != nil {
+		return err
+	}
+	want := unionSorted(ev.GetPlaceIds(), matched)
+
+	rows, err := tx.Query(`SELECT place_id FROM event_places WHERE event_id = ? ORDER BY place_id`, ev.GetId())
+	if err != nil {
+		return fmt.Errorf("store: load event_places %s: %w", ev.GetId(), err)
+	}
+	var have []string
+	for rows.Next() {
+		var pid string
+		if err := rows.Scan(&pid); err != nil {
+			rows.Close()
+			return fmt.Errorf("store: scan event_places %s: %w", ev.GetId(), err)
+		}
+		have = append(have, pid)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("store: iterate event_places %s: %w", ev.GetId(), err)
+	}
+	if slices.Equal(want, have) {
+		return nil
+	}
+
+	if err := replaceEventPlaces(tx, ev.GetId(), want); err != nil {
+		return err
+	}
+	// Keep the canonical blob consistent with event_places so reads (which
+	// rehydrate from the blob) see the same attachments as place queries.
+	var blob []byte
+	if err := tx.QueryRow(`SELECT proto FROM events WHERE id = ?`, ev.GetId()).Scan(&blob); err != nil {
+		return fmt.Errorf("store: load event %s for place refresh: %w", ev.GetId(), err)
+	}
+	stored := &gridv1.Event{}
+	if err := proto.Unmarshal(blob, stored); err != nil {
+		return fmt.Errorf("store: unmarshal event %s for place refresh: %w", ev.GetId(), err)
+	}
+	stored.PlaceIds = want
+	newBlob, err := proto.Marshal(stored)
+	if err != nil {
+		return fmt.Errorf("store: marshal event %s for place refresh: %w", ev.GetId(), err)
+	}
+	if _, err := tx.Exec(`UPDATE events SET proto = ? WHERE id = ?`, newBlob, ev.GetId()); err != nil {
+		return fmt.Errorf("store: update event %s for place refresh: %w", ev.GetId(), err)
 	}
 	return nil
 }
@@ -442,20 +564,4 @@ func unionSorted(a, b []string) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-func scanEvents(rows *sql.Rows) ([]*gridv1.Event, error) {
-	var out []*gridv1.Event
-	for rows.Next() {
-		var blob []byte
-		if err := rows.Scan(&blob); err != nil {
-			return nil, fmt.Errorf("store: scan event: %w", err)
-		}
-		ev := &gridv1.Event{}
-		if err := proto.Unmarshal(blob, ev); err != nil {
-			return nil, fmt.Errorf("store: unmarshal event: %w", err)
-		}
-		out = append(out, ev)
-	}
-	return out, rows.Err()
 }

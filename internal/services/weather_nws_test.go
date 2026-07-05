@@ -3,7 +3,9 @@ package services
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -144,6 +146,175 @@ func TestGetNWSAlertsBoundedStaleFallback(t *testing.T) {
 	c.Backdate("nws:alerts", 2*time.Minute) // now very stale
 	if got := svc.getNWSAlerts(testCtx()); got != nil {
 		t.Fatalf("expected no alerts once cache is very stale, got %v", got)
+	}
+}
+
+// cannedDoer returns a fixed 200 response body for every request.
+type cannedDoer struct{ body string }
+
+func (d cannedDoer) Do(*http.Request) (*http.Response, error) {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(d.body)),
+		Header:     make(http.Header),
+	}, nil
+}
+
+// nwsActiveAlertsJSON is a minimal NWS /alerts/active GeoJSON response
+// carrying the raw fields (certainty/urgency/instruction/areaDesc, NWS
+// "Extreme" severity) that the api.WeatherAlert projection drops.
+const nwsActiveAlertsJSON = `{
+  "features": [
+    {
+      "properties": {
+        "id": "urn:oid:2.49.0.1.840.0.raw1",
+        "event": "Red Flag Warning",
+        "severity": "Extreme",
+        "certainty": "Likely",
+        "urgency": "Immediate",
+        "headline": "Red Flag Warning in effect",
+        "description": "Critical fire weather conditions.",
+        "instruction": "Avoid outdoor burning.",
+        "senderName": "NWS Sacramento CA",
+        "areaDesc": "Calaveras County",
+        "effective": "2026-07-05T10:00:00-07:00",
+        "expires": "2026-07-06T20:00:00-07:00",
+        "geocode": { "UGC": ["CAZ064"] }
+      }
+    }
+  ]
+}`
+
+// A fresh nws:alerts cache entry is served as-is with the entry's fetch time
+// and no error — and no upstream fetch happens (the doer here always fails).
+func TestRawNWSAlerts_FreshCacheHit(t *testing.T) {
+	svc, c := newOutageTestService(t)
+	seed := []nws.Alert{{
+		ID: "a1", Event: "Wind Advisory", Severity: "Moderate",
+		Certainty: "Likely", Urgency: "Expected",
+		Instruction: "Secure loose objects.", AreaDesc: "Calaveras County",
+		Zones: []string{"CAZ064"},
+	}}
+	if err := c.Set(nwsAlertsCacheKey, seed, time.Minute, "nws_alerts"); err != nil {
+		t.Fatalf("seed cache: %v", err)
+	}
+	c.Backdate(nwsAlertsCacheKey, 30*time.Second) // still fresh (TTL 1m)
+
+	alerts, fetchedAt, err := svc.RawNWSAlerts(testCtx())
+	if err != nil {
+		t.Fatalf("fresh cache hit must not error (or fetch): %v", err)
+	}
+	if len(alerts) != 1 || alerts[0].ID != "a1" {
+		t.Fatalf("expected the cached alert, got %v", alerts)
+	}
+	// Raw NWS fields the proto projection drops must survive.
+	a := alerts[0]
+	if a.Certainty != "Likely" || a.Urgency != "Expected" ||
+		a.Instruction != "Secure loose objects." || a.AreaDesc != "Calaveras County" {
+		t.Errorf("raw NWS fields not preserved: %+v", a)
+	}
+	if age := time.Since(fetchedAt); age < 25*time.Second || age > 45*time.Second {
+		t.Errorf("fetchedAt should be the cache entry's CreatedAt (~30s ago), got age %v", age)
+	}
+}
+
+// With no fresh cache, a successful fetch returns the raw alerts with
+// fetchedAt ~ now, and populates the shared nws:alerts cache (single fetch
+// path shared with the proto-alert consumers).
+func TestRawNWSAlerts_FetchSuccess(t *testing.T) {
+	c := cache.NewCache()
+	svc := NewWeatherService(nil, nws.NewClientWithHTTPDoer("test", "http://nws.test", cannedDoer{body: nwsActiveAlertsJSON}), c, &config.Config{
+		Weather: config.WeatherConfig{
+			NWS:             config.NWSConfig{UserAgent: "test", Zones: []string{"CAZ064"}},
+			RefreshInterval: time.Minute,
+		},
+	})
+
+	alerts, fetchedAt, err := svc.RawNWSAlerts(testCtx())
+	if err != nil {
+		t.Fatalf("RawNWSAlerts: %v", err)
+	}
+	if len(alerts) != 1 {
+		t.Fatalf("got %d alerts, want 1", len(alerts))
+	}
+	a := alerts[0]
+	// NWS "Extreme" must arrive unmapped (api.WeatherAlert collapses it into
+	// CRITICAL), along with the other raw-only fields.
+	if a.Severity != "Extreme" || a.Certainty != "Likely" || a.Urgency != "Immediate" ||
+		a.Instruction != "Avoid outdoor burning." || a.AreaDesc != "Calaveras County" {
+		t.Errorf("raw NWS fields missing or mapped: %+v", a)
+	}
+	if fetchedAt.IsZero() || time.Since(fetchedAt) > 10*time.Second {
+		t.Errorf("fetchedAt should be ~now for a fresh fetch, got %v", fetchedAt)
+	}
+	var cached []nws.Alert
+	if found, _ := c.Get(nwsAlertsCacheKey, &cached); !found || len(cached) != 1 {
+		t.Error("fetch should populate the shared nws:alerts cache")
+	}
+}
+
+// A failed fetch with a stale-but-servable cache returns BOTH the last-good
+// alerts (with their real fetch time) and the fetch error, so the caller can
+// serve degraded data while reporting the source unhealthy.
+func TestRawNWSAlerts_FetchFailureServesStaleWithError(t *testing.T) {
+	svc, c := newOutageTestService(t)
+	if err := c.Set(nwsAlertsCacheKey, []nws.Alert{{ID: "a1", Event: "Winter Storm Warning"}}, time.Minute, "nws_alerts"); err != nil {
+		t.Fatalf("seed cache: %v", err)
+	}
+	c.Backdate(nwsAlertsCacheKey, 90*time.Second) // stale, within the 2x bound
+
+	alerts, fetchedAt, err := svc.RawNWSAlerts(testCtx())
+	if err == nil {
+		t.Fatal("the fetch error must be surfaced alongside the stale data")
+	}
+	if len(alerts) != 1 || alerts[0].ID != "a1" {
+		t.Fatalf("expected the stale last-good alerts, got %v", alerts)
+	}
+	if age := time.Since(fetchedAt); age < 85*time.Second || age > 105*time.Second {
+		t.Errorf("fetchedAt should be the stale entry's CreatedAt (~90s ago), got age %v", age)
+	}
+}
+
+// With no cache (or one past the very-stale bound) a failed fetch returns
+// nothing: nil alerts, zero time, error.
+func TestRawNWSAlerts_FetchFailureNoUsableCache(t *testing.T) {
+	svc, c := newOutageTestService(t)
+
+	alerts, fetchedAt, err := svc.RawNWSAlerts(testCtx())
+	if err == nil || alerts != nil || !fetchedAt.IsZero() {
+		t.Fatalf("no cache: want (nil, zero, err), got (%v, %v, %v)", alerts, fetchedAt, err)
+	}
+
+	if err := c.Set(nwsAlertsCacheKey, []nws.Alert{{ID: "a1"}}, time.Minute, "nws_alerts"); err != nil {
+		t.Fatalf("seed cache: %v", err)
+	}
+	c.Backdate(nwsAlertsCacheKey, 3*time.Minute) // past the 2x bound
+
+	alerts, fetchedAt, err = svc.RawNWSAlerts(testCtx())
+	if err == nil || alerts != nil || !fetchedAt.IsZero() {
+		t.Fatalf("very-stale cache: want (nil, zero, err), got (%v, %v, %v)", alerts, fetchedAt, err)
+	}
+}
+
+// NWSAlertID is the exported id derivation and must match the ids
+// nwsAlertsToProto ships on the wire exactly (the grid poller prefixes them
+// with "wx:").
+func TestNWSAlertID(t *testing.T) {
+	withID := nws.Alert{ID: "urn:oid:abc", Event: "Flood Watch", Effective: time.Unix(1782400000, 0)}
+	if got := NWSAlertID(withID); got != "urn:oid:abc" {
+		t.Errorf("NWSAlertID = %q, want the alert's own ID", got)
+	}
+
+	noID := nws.Alert{Event: "Flood Watch", Effective: time.Unix(1782400000, 0)}
+	if got, want := NWSAlertID(noID), "nws_Flood Watch_1782400000"; got != want {
+		t.Errorf("NWSAlertID = %q, want synthesized %q", got, want)
+	}
+
+	for _, a := range []nws.Alert{withID, noID} {
+		proto := nwsAlertsToProto([]nws.Alert{a})
+		if len(proto) != 1 || proto[0].Id != NWSAlertID(a) {
+			t.Errorf("wire id %q != NWSAlertID %q — the derivations must match", proto[0].Id, NWSAlertID(a))
+		}
 	}
 }
 

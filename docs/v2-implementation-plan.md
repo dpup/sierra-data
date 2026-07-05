@@ -440,6 +440,20 @@ T12–T14 (/v1 live); T22 (site); T25 (final). Conventional commits, no push.
   resolve still works via county/area/town polygons.
 - **wfigs id change**: documented breaking-ish detail in CHANGELOG (ids were
   never stable).
+- **Byte-compat exclusion list** (T13 harness compares modulo exactly these,
+  each CHANGELOG'd): (1) wfigs standalone ids (stability fix); (2)
+  `source.fetched_at` freshness; (3) weather_alert severity — the store maps
+  NWS "Extreme"→EXTREME (shipped path collapsed it to SEVERE via the api enum;
+  accuracy fix); (4) earthquake `updated_at` — projection omits it when
+  `observed_at == effective` (matches shipped omit-when-zero behavior); (5)
+  road_incident `source` block — projection emits the shipped per-layer
+  constant `{id:"chp", name:"CHP / Caltrans", attribution:"quickmap.dot.ca.gov"}`
+  for ALL road incidents (store provenance keeps the chp/caltrans split for
+  source health; the envelope block is a projection constant, as are the other
+  layers' source blocks — derive them from the layer, not stored provenance,
+  except URL/name fields that genuinely vary per event: usgs/calfire event
+  URLs come from `Event.canonical_url`, wildfire standalone perimeters emit
+  the wfigs block, evacuation emits the caloes block verbatim).
 - **Prefab route precedence**: `/v1/` and `/` are distinct ServeMux prefixes;
   `/api/` (gateway) keeps precedence by longer-prefix match. Verified in T12
   tests via the mounted mux.

@@ -34,7 +34,7 @@ func NewEarthquakeNormalizer(cfg *config.Config, client *usgs.Client) *Earthquak
 func (n *EarthquakeNormalizer) SourceIDs() []string { return []string{"usgs"} }
 
 // Poll implements Normalizer.
-func (n *EarthquakeNormalizer) Poll(ctx context.Context) (*PollResult, error) {
+func (n *EarthquakeNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult, error) {
 	minLat, minLng, maxLat, maxLng, ok := unionBounds(n.cfg.Hazards.Areas)
 	if !ok {
 		return &PollResult{}, nil

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	gridv1 "github.com/dpup/info.ersn.net/server/api/grid/v1"
 	api "github.com/dpup/info.ersn.net/server/api/v1"
@@ -14,9 +15,14 @@ import (
 
 // roadsIncidentsAPI is the slice of RoadsService this normalizer consumes
 // (decision 6: ingest reuses the AI-enhanced, budgeted, cached incidents
-// pipeline rather than re-parsing the KML feeds).
+// pipeline rather than re-parsing the KML feeds). IncidentFeedHealth exposes
+// the per-feed outcome hidden inside ListIncidents: the service keeps serving
+// the surviving feed when only one KML feed fails, so without it a dead feed
+// is indistinguishable from a quiet one — and the disappearance sweep would
+// RESOLVE the dead feed's still-active events.
 type roadsIncidentsAPI interface {
 	ListIncidents(ctx context.Context, req *api.ListIncidentsRequest) (*api.ListIncidentsResponse, error)
+	IncidentFeedHealth() (chpErr, laneErr error, at time.Time)
 }
 
 // enhancedFields are the Event fields the incident AI pipeline generates,
@@ -45,7 +51,7 @@ func (n *RoadIncidentNormalizer) SourceIDs() []string { return []string{"chp", "
 // ListIncidents calls, so a partial area failure degrades both source rows
 // (the surviving areas' events still return); every area failing is a hard
 // error.
-func (n *RoadIncidentNormalizer) Poll(ctx context.Context) (*PollResult, error) {
+func (n *RoadIncidentNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult, error) {
 	areas := n.cfg.Roads.IncidentAreas
 	if len(areas) == 0 {
 		return &PollResult{}, nil
@@ -67,18 +73,51 @@ func (n *RoadIncidentNormalizer) Poll(ctx context.Context) (*PollResult, error) 
 			if ev == nil || seen[ev.Id] {
 				continue // locationless, or duplicated across overlapping areas
 			}
+			// Restart churn suppression: the roads pipeline's AI cache is
+			// in-memory, so after a restart incidents beyond its 5-per-refresh
+			// enhancement budget are served UNENHANCED for a few refreshes.
+			// Upserting that raw copy over a stored enhanced event would
+			// hash-differ (raw headline/detail) => a spurious revision, then a
+			// SECOND revision when re-enhancement lands. When the incoming
+			// incident hasn't been AI-processed yet (impact UNSPECIFIED is set
+			// exclusively by the model) and the store already holds an
+			// enhanced version, carry the prior event forward verbatim for
+			// this tick: hash-equal => no revision, and it still counts as
+			// seen. Genuinely new incidents (no prior) emit raw immediately —
+			// availability first; the enhanced revision follows.
+			if in.GetImpact() == api.AlertImpact_ALERT_IMPACT_UNSPECIFIED {
+				if pe := priorByID(prior, ev.Id); pe != nil && pe.GetEnhancement() != nil {
+					ev = pe
+				}
+			}
 			seen[ev.Id] = true
 			events = append(events, ev)
 		}
 	}
 
-	if len(errs) == len(areas) {
+	// Per-feed health: ListIncidents alone can't show a single dead feed (the
+	// service keeps serving the survivor), and the sweep must never resolve a
+	// dead feed's events. A hard error stays reserved for the every-area AND
+	// both-feeds-down case, as before.
+	chpErr, laneErr, _ := n.roads.IncidentFeedHealth()
+	if len(errs) == len(areas) && chpErr != nil && laneErr != nil {
 		return nil, fmt.Errorf("all incident areas failed: %w", errors.Join(errs...))
 	}
-	var perSource map[string]error
+	perSource := make(map[string]error)
 	if len(errs) > 0 {
+		// Area-level failures degrade both source rows — they share the calls.
 		err := fmt.Errorf("partial incident coverage: %w", errors.Join(errs...))
-		perSource = map[string]error{"chp": err, "caltrans": err}
+		perSource["chp"] = err
+		perSource["caltrans"] = err
+	}
+	if chpErr != nil {
+		perSource["chp"] = errors.Join(perSource["chp"], fmt.Errorf("chp feed: %w", chpErr))
+	}
+	if laneErr != nil {
+		perSource["caltrans"] = errors.Join(perSource["caltrans"], fmt.Errorf("lane-closure feed: %w", laneErr))
+	}
+	if len(perSource) == 0 {
+		perSource = nil
 	}
 	return &PollResult{Events: events, PerSource: perSource}, nil
 }

@@ -1,6 +1,8 @@
 package hazards
 
 import (
+	"strings"
+
 	api "github.com/dpup/info.ersn.net/server/api/v1"
 )
 
@@ -22,6 +24,13 @@ func SeverityFromEvacLevel(level string) string { return fromEvacLevel(level) }
 // unified scale.
 func SeverityFromAlertSeverity(s api.AlertSeverity) string { return fromAlertSeverity(s) }
 
+// SeverityFromNWSSeverity maps the raw NWS severity vocabulary
+// (Extreme|Severe|Moderate|Minor|Unknown) onto the unified scale. Unlike the
+// api.AlertSeverity path — which collapses NWS "Extreme" into CRITICAL and so
+// into SEVERE — this direct mapping keeps "Extreme" as EXTREME, preserving the
+// top of the NWS scale.
+func SeverityFromNWSSeverity(s string) string { return fromNWSSeverity(s) }
+
 // NormalizeEvacLevel maps Cal OES free-text STATUS to a coded level ("" only
 // for explicitly-inactive statuses; unrecognized active statuses default to a
 // conservative WARNING — see normalizeEvacLevel).
@@ -31,6 +40,33 @@ func NormalizeEvacLevel(status string) string { return normalizeEvacLevel(status
 // a known keyword; callers log unrecognized phrasings that fell through to the
 // conservative WARNING default.
 func EvacStatusRecognized(status string) bool { return evacStatusRecognized(status) }
+
+// evacInactiveKeywords are the phrasings that mark a Cal OES zone explicitly
+// inactive. MUST stay in sync with normalizeEvacLevel's inactive branch —
+// TestEvacStatusInactiveMatchesNormalize cross-checks both against the same
+// table.
+var evacInactiveKeywords = []string{"lifted", "normal", "all clear", "all-clear", "repopulat", "no evac"}
+
+// EvacStatusInactive reports whether a Cal OES STATUS explicitly marks a zone
+// inactive (lifted / back to normal / all clear / repopulation / no
+// evacuation). It deliberately does NOT treat a blank/whitespace STATUS as
+// inactive: normalizeEvacLevel maps blank to "" alongside the explicit
+// keywords, but a present row in the active-events-only aggregation layer
+// whose STATUS is merely blank is missing data, not an all-clear — the
+// life-safety consumer (ingest) must keep such a zone active with a
+// conservative default rather than drop it (an error never becomes a 0).
+func EvacStatusInactive(status string) bool {
+	s := strings.ToLower(strings.TrimSpace(status))
+	if s == "" {
+		return false
+	}
+	for _, kw := range evacInactiveKeywords {
+		if strings.Contains(s, kw) {
+			return true
+		}
+	}
+	return false
+}
 
 // NormFireName normalizes an incident/perimeter name for joining CAL FIRE and
 // WFIGS (e.g. "Salt Springs Fire" and "Salt Springs" → "saltsprings").

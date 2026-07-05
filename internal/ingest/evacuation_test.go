@@ -1,6 +1,8 @@
 package ingest
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -65,7 +67,7 @@ func TestEvacuationPoll(t *testing.T) {
 	n := NewEvacuationNormalizer(testConfig(), caloes.NewClientWithHTTPDoer("https://caloes.test", doer))
 	assert.Equal(t, []string{"caloes"}, n.SourceIDs())
 
-	res, err := n.Poll(testCtx())
+	res, err := n.Poll(testCtx(), nil)
 	require.NoError(t, err)
 	assert.Nil(t, res.PerSource)
 	// Zone B ("... Lifted") is inactive and dropped.
@@ -116,11 +118,142 @@ func TestEvacuationPoll(t *testing.T) {
 	assert.Equal(t, "Evacuation Shelter In Place — Zone D", sip.Headline)
 }
 
+// evacFeature renders one Cal OES feature; geometry is a small square at
+// (lat, lng) unless rawGeometry overrides it.
+func evacFeature(zoneID, zoneName, county, status, publicInfo string, lat, lng float64) string {
+	return fmt.Sprintf(`{
+	  "properties": {"ZONE_ID": %q, "ZONE_NAME": %q, "COUNTY": %q, "STATUS": %q, "PUBLIC_INFO": %q},
+	  "geometry": {"type": "Polygon", "coordinates": [[[%[6]f,%[7]f],[%[8]f,%[7]f],[%[8]f,%[9]f],[%[6]f,%[9]f],[%[6]f,%[7]f]]]}
+	}`, zoneID, zoneName, county, status, publicInfo, lng, lat, lng+0.1, lat+0.1)
+}
+
+func evacCollection(features ...string) string {
+	return `{"type": "FeatureCollection", "features": [` + strings.Join(features, ",") + `]}`
+}
+
+func pollEvac(t *testing.T, fixture string) *PollResult {
+	t.Helper()
+	n := NewEvacuationNormalizer(testConfig(), caloes.NewClientWithHTTPDoer("https://caloes.test", &fakeDoer{resp: fixture}))
+	res, err := n.Poll(testCtx(), nil)
+	require.NoError(t, err)
+	return res
+}
+
+// A present row whose STATUS is blank is missing data, NOT an all-clear:
+// dropping it would let the resolve sweep fabricate a lifted zone. It takes
+// the conservative WARNING default; only explicit inactive keywords drop.
+func TestEvacuationPoll_BlankStatusKeptAsWarning(t *testing.T) {
+	res := pollEvac(t, evacCollection(
+		evacFeature("CAL-E-050", "Zone Blank", "Calaveras", "", "Await instructions.", 38.1, -120.4),
+		evacFeature("CAL-E-051", "Zone Space", "Calaveras", "   ", "", 38.1, -120.2),
+		evacFeature("CAL-E-052", "Zone Lifted", "Calaveras", "Evacuation Order Lifted", "All clear.", 38.1, -120.6),
+	))
+	// Blank and whitespace-only survive; the explicit "Lifted" drops.
+	assert.ElementsMatch(t, []string{"evac:CAL-E-050", "evac:CAL-E-051"}, eventIDs(res.Events))
+
+	blank := eventByID(t, res.Events, "evac:CAL-E-050")
+	assert.Equal(t, "WARNING", blank.GetEvacuation().Level)
+	assert.Equal(t, gridv1.Severity_SEVERE, blank.Severity)
+	assert.Equal(t, gridv1.EventStatus_ACTIVE, blank.Status)
+	assert.Equal(t, "Evacuation Warning — Zone Blank", blank.Headline)
+	assert.Equal(t, "Await instructions.", blank.Description)
+}
+
+// Two concurrent events on ONE zone collapse to a single event keeping the
+// higher-severity level (ORDER > SHELTER_IN_PLACE > WARNING > ADVISORY),
+// instead of two same-id events overwriting each other every poll.
+func TestEvacuationPoll_ConcurrentEventsOneZoneKeepHigherSeverity(t *testing.T) {
+	res := pollEvac(t, evacCollection(
+		evacFeature("CAL-E-046", "Zone A", "Calaveras", "Evacuation Warning", "Be ready.", 38.1, -120.4),
+		evacFeature("CAL-E-046", "Zone A", "Calaveras", "Evacuation Order", "Leave now.", 38.1, -120.4),
+	))
+	require.Len(t, res.Events, 1, "one zone => one event, whatever the upstream duplication")
+	ev := res.Events[0]
+	assert.Equal(t, "evac:CAL-E-046", ev.Id)
+	assert.Equal(t, "ORDER", ev.GetEvacuation().Level)
+	assert.Equal(t, gridv1.Severity_EXTREME, ev.Severity)
+	assert.Equal(t, "Leave now.", ev.Description, "the winning event's directive text is kept")
+
+	// Order-independence: the higher severity wins regardless of feed order.
+	res = pollEvac(t, evacCollection(
+		evacFeature("CAL-E-046", "Zone A", "Calaveras", "Evacuation Order", "Leave now.", 38.1, -120.4),
+		evacFeature("CAL-E-046", "Zone A", "Calaveras", "Evacuation Warning", "Be ready.", 38.1, -120.4),
+	))
+	require.Len(t, res.Events, 1)
+	assert.Equal(t, "ORDER", res.Events[0].GetEvacuation().Level)
+}
+
+// Rows with BOTH identifiers blank must not collapse to the single id
+// "evac:" — they get a synthetic content id from county + geometry bytes,
+// stable across polls and distinct per zone.
+func TestEvacuationPoll_BlankIdentityGetsSyntheticID(t *testing.T) {
+	fixture := evacCollection(
+		evacFeature("", "", "Calaveras", "Evacuation Order", "Leave.", 38.1, -120.4),
+		evacFeature("", "", "Tuolumne", "Evacuation Warning", "Ready.", 38.0, -120.1),
+	)
+	res := pollEvac(t, fixture)
+	require.Len(t, res.Events, 2)
+	id0, id1 := res.Events[0].Id, res.Events[1].Id
+	assert.NotEqual(t, id0, id1, "distinct unnamed zones must keep distinct ids")
+	for _, id := range []string{id0, id1} {
+		assert.Regexp(t, `^evac:zone-[0-9a-f]{8}$`, id)
+	}
+
+	// Deterministic across polls: same feed bytes => same ids.
+	res2 := pollEvac(t, fixture)
+	assert.ElementsMatch(t, []string{id0, id1}, eventIDs(res2.Events))
+}
+
+// Residual collision: two DIFFERENT zones that still collide on an id (same
+// name, no zone id) are suffixed deterministically by (county, centroid)
+// order rather than overwriting each other.
+func TestEvacuationPoll_ResidualCollisionSuffixed(t *testing.T) {
+	fixture := evacCollection(
+		// Feed order is reversed relative to county sort order to prove the
+		// suffix assignment is deterministic, not first-come.
+		evacFeature("", "Twin Zone", "Tuolumne", "Evacuation Warning", "", 38.0, -120.1),
+		evacFeature("", "Twin Zone", "Calaveras", "Evacuation Order", "", 38.1, -120.4),
+	)
+	res := pollEvac(t, fixture)
+	require.Len(t, res.Events, 2)
+	assert.ElementsMatch(t, []string{"evac:Twin Zone", "evac:Twin Zone-2"}, eventIDs(res.Events))
+	// Calaveras < Tuolumne: the Calaveras zone keeps the bare id.
+	bare := eventByID(t, res.Events, "evac:Twin Zone")
+	assert.Equal(t, "Calaveras", bare.GetEvacuation().County)
+	suffixed := eventByID(t, res.Events, "evac:Twin Zone-2")
+	assert.Equal(t, "Tuolumne", suffixed.GetEvacuation().County)
+}
+
+// An active zone with unparseable geometry must stay visible to place-scoped
+// reads: with no geometry there are no geometric place matches, so it is
+// preset onto every configured hazard-area place (conservative
+// over-attachment; the store unions presets with geometric matches).
+func TestEvacuationPoll_BadGeometryAttachesEveryArea(t *testing.T) {
+	res := pollEvac(t, `{"type": "FeatureCollection", "features": [{
+	  "properties": {"ZONE_ID": "CAL-E-060", "ZONE_NAME": "Zone Broken", "COUNTY": "Calaveras", "STATUS": "Evacuation Order", "PUBLIC_INFO": "Leave now."},
+	  "geometry": {"type": "Polygon", "coordinates": "garbage"}
+	}]}`)
+	require.Len(t, res.Events, 1)
+	ev := res.Events[0]
+	assert.Equal(t, "evac:CAL-E-060", ev.Id)
+	assert.Nil(t, ev.Geometry)
+	assert.Equal(t, []string{"area:calaveras", "area:tuolumne"}, ev.PlaceIds,
+		"geometry-less life-safety event must be attached to every configured area")
+	assert.Equal(t, gridv1.Severity_EXTREME, ev.Severity)
+}
+
+func TestEvacLevelRank(t *testing.T) {
+	assert.Greater(t, evacLevelRank("ORDER"), evacLevelRank("SHELTER_IN_PLACE"))
+	assert.Greater(t, evacLevelRank("SHELTER_IN_PLACE"), evacLevelRank("WARNING"))
+	assert.Greater(t, evacLevelRank("WARNING"), evacLevelRank("ADVISORY"))
+	assert.Greater(t, evacLevelRank("ADVISORY"), evacLevelRank(""))
+}
+
 func TestEvacuationPollError(t *testing.T) {
 	// A Cal OES failure must be a hard error (UNAVAILABLE upstream), never an
 	// empty all-clear.
 	n := NewEvacuationNormalizer(testConfig(), caloes.NewClientWithHTTPDoer("https://caloes.test", &fakeDoer{err: assert.AnError}))
-	_, err := n.Poll(testCtx())
+	_, err := n.Poll(testCtx(), nil)
 	assert.Error(t, err)
 }
 

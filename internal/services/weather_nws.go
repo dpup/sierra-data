@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/dpup/prefab/logging"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -60,6 +61,44 @@ func (s *WeatherService) getNWSAlerts(ctx context.Context) []nws.Alert {
 	return nil
 }
 
+// RawNWSAlerts returns the raw NWS zone alerts — the full nws.Alert records
+// (certainty/urgency/instruction/areaDesc, unmapped NWS severity), which the
+// api.WeatherAlert projection drops — plus the time they were fetched from
+// NWS. It rides the shared nws:alerts cache (one fetch per refresh interval,
+// no second fetch path). Consumers that need honest freshness (the grid
+// weather_alert poller) use it as follows:
+//
+//   - fresh cache hit  => (alerts, cache CreatedAt, nil)
+//   - successful fetch => (alerts, now, nil)
+//   - fetch failure with a cache entry inside the very-stale bound
+//     => (stale alerts, cache CreatedAt, fetch error) — BOTH data and error,
+//     so the caller can keep serving last-good while reporting the source
+//     degraded rather than either lying about freshness or dropping data
+//   - fetch failure with no usable cache => (nil, zero time, error)
+func (s *WeatherService) RawNWSAlerts(ctx context.Context) (alerts []nws.Alert, fetchedAt time.Time, err error) {
+	// Fresh cache hit: serve it with its actual fetch time.
+	var cached []nws.Alert
+	if entry, found, cerr := s.cache.GetWithMetadata(nwsAlertsCacheKey, &cached); cerr == nil && found && !s.cache.IsStale(nwsAlertsCacheKey) {
+		return cached, entry.CreatedAt, nil
+	}
+
+	fresh, err := s.fetchNWSAlerts(ctx)
+	if err == nil {
+		return fresh, time.Now(), nil
+	}
+
+	// Fetch failed: fall back to the last-good list while it is within the
+	// very-stale bound, still surfacing the fetch error so the caller can
+	// mark the source degraded instead of treating stale data as current.
+	var stale []nws.Alert
+	if entry, found, cerr := s.cache.GetWithMetadata(nwsAlertsCacheKey, &stale); cerr == nil && found && !s.cache.IsVeryStale(nwsAlertsCacheKey) {
+		logging.Errorw(ctx, "NWS fetch failed, returning stale alerts alongside the error",
+			"error", err, "fetched_at", entry.CreatedAt.Format(time.RFC3339))
+		return stale, entry.CreatedAt, err
+	}
+	return nil, time.Time{}, err
+}
+
 // nwsAlertsForZone filters the shared NWS alert list down to alerts active in a
 // single forecast zone, for attaching to the weather location in that zone.
 // An empty zone returns nothing (an unzoned location gets no alerts).
@@ -89,7 +128,7 @@ func nwsAlertsToProto(alerts []nws.Alert) []*api.WeatherAlert {
 	var out []*api.WeatherAlert
 	for _, a := range alerts {
 		wa := &api.WeatherAlert{
-			Id:          nwsAlertID(a),
+			Id:          NWSAlertID(a),
 			SenderName:  a.SenderName,
 			Event:       a.Event,
 			Headline:    a.Headline,    // short, authoritative one-liner
@@ -109,7 +148,12 @@ func nwsAlertsToProto(alerts []nws.Alert) []*api.WeatherAlert {
 	return out
 }
 
-func nwsAlertID(a nws.Alert) string {
+// NWSAlertID is the stable alert-id derivation used for every NWS alert this
+// service ships (nwsAlertsToProto): the alert's own ID when present, else a
+// synthesized "nws_<event>_<unix>". Exported so other consumers of the raw
+// alerts (the grid poller's "wx:"+id namespace) derive exactly the ids that
+// already exist on the wire.
+func NWSAlertID(a nws.Alert) string {
 	if a.ID != "" {
 		return a.ID
 	}

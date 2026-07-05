@@ -123,8 +123,10 @@ func (s *Scheduler) tick(ctx context.Context, spec PollerSpec) {
 	n := spec.Normalizer
 	sourceIDs := n.SourceIDs()
 
-	// (a) Poll. A hard error fails every covered source and ends the tick.
-	result, err := n.Poll(ctx)
+	// (a) Poll, handing the normalizer the store's current active set so it
+	// can keep identity/state stable across ticks. A hard error fails every
+	// covered source and ends the tick.
+	result, err := n.Poll(ctx, s.loadPrior(ctx, sourceIDs))
 	if err != nil {
 		logging.Errorw(ctx, "Ingest tick: poll failed", "sources", sourceIDs, "error", err)
 		for _, src := range sourceIDs {
@@ -141,29 +143,93 @@ func (s *Scheduler) tick(ctx context.Context, spec PollerSpec) {
 	for _, src := range sourceIDs {
 		polled[src] = make(map[string]bool)
 	}
+	var polledIDs []string
 	for _, ev := range result.Events {
 		if ids, ok := polled[ev.GetProvenance().GetSourceId()]; ok {
 			ids[ev.GetId()] = true
 		}
+		polledIDs = append(polledIDs, ev.GetId())
 		s.maybeEnhance(ctx, ev, &budget)
 		if _, err := s.store.UpsertEvent(ctx, ev); err != nil {
 			logging.Errorw(ctx, "Ingest tick: upsert failed", "event", ev.GetId(), "error", err)
 		}
 	}
 
+	// Every id this successful poll returned was just confirmed by its
+	// source — including hash-equal no-op upserts, which write nothing.
+	// TouchSeen anchors the expire grace to this confirmation, so a stable
+	// event that later drops out of one poll is not expired instantly.
+	if err := s.store.TouchSeen(ctx, polledIDs, now); err != nil {
+		logging.Errorw(ctx, "Ingest tick: touch seen failed", "sources", sourceIDs, "error", err)
+	}
+
 	// (c) Disappearance sweep — ONLY for sources whose fetch succeeded this
-	// tick (PerSource errors mean that source's absence proves nothing).
+	// tick (PerSource errors mean that source's absence proves nothing) AND
+	// that the poller did not suppress. Suppression is life-safety honesty:
+	// a source can fetch cleanly yet be unable to prove disappearance (e.g.
+	// wildfire can't compute the standalone-perimeter set while its sibling
+	// feed is down) — sweeping anyway would turn a partial view into a false
+	// all-clear, resolving hazards that are still burning.
+	suppressed := make(map[string]bool, len(result.SweepSuppress))
+	for _, src := range result.SweepSuppress {
+		suppressed[src] = true
+	}
 	for _, src := range sourceIDs {
-		if result.PerSource[src] != nil {
+		if result.PerSource[src] != nil || suppressed[src] {
 			continue
 		}
 		s.sweepDisappeared(ctx, src, polled[src], now)
 	}
 
 	// (d) Per-source health: nil for success, the partial error otherwise.
+	// Sweep-suppressed sources still record success — their fetch worked;
+	// only their lifecycle evidence was incomplete.
 	for _, src := range sourceIDs {
 		s.recordAttempt(ctx, src, result.PerSource[src])
 	}
+}
+
+// loadPrior snapshots the store's active/scheduled events for the poller's
+// sources. Store errors degrade to an empty view (logged): a normalizer can
+// always call the Prior it is handed.
+func (s *Scheduler) loadPrior(ctx context.Context, sourceIDs []string) Prior {
+	p := &priorEvents{
+		byID:     make(map[string]*gridv1.Event),
+		bySource: make(map[string][]*gridv1.Event, len(sourceIDs)),
+	}
+	for _, src := range sourceIDs {
+		stored, err := s.store.ActiveEventsBySource(ctx, src)
+		if err != nil {
+			logging.Warnw(ctx, "Ingest tick: loading prior events failed", "source", src, "error", err)
+			continue
+		}
+		for _, se := range stored {
+			p.byID[se.Event.GetId()] = se.Event
+			p.bySource[src] = append(p.bySource[src], se.Event)
+		}
+	}
+	return p
+}
+
+// priorEvents is the scheduler's Prior implementation. Nil-safe so tests
+// (and any direct caller) can pass a zero value.
+type priorEvents struct {
+	byID     map[string]*gridv1.Event
+	bySource map[string][]*gridv1.Event
+}
+
+func (p *priorEvents) ByID(id string) *gridv1.Event {
+	if p == nil {
+		return nil
+	}
+	return p.byID[id]
+}
+
+func (p *priorEvents) ForSource(sourceID string) []*gridv1.Event {
+	if p == nil {
+		return nil
+	}
+	return p.bySource[sourceID]
 }
 
 // maybeEnhance summarizes a changed weather alert while budget remains.
@@ -229,10 +295,10 @@ func (s *Scheduler) sweepDisappeared(ctx context.Context, src string, polledIDs 
 			"source", src, "error", err)
 		return
 	}
-	var disappeared []*gridv1.Event
-	for _, ev := range active {
-		if !polledIDs[ev.GetId()] {
-			disappeared = append(disappeared, ev)
+	var disappeared []store.StoredEvent
+	for _, se := range active {
+		if !polledIDs[se.Event.GetId()] {
+			disappeared = append(disappeared, se)
 		}
 	}
 	if len(disappeared) == 0 {
@@ -244,14 +310,14 @@ func (s *Scheduler) sweepDisappeared(ctx context.Context, src string, polledIDs 
 	to := gridv1.EventStatus_RESOLVED
 	if tuning.Disappearance == store.DisappearanceExpire {
 		to = gridv1.EventStatus_EXPIRED
-		for _, ev := range disappeared {
-			if shouldExpire(ev, tuning.ExpireAfter, now) {
-				ids = append(ids, ev.GetId())
+		for _, se := range disappeared {
+			if shouldExpire(se, tuning.ExpireAfter, now) {
+				ids = append(ids, se.Event.GetId())
 			}
 		}
 	} else {
-		for _, ev := range disappeared {
-			ids = append(ids, ev.GetId())
+		for _, se := range disappeared {
+			ids = append(ids, se.Event.GetId())
 		}
 	}
 	if len(ids) == 0 {
@@ -266,21 +332,28 @@ func (s *Scheduler) sweepDisappeared(ctx context.Context, src string, polledIDs 
 		"source", src, "to", to.String(), "count", len(ids))
 }
 
-// shouldExpire implements the expire policy's time test. Events without an
-// upstream observed_at stamp (e.g. standalone WFIGS perimeters) age from
-// their last ingest instead, so the grace still terminates them.
-func shouldExpire(ev *gridv1.Event, expireAfter time.Duration, now time.Time) bool {
-	if exp := ev.GetExpires(); exp != nil && now.After(exp.AsTime()) {
+// shouldExpire implements the expire policy's time test. The grace is
+// anchored to LastSeenAt — the last successful poll that included the event
+// — NOT to observed/ingested times, which only move on content changes: a
+// stable long-lived event dropping out of a single poll must not expire
+// instantly. Rows that predate last-seen tracking (zero LastSeenAt) fall
+// back to observed_at, then ingested_at, so the grace still terminates them.
+func shouldExpire(se store.StoredEvent, expireAfter time.Duration, now time.Time) bool {
+	if exp := se.Event.GetExpires(); exp != nil && now.After(exp.AsTime()) {
 		return true
 	}
 	if expireAfter <= 0 {
 		return false
 	}
-	ref := ev.GetObservedAt()
-	if ref == nil {
-		ref = ev.GetIngestedAt()
+	ref := se.LastSeenAt
+	if ref.IsZero() {
+		if ts := se.Event.GetObservedAt(); ts != nil {
+			ref = ts.AsTime()
+		} else if ts := se.Event.GetIngestedAt(); ts != nil {
+			ref = ts.AsTime()
+		}
 	}
-	return ref != nil && now.Sub(ref.AsTime()) > expireAfter
+	return !ref.IsZero() && now.Sub(ref) > expireAfter
 }
 
 // recordAttempt writes source health, logging (not failing the tick) on

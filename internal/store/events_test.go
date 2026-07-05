@@ -164,6 +164,109 @@ func TestEventPlacesUnionKeepsPresetIDs(t *testing.T) {
 	assert.Equal(t, []string{"area:calaveras", "county:calaveras"}, placeIDs)
 }
 
+// A place seeded AFTER an event exists must attach on the next hash-equal
+// upsert: place_ids are zeroed out of the content hash, so hash-equal must
+// still recompute the place set (Finding: preset/newly-seeded places never
+// attached to unchanged events).
+func TestUpsertHashEqualRefreshesPlaces(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	seedSource(t, s, "usgs")
+
+	ev := testEvent("usgs:q1", gridv1.Severity_MODERATE, gridv1.EventStatus_ACTIVE, "quake")
+	ev.Geometry = pointGeometry(38.2, -120.45)
+	res, err := s.UpsertEvent(ctx, ev)
+	require.NoError(t, err)
+	require.True(t, res.Changed)
+
+	got, err := s.GetEvent(ctx, "usgs:q1")
+	require.NoError(t, err)
+	require.Empty(t, got.GetPlaceIds(), "no places seeded yet")
+
+	// The containing county arrives afterwards (boot order: events can be
+	// ingested before the places seeder runs, and polygons get added later).
+	require.NoError(t, s.UpsertPlace(ctx, testPlace(
+		"county:calaveras", "calaveras", "Calaveras County",
+		gridv1.PlaceKind_COUNTY, polyGeometry(38.0, -120.9, 38.5, -120.0))))
+
+	// Re-upsert identical content: no revision, but the place attaches.
+	same := proto.Clone(ev).(*gridv1.Event)
+	res, err = s.UpsertEvent(ctx, same)
+	require.NoError(t, err)
+	assert.Equal(t, UpsertResult{Changed: false, Revision: 1}, res)
+	assert.Equal(t, 1, revisionCount(t, s, "usgs:q1"), "place refresh must not write a revision")
+
+	got, err = s.GetEvent(ctx, "usgs:q1")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"county:calaveras"}, got.GetPlaceIds(), "blob place_ids updated in place")
+
+	events, _, err := s.QueryEvents(ctx, EventQuery{PlaceID: "county:calaveras"})
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	assert.Equal(t, "usgs:q1", events[0].GetId())
+
+	// A changed caller preset on identical content also attaches (still no
+	// revision), unioned with the geometric matches.
+	preset := proto.Clone(ev).(*gridv1.Event)
+	preset.PlaceIds = []string{"area:calaveras"}
+	res, err = s.UpsertEvent(ctx, preset)
+	require.NoError(t, err)
+	assert.Equal(t, UpsertResult{Changed: false, Revision: 1}, res)
+	got, err = s.GetEvent(ctx, "usgs:q1")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"area:calaveras", "county:calaveras"}, got.GetPlaceIds())
+	assert.Equal(t, 1, revisionCount(t, s, "usgs:q1"))
+}
+
+// TouchSeen stamps last_seen_at in one UPDATE with no revision and no hash
+// effect; UpsertEvent stamps it on the insert/change paths.
+func TestTouchSeenAndLastSeenAt(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	seedSource(t, s, "usgs")
+
+	before := time.Now().Add(-time.Second)
+	ev := testEvent("usgs:q1", gridv1.Severity_MODERATE, gridv1.EventStatus_ACTIVE, "quake")
+	_, err := s.UpsertEvent(ctx, ev)
+	require.NoError(t, err)
+
+	active, err := s.ActiveEventsBySource(ctx, "usgs")
+	require.NoError(t, err)
+	require.Len(t, active, 1)
+	assert.False(t, active[0].LastSeenAt.IsZero(), "insert stamps last_seen_at")
+	assert.False(t, active[0].LastSeenAt.Before(before))
+
+	// Touch (unknown ids are simply not matched by the UPDATE).
+	seenAt := baseTime.Add(30 * time.Hour)
+	require.NoError(t, s.TouchSeen(ctx, []string{"usgs:q1", "usgs:unknown"}, seenAt))
+
+	active, err = s.ActiveEventsBySource(ctx, "usgs")
+	require.NoError(t, err)
+	require.Len(t, active, 1)
+	assert.Equal(t, seenAt.Unix(), active[0].LastSeenAt.Unix())
+	assert.Equal(t, uint32(1), active[0].Event.GetRevision(), "touch writes no revision")
+	assert.Equal(t, 1, revisionCount(t, s, "usgs:q1"))
+
+	// Touch has no hash effect: an identical upsert is still a no-op.
+	res, err := s.UpsertEvent(ctx, proto.Clone(ev).(*gridv1.Event))
+	require.NoError(t, err)
+	assert.False(t, res.Changed)
+
+	// Empty id list is a no-op.
+	require.NoError(t, s.TouchSeen(ctx, nil, seenAt))
+
+	// A content change (the DO UPDATE path) re-stamps last_seen_at.
+	changed := proto.Clone(ev).(*gridv1.Event)
+	changed.Headline = "bigger quake"
+	_, err = s.UpsertEvent(ctx, changed)
+	require.NoError(t, err)
+	active, err = s.ActiveEventsBySource(ctx, "usgs")
+	require.NoError(t, err)
+	require.Len(t, active, 1)
+	assert.False(t, active[0].LastSeenAt.Before(before), "change path re-stamps last_seen_at")
+	assert.NotEqual(t, seenAt.Unix(), active[0].LastSeenAt.Unix())
+}
+
 func TestPolygonEventPlaceMatching(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)

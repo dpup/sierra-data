@@ -29,7 +29,21 @@ type Normalizer interface {
 	// SourceIDs lists the source-registry rows this poller updates. A poller
 	// may update several (wildfire → calfire + wfigs); poller ≠ source.
 	SourceIDs() []string
-	Poll(ctx context.Context) (*PollResult, error)
+	// Poll fetches the upstream(s). prior is the store's current active set
+	// for this poller's sources — normalizers use it to carry identity and
+	// state across ticks (e.g. keeping a joined fire's id stable while one
+	// sibling feed is down). It is never nil when called by the scheduler.
+	Poll(ctx context.Context, prior Prior) (*PollResult, error)
+}
+
+// Prior is a read-only view of the active events already in the store for a
+// poller's sources, built by the scheduler from ActiveEventsBySource before
+// each tick.
+type Prior interface {
+	// ByID returns the active/scheduled event with this id, or nil.
+	ByID(id string) *gridv1.Event
+	// ForSource returns the active/scheduled events for one source id.
+	ForSource(sourceID string) []*gridv1.Event
 }
 
 // PollResult carries a poll's events plus per-source partial failures. A
@@ -39,6 +53,13 @@ type Normalizer interface {
 type PollResult struct {
 	Events    []*gridv1.Event
 	PerSource map[string]error
+	// SweepSuppress lists source ids whose fetch SUCCEEDED this tick but
+	// whose disappearance sweep must be skipped anyway: the poller could not
+	// compute that source's full current set (e.g. wildfire can't tell which
+	// perimeters are standalone while the sibling CAL FIRE feed is down), so
+	// an event missing from Events proves nothing. RecordAttempt still
+	// records the success — health and lifecycle are deliberately separate.
+	SweepSuppress []string
 }
 
 // NewEvent builds an event with the envelope fields every normalizer sets.

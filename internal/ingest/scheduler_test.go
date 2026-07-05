@@ -16,18 +16,20 @@ import (
 )
 
 // fakeNormalizer returns a canned PollResult (or error), mutable between
-// ticks.
+// ticks, and captures the Prior each Poll received.
 type fakeNormalizer struct {
-	ids    []string
-	result *PollResult
-	err    error
-	polls  int
+	ids       []string
+	result    *PollResult
+	err       error
+	polls     int
+	lastPrior Prior
 }
 
 func (f *fakeNormalizer) SourceIDs() []string { return f.ids }
 
-func (f *fakeNormalizer) Poll(ctx context.Context) (*PollResult, error) {
+func (f *fakeNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult, error) {
 	f.polls++
+	f.lastPrior = prior
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -170,25 +172,27 @@ func TestTickResolvesDisappeared(t *testing.T) {
 }
 
 // Expire policy: a disappeared event only becomes EXPIRED once past its own
-// expires time or the expire_after grace; otherwise it stays active.
+// expires time, or once the expire_after grace has elapsed since the LAST
+// SUCCESSFUL POLL that included it. observed_at is the time of the last
+// content change and must NOT anchor the grace — a stable event that misses
+// one poll would be expired instantly.
 func TestTickExpirePolicy(t *testing.T) {
 	ctx := testCtx()
 	st := newSchedStore(t)
 	seedSchedSources(t, st, "nws")
-	now := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
+	t0 := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
+	now := t0
 
 	past := schedEvent("wx:past", "nws", gridv1.Layer_WEATHER_ALERT)
-	past.Expires = timestamppb.New(now.Add(-time.Hour))
+	past.Expires = timestamppb.New(t0.Add(-time.Hour))
 	future := schedEvent("wx:future", "nws", gridv1.Layer_WEATHER_ALERT)
-	future.Expires = timestamppb.New(now.Add(time.Hour))
-	graceOld := schedEvent("wx:grace-old", "nws", gridv1.Layer_WEATHER_ALERT)
-	graceOld.ObservedAt = timestamppb.New(now.Add(-48 * time.Hour)) // no expires; past grace
-	graceFresh := schedEvent("wx:grace-fresh", "nws", gridv1.Layer_WEATHER_ALERT)
-	graceFresh.ObservedAt = timestamppb.New(now.Add(-time.Hour)) // no expires; within grace
+	future.Expires = timestamppb.New(t0.Add(48 * time.Hour))
+	stale := schedEvent("wx:stale", "nws", gridv1.Layer_WEATHER_ALERT)
+	stale.ObservedAt = timestamppb.New(t0.Add(-48 * time.Hour)) // no expires; content 48h old
 
 	fn := &fakeNormalizer{
 		ids:    []string{"nws"},
-		result: &PollResult{Events: []*gridv1.Event{past, future, graceOld, graceFresh}},
+		result: &PollResult{Events: []*gridv1.Event{past, future, stale}},
 	}
 	sched := NewScheduler(st, SchedulerConfig{
 		Tuning: map[string]config.SourceTuning{"nws": {
@@ -199,18 +203,102 @@ func TestTickExpirePolicy(t *testing.T) {
 	sched.now = func() time.Time { return now }
 	spec := PollerSpec{Normalizer: fn, Interval: time.Minute}
 
-	sched.tick(ctx, spec)
+	sched.tick(ctx, spec) // all present: last seen = t0
 
 	// Everything disappears from the feed.
 	fn.result = &PollResult{}
 	sched.tick(ctx, spec)
 
-	assert.Equal(t, gridv1.EventStatus_EXPIRED, eventStatus(t, st, "wx:past"))
-	assert.Equal(t, gridv1.EventStatus_EXPIRED, eventStatus(t, st, "wx:grace-old"))
+	assert.Equal(t, gridv1.EventStatus_EXPIRED, eventStatus(t, st, "wx:past"),
+		"missing and past its own expires: expired")
 	assert.Equal(t, gridv1.EventStatus_ACTIVE, eventStatus(t, st, "wx:future"),
 		"missing from feed but not yet past expires: stays active")
-	assert.Equal(t, gridv1.EventStatus_ACTIVE, eventStatus(t, st, "wx:grace-fresh"),
-		"no expires and within grace: stays active")
+	assert.Equal(t, gridv1.EventStatus_ACTIVE, eventStatus(t, st, "wx:stale"),
+		"content is 48h old but the feed listed it moments ago: the grace runs from last seen, not observed_at")
+
+	// Missing continuously: expired once the grace since last seen elapses.
+	now = t0.Add(23 * time.Hour)
+	sched.tick(ctx, spec)
+	assert.Equal(t, gridv1.EventStatus_ACTIVE, eventStatus(t, st, "wx:stale"),
+		"still within the grace since last seen")
+
+	now = t0.Add(25 * time.Hour)
+	sched.tick(ctx, spec)
+	assert.Equal(t, gridv1.EventStatus_EXPIRED, eventStatus(t, st, "wx:stale"),
+		"missing continuously past the grace since last seen: expired")
+}
+
+// A stable event (unchanged content => hash-equal no-op upserts) present in
+// every poll for LONGER than the expire grace, then missing once, must not
+// expire until the grace elapses after its last successful appearance.
+func TestTickExpireAnchorsToLastSeen(t *testing.T) {
+	ctx := testCtx()
+	st := newSchedStore(t)
+	seedSchedSources(t, st, "nws")
+
+	t0 := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	now := t0
+	ev := schedEvent("wx:stable", "nws", gridv1.Layer_WEATHER_ALERT)
+	ev.ObservedAt = timestamppb.New(t0) // content never changes after this
+
+	fn := &fakeNormalizer{ids: []string{"nws"}, result: &PollResult{Events: []*gridv1.Event{ev}}}
+	sched := NewScheduler(st, SchedulerConfig{
+		Tuning: map[string]config.SourceTuning{"nws": {
+			Disappearance: store.DisappearanceExpire,
+			ExpireAfter:   24 * time.Hour,
+		}},
+	})
+	sched.now = func() time.Time { return now }
+	spec := PollerSpec{Normalizer: fn, Interval: time.Minute}
+
+	// Present in every poll across 30h (> the 24h grace). Each tick after
+	// the first is a hash-equal no-op upsert; only TouchSeen moves.
+	for _, offset := range []time.Duration{0, 10 * time.Hour, 20 * time.Hour, 30 * time.Hour} {
+		now = t0.Add(offset)
+		sched.tick(ctx, spec)
+		require.Equal(t, gridv1.EventStatus_ACTIVE, eventStatus(t, st, "wx:stable"))
+	}
+	got, err := st.GetEvent(ctx, "wx:stable")
+	require.NoError(t, err)
+	require.Equal(t, uint32(1), got.GetRevision(), "sanity: re-polls were no-op upserts")
+
+	// Missing one poll, 1h after its last appearance (t0+30h): observed_at
+	// is 31h stale, but the grace runs from last seen — stays active.
+	fn.result = &PollResult{}
+	now = t0.Add(31 * time.Hour)
+	sched.tick(ctx, spec)
+	assert.Equal(t, gridv1.EventStatus_ACTIVE, eventStatus(t, st, "wx:stable"),
+		"one missed poll must not expire a stable event")
+
+	// Still missing just inside the grace since last seen: still active.
+	now = t0.Add(53 * time.Hour)
+	sched.tick(ctx, spec)
+	assert.Equal(t, gridv1.EventStatus_ACTIVE, eventStatus(t, st, "wx:stable"))
+
+	// Missing continuously past the grace since last seen (t0+30h+24h): expired.
+	now = t0.Add(55 * time.Hour)
+	sched.tick(ctx, spec)
+	assert.Equal(t, gridv1.EventStatus_EXPIRED, eventStatus(t, st, "wx:stable"))
+}
+
+// shouldExpire falls back to observed_at then ingested_at only for rows with
+// a zero LastSeenAt (pre-migration rows from an old-schema DB).
+func TestShouldExpireLastSeenFallback(t *testing.T) {
+	now := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
+	grace := 24 * time.Hour
+
+	observedOld := &gridv1.Event{ObservedAt: timestamppb.New(now.Add(-48 * time.Hour))}
+	assert.True(t, shouldExpire(store.StoredEvent{Event: observedOld}, grace, now),
+		"zero last-seen falls back to observed_at")
+	assert.False(t, shouldExpire(store.StoredEvent{Event: observedOld, LastSeenAt: now.Add(-time.Hour)}, grace, now),
+		"a recent last-seen wins over stale observed_at")
+
+	ingestedOld := &gridv1.Event{IngestedAt: timestamppb.New(now.Add(-48 * time.Hour))}
+	assert.True(t, shouldExpire(store.StoredEvent{Event: ingestedOld}, grace, now),
+		"no observed_at falls back to ingested_at")
+
+	assert.False(t, shouldExpire(store.StoredEvent{Event: &gridv1.Event{}}, grace, now),
+		"no reference time at all: never grace-expired")
 }
 
 // The enhancement budget caps Enhance calls per tick; unenhanced events are
@@ -350,4 +438,86 @@ func TestTickPerSourcePartialFailure(t *testing.T) {
 	caltrans := sourceByID(t, st, "caltrans")
 	assert.Equal(t, gridv1.SourceStatus_STALE, caltrans.GetStatus())
 	assert.NotEmpty(t, caltrans.GetLastError())
+}
+
+// SweepSuppress: a source whose fetch succeeded but whose full current set
+// could not be computed (e.g. wildfire's standalone-perimeter set while the
+// sibling feed is down) skips the disappearance sweep — a partial view must
+// never become an all-clear — while its health still records the success.
+func TestTickSweepSuppression(t *testing.T) {
+	ctx := testCtx()
+	st := newSchedStore(t)
+	seedSchedSources(t, st, "wfigs")
+
+	fn := &fakeNormalizer{
+		ids:    []string{"wfigs"},
+		result: &PollResult{Events: []*gridv1.Event{schedEvent("wfigs:fire", "wfigs", gridv1.Layer_WILDFIRE)}},
+	}
+	sched := NewScheduler(st, SchedulerConfig{
+		Tuning: map[string]config.SourceTuning{"wfigs": {Disappearance: store.DisappearanceResolve}},
+	})
+	spec := PollerSpec{Normalizer: fn, Interval: time.Minute}
+	sched.tick(ctx, spec)
+	require.Equal(t, gridv1.EventStatus_ACTIVE, eventStatus(t, st, "wfigs:fire"))
+
+	// The event disappears but the poller suppresses the sweep: fetch OK,
+	// disappearance evidence incomplete.
+	fn.result = &PollResult{SweepSuppress: []string{"wfigs"}}
+	sched.tick(ctx, spec)
+
+	ev, err := st.GetEvent(ctx, "wfigs:fire")
+	require.NoError(t, err)
+	assert.Equal(t, gridv1.EventStatus_ACTIVE, ev.GetStatus(),
+		"suppressed sweep must not transition disappeared events")
+	assert.Equal(t, uint32(1), ev.GetRevision())
+	src := sourceByID(t, st, "wfigs")
+	assert.Equal(t, gridv1.SourceStatus_OK, src.GetStatus(), "suppression still records success")
+	assert.Empty(t, src.GetLastError())
+
+	// Suppression lifted, still missing: the disappearance now resolves.
+	fn.result = &PollResult{}
+	sched.tick(ctx, spec)
+	assert.Equal(t, gridv1.EventStatus_RESOLVED, eventStatus(t, st, "wfigs:fire"))
+}
+
+// Poll receives a Prior populated from the store's active/scheduled sets for
+// exactly the poller's sources.
+func TestTickPriorPopulatedFromStore(t *testing.T) {
+	ctx := testCtx()
+	st := newSchedStore(t)
+	seedSchedSources(t, st, "calfire", "wfigs")
+
+	fn := &fakeNormalizer{
+		ids: []string{"calfire", "wfigs"},
+		result: &PollResult{Events: []*gridv1.Event{
+			schedEvent("calfire:one", "calfire", gridv1.Layer_WILDFIRE),
+			schedEvent("wfigs:two", "wfigs", gridv1.Layer_WILDFIRE),
+		}},
+	}
+	sched := NewScheduler(st, SchedulerConfig{
+		Tuning: map[string]config.SourceTuning{
+			"calfire": {Disappearance: store.DisappearanceResolve},
+			"wfigs":   {Disappearance: store.DisappearanceResolve},
+		},
+	})
+	spec := PollerSpec{Normalizer: fn, Interval: time.Minute}
+
+	sched.tick(ctx, spec)
+	require.NotNil(t, fn.lastPrior, "Poll always receives a non-nil Prior")
+	assert.Nil(t, fn.lastPrior.ByID("calfire:one"), "first tick: store is empty")
+	assert.Empty(t, fn.lastPrior.ForSource("calfire"))
+
+	sched.tick(ctx, spec)
+	prior := fn.lastPrior
+	require.NotNil(t, prior.ByID("calfire:one"))
+	assert.Equal(t, "headline calfire:one", prior.ByID("calfire:one").GetHeadline())
+	assert.Nil(t, prior.ByID("calfire:nope"))
+
+	forCalfire := prior.ForSource("calfire")
+	require.Len(t, forCalfire, 1, "ForSource splits by source id")
+	assert.Equal(t, "calfire:one", forCalfire[0].GetId())
+	forWfigs := prior.ForSource("wfigs")
+	require.Len(t, forWfigs, 1)
+	assert.Equal(t, "wfigs:two", forWfigs[0].GetId())
+	assert.Empty(t, prior.ForSource("caloes"), "sources outside the poller are not loaded")
 }

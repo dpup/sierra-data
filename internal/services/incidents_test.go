@@ -2,8 +2,13 @@ package services
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	api "github.com/dpup/info.ersn.net/server/api/v1"
 	"github.com/dpup/info.ersn.net/server/internal/cache"
@@ -272,6 +277,184 @@ func TestBuildIncident_LaneClosure2026Format(t *testing.T) {
 	}
 	if inc.Severity != api.AlertSeverity_WARNING {
 		t.Errorf("severity = %v, want WARNING", inc.Severity)
+	}
+}
+
+// caltransFeedDoer serves canned KML per quickmap feed, with per-feed failure
+// injection, so tests can kill exactly one of the two incident feeds.
+type caltransFeedDoer struct {
+	chpBody  string
+	laneBody string
+	failCHP  bool
+	failLane bool
+}
+
+func (d *caltransFeedDoer) Do(req *http.Request) (*http.Response, error) {
+	u := req.URL.String()
+	switch {
+	case strings.Contains(u, "chp-only"):
+		if d.failCHP {
+			return nil, errors.New("simulated CHP feed outage")
+		}
+		return kmlResponse(d.chpBody), nil
+	case strings.Contains(u, "lcs2way"):
+		if d.failLane {
+			return nil, errors.New("simulated lane-closure feed outage")
+		}
+		return kmlResponse(d.laneBody), nil
+	}
+	return nil, fmt.Errorf("unexpected feed URL: %s", u)
+}
+
+func kmlResponse(body string) *http.Response {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     make(http.Header),
+	}
+}
+
+// chpFeedKML is a minimal chp-only.kml with one incident inside the
+// mother-lode bounds (2026 iw-* markup).
+const chpFeedKML = `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2"><Document>
+  <Placemark>
+    <name>CHP Incident 260705SA0001</name>
+    <description><![CDATA[<h2 class="iw-title">1183-Trfc Collision-Injury</h2><p class="iw-text">Jul 5 2026  8:00AM <br> Hwy 4 / Main St</p>]]></description>
+    <styleUrl>#chp</styleUrl>
+    <Point><coordinates>-120.5402,38.0671,0</coordinates></Point>
+  </Placemark>
+</Document></kml>`
+
+// laneFeedKML is a minimal lcs2way.kml with one closure inside the bounds.
+const laneFeedKML = `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2"><Document>
+  <Placemark>
+    <name>Route 4 One-way Traffic Operation</name>
+    <description><![CDATA[<h2 class="iw-title">Route 4 One-way Traffic Operation</h2><p class="iw-text">From 0.5 mi E of Murphys to 0.8 mi E</p><div>Closure ID: C4TA</div>]]></description>
+    <styleUrl>#closure</styleUrl>
+    <Point><coordinates>-120.456,38.139,0</coordinates></Point>
+  </Placemark>
+</Document></kml>`
+
+// newIncidentsFeedService builds a RoadsService over fake KML feeds for
+// exercising ListIncidents end to end (no AI enhancer; cache TTL 1 minute).
+func newIncidentsFeedService(doer *caltransFeedDoer) (*RoadsService, *cache.Cache) {
+	parser := caltrans.NewFeedParser()
+	parser.HTTPClient = doer
+	c := cache.NewCache()
+	cfg := &config.Config{
+		Roads: config.RoadsConfig{
+			IncidentAreas: []config.IncidentArea{motherLode()},
+			CaltransFeeds: config.CaltransConfig{
+				CHPIncidents: config.CaltransFeedConfig{RefreshInterval: time.Minute},
+			},
+		},
+	}
+	return NewRoadsService(nil, parser, c, cfg, nil), c
+}
+
+// When exactly one KML feed fails, ListIncidents still serves the survivor's
+// incidents (availability) AND IncidentFeedHealth reports the failed feed's
+// error (honesty) — a consumer must be able to tell a dead feed from an
+// all-clear, or it would falsely resolve every active event from that feed.
+func TestListIncidents_PartialFeedFailure_ServesSurvivorAndReportsHealth(t *testing.T) {
+	t.Run("lane feed down", func(t *testing.T) {
+		svc, _ := newIncidentsFeedService(&caltransFeedDoer{chpBody: chpFeedKML, failLane: true})
+
+		before := time.Now()
+		resp, err := svc.ListIncidents(testCtx(), &api.ListIncidentsRequest{Area: "mother-lode"})
+		if err != nil {
+			t.Fatalf("expected surviving CHP feed to be served, got error: %v", err)
+		}
+		if len(resp.Incidents) != 1 || resp.Incidents[0].Id != "260705SA0001" {
+			t.Fatalf("expected the CHP incident, got %v", resp.Incidents)
+		}
+
+		chpErr, laneErr, at := svc.IncidentFeedHealth()
+		if chpErr != nil {
+			t.Errorf("chpErr = %v, want nil (feed succeeded)", chpErr)
+		}
+		if laneErr == nil {
+			t.Error("laneErr should report the lane-closure feed failure")
+		}
+		if at.Before(before) || at.After(time.Now()) {
+			t.Errorf("attempt time not recorded: %v", at)
+		}
+	})
+
+	t.Run("chp feed down", func(t *testing.T) {
+		svc, _ := newIncidentsFeedService(&caltransFeedDoer{laneBody: laneFeedKML, failCHP: true})
+
+		resp, err := svc.ListIncidents(testCtx(), &api.ListIncidentsRequest{Area: "mother-lode"})
+		if err != nil {
+			t.Fatalf("expected surviving lane feed to be served, got error: %v", err)
+		}
+		if len(resp.Incidents) != 1 || resp.Incidents[0].Id != "C4TA" {
+			t.Fatalf("expected the lane closure, got %v", resp.Incidents)
+		}
+
+		chpErr, laneErr, _ := svc.IncidentFeedHealth()
+		if chpErr == nil {
+			t.Error("chpErr should report the CHP feed failure")
+		}
+		if laneErr != nil {
+			t.Errorf("laneErr = %v, want nil (feed succeeded)", laneErr)
+		}
+	})
+}
+
+// A healthy refresh clears previously recorded feed errors.
+func TestIncidentFeedHealth_RecoveryClearsErrors(t *testing.T) {
+	doer := &caltransFeedDoer{chpBody: chpFeedKML, laneBody: laneFeedKML, failLane: true}
+	svc, c := newIncidentsFeedService(doer)
+
+	if _, err := svc.ListIncidents(testCtx(), &api.ListIncidentsRequest{Area: "mother-lode"}); err != nil {
+		t.Fatalf("ListIncidents: %v", err)
+	}
+	if _, laneErr, _ := svc.IncidentFeedHealth(); laneErr == nil {
+		t.Fatal("laneErr should be set while the feed is down")
+	}
+
+	// Feed recovers; force a refresh by expiring the cache.
+	doer.failLane = false
+	c.Backdate("incidents:mother-lode", 90*time.Second)
+	if _, err := svc.ListIncidents(testCtx(), &api.ListIncidentsRequest{Area: "mother-lode"}); err != nil {
+		t.Fatalf("ListIncidents after recovery: %v", err)
+	}
+	chpErr, laneErr, _ := svc.IncidentFeedHealth()
+	if chpErr != nil || laneErr != nil {
+		t.Errorf("healthy refresh should clear feed errors, got chp=%v lane=%v", chpErr, laneErr)
+	}
+}
+
+// The stale-cache fallback in ListIncidents is gated by the documented 2x
+// refresh-interval bound: a stale-but-servable cache is returned when both
+// feeds fail, but a very-stale one is refused (fail loud, never serve
+// arbitrarily old incidents as current).
+func TestListIncidents_StaleFallbackGatedByVeryStale(t *testing.T) {
+	svc, c := newIncidentsFeedService(&caltransFeedDoer{failCHP: true, failLane: true})
+	cached := []*api.Incident{{Id: "260705SA0009", Description: "Traffic Collision", Area: "mother-lode"}}
+	if err := c.Set("incidents:mother-lode", cached, time.Minute, "incidents"); err != nil {
+		t.Fatalf("seed cache: %v", err)
+	}
+	c.Backdate("incidents:mother-lode", 90*time.Second) // stale, within the 2x bound
+
+	resp, err := svc.ListIncidents(testCtx(), &api.ListIncidentsRequest{Area: "mother-lode"})
+	if err != nil {
+		t.Fatalf("expected stale fallback, got error: %v", err)
+	}
+	if len(resp.Incidents) != 1 || resp.Incidents[0].Id != "260705SA0009" {
+		t.Fatalf("expected the stale cached incident, got %v", resp.Incidents)
+	}
+	if resp.LastUpdated == nil || time.Since(resp.LastUpdated.AsTime()) < 80*time.Second {
+		t.Error("LastUpdated should reflect the stale entry's original CreatedAt")
+	}
+
+	// Past the very-stale bound the fallback no longer applies.
+	c.Backdate("incidents:mother-lode", 2*time.Minute)
+	if _, err := svc.ListIncidents(testCtx(), &api.ListIncidentsRequest{Area: "mother-lode"}); err == nil {
+		t.Fatal("expected error once cache is very stale and both feeds are down")
 	}
 }
 

@@ -2,12 +2,14 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	gridv1 "github.com/dpup/info.ersn.net/server/api/grid/v1"
@@ -84,7 +86,7 @@ func TestOpenMigrateIdempotent(t *testing.T) {
 
 	var applied int
 	require.NoError(t, s2.db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&applied))
-	assert.Equal(t, 1, applied)
+	assert.Equal(t, len(migrations), applied)
 
 	srcs, err := s2.ListSources(ctx)
 	require.NoError(t, err)
@@ -135,6 +137,61 @@ func TestReopenRehydrates(t *testing.T) {
 	active, err := s2.ActiveEventsBySource(ctx, "usgs")
 	require.NoError(t, err)
 	assert.Len(t, active, 1)
+}
+
+// An existing dev DB created at schema v1 (before last_seen_at existed)
+// upgrades in place via migration v2 on Open; its pre-migration rows read
+// back with a zero LastSeenAt (the DEFAULT 0), and new writes stamp the
+// column normally.
+func TestMigrateV1DatabaseToV2(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "grid.db")
+
+	// Hand-build a v1-only database, exactly as Open() would have created it
+	// before migration v2 existed. schemaV1 is unchanged, so it IS the old
+	// schema (no last_seen_at column).
+	db, err := sql.Open("sqlite", "file:"+path)
+	require.NoError(t, err)
+	_, err = db.Exec(`CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)`)
+	require.NoError(t, err)
+	_, err = db.Exec(schemaV1)
+	require.NoError(t, err)
+	_, err = db.Exec(`INSERT INTO schema_migrations (version, applied_at) VALUES (1, 0)`)
+	require.NoError(t, err)
+	_, err = db.Exec(`INSERT INTO sources (id, name, poll_interval_seconds) VALUES ('usgs', 'USGS', 60)`)
+	require.NoError(t, err)
+	ev := testEvent("usgs:q1", gridv1.Severity_MODERATE, gridv1.EventStatus_ACTIVE, "pre-migration row")
+	blob, err := proto.Marshal(ev)
+	require.NoError(t, err)
+	_, err = db.Exec(`
+		INSERT INTO events (id, layer, severity, status, source_id, observed_at,
+		                    ingested_at, revision, content_hash, proto)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+		ev.GetId(), int32(ev.GetLayer()), int32(ev.GetSeverity()), int32(ev.GetStatus()),
+		"usgs", baseTime.Unix(), baseTime.Unix(), ContentHash(ev), blob)
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+
+	// Reopen through the store: migration v2 must apply.
+	s, err := Open(path)
+	require.NoError(t, err)
+	defer s.Close()
+
+	var maxVersion int
+	require.NoError(t, s.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&maxVersion))
+	assert.Equal(t, len(migrations), maxVersion)
+
+	active, err := s.ActiveEventsBySource(ctx, "usgs")
+	require.NoError(t, err)
+	require.Len(t, active, 1)
+	assert.Equal(t, "usgs:q1", active[0].Event.GetId())
+	assert.True(t, active[0].LastSeenAt.IsZero(), "pre-migration rows have zero last-seen")
+
+	require.NoError(t, s.TouchSeen(ctx, []string{"usgs:q1"}, baseTime.Add(time.Hour)))
+	active, err = s.ActiveEventsBySource(ctx, "usgs")
+	require.NoError(t, err)
+	require.Len(t, active, 1)
+	assert.Equal(t, baseTime.Add(time.Hour).Unix(), active[0].LastSeenAt.Unix())
 }
 
 func TestGetEventNotFound(t *testing.T) {

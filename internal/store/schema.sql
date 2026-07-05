@@ -17,6 +17,8 @@ CREATE TABLE events (
   content_hash TEXT NOT NULL,       -- normalized proto hash; unchanged => no revision
   proto        BLOB NOT NULL
 );
+-- v2 (store.go migrationV2) adds: last_seen_at INTEGER NOT NULL DEFAULT 0
+
 CREATE INDEX idx_events_active ON events(status, severity DESC, observed_at DESC);
 CREATE INDEX idx_events_layer  ON events(layer, status);
 

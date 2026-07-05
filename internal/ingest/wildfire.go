@@ -3,7 +3,9 @@ package ingest
 import (
 	"context"
 	"fmt"
+	"math"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/dpup/prefab/logging"
@@ -35,9 +37,26 @@ func NewWildfireNormalizer(cfg *config.Config, cf *calfire.Client, wf *wfigs.Cli
 // SourceIDs implements Normalizer. One poller, two source rows.
 func (n *WildfireNormalizer) SourceIDs() []string { return []string{"calfire", "wfigs"} }
 
+// priorByID is a nil-tolerant Prior.ByID (the scheduler always passes a real
+// Prior; unit tests may pass nil).
+func priorByID(p Prior, id string) *gridv1.Event {
+	if p == nil {
+		return nil
+	}
+	return p.ByID(id)
+}
+
+// priorForSource is a nil-tolerant Prior.ForSource.
+func priorForSource(p Prior, sourceID string) []*gridv1.Event {
+	if p == nil {
+		return nil
+	}
+	return p.ForSource(sourceID)
+}
+
 // Poll implements Normalizer. One source failing degrades to a PerSource
 // entry (the survivor's events still return); both failing is a hard error.
-func (n *WildfireNormalizer) Poll(ctx context.Context) (*PollResult, error) {
+func (n *WildfireNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult, error) {
 	minLat, minLng, maxLat, maxLng, ok := unionBounds(n.cfg.Hazards.Areas)
 	if !ok {
 		return &PollResult{}, nil
@@ -132,6 +151,20 @@ func (n *WildfireNormalizer) Poll(ctx context.Context) (*PollResult, error) {
 					"fire", in.Name, "error", err)
 				ev.Geometry = GeometryFromPoint(in.Lat, in.Lng)
 			}
+		} else if perr != nil {
+			// WFIGS is down, so the adoption lookup can see no perimeters at
+			// all. Downgrading an incident that held a perimeter last tick to a
+			// point + has_perimeter=false would write a false "perimeter gone"
+			// revision and throw away real spatial extent. Carry the PRIOR
+			// geometry and has_perimeter forward instead; the scalar fields
+			// (acres, containment, headline) still update from CAL FIRE — those
+			// are genuine revisions.
+			if pe := priorByID(prior, ev.Id); pe.GetWildfire().GetHasPerimeter() && pe.GetGeometry() != nil {
+				ev.Geometry = pe.GetGeometry()
+				detail.HasPerimeter = true
+			} else {
+				ev.Geometry = GeometryFromPoint(in.Lat, in.Lng)
+			}
 		} else {
 			ev.Geometry = GeometryFromPoint(in.Lat, in.Lng)
 		}
@@ -139,7 +172,31 @@ func (n *WildfireNormalizer) Poll(ctx context.Context) (*PollResult, error) {
 		events = append(events, ev)
 	}
 
-	events = append(events, standalonePerimeterEvents(ctx, perims, used)...)
+	standalone := standalonePerimeterEvents(ctx, perims, used, prior)
+	if ierr != nil {
+		// CAL FIRE is down, so adoption is uncomputable and the used-map above
+		// is empty: perimeters that are normally folded into calfire:* incidents
+		// would be minted as NEW standalone wfigs:* ACTIVE events, duplicating
+		// the still-active calfire events (whose sweep the PerSource error
+		// suppresses) for up to the expire grace. While adoption is
+		// uncomputable, emit standalone events ONLY for computed ids the store
+		// already tracks as wfigs standalones — never mint new standalone ids.
+		// Tradeoff: a genuinely new fire that first appears while CAL FIRE is
+		// down stays invisible until CAL FIRE recovers; delayed visibility is
+		// preferred over duplicate ACTIVE fires on the map.
+		priorIDs := make(map[string]bool)
+		for _, pe := range priorForSource(prior, "wfigs") {
+			priorIDs[pe.GetId()] = true
+		}
+		kept := standalone[:0]
+		for _, ev := range standalone {
+			if priorIDs[ev.GetId()] {
+				kept = append(kept, ev)
+			}
+		}
+		standalone = kept
+	}
+	events = append(events, standalone...)
 
 	if len(perSource) == 0 {
 		perSource = nil
@@ -152,8 +209,10 @@ func (n *WildfireNormalizer) Poll(ctx context.Context) (*PollResult, error) {
 // several distinct perimeters share a normalized name the -2/-3 collision
 // suffixes are assigned in centroid (lat, lng) order, so ids are stable across
 // polls regardless of upstream feature order (plan decision 3 — NOT slice
-// index, which the shipped builder used).
-func standalonePerimeterEvents(ctx context.Context, perims []wfigs.Perimeter, used map[string]bool) []*gridv1.Event {
+// index, which the shipped builder used). When a name is back down to exactly
+// ONE candidate, standaloneContinuityID keeps the survivor on the id it
+// already holds in the store instead of silently reassigning it the bare id.
+func standalonePerimeterEvents(ctx context.Context, perims []wfigs.Perimeter, used map[string]bool, prior Prior) []*gridv1.Event {
 	type candidate struct {
 		perim wfigs.Perimeter
 		geom  *gridv1.Geometry
@@ -185,12 +244,22 @@ func standalonePerimeterEvents(ctx context.Context, perims []wfigs.Perimeter, us
 	})
 
 	counts := make(map[string]int)
-	out := make([]*gridv1.Event, 0, len(cands))
 	for _, c := range cands {
 		counts[c.norm]++
-		id := "wfigs:" + c.norm
-		if counts[c.norm] > 1 {
-			id = fmt.Sprintf("%s-%d", id, counts[c.norm])
+	}
+
+	seq := make(map[string]int)
+	out := make([]*gridv1.Event, 0, len(cands))
+	for _, c := range cands {
+		seq[c.norm]++
+		var id string
+		if counts[c.norm] == 1 {
+			id = standaloneContinuityID(prior, c.norm, c.geom)
+		} else {
+			id = "wfigs:" + c.norm
+			if seq[c.norm] > 1 {
+				id = fmt.Sprintf("%s-%d", id, seq[c.norm])
+			}
 		}
 		p := c.perim
 		ev := NewEvent(
@@ -212,4 +281,76 @@ func standalonePerimeterEvents(ctx context.Context, perims []wfigs.Perimeter, us
 		out = append(out, ev)
 	}
 	return out
+}
+
+// standaloneContinuityID picks the standalone id for a normalized name with
+// exactly ONE current candidate. Without continuity, when one of two
+// same-named perimeters disappears the survivor always inherits the bare id —
+// if the survivor had been "wfigs:{name}-2", the bare id would silently splice
+// two different fires' histories together.
+//
+// Rule: if the store's prior standalone set holds the bare id (and nothing
+// else for this name), keep it; else if it holds exactly one suffixed id for
+// this name, REUSE that suffixed id; else mint the bare id.
+//
+// Residual edge: prior holds SEVERAL ids for this name (e.g. both the bare id
+// and "-2") while only one candidate remains — which fire survived is a
+// spatial question, not a naming one, so pick the prior id whose stored
+// centroid is nearest the candidate's centroid; the others expire under the
+// wfigs disappearance policy.
+func standaloneContinuityID(prior Prior, norm string, geom *gridv1.Geometry) string {
+	bare := "wfigs:" + norm
+	var priorIDs []*gridv1.Event
+	for _, pe := range priorForSource(prior, "wfigs") {
+		if isStandaloneIDForName(pe.GetId(), norm) {
+			priorIDs = append(priorIDs, pe)
+		}
+	}
+	switch len(priorIDs) {
+	case 0:
+		return bare
+	case 1:
+		return priorIDs[0].GetId()
+	}
+	best := priorIDs[0]
+	bestDist := centroidDistSq(best.GetGeometry(), geom)
+	for _, pe := range priorIDs[1:] {
+		if d := centroidDistSq(pe.GetGeometry(), geom); d < bestDist {
+			best, bestDist = pe, d
+		}
+	}
+	return best.GetId()
+}
+
+// isStandaloneIDForName reports whether id is "wfigs:{norm}" or
+// "wfigs:{norm}-{digits}". Normalized names contain only [a-z0-9], so the "-"
+// separator is unambiguous.
+func isStandaloneIDForName(id, norm string) bool {
+	bare := "wfigs:" + norm
+	if id == bare {
+		return true
+	}
+	rest, ok := strings.CutPrefix(id, bare+"-")
+	if !ok || rest == "" {
+		return false
+	}
+	for _, r := range rest {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// centroidDistSq is the squared lat/lng distance between two geometries'
+// centroids — a comparison key only, not a physical distance. A missing
+// centroid sorts last.
+func centroidDistSq(a, b *gridv1.Geometry) float64 {
+	ca, cb := a.GetCentroid(), b.GetCentroid()
+	if ca == nil || cb == nil {
+		return math.Inf(1)
+	}
+	dLat := ca.GetLat() - cb.GetLat()
+	dLng := ca.GetLng() - cb.GetLng()
+	return dLat*dLat + dLng*dLng
 }

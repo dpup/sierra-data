@@ -25,10 +25,18 @@ import (
 //go:embed schema.sql
 var schemaV1 string
 
+// migrationV2 adds last-seen tracking (see TouchSeen): the lifecycle expire
+// grace is measured from when a source last CONFIRMED an event, not from
+// when its content last changed — a stable event must not expire just
+// because it never produced a new revision. DEFAULT 0 leaves pre-migration
+// rows with a zero LastSeenAt so callers can fall back to observed/ingested.
+const migrationV2 = `ALTER TABLE events ADD COLUMN last_seen_at INTEGER NOT NULL DEFAULT 0`
+
 // migrations[i] is the DDL for schema version i+1. Applied versions are
 // recorded in schema_migrations; already-applied versions are skipped, so
-// Open is idempotent across restarts.
-var migrations = []string{schemaV1}
+// Open is idempotent across restarts and an existing dev DB at an older
+// version picks up only the missing migrations.
+var migrations = []string{schemaV1, migrationV2}
 
 // ErrNotFound is returned by point lookups (GetEvent, GetPlace) when no row
 // matches. Callers map it to a 404.

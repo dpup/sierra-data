@@ -60,8 +60,11 @@ func (s *RoadsService) ListIncidents(ctx context.Context, req *api.ListIncidents
 
 	incidents, err := s.refreshIncidents(ctx, area)
 	if err != nil {
-		// Fall back to stale cache rather than erroring if we have anything.
-		if found {
+		// Fall back to stale cache rather than erroring if we have anything —
+		// but only within the documented very-stale bound (2x the refresh
+		// interval, matching ListRoads/ListWeatherAlerts). Beyond that, fail
+		// loud rather than serve arbitrarily old incidents as current.
+		if found && !s.cache.IsVeryStale(cacheKey) {
 			logging.Errorw(ctx, "Incident refresh failed, returning stale cache", "error", err)
 			var lastUpdated *timestamppb.Timestamp
 			if entry != nil {
@@ -72,6 +75,10 @@ func (s *RoadsService) ListIncidents(ctx context.Context, req *api.ListIncidents
 				LastUpdated: lastUpdated,
 				Area:        area.ID,
 			}, nil
+		}
+		if found {
+			logging.Errorw(ctx, "Incident refresh failed and cache is very stale; refusing to serve it",
+				"error", err, "cache_key", cacheKey)
 		}
 		return nil, fmt.Errorf("failed to refresh incidents: %w", err)
 	}
@@ -99,12 +106,22 @@ func (s *RoadsService) resolveIncidentArea(id string) (config.IncidentArea, bool
 }
 
 // refreshIncidents fetches CHP and lane-closure feeds and converts the ones
-// inside the area bounds into structured incidents.
+// inside the area bounds into structured incidents. A single-feed failure is
+// tolerated for availability (the survivor's data is still served) but is
+// recorded so IncidentFeedHealth exposes it — otherwise a dead feed is
+// indistinguishable from an all-clear downstream.
 func (s *RoadsService) refreshIncidents(ctx context.Context, area config.IncidentArea) ([]*api.Incident, error) {
 	chpIncidents, chpErr := s.caltransClient.ParseCHPIncidents(ctx)
 	laneClosures, lcErr := s.caltransClient.ParseLaneClosures(ctx)
+	s.recordIncidentFeedHealth(chpErr, lcErr)
 	if chpErr != nil && lcErr != nil {
 		return nil, fmt.Errorf("both incident feeds failed: chp=%v lanes=%v", chpErr, lcErr)
+	}
+	if chpErr != nil {
+		logging.Errorw(ctx, "CHP incident feed failed; serving lane closures only", "error", chpErr)
+	}
+	if lcErr != nil {
+		logging.Errorw(ctx, "Lane-closure feed failed; serving CHP incidents only", "error", lcErr)
 	}
 
 	incidents := s.normalizeIncidents(ctx, area, s.previouslyEnhancedIncidents(area), chpIncidents, laneClosures)
@@ -116,6 +133,30 @@ func (s *RoadsService) refreshIncidents(ctx context.Context, area config.Inciden
 		"in_area", len(incidents))
 
 	return incidents, nil
+}
+
+// recordIncidentFeedHealth stores the per-feed outcome of the latest
+// refreshIncidents attempt, along with when it ran.
+func (s *RoadsService) recordIncidentFeedHealth(chpErr, laneErr error) {
+	s.incidentFeedMu.Lock()
+	defer s.incidentFeedMu.Unlock()
+	s.incidentFeedChpErr = chpErr
+	s.incidentFeedLaneErr = laneErr
+	s.incidentFeedAt = time.Now()
+}
+
+// IncidentFeedHealth reports the per-feed outcome of the most recent incident
+// refresh attempt: chpErr for the CHP dispatch feed (chp-only.kml), laneErr
+// for the lane-closure feed (lcs2way.kml), and at for when the attempt ran.
+// Refresh keeps serving the surviving feed's data when only one feed fails,
+// so this accessor is how consumers (e.g. the grid road-incident poller) tell
+// a dead feed from a genuinely quiet one — an upstream error must never read
+// as an all-clear that RESOLVEs the failed feed's active events. A zero `at`
+// means no refresh has been attempted yet.
+func (s *RoadsService) IncidentFeedHealth() (chpErr, laneErr error, at time.Time) {
+	s.incidentFeedMu.Lock()
+	defer s.incidentFeedMu.Unlock()
+	return s.incidentFeedChpErr, s.incidentFeedLaneErr, s.incidentFeedAt
 }
 
 // maxIncidentEnhancementsPerRefresh bounds OpenAI calls (and request latency)

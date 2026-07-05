@@ -17,6 +17,10 @@ type fakeRoadsAPI struct {
 	byArea map[string]*api.ListIncidentsResponse
 	errs   map[string]error
 	calls  []string
+	// Per-feed health reported by IncidentFeedHealth (services keeps serving
+	// the surviving feed when only one KML feed fails).
+	feedChpErr  error
+	feedLaneErr error
 }
 
 func (f *fakeRoadsAPI) ListIncidents(ctx context.Context, req *api.ListIncidentsRequest) (*api.ListIncidentsResponse, error) {
@@ -25,6 +29,10 @@ func (f *fakeRoadsAPI) ListIncidents(ctx context.Context, req *api.ListIncidents
 		return nil, err
 	}
 	return f.byArea[req.GetArea()], nil
+}
+
+func (f *fakeRoadsAPI) IncidentFeedHealth() (chpErr, laneErr error, at time.Time) {
+	return f.feedChpErr, f.feedLaneErr, time.Now()
 }
 
 func testIncidents() (*api.Incident, *api.Incident, *api.Incident) {
@@ -69,7 +77,7 @@ func TestRoadIncidentPoll(t *testing.T) {
 	n := NewRoadIncidentNormalizer(testConfig(), roads)
 	assert.Equal(t, []string{"chp", "caltrans"}, n.SourceIDs())
 
-	res, err := n.Poll(testCtx())
+	res, err := n.Poll(testCtx(), nil)
 	require.NoError(t, err)
 	assert.Nil(t, res.PerSource)
 	assert.Equal(t, []string{"mother-lode", "high-country"}, roads.calls)
@@ -134,7 +142,7 @@ func TestRoadIncidentPoll_PartialFailure(t *testing.T) {
 	}
 	n := NewRoadIncidentNormalizer(testConfig(), roads)
 
-	res, err := n.Poll(testCtx())
+	res, err := n.Poll(testCtx(), nil)
 	require.NoError(t, err)
 	// Both source rows degrade together — they share the per-area calls.
 	require.NotNil(t, res.PerSource)
@@ -144,13 +152,177 @@ func TestRoadIncidentPoll_PartialFailure(t *testing.T) {
 }
 
 func TestRoadIncidentPoll_AllAreasFail(t *testing.T) {
-	roads := &fakeRoadsAPI{errs: map[string]error{
-		"mother-lode":  assert.AnError,
-		"high-country": assert.AnError,
-	}}
+	// Every area failing (which in the service co-occurs with both KML feeds
+	// being down) stays a hard error, as before.
+	roads := &fakeRoadsAPI{
+		errs: map[string]error{
+			"mother-lode":  assert.AnError,
+			"high-country": assert.AnError,
+		},
+		feedChpErr:  assert.AnError,
+		feedLaneErr: assert.AnError,
+	}
 	n := NewRoadIncidentNormalizer(testConfig(), roads)
-	_, err := n.Poll(testCtx())
+	_, err := n.Poll(testCtx(), nil)
 	assert.Error(t, err)
+}
+
+// A single dead KML feed is invisible at the ListIncidents level (the service
+// serves the survivor), but the sweep must not resolve the dead feed's
+// events: its source row must carry the error while the surviving feed's
+// events keep flowing and its sweep stays live.
+func TestRoadIncidentPoll_SingleFeedDown(t *testing.T) {
+	_, closure, _ := testIncidents()
+	roads := &fakeRoadsAPI{
+		byArea: map[string]*api.ListIncidentsResponse{
+			"mother-lode":  {Incidents: []*api.Incident{closure}},
+			"high-country": {},
+		},
+		feedChpErr: assert.AnError, // chp-only.kml down; lane closures healthy
+	}
+	n := NewRoadIncidentNormalizer(testConfig(), roads)
+
+	res, err := n.Poll(testCtx(), nil)
+	require.NoError(t, err, "one dead feed must degrade, not hard-fail the poll")
+	require.NotNil(t, res.PerSource)
+	assert.Error(t, res.PerSource["chp"], "the dead feed's source row must carry the error (sweep suppressed)")
+	assert.NotContains(t, res.PerSource, "caltrans", "the healthy feed still sweeps")
+	// The surviving feed's closures still process.
+	assert.ElementsMatch(t, []string{"chp:closure-hwy-4-avery"}, eventIDs(res.Events))
+
+	// Symmetric: lane-closure feed down, CHP healthy.
+	enhanced, _, _ := testIncidents()
+	roads = &fakeRoadsAPI{
+		byArea: map[string]*api.ListIncidentsResponse{
+			"mother-lode":  {Incidents: []*api.Incident{enhanced}},
+			"high-country": {},
+		},
+		feedLaneErr: assert.AnError,
+	}
+	res, err = NewRoadIncidentNormalizer(testConfig(), roads).Poll(testCtx(), nil)
+	require.NoError(t, err)
+	assert.Error(t, res.PerSource["caltrans"])
+	assert.NotContains(t, res.PerSource, "chp")
+	assert.ElementsMatch(t, []string{"chp:250916ST0066"}, eventIDs(res.Events))
+}
+
+// All areas failing with only ONE feed down is still a degraded poll, not a
+// hard error: both source rows carry the area error so nothing sweeps, but
+// health stays per-source.
+func TestRoadIncidentPoll_AllAreasFailOneFeedDownDegrades(t *testing.T) {
+	roads := &fakeRoadsAPI{
+		errs: map[string]error{
+			"mother-lode":  assert.AnError,
+			"high-country": assert.AnError,
+		},
+		feedChpErr: assert.AnError,
+	}
+	res, err := NewRoadIncidentNormalizer(testConfig(), roads).Poll(testCtx(), nil)
+	require.NoError(t, err)
+	assert.Error(t, res.PerSource["chp"])
+	assert.Error(t, res.PerSource["caltrans"])
+	assert.Empty(t, res.Events)
+}
+
+// priorRoadIncidentEvent builds a stored, AI-enhanced road incident event for
+// scripting a Prior.
+func priorRoadIncidentEvent(id string) *gridv1.Event {
+	ev := NewEvent(id, gridv1.Layer_ROAD_INCIDENT, gridv1.Severity_SEVERE, gridv1.EventStatus_ACTIVE,
+		"Enhanced: vehicle fire blocking the right lane near Avery")
+	ev.Summary = "Vehicle fire on Hwy 4"
+	ev.Provenance = NewProvenance("chp", "CHP / Caltrans", "quickmap.dot.ca.gov", "")
+	ev.Enhancement = &gridv1.Enhancement{Model: "gpt-5-mini", Fields: enhancedFields}
+	return ev
+}
+
+// After a restart the AI cache is empty and incidents beyond the enhancement
+// budget arrive with impact UNSPECIFIED. When the store already holds an
+// enhanced version, the prior event is carried forward verbatim (hash-equal
+// => no spurious raw revision + re-enhancement revision pair).
+func TestRoadIncidentPoll_UnenhancedIncomingKeepsPriorEnhanced(t *testing.T) {
+	raw := &api.Incident{
+		Id:                  "250916ST0066",
+		Type:                api.AlertType_INCIDENT,
+		Severity:            api.AlertSeverity_CRITICAL,
+		Location:            &api.Coordinates{Latitude: 38.2, Longitude: -120.35},
+		LocationDescription: "Hwy 4 at Avery",
+		Description:         "VEH FIRE RHS", // raw feed text, not yet AI-processed
+		LogNumber:           "250916ST0066",
+		Impact:              api.AlertImpact_ALERT_IMPACT_UNSPECIFIED,
+	}
+	roads := &fakeRoadsAPI{byArea: map[string]*api.ListIncidentsResponse{
+		"mother-lode":  {Incidents: []*api.Incident{raw}},
+		"high-country": {},
+	}}
+	prior := &scriptedPrior{events: []*gridv1.Event{priorRoadIncidentEvent("chp:250916ST0066")}}
+
+	res, err := NewRoadIncidentNormalizer(testConfig(), roads).Poll(testCtx(), prior)
+	require.NoError(t, err)
+	require.Len(t, res.Events, 1)
+	ev := res.Events[0]
+	assert.Equal(t, "chp:250916ST0066", ev.Id)
+	assert.Equal(t, "Enhanced: vehicle fire blocking the right lane near Avery", ev.Headline,
+		"the stored enhanced event must be carried forward verbatim, not clobbered by the raw copy")
+	assert.Equal(t, "Vehicle fire on Hwy 4", ev.Summary)
+	require.NotNil(t, ev.Enhancement)
+}
+
+// Controls for the carry-forward: it must apply ONLY when the incoming copy
+// is unenhanced AND the prior is enhanced.
+func TestRoadIncidentPoll_CarryForwardControls(t *testing.T) {
+	t.Run("genuinely new incident emits raw immediately", func(t *testing.T) {
+		raw := &api.Incident{
+			Id:          "NEW123",
+			Type:        api.AlertType_INCIDENT,
+			Location:    &api.Coordinates{Latitude: 38.2, Longitude: -120.35},
+			Description: "TRFC COLLISION",
+		}
+		roads := &fakeRoadsAPI{byArea: map[string]*api.ListIncidentsResponse{
+			"mother-lode":  {Incidents: []*api.Incident{raw}},
+			"high-country": {},
+		}}
+		res, err := NewRoadIncidentNormalizer(testConfig(), roads).Poll(testCtx(), &scriptedPrior{})
+		require.NoError(t, err)
+		require.Len(t, res.Events, 1)
+		assert.Equal(t, "TRFC COLLISION", res.Events[0].Headline, "availability first: new incidents are never held back")
+		assert.Nil(t, res.Events[0].Enhancement)
+	})
+
+	t.Run("enhanced incoming supersedes the prior", func(t *testing.T) {
+		enhanced, _, _ := testIncidents()
+		roads := &fakeRoadsAPI{byArea: map[string]*api.ListIncidentsResponse{
+			"mother-lode":  {Incidents: []*api.Incident{enhanced}},
+			"high-country": {},
+		}}
+		prior := &scriptedPrior{events: []*gridv1.Event{priorRoadIncidentEvent("chp:250916ST0066")}}
+		res, err := NewRoadIncidentNormalizer(testConfig(), roads).Poll(testCtx(), prior)
+		require.NoError(t, err)
+		require.Len(t, res.Events, 1)
+		assert.Equal(t, "Vehicle fire blocking the right lane", res.Events[0].Headline,
+			"a freshly enhanced incoming copy must replace the stored version")
+	})
+
+	t.Run("unenhanced prior does not suppress raw updates", func(t *testing.T) {
+		raw := &api.Incident{
+			Id:          "250916ST0066",
+			Type:        api.AlertType_INCIDENT,
+			Location:    &api.Coordinates{Latitude: 38.2, Longitude: -120.35},
+			Description: "VEH FIRE RHS [UPDATED]",
+		}
+		roads := &fakeRoadsAPI{byArea: map[string]*api.ListIncidentsResponse{
+			"mother-lode":  {Incidents: []*api.Incident{raw}},
+			"high-country": {},
+		}}
+		priorRaw := priorRoadIncidentEvent("chp:250916ST0066")
+		priorRaw.Enhancement = nil // stored copy was itself raw
+		priorRaw.Headline = "VEH FIRE RHS"
+		prior := &scriptedPrior{events: []*gridv1.Event{priorRaw}}
+		res, err := NewRoadIncidentNormalizer(testConfig(), roads).Poll(testCtx(), prior)
+		require.NoError(t, err)
+		require.Len(t, res.Events, 1)
+		assert.Equal(t, "VEH FIRE RHS [UPDATED]", res.Events[0].Headline,
+			"raw-over-raw carries the newest feed text (new detail lines must flow)")
+	})
 }
 
 func TestImpactSlug(t *testing.T) {
