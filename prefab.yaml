@@ -42,7 +42,10 @@ google_routes:
 
 openai:
   apiKey: ""
-  model: "gpt-4o-mini"       # OpenAI model for alert enhancement with JSON schema support
+  # Model for alert/incident enhancement. Must support JSON-schema structured
+  # outputs. gpt-5-family models run with reasoning_effort=low (see
+  # internal/lib/alerts/enhancer.go for the gpt-5 param compatibility notes).
+  model: "gpt-5-mini"
   timeout: "30s"             # Timeout for API calls
   maxRetries: 3              # Maximum retry attempts
 

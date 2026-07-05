@@ -14,15 +14,15 @@ import (
 func TestRoadAlert_NewStructure(t *testing.T) {
 	// Test that RoadAlert has the new flattened structure
 	alert := &RoadAlert{
-		Type:                AlertType_CLOSURE,
-		Severity:            AlertSeverity_WARNING,
-		Classification:      AlertClassification_ON_ROUTE,
-		Title:               "CHP Incident 250911GG0206",
-		Description:         "Lane closure on Highway 4 eastbound at mile marker 31, emergency services responding",
-		CondensedSummary:    "Lane closure, emergency services responding",
-		StartTime:           timestamppb.New(time.Now()),
-		EndTime:             timestamppb.New(time.Now().Add(time.Hour)),
-		LastUpdated:         timestamppb.New(time.Now()),
+		Type:             AlertType_CLOSURE,
+		Severity:         AlertSeverity_WARNING,
+		Classification:   AlertClassification_ON_ROUTE,
+		Title:            "CHP Incident 250911GG0206",
+		Description:      "Lane closure on Highway 4 eastbound at mile marker 31, emergency services responding",
+		CondensedSummary: "Lane closure, emergency services responding",
+		StartTime:        timestamppb.New(time.Now()),
+		EndTime:          timestamppb.New(time.Now().Add(time.Hour)),
+		LastUpdated:      timestamppb.New(time.Now()),
 		Location: &Coordinates{
 			Latitude:  38.0675,
 			Longitude: -120.5436,
@@ -66,7 +66,7 @@ func TestRoadAlert_AIEnhancedFields(t *testing.T) {
 		LocationDescription: "Highway 4 near Bear Valley Road",
 		CondensedSummary:    "Multi-vehicle collision, injuries reported",
 		Metadata: map[string]string{
-			"responders": "CHP, EMS, Fire",
+			"responders":    "CHP, EMS, Fire",
 			"lanes_blocked": "2 of 3",
 		},
 	}
@@ -108,11 +108,11 @@ func TestAlertClassification_Enum(t *testing.T) {
 func TestProcessingMetrics_Fields(t *testing.T) {
 	// Test ProcessingMetrics message structure
 	metrics := &ProcessingMetrics{
-		TotalRawAlerts:         150,
-		FilteredAlerts:         45,
-		EnhancedAlerts:         42,
-		EnhancementFailures:    3,
-		AvgProcessingTimeMs:    245.7,
+		TotalRawAlerts:      150,
+		FilteredAlerts:      45,
+		EnhancedAlerts:      42,
+		EnhancementFailures: 3,
+		AvgProcessingTimeMs: 245.7,
 	}
 
 	assert.Equal(t, int64(150), metrics.TotalRawAlerts)

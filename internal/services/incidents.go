@@ -2,8 +2,10 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -15,13 +17,16 @@ import (
 	api "github.com/dpup/info.ersn.net/server/api/v1"
 	"github.com/dpup/info.ersn.net/server/internal/clients/caltrans"
 	"github.com/dpup/info.ersn.net/server/internal/config"
+	"github.com/dpup/info.ersn.net/server/internal/lib/alerts"
 )
 
 // ListIncidents returns region-wide CHP/Caltrans dispatch incidents for a
 // configured area (issue #7). Unlike the alerts embedded in each Road, this is
-// a flat list scoped only by geography, with no per-route classification or AI
-// enhancement - it is intentionally lightweight so the whole region can be
-// surfaced cheaply.
+// a flat list scoped only by geography, with no per-route classification.
+// Every incident is AI-enhanced (readable description, condensed summary,
+// impact, metadata — with severity driven by the model's impact assessment),
+// capped per refresh and served from the 24h content-hash cache, so the whole
+// region is still surfaced cheaply (~100 mini-model calls/day).
 func (s *RoadsService) ListIncidents(ctx context.Context, req *api.ListIncidentsRequest) (*api.ListIncidentsResponse, error) {
 	logging.Infow(ctx, "ListIncidents called", "area", req.Area)
 
@@ -102,7 +107,7 @@ func (s *RoadsService) refreshIncidents(ctx context.Context, area config.Inciden
 		return nil, fmt.Errorf("both incident feeds failed: chp=%v lanes=%v", chpErr, lcErr)
 	}
 
-	incidents := s.normalizeIncidents(area, chpIncidents, laneClosures)
+	incidents := s.normalizeIncidents(ctx, area, s.previouslyEnhancedIncidents(area), chpIncidents, laneClosures)
 
 	logging.Infow(ctx, "Region-wide incidents refreshed",
 		"area", area.ID,
@@ -113,13 +118,46 @@ func (s *RoadsService) refreshIncidents(ctx context.Context, area config.Inciden
 	return incidents, nil
 }
 
+// maxIncidentEnhancementsPerRefresh bounds OpenAI calls (and request latency)
+// on a single incidents refresh. Content-hash cache hits don't count against
+// it, so a backlog larger than the cap finishes enhancing over the next few
+// refresh cycles rather than never.
+const maxIncidentEnhancementsPerRefresh = 5
+
+// previouslyEnhancedIncidents returns the ids that carried an AI enhancement
+// in the last served list (stale cache included). Used to prioritize the
+// per-refresh budget: active CHP incidents get new detail lines appended,
+// which changes their content hash and makes already-enhanced incidents
+// compete for budget again — without prioritization they starve incidents
+// that have never been enhanced at all.
+func (s *RoadsService) previouslyEnhancedIncidents(area config.IncidentArea) map[string]bool {
+	enhanced := make(map[string]bool)
+	var prev []*api.Incident
+	if _, found, _ := s.cache.GetWithMetadata(fmt.Sprintf("incidents:%s", area.ID), &prev); found {
+		for _, p := range prev {
+			if p.CondensedSummary != "" {
+				enhanced[p.Id] = true
+			}
+		}
+	}
+	return enhanced
+}
+
 // normalizeIncidents builds a clean, one-entry-per-incident list from the raw
 // feeds. It drops geometry-only placemarks and collapses duplicates: the
 // Caltrans lane-closure feed emits a separate LineString "path" placemark per
 // closure (no description) and repeats closures across directions, neither of
 // which belongs in a flat list. CHP incidents come first, then lane closures.
-func (s *RoadsService) normalizeIncidents(area config.IncidentArea, lists ...[]caltrans.CaltransIncident) []*api.Incident {
+// Incidents are AI-enhanced after dedupe (so repeats don't spend budget),
+// never-enhanced ones first so budget-hungry re-enhancements of updated
+// incidents can't starve them.
+func (s *RoadsService) normalizeIncidents(ctx context.Context, area config.IncidentArea, previouslyEnhanced map[string]bool, lists ...[]caltrans.CaltransIncident) []*api.Incident {
+	type pendingEnhancement struct {
+		inc *api.Incident
+		in  caltrans.CaltransIncident
+	}
 	var incidents []*api.Incident
+	var pending []pendingEnhancement
 	seen := make(map[string]bool)
 	for _, list := range lists {
 		for _, in := range list {
@@ -134,9 +172,93 @@ func (s *RoadsService) normalizeIncidents(area config.IncidentArea, lists ...[]c
 				seen[inc.Id] = true
 			}
 			incidents = append(incidents, inc)
+			pending = append(pending, pendingEnhancement{inc: inc, in: in})
 		}
 	}
+
+	// Spend the enhancement budget on never-enhanced incidents first (stable,
+	// so feed order is preserved within each group). Cache hits are free
+	// regardless of position.
+	sort.SliceStable(pending, func(i, j int) bool {
+		return !previouslyEnhanced[pending[i].inc.Id] && previouslyEnhanced[pending[j].inc.Id]
+	})
+	apiCalls := 0
+	for _, p := range pending {
+		s.enhanceIncident(ctx, p.inc, p.in, &apiCalls)
+	}
+
 	return incidents
+}
+
+// enhanceIncident enriches an incident through the shared AI pipeline (same
+// content-hash 24h cache as road alerts, so an incident that also appears as a
+// road alert costs one OpenAI call, not two). Every incident is eligible: the
+// model's impact assessment then drives `severity`, replacing the keyword
+// heuristic (which remains only as the placeholder for incidents not yet
+// enhanced — deferred by the per-refresh budget or failed). Enhancement
+// failures keep the structural fields untouched — enrichment is strictly
+// additive, never load-bearing.
+func (s *RoadsService) enhanceIncident(ctx context.Context, inc *api.Incident, in caltrans.CaltransIncident, apiCalls *int) {
+	if s.alertEnhancer == nil {
+		return
+	}
+
+	raw := alerts.RawAlert{
+		ID:          inc.Id,
+		Title:       inc.Description, // humanized type line, e.g. "Traffic Collision-Injury"
+		Description: in.DescriptionText,
+		Location:    fmt.Sprintf("%s (%.4f, %.4f)", inc.LocationDescription, inc.Location.Latitude, inc.Location.Longitude),
+		StyleUrl:    in.StyleUrl,
+		Timestamp:   time.Now(),
+	}
+
+	enhanced, calledAPI, err := s.enhanceRawAlert(ctx, raw, *apiCalls < maxIncidentEnhancementsPerRefresh)
+	if calledAPI {
+		*apiCalls++
+	}
+	if err != nil {
+		if errors.Is(err, errEnhancementBudget) {
+			logging.Infow(ctx, "Incident enhancement deferred to next refresh (per-refresh budget reached)",
+				"id", inc.Id, "budget", maxIncidentEnhancementsPerRefresh)
+		} else {
+			logging.Errorw(ctx, "Incident enhancement failed, keeping structural fields", "id", inc.Id, "error", err)
+		}
+		return
+	}
+
+	if details := strings.TrimSpace(enhanced.StructuredDescription.Details); details != "" {
+		inc.Description = details
+	}
+	inc.CondensedSummary = enhanced.CondensedSummary
+	inc.Impact = mapAlertImpact(enhanced.StructuredDescription.Impact)
+	if sev := severityFromImpact(enhanced.StructuredDescription.Impact); sev != api.AlertSeverity_ALERT_SEVERITY_UNSPECIFIED {
+		inc.Severity = sev
+	}
+	if loc := strings.TrimSpace(enhanced.StructuredDescription.Location.Description); loc != "" {
+		inc.LocationDescription = loc
+	}
+	if len(enhanced.StructuredDescription.AdditionalInfo) > 0 {
+		inc.Metadata = make(map[string]string, len(enhanced.StructuredDescription.AdditionalInfo))
+		for k, v := range enhanced.StructuredDescription.AdditionalInfo {
+			inc.Metadata[k] = v
+		}
+	}
+}
+
+// severityFromImpact maps the AI-assessed impact onto the shared severity
+// scale, mirroring the roads mapping in determineAlertSeverity. An unknown
+// impact returns UNSPECIFIED so the caller keeps the heuristic severity.
+func severityFromImpact(impact string) api.AlertSeverity {
+	switch strings.ToLower(strings.TrimSpace(impact)) {
+	case "severe":
+		return api.AlertSeverity_CRITICAL
+	case "moderate", "light":
+		return api.AlertSeverity_WARNING
+	case "none":
+		return api.AlertSeverity_INFO
+	default:
+		return api.AlertSeverity_ALERT_SEVERITY_UNSPECIFIED
+	}
 }
 
 // buildIncident converts a Caltrans incident into the API representation,
@@ -239,8 +361,11 @@ func incidentType(in caltrans.CaltransIncident) api.AlertType {
 	}
 }
 
-// incidentSeverity is a lightweight, non-AI heuristic based on the incident text
-// and feed type. The region-wide feed favours breadth over per-incident analysis.
+// incidentSeverity is a lightweight, non-AI keyword heuristic based on the
+// incident text and feed type. It is only the placeholder severity for
+// incidents that haven't been AI-enhanced yet (deferred by the per-refresh
+// budget, or enhancement failed) — once enhanced, severityFromImpact
+// overrides it with the model's assessment.
 func incidentSeverity(in caltrans.CaltransIncident, typeText string) api.AlertSeverity {
 	lower := strings.ToLower(typeText + " " + in.DescriptionText + " " + in.StyleUrl)
 

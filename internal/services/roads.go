@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -1047,7 +1048,20 @@ func (s *RoadsService) EnhanceAlertWithAI(ctx context.Context, classifiedAlert r
 		StyleUrl:    classifiedAlert.StyleUrl,
 		Timestamp:   time.Now(),
 	}
+	enhanced, _, err := s.enhanceRawAlert(ctx, rawAlert, true)
+	return enhanced, err
+}
 
+// errEnhancementBudget signals that a cache-miss enhancement was skipped
+// because the caller's per-refresh OpenAI budget was exhausted.
+var errEnhancementBudget = errors.New("enhancement budget exhausted for this refresh")
+
+// enhanceRawAlert runs the content-hash → cache → OpenAI → cache pipeline for
+// a raw alert. Shared by per-road alerts and the region-wide incidents feed.
+// calledAPI reports whether an OpenAI call was actually made (false on cache
+// hits), letting callers budget API usage. When allowAPICall is false a cache
+// miss returns errEnhancementBudget instead of calling OpenAI.
+func (s *RoadsService) enhanceRawAlert(ctx context.Context, rawAlert alerts.RawAlert, allowAPICall bool) (enhancedAlert *alerts.EnhancedAlert, calledAPI bool, err error) {
 	// Generate content hash for cache key
 	contentHash := s.contentHasher.HashRawAlert(rawAlert)
 
@@ -1056,7 +1070,11 @@ func (s *RoadsService) EnhanceAlertWithAI(ctx context.Context, classifiedAlert r
 	key := fmt.Sprintf("enhanced_alert:%s", contentHash)
 	if found, err := s.cache.Get(key, &cachedAlert); err == nil && found {
 		logging.Infow(ctx, "Cache hit for alert content hash", "hash", contentHash[:8])
-		return &cachedAlert, nil
+		return &cachedAlert, false, nil
+	}
+
+	if !allowAPICall {
+		return nil, false, errEnhancementBudget
 	}
 
 	logging.Infow(ctx, "Cache miss for alert content hash - calling OpenAI", "hash", contentHash[:8])
@@ -1065,7 +1083,7 @@ func (s *RoadsService) EnhanceAlertWithAI(ctx context.Context, classifiedAlert r
 	enhanced, err := s.alertEnhancer.EnhanceAlert(ctx, rawAlert)
 	if err != nil {
 		logging.Errorw(ctx, "OpenAI enhancement failed", "hash", contentHash[:8], "error", err)
-		return nil, err
+		return nil, true, err
 	}
 
 	// Cache the result with 24 hour TTL to prevent duplicate OpenAI calls
@@ -1077,7 +1095,7 @@ func (s *RoadsService) EnhanceAlertWithAI(ctx context.Context, classifiedAlert r
 		logging.Infow(ctx, "Cached enhanced alert for 24h", "hash", contentHash[:8])
 	}
 
-	return &enhanced, nil
+	return &enhanced, true, nil
 }
 
 // mapAlertImpact maps the AI enhancer's impact string to the AlertImpact enum.

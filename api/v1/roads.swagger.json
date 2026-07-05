@@ -347,7 +347,7 @@
         },
         "description": {
           "type": "string",
-          "title": "Incident detail text from the feed"
+          "title": "Incident detail text (AI-enhanced for high-severity incidents)"
         },
         "status": {
           "$ref": "#/definitions/v1IncidentStatus",
@@ -370,6 +370,21 @@
         "area": {
           "type": "string",
           "title": "Area id this incident was matched to"
+        },
+        "condensedSummary": {
+          "type": "string",
+          "description": "AI-enhancement fields, populated only for high-severity (CRITICAL)\nincidents — fires, injury collisions, overturns, full closures. Other\nincidents keep the structural fields above and leave these empty/unset.\n\nShort format for mobile"
+        },
+        "impact": {
+          "$ref": "#/definitions/v1AlertImpact",
+          "title": "AI-assessed impact (IMPACT_UNSPECIFIED when not enhanced)"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Structured extras (vehicles involved, injuries, ...)"
         }
       },
       "description": "Incident is a region-wide CHP/Caltrans dispatch incident, surfaced\nindependently of any monitored road."

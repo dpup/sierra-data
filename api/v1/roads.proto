@@ -108,12 +108,19 @@ message Incident {
   AlertSeverity severity = 3;             // Heuristic severity from incident text
   Coordinates location = 4;              // Point location
   string location_description = 5;        // Human-readable location (e.g. "Sr132 Ofr / I580 E")
-  string description = 6;                 // Incident detail text from the feed
+  string description = 6;                 // Incident detail text (AI-enhanced for high-severity incidents)
   IncidentStatus status = 7;              // Lifecycle state (feeds only list active incidents)
   string log_number = 8;                  // CHP/CAD log number (e.g. "250916ST0066")
   google.protobuf.Timestamp started = 9;  // When the incident was first reported
   google.protobuf.Timestamp last_updated = 10; // Last update from the feed
   string area = 11;                       // Area id this incident was matched to
+
+  // AI-enhancement fields, populated only for high-severity (CRITICAL)
+  // incidents — fires, injury collisions, overturns, full closures. Other
+  // incidents keep the structural fields above and leave these empty/unset.
+  string condensed_summary = 12;          // Short format for mobile
+  AlertImpact impact = 13;                // AI-assessed impact (IMPACT_UNSPECIFIED when not enhanced)
+  map<string, string> metadata = 14;      // Structured extras (vehicles involved, injuries, ...)
 }
 
 message ProcessingMetrics {

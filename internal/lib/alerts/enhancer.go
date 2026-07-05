@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	openai "github.com/sashabaranov/go-openai"
@@ -47,23 +48,20 @@ If a style_url is provided, incorporate the relevant traffic flow context from t
 For the condensed summary, follow the examples provided - do NOT include location, keep it under 120 characters.`,
 		string(rawAlertJSON))
 
-	// Determine response format based on model capability
-	var responseFormat *openai.ChatCompletionResponseFormat
-	if a.model == "gpt-4o" || a.model == "gpt-4o-mini" {
-		// Use JSON Schema for models that support it
-		responseFormat = &openai.ChatCompletionResponseFormat{
-			Type:       openai.ChatCompletionResponseFormatTypeJSONSchema,
-			JSONSchema: &AlertEnhancementSchema,
-		}
-	} else {
-		// Fall back to JSON object for older models
-		responseFormat = &openai.ChatCompletionResponseFormat{
-			Type: openai.ChatCompletionResponseFormatTypeJSONObject,
-		}
+	// All models we configure (gpt-4o family, gpt-5 family) support JSON Schema
+	// structured outputs.
+	responseFormat := &openai.ChatCompletionResponseFormat{
+		Type:       openai.ChatCompletionResponseFormatTypeJSONSchema,
+		JSONSchema: &AlertEnhancementSchema,
 	}
 
-	// Make OpenAI API call with structured output request
-	resp, err := a.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
+	// Make OpenAI API call with structured output request.
+	// gpt-5-family compatibility: those models reject non-default `temperature`
+	// and the legacy `max_tokens` param (replaced by `max_completion_tokens`),
+	// and their completion budget also covers hidden reasoning tokens — hence
+	// the headroom and low reasoning effort (this is jargon expansion +
+	// classification, not a reasoning-heavy task).
+	req := openai.ChatCompletionRequest{
 		Model: a.model,
 		Messages: []openai.ChatCompletionMessage{
 			{
@@ -75,10 +73,13 @@ For the condensed summary, follow the examples provided - do NOT include locatio
 				Content: userPrompt,
 			},
 		},
-		ResponseFormat: responseFormat,
-		Temperature:    0.3, // Lower temperature for more consistent structured output
-		MaxTokens:      1000,
-	})
+		ResponseFormat:      responseFormat,
+		MaxCompletionTokens: 3000,
+	}
+	if isReasoningModel(a.model) {
+		req.ReasoningEffort = "low"
+	}
+	resp, err := a.client.CreateChatCompletion(ctx, req)
 
 	if err != nil {
 		return EnhancedAlert{}, fmt.Errorf("OpenAI API error: %w", err)
@@ -139,7 +140,10 @@ func (a *alertEnhancer) HealthCheck(ctx context.Context) error {
 		return errors.New("OpenAI client not initialized")
 	}
 
-	// Make a minimal API call to test connectivity
+	// Make a minimal API call to test connectivity. MaxCompletionTokens (not
+	// the legacy MaxTokens) so this works on gpt-5-family models too; small
+	// headroom because reasoning models spend completion budget on hidden
+	// reasoning tokens.
 	_, err := a.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
 		Model: a.model,
 		Messages: []openai.ChatCompletionMessage{
@@ -148,7 +152,7 @@ func (a *alertEnhancer) HealthCheck(ctx context.Context) error {
 				Content: "Test",
 			},
 		},
-		MaxTokens: 1,
+		MaxCompletionTokens: 16,
 	})
 
 	if err != nil {
@@ -159,6 +163,14 @@ func (a *alertEnhancer) HealthCheck(ctx context.Context) error {
 }
 
 // Helper functions
+
+// isReasoningModel reports whether the configured model is an OpenAI reasoning
+// model (gpt-5 family / o-series), which accepts the reasoning_effort param.
+// Non-reasoning models (gpt-4o family) reject it.
+func isReasoningModel(model string) bool {
+	return strings.HasPrefix(model, "gpt-5") || strings.HasPrefix(model, "o1") ||
+		strings.HasPrefix(model, "o3") || strings.HasPrefix(model, "o4")
+}
 
 // isValidImpact validates impact enum values
 func isValidImpact(impact string) bool {
