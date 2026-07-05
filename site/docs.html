@@ -421,14 +421,21 @@ Content-Type: application/json
     </table></div>
 
     <h3>Detail blocks (the <code class="inline">oneof</code>)</h3>
+    <p class="muted small">Each block carries only <em>kind-specific</em> fields. Anything
+      already in the envelope is not repeated: the incident/alert type is
+      <code class="inline">category</code>, the human location is
+      <code class="inline">area_label</code>, the short line is
+      <code class="inline">headline</code>, the sending office is
+      <code class="inline">provenance.source_name</code>, and the source page is
+      <code class="inline">canonical_url</code>.</p>
     <div class="table-wrap"><table class="data-table">
       <thead><tr><th>Key</th><th>Fields</th></tr></thead>
       <tbody>
         <tr><td class="mono">wildfire</td><td class="wrap mono">acres (double), containment (int32), county, cause (string), has_perimeter (bool)</td></tr>
         <tr><td class="mono">evacuation</td><td class="wrap mono">zone_id, level (ORDER | WARNING | ADVISORY | SHELTER_IN_PLACE, as string), event_type, county (string)</td></tr>
-        <tr><td class="mono">weather_alert</td><td class="wrap mono">event, nws_severity, certainty, urgency, instruction, sender_name, area_desc (string), zones (repeated string)</td></tr>
-        <tr><td class="mono">earthquake</td><td class="wrap mono">magnitude (double), depth_km (double), felt (int32), url (string)</td></tr>
-        <tr><td class="mono">road_incident</td><td class="wrap mono">log_number, incident_type, location_description (string), impact, duration, condensed_summary (string), metadata (map&lt;string,string&gt;)</td></tr>
+        <tr><td class="mono">weather_alert</td><td class="wrap mono">nws_severity, certainty, urgency, instruction, area_desc (string), zones (repeated string)</td></tr>
+        <tr><td class="mono">earthquake</td><td class="wrap mono">magnitude (double), depth_km (double), felt (int32)</td></tr>
+        <tr><td class="mono">road_incident</td><td class="wrap mono">log_number (string), impact, duration (string), metadata (map&lt;string,string&gt;)</td></tr>
       </tbody>
     </table></div>
     <p class="small muted">

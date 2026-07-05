@@ -204,9 +204,9 @@ func TestProjectEvents_WeatherAlert_ZonelessNullGeometry(t *testing.T) {
 		Expires:     ts("2026-07-04T20:00:00Z"),
 		Provenance:  &gridv1.Provenance{SourceId: "nws", SourceName: "NWS Sacramento CA"},
 		Detail: &gridv1.Event_WeatherAlert{WeatherAlert: &gridv1.WeatherAlertDetail{
-			Event: "Red Flag Warning", NwsSeverity: "Severe", Certainty: "Likely",
+			NwsSeverity: "Severe", Certainty: "Likely",
 			Urgency: "Expected", Instruction: "Avoid outdoor burning.",
-			SenderName: "NWS Sacramento CA", AreaDesc: "West Slope", Zones: []string{"CAZ064"},
+			AreaDesc: "West Slope", Zones: []string{"CAZ064"},
 		}},
 	}
 
@@ -251,7 +251,6 @@ func TestProjectEvents_Earthquake_UpdatedAtRule(t *testing.T) {
 		Provenance:   &gridv1.Provenance{SourceId: "usgs", SourceName: "USGS"},
 		Detail: &gridv1.Event_Earthquake{Earthquake: &gridv1.EarthquakeDetail{
 			Magnitude: 4.2, DepthKm: 7.6, Felt: 37,
-			Url: "https://earthquake.usgs.gov/earthquakes/eventpage/nc75095123",
 		}},
 	}
 	// Ingest falls observed_at back to the event time when USGS never revised
@@ -307,21 +306,20 @@ func TestProjectEvents_Earthquake_UpdatedAtRule(t *testing.T) {
 func TestProjectEvents_RoadIncident_ConstantSourceBlock(t *testing.T) {
 	const point = `{"type":"Point","coordinates":[-120.35,38.2]}`
 	chp := &gridv1.Event{
-		Id:         "chp:250916ST0066",
-		Layer:      gridv1.Layer_ROAD_INCIDENT,
-		Category:   "incident",
-		Severity:   gridv1.Severity_SEVERE,
-		Status:     gridv1.EventStatus_ACTIVE,
-		Headline:   "Vehicle fire blocking the right lane",
-		Summary:    "Vehicle fire on Hwy 4",
-		AreaLabel:  "Hwy 4 at Avery",
-		Geometry:   geom(point),
-		Effective:  ts("2026-07-04T06:24:00Z"),
-		ObservedAt: ts("2026-07-04T07:00:00Z"),
-		Provenance: &gridv1.Provenance{SourceId: "chp", SourceName: "CHP / Caltrans"},
+		Id:          "chp:250916ST0066",
+		Layer:       gridv1.Layer_ROAD_INCIDENT,
+		Category:    "incident",
+		Severity:    gridv1.Severity_SEVERE,
+		Status:      gridv1.EventStatus_ACTIVE,
+		Headline:    "Vehicle fire on Hwy 4",                // short condensed line
+		Description: "Vehicle fire blocking the right lane", // long detail text
+		AreaLabel:   "Hwy 4 at Avery",
+		Geometry:    geom(point),
+		Effective:   ts("2026-07-04T06:24:00Z"),
+		ObservedAt:  ts("2026-07-04T07:00:00Z"),
+		Provenance:  &gridv1.Provenance{SourceId: "chp", SourceName: "CHP / Caltrans"},
 		Detail: &gridv1.Event_RoadIncident{RoadIncident: &gridv1.RoadIncidentDetail{
-			LogNumber: "250916ST0066", IncidentType: "incident",
-			LocationDescription: "Hwy 4 at Avery", Impact: "severe",
+			LogNumber: "250916ST0066", Impact: "severe",
 		}},
 	}
 	// Lane closures carry caltrans provenance in the STORE (source health), but
@@ -337,7 +335,7 @@ func TestProjectEvents_RoadIncident_ConstantSourceBlock(t *testing.T) {
 		AreaLabel:  "Hwy 4 EB near Avery",
 		Geometry:   geom(point),
 		Provenance: &gridv1.Provenance{SourceId: "caltrans", SourceName: "Caltrans"},
-		Detail:     &gridv1.Event_RoadIncident{RoadIncident: &gridv1.RoadIncidentDetail{LocationDescription: "Hwy 4 EB near Avery"}},
+		Detail:     &gridv1.Event_RoadIncident{RoadIncident: &gridv1.RoadIncidentDetail{}},
 	}
 
 	feats := ProjectEvents(hazards.LayerRoadIncident, []*gridv1.Event{chp, closure})
@@ -353,7 +351,8 @@ func TestProjectEvents_RoadIncident_ConstantSourceBlock(t *testing.T) {
 	    "category": "incident",
 	    "severity": "SEVERE",
 	    "severity_rank": 3,
-	    "headline": "Vehicle fire blocking the right lane",
+	    "headline": "Vehicle fire on Hwy 4",
+	    "description": "Vehicle fire blocking the right lane",
 	    "status": "active",
 	    "effective": "2026-07-04T06:24:00Z",
 	    "updated_at": "2026-07-04T07:00:00Z",

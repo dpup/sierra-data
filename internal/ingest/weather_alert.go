@@ -91,13 +91,13 @@ func (n *WeatherAlertNormalizer) Poll(ctx context.Context, prior Prior) (*PollRe
 			}
 		}
 		ev.Provenance = NewProvenance("nws", a.SenderName, "", "")
+		// event name is the envelope category; sender is provenance.source_name —
+		// neither is repeated in the detail.
 		ev.Detail = &gridv1.Event_WeatherAlert{WeatherAlert: &gridv1.WeatherAlertDetail{
-			Event:       a.Event,
 			NwsSeverity: a.Severity, // raw NWS vocabulary: Extreme|Severe|Moderate|Minor|Unknown
 			Certainty:   a.Certainty,
 			Urgency:     a.Urgency,
 			Instruction: a.Instruction,
-			SenderName:  a.SenderName,
 			AreaDesc:    a.AreaDesc,
 			Zones:       a.Zones,
 		}}

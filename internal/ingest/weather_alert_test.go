@@ -84,15 +84,16 @@ func TestWeatherAlertPoll(t *testing.T) {
 	assert.Equal(t, "nws", active.Provenance.SourceId)
 	assert.Equal(t, "NWS Sacramento CA", active.Provenance.SourceName)
 
-	// Detail fidelity: the raw nws.Alert fields the api projection drops.
+	// Envelope carries the event name (category) and sender (provenance); the
+	// detail carries only the kind-specific NWS fields.
+	assert.Equal(t, "Red Flag Warning", active.Category)
+	assert.Equal(t, "NWS Sacramento CA", active.GetProvenance().GetSourceName())
 	d := active.GetWeatherAlert()
 	require.NotNil(t, d)
-	assert.Equal(t, "Red Flag Warning", d.Event)
 	assert.Equal(t, "Severe", d.NwsSeverity, "detail carries the RAW NWS vocabulary, not the api enum name")
 	assert.Equal(t, "Likely", d.Certainty)
 	assert.Equal(t, "Expected", d.Urgency)
 	assert.Equal(t, "Avoid outdoor burning.", d.Instruction)
-	assert.Equal(t, "NWS Sacramento CA", d.SenderName)
 	assert.Equal(t, "West Slope Northern Sierra Nevada", d.AreaDesc)
 	assert.Equal(t, []string{"CAZ064"}, d.Zones)
 

@@ -164,13 +164,10 @@ func (n *RoadIncidentNormalizer) buildEvent(in *api.Incident) *gridv1.Event {
 	ev.ObservedAt = in.GetLastUpdated()
 	ev.Provenance = incidentProvenance(in.GetType())
 	ev.Detail = &gridv1.Event_RoadIncident{RoadIncident: &gridv1.RoadIncidentDetail{
-		LogNumber:           in.GetLogNumber(),
-		IncidentType:        category,
-		LocationDescription: in.GetLocationDescription(),
-		Impact:              impactSlug(in.GetImpact()),
-		Duration:            in.GetMetadata()["duration"], // AI extra when the model provided one
-		CondensedSummary:    in.GetCondensedSummary(),
-		Metadata:            in.GetMetadata(),
+		LogNumber: in.GetLogNumber(),
+		Impact:    impactSlug(in.GetImpact()),
+		Duration:  in.GetMetadata()["duration"], // AI extra when the model provided one
+		Metadata:  publicMetadata(in.GetMetadata()),
 	}}
 	// Enhancement provenance only when the incident actually went through the
 	// AI pipeline — impact is set exclusively by the model's assessment
@@ -191,6 +188,33 @@ func incidentProvenance(t api.AlertType) *gridv1.Provenance {
 		return NewProvenance("caltrans", "Caltrans", "quickmap.dot.ca.gov", "")
 	}
 	return NewProvenance("chp", "CHP / Caltrans", "quickmap.dot.ca.gov", "")
+}
+
+// internalMetadataKeys are metadata entries that are upstream/parsing artifacts,
+// not public incident detail — stripped before the map reaches the /v1 API.
+//   - style_url: the Caltrans KML placemark style ref ("#chp"), a rendering
+//     artifact of the feed parser
+//   - source: duplicates provenance.source_name
+//   - duration: promoted to the typed RoadIncidentDetail.duration field
+var internalMetadataKeys = map[string]bool{"style_url": true, "source": true, "duration": true}
+
+// publicMetadata copies the AI metadata map, dropping internal/redundant keys.
+// Returns nil when nothing public remains (so protojson omits the field).
+func publicMetadata(m map[string]string) map[string]string {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		if internalMetadataKeys[k] || v == "" {
+			continue
+		}
+		out[k] = v
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // impactSlug renders the AI-assessed impact enum as its wire slug

@@ -103,7 +103,7 @@ func projectWeatherAlert(ev *gridv1.Event) hazards.Feature {
 	p.Expires = rfc3339(ev.GetExpires())
 	p.Source = hazards.Source{ID: "nws", Name: ev.GetProvenance().GetSourceName()}
 	p.Weather = &hazards.WeatherProps{
-		Event: d.GetEvent(),
+		Event: ev.GetCategory(), // NWS event name lives in the envelope category
 		// The shipped block carried the api.AlertSource enum name; every stored
 		// weather alert is NWS-sourced (OpenWeatherMap alerts were removed
 		// 2026-07-04), so this is a projection constant.

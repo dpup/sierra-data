@@ -50,7 +50,12 @@ func testIncidents() (*api.Incident, *api.Incident, *api.Incident) {
 		LastUpdated:         updated,
 		CondensedSummary:    "Vehicle fire on Hwy 4",
 		Impact:              api.AlertImpact_IMPACT_SEVERE,
-		Metadata:            map[string]string{"duration": "several hours", "emergency_services": "on scene"},
+		Metadata: map[string]string{
+			"duration":           "several hours",
+			"emergency_services": "on scene",
+			"style_url":          "#chp",       // internal KML artifact — must be stripped
+			"source":             "CHP report", // duplicates provenance — must be stripped
+		},
 	}
 	closure := &api.Incident{
 		Id:                  "closure-hwy-4-avery",
@@ -110,13 +115,18 @@ func TestRoadIncidentPoll(t *testing.T) {
 
 	d := ev.GetRoadIncident()
 	require.NotNil(t, d)
+	// Detail carries only kind-specific fields; incident type / location / short
+	// line live in the envelope (category / area_label / headline, asserted above).
 	assert.Equal(t, "250916ST0066", d.LogNumber)
-	assert.Equal(t, "incident", d.IncidentType)
-	assert.Equal(t, "Hwy 4 at Avery", d.LocationDescription)
 	assert.Equal(t, "severe", d.Impact)
 	assert.Equal(t, "several hours", d.Duration)
-	assert.Equal(t, "Vehicle fire on Hwy 4", d.CondensedSummary)
 	assert.Equal(t, "on scene", d.Metadata["emergency_services"])
+	// Internal/redundant metadata keys are stripped from the public map;
+	// duration is promoted to the typed field, source duplicates provenance.
+	for _, k := range []string{"style_url", "source", "duration"} {
+		_, present := d.Metadata[k]
+		assert.False(t, present, "internal metadata key %q must be stripped", k)
+	}
 
 	// AI-enhanced (impact set) => Enhancement provenance from config.
 	require.NotNil(t, ev.Enhancement)

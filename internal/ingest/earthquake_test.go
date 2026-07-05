@@ -78,7 +78,8 @@ func TestEarthquakePoll(t *testing.T) {
 	assert.Equal(t, 4.2, d.Magnitude)
 	assert.Equal(t, 7.6, d.DepthKm)
 	assert.Equal(t, int32(37), d.Felt)
-	assert.Equal(t, "https://earthquake.usgs.gov/earthquakes/eventpage/nc75095123", d.Url)
+	// The event page is the envelope canonical_url, not a detail field.
+	assert.Equal(t, "https://earthquake.usgs.gov/earthquakes/eventpage/nc75095123", ev.CanonicalUrl)
 
 	require.NotNil(t, ev.Provenance)
 	assert.Equal(t, "usgs", ev.Provenance.SourceId)
@@ -95,7 +96,6 @@ func TestEarthquakePoll(t *testing.T) {
 	assert.Equal(t, "usgs:nc75095124", ev2.Id)
 	assert.Equal(t, gridv1.Severity_MINOR, ev2.Severity)
 	assert.Empty(t, ev2.CanonicalUrl)
-	assert.Empty(t, ev2.GetEarthquake().Url)
 	require.NotNil(t, ev2.ObservedAt)
 	assert.Equal(t, ev2.Effective.AsTime(), ev2.ObservedAt.AsTime())
 }

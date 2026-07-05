@@ -71,11 +71,11 @@ func (n *EarthquakeNormalizer) Poll(ctx context.Context, prior Prior) (*PollResu
 			ev.ObservedAt = tsProto(q.Updated)
 		}
 		ev.Provenance = NewProvenance("usgs", "USGS", "U.S. Geological Survey", safeURL(q.URL))
+		// the event page is the envelope canonical_url — not repeated here.
 		ev.Detail = &gridv1.Event_Earthquake{Earthquake: &gridv1.EarthquakeDetail{
 			Magnitude: q.Magnitude,
 			DepthKm:   q.DepthKm,
 			Felt:      q.Felt,
-			Url:       safeURL(q.URL),
 		}}
 		events = append(events, ev)
 	}

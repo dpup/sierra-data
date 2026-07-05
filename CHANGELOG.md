@@ -54,6 +54,14 @@ everywhere. Full reference: the site's `/docs.html` (when deployed) and
 - `GET /v1/scanners?place=` — Broadcastify feed config (link-out only).
 - `GET /v1/sources` — the source registry with per-source health.
 
+**Event detail blocks are kind-specific only.** Each `detail` oneof block carries
+only fields not already in the envelope — the incident/alert type is `category`,
+the human location is `area_label`, the short line is `headline`, the sending
+office is `provenance.source_name`, and the source page is `canonical_url`. The
+`road_incident` `metadata` map additionally strips internal keys (`style_url`, a
+KML rendering artifact; `source`; and `duration`, which is promoted to the typed
+field). The `.geojson` envelope is unchanged (byte-compatible).
+
 **Persistence (SQLite + revision history).** Events, their full revision
 snapshots, the place directory, and source health live in a SQLite database
 (`grid.dbPath`, default `./data/grid.db`; production points at an EBS volume via

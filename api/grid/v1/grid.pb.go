@@ -1292,16 +1292,18 @@ func (x *EvacuationDetail) GetCounty() string {
 	return ""
 }
 
+// Detail messages carry only KIND-SPECIFIC fields not already in the Event
+// envelope. Fields that duplicate an envelope field are NOT repeated here:
+//   - the NWS event name is the envelope `category`
+//   - the sending office is `provenance.source_name`
 type WeatherAlertDetail struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Event         string                 `protobuf:"bytes,1,opt,name=event,proto3" json:"event,omitempty"` // NWS event name, e.g. "Red Flag Warning"
-	NwsSeverity   string                 `protobuf:"bytes,2,opt,name=nws_severity,json=nwsSeverity,proto3" json:"nws_severity,omitempty"`
-	Certainty     string                 `protobuf:"bytes,3,opt,name=certainty,proto3" json:"certainty,omitempty"`
-	Urgency       string                 `protobuf:"bytes,4,opt,name=urgency,proto3" json:"urgency,omitempty"`
-	Instruction   string                 `protobuf:"bytes,5,opt,name=instruction,proto3" json:"instruction,omitempty"`
-	SenderName    string                 `protobuf:"bytes,6,opt,name=sender_name,json=senderName,proto3" json:"sender_name,omitempty"`
-	AreaDesc      string                 `protobuf:"bytes,7,opt,name=area_desc,json=areaDesc,proto3" json:"area_desc,omitempty"`
-	Zones         []string               `protobuf:"bytes,8,rep,name=zones,proto3" json:"zones,omitempty"` // NWS forecast zones, e.g. "CAZ064"
+	NwsSeverity   string                 `protobuf:"bytes,1,opt,name=nws_severity,json=nwsSeverity,proto3" json:"nws_severity,omitempty"` // raw NWS vocabulary (Extreme..Minor), distinct from unified severity
+	Certainty     string                 `protobuf:"bytes,2,opt,name=certainty,proto3" json:"certainty,omitempty"`
+	Urgency       string                 `protobuf:"bytes,3,opt,name=urgency,proto3" json:"urgency,omitempty"`
+	Instruction   string                 `protobuf:"bytes,4,opt,name=instruction,proto3" json:"instruction,omitempty"`
+	AreaDesc      string                 `protobuf:"bytes,5,opt,name=area_desc,json=areaDesc,proto3" json:"area_desc,omitempty"` // NWS free-text area (no envelope equivalent for zone alerts)
+	Zones         []string               `protobuf:"bytes,6,rep,name=zones,proto3" json:"zones,omitempty"`                       // NWS forecast zones, e.g. "CAZ064"
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1336,13 +1338,6 @@ func (*WeatherAlertDetail) Descriptor() ([]byte, []int) {
 	return file_grid_proto_rawDescGZIP(), []int{10}
 }
 
-func (x *WeatherAlertDetail) GetEvent() string {
-	if x != nil {
-		return x.Event
-	}
-	return ""
-}
-
 func (x *WeatherAlertDetail) GetNwsSeverity() string {
 	if x != nil {
 		return x.NwsSeverity
@@ -1367,13 +1362,6 @@ func (x *WeatherAlertDetail) GetUrgency() string {
 func (x *WeatherAlertDetail) GetInstruction() string {
 	if x != nil {
 		return x.Instruction
-	}
-	return ""
-}
-
-func (x *WeatherAlertDetail) GetSenderName() string {
-	if x != nil {
-		return x.SenderName
 	}
 	return ""
 }
@@ -1459,7 +1447,6 @@ type EarthquakeDetail struct {
 	Magnitude     float64                `protobuf:"fixed64,1,opt,name=magnitude,proto3" json:"magnitude,omitempty"`
 	DepthKm       float64                `protobuf:"fixed64,2,opt,name=depth_km,json=depthKm,proto3" json:"depth_km,omitempty"`
 	Felt          int32                  `protobuf:"varint,3,opt,name=felt,proto3" json:"felt,omitempty"` // USGS DYFI felt-report count
-	Url           string                 `protobuf:"bytes,4,opt,name=url,proto3" json:"url,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1515,24 +1502,17 @@ func (x *EarthquakeDetail) GetFelt() int32 {
 	return 0
 }
 
-func (x *EarthquakeDetail) GetUrl() string {
-	if x != nil {
-		return x.Url
-	}
-	return ""
-}
-
+// Kind-specific only. The incident type is the envelope `category`, the human
+// location is `area_label`, and the short line is the `headline` — none are
+// repeated here.
 type RoadIncidentDetail struct {
-	state               protoimpl.MessageState `protogen:"open.v1"`
-	LogNumber           string                 `protobuf:"bytes,1,opt,name=log_number,json=logNumber,proto3" json:"log_number,omitempty"`
-	IncidentType        string                 `protobuf:"bytes,2,opt,name=incident_type,json=incidentType,proto3" json:"incident_type,omitempty"`
-	LocationDescription string                 `protobuf:"bytes,3,opt,name=location_description,json=locationDescription,proto3" json:"location_description,omitempty"`
-	Impact              string                 `protobuf:"bytes,4,opt,name=impact,proto3" json:"impact,omitempty"`     // AI-assessed: none | light | moderate | severe
-	Duration            string                 `protobuf:"bytes,5,opt,name=duration,proto3" json:"duration,omitempty"` // AI-assessed: unknown | < 1 hour | several hours | ongoing
-	CondensedSummary    string                 `protobuf:"bytes,6,opt,name=condensed_summary,json=condensedSummary,proto3" json:"condensed_summary,omitempty"`
-	Metadata            map[string]string      `protobuf:"bytes,7,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // structured extras from AI analysis
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	LogNumber     string                 `protobuf:"bytes,1,opt,name=log_number,json=logNumber,proto3" json:"log_number,omitempty"`
+	Impact        string                 `protobuf:"bytes,2,opt,name=impact,proto3" json:"impact,omitempty"`                                                                               // AI-assessed: none | light | moderate | severe
+	Duration      string                 `protobuf:"bytes,3,opt,name=duration,proto3" json:"duration,omitempty"`                                                                           // AI-assessed: unknown | < 1 hour | several hours | ongoing
+	Metadata      map[string]string      `protobuf:"bytes,4,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // structured extras from AI analysis (internal keys stripped)
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *RoadIncidentDetail) Reset() {
@@ -1572,20 +1552,6 @@ func (x *RoadIncidentDetail) GetLogNumber() string {
 	return ""
 }
 
-func (x *RoadIncidentDetail) GetIncidentType() string {
-	if x != nil {
-		return x.IncidentType
-	}
-	return ""
-}
-
-func (x *RoadIncidentDetail) GetLocationDescription() string {
-	if x != nil {
-		return x.LocationDescription
-	}
-	return ""
-}
-
 func (x *RoadIncidentDetail) GetImpact() string {
 	if x != nil {
 		return x.Impact
@@ -1596,13 +1562,6 @@ func (x *RoadIncidentDetail) GetImpact() string {
 func (x *RoadIncidentDetail) GetDuration() string {
 	if x != nil {
 		return x.Duration
-	}
-	return ""
-}
-
-func (x *RoadIncidentDetail) GetCondensedSummary() string {
-	if x != nil {
-		return x.CondensedSummary
 	}
 	return ""
 }
@@ -1976,35 +1935,28 @@ const file_grid_proto_rawDesc = "" +
 	"\x05level\x18\x02 \x01(\tR\x05level\x12\x1d\n" +
 	"\n" +
 	"event_type\x18\x03 \x01(\tR\teventType\x12\x16\n" +
-	"\x06county\x18\x04 \x01(\tR\x06county\"\xfb\x01\n" +
-	"\x12WeatherAlertDetail\x12\x14\n" +
-	"\x05event\x18\x01 \x01(\tR\x05event\x12!\n" +
-	"\fnws_severity\x18\x02 \x01(\tR\vnwsSeverity\x12\x1c\n" +
-	"\tcertainty\x18\x03 \x01(\tR\tcertainty\x12\x18\n" +
-	"\aurgency\x18\x04 \x01(\tR\aurgency\x12 \n" +
-	"\vinstruction\x18\x05 \x01(\tR\vinstruction\x12\x1f\n" +
-	"\vsender_name\x18\x06 \x01(\tR\n" +
-	"senderName\x12\x1b\n" +
-	"\tarea_desc\x18\a \x01(\tR\bareaDesc\x12\x14\n" +
-	"\x05zones\x18\b \x03(\tR\x05zones\"b\n" +
+	"\x06county\x18\x04 \x01(\tR\x06county\"\xc4\x01\n" +
+	"\x12WeatherAlertDetail\x12!\n" +
+	"\fnws_severity\x18\x01 \x01(\tR\vnwsSeverity\x12\x1c\n" +
+	"\tcertainty\x18\x02 \x01(\tR\tcertainty\x12\x18\n" +
+	"\aurgency\x18\x03 \x01(\tR\aurgency\x12 \n" +
+	"\vinstruction\x18\x04 \x01(\tR\vinstruction\x12\x1b\n" +
+	"\tarea_desc\x18\x05 \x01(\tR\bareaDesc\x12\x14\n" +
+	"\x05zones\x18\x06 \x03(\tR\x05zones\"b\n" +
 	"\x11FireWeatherDetail\x12\x14\n" +
 	"\x05state\x18\x01 \x01(\tR\x05state\x12!\n" +
 	"\fsource_event\x18\x02 \x01(\tR\vsourceEvent\x12\x14\n" +
-	"\x05zones\x18\x03 \x03(\tR\x05zones\"q\n" +
+	"\x05zones\x18\x03 \x03(\tR\x05zones\"_\n" +
 	"\x10EarthquakeDetail\x12\x1c\n" +
 	"\tmagnitude\x18\x01 \x01(\x01R\tmagnitude\x12\x19\n" +
 	"\bdepth_km\x18\x02 \x01(\x01R\adepthKm\x12\x12\n" +
-	"\x04felt\x18\x03 \x01(\x05R\x04felt\x12\x10\n" +
-	"\x03url\x18\x04 \x01(\tR\x03url\"\xf0\x02\n" +
+	"\x04felt\x18\x03 \x01(\x05R\x04felt\"\xeb\x01\n" +
 	"\x12RoadIncidentDetail\x12\x1d\n" +
 	"\n" +
-	"log_number\x18\x01 \x01(\tR\tlogNumber\x12#\n" +
-	"\rincident_type\x18\x02 \x01(\tR\fincidentType\x121\n" +
-	"\x14location_description\x18\x03 \x01(\tR\x13locationDescription\x12\x16\n" +
-	"\x06impact\x18\x04 \x01(\tR\x06impact\x12\x1a\n" +
-	"\bduration\x18\x05 \x01(\tR\bduration\x12+\n" +
-	"\x11condensed_summary\x18\x06 \x01(\tR\x10condensedSummary\x12E\n" +
-	"\bmetadata\x18\a \x03(\v2).grid.v1.RoadIncidentDetail.MetadataEntryR\bmetadata\x1a;\n" +
+	"log_number\x18\x01 \x01(\tR\tlogNumber\x12\x16\n" +
+	"\x06impact\x18\x02 \x01(\tR\x06impact\x12\x1a\n" +
+	"\bduration\x18\x03 \x01(\tR\bduration\x12E\n" +
+	"\bmetadata\x18\x04 \x03(\v2).grid.v1.RoadIncidentDetail.MetadataEntryR\bmetadata\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"[\n" +
