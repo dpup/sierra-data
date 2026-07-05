@@ -26,7 +26,7 @@ func TestZonesMatch(t *testing.T) {
 	}
 }
 
-// fakeWeather implements weatherAPI for builder tests.
+// fakeWeather implements WeatherAPI for builder tests.
 type fakeWeather struct {
 	alerts []*api.WeatherAlert
 	fw     *api.FireWeather

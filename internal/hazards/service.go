@@ -23,13 +23,15 @@ import (
 	"github.com/dpup/info.ersn.net/server/internal/services"
 )
 
-// roadsAPI / weatherAPI are the slices of the existing services the hazard layer
-// re-projects. Interfaces keep the package testable.
-type roadsAPI interface {
+// RoadsAPI / WeatherAPI are the slices of the existing services the hazard layer
+// re-projects. Interfaces keep the package testable; exported so external
+// consumers (the /v1 grid API, the store→GeoJSON byte-compat harness) can
+// construct the service with fakes via NewServiceWithAPIs.
+type RoadsAPI interface {
 	ListRoads(context.Context, *api.ListRoadsRequest) (*api.ListRoadsResponse, error)
 	ListIncidents(context.Context, *api.ListIncidentsRequest) (*api.ListIncidentsResponse, error)
 }
-type weatherAPI interface {
+type WeatherAPI interface {
 	ListWeather(context.Context, *api.ListWeatherRequest) (*api.ListWeatherResponse, error)
 	ListWeatherAlerts(context.Context, *api.ListWeatherAlertsRequest) (*api.ListWeatherAlertsResponse, error)
 }
@@ -38,8 +40,8 @@ type weatherAPI interface {
 // hazard model and serves them at /api/v1/hazards/{area}/{layer}.geojson.
 type Service struct {
 	cfg      *config.Config
-	roads    roadsAPI
-	weather  weatherAPI
+	roads    RoadsAPI
+	weather  WeatherAPI
 	caltrans *caltrans.FeedParser
 	usgs     *usgs.Client
 	calfire  *calfire.Client
@@ -58,6 +60,13 @@ type Service struct {
 // here. The shared cache is reused for stale-on-error resilience on the new
 // upstreams (see buildLayer); pass nil to disable hazard-layer caching.
 func NewService(cfg *config.Config, roads *services.RoadsService, weather *services.WeatherService, ct *caltrans.FeedParser, c *cache.Cache) *Service {
+	return NewServiceWithAPIs(cfg, roads, weather, ct, c)
+}
+
+// NewServiceWithAPIs is NewService with the roads/weather dependencies as
+// their narrow interfaces, so consumers outside this package (the /v1 grid
+// API, the byte-compat harness) can construct the service with fakes.
+func NewServiceWithAPIs(cfg *config.Config, roads RoadsAPI, weather WeatherAPI, ct *caltrans.FeedParser, c *cache.Cache) *Service {
 	s := &Service{
 		cfg:      cfg,
 		roads:    roads,
@@ -75,6 +84,27 @@ func NewService(cfg *config.Config, roads *services.RoadsService, weather *servi
 	for _, e := range reg {
 		s.layerBuilders[e.name] = e.build
 		s.layerOrder = append(s.layerOrder, e.name)
+	}
+	return s
+}
+
+// WithClients overrides the keyless upstream clients (nil keeps the default)
+// and returns s for chaining. The client fields are unexported, so this is
+// the injection seam external tests use — the store→GeoJSON byte-compat
+// harness feeds the real builders fixture HTTPDoer-backed clients through it.
+// Not for production wiring: NewService's defaults are the real upstreams.
+func (s *Service) WithClients(u *usgs.Client, cf *calfire.Client, wf *wfigs.Client, co *caloes.Client) *Service {
+	if u != nil {
+		s.usgs = u
+	}
+	if cf != nil {
+		s.calfire = cf
+	}
+	if wf != nil {
+		s.wfigs = wf
+	}
+	if co != nil {
+		s.caloes = co
 	}
 	return s
 }
