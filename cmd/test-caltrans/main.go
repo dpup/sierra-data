@@ -71,7 +71,7 @@ func main() {
 		testChainControls(parser, ctx)
 		testLaneClosures(parser, ctx)
 		testCHPIncidents(parser, ctx)
-		
+
 	default:
 		log.Fatalf("Unknown feed type: %s", *feedType)
 	}
@@ -122,10 +122,10 @@ func createOfflineParser() *caltrans.FeedParser {
 		log.Printf("Warning: Could not determine executable path: %v", err)
 		execDir = "."
 	}
-	
+
 	// Look for test data relative to project root
 	testDataDir := filepath.Join(filepath.Dir(execDir), "..", "tests", "testdata", "caltrans")
-	
+
 	// Also try relative to current working directory
 	if _, err := os.Stat(testDataDir); err != nil {
 		testDataDir = filepath.Join("tests", "testdata", "caltrans")
@@ -141,7 +141,7 @@ func createOfflineParser() *caltrans.FeedParser {
 
 func testChainControls(parser *caltrans.FeedParser, ctx context.Context) {
 	fmt.Printf("Testing Chain Controls feed...\n")
-	
+
 	incidents, err := parser.ParseChainControls(ctx)
 	if err != nil {
 		log.Fatalf("ParseChainControls failed: %v", err)
@@ -149,7 +149,7 @@ func testChainControls(parser *caltrans.FeedParser, ctx context.Context) {
 
 	fmt.Printf("✅ Chain Controls successful!\n")
 	fmt.Printf("Incidents found: %d\n", len(incidents))
-	
+
 	if len(incidents) > 0 {
 		printSampleIncident("Chain Control", incidents[0])
 	}
@@ -158,7 +158,7 @@ func testChainControls(parser *caltrans.FeedParser, ctx context.Context) {
 
 func testLaneClosures(parser *caltrans.FeedParser, ctx context.Context) {
 	fmt.Printf("Testing Lane Closures feed...\n")
-	
+
 	incidents, err := parser.ParseLaneClosures(ctx)
 	if err != nil {
 		log.Fatalf("ParseLaneClosures failed: %v", err)
@@ -166,7 +166,7 @@ func testLaneClosures(parser *caltrans.FeedParser, ctx context.Context) {
 
 	fmt.Printf("✅ Lane Closures successful!\n")
 	fmt.Printf("Incidents found: %d\n", len(incidents))
-	
+
 	if len(incidents) > 0 {
 		printSampleIncident("Lane Closure", incidents[0])
 	}
@@ -175,7 +175,7 @@ func testLaneClosures(parser *caltrans.FeedParser, ctx context.Context) {
 
 func testCHPIncidents(parser *caltrans.FeedParser, ctx context.Context) {
 	fmt.Printf("Testing CHP Incidents feed...\n")
-	
+
 	incidents, err := parser.ParseCHPIncidents(ctx)
 	if err != nil {
 		log.Fatalf("ParseCHPIncidents failed: %v", err)
@@ -183,18 +183,17 @@ func testCHPIncidents(parser *caltrans.FeedParser, ctx context.Context) {
 
 	fmt.Printf("✅ CHP Incidents successful!\n")
 	fmt.Printf("Incidents found: %d\n", len(incidents))
-	
+
 	if len(incidents) > 0 {
 		printSampleIncident("CHP Incident", incidents[0])
 	}
 	fmt.Printf("\n")
 }
 
-
 func printSampleIncident(label string, incident caltrans.CaltransIncident) {
 	fmt.Printf("Sample %s:\n", label)
 	fmt.Printf("  Name: %s\n", incident.Name)
-	fmt.Printf("  Coordinates: %.6f, %.6f\n", 
+	fmt.Printf("  Coordinates: %.6f, %.6f\n",
 		incident.Coordinates.Latitude, incident.Coordinates.Longitude)
 	fmt.Printf("  Status: %s\n", incident.ParsedStatus)
 	fmt.Printf("  Description: %s\n", truncateString(incident.DescriptionText, 100))

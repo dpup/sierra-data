@@ -8,7 +8,7 @@ import (
 // RawAlert represents unprocessed alert data from Caltrans
 type RawAlert struct {
 	ID          string    `json:"id"`
-	Title       string    `json:"title"`               // Incident title (e.g., "Northbound 101 Lane Closure")
+	Title       string    `json:"title"` // Incident title (e.g., "Northbound 101 Lane Closure")
 	Description string    `json:"description"`
 	Location    string    `json:"location"`
 	StyleUrl    string    `json:"style_url,omitempty"` // KML style indicating closure type
@@ -28,7 +28,7 @@ type StructuredDescription struct {
 	Details            string             `json:"details"`
 	Location           StructuredLocation `json:"location"`
 	LastUpdate         string             `json:"last_update,omitempty"`
-	Impact             string             `json:"impact"` // enum: none, light, moderate, severe
+	Impact             string             `json:"impact"`              // enum: none, light, moderate, severe
 	RoadStatus         string             `json:"road_status"`         // enum: open, restricted, closed
 	RestrictionDetails string             `json:"restriction_details"` // Details when restricted/closed
 	ChainStatus        string             `json:"chain_status"`        // enum: none, r1, r2, active_unspecified

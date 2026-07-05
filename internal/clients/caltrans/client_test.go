@@ -9,11 +9,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dpup/info.ersn.net/server/internal/lib/geo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/dpup/info.ersn.net/server/internal/lib/geo"
 )
-
 
 // mockHTTPClient provides local KML file responses for testing
 type mockHTTPClient struct {
@@ -53,7 +52,7 @@ func (m *mockHTTPClient) Do(req *http.Request) (*http.Response, error) {
 
 func setupTestParser(t *testing.T) *FeedParser {
 	testDataDir := filepath.Join("..", "..", "..", "tests", "testdata", "caltrans")
-	
+
 	// Verify test data exists
 	_, err := os.Stat(testDataDir)
 	require.NoError(t, err, "Test data directory not found. Run 'make test-setup' to download test data.")
@@ -62,18 +61,18 @@ func setupTestParser(t *testing.T) *FeedParser {
 		HTTPClient: &mockHTTPClient{testDataDir: testDataDir},
 		geoUtils:   geo.NewGeoUtils(),
 	}
-	
+
 	return parser
 }
 
 func TestParseLaneClosures(t *testing.T) {
 	parser := setupTestParser(t)
-	
+
 	incidents, err := parser.ParseLaneClosures(context.Background())
-	
+
 	require.NoError(t, err)
 	assert.Greater(t, len(incidents), 0, "Should parse some lane closure incidents")
-	
+
 	// Verify structure of first incident
 	if len(incidents) > 0 {
 		incident := incidents[0]
@@ -86,12 +85,12 @@ func TestParseLaneClosures(t *testing.T) {
 
 func TestParseCHPIncidents(t *testing.T) {
 	parser := setupTestParser(t)
-	
+
 	incidents, err := parser.ParseCHPIncidents(context.Background())
-	
+
 	require.NoError(t, err)
 	assert.Greater(t, len(incidents), 0, "Should parse some CHP incidents")
-	
+
 	// Verify structure of first incident
 	if len(incidents) > 0 {
 		incident := incidents[0]
@@ -104,12 +103,12 @@ func TestParseCHPIncidents(t *testing.T) {
 
 func TestParseChainControls(t *testing.T) {
 	parser := setupTestParser(t)
-	
+
 	incidents, err := parser.ParseChainControls(context.Background())
-	
+
 	require.NoError(t, err)
 	// Chain controls may be empty in summer, so just verify it doesn't error
-	
+
 	// If we have incidents, verify structure
 	if len(incidents) > 0 {
 		incident := incidents[0]
@@ -119,7 +118,6 @@ func TestParseChainControls(t *testing.T) {
 		assert.NotZero(t, incident.LastFetched)
 	}
 }
-
 
 func TestHaversineDistance(t *testing.T) {
 	tests := []struct {
@@ -151,21 +149,21 @@ func TestHaversineDistance(t *testing.T) {
 		},
 		{
 			name:     "Short distance in SF",
-			lat1:     37.7749,  // Downtown SF
+			lat1:     37.7749, // Downtown SF
 			lon1:     -122.4194,
-			lat2:     37.8044,  // North Beach
+			lat2:     37.8044, // North Beach
 			lon2:     -122.4078,
-			expected: 3435,     // approximately 3.4km (corrected)
-			delta:    200,      // 200m tolerance
+			expected: 3435, // approximately 3.4km (corrected)
+			delta:    200,  // 200m tolerance
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			geoUtils := geo.NewGeoUtils()
 			result, err := geoUtils.DistanceFromCoords(tt.lat1, tt.lon1, tt.lat2, tt.lon2)
 			require.NoError(t, err)
-			assert.InDelta(t, tt.expected, result, tt.delta, 
+			assert.InDelta(t, tt.expected, result, tt.delta,
 				"Distance should be approximately %v meters", tt.expected)
 		})
 	}
@@ -198,7 +196,7 @@ func TestExtractTextFromHTML(t *testing.T) {
 			expected: "",
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := extractTextFromHTML(tt.input)
@@ -234,7 +232,7 @@ func TestExtractStatus(t *testing.T) {
 			expected: "",
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := extractStatus(tt.input)
@@ -270,7 +268,7 @@ func TestExtractDates(t *testing.T) {
 			expected: []string{},
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := extractDates(tt.input)
@@ -290,7 +288,7 @@ func TestExtractGeometry(t *testing.T) {
 		}
 
 		coord, polyline := parser.extractGeometry(placemark)
-		
+
 		require.NotNil(t, coord)
 		assert.Equal(t, 38.1000, coord.Latitude)
 		assert.Equal(t, -120.5000, coord.Longitude)
@@ -305,7 +303,7 @@ func TestExtractGeometry(t *testing.T) {
 		}
 
 		coord, polyline := parser.extractGeometry(placemark)
-		
+
 		require.NotNil(t, coord)
 		require.NotNil(t, polyline)
 		assert.Equal(t, 38.1000, coord.Latitude) // First point
@@ -325,7 +323,7 @@ func TestExtractGeometry(t *testing.T) {
 		}
 
 		coord, polyline := parser.extractGeometry(placemark)
-		
+
 		require.NotNil(t, coord)
 		require.NotNil(t, polyline)
 		assert.Equal(t, 4, len(polyline.Points)) // Polygon with closing point
@@ -344,7 +342,7 @@ func TestExtractGeometry(t *testing.T) {
 		}
 
 		coord, polyline := parser.extractGeometry(placemark)
-		
+
 		require.NotNil(t, coord)
 		require.NotNil(t, polyline)
 		assert.Equal(t, 3, len(polyline.Points)) // 1 point + 2 linestring points
@@ -356,7 +354,7 @@ func TestExtractGeometry(t *testing.T) {
 		}
 
 		coord, polyline := parser.extractGeometry(placemark)
-		
+
 		assert.Nil(t, coord)
 		assert.Nil(t, polyline)
 	})
@@ -368,7 +366,7 @@ func TestParseCoordinateList(t *testing.T) {
 	t.Run("Multiple coordinates", func(t *testing.T) {
 		coordString := "-120.5000,38.1000,0 -120.4500,38.1200,0 -120.4000,38.1400,0"
 		coords := parser.parseCoordinateList(coordString)
-		
+
 		require.Equal(t, 3, len(coords))
 		assert.Equal(t, 38.1000, coords[0].Latitude)
 		assert.Equal(t, -120.5000, coords[0].Longitude)
@@ -379,7 +377,7 @@ func TestParseCoordinateList(t *testing.T) {
 	t.Run("Single coordinate", func(t *testing.T) {
 		coordString := "-120.5000,38.1000,0"
 		coords := parser.parseCoordinateList(coordString)
-		
+
 		require.Equal(t, 1, len(coords))
 		assert.Equal(t, 38.1000, coords[0].Latitude)
 		assert.Equal(t, -120.5000, coords[0].Longitude)
@@ -487,18 +485,18 @@ func TestParseChainControlName(t *testing.T) {
 
 func TestParseChainControlDescription(t *testing.T) {
 	tests := []struct {
-		name                 string
-		input                string
-		expectedLocation     string
-		expectedTime         string
-		expectedDescription  string
-		expectedLastUpdated  string
-		expectedDistrict     string
-		expectedMessageID    string
+		name                string
+		input               string
+		expectedLocation    string
+		expectedTime        string
+		expectedDescription string
+		expectedLastUpdated string
+		expectedDistrict    string
+		expectedMessageID   string
 	}{
 		{
-			name: "Standard chain control description",
-			input: `<img src="https://quickmap.dot.ca.gov/img/cc32x32.png" style="float:left"><div style=\"font-size:1.15em;\"><p align="left">Twin Bridges</p><p align="left">Chains or traction devices are required on all vehicles except four wheel/ all wheel drive vehicles with snow-tread tires on all four wheels. (Four wheel/all wheel drive vehicles must carry traction devices in chain control areas).</p><p>Chain control effective from: 12/24/2025 08:19</p><p>Information courtesy of <img src="https://quickmap.dot.ca.gov/QM/imagesquickmap/caltranslogo.png" height=20></p><p class="update-stamp">Last updated: 12/24/2025 9:54am</p></div><p style="font-size:xx-small;">District:3 Message ID:8780</p>`,
+			name:                "Standard chain control description",
+			input:               `<img src="https://quickmap.dot.ca.gov/img/cc32x32.png" style="float:left"><div style=\"font-size:1.15em;\"><p align="left">Twin Bridges</p><p align="left">Chains or traction devices are required on all vehicles except four wheel/ all wheel drive vehicles with snow-tread tires on all four wheels. (Four wheel/all wheel drive vehicles must carry traction devices in chain control areas).</p><p>Chain control effective from: 12/24/2025 08:19</p><p>Information courtesy of <img src="https://quickmap.dot.ca.gov/QM/imagesquickmap/caltranslogo.png" height=20></p><p class="update-stamp">Last updated: 12/24/2025 9:54am</p></div><p style="font-size:xx-small;">District:3 Message ID:8780</p>`,
 			expectedLocation:    "Twin Bridges",
 			expectedTime:        "2025-12-24T08:19:00Z",
 			expectedDescription: "Chains or traction devices are required on all vehicles except four wheel/ all wheel drive vehicles with snow-tread tires on all four wheels. (Four wheel/all wheel drive vehicles must carry traction devices in chain control areas).",
@@ -507,8 +505,8 @@ func TestParseChainControlDescription(t *testing.T) {
 			expectedMessageID:   "8780",
 		},
 		{
-			name: "R1 chain control description",
-			input: `<img src="https://quickmap.dot.ca.gov/img/cc32x32.png" style="float:left"><div style=\"font-size:1.15em;\"><p align="left">Sattley</p><p align="left">Chains are required on all vehicles except passenger vehicles and light-duty trucks under 6,000 pounds gross weight and equipped with snow tires on at least two drive wheels. Chains must be carried by vehicles using snow tires. All vehicles towing trailers must have chains on one drive axle. Trailers with brakes must have chains on at least one axle.</p><p>Chain control effective from: 12/24/2025 09:46</p><p>Information courtesy of <img src="https://quickmap.dot.ca.gov/QM/imagesquickmap/caltranslogo.png" height=20></p><p class="update-stamp">Last updated: 12/24/2025 9:54am</p></div><p style="font-size:xx-small;">District:3 Message ID:8759</p>`,
+			name:                "R1 chain control description",
+			input:               `<img src="https://quickmap.dot.ca.gov/img/cc32x32.png" style="float:left"><div style=\"font-size:1.15em;\"><p align="left">Sattley</p><p align="left">Chains are required on all vehicles except passenger vehicles and light-duty trucks under 6,000 pounds gross weight and equipped with snow tires on at least two drive wheels. Chains must be carried by vehicles using snow tires. All vehicles towing trailers must have chains on one drive axle. Trailers with brakes must have chains on at least one axle.</p><p>Chain control effective from: 12/24/2025 09:46</p><p>Information courtesy of <img src="https://quickmap.dot.ca.gov/QM/imagesquickmap/caltranslogo.png" height=20></p><p class="update-stamp">Last updated: 12/24/2025 9:54am</p></div><p style="font-size:xx-small;">District:3 Message ID:8759</p>`,
 			expectedLocation:    "Sattley",
 			expectedTime:        "2025-12-24T09:46:00Z",
 			expectedDescription: "Chains are required on all vehicles except passenger vehicles and light-duty trucks under 6,000 pounds gross weight and equipped with snow tires on at least two drive wheels. Chains must be carried by vehicles using snow tires. All vehicles towing trailers must have chains on one drive axle. Trailers with brakes must have chains on at least one axle.",
@@ -530,4 +528,3 @@ func TestParseChainControlDescription(t *testing.T) {
 		})
 	}
 }
-

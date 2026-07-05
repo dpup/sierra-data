@@ -45,8 +45,8 @@ type CaltransIncident struct {
 	DescriptionHtml string
 	DescriptionText string
 	StyleUrl        string
-	Coordinates     *api.Coordinates  // Point location (for incidents)
-	AffectedArea    *api.Polyline     // Polyline/polygon for closures
+	Coordinates     *api.Coordinates // Point location (for incidents)
+	AffectedArea    *api.Polyline    // Polyline/polygon for closures
 	ParsedStatus    string
 	ParsedDates     []string
 	LastFetched     time.Time
@@ -86,13 +86,13 @@ type Folder struct {
 }
 
 type Placemark struct {
-	XMLName      xml.Name      `xml:"Placemark"`
-	Name         string        `xml:"name"`
-	Description  string        `xml:"description"`
-	StyleURL     string        `xml:"styleUrl"`
-	Point        Point         `xml:"Point"`
-	LineString   LineString    `xml:"LineString"`
-	Polygon      Polygon       `xml:"Polygon"`
+	XMLName       xml.Name      `xml:"Placemark"`
+	Name          string        `xml:"name"`
+	Description   string        `xml:"description"`
+	StyleURL      string        `xml:"styleUrl"`
+	Point         Point         `xml:"Point"`
+	LineString    LineString    `xml:"LineString"`
+	Polygon       Polygon       `xml:"Polygon"`
 	MultiGeometry MultiGeometry `xml:"MultiGeometry"`
 }
 
@@ -107,9 +107,9 @@ type LineString struct {
 }
 
 type Polygon struct {
-	XMLName        xml.Name `xml:"Polygon"`
-	OuterBoundary  OuterBoundary `xml:"outerBoundaryIs"`
-	InnerBoundary  []InnerBoundary `xml:"innerBoundaryIs"`
+	XMLName       xml.Name        `xml:"Polygon"`
+	OuterBoundary OuterBoundary   `xml:"outerBoundaryIs"`
+	InnerBoundary []InnerBoundary `xml:"innerBoundaryIs"`
 }
 
 type OuterBoundary struct {
@@ -268,7 +268,7 @@ func parseChainControlTime(timeStr string) string {
 	return timeStr
 }
 
-// ParseLaneClosures processes lane closures KML feed  
+// ParseLaneClosures processes lane closures KML feed
 // URL from research.md line 72
 func (p *FeedParser) ParseLaneClosures(ctx context.Context) ([]CaltransIncident, error) {
 	return p.parseKMLFeed(ctx, "https://quickmap.dot.ca.gov/data/lcs2way.kml", LANE_CLOSURE)
@@ -279,7 +279,6 @@ func (p *FeedParser) ParseLaneClosures(ctx context.Context) ([]CaltransIncident,
 func (p *FeedParser) ParseCHPIncidents(ctx context.Context) ([]CaltransIncident, error) {
 	return p.parseKMLFeed(ctx, "https://quickmap.dot.ca.gov/data/chp-only.kml", CHP_INCIDENT)
 }
-
 
 // parseKMLFeed downloads and parses a KML feed
 func (p *FeedParser) parseKMLFeed(ctx context.Context, url string, feedType CaltransFeedType) ([]CaltransIncident, error) {
@@ -294,7 +293,7 @@ func (p *FeedParser) parseKMLFeed(ctx context.Context, url string, feedType Calt
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 30 * time.Second}
 	}
-	
+
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to download KML: %w", err)
@@ -376,18 +375,18 @@ func (p *FeedParser) ParseKMLContent(kmlData []byte, feedType CaltransFeedType) 
 // This method is extracted for testing purposes
 func (p *FeedParser) FilterByGeography(incidents []CaltransIncident, routeCoordinates []geo.Point, radiusMeters float64) []CaltransIncident {
 	filteredIncidents := make([]CaltransIncident, 0)
-	
+
 	for _, incident := range incidents {
 		// Skip incidents without valid coordinates
 		if incident.Coordinates == nil {
 			continue
 		}
-		
+
 		incidentPoint := geo.Point{
 			Latitude:  incident.Coordinates.Latitude,
 			Longitude: incident.Coordinates.Longitude,
 		}
-		
+
 		// Check if incident is within radius of any route coordinate
 		isNearRoute := false
 		for _, coord := range routeCoordinates {
@@ -403,7 +402,7 @@ func (p *FeedParser) FilterByGeography(incidents []CaltransIncident, routeCoordi
 				break // Found within range, no need to check other coordinates
 			}
 		}
-		
+
 		if isNearRoute {
 			filteredIncidents = append(filteredIncidents, incident)
 		}
@@ -417,7 +416,7 @@ func (p *FeedParser) FilterByGeography(incidents []CaltransIncident, routeCoordi
 func (p *FeedParser) processPlacemark(placemark *Placemark, feedType CaltransFeedType, fetchTime time.Time) *CaltransIncident {
 	// Extract geometry data (coordinates and polylines)
 	coordinates, polyline := p.extractGeometry(placemark)
-	
+
 	// Skip placemarks with no valid geometry
 	if coordinates == nil && polyline == nil {
 		return nil
@@ -490,10 +489,10 @@ func (p *FeedParser) extractGeometry(placemark *Placemark) (*api.Coordinates, *a
 	}
 
 	// Handle MultiGeometry (complex geometries)
-	if len(placemark.MultiGeometry.Points) > 0 || 
-	   len(placemark.MultiGeometry.LineStrings) > 0 || 
-	   len(placemark.MultiGeometry.Polygons) > 0 {
-		
+	if len(placemark.MultiGeometry.Points) > 0 ||
+		len(placemark.MultiGeometry.LineStrings) > 0 ||
+		len(placemark.MultiGeometry.Polygons) > 0 {
+
 		var allCoords []*api.Coordinates
 
 		// Collect all points from MultiGeometry
@@ -574,7 +573,7 @@ func (p *FeedParser) parseCoordinateList(coordString string) []*api.Coordinates 
 
 	// Split by whitespace or newlines to get individual coordinate sets
 	coordSets := regexp.MustCompile(`\s+`).Split(coordString, -1)
-	
+
 	for _, coordSet := range coordSets {
 		coordSet = strings.TrimSpace(coordSet)
 		if coordSet == "" {
@@ -693,4 +692,3 @@ func extractDates(text string) []string {
 	}
 	return uniqueDates
 }
-

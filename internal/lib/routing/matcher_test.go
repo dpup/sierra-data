@@ -20,10 +20,10 @@ func TestRouteMatcher_ClassifyAlert(t *testing.T) {
 
 	// Define Highway 4 test route
 	hwy4Route := Route{
-		ID:   "hwy4-angels-murphys",
-		Name: "Hwy 4",
-		Section: "Angels Camp to Murphys",
-		Origin: geo.Point{Latitude: 38.0675, Longitude: -120.5436},
+		ID:          "hwy4-angels-murphys",
+		Name:        "Hwy 4",
+		Section:     "Angels Camp to Murphys",
+		Origin:      geo.Point{Latitude: 38.0675, Longitude: -120.5436},
 		Destination: geo.Point{Latitude: 38.1391, Longitude: -120.4561},
 		Polyline: geo.Polyline{
 			EncodedPolyline: "_p~iF~ps|U_ulLnnqC_mqNvxq`@",
@@ -39,10 +39,10 @@ func TestRouteMatcher_ClassifyAlert(t *testing.T) {
 
 	// Test ON_ROUTE classification (point very close to route)
 	onRouteAlert := UnclassifiedAlert{
-		ID:       "test-001",
-		Location: geo.Point{Latitude: 38.0675, Longitude: -120.5436}, // At Angels Camp
+		ID:          "test-001",
+		Location:    geo.Point{Latitude: 38.0675, Longitude: -120.5436}, // At Angels Camp
 		Description: "Lane closure on Highway 4",
-		Type: "closure",
+		Type:        "closure",
 	}
 
 	classified, err := matcher.ClassifyAlert(ctx, onRouteAlert, routes)
@@ -53,10 +53,10 @@ func TestRouteMatcher_ClassifyAlert(t *testing.T) {
 
 	// Test NEARBY classification (within threshold but not on route)
 	nearbyAlert := UnclassifiedAlert{
-		ID:       "test-002",
-		Location: geo.Point{Latitude: 38.0800, Longitude: -120.5200}, // ~2 miles from route
+		ID:          "test-002",
+		Location:    geo.Point{Latitude: 38.0800, Longitude: -120.5200}, // ~2 miles from route
 		Description: "Incident on side road near Angels Camp",
-		Type: "incident",
+		Type:        "incident",
 	}
 
 	classified, err = matcher.ClassifyAlert(ctx, nearbyAlert, routes)
@@ -68,10 +68,10 @@ func TestRouteMatcher_ClassifyAlert(t *testing.T) {
 
 	// Test DISTANT classification (beyond threshold)
 	distantAlert := UnclassifiedAlert{
-		ID:       "test-003",
-		Location: geo.Point{Latitude: 37.5000, Longitude: -121.0000}, // Far from route
+		ID:          "test-003",
+		Location:    geo.Point{Latitude: 37.5000, Longitude: -121.0000}, // Far from route
 		Description: "Incident far from Highway 4",
-		Type: "incident",
+		Type:        "incident",
 	}
 
 	classified, err = matcher.ClassifyAlert(ctx, distantAlert, routes)
@@ -87,7 +87,7 @@ func TestRouteMatcher_PolylineBasedClassification(t *testing.T) {
 
 	// Test route
 	hwy4Route := Route{
-		ID: "hwy4-angels-murphys",
+		ID:   "hwy4-angels-murphys",
 		Name: "Hwy 4",
 		Polyline: geo.Polyline{
 			Points: []geo.Point{
@@ -102,8 +102,8 @@ func TestRouteMatcher_PolylineBasedClassification(t *testing.T) {
 
 	// Test closure with polyline that overlaps route (> 10% overlap = ON_ROUTE)
 	closureAlert := UnclassifiedAlert{
-		ID:   "test-closure-001",
-		Type: "closure",
+		ID:          "test-closure-001",
+		Type:        "closure",
 		Description: "Lane closure on Highway 4 between Angels Camp and Murphys",
 		AffectedPolyline: &geo.Polyline{
 			Points: []geo.Point{
@@ -115,7 +115,7 @@ func TestRouteMatcher_PolylineBasedClassification(t *testing.T) {
 
 	classified, err := matcher.ClassifyAlert(ctx, closureAlert, routes)
 	require.NoError(t, err)
-	
+
 	// Should be classified based on polyline overlap percentage
 	assert.NotEqual(t, Distant, classified.Classification, "Overlapping closure should not be DISTANT")
 }
@@ -126,7 +126,7 @@ func TestRouteMatcher_MultiRouteIncident(t *testing.T) {
 
 	// Define two intersecting routes
 	hwy4Route := Route{
-		ID: "hwy4-angels-murphys",
+		ID:   "hwy4-angels-murphys",
 		Name: "Hwy 4",
 		Polyline: geo.Polyline{
 			Points: []geo.Point{
@@ -138,7 +138,7 @@ func TestRouteMatcher_MultiRouteIncident(t *testing.T) {
 	}
 
 	hwy49Route := Route{
-		ID: "hwy49-angels-camp",
+		ID:   "hwy49-angels-camp",
 		Name: "Hwy 49",
 		Polyline: geo.Polyline{
 			Points: []geo.Point{
@@ -153,15 +153,15 @@ func TestRouteMatcher_MultiRouteIncident(t *testing.T) {
 
 	// Incident at intersection of both routes
 	intersectionAlert := UnclassifiedAlert{
-		ID:       "test-multi-001",
-		Location: geo.Point{Latitude: 38.0675, Longitude: -120.5436}, // Angels Camp intersection
+		ID:          "test-multi-001",
+		Location:    geo.Point{Latitude: 38.0675, Longitude: -120.5436}, // Angels Camp intersection
 		Description: "Multi-vehicle accident at intersection",
-		Type: "incident",
+		Type:        "incident",
 	}
 
 	classified, err := matcher.ClassifyAlert(ctx, intersectionAlert, routes)
 	require.NoError(t, err)
-	
+
 	// Should be ON_ROUTE for both routes
 	assert.Equal(t, OnRoute, classified.Classification)
 	assert.Len(t, classified.RouteIDs, 2, "Should affect both intersecting routes")
@@ -178,31 +178,31 @@ func TestRouteMatcher_GetRouteAlerts(t *testing.T) {
 		{
 			UnclassifiedAlert: UnclassifiedAlert{ID: "alert-001", Type: "closure"},
 			Classification:    OnRoute,
-			RouteIDs:         []string{"hwy4-angels-murphys"},
+			RouteIDs:          []string{"hwy4-angels-murphys"},
 		},
 		{
 			UnclassifiedAlert: UnclassifiedAlert{ID: "alert-002", Type: "incident"},
 			Classification:    Nearby,
-			RouteIDs:         []string{"hwy4-angels-murphys"},
+			RouteIDs:          []string{"hwy4-angels-murphys"},
 		},
 		{
 			UnclassifiedAlert: UnclassifiedAlert{ID: "alert-003", Type: "incident"},
 			Classification:    OnRoute,
-			RouteIDs:         []string{"hwy49-angels-camp"},
+			RouteIDs:          []string{"hwy49-angels-camp"},
 		},
 		{
 			UnclassifiedAlert: UnclassifiedAlert{ID: "alert-004", Type: "incident"},
 			Classification:    Distant,
-			RouteIDs:         []string{}, // No routes
+			RouteIDs:          []string{}, // No routes
 		},
 	}
 
 	// Get alerts for specific route
 	routeAlerts, err := matcher.GetRouteAlerts(ctx, "hwy4-angels-murphys", alerts)
 	require.NoError(t, err)
-	
+
 	assert.Len(t, routeAlerts, 2, "Should return 2 alerts for hwy4-angels-murphys")
-	
+
 	// Verify ON_ROUTE alerts come first (prioritization)
 	assert.Equal(t, OnRoute, routeAlerts[0].Classification, "ON_ROUTE alerts should be prioritized")
 	assert.Equal(t, "alert-001", routeAlerts[0].ID)
@@ -232,7 +232,7 @@ func TestRouteMatcher_ConfigurableThresholds(t *testing.T) {
 
 	// Test route with different distance threshold
 	customRoute := Route{
-		ID: "test-route",
+		ID:   "test-route",
 		Name: "Test Route",
 		Polyline: geo.Polyline{
 			Points: []geo.Point{
@@ -247,15 +247,15 @@ func TestRouteMatcher_ConfigurableThresholds(t *testing.T) {
 
 	// Alert that would be NEARBY at 10 miles but DISTANT at 5 miles
 	alert := UnclassifiedAlert{
-		ID:       "test-threshold",
-		Location: geo.Point{Latitude: 38.1000, Longitude: -120.1000}, // Further away, ~10+ miles
+		ID:          "test-threshold",
+		Location:    geo.Point{Latitude: 38.1000, Longitude: -120.1000}, // Further away, ~10+ miles
 		Description: "Test threshold configuration",
-		Type: "incident",
+		Type:        "incident",
 	}
 
 	classified, err := matcher.ClassifyAlert(ctx, alert, routes)
 	require.NoError(t, err)
-	
+
 	// Should be DISTANT due to 5-mile threshold
 	assert.Equal(t, Distant, classified.Classification, "Should respect custom threshold")
 }
@@ -266,10 +266,10 @@ func TestRouteMatcher_ErrorHandling(t *testing.T) {
 
 	// Test with empty routes slice
 	alert := UnclassifiedAlert{
-		ID:       "test-error",
-		Location: geo.Point{Latitude: 38.0000, Longitude: -120.0000},
+		ID:          "test-error",
+		Location:    geo.Point{Latitude: 38.0000, Longitude: -120.0000},
 		Description: "Test error handling",
-		Type: "incident",
+		Type:        "incident",
 	}
 
 	classified, err := matcher.ClassifyAlert(ctx, alert, []Route{})
@@ -278,7 +278,7 @@ func TestRouteMatcher_ErrorHandling(t *testing.T) {
 
 	// Test with invalid route geometry
 	invalidRoute := Route{
-		ID: "invalid-route",
+		ID:   "invalid-route",
 		Name: "Invalid Route",
 		Polyline: geo.Polyline{
 			Points: []geo.Point{}, // Empty points slice
@@ -296,7 +296,7 @@ func BenchmarkRouteMatcher_ClassifyAlert(b *testing.B) {
 	ctx := context.Background()
 
 	route := Route{
-		ID: "benchmark-route",
+		ID:   "benchmark-route",
 		Name: "Benchmark Route",
 		Polyline: geo.Polyline{
 			Points: []geo.Point{
@@ -309,10 +309,10 @@ func BenchmarkRouteMatcher_ClassifyAlert(b *testing.B) {
 
 	routes := []Route{route}
 	alert := UnclassifiedAlert{
-		ID:       "benchmark-alert",
-		Location: geo.Point{Latitude: 38.1000, Longitude: -120.5000},
+		ID:          "benchmark-alert",
+		Location:    geo.Point{Latitude: 38.1000, Longitude: -120.5000},
 		Description: "Benchmark test alert",
-		Type: "incident",
+		Type:        "incident",
 	}
 
 	b.ResetTimer()

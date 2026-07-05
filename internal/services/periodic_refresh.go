@@ -5,9 +5,9 @@ import (
 	"runtime/debug"
 	"time"
 
+	"github.com/dpup/info.ersn.net/server/internal/config"
 	"github.com/dpup/prefab/errors"
 	"github.com/dpup/prefab/logging"
-	"github.com/dpup/info.ersn.net/server/internal/config"
 )
 
 // PeriodicRefreshService simulates regular API requests to maintain cache warmth
@@ -15,7 +15,7 @@ import (
 type PeriodicRefreshService struct {
 	roadsService *RoadsService
 	config       *config.Config
-	
+
 	// Background refresh control
 	stopChan chan struct{}
 	running  bool
@@ -36,14 +36,14 @@ func (p *PeriodicRefreshService) StartPeriodicRefresh(ctx context.Context) error
 	if p.running {
 		return nil // Already running
 	}
-	
+
 	p.running = true
-	
+
 	// Use roads refresh interval from config (default 5 minutes)
 	interval := p.config.Roads.RefreshInterval
-	
+
 	logging.Infow(ctx, "Starting periodic refresh", "interval", interval)
-	
+
 	// Start background goroutine for periodic refresh
 	go func() {
 		defer func() {
@@ -61,7 +61,7 @@ func (p *PeriodicRefreshService) StartPeriodicRefresh(ctx context.Context) error
 
 		p.refreshLoop(ctx, interval)
 	}()
-	
+
 	return nil
 }
 
@@ -80,10 +80,10 @@ func (p *PeriodicRefreshService) Stop() {
 func (p *PeriodicRefreshService) refreshLoop(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
-	
+
 	// Do initial refresh immediately
 	p.refreshCacheData(ctx)
-	
+
 	for {
 		select {
 		case <-ctx.Done():

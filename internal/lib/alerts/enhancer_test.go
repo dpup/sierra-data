@@ -27,10 +27,10 @@ func TestAlertEnhancer_EnhanceAlert(t *testing.T) {
 
 	_, err := enhancer.EnhanceAlert(ctx, rawAlert)
 	assert.Error(t, err, "Should return error with invalid API key")
-	
+
 	// Test basic interface compliance
 	assert.NotNil(t, enhancer, "Enhancer should be created even with invalid key")
-	
+
 	// Test with empty API key (should return error)
 	emptyEnhancer := NewAlertEnhancer("", "gpt-3.5-turbo")
 	_, err = emptyEnhancer.EnhanceAlert(ctx, rawAlert)
@@ -69,7 +69,7 @@ func TestAlertEnhancer_CondensedSummaryGeneration(t *testing.T) {
 	// This will fail due to invalid API key, but verifies the interface
 	_, err := enhancer.EnhanceAlert(ctx, rawAlert)
 	assert.Error(t, err, "Should return error with invalid API key")
-	
+
 	// Verify the interface expects EnhanceAlert to return EnhancedAlert with CondensedSummary field
 	// The actual condensed summary generation is tested via integration with the AI
 	assert.NotNil(t, enhancer, "Enhancer should be created")
@@ -83,7 +83,7 @@ func TestAlertEnhancer_HealthCheck(t *testing.T) {
 
 	err := enhancer.HealthCheck(ctx)
 	assert.Error(t, err, "Should return error with invalid API key")
-	
+
 	// Test with nil client (should return error)
 	emptyEnhancer := NewAlertEnhancer("", "gpt-3.5-turbo")
 	err = emptyEnhancer.HealthCheck(ctx)
@@ -92,7 +92,7 @@ func TestAlertEnhancer_HealthCheck(t *testing.T) {
 
 func TestAlertEnhancer_TimeoutHandling(t *testing.T) {
 	enhancer := NewAlertEnhancer("test-api-key", "gpt-3.5-turbo")
-	
+
 	// Test with very short timeout to force timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
 	defer cancel()
@@ -138,7 +138,7 @@ func TestAlertEnhancer_StructuredOutputValidation(t *testing.T) {
 
 	_, err := enhancer.EnhanceAlert(ctx, rawAlert)
 	assert.Error(t, err, "Should return error with invalid API key")
-	
+
 	// Test that the interface works as expected
 	assert.NotNil(t, enhancer, "Enhancer should be created")
 }

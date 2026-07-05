@@ -14,10 +14,10 @@ import (
 type RoadConditionType int
 
 const (
-	CONDITION_CLOSURE      RoadConditionType = iota // Full road closure
-	CONDITION_CHAIN        // Chain control requirement
-	CONDITION_RESTRICTION  // Traffic restriction (1-way, etc.)
-	CONDITION_INFO         // Informational message
+	CONDITION_CLOSURE     RoadConditionType = iota // Full road closure
+	CONDITION_CHAIN                                // Chain control requirement
+	CONDITION_RESTRICTION                          // Traffic restriction (1-way, etc.)
+	CONDITION_INFO                                 // Informational message
 )
 
 // RoadCondition represents a parsed condition from roads.dot.ca.gov
