@@ -142,6 +142,7 @@ func projectEarthquake(ev *gridv1.Event) hazards.Feature {
 func projectRoadIncident(ev *gridv1.Event) hazards.Feature {
 	d := ev.GetRoadIncident()
 	p := baseProps(ev, hazards.LayerRoadIncident, "Road incident")
+	p.Description = ev.GetDescription() // long detail text; empty for unenhanced incidents
 	p.Status = lifecycleStatus(ev)
 	p.Effective = rfc3339(ev.GetEffective())
 	p.UpdatedAt = rfc3339(ev.GetObservedAt())

@@ -86,8 +86,11 @@ func TestRoadIncidentPoll(t *testing.T) {
 
 	ev := eventByID(t, res.Events, "chp:250916ST0066")
 	assert.Equal(t, gridv1.Layer_ROAD_INCIDENT, ev.Layer)
-	assert.Equal(t, "Vehicle fire blocking the right lane", ev.Headline) // shipped: the description
-	assert.Equal(t, "Vehicle fire on Hwy 4", ev.Summary)
+	// Enhanced incident: the short condensed_summary is the headline; the long
+	// detail text is the summary/description (grid model §3).
+	assert.Equal(t, "Vehicle fire on Hwy 4", ev.Headline)
+	assert.Equal(t, "Vehicle fire blocking the right lane", ev.Summary)
+	assert.Equal(t, "Vehicle fire blocking the right lane", ev.Description)
 	assert.Equal(t, "incident", ev.Category)
 	assert.Equal(t, gridv1.Severity_SEVERE, ev.Severity)
 	assert.Equal(t, gridv1.EventStatus_ACTIVE, ev.Status)
@@ -121,6 +124,11 @@ func TestRoadIncidentPoll(t *testing.T) {
 
 	// Lane closures attribute to "caltrans"; not enhanced => no Enhancement.
 	cl := eventByID(t, res.Events, "chp:closure-hwy-4-avery")
+	// Unenhanced incident (no condensed_summary): the detail text is the only
+	// text, so it stays the headline and there is no separate summary/description.
+	assert.Equal(t, "One-way traffic control for utility work", cl.Headline)
+	assert.Empty(t, cl.Summary)
+	assert.Empty(t, cl.Description)
 	assert.Equal(t, "closure", cl.Category)
 	assert.Equal(t, gridv1.Severity_MODERATE, cl.Severity)
 	assert.Equal(t, "caltrans", cl.Provenance.SourceId)
@@ -298,7 +306,7 @@ func TestRoadIncidentPoll_CarryForwardControls(t *testing.T) {
 		res, err := NewRoadIncidentNormalizer(testConfig(), roads).Poll(testCtx(), prior)
 		require.NoError(t, err)
 		require.Len(t, res.Events, 1)
-		assert.Equal(t, "Vehicle fire blocking the right lane", res.Events[0].Headline,
+		assert.Equal(t, "Vehicle fire on Hwy 4", res.Events[0].Headline,
 			"a freshly enhanced incoming copy must replace the stored version")
 	})
 

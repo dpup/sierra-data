@@ -296,8 +296,8 @@ function init() {
 
   /* ---- map ---- */
 
-  // Local base style only — no tile server, no CDN (site principle: the
-  // only network is same-origin /v1/* through api.js).
+  // Shared OSM raster basemap (basemap.js) under the hazard geometry. API data
+  // is still only ever fetched same-origin from /v1/* through api.js.
   const map = new maplibregl.Map({
     container: 'map-canvas',
     style: BASE_STYLE,

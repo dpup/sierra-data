@@ -504,18 +504,32 @@ func (s *Service) roadIncidents(ctx context.Context, area config.HazardArea) ([]
 		if loc == nil {
 			continue
 		}
+		// Prefer the short condensed_summary as the headline; the long detail
+		// text moves to description. Unenhanced incidents have no condensed
+		// summary, so their detail text stays the headline (see the grid
+		// road_incident normalizer — the two must agree for byte-compat).
+		short := in.GetCondensedSummary()
+		long := in.GetDescription()
+		headline := short
+		desc := ""
+		if short != "" {
+			desc = long
+		} else {
+			headline = long
+		}
 		p := Properties{
-			ID:        "chp:" + in.GetId(),
-			Layer:     LayerRoadIncident,
-			Kind:      "Road incident",
-			Category:  strings.ToLower(strings.TrimPrefix(in.GetType().String(), "ALERT_TYPE_")),
-			Headline:  in.GetDescription(),
-			Status:    strings.ToLower(strings.TrimPrefix(in.GetStatus().String(), "INCIDENT_STATUS_")),
-			AreaLabel: in.GetLocationDescription(),
-			Source:    Source{ID: "chp", Name: "CHP / Caltrans", Attribution: "quickmap.dot.ca.gov"},
-			Incident:  &IncidentProps{LogNumber: in.GetLogNumber()},
-			Effective: tsToRFC3339(in.GetStarted()),
-			UpdatedAt: tsToRFC3339(in.GetLastUpdated()),
+			ID:          "chp:" + in.GetId(),
+			Layer:       LayerRoadIncident,
+			Kind:        "Road incident",
+			Category:    strings.ToLower(strings.TrimPrefix(in.GetType().String(), "ALERT_TYPE_")),
+			Headline:    headline,
+			Description: desc,
+			Status:      strings.ToLower(strings.TrimPrefix(in.GetStatus().String(), "INCIDENT_STATUS_")),
+			AreaLabel:   in.GetLocationDescription(),
+			Source:      Source{ID: "chp", Name: "CHP / Caltrans", Attribution: "quickmap.dot.ca.gov"},
+			Incident:    &IncidentProps{LogNumber: in.GetLogNumber()},
+			Effective:   tsToRFC3339(in.GetStarted()),
+			UpdatedAt:   tsToRFC3339(in.GetLastUpdated()),
 		}
 		p.setSeverity(fromAlertSeverity(in.GetSeverity()))
 		out = append(out, Feature{Type: "Feature", Geometry: PointGeom(loc.GetLatitude(), loc.GetLongitude()), Properties: p})

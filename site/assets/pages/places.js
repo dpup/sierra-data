@@ -283,9 +283,9 @@ export function initPlacesPage() {
       container.replaceWith(note);
       return;
     }
-    // Local base style only — no tile server, no CDN (site principle: the
-    // only network is same-origin /v1/* through api.js). Place geometry
-    // itself is the geographic reference.
+    // Shared OSM raster basemap (basemap.js) for geographic context — the
+    // resolve tester needs a recognizable backdrop to click against. API data
+    // is still only ever fetched same-origin from /v1/* through api.js.
     map = new maplibregl.Map({
       container,
       style: BASE_STYLE,

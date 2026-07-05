@@ -295,9 +295,9 @@ function renderEventMap(container, decoded, bounds, severity) {
     const center = bounds
       ? [(bounds.minLng + bounds.maxLng) / 2, (bounds.minLat + bounds.maxLat) / 2]
       : [-120.35, 38.2];
-    // Local base style only — no tile server, no CDN (site principle: the
-    // only network is same-origin /v1/* through api.js). The bbox/centroid
-    // text above the map carries the geographic reference.
+    // Shared OSM raster basemap (basemap.js) for geographic context under the
+    // event geometry; the bbox/centroid text above the map is the fallback when
+    // the map library fails to load. API data stays same-origin /v1/* via api.js.
     const map = new lib.Map({
       container,
       style: BASE_STYLE,

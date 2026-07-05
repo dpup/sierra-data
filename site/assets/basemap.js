@@ -1,27 +1,39 @@
-// basemap.js — the shared local MapLibre base style.
+// basemap.js — the shared MapLibre base style.
 //
-// Site principle (non-negotiable): the only network this site touches is
-// same-origin /v1/* fetches through api.js — no tile servers, no CDNs. The
-// base map is therefore a plain local background with zero external
-// requests; geographic context comes from the rendered geometry itself
-// (place outlines, event footprints, bbox/centroid text).
+// A raster basemap (OpenStreetMap standard tiles) so the map reads as an actual
+// map: the resolve tester needs a recognizable backdrop to click against, and
+// the layer previews need geographic context under the hazard geometry. Tiles
+// are map furniture (images), not API data — the site principle that DATA is
+// only ever fetched from same-origin /v1/* through api.js still holds; every
+// /v1 call goes through api.js and nothing else talks to the API.
+//
+// Attribution is required by the OSM tile usage policy and is rendered by
+// MapLibre's default AttributionControl from the source's `attribution`.
 //
 // Pure data, no DOM or network access at import time — node can import this.
 
 /**
- * Minimal MapLibre style object: one flat background layer, no sources.
- * Dark-panel tone matching app.css --bg-inset so the canvas reads as part
- * of the instrument panel in both themes.
+ * MapLibre style object: one OSM raster source + layer. Pages add their own
+ * geojson sources/layers (place geometry, hazard footprints, markers) on top.
+ * Raster-only base needs no glyphs/sprites (no symbol layers here).
  */
 export const BASE_STYLE = {
   version: 8,
-  name: 'grid-local-base',
-  sources: {},
+  name: 'grid-osm-raster',
+  sources: {
+    osm: {
+      type: 'raster',
+      tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+      tileSize: 256,
+      maxzoom: 19,
+      attribution: '© OpenStreetMap contributors',
+    },
+  },
   layers: [
     {
-      id: 'background',
-      type: 'background',
-      paint: { 'background-color': '#0e141b' },
+      id: 'osm-base',
+      type: 'raster',
+      source: 'osm',
     },
   ],
 };

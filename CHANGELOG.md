@@ -110,6 +110,16 @@ changes (each also applies to the new `/v1/.../map/{layer}.geojson`):
   Enhancement (and the summary text) is content-hash-gated and persisted with the
   event, so an unchanged alert keeps its enhanced fields across polls instead of
   being re-generated per refresh cycle — fewer OpenAI calls, stable output.
+- **`road_incident` `headline` / `description` roles corrected.** For an
+  AI-enhanced incident, `headline` is now the short, card-renderable
+  `condensed_summary` and the long detail text moves to `description` (previously
+  `headline` held the long text and `description` was empty). This applies to both
+  the `/api/v1/hazards/{area}/road_incident.geojson` envelope and the `/v1` event
+  (`headline` short, `summary`/`description` long). Unenhanced incidents (no
+  condensed summary) keep the detail text as the `headline`. Consuming sites that
+  render `headline` as a card title now get a proper short line; the full text is
+  under `description`. On deploy, existing stored incidents self-heal to the new
+  shape on their next enhanced poll.
 
 ### Changed — weather alerts removed from `/v1/weather` (still on `/api/v1`)
 
