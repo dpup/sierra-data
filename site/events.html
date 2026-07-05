@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Events — SIERRA Grid Data</title>
+  <meta name="description" content="Event explorer over GET /v1/events — cross-layer query of every discrete occurrence the Grid Info Service tracks, with filters mapping 1:1 to the endpoint's parameters.">
+  <link rel="stylesheet" href="/assets/app.css">
+  <style>
+    /* Page-local: checkbox groups in the filter bar + the request line. */
+    .opt-checks {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.15rem 0.9rem;
+      max-width: 34rem;
+    }
+    .opt-check {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      text-transform: none;
+      letter-spacing: 0;
+      font-size: var(--fs-sm);
+      color: var(--text);
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .query-line {
+      display: flex;
+      align-items: baseline;
+      gap: 0.6rem;
+      font-family: var(--font-mono);
+      font-size: var(--fs-sm);
+      margin: 0.5rem 0 0.75rem;
+      overflow-x: auto;
+      white-space: nowrap;
+    }
+    .results-foot {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Events — explorer</h1>
+  <p>
+    The cross-layer query surface:
+    <code class="inline">GET /v1/events?place=&amp;layer=&amp;status=&amp;severity_min=&amp;since=&amp;page_token=&amp;page_size=</code>.
+    Every discrete occurrence — wildfire, evacuation, weather alert,
+    earthquake, road incident, and the rest — is reachable through this one
+    endpoint; the filters below map 1:1 to its query parameters
+    (<code class="inline">layer</code> and <code class="inline">status</code>
+    repeat). Default status filter is
+    <code class="inline">ACTIVE,SCHEDULED</code> (the API's own default).
+    Results are the snake_case protojson of
+    <code class="inline">grid.v1.EventList</code>, server-sorted severity-first
+    then newest-first, paginated by
+    <code class="inline">next_page_token</code>. This page's URL carries the
+    full filter state — any view here is a shareable permalink.
+  </p>
+
+  <div class="filter-bar">
+    <div class="field">
+      <label for="ev-place">place</label>
+      <select id="ev-place"></select>
+    </div>
+    <div class="field">
+      <label id="ev-layers-label">layer (any of)</label>
+      <div id="ev-layers" class="opt-checks" role="group" aria-labelledby="ev-layers-label"></div>
+    </div>
+    <div class="field">
+      <label id="ev-status-label">status (default ACTIVE+SCHEDULED)</label>
+      <div id="ev-status" class="opt-checks" role="group" aria-labelledby="ev-status-label"></div>
+    </div>
+    <div class="field">
+      <label for="ev-sev">severity_min</label>
+      <select id="ev-sev"></select>
+    </div>
+    <div class="field">
+      <label for="ev-since">since (local time)</label>
+      <input type="datetime-local" id="ev-since">
+    </div>
+    <div class="field">
+      <label for="ev-size">page_size</label>
+      <select id="ev-size"></select>
+    </div>
+    <div class="field">
+      <button type="button" id="ev-apply">Apply</button>
+    </div>
+  </div>
+
+  <div id="ev-query" class="query-line" aria-label="Request behind these results"></div>
+  <div id="ev-errors"></div>
+
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Severity</th>
+          <th>Headline</th>
+          <th>Layer</th>
+          <th>Area</th>
+          <th>Source</th>
+          <th>Observed</th>
+          <th class="num">Rev</th>
+        </tr>
+      </thead>
+      <tbody id="ev-tbody" aria-live="polite"></tbody>
+    </table>
+  </div>
+  <div id="ev-empty"></div>
+
+  <div class="results-foot">
+    <button type="button" id="ev-more" hidden>Load more</button>
+    <span id="ev-status-line" class="loading">Loading…</span>
+  </div>
+</main>
+
+<script type="module">
+  import { initEventsPage } from '/assets/pages/events.js';
+  initEventsPage();
+</script>
+</body>
+</html>

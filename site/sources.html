@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sources — SIERRA Grid Data</title>
+  <meta name="description" content="Feed-health board for the Grid Info Service: per-source poll intervals, last success/attempt, staleness state, and last error, live from GET /v1/sources.">
+  <link rel="stylesheet" href="/assets/app.css">
+  <style>
+    /* Page-scoped: non-OK row tinting (degradation must be impossible to miss)
+       and the summary-line filter chips. */
+    .data-table tr.row-STALE {
+      background: color-mix(in srgb, var(--st-stale) 9%, transparent);
+    }
+    .data-table tr.row-UNAVAILABLE {
+      background: color-mix(in srgb, var(--st-unavailable) 12%, transparent);
+    }
+    .data-table tr.row-UNKNOWN {
+      background: color-mix(in srgb, var(--text-dim) 8%, transparent);
+    }
+    .data-table td.err-cell {
+      color: var(--st-unavailable);
+    }
+    .data-table td.wrap {
+      min-width: 10rem;
+      max-width: 24rem;
+    }
+
+    .summary-line {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 0.35rem;
+      font-family: var(--font-mono);
+      font-size: var(--fs-base);
+      margin: 0.75rem 0;
+    }
+    .chip-filter {
+      font-family: var(--font-mono);
+      font-size: var(--fs-sm);
+      padding: 0.1rem 0.55rem;
+      border-radius: 999px;
+      border: 1px solid var(--border-strong);
+      background: var(--bg-raised);
+      cursor: pointer;
+    }
+    .chip-filter.st-OK { color: var(--st-ok); }
+    .chip-filter.st-STALE { color: var(--st-stale); }
+    .chip-filter.st-UNAVAILABLE { color: var(--st-unavailable); font-weight: 700; }
+    .chip-filter.st-UNKNOWN { color: var(--text-dim); }
+    .chip-filter.clear { color: var(--text-dim); }
+    .chip-filter[aria-pressed="true"] {
+      border-color: var(--accent);
+      box-shadow: inset 0 0 0 1px var(--accent);
+      background: var(--bg-inset);
+    }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Sources — feed health</h1>
+  <p>
+    Every upstream feed the Grid Info Service polls, with its poll interval,
+    last success/attempt, staleness state, and last error — live from
+    <code class="inline">GET /v1/sources</code>. Sorted unhealthy-first
+    (<span class="mono">UNAVAILABLE</span>, <span class="mono">STALE</span>,
+    then <span class="mono">OK</span>; longest-silent first within each group).
+    A browser tab on this page is the ops dashboard.
+  </p>
+
+  <div id="summary-line" class="summary-line" aria-live="polite"></div>
+  <div id="degradation-alert"></div>
+  <div id="page-errors"></div>
+  <div id="board"><div class="loading">Loading /v1/sources…</div></div>
+  <p id="refresh-line" class="freshness"></p>
+</main>
+
+<script type="module">
+  import { initSourcesPage } from '/assets/pages/sources.js';
+  initSourcesPage();
+</script>
+</body>
+</html>

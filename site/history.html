@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>History — SIERRA Grid Data</title>
+  <meta name="description" content="Archive browser over GET /v1/history — chronological feed of event revisions for after-action review.">
+  <link rel="stylesheet" href="/assets/app.css">
+  <style>
+    /* Page-local styles for the revision feed. */
+    .layer-checks {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.15rem 0.9rem;
+      max-width: 34rem;
+    }
+    .layer-check {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      text-transform: none;
+      letter-spacing: 0;
+      font-size: var(--fs-sm);
+      color: var(--text);
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .query-line {
+      font-family: var(--font-mono);
+      font-size: var(--fs-sm);
+      margin: 0.5rem 0 0.75rem;
+      overflow-x: auto;
+      white-space: nowrap;
+    }
+    .feed {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--bg-raised);
+      margin-bottom: 0.75rem;
+    }
+    .day-sep {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      background: var(--bg-inset);
+      color: var(--text-dim);
+      font-family: var(--font-mono);
+      font-size: var(--fs-xs);
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      padding: 0.3rem 0.75rem;
+      border-top: 1px solid var(--border-strong);
+      border-bottom: 1px solid var(--border-strong);
+    }
+    .feed .day-sep:first-child {
+      border-top: none;
+    }
+    .rev-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 0.35rem 0.8rem;
+      padding: 0.32rem 0.75rem;
+      border-bottom: 1px solid var(--border);
+      font-size: var(--fs-sm);
+    }
+    .rev-row:last-child {
+      border-bottom: none;
+    }
+    .rev-row:hover {
+      background: var(--bg-inset);
+    }
+    .rev-meta {
+      display: inline-flex;
+      gap: 0.8rem;
+      font-size: var(--fs-xs);
+      color: var(--text-dim);
+      white-space: nowrap;
+    }
+    .rev-meta .rev-layer {
+      color: var(--text);
+    }
+    .rev-headline {
+      flex: 1 1 18rem;
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+    .feed-foot {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+  </style>
+</head>
+<body>
+<main>
+  <h1>History — archive browser</h1>
+  <p>
+    Cross-event archive over
+    <code class="inline">GET /v1/history?place=&amp;layer=&amp;from=&amp;to=</code> —
+    every stored revision of every event in the time range, newest first: the
+    after-action review view. Filters map 1:1 to the endpoint's query
+    parameters and live in this page's URL, so a date-range view of an
+    incident's whole arc is a shareable permalink. Pagination follows
+    <code class="inline">next_page_token</code>. Timestamps are RFC&nbsp;3339;
+    the response is the snake_case protojson of
+    <code class="inline">grid.v1.EventRevisionList</code>
+    (<code class="inline">revisions[].{revision, observed_at, ingested_at, event}</code>).
+  </p>
+
+  <div class="filter-bar">
+    <div class="field">
+      <label for="hist-place">place</label>
+      <select id="hist-place"></select>
+    </div>
+    <div class="field">
+      <label id="hist-layers-label">layer (any of)</label>
+      <div id="hist-layers" class="layer-checks" role="group" aria-labelledby="hist-layers-label"></div>
+    </div>
+    <div class="field">
+      <label for="hist-from">from (local time)</label>
+      <input type="datetime-local" id="hist-from">
+    </div>
+    <div class="field">
+      <label for="hist-to">to (local time, blank = now)</label>
+      <input type="datetime-local" id="hist-to">
+    </div>
+    <div class="field">
+      <label for="hist-size">page_size</label>
+      <select id="hist-size"></select>
+    </div>
+    <div class="field">
+      <button type="button" id="hist-apply">Apply</button>
+    </div>
+  </div>
+
+  <div id="hist-query" class="query-line" aria-label="Request behind these results"></div>
+
+  <div id="hist-feed" class="feed" aria-live="polite"></div>
+  <div class="feed-foot">
+    <button type="button" id="hist-more" hidden>Load more</button>
+    <span id="hist-status" class="loading">Loading…</span>
+  </div>
+</main>
+
+<script type="module">
+  import { initChrome } from '/assets/nav.js';
+  import { initHistoryPage } from '/assets/pages/history.js';
+
+  initChrome('history');
+  initHistoryPage();
+</script>
+</body>
+</html>

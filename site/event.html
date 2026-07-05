@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Event — SIERRA Grid Data</title>
+  <meta name="description" content="Event detail: full envelope and typed detail from GET /v1/events/{id}, geometry on a map, provenance, AI-enhancement badge with the verbatim original, and the revision timeline with client-side field diffs from GET /v1/events/{id}/history.">
+  <link rel="stylesheet" href="/lib/maplibre-gl.css">
+  <link rel="stylesheet" href="/assets/app.css">
+  <style>
+    /* Page-local: header chip row, AI badge, revision cards + diff table,
+       raw toggles, request lines. */
+    .chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.4rem;
+      margin-bottom: 0.4rem;
+    }
+    .meta-chip {
+      font-size: var(--fs-xs);
+      border: 1px solid var(--border-strong);
+      border-radius: 2px;
+      padding: 0.1rem 0.5rem;
+      color: var(--text-dim);
+    }
+    .ai-chip {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    #ed-head h1 {
+      margin-bottom: 0.25rem;
+      overflow-wrap: anywhere;
+    }
+    .query-line {
+      font-family: var(--font-mono);
+      font-size: var(--fs-sm);
+      margin: 0.75rem 0 1rem;
+      overflow-x: auto;
+    }
+    .query-row {
+      display: flex;
+      align-items: baseline;
+      gap: 0.6rem;
+      padding: 0.12rem 0;
+      white-space: nowrap;
+    }
+
+    .raw-toggle {
+      margin-top: 0.5rem;
+      font-family: var(--font-mono);
+      font-size: var(--fs-xs);
+    }
+    .raw-toggle summary {
+      cursor: pointer;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .raw-toggle[open] summary {
+      color: var(--accent);
+    }
+    .raw-toggle pre.code {
+      margin-top: 0.4rem;
+      max-height: 24rem;
+      overflow: auto;
+    }
+
+    .ed-map {
+      height: 20rem;
+      margin-top: 0.5rem;
+    }
+
+    .ai-badge {
+      display: inline-flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 0.15rem;
+      border: 1px solid var(--accent);
+      border-left-width: 4px;
+      border-radius: var(--radius);
+      background: color-mix(in srgb, var(--accent) 10%, var(--bg-raised));
+      padding: 0.35rem 0.7rem;
+      font-size: var(--fs-sm);
+      margin-bottom: 0.4rem;
+    }
+    .ai-badge-tag {
+      font-family: var(--font-mono);
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      font-size: var(--fs-xs);
+      color: var(--accent);
+    }
+    .original-text {
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      font-family: var(--font-mono);
+      font-size: var(--fs-sm);
+      background: var(--bg-inset);
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--border-strong);
+      border-radius: var(--radius);
+      padding: 0.55rem 0.75rem;
+      margin: 0.25rem 0 0.5rem;
+    }
+
+    .timeline {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+    .rev-card {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--bg-inset);
+      padding: 0.55rem 0.75rem;
+    }
+    .rev-card-head {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 0.4rem 1rem;
+      margin-bottom: 0.35rem;
+    }
+    .diff-wrap {
+      margin-bottom: 0.25rem;
+      background: var(--bg-raised);
+    }
+    .diff-table td.diff-val {
+      max-width: 22rem;
+      overflow-wrap: anywhere;
+    }
+    .diff-kind {
+      font-family: var(--font-mono);
+      white-space: nowrap;
+    }
+    .k-added { color: var(--st-ok); }
+    .k-removed { color: var(--st-unavailable); }
+    .k-changed { color: var(--st-stale); }
+    .timeline-foot {
+      margin-top: 0.6rem;
+    }
+  </style>
+</head>
+<body>
+<main>
+  <p class="muted small mono"><a href="/events.html">&larr; events explorer</a></p>
+
+  <div id="ed-errors"></div>
+  <div id="ed-loading" class="loading">Loading /v1/events/{id}…</div>
+
+  <header id="ed-head" hidden>
+    <div id="ed-chips" class="chip-row"></div>
+    <h1 id="ed-headline"></h1>
+    <div id="ed-sub" class="muted mono small"></div>
+  </header>
+
+  <div id="ed-query" class="query-line" aria-label="Requests behind this page"></div>
+
+  <div id="ed-sections"></div>
+</main>
+
+<script src="/lib/maplibre-gl.js"></script>
+<script type="module">
+  import { initEventPage } from '/assets/pages/event-detail.js';
+  initEventPage();
+</script>
+</body>
+</html>

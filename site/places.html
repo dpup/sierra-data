@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Places — SIERRA Grid Data</title>
+  <meta name="description" content="Place directory for the Grid Info Service: areas, counties, towns, evacuation zones, corridors — with geometry on a map and a lat/lng and address resolve tester.">
+  <link rel="stylesheet" href="/assets/app.css">
+  <link rel="stylesheet" href="/lib/maplibre-gl.css">
+  <script src="/lib/maplibre-gl.js" defer></script>
+</head>
+<body>
+<main>
+  <h1>Places</h1>
+  <p>
+    Every event and summary in the Grid Info Service is scoped to a
+    <em>place</em> — an area, county, town, evacuation zone, corridor, or site.
+    Places are addressable by slug (<code class="inline">calaveras</code>) or id
+    (<code class="inline">county:calaveras</code>). This page is the directory,
+    the per-place detail view, and the resolve tester that answers
+    &ldquo;which places contain this point or address?&rdquo;
+  </p>
+
+  <section class="panel" aria-labelledby="endpoints-h">
+    <h3 id="endpoints-h">Endpoints</h3>
+    <dl class="kv">
+      <dt><code>GET /v1/places</code></dt>
+      <dd>Directory. Filters: <code>kind</code> (AREA, COUNTY, TOWN, EVAC_ZONE, CORRIDOR, SITE), <code>q</code> (name search). Try <a href="/v1/places?kind=COUNTY">/v1/places?kind=COUNTY</a>.</dd>
+      <dt><code>GET /v1/places/{place}</code></dt>
+      <dd>One place by slug or id, including geometry (base64 GeoJSON in <code>geometry.geojson</code>) and <code>parent_id</code>. Try <a href="/v1/places/calaveras">/v1/places/calaveras</a>.</dd>
+      <dt><code>GET /v1/places/resolve</code></dt>
+      <dd><code>?lat=&amp;lng=</code> or <code>?address=</code> &rarr; containing places, most-specific first (SITE &rarr; AREA). Try <a href="/v1/places/resolve?lat=38.0679&amp;lng=-120.5385">/v1/places/resolve?lat=38.0679&amp;lng=-120.5385</a>.</dd>
+    </dl>
+  </section>
+
+  <section id="place-view" hidden aria-labelledby="place-name">
+    <p class="small"><a href="/places.html">&larr; All places</a></p>
+    <h2 id="place-name">Loading&hellip;</h2>
+    <div id="place-detail"><span class="loading">Loading place&hellip;</span></div>
+  </section>
+
+  <section id="directory-view" aria-labelledby="directory-h">
+    <h2 id="directory-h">Directory <span class="muted small">&mdash; <code class="inline">GET /v1/places</code></span></h2>
+    <div id="directory"><span class="loading">Loading /v1/places&hellip;</span></div>
+  </section>
+
+  <section id="resolve-section" aria-labelledby="resolve-h">
+    <h2 id="resolve-h">Resolve tester <span class="muted small">&mdash; <code class="inline">GET /v1/places/resolve</code></span></h2>
+    <p id="map-hint" class="small muted">Click anywhere on the map to resolve that point to its containing places.</p>
+    <div id="map" class="map-box" role="application" aria-label="Map. Click a point to resolve it to containing places."></div>
+    <div class="filter-bar">
+      <form id="point-form" class="row">
+        <div class="field">
+          <label for="lat-input">lat</label>
+          <input id="lat-input" name="lat" size="10" inputmode="decimal" autocomplete="off" placeholder="38.0679">
+        </div>
+        <div class="field">
+          <label for="lng-input">lng</label>
+          <input id="lng-input" name="lng" size="10" inputmode="decimal" autocomplete="off" placeholder="-120.5385">
+        </div>
+        <button type="submit">Resolve point</button>
+      </form>
+      <form id="address-form" class="row">
+        <div class="field">
+          <label for="address-input">address</label>
+          <input id="address-input" name="address" size="34" autocomplete="off" placeholder="1225 Main St, Angels Camp">
+        </div>
+        <button type="submit">Resolve address</button>
+      </form>
+    </div>
+    <div id="resolve-results"></div>
+  </section>
+</main>
+
+<script type="module">
+  import { initPlacesPage } from '/assets/pages/places.js';
+  initPlacesPage();
+</script>
+</body>
+</html>

@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SIERRA Grid Data — data.sierragridteam.org</title>
+  <meta name="description" content="Grid Info Service — public hazard, road, and weather data for the central Sierra. Live API docs and explorer.">
+  <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+<main>
+  <h1>Grid Info Service</h1>
+  <p class="tagline">Public hazard, road, and weather data for the central Sierra.</p>
+  <p>
+    This site is the live documentation and explorer for the Grid Info Service
+    API at <code class="inline">data.sierragridteam.org/v1</code>. Everything on
+    every page is fetched in your browser from the same public, read-only,
+    CORS-open endpoints any third-party client would use — wildfire, evacuation,
+    weather-alert, earthquake, and road-incident events, plus place geometry and
+    per-source feed health. Each section below documents one endpoint and
+    explores its live data; the footer of every page lists the exact requests
+    behind it.
+  </p>
+
+  <h2>Live status</h2>
+  <div class="status-strip">
+    <section class="panel" aria-labelledby="sources-h">
+      <h3 id="sources-h">Source health <span class="muted small">— <code class="inline">GET /v1/sources</code></span></h3>
+      <div id="source-health" class="status-list"><span class="loading">Loading /v1/sources…</span></div>
+    </section>
+    <section class="panel" aria-labelledby="areas-h">
+      <h3 id="areas-h">Area mode <span class="muted small">— <code class="inline">GET /v1/places/{area}/summary</code></span></h3>
+      <div id="area-modes" class="status-list"><span class="loading">Loading area summaries…</span></div>
+    </section>
+  </div>
+  <p id="freshness" class="freshness">Fetching…</p>
+
+  <h2>Sections</h2>
+  <div class="section-grid">
+    <a class="section-card" href="/sources.html">
+      <span class="card-title">Sources</span>
+      <span class="card-endpoint">GET /v1/sources</span>
+      <span class="card-desc">Feed health board: poll intervals, last success/attempt, staleness, last error. The ops dashboard.</span>
+    </a>
+    <a class="section-card" href="/events.html">
+      <span class="card-title">Events</span>
+      <span class="card-endpoint">GET /v1/events — cross-layer query</span>
+      <span class="card-desc">Filter by place, layer, status, severity, time; event detail with revision timeline and diffs.</span>
+    </a>
+    <a class="section-card" href="/places.html">
+      <span class="card-title">Places</span>
+      <span class="card-endpoint">GET /v1/places, /v1/places/resolve</span>
+      <span class="card-desc">Areas, counties, towns, zones, corridors; geometry on a map; lat/lng and address resolve tester.</span>
+    </a>
+    <a class="section-card" href="/map.html">
+      <span class="card-title">Map</span>
+      <span class="card-endpoint">GET /v1/places/{place}/map/{layer}.geojson</span>
+      <span class="card-desc">Per-layer GeoJSON previews with the honest-freshness metadata block, on MapLibre.</span>
+    </a>
+    <a class="section-card" href="/history.html">
+      <span class="card-title">History</span>
+      <span class="card-endpoint">GET /v1/history</span>
+      <span class="card-desc">Archive browser: chronological revision feed over a time range — the after-action view.</span>
+    </a>
+    <a class="section-card" href="/docs.html">
+      <span class="card-title">Docs</span>
+      <span class="card-endpoint">/v1 reference</span>
+      <span class="card-desc">Endpoint reference, severity scale and color ramp, place id scheme, evacuation fail-loud contract.</span>
+    </a>
+  </div>
+
+  <div id="page-errors"></div>
+</main>
+
+<script type="module">
+  import { get, ApiError } from '/assets/api.js';
+  import { timeAgo, timeAbs, sourceDot } from '/assets/format.js';
+  import { initChrome } from '/assets/nav.js';
+
+  initChrome('home');
+
+  const $ = (id) => document.getElementById(id);
+
+  function errorBlock(err) {
+    const div = document.createElement('div');
+    div.className = 'error-block';
+    const head = document.createElement('div');
+    head.textContent =
+      err instanceof ApiError
+        ? `Request failed (HTTP ${err.status || 'network error'}):`
+        : 'Request failed:';
+    const url = document.createElement('div');
+    url.className = 'error-url';
+    url.textContent = err instanceof ApiError ? `GET ${err.url}` : String(err.message || err);
+    div.append(head, url);
+    if (err instanceof ApiError && err.body && typeof err.body === 'object' && err.body.message) {
+      const msg = document.createElement('div');
+      msg.className = 'muted';
+      msg.textContent = err.body.message;
+      div.append(msg);
+    }
+    return div;
+  }
+
+  // ---- Source health: GET /v1/sources -----------------------------------
+  // Unhealthy sources first and loud; each dot titled with last_success_at.
+  const STATUS_ORDER = { UNAVAILABLE: 0, STALE: 1, UNKNOWN: 2, OK: 3 };
+
+  async function loadSources() {
+    const box = $('source-health');
+    try {
+      const data = await get('/v1/sources');
+      const sources = Array.isArray(data.sources) ? data.sources : [];
+      box.textContent = '';
+      if (sources.length === 0) {
+        const none = document.createElement('span');
+        none.className = 'muted';
+        none.textContent = 'No sources registered.';
+        box.append(none);
+        return;
+      }
+      const rank = (s) => STATUS_ORDER[String(s.status || '').toUpperCase()] ?? STATUS_ORDER.UNKNOWN;
+      sources.sort((a, b) => rank(a) - rank(b) || String(a.id).localeCompare(String(b.id)));
+
+      const unhealthy = sources.filter((s) => String(s.status || '').toUpperCase() !== 'OK');
+      if (unhealthy.length > 0) {
+        const warn = document.createElement('div');
+        warn.className = 'error-block';
+        warn.textContent =
+          `${unhealthy.length} source(s) unhealthy: ` +
+          unhealthy.map((s) => `${s.id || s.name || '?'} ${String(s.status || 'UNKNOWN').toUpperCase()}`).join(', ');
+        box.append(warn);
+      }
+
+      for (const s of sources) {
+        const item = document.createElement('span');
+        item.className = 'status-item';
+        const dot = sourceDot(s.status);
+        dot.title = s.last_success_at
+          ? `last success ${timeAbs(s.last_success_at)} (${timeAgo(s.last_success_at)})`
+          : 'no successful fetch recorded';
+        const name = document.createElement('a');
+        name.href = '/sources.html';
+        name.textContent = s.id || s.name || '?';
+        item.append(name, dot);
+        if (s.last_error && String(s.status || '').toUpperCase() !== 'OK') {
+          item.title = s.last_error;
+        }
+        box.append(item);
+      }
+    } catch (err) {
+      box.textContent = '';
+      box.append(errorBlock(err));
+    }
+  }
+
+  // ---- Area modes: /v1/places?kind=AREA then per-area summary ------------
+  async function loadAreas() {
+    const box = $('area-modes');
+    let places;
+    try {
+      const data = await get('/v1/places', { kind: 'AREA' });
+      places = Array.isArray(data.places) ? data.places : [];
+    } catch (err) {
+      box.textContent = '';
+      box.append(errorBlock(err));
+      return;
+    }
+    box.textContent = '';
+    if (places.length === 0) {
+      const none = document.createElement('span');
+      none.className = 'muted';
+      none.textContent = 'No areas configured.';
+      box.append(none);
+      return;
+    }
+
+    const generatedAts = [];
+    const results = await Promise.allSettled(
+      places.map((p) => get(`/v1/places/${encodeURIComponent(p.slug || p.id)}/summary`))
+    );
+
+    results.forEach((res, i) => {
+      const place = places[i];
+      const row = document.createElement('div');
+      row.className = 'status-item';
+
+      const name = document.createElement('a');
+      name.href = `/places.html?place=${encodeURIComponent(place.slug || place.id || '')}`;
+      name.textContent = place.name || place.slug || place.id || '?';
+      row.append(name);
+
+      if (res.status === 'rejected') {
+        row.append(errorBlock(res.reason));
+        box.append(row);
+        return;
+      }
+
+      const summary = res.value;
+      const mode = String(summary.mode || '').toUpperCase() || 'UNKNOWN';
+      const chip = document.createElement('span');
+      chip.className =
+        'chip ' + (['QUIET', 'WATCH', 'ACTIVE'].includes(mode) ? `mode-${mode}` : 'sev-unknown');
+      chip.textContent = mode;
+      row.append(chip);
+
+      // Evacuation status per the fail-loud contract: null is never all-clear.
+      const evac = document.createElement('span');
+      evac.className = 'small';
+      const s = summary.summary || {};
+      if (s.active_evacuations === null || s.active_evacuations === undefined) {
+        evac.classList.add('mono');
+        evac.style.color = 'var(--st-unavailable)';
+        evac.append('evacuations unknown — check ');
+        const link = document.createElement('a');
+        link.href = 'https://protect.genasys.com/search';
+        link.textContent = 'Genasys';
+        link.rel = 'noopener';
+        evac.append(link);
+      } else if (Number(s.active_evacuations) === 0) {
+        evac.className = 'small muted';
+        evac.textContent = 'no active evacuations reported (per Cal OES)';
+      } else {
+        evac.classList.add('mono');
+        evac.style.color = 'var(--st-unavailable)';
+        evac.style.fontWeight = '700';
+        evac.textContent = `${s.active_evacuations} active evacuation(s)`;
+      }
+      row.append(evac);
+
+      if (summary.generated_at) generatedAts.push(summary.generated_at);
+      box.append(row);
+    });
+
+    // Freshness line: oldest summary generated_at (the pessimistic read).
+    const fresh = $('freshness');
+    if (generatedAts.length > 0) {
+      generatedAts.sort();
+      const oldest = generatedAts[0];
+      fresh.textContent =
+        `Summaries generated ${timeAgo(oldest)} (${timeAbs(oldest)}); page loaded ${timeAbs(new Date().toISOString())}.`;
+    } else {
+      fresh.textContent = `No summary freshness available; page loaded ${timeAbs(new Date().toISOString())}.`;
+    }
+  }
+
+  loadSources();
+  loadAreas();
+</script>
+</body>
+</html>

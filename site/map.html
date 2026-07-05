@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Map — layer previews — SIERRA Grid Data</title>
+  <meta name="description" content="Per-layer GeoJSON previews on MapLibre with the honest-freshness metadata block: source status, generated-at, attribution, and the exact .geojson URL.">
+  <link rel="stylesheet" href="/assets/app.css">
+  <link rel="stylesheet" href="/lib/maplibre-gl.css">
+  <style>
+    /* Page-local layout: full-height map + honesty sidebar. */
+    main.map-main {
+      max-width: 100rem;
+    }
+    .map-layout {
+      display: grid;
+      grid-template-columns: minmax(20rem, 24rem) 1fr;
+      gap: 1rem;
+      align-items: start;
+    }
+    #map-canvas {
+      width: 100%;
+      height: max(28rem, calc(100vh - 17rem));
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--bg-inset);
+    }
+    .layer-checks {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.3rem 0.75rem;
+      margin-top: 0.5rem;
+    }
+    .layer-check {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      text-transform: none;
+      letter-spacing: 0;
+      font-size: var(--fs-sm);
+      color: var(--text);
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    /* Honesty panel entries */
+    .layer-meta {
+      border-top: 1px solid var(--border);
+      padding: 0.55rem 0;
+      font-size: var(--fs-sm);
+    }
+    .layer-meta:first-child {
+      border-top: none;
+      padding-top: 0.2rem;
+    }
+    .layer-meta-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.6rem;
+      margin-bottom: 0.25rem;
+      font-family: var(--font-mono);
+    }
+    .meta-row {
+      font-family: var(--font-mono);
+      font-size: var(--fs-xs);
+      padding: 0.08rem 0;
+      overflow-wrap: anywhere;
+    }
+    .meta-key {
+      color: var(--text-dim);
+    }
+    .meta-note {
+      font-size: var(--fs-xs);
+      margin: 0.2rem 0;
+    }
+    .meta-stale {
+      color: var(--st-stale);
+    }
+    .meta-unavailable {
+      color: var(--st-unavailable);
+      font-weight: 700;
+      font-size: var(--fs-sm);
+      margin: 0.25rem 0;
+    }
+    .error-block.meta-error {
+      margin: 0.35rem 0;
+      padding: 0.4rem 0.6rem;
+      font-size: var(--fs-xs);
+    }
+    .geojson-url {
+      margin-top: 0.35rem;
+    }
+    .geojson-url-caption {
+      font-size: var(--fs-xs);
+    }
+    .geojson-url-line {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .geojson-url-line code {
+      font-size: var(--fs-xs);
+      background: var(--bg-inset);
+      border: 1px solid var(--border);
+      border-radius: 2px;
+      padding: 0.1rem 0.3rem;
+      overflow-wrap: anywhere;
+      user-select: all;
+    }
+    /* MapLibre popup, instrument-panel themed */
+    .maplibregl-popup-content {
+      background: var(--bg-raised);
+      color: var(--text);
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius);
+      font-family: var(--font-mono);
+      font-size: var(--fs-sm);
+      padding: 0.6rem 0.75rem;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+    }
+    .maplibregl-popup-close-button {
+      color: var(--text-dim);
+      font-size: 1.05rem;
+    }
+    .maplibregl-popup-anchor-bottom .maplibregl-popup-tip,
+    .maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip,
+    .maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip {
+      border-top-color: var(--bg-raised);
+    }
+    .maplibregl-popup-anchor-top .maplibregl-popup-tip,
+    .maplibregl-popup-anchor-top-left .maplibregl-popup-tip,
+    .maplibregl-popup-anchor-top-right .maplibregl-popup-tip {
+      border-bottom-color: var(--bg-raised);
+    }
+    .maplibregl-popup-anchor-left .maplibregl-popup-tip {
+      border-right-color: var(--bg-raised);
+    }
+    .maplibregl-popup-anchor-right .maplibregl-popup-tip {
+      border-left-color: var(--bg-raised);
+    }
+    .map-popup .popup-headline {
+      font-weight: 700;
+      color: var(--text-loud);
+      margin-bottom: 0.3rem;
+    }
+    .map-popup .popup-chips {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 0.3rem;
+    }
+    @media (max-width: 60rem) {
+      .map-layout {
+        grid-template-columns: 1fr;
+      }
+      #map-canvas {
+        height: 60vh;
+      }
+    }
+  </style>
+</head>
+<body>
+<main class="map-main">
+  <h1>Map — layer previews</h1>
+  <p>
+    Each hazard layer is served as one RFC 7946 FeatureCollection from
+    <code class="inline">GET /v1/places/{place}/map/{layer}.geojson</code> —
+    exactly what a third-party map client (MapLibre, Leaflet, QGIS) would point
+    a GeoJSON source at. Features share a common <code class="inline">properties</code>
+    envelope (<code class="inline">id, layer, severity, headline, source, updated_at</code>)
+    colored here on the canonical severity ramp. The sidebar renders each
+    response's <code class="inline">metadata</code> member — the honest-freshness
+    contract: <code class="inline">source_status</code> of
+    <code class="inline">OK</code>, <code class="inline">STALE</code>, or
+    <code class="inline">UNAVAILABLE</code>. An UNAVAILABLE layer draws nothing,
+    and nothing on the map is <em>not</em> an all-clear.
+  </p>
+
+  <div class="map-layout">
+    <div class="map-side">
+      <section class="panel" aria-labelledby="controls-h">
+        <h3 id="controls-h">Controls</h3>
+        <div class="field" style="margin-bottom: 0.6rem;">
+          <label for="place-select">Place <span class="muted">— GET /v1/places?kind=AREA</span></label>
+          <select id="place-select">
+            <option value="">loading places…</option>
+          </select>
+        </div>
+        <label>Layers</label>
+        <div id="layer-checks" class="layer-checks"></div>
+      </section>
+
+      <section class="panel" aria-labelledby="meta-h">
+        <h3 id="meta-h">Feed metadata</h3>
+        <p class="small muted" style="margin-bottom: 0.5rem;">
+          Per-layer <code class="inline">metadata</code>: source status,
+          freshness, attribution, and the exact .geojson URL. This block is why
+          a consumer can trust — or knows not to trust — what the map shows.
+        </p>
+        <div id="honesty-panel"></div>
+      </section>
+    </div>
+
+    <div class="map-area">
+      <div id="map-canvas"></div>
+      <section aria-labelledby="unlocated-h">
+        <h2 id="unlocated-h">Unlocated features</h2>
+        <p class="small muted">
+          Features with <code class="inline">"geometry": null</code> — e.g. a
+          county-wide advisory — are valid and can't be drawn on the map, so
+          they are listed here instead.
+        </p>
+        <div id="unlocated"></div>
+      </section>
+    </div>
+  </div>
+
+  <div id="page-errors"></div>
+</main>
+
+<script src="/lib/maplibre-gl.js"></script>
+<script type="module" src="/assets/pages/map.js"></script>
+</body>
+</html>
