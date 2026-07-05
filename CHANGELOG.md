@@ -7,6 +7,62 @@ There are no formal releases — the service deploys from `main`. Each entry bel
 is timestamped; add a new dated section at the top when the API surface changes.
 The API is JSON over HTTP (`/api/v1/...`); field names are camelCase.
 
+## 2026-07-04 21:00 UTC
+
+### Added — region incidents are now AI-enhanced, with model-assessed severity
+
+`GET /api/v1/incidents/{area}` items now go through the same AI pipeline as
+road alerts (model: gpt-5-mini). Additive, non-breaking:
+
+- `description` becomes a readable narrative (e.g. "A collision with injuries
+  occurred; emergency services are on scene") instead of the raw type line.
+- New optional fields on `Incident`: `condensedSummary` (short mobile text),
+  `impact` (`IMPACT_NONE|LIGHT|MODERATE|SEVERE`), and `metadata` (structured
+  extras like vehicles involved / injuries).
+- `severity` is now derived from the model's impact assessment (severe →
+  CRITICAL, moderate/light → WARNING, none → INFO — same mapping as road
+  alerts) instead of a keyword heuristic, so severity values may shift for
+  equivalent incidents compared to before.
+- Enhancement is cached 24h by content hash and capped per refresh, so a large
+  backlog enriches over a few refresh cycles — an incident may appear on one
+  poll with structural fields and keyword-heuristic severity, then enhanced
+  (with model severity) on the next. Consumers should treat the new fields as
+  progressive enrichment.
+
+## 2026-07-04 00:00 UTC
+
+### Changed — weather alerts are now NWS-only (**breaking**); weather refresh 5m → 15m
+
+The server was exceeding OpenWeather's One Call 3.0 free cap (1,000 calls/day)
+fetching per-location alerts that, for US locations, are relabeled NWS data we
+already fetch directly. OpenWeather is now used **only** for current conditions.
+
+- **`GET /api/v1/weather/alerts`**: alerts with `source: "OPENWEATHERMAP"` are
+  gone; every alert now has `source: "NWS"`. **Migration**: drop any
+  source-based branching; read `headline` + `description` (authoritative NWS
+  wording). The AI-enhancement fields `summary`/`details` — previously populated
+  on OpenWeatherMap alerts — are empty on NWS alerts (unchanged for NWS-sourced
+  alerts; the fields remain in the schema).
+- **`GET /api/v1/weather`** (and `/weather/{location_id}`): per-location
+  `alerts[]` are now the NWS alerts active in the location's configured forecast
+  zone, instead of OpenWeather One Call alerts. Same `WeatherAlert` shape, but:
+  ids are NWS URNs (no longer prefixed `{locationId}_…`), `zones` is populated,
+  and the same alert appears under every location in the affected zone.
+- The `hazards` `weather_alert` layer inherits this: feature `source` is always
+  `NWS` now.
+- **Freshness**: `weather.refreshInterval` raised from 5m to **15m** (current
+  conditions may be up to ~15 minutes old; up to 30m when serving stale on an
+  upstream failure). Alert latency is effectively unchanged — NWS alerts refresh
+  on the same interval and NWS is the originating source.
+- Reliability note: a NWS outage on the alerts path now propagates as an
+  error/stale-cache response rather than being silently absorbed, consistent
+  with the fail-loud `source_status` contract.
+- Bug fix: the weather endpoints' serve-stale-on-upstream-failure fallback was
+  dead code (the cache accessor it used never returns stale entries), so an
+  upstream failure after the TTL returned an error even when ≤2×TTL-old data
+  existed. The fallback now works: on refresh failure you may receive stale
+  data with `lastUpdated` reflecting its true age, instead of a 5xx.
+
 ## 2026-06-29 00:00 UTC
 
 ### Changed — evacuation now distinguishes "no active zones" from "feed error"

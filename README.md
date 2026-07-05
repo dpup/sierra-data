@@ -6,7 +6,7 @@ A real-time API server providing road, weather, and hazard information for the E
 
 The server dynamically builds routes between geographic points using the Google Routes API, retrieving real-time traffic data and estimated travel times. Polyline geometry from Google is used to cross-reference Caltrans feeds, with alerts filtered and classified as on-route or nearby based on spatial relevance. To improve usability, OpenAI is integrated to automatically convert technical Caltrans alerts into clear, human-readable summaries.
 
-Weather data is independently sourced from OpenWeatherMap for each configured location, providing current conditions and active alerts.
+Weather data combines OpenWeatherMap current conditions (fetched per configured location) with authoritative National Weather Service zone alerts — each location is mapped to its NWS forecast zone, so alerts come from NWS rather than OpenWeather's rate-capped One Call API.
 
 The architecture is modular and location-agnostic, allowing easy adaptation to other regions or road networks by updating configuration.
 
@@ -18,7 +18,7 @@ The architecture is modular and location-agnostic, allowing easy adaptation to o
 - **Intelligent Road Alerts**: AI-enhanced alerts from Caltrans feeds including lane closures, CHP incidents, and construction
 - **Smart Alert Classification**: Route-aware filtering (ON_ROUTE/NEARBY/DISTANT) based on spatial analysis
 - **AI-Enhanced Descriptions**: Automatic OpenAI conversion of technical alerts into clear, human-readable summaries
-- **Weather Information**: Current conditions and alerts for multiple locations from OpenWeatherMap
+- **Weather Information**: Current conditions from OpenWeatherMap plus authoritative NWS zone alerts for multiple locations
 - **Unified Hazard Layer**: Map-ready GeoJSON aggregating wildfires, earthquakes, evacuations, weather alerts, and road incidents into one standardized interface, with a fail-loud `source_status` and a life-safety evacuation contract
 - **Stale-while-revalidate Caching**: Sub-100ms responses by serving cached data while refreshing in background
 - **REST API**: Clean HTTP endpoints with comprehensive JSON responses
@@ -193,7 +193,12 @@ requirements.
 
 Region-wide CHP/Caltrans dispatch incidents, surfaced independently of the
 monitored roads (issue #7). Unlike road `alerts[]`, this is a flat list scoped by
-a configured geographic area rather than per-route, and is not AI-enhanced.
+a configured geographic area rather than per-route. Every incident is
+AI-enhanced with a readable `description` plus `condensedSummary`, `impact`,
+and `metadata` (cached 24h by content, capped per refresh), and `severity` is
+derived from the model's impact assessment. An incident may briefly appear with
+structural fields and keyword-heuristic severity until its enhancement lands on
+a following refresh.
 
 ```http
 GET /api/v1/incidents/{area}
@@ -265,11 +270,11 @@ GET /api/v1/weather/alerts
 GET /api/v1/weather/alerts?zones=CAZ064,CAZ065   # filter to NWS zones
 ```
 
-Returns authoritative **NWS** zone alerts first (`source: "NWS"`), followed by
-OpenWeatherMap alerts (`source: "OPENWEATHERMAP"`). NWS alerts carry `severity`
-and `zones`. The optional `?zones=` filter narrows the **NWS** alerts to the
-given forecast zones; OpenWeatherMap alerts are not zone-scoped and always pass
-through (issue #4).
+Returns authoritative **NWS** zone alerts (`source: "NWS"`), carrying `severity`
+and `zones`. The optional `?zones=` filter narrows the alerts to the given
+forecast zones (issue #4). OpenWeatherMap-sourced alerts were removed 2026-07-04
+(see CHANGELOG) — for US locations they were relabeled NWS data fetched through
+a rate-capped endpoint.
 
 **Response Example:**
 ```json
@@ -456,7 +461,7 @@ googleRoutes:
 
 openai:
   # apiKey set via PF__OPENAI__API_KEY  
-  model: "gpt-4o-mini"
+  model: "gpt-5-mini"
   timeout: "30s"
   maxRetries: 3
 
@@ -642,7 +647,7 @@ make lint && make test
 ### API Rate Limits
 
 - **Google Routes API**: 3,000 queries per minute
-- **OpenWeatherMap API**: 60 calls per minute (free tier)
+- **OpenWeatherMap API**: 60 calls per minute (free tier). Only `/data/2.5/weather` is used — the One Call 3.0 endpoint has a separate 1,000 calls/day cap and is deliberately avoided (alerts come from NWS instead)
 - **Caltrans KML Feeds**: No official limits, but feeds are refreshed every 5-30 minutes
 
 ### Architecture

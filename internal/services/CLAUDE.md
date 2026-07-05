@@ -15,10 +15,17 @@ caching, route classification, and AI enhancement.
 
 Every read endpoint follows the same shape:
 
-1. `GetWithMetadata(key, &dst)` — serve cached data; `IsStale`/`IsVeryStale`
-   decide freshness.
+1. `Get(key, &dst)` — serve **fresh** data only (`Get` returns found=false for
+   stale entries).
 2. On miss/stale, refresh from upstream, then `Set(key, data, ttl, kind)`.
-3. On refresh failure, fall back to stale cache rather than erroring.
+3. On refresh failure, fall back to stale cache via `GetWithMetadata(key, &dst)`
+   — the accessor that returns stale entries — gated by `!IsVeryStale(key)`
+   (2× the refresh interval). **Don't use `Get` in a stale-fallback branch; it
+   can never return stale data** (this exact bug made the weather fallbacks
+   dead code until 2026-07).
+
+Staleness tiers: fresh (< TTL) → servable-stale (< 2×TTL) → very stale
+(evicted by the hourly cleanup goroutine started in `cmd/server/main.go`).
 
 The cache is in-memory JSON (TTL-based), so any value must be JSON-serializable
 (this is why `nws.Alert` uses exported fields). TTLs: API data ~5–15m,
@@ -45,10 +52,22 @@ stay within the monthly API budget — adding monitored roads increases that loa
 ## Region-wide incidents (`incidents.go`)
 
 Surfaces the same Caltrans/CHP data as road alerts, but as a flat list scoped by
-a configured bounding box (`roads.incidentAreas`) instead of per-route. It is
-intentionally **not** AI-enhanced — region-wide volume would be too costly — so
-parsing of log number / type / location / time is done structurally from the KML
+a configured bounding box (`roads.incidentAreas`) instead of per-route. Parsing
+of log number / type / location / time is done structurally from the KML
 description. See `internal/clients/CLAUDE.md` for the 2026 feed-format caveat.
+
+**Every incident is AI-enhanced** (`enhanceIncident`), via the same
+content-hash 24h cache as road alerts (`enhanceRawAlert` in `roads.go` —
+shared, so an incident that is also a road alert costs one OpenAI call).
+`severity` is driven by the model's impact assessment (`severityFromImpact`,
+mirroring the roads mapping); the keyword heuristic (`incidentSeverity`) is
+only the placeholder until enhancement lands. Cache-miss calls are capped at
+`maxIncidentEnhancementsPerRefresh` per refresh to bound latency/cost;
+deferred incidents pick up enhancement on a later refresh. Enhancement is
+strictly additive: failures keep the structural fields and heuristic severity.
+The model is `openai.model` in prefab.yaml (gpt-5-mini); the enhancer handles
+gpt-5-family param differences (no temperature, `max_completion_tokens`,
+`reasoning_effort=low`) — see `internal/lib/alerts/enhancer.go`.
 
 Each incident normalizes to the same primitives the other APIs use (shared
 `AlertType`/`AlertSeverity` enums, `Coordinates`, `google.protobuf.Timestamp`,
@@ -65,9 +84,14 @@ no dispatch time, so their `started` is null (expected, not a bug).
 
 ## Weather alerts & fire weather
 
-`ListWeatherAlerts` returns authoritative **NWS** zone alerts first (source
-`NWS`) followed by OpenWeatherMap alerts (source `OPENWEATHERMAP`), so clients
-can prefer NWS. `?zones=CAZ064,...` filters to NWS alerts in those zones.
+`ListWeatherAlerts` returns authoritative **NWS** zone alerts only (source
+`NWS`). `?zones=CAZ064,...` filters to alerts in those zones. Per-location
+`weather_data[].alerts` are the NWS alerts for that location's configured
+`zone` (see `nwsAlertsForZone` in `weather_nws.go`). OpenWeatherMap One Call
+alerts were removed 2026-07-04: for US locations they duplicate NWS, and the
+One Call 3.0 endpoint's 1,000 calls/day cap was being exceeded — don't
+reintroduce per-location One Call fetches. OpenWeather now serves current
+conditions only (`/data/2.5/weather`, one call per location per refresh).
 
 `fire_weather` is **region-wide** (NWS fire-weather products are issued by zone,
 not point), so it lives on the response (`ListWeatherResponse` /

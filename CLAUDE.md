@@ -162,8 +162,14 @@ export PORT=8181
 
 **OpenWeatherMap API**:
 - Rate limit: 60 calls/minute (free tier)
-- Current weather: `/data/2.5/weather`
-- Weather alerts: `/data/3.0/onecall`
+- Current weather: `/data/2.5/weather` — the ONLY endpoint the server uses.
+  One call per location per `weather.refreshInterval` (15m), request-driven:
+  7 locations ≈ 672 calls/day worst case.
+- **Do NOT use `/data/3.0/onecall`** (One Call 3.0): it has a separate 1,000
+  calls/day free cap that per-location alert fetching blew through (2026-07).
+  For US locations its alerts are relabeled NWS data — alerts come from NWS
+  directly instead (each `weather.locations` entry carries a `zone`). The
+  client method survives only for the `test-weather` diagnostic CLI.
 
 **Caltrans KML Feeds**:
 - Chain control status, lane closures, CHP incidents
@@ -200,7 +206,7 @@ breaking change with a migration note.
 - `GET /api/v1/roads` - List all configured roads with current conditions
 - `GET /api/v1/roads/{road_id}` - Get specific road details
 - `GET /api/v1/metrics` - Alert processing metrics (currently returns 501 Unimplemented; not yet wired to real counters)
-- `GET /api/v1/incidents/{area}` - Region-wide CHP/Caltrans incident feed for an area, e.g. `/api/v1/incidents/mother-lode` (flat, not route-scoped; areas configured under `roads.incidentAreas` in `prefab.yaml`)
+- `GET /api/v1/incidents/{area}` - Region-wide CHP/Caltrans incident feed for an area, e.g. `/api/v1/incidents/mother-lode` (flat, not route-scoped; areas configured under `roads.incidentAreas` in `prefab.yaml`). All incidents are AI-enhanced (`description`, `condensed_summary`, `impact`, `metadata`), with `severity` driven by the model's impact assessment; keyword-heuristic severity is only the pre-enhancement placeholder.
 - Returns: Road status, status explanations, traffic conditions, chain controls, AI-enhanced alerts
 
 **Key API Response Fields**:
@@ -214,9 +220,10 @@ breaking change with a migration note.
 **Weather Service** (`/api/v1/weather`):
 - `GET /api/v1/weather` - Current weather for all configured locations (each includes a `fire_weather` classification)
 - `GET /api/v1/weather/{location_id}` - Get specific location weather
-- `GET /api/v1/weather/alerts` - Active weather alerts (authoritative NWS zone alerts + OpenWeatherMap, each tagged with `source`)
-- `GET /api/v1/weather/alerts?zones=CAZ064,CAZ065` - Filter to NWS alerts in specific forecast zones
+- `GET /api/v1/weather/alerts` - Active weather alerts (authoritative NWS zone alerts, `source: NWS`; OpenWeatherMap alerts removed 2026-07-04)
+- `GET /api/v1/weather/alerts?zones=CAZ064,CAZ065` - Filter to alerts in specific forecast zones
 - Returns: Temperature, conditions, visibility, wind, alerts, fire-weather state
+- Per-location `alerts` are the NWS alerts for the location's configured `zone` (prefab.yaml)
 
 **Fire-weather** (`weather_data[].fire_weather`): `state` escalates `normal` →
 `elevated` (Fire Weather Watch) → `red-flag` (Red Flag Warning), derived only
@@ -253,8 +260,8 @@ hand-built GeoJSON/JSON (not grpc-gateway), so field names are `snake_case`.
 **Response Time Targets**:
 - Weather API: < 1 second
 - Roads API: < 2 seconds  
-- Cache refresh: 5-minute intervals
-- Stale data threshold: 10 minutes
+- Cache refresh: 15-minute intervals for weather (API-budget driven), 5–15 min for road feeds
+- Stale data: cache serves stale up to 2× the refresh interval on upstream failure
 
 **Logging**:
 - Structured JSON logs via Prefab framework
@@ -281,9 +288,12 @@ hand-built GeoJSON/JSON (not grpc-gateway), so field names are `snake_case`.
 4. Verify new road appears in `/api/v1/roads` response
 
 **Adding New Weather Locations**:
-1. Update `prefab.yaml` weather locations section
+1. Update `prefab.yaml` weather locations section, including the `zone` field
+   (the NWS forecast zone containing the location — must also be listed in
+   `weather.nws.zones`, or the location gets no alerts)
 2. Test with `./bin/test-weather` using new coordinates
 3. Restart server and verify in `/api/v1/weather` response
+4. Note each location adds one `/data/2.5/weather` call per refresh interval
 
 ## AI Enhancement System
 
