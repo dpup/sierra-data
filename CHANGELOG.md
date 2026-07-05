@@ -115,7 +115,8 @@ changes (each also applies to the new `/v1/.../map/{layer}.geojson`):
   `condensed_summary` and the long detail text moves to `description` (previously
   `headline` held the long text and `description` was empty). This applies to both
   the `/api/v1/hazards/{area}/road_incident.geojson` envelope and the `/v1` event
-  (`headline` short, `summary`/`description` long). Unenhanced incidents (no
+  (`headline` short, `description` long; `summary` stays empty — road incidents
+  have no distinct middle tier). Unenhanced incidents (no
   condensed summary) keep the detail text as the `headline`. Consuming sites that
   render `headline` as a card title now get a proper short line; the full text is
   under `description`. On deploy, existing stored incidents self-heal to the new

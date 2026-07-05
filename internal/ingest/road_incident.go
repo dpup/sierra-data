@@ -131,17 +131,18 @@ func (n *RoadIncidentNormalizer) buildEvent(in *api.Incident) *gridv1.Event {
 	}
 
 	// Field roles (grid model §3): headline is the short, card-renderable line;
-	// summary/description hold the longer prose. The AI pipeline produces a short
-	// condensed_summary and a long description, so the short one is the headline
-	// and the long one is the summary/description. When there is no condensed
-	// summary (an unenhanced incident), the detail text is the only text we have,
-	// so it becomes the headline and there is no separate longer form.
+	// description is the long form. The AI pipeline gives us exactly two texts —
+	// a short condensed_summary and a long description — so the short one is the
+	// headline and the long one is the description. There is no distinct middle
+	// tier, so summary stays empty for road incidents (it is populated for layers
+	// that have one, e.g. weather alerts). When there is no condensed summary (an
+	// unenhanced incident) the detail text is the only text, so it is the headline
+	// and description stays empty.
 	short := in.GetCondensedSummary()
 	long := in.GetDescription()
 	headline := short
-	var summary, description string
+	description := ""
 	if short != "" {
-		summary = long
 		description = long
 	} else {
 		headline = long
@@ -156,7 +157,6 @@ func (n *RoadIncidentNormalizer) buildEvent(in *api.Incident) *gridv1.Event {
 	)
 	category := strings.ToLower(strings.TrimPrefix(in.GetType().String(), "ALERT_TYPE_"))
 	ev.Category = category
-	ev.Summary = summary
 	ev.Description = description
 	ev.AreaLabel = in.GetLocationDescription()
 	ev.Geometry = GeometryFromPoint(loc.GetLatitude(), loc.GetLongitude())
