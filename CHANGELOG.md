@@ -12,6 +12,19 @@ same binary over the same store (see the 2026-07-05 entry and its migration plan
 
 ## 2026-07-06
 
+### Changed — SQLite journal mode is configurable; default TRUNCATE (EFS-safe)
+
+The grid store's journal mode is now `grid.journalMode` (`PF__GRID__JOURNALMODE`),
+defaulting to **TRUNCATE** — which works on both local disk and a network
+filesystem (NFS/EFS). WAL (the previous hardcoded mode) is faster for concurrent
+reads but its memory-mapped `-shm` sidecar does **not** work over NFS/EFS, so it
+is now opt-in and only for a real local disk. Rollback modes (TRUNCATE/DELETE/
+PERSIST) run with `synchronous=FULL` (crash-safe history); WAL keeps NORMAL. Ops:
+mount the persistent volume at the `/data` directory (not the file); a single
+writer + single running task is required. Deploying on EFS needs no config change
+(TRUNCATE is the default); WAL on local disk is `PF__GRID__JOURNALMODE=WAL`.
+
+
 ### Added — AI enhancement transparency: model I/O on `Event.enhancement`
 
 `Event.enhancement` now carries `request` (the incident-specific prompt sent to

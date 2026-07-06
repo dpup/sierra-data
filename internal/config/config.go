@@ -25,7 +25,11 @@ type Config struct {
 // (production overrides via PF__GRID__DBPATH); Sources keys are source
 // registry ids ("usgs", "nws", ...) — a poller may span several.
 type GridConfig struct {
-	DBPath      string                  `koanf:"dbPath"`
+	DBPath string `koanf:"dbPath"`
+	// JournalMode is the SQLite journal mode. Default TRUNCATE (safe on both
+	// local disk and a network filesystem). Use WAL only on a real local disk —
+	// its memory-mapped -shm file does NOT work over NFS/EFS. Empty => TRUNCATE.
+	JournalMode string                  `koanf:"journalMode"`
 	Enhancement GridEnhancement         `koanf:"enhancement"`
 	Sources     map[string]SourceTuning `koanf:"sources"`
 }

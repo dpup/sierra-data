@@ -94,9 +94,32 @@ disagree.
 
 Writes go through `inTx` (or `TouchSeen`), which take the store mutex — the ingest
 scheduler is the **only** writer, serialized. Reads go straight to the connection
-pool; WAL lets them run alongside the writer. `matchPlaces` reads the `places`
-table inside the write transaction (consistent snapshot). Do not add a second
-writer; if you need one, it must also hold `mu`.
+pool and serialize against the writer's short commit via `busy_timeout(5000)`
+(the default TRUNCATE rollback journal has no WAL MVCC, so a reader waits up to
+5s for a commit rather than erroring `SQLITE_BUSY`). Keep write transactions
+small — one `UpsertEvent` per tx — so that window stays tiny; this is why
+`matchPlaces` is cache-backed. `matchPlaces` reads the `places` table inside the
+write transaction (consistent snapshot). Do not add a second writer; if you need
+one, it must also hold `mu`.
+
+## Journal mode / filesystem (`WithJournalMode`)
+
+`Open` takes a journal mode; default **TRUNCATE**, config `grid.journalMode`
+(`PF__GRID__JOURNALMODE`). It is whitelisted and paired with a `synchronous`
+level in `journalModeSynchronous`:
+
+- **TRUNCATE / DELETE / PERSIST** (rollback journals) → `synchronous=FULL`. No
+  memory-mapped `-shm` file, so they work over a **network filesystem (NFS/EFS)**
+  — which is why this is the default (prod runs on EFS). TRUNCATE zero-truncates
+  the `-journal` instead of unlinking it (one fewer NFS metadata op per commit).
+  FULL keeps the rollback journal crash-safe (NORMAL can corrupt a rollback
+  journal on power loss).
+- **WAL** → `synchronous=NORMAL`. Faster concurrent reads, but the `-shm` is
+  memory-mapped and **breaks over NFS/EFS** — use it only on a real local disk.
+
+The store is a rehydrate-able cache (restart re-ingests from upstreams), so the
+worst case of a bad journal choice is lost history, not a hard outage — but
+don't rely on that: match the mode to the filesystem.
 
 ## Migration ladder
 

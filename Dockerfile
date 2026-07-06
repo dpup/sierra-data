@@ -57,9 +57,13 @@ COPY --from=go-builder /app/prefab.yaml /app/prefab.yaml
 # Copy the generated OpenAPI specifications
 COPY --from=go-builder /app/api/v1/*.swagger.json /app/api/v1/
 
-# Persistent grid event store (SQLite). /data is a volume so events,
-# revisions, and source health survive container replacement; prod mounts
-# EBS here. Owned by ersn so the WAL sidecar files can be created.
+# Persistent grid event store (SQLite). /data is a volume so events, revisions,
+# and source health survive container replacement; prod mounts a persistent
+# filesystem (EFS) here. The store defaults to the TRUNCATE journal mode, which
+# works over NFS/EFS (WAL's -shm is memory-mapped and does not) — override with
+# PF__GRID__JOURNALMODE if the mount is a real local disk. Owned by ersn so the
+# db + rollback journal can be created (the runtime mount must also be writable
+# by this user — see docs when provisioning the volume).
 RUN mkdir -p /data && chown ersn:ersn /data
 VOLUME ["/data"]
 ENV PF__GRID__DBPATH=/data/grid.db

@@ -3,8 +3,11 @@
 //
 // The proto blob is canonical — scalar columns exist only as query indexes and
 // every read path rehydrates from the blob. Writes are serialized through an
-// internal mutex (single-writer discipline: the ingest scheduler); reads run
-// concurrently under WAL.
+// internal mutex (single-writer discipline: the ingest scheduler); reads go to
+// the pool and serialize against the writer's brief commit via busy_timeout
+// (the default TRUNCATE rollback journal has no WAL MVCC). The journal mode is
+// configurable (WithJournalMode) so the DB can live on a network filesystem
+// (NFS/EFS), where WAL's memory-mapped -shm file does not work.
 package store
 
 import (
@@ -15,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -43,8 +47,9 @@ var migrations = []string{schemaV1, migrationV2}
 // matches. Callers map it to a 404.
 var ErrNotFound = errors.New("store: not found")
 
-// Store wraps the SQLite database. Safe for concurrent use: writes take mu,
-// reads go straight to the pool (WAL allows readers alongside the writer).
+// Store wraps the SQLite database. Safe for concurrent use: writes take mu and
+// run one at a time; reads go straight to the pool and serialize against the
+// writer's short commit via busy_timeout.
 type Store struct {
 	db *sql.DB
 	mu sync.Mutex // single-writer discipline
@@ -66,16 +71,66 @@ type parsedPlace struct {
 	polygonal                      bool
 }
 
+// Option configures Open.
+type Option func(*openConfig)
+
+type openConfig struct{ journalMode string }
+
+// journalModeSynchronous maps a journal mode to the synchronous level that
+// keeps it crash-safe. Whitelisted (also guards against DSN injection): only
+// these values are accepted.
+//   - WAL: NORMAL is safe — a crash can only lose the last transaction, never
+//     corrupt. Needs a real local disk (the -shm is memory-mapped, so WAL does
+//     NOT work over NFS/EFS).
+//   - DELETE/TRUNCATE/PERSIST (rollback journals): FULL, so the journal is
+//     durably synced before the DB pages are overwritten — a rollback journal
+//     with only NORMAL can corrupt on power loss. These modes have no shared-
+//     memory file and work over a network filesystem (NFS/EFS). TRUNCATE is
+//     preferred there: it zero-truncates the journal instead of unlinking it,
+//     one fewer metadata round-trip per commit.
+var journalModeSynchronous = map[string]string{
+	"WAL":      "NORMAL",
+	"DELETE":   "FULL",
+	"TRUNCATE": "FULL",
+	"PERSIST":  "FULL",
+}
+
+// WithJournalMode selects the SQLite journal mode (default TRUNCATE — safe on
+// both local disk and a network filesystem). Use WAL only on a real local disk.
+func WithJournalMode(mode string) Option {
+	return func(c *openConfig) {
+		if m := strings.ToUpper(strings.TrimSpace(mode)); m != "" {
+			c.journalMode = m
+		}
+	}
+}
+
 // Open opens (creating if needed) the database at path, applies pragmas via
 // the DSN, and runs any pending migrations. The parent directory is created.
-func Open(path string) (*Store, error) {
+// The default journal mode is TRUNCATE (works on local disk AND NFS/EFS);
+// override with WithJournalMode.
+func Open(path string, opts ...Option) (*Store, error) {
+	cfg := openConfig{journalMode: "TRUNCATE"}
+	for _, o := range opts {
+		o(&cfg)
+	}
+	sync, ok := journalModeSynchronous[cfg.journalMode]
+	if !ok {
+		return nil, fmt.Errorf("store: unsupported journal_mode %q (want one of WAL, DELETE, TRUNCATE, PERSIST)", cfg.journalMode)
+	}
+
 	if dir := filepath.Dir(path); dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return nil, fmt.Errorf("store: creating db dir: %w", err)
 		}
 	}
-	// _pragma entries apply to every pooled connection.
-	dsn := "file:" + path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_pragma=synchronous(NORMAL)"
+	// _pragma entries apply to every pooled connection. busy_timeout absorbs the
+	// reader/writer serialization of a rollback journal (no WAL MVCC): a reader
+	// waits up to this long for the single writer's brief commit rather than
+	// erroring SQLITE_BUSY.
+	dsn := fmt.Sprintf(
+		"file:%s?_pragma=busy_timeout(5000)&_pragma=journal_mode(%s)&_pragma=foreign_keys(1)&_pragma=synchronous(%s)",
+		path, cfg.journalMode, sync)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("store: open %s: %w", path, err)

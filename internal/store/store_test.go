@@ -208,3 +208,18 @@ func TestUpsertEventRequiresSeededSource(t *testing.T) {
 		testEvent("usgs:q1", gridv1.Severity_INFO, gridv1.EventStatus_ACTIVE, "x"))
 	assert.Error(t, err)
 }
+
+func TestOpenJournalMode(t *testing.T) {
+	// Default (TRUNCATE) and an explicit rollback mode both open and migrate;
+	// an unsupported mode fails fast rather than silently falling back.
+	for _, m := range []string{"", "TRUNCATE", "DELETE", "wal", "PERSIST"} {
+		s, err := Open(filepath.Join(t.TempDir(), "grid.db"), WithJournalMode(m))
+		if err != nil {
+			t.Fatalf("Open(journalMode=%q) failed: %v", m, err)
+		}
+		s.Close()
+	}
+	if _, err := Open(filepath.Join(t.TempDir(), "grid.db"), WithJournalMode("BOGUS")); err == nil {
+		t.Fatal("Open with an unsupported journal mode must error")
+	}
+}
