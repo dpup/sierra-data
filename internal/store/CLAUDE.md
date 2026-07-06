@@ -117,9 +117,19 @@ level in `journalModeSynchronous`:
 - **WAL** → `synchronous=NORMAL`. Faster concurrent reads, but the `-shm` is
   memory-mapped and **breaks over NFS/EFS** — use it only on a real local disk.
 
-The store is a rehydrate-able cache (restart re-ingests from upstreams), so the
-worst case of a bad journal choice is lost history, not a hard outage — but
-don't rely on that: match the mode to the filesystem.
+**The store is a system of record, not a rehydrate-able cache.** A clean restart
+with the DB intact rehydrates everything (that is the point of persistence). But
+if the DB is *lost*, only the **current active snapshot** rebuilds — the pollers
+re-fetch the upstreams' present state and re-insert those events (as revision 1,
+freshly ingested). Everything else is **irreplaceable**, because most sources are
+active-only and ephemeral (CAL FIRE `inactive=false`, Cal OES active-zones,
+CHP/Caltrans current incidents, NWS active alerts): the full revision history,
+every RESOLVED/EXPIRED event (things that already ended are gone from the feeds),
+and the true first-seen times / revision counts of even still-active events
+cannot be recovered. So the durability choices here matter — hence FULL on the
+rollback journal — and the volume deserves real backups, not "it'll just
+rebuild." Match the journal mode to the filesystem, and treat DB loss as data
+loss of history, not a cache miss.
 
 ## Migration ladder
 
