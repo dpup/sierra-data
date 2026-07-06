@@ -217,6 +217,13 @@ hazards:
   areas:
     - id: "ebbetts-pass"
       name: "Ebbetts Pass Corridor"
+      # The SIERRA Grid team's coverage footprint deliberately OVERLAPS SEVERAL
+      # COUNTIES — that's why an AREA is its own place kind, not a county. This
+      # bbox is a coarse first cut: it's roughly square, reaching up past San
+      # Andreas to Jackson (Amador) and almost down to Farmington (San Joaquin),
+      # so it spills beyond the Calaveras+Tuolumne core. Fine for now; a hand-
+      # drawn polygon boundary (checked into data/places/, like the county
+      # polygons, and referenced here) is the intended cleaner-boundary refinement.
       bounds:
         minLatitude: 37.8
         maxLatitude: 38.55
