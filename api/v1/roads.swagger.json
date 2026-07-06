@@ -539,6 +539,14 @@
         "chainControlInfo": {
           "$ref": "#/definitions/v1ChainControlInfo",
           "title": "Detailed chain control information"
+        },
+        "polyline": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1Coordinates"
+          },
+          "description": "Ordered route path — the decoded Google Routes polyline following the actual\nhighway. Falls back to a straight [origin, destination] line when the routing\ncall is unavailable (e.g. no API key). Empty only if the road can't be built."
         }
       },
       "title": "Data models"

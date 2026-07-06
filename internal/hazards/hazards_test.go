@@ -203,3 +203,69 @@ func TestRoadIncidents_Reprojection(t *testing.T) {
 		t.Errorf("status = %q", f.Properties.Status)
 	}
 }
+
+// TestRoadSegments_FollowsPolyline verifies the road_segment layer draws along
+// the road's decoded polyline (Road.polyline) when present, and falls back to a
+// straight origin->destination line when it is absent.
+func TestRoadSegments_FollowsPolyline(t *testing.T) {
+	area := config.HazardArea{Bounds: config.GeoBounds{
+		MinLatitude: 37, MaxLatitude: 39, MinLongitude: -121, MaxLongitude: -120,
+	}}
+	cfg := &config.Config{Roads: config.RoadsConfig{MonitoredRoads: []config.MonitoredRoad{{
+		ID: "hwy4-x", Name: "Hwy 4", Section: "A to B",
+		Origin:      config.Coordinates{Latitude: 38.0, Longitude: -120.5},
+		Destination: config.Coordinates{Latitude: 38.2, Longitude: -120.3},
+	}}}}
+
+	lineCoords := func(t *testing.T, f Feature) [][]float64 {
+		t.Helper()
+		if f.Geometry == nil || f.Geometry.Type != "LineString" {
+			t.Fatalf("geometry = %+v, want LineString", f.Geometry)
+		}
+		c, ok := f.Geometry.Coordinates.([][]float64)
+		if !ok {
+			t.Fatalf("coordinates type = %T, want [][]float64", f.Geometry.Coordinates)
+		}
+		return c
+	}
+
+	t.Run("uses the road polyline when present", func(t *testing.T) {
+		s := &Service{cfg: cfg, roads: fakeRoads{roads: []*api.Road{{
+			Id: "hwy4-x",
+			Polyline: []*api.Coordinates{
+				{Latitude: 38.0, Longitude: -120.5},
+				{Latitude: 38.1, Longitude: -120.42}, // interior point a straight line wouldn't have
+				{Latitude: 38.2, Longitude: -120.3},
+			},
+		}}}}
+		feats, err := s.roadSegments(context.Background(), area)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(feats) != 1 {
+			t.Fatalf("got %d features, want 1", len(feats))
+		}
+		c := lineCoords(t, feats[0])
+		if len(c) != 3 {
+			t.Fatalf("got %d coords, want the 3-point polyline (a straight line would be 2)", len(c))
+		}
+		// GeoJSON is [lng, lat]; the middle vertex is the polyline's interior point.
+		if c[1][1] <= 38.0 || c[1][1] >= 38.2 {
+			t.Errorf("middle coord lat = %v, want an interior polyline point", c[1][1])
+		}
+	})
+
+	t.Run("falls back to origin/destination without a polyline", func(t *testing.T) {
+		s := &Service{cfg: cfg, roads: fakeRoads{roads: []*api.Road{{Id: "hwy4-x"}}}}
+		feats, err := s.roadSegments(context.Background(), area)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(feats) != 1 {
+			t.Fatalf("got %d features, want 1", len(feats))
+		}
+		if c := lineCoords(t, feats[0]); len(c) != 2 {
+			t.Errorf("got %d coords, want 2 (straight origin->destination)", len(c))
+		}
+	})
+}

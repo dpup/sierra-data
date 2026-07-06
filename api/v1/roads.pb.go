@@ -980,8 +980,12 @@ type Road struct {
 	ChainControl      ChainControlStatus     `protobuf:"varint,10,opt,name=chain_control,json=chainControl,proto3,enum=api.v1.ChainControlStatus" json:"chain_control,omitempty"`      // Chain control requirements (legacy, use chain_control_info)
 	Alerts            []*RoadAlert           `protobuf:"bytes,11,rep,name=alerts,proto3" json:"alerts,omitempty"`                                                                      // Combined from multiple sources
 	ChainControlInfo  *ChainControlInfo      `protobuf:"bytes,12,opt,name=chain_control_info,json=chainControlInfo,proto3" json:"chain_control_info,omitempty"`                        // Detailed chain control information
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// Ordered route path — the decoded Google Routes polyline following the actual
+	// highway. Falls back to a straight [origin, destination] line when the routing
+	// call is unavailable (e.g. no API key). Empty only if the road can't be built.
+	Polyline      []*Coordinates `protobuf:"bytes,13,rep,name=polyline,proto3" json:"polyline,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Road) Reset() {
@@ -1094,6 +1098,13 @@ func (x *Road) GetAlerts() []*RoadAlert {
 func (x *Road) GetChainControlInfo() *ChainControlInfo {
 	if x != nil {
 		return x.ChainControlInfo
+	}
+	return nil
+}
+
+func (x *Road) GetPolyline() []*Coordinates {
+	if x != nil {
+		return x.Polyline
 	}
 	return nil
 }
@@ -1484,7 +1495,7 @@ const file_roads_proto_rawDesc = "" +
 	"\x0ffiltered_alerts\x18\x02 \x01(\x03R\x0efilteredAlerts\x12'\n" +
 	"\x0fenhanced_alerts\x18\x03 \x01(\x03R\x0eenhancedAlerts\x121\n" +
 	"\x14enhancement_failures\x18\x04 \x01(\x03R\x13enhancementFailures\x123\n" +
-	"\x16avg_processing_time_ms\x18\x05 \x01(\x01R\x13avgProcessingTimeMs\"\x88\x04\n" +
+	"\x16avg_processing_time_ms\x18\x05 \x01(\x01R\x13avgProcessingTimeMs\"\xb9\x04\n" +
 	"\x04Road\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
@@ -1499,7 +1510,8 @@ const file_roads_proto_rawDesc = "" +
 	"\rchain_control\x18\n" +
 	" \x01(\x0e2\x1a.api.v1.ChainControlStatusR\fchainControl\x12)\n" +
 	"\x06alerts\x18\v \x03(\v2\x11.api.v1.RoadAlertR\x06alerts\x12F\n" +
-	"\x12chain_control_info\x18\f \x01(\v2\x18.api.v1.ChainControlInfoR\x10chainControlInfo\"\xa5\x02\n" +
+	"\x12chain_control_info\x18\f \x01(\v2\x18.api.v1.ChainControlInfoR\x10chainControlInfo\x12/\n" +
+	"\bpolyline\x18\r \x03(\v2\x13.api.v1.CoordinatesR\bpolyline\"\xa5\x02\n" +
 	"\x10ChainControlInfo\x12/\n" +
 	"\x05level\x18\x01 \x01(\x0e2\x19.api.v1.ChainControlLevelR\x05level\x12#\n" +
 	"\rlocation_name\x18\x02 \x01(\tR\flocationName\x12\x1a\n" +
@@ -1651,32 +1663,33 @@ var file_roads_proto_depIdxs = []int32{
 	1,  // 17: api.v1.Road.chain_control:type_name -> api.v1.ChainControlStatus
 	17, // 18: api.v1.Road.alerts:type_name -> api.v1.RoadAlert
 	16, // 19: api.v1.Road.chain_control_info:type_name -> api.v1.ChainControlInfo
-	2,  // 20: api.v1.ChainControlInfo.level:type_name -> api.v1.ChainControlLevel
-	21, // 21: api.v1.ChainControlInfo.effective_time:type_name -> google.protobuf.Timestamp
-	4,  // 22: api.v1.RoadAlert.type:type_name -> api.v1.AlertType
-	22, // 23: api.v1.RoadAlert.severity:type_name -> api.v1.AlertSeverity
-	5,  // 24: api.v1.RoadAlert.classification:type_name -> api.v1.AlertClassification
-	21, // 25: api.v1.RoadAlert.start_time:type_name -> google.protobuf.Timestamp
-	21, // 26: api.v1.RoadAlert.end_time:type_name -> google.protobuf.Timestamp
-	21, // 27: api.v1.RoadAlert.last_updated:type_name -> google.protobuf.Timestamp
-	23, // 28: api.v1.RoadAlert.location:type_name -> api.v1.Coordinates
-	25, // 29: api.v1.RoadAlert.impact:type_name -> api.v1.AlertImpact
-	26, // 30: api.v1.RoadAlert.duration:type_name -> api.v1.AlertDuration
-	21, // 31: api.v1.RoadAlert.time_reported:type_name -> google.protobuf.Timestamp
-	20, // 32: api.v1.RoadAlert.metadata:type_name -> api.v1.RoadAlert.MetadataEntry
-	6,  // 33: api.v1.RoadsService.ListRoads:input_type -> api.v1.ListRoadsRequest
-	7,  // 34: api.v1.RoadsService.GetRoad:input_type -> api.v1.GetRoadRequest
-	8,  // 35: api.v1.RoadsService.GetProcessingMetrics:input_type -> api.v1.GetProcessingMetricsRequest
-	9,  // 36: api.v1.RoadsService.ListIncidents:input_type -> api.v1.ListIncidentsRequest
-	10, // 37: api.v1.RoadsService.ListRoads:output_type -> api.v1.ListRoadsResponse
-	11, // 38: api.v1.RoadsService.GetRoad:output_type -> api.v1.GetRoadResponse
-	14, // 39: api.v1.RoadsService.GetProcessingMetrics:output_type -> api.v1.ProcessingMetrics
-	12, // 40: api.v1.RoadsService.ListIncidents:output_type -> api.v1.ListIncidentsResponse
-	37, // [37:41] is the sub-list for method output_type
-	33, // [33:37] is the sub-list for method input_type
-	33, // [33:33] is the sub-list for extension type_name
-	33, // [33:33] is the sub-list for extension extendee
-	0,  // [0:33] is the sub-list for field type_name
+	23, // 20: api.v1.Road.polyline:type_name -> api.v1.Coordinates
+	2,  // 21: api.v1.ChainControlInfo.level:type_name -> api.v1.ChainControlLevel
+	21, // 22: api.v1.ChainControlInfo.effective_time:type_name -> google.protobuf.Timestamp
+	4,  // 23: api.v1.RoadAlert.type:type_name -> api.v1.AlertType
+	22, // 24: api.v1.RoadAlert.severity:type_name -> api.v1.AlertSeverity
+	5,  // 25: api.v1.RoadAlert.classification:type_name -> api.v1.AlertClassification
+	21, // 26: api.v1.RoadAlert.start_time:type_name -> google.protobuf.Timestamp
+	21, // 27: api.v1.RoadAlert.end_time:type_name -> google.protobuf.Timestamp
+	21, // 28: api.v1.RoadAlert.last_updated:type_name -> google.protobuf.Timestamp
+	23, // 29: api.v1.RoadAlert.location:type_name -> api.v1.Coordinates
+	25, // 30: api.v1.RoadAlert.impact:type_name -> api.v1.AlertImpact
+	26, // 31: api.v1.RoadAlert.duration:type_name -> api.v1.AlertDuration
+	21, // 32: api.v1.RoadAlert.time_reported:type_name -> google.protobuf.Timestamp
+	20, // 33: api.v1.RoadAlert.metadata:type_name -> api.v1.RoadAlert.MetadataEntry
+	6,  // 34: api.v1.RoadsService.ListRoads:input_type -> api.v1.ListRoadsRequest
+	7,  // 35: api.v1.RoadsService.GetRoad:input_type -> api.v1.GetRoadRequest
+	8,  // 36: api.v1.RoadsService.GetProcessingMetrics:input_type -> api.v1.GetProcessingMetricsRequest
+	9,  // 37: api.v1.RoadsService.ListIncidents:input_type -> api.v1.ListIncidentsRequest
+	10, // 38: api.v1.RoadsService.ListRoads:output_type -> api.v1.ListRoadsResponse
+	11, // 39: api.v1.RoadsService.GetRoad:output_type -> api.v1.GetRoadResponse
+	14, // 40: api.v1.RoadsService.GetProcessingMetrics:output_type -> api.v1.ProcessingMetrics
+	12, // 41: api.v1.RoadsService.ListIncidents:output_type -> api.v1.ListIncidentsResponse
+	38, // [38:42] is the sub-list for method output_type
+	34, // [34:38] is the sub-list for method input_type
+	34, // [34:34] is the sub-list for extension type_name
+	34, // [34:34] is the sub-list for extension extendee
+	0,  // [0:34] is the sub-list for field type_name
 }
 
 func init() { file_roads_proto_init() }

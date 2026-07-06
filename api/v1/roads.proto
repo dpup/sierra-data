@@ -165,6 +165,10 @@ message Road {
   ChainControlStatus chain_control = 10; // Chain control requirements (legacy, use chain_control_info)
   repeated RoadAlert alerts = 11;        // Combined from multiple sources
   ChainControlInfo chain_control_info = 12; // Detailed chain control information
+  // Ordered route path — the decoded Google Routes polyline following the actual
+  // highway. Falls back to a straight [origin, destination] line when the routing
+  // call is unavailable (e.g. no API key). Empty only if the road can't be built.
+  repeated Coordinates polyline = 13;
 }
 
 // ChainControlInfo provides detailed chain control status for a road

@@ -12,6 +12,22 @@ same binary over the same store (see the 2026-07-05 entry and its migration plan
 
 ## 2026-07-06
 
+### Added — road geometry: `Road.polyline`, and `road_segment` follows the highway
+
+`GET /api/v1/roads` (and `/v1/roads`) now include a `polyline` on each road: an
+ordered array of `{latitude, longitude}` tracing the actual route, decoded from
+the Google Routes polyline we already request (Compute Routes **Pro** SKU — no
+billing change). It falls back to a straight `[origin, destination]` pair when
+the routing call is unavailable (e.g. no API key). Additive, non-breaking.
+
+Consequently the **`road_segment` map layer** — `/api/v1/hazards/{area}/road_segment.geojson`
+and `/v1/places/{place}/map/road_segment.geojson` — now draws each segment along
+that polyline instead of a straight origin→destination line, so corridors follow
+the highway. Same `LineString` geometry type, just more vertices; a straight
+2-point line is still emitted as the fallback. (The corridor *place* geometry in
+`/v1/places` is seeded statically and remains the 2-point line for now.)
+
+
 ### Changed — coverage area renamed `calaveras` → `ebbetts-pass` (**breaking** for `/api/v1` hazard URLs)
 
 The one configured coverage area was mis-named "Calaveras County" (slug `calaveras`)

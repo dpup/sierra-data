@@ -582,10 +582,26 @@ func (s *Service) roadSegments(ctx context.Context, area config.HazardArea) ([]F
 			!area.Bounds.Contains(mr.Destination.Latitude, mr.Destination.Longitude) {
 			continue
 		}
-		geom := LineStringGeom([]LatLng{
-			{Lat: mr.Origin.Latitude, Lng: mr.Origin.Longitude},
-			{Lat: mr.Destination.Latitude, Lng: mr.Destination.Longitude},
-		})
+		rd := byID[mr.ID]
+
+		// Draw the segment along the actual route (the decoded Google polyline
+		// exposed on Road.polyline) so it follows the highway; fall back to a
+		// straight origin→destination line when the polyline is unavailable.
+		var geom *Geometry
+		if rd != nil && len(rd.GetPolyline()) >= 2 {
+			pts := make([]LatLng, len(rd.GetPolyline()))
+			for i, c := range rd.GetPolyline() {
+				pts[i] = LatLng{Lat: c.GetLatitude(), Lng: c.GetLongitude()}
+			}
+			geom = LineStringGeom(pts)
+		}
+		if geom == nil {
+			geom = LineStringGeom([]LatLng{
+				{Lat: mr.Origin.Latitude, Lng: mr.Origin.Longitude},
+				{Lat: mr.Destination.Latitude, Lng: mr.Destination.Longitude},
+			})
+		}
+
 		p := Properties{
 			ID:        "road:" + mr.ID,
 			Layer:     LayerRoadSegment,
@@ -596,7 +612,7 @@ func (s *Service) roadSegments(ctx context.Context, area config.HazardArea) ([]F
 			Road:      &RoadProps{RoadID: mr.ID},
 		}
 		sev := SevInfo
-		if rd := byID[mr.ID]; rd != nil {
+		if rd != nil {
 			p.Status = strings.ToLower(strings.TrimPrefix(rd.GetStatus().String(), "ROAD_STATUS_"))
 			p.Road.Congestion = strings.TrimPrefix(rd.GetCongestionLevel().String(), "CONGESTION_LEVEL_")
 			p.Road.DelayMinutes = i32ptr(rd.GetDelayMinutes())

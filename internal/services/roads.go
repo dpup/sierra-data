@@ -470,6 +470,14 @@ func (s *RoadsService) buildRoadFromRouteAndAlerts(ctx context.Context, monitore
 	// Convert congestion level to enum
 	congestionEnum := s.mapCongestionLevel(congestionLevel)
 
+	// Expose the route path so map clients can draw the road along the highway,
+	// not as a straight origin→destination line. route.Polyline is the decoded
+	// Google Routes polyline, or the 2-point [origin, destination] fallback.
+	geometry := make([]*api.Coordinates, len(route.Polyline.Points))
+	for i, p := range route.Polyline.Points {
+		geometry[i] = &api.Coordinates{Latitude: p.Latitude, Longitude: p.Longitude}
+	}
+
 	return &api.Road{
 		Id:                monitoredRoad.ID,
 		Name:              monitoredRoad.Name,
@@ -483,6 +491,7 @@ func (s *RoadsService) buildRoadFromRouteAndAlerts(ctx context.Context, monitore
 		ChainControl:      chainControl,
 		Alerts:            enhancedAlerts,
 		ChainControlInfo:  chainControlInfo,
+		Polyline:          geometry,
 	}, nil
 }
 
