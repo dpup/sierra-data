@@ -1,5 +1,5 @@
 # Live Data API Server - Build, Test, and Deployment Tasks
-.PHONY: build test proto clean server tools site site-install site-dev run dev lint fmt docker docker-build docker-run docker-run-dev docker-push docker-clean deploy install help
+.PHONY: build test proto clean server tools site site-install site-dev site-shots run dev lint fmt docker docker-build docker-run docker-run-dev docker-push docker-clean deploy install help
 
 # Go parameters
 GOCMD=go
@@ -77,6 +77,15 @@ site-install:
 # /api calls still need the Go server running — point the dev site at it or proxy.
 site-dev:
 	cd web && npm run dev
+
+# Screenshot + layout-metrics of the running site for spacing/layout diagnosis.
+# Needs Playwright + Chromium (baked into the container via moat.yaml hooks) and
+# a server already running — point BASE_URL at it (default :8190). Set LABEL to
+# tag a run (e.g. before/after) for numeric diffs. Output lands under
+# tools/screenshots/out/<LABEL>/ (git-ignored).
+site-shots:
+	cd tools/screenshots && npm install && \
+		BASE_URL=$(or $(BASE_URL),http://localhost:8190) LABEL=$(or $(LABEL),current) node shots.mjs
 
 # Generate protobuf code
 # Note: googleapis is a proto-only module (no Go code), so we download it explicitly with @latest.
@@ -422,6 +431,7 @@ help:
 	@echo "  proto       - Generate protobuf code"
 	@echo "  site        - Build the static site (Astro, web/ → site/dist; commit the output)"
 	@echo "  site-dev    - Run the Astro dev server (hot reload)"
+	@echo "  site-shots [BASE_URL=url] [LABEL=tag] - Screenshot + layout metrics of a running site (Playwright)"
 	@echo "  clean       - Clean build artifacts"
 	@echo ""
 	@echo "Testing targets:"

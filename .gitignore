@@ -70,6 +70,9 @@ node_modules/
 # purpose — like the generated *.pb.go — so the Docker `go build` stays Node-free.
 web/.astro/
 
+# Screenshot/layout-diagnosis artifacts (tools/screenshots) — regenerated.
+tools/screenshots/out/
+
 # Optional npm cache directory
 .npm
 

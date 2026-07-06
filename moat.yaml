@@ -16,4 +16,14 @@ dependencies:
   - mockgen
   - node
   - node-dev
- 
+hooks:
+  # Playwright + Chromium for headless-browser screenshot / layout testing of
+  # the site (tools/screenshots). Split on purpose:
+  #  - post_build_root installs the OS libraries Chromium needs (apt, needs root)
+  #  - post_build downloads the Chromium binary AS the container user, so it
+  #    lands in moatuser's ~/.cache/ms-playwright where runtime Playwright finds
+  #    it automatically (installing as root would put it under /root).
+  # Pinned to the same minor as tools/screenshots/package.json so the driver and
+  # the downloaded browser build match. Bump both together.
+  post_build_root: npx --yes playwright@1.49 install-deps chromium
+  post_build: npx --yes playwright@1.49 install chromium
