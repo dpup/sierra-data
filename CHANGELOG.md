@@ -24,6 +24,14 @@ returned by `/v1/events/{id}` and `/history`) but **excluded from the content
 hash**, so capturing it never churns revisions. On `/api/v1/incidents`, the same
 I/O is exposed additively as `ai_request` / `ai_response` / `ai_enhanced_at`.
 
+**Opt-in to keep lists lean.** The heavy `request` / `response` strings are
+**omitted by default** and returned only when asked via `?enhancement_io=true`
+(also `1`/`yes`). The lightweight provenance (`model`, `enhanced_at`, `fields` on
+`/v1`; `ai_enhanced_at` on `/api/v1`) is always present. Applies to `/v1/events`,
+`/v1/events/{id}`, `/v1/events/{id}/history`, `/v1/history`, and
+`/api/v1/incidents`. The data site's event-detail page requests it; list views
+and other consumers stay small by default.
+
 ### Added — `/api/v1/incidents[].original_text` (verbatim pre-AI text)
 
 Each incident now carries `original_text`: the raw upstream feed text (CHP CAD

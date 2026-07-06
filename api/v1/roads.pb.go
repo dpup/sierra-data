@@ -475,8 +475,13 @@ func (*GetProcessingMetricsRequest) Descriptor() ([]byte, []int) {
 
 // ListIncidentsRequest selects the configured area whose incidents to return.
 type ListIncidentsRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Area          string                 `protobuf:"bytes,1,opt,name=area,proto3" json:"area,omitempty"` // Area id path param (e.g. "mother-lode"). Unknown id -> 404.
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Area  string                 `protobuf:"bytes,1,opt,name=area,proto3" json:"area,omitempty"` // Area id path param (e.g. "mother-lode"). Unknown id -> 404.
+	// Include the AI model I/O (`ai_request` / `ai_response`) in the response.
+	// Default false — those fields are large, so they are omitted unless asked
+	// for (query param `?enhancement_io=true`). The lightweight `ai_enhanced_at`
+	// provenance is always included.
+	EnhancementIo bool `protobuf:"varint,2,opt,name=enhancement_io,json=enhancementIo,proto3" json:"enhancement_io,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -516,6 +521,13 @@ func (x *ListIncidentsRequest) GetArea() string {
 		return x.Area
 	}
 	return ""
+}
+
+func (x *ListIncidentsRequest) GetEnhancementIo() bool {
+	if x != nil {
+		return x.EnhancementIo
+	}
+	return false
 }
 
 // Response messages
@@ -1427,9 +1439,10 @@ const file_roads_proto_rawDesc = "" +
 	"\x10ListRoadsRequest\")\n" +
 	"\x0eGetRoadRequest\x12\x17\n" +
 	"\aroad_id\x18\x01 \x01(\tR\x06roadId\"\x1d\n" +
-	"\x1bGetProcessingMetricsRequest\"*\n" +
+	"\x1bGetProcessingMetricsRequest\"Q\n" +
 	"\x14ListIncidentsRequest\x12\x12\n" +
-	"\x04area\x18\x01 \x01(\tR\x04area\"v\n" +
+	"\x04area\x18\x01 \x01(\tR\x04area\x12%\n" +
+	"\x0eenhancement_io\x18\x02 \x01(\bR\renhancementIo\"v\n" +
 	"\x11ListRoadsResponse\x12\"\n" +
 	"\x05roads\x18\x01 \x03(\v2\f.api.v1.RoadR\x05roads\x12=\n" +
 	"\flast_updated\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\vlastUpdated\"r\n" +

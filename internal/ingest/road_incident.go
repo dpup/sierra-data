@@ -65,7 +65,9 @@ func (n *RoadIncidentNormalizer) Poll(ctx context.Context, prior Prior) (*PollRe
 		errs   []error
 	)
 	for _, area := range areas {
-		resp, err := n.roads.ListIncidents(ctx, &api.ListIncidentsRequest{Area: area.ID})
+		// EnhancementIo: the store persists the model I/O, so ingest needs it even
+		// though the external /api/v1/incidents response omits it by default.
+		resp, err := n.roads.ListIncidents(ctx, &api.ListIncidentsRequest{Area: area.ID, EnhancementIo: true})
 		if err != nil {
 			errs = append(errs, fmt.Errorf("area %s: %w", area.ID, err))
 			continue

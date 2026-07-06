@@ -81,6 +81,11 @@ message GetProcessingMetricsRequest {}
 // ListIncidentsRequest selects the configured area whose incidents to return.
 message ListIncidentsRequest {
   string area = 1;  // Area id path param (e.g. "mother-lode"). Unknown id -> 404.
+  // Include the AI model I/O (`ai_request` / `ai_response`) in the response.
+  // Default false — those fields are large, so they are omitted unless asked
+  // for (query param `?enhancement_io=true`). The lightweight `ai_enhanced_at`
+  // provenance is always included.
+  bool enhancement_io = 2;
 }
 
 // Response messages

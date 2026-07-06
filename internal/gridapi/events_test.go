@@ -129,6 +129,45 @@ func TestEventByID(t *testing.T) {
 	requireStatus(t, rec, http.StatusNotFound, 5)
 }
 
+func TestEventEnhancementIOOptIn(t *testing.T) {
+	s := newTestService(t)
+
+	type enhEvent struct {
+		Enhancement struct {
+			Model    string `json:"model"`
+			Request  string `json:"request"`
+			Response string `json:"response"`
+		} `json:"enhancement"`
+	}
+
+	// Default: the lightweight provenance is present but the heavy I/O is omitted.
+	rec := get(t, s, "/v1/events/chp:i1")
+	require.Equal(t, http.StatusOK, rec.Code)
+	var def enhEvent
+	decode(t, rec, &def)
+	assert.Equal(t, "gpt-5-mini", def.Enhancement.Model, "lightweight provenance kept")
+	assert.Empty(t, def.Enhancement.Request, "request omitted by default")
+	assert.Empty(t, def.Enhancement.Response, "response omitted by default")
+
+	// Opt in: enhancement_io=true includes the model I/O.
+	rec = get(t, s, "/v1/events/chp:i1?enhancement_io=true")
+	require.Equal(t, http.StatusOK, rec.Code)
+	var full enhEvent
+	decode(t, rec, &full)
+	assert.NotEmpty(t, full.Enhancement.Request, "request included when opted in")
+	assert.NotEmpty(t, full.Enhancement.Response, "response included when opted in")
+
+	// The list endpoint also omits it by default.
+	rec = get(t, s, "/v1/events?status=RESOLVED")
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.NotContains(t, rec.Body.String(), "Parse this traffic incident report",
+		"list responses stay lean by default")
+	rec = get(t, s, "/v1/events?status=RESOLVED&enhancement_io=1")
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), "Parse this traffic incident report",
+		"list includes I/O when opted in")
+}
+
 // revisionList decodes an EventRevisionList body.
 type revisionList struct {
 	Revisions []struct {

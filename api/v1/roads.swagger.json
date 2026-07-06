@@ -50,6 +50,13 @@
             "in": "path",
             "required": true,
             "type": "string"
+          },
+          {
+            "name": "enhancementIo",
+            "description": "Include the AI model I/O (`ai_request` / `ai_response`) in the response.\nDefault false — those fields are large, so they are omitted unless asked\nfor (query param `?enhancement_io=true`). The lightweight `ai_enhanced_at`\nprovenance is always included.",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
           }
         ],
         "tags": [

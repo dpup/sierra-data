@@ -81,6 +81,7 @@ func (s *Service) serveEvents(w http.ResponseWriter, r *http.Request) {
 		internal(ctx, w, err)
 		return
 	}
+	stripEventsIO(events, wantEnhancementIO(r))
 	writeMessage(w, r, &gridv1.EventList{Events: events, NextPageToken: next}, maxAgeEntities)
 }
 
@@ -95,6 +96,7 @@ func (s *Service) serveEvent(w http.ResponseWriter, r *http.Request, id string) 
 		internal(r.Context(), w, err)
 		return
 	}
+	stripEventsIO([]*gridv1.Event{ev}, wantEnhancementIO(r))
 	writeMessage(w, r, ev, maxAgeEntities)
 }
 
@@ -127,6 +129,7 @@ func (s *Service) serveEventHistory(w http.ResponseWriter, r *http.Request, id s
 		internal(ctx, w, err)
 		return
 	}
+	stripRevisionsIO(revs, wantEnhancementIO(r))
 	writeMessage(w, r, &gridv1.EventRevisionList{Revisions: revs, NextPageToken: next}, maxAgeEntities)
 }
 
@@ -183,7 +186,49 @@ func (s *Service) serveHistory(w http.ResponseWriter, r *http.Request) {
 		internal(ctx, w, err)
 		return
 	}
+	stripRevisionsIO(revs, wantEnhancementIO(r))
 	writeMessage(w, r, &gridv1.EventRevisionList{Revisions: revs, NextPageToken: next}, maxAgeEntities)
+}
+
+// wantEnhancementIO reports whether the request opted into the large model I/O
+// fields (enhancement.request/response). Default false — they are omitted so
+// list responses stay lean; opt in with ?enhancement_io=true (or 1). The
+// lightweight provenance (model, enhanced_at, fields) is always kept.
+func wantEnhancementIO(r *http.Request) bool {
+	switch strings.ToLower(r.URL.Query().Get("enhancement_io")) {
+	case "true", "1", "yes":
+		return true
+	default:
+		return false
+	}
+}
+
+// stripEventsIO clears enhancement.request/response on each event unless kept.
+// Mutates in place — safe because the store returns freshly unmarshaled events
+// per query (never shared with the caching layer).
+func stripEventsIO(events []*gridv1.Event, keep bool) {
+	if keep {
+		return
+	}
+	for _, ev := range events {
+		if e := ev.GetEnhancement(); e != nil {
+			e.Request = ""
+			e.Response = ""
+		}
+	}
+}
+
+// stripRevisionsIO is stripEventsIO over a revision list.
+func stripRevisionsIO(revs []*gridv1.EventRevision, keep bool) {
+	if keep {
+		return
+	}
+	for _, rev := range revs {
+		if e := rev.GetEvent().GetEnhancement(); e != nil {
+			e.Request = ""
+			e.Response = ""
+		}
+	}
 }
 
 // --- query-param parsers (shared by events, history, places) ---

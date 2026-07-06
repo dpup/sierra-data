@@ -52,7 +52,7 @@ func (s *RoadsService) ListIncidents(ctx context.Context, req *api.ListIncidents
 			lastUpdated = timestamppb.New(entry.CreatedAt)
 		}
 		return &api.ListIncidentsResponse{
-			Incidents:   cachedIncidents,
+			Incidents:   applyEnhancementIO(cachedIncidents, req.GetEnhancementIo()),
 			LastUpdated: lastUpdated,
 			Area:        area.ID,
 		}, nil
@@ -71,7 +71,7 @@ func (s *RoadsService) ListIncidents(ctx context.Context, req *api.ListIncidents
 				lastUpdated = timestamppb.New(entry.CreatedAt)
 			}
 			return &api.ListIncidentsResponse{
-				Incidents:   cachedIncidents,
+				Incidents:   applyEnhancementIO(cachedIncidents, req.GetEnhancementIo()),
 				LastUpdated: lastUpdated,
 				Area:        area.ID,
 			}, nil
@@ -88,10 +88,29 @@ func (s *RoadsService) ListIncidents(ctx context.Context, req *api.ListIncidents
 	}
 
 	return &api.ListIncidentsResponse{
-		Incidents:   incidents,
+		Incidents:   applyEnhancementIO(incidents, req.GetEnhancementIo()),
 		LastUpdated: timestamppb.Now(),
 		Area:        area.ID,
 	}, nil
+}
+
+// applyEnhancementIO strips the large AI I/O fields (ai_request, ai_response)
+// from the response unless the caller asked for them, so the default response
+// stays lean. The lightweight ai_enhanced_at provenance is always kept. The
+// cache always stores the full incident (Set happens before this), so an
+// internal caller (the grid ingest, enhancement_io=true) still gets the I/O on
+// a cache hit. Safe to mutate in place: each cache Get unmarshals fresh objects.
+func applyEnhancementIO(incidents []*api.Incident, include bool) []*api.Incident {
+	if include {
+		return incidents
+	}
+	for _, in := range incidents {
+		if in != nil {
+			in.AiRequest = ""
+			in.AiResponse = ""
+		}
+	}
+	return incidents
 }
 
 // resolveIncidentArea looks up a configured area by id. The id is required (it

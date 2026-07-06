@@ -15,7 +15,7 @@
 // loaded by event.html as a classic script (window.maplibregl); this module
 // only touches it inside functions and degrades to text when it is absent.
 
-import { get, curlFor, ApiError } from '../api.js';
+import { get, apiURL, curlFor, ApiError } from '../api.js';
 import {
   timeCell,
   sevChip,
@@ -395,15 +395,21 @@ export function initEventPage() {
 
   const eventPath = `/v1/events/${encodeURIComponent(id)}`;
   const historyPath = `/v1/events/${encodeURIComponent(id)}/history`;
+  // Opt into the model I/O (enhancement.request/response) — the detail page
+  // shows it; list endpoints omit it by default to stay lean.
+  const ioParams = { enhancement_io: 'true' };
 
-  queryEl.append(requestLine(eventPath), requestLine(historyPath));
+  queryEl.append(
+    requestLine(apiURL(eventPath, ioParams)),
+    requestLine(apiURL(historyPath, ioParams))
+  );
 
   load();
 
   async function load() {
     const [evRes, histRes] = await Promise.allSettled([
-      get(eventPath),
-      get(historyPath),
+      get(eventPath, ioParams),
+      get(historyPath, ioParams),
     ]);
     loadingEl.remove();
 
@@ -654,7 +660,7 @@ export function initEventPage() {
       moreBtn.addEventListener('click', async () => {
         moreBtn.disabled = true;
         try {
-          const more = await get(historyPath, { page_token: histNext });
+          const more = await get(historyPath, { ...ioParams, page_token: histNext });
           revisions = sortRevisionsDesc(
             revisions.concat(Array.isArray(more.revisions) ? more.revisions : [])
           );

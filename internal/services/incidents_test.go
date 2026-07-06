@@ -15,7 +15,49 @@ import (
 	"github.com/dpup/info.ersn.net/server/internal/clients/caltrans"
 	"github.com/dpup/info.ersn.net/server/internal/config"
 	"github.com/dpup/info.ersn.net/server/internal/lib/alerts"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
+
+// TestListIncidents_EnhancementIOOptIn: the large AI I/O fields are omitted by
+// default and included only when the request asks (enhancement_io=true). The
+// lightweight ai_enhanced_at provenance is always kept.
+func TestListIncidents_EnhancementIOOptIn(t *testing.T) {
+	svc, c := newIncidentsFeedService(&caltransFeedDoer{chpBody: chpFeedKML})
+	// Pre-seed the cache with an already-enhanced incident (fresh TTL) so no
+	// refresh or AI call is needed; the response is served straight from cache.
+	when := timestamppb.Now()
+	c.Set("incidents:mother-lode", []*api.Incident{{
+		Id:           "260705SA0001",
+		AiRequest:    "prompt that was sent",
+		AiResponse:   `{"impact":"severe"}`,
+		AiEnhancedAt: when,
+	}}, time.Minute, "incidents")
+
+	// Default: request/response stripped, enhanced_at kept.
+	resp, err := svc.ListIncidents(testCtx(), &api.ListIncidentsRequest{Area: "mother-lode"})
+	if err != nil {
+		t.Fatalf("ListIncidents: %v", err)
+	}
+	if len(resp.Incidents) != 1 {
+		t.Fatalf("expected 1 incident, got %d", len(resp.Incidents))
+	}
+	if resp.Incidents[0].AiRequest != "" || resp.Incidents[0].AiResponse != "" {
+		t.Errorf("AI I/O should be stripped by default, got request=%q response=%q",
+			resp.Incidents[0].AiRequest, resp.Incidents[0].AiResponse)
+	}
+	if resp.Incidents[0].AiEnhancedAt == nil {
+		t.Error("ai_enhanced_at (lightweight provenance) should be kept")
+	}
+
+	// Opt in: the I/O is included (cache still holds the full incident).
+	resp, err = svc.ListIncidents(testCtx(), &api.ListIncidentsRequest{Area: "mother-lode", EnhancementIo: true})
+	if err != nil {
+		t.Fatalf("ListIncidents(enhancement_io): %v", err)
+	}
+	if resp.Incidents[0].AiRequest != "prompt that was sent" {
+		t.Errorf("AI request should be included when opted in, got %q", resp.Incidents[0].AiRequest)
+	}
+}
 
 func motherLode() config.IncidentArea {
 	return config.IncidentArea{

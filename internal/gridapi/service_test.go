@@ -216,6 +216,12 @@ func seedEvents(t *testing.T, st *store.Store) {
 		Geometry:   pointGeom(38.05, -120.55),
 		ObservedAt: timestamppb.New(base.Add(-2 * time.Hour)),
 		Provenance: &gridv1.Provenance{SourceId: "chp"},
+		Enhancement: &gridv1.Enhancement{
+			Model:    "gpt-5-mini",
+			Fields:   []string{"headline", "summary", "impact"},
+			Request:  "Parse this traffic incident report...",
+			Response: `{"details":"Vehicle off roadway","impact":"light"}`,
+		},
 	})
 	require.NoError(t, err)
 }
