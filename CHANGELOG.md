@@ -58,7 +58,7 @@ field; existing consumers are unaffected.
 For an AI-enhanced incident the `/v1` event now reads: `headline` = the short AI
 condensed line, `summary` = the AI narrative, `description` = the **verbatim
 original** (from `original_text`). `Event.enhancement.fields` accurately lists the
-AI-generated fields (`headline, summary, impact`) — previously it listed a
+AI-generated Event fields (`headline, summary, severity`) — previously it listed a
 `summary`/`description` that no longer matched the mapping. The
 `.geojson` map envelope is unchanged (it shows the readable narrative as
 `description`; byte-compatible).
@@ -117,7 +117,7 @@ field). The `.geojson` envelope is unchanged (byte-compatible).
 
 **Persistence (SQLite + revision history).** Events, their full revision
 snapshots, the place directory, and source health live in a SQLite database
-(`grid.dbPath`, default `./data/grid.db`; production points at an EBS volume via
+(`grid.dbPath`, default `./data/grid.db`; production points at a persistent volume (EFS) via
 `PF__GRID__DBPATH=/data/grid.db`, mounted at `/data` in the container). The store
 is the system of record: a restart **rehydrates** all events and revisions — no
 warm-up re-fetch needed. Every state transition (including the all-clear when an
