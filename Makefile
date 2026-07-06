@@ -63,9 +63,10 @@ $(TEST_WEATHER_BINARY): proto
 site:
 	@echo "Building site (Astro → site/dist)..."
 	cd web && (test -f package-lock.json && npm ci || npm install) && npm run build
-	@# Astro's content layer emits empty `content-*.mjs` stubs even with no
-	@# collections; prune them so they aren't embedded/served.
-	rm -f site/dist/content-assets.mjs site/dist/content-modules.mjs
+	@# Astro emits build-internal *.mjs at the dist root (content-*.mjs stubs, a
+	@# hash-named manifest_*.mjs) that are never served and whose hashes churn the
+	@# committed output. Prune all root-level *.mjs; real page JS lives in assets/.
+	rm -f site/dist/*.mjs
 	@echo "✅ Site built: site/dist"
 
 # Install site build dependencies only (no build).

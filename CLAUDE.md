@@ -92,6 +92,29 @@ make clean
 
 **IMPORTANT**: Always use `make run-bg` to start the server in background, not manual `./bin/server &` commands. The Makefile handles proper process management.
 
+**Server management inside the container**: the Moat sandbox has **no `pkill`
+and no working `ps`** for finding these processes, so `make stop` (and `make
+run-bg`, which stops any existing server first) is the only reliable lifecycle
+path — prefer it over ad-hoc kills. When you must kill a server by hand:
+
+- Find PIDs by scanning `/proc` for the command line, not `ps`/`pgrep`:
+  ```bash
+  for d in /proc/[0-9]*; do tr '\0' ' ' < "$d/cmdline" 2>/dev/null \
+    | grep -q './bin/server' && echo "${d#/proc/}"; done
+  ```
+  then `kill -9 <pid>` (a bash builtin — available even though `pkill` isn't).
+- Do **not** rely on `pkill -f`: it is absent, and even where present it matches
+  argv, so an env-var prefix like `PF__SERVER__PORT=8188 ./bin/server` is **not**
+  matchable that way (the process argv is just `./bin/server`). Killing by a
+  port set via env therefore fails silently and leaks servers that keep the port
+  bound — the next launch then hits "address already in use" and you unknowingly
+  test the stale binary.
+- Port `8181` may be served by an instance **outside** the sandbox (forwarded
+  in) that this container cannot see or kill. To verify a local build, run it on
+  a different port with a throwaway DB (`PF__SERVER__PORT=<port>
+  PF__GRID__DBPATH=<scratch>/verify.db ./bin/server`) rather than fighting 8181,
+  and confirm you bound it by checking the "Listening for traffic" log line.
+
 ### Testing
 ```bash
 # Run all tests
