@@ -255,6 +255,10 @@ code.inline {
   position: sticky; top: 0; z-index: 30; height: 52px;
   background: var(--bg-ctx); backdrop-filter: blur(8px);
   border-bottom: 1px solid var(--border-rail);
+  display: flex; align-items: center;
+}
+.ctx-inner {
+  width: 100%; max-width: var(--content-max); height: 100%;
   display: flex; align-items: center; justify-content: space-between; padding: 0 34px;
 }
 .crumb { font-size: 12.5px; color: var(--text-faint); }
@@ -277,8 +281,10 @@ main {
 
 .site-footer {
   background: var(--bg-rail); border-top: 1px solid var(--border-rail);
-  padding: 16px 34px 22px; font-size: 12px; color: var(--text-dimmer);
+  font-size: 12px; color: var(--text-dimmer);
 }
+/* Cap footer content to the same column width as <main> so they line up. */
+.footer-inner { max-width: var(--content-max); padding: 16px 34px 22px; }
 .footer-line { margin: 0 0 8px; max-width: none; color: var(--text-dim); }
 
 /* Request drawer */
@@ -647,7 +653,7 @@ button:disabled { opacity: 0.5; cursor: default; }
   .sidebar-foot { display: none; }
   .content { margin-left: 0; }
   main { padding: 24px 16px 40px; }
-  .context-bar { padding: 0 16px; }
+  .ctx-inner { padding: 0 16px; }
 
   /* Stack every two-column layout; let heads and chip rows wrap. */
   .grid-2, .cap-grid, .filters { grid-template-columns: 1fr; }
@@ -655,7 +661,7 @@ button:disabled { opacity: 0.5; cursor: default; }
   .section-head { flex-wrap: wrap; }
   .section-head .cap { width: 100%; }
   .page-head { gap: 14px; }
-  .site-footer { padding: 16px; }
+  .footer-inner { padding: 16px; }
 
   /* Endpoint rows: method + path on one line, description wraps beneath. */
   .endpoint-row { grid-template-columns: 44px 1fr; gap: 6px 14px; }

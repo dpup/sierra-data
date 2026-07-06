@@ -96,6 +96,7 @@ function loadHealth(dot, text) {
 
 function buildContextBar(current) {
   const bar = el('div', 'context-bar');
+  const inner = el('div', 'ctx-inner'); // caps content to the <main> column width
   const crumb = el('div', 'crumb');
   const here = (NAV.find((n) => n.key === current) || {}).crumb || 'The Grid';
   crumb.append(el('span', undefined, 'grid.v1'), ' ', el('span', 'sep', '/'), ' ', el('span', 'here', here));
@@ -106,7 +107,8 @@ function buildContextBar(current) {
   const ctime = el('span', undefined, '––:––:––Z');
   clock.append(cdot, ctime);
   right.append(clock);
-  bar.append(crumb, right);
+  inner.append(crumb, right);
+  bar.append(inner);
 
   const tick = () => {
     const d = new Date();
@@ -152,6 +154,9 @@ function renderRequestLog(listEl, countEl) {
 
 function buildFooter() {
   const footer = el('footer', 'site-footer');
+  // Full-bleed bar (like the context bar); .footer-inner caps its content to the
+  // same max-width as <main> so the two line up.
+  const inner = el('div', 'footer-inner');
 
   const details = el('details', 'request-log');
   const summary = el('summary');
@@ -167,7 +172,8 @@ function buildFooter() {
       'a volunteer 501(c)(3). Every value on this site is a browser fetch of the public /v1 API — replay any of them yourself.'
   );
 
-  footer.append(details, legal);
+  inner.append(details, legal);
+  footer.append(inner);
   renderRequestLog(listEl, countEl);
   document.addEventListener(API_REQUEST_EVENT, () => renderRequestLog(listEl, countEl));
   return footer;
