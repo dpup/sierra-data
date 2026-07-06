@@ -27,7 +27,7 @@ external contracts survive, internals change.
 - Unified severity `INFO < MINOR < MODERATE < SEVERE < EXTREME` with per-source
   mapping table and color ramp.
 - `source_status` (OK | STALE | UNAVAILABLE) per layer.
-- Area concept (`calaveras`, `mother-lode`), TTL caching, CORS allowlist,
+- Area concept (`ebbetts-pass`, `mother-lode`), TTL caching, CORS allowlist,
   AI enhancement of road/weather alerts.
 
 **Missing — the actual scope of this rework:**
@@ -180,7 +180,7 @@ message Source {
 enum SourceStatus { SOURCE_STATUS_UNSPECIFIED = 0; OK = 1; STALE = 2; UNAVAILABLE = 3; }
 
 message Place {
-  string id = 1;        // "area:calaveras" — existing area ids preserved under a kind
+  string id = 1;        // "area:ebbetts-pass" — existing area ids preserved under a kind
   PlaceKind kind = 2;
   string name = 3;
   string slug = 4;
@@ -341,7 +341,7 @@ the migration). Everything under `/v1/`.
 4. **Conventions:** timestamps RFC 3339; filters `place`, `layer` (repeatable),
    `status`, `severity_min`, `since`, `from`/`to`; cursor `page_token`. Errors are
    `google.rpc.Status` protojson. ETags everywhere.
-5. Places addressable by slug (`calaveras`) or id (`county:calaveras`); slugs
+5. Places addressable by slug (`ebbetts-pass`) or id (`county:calaveras-county`); slugs
    globally unique.
 
 | Endpoint | Returns | Notes |

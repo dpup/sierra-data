@@ -20,7 +20,7 @@ question-oriented, data. is dense and endpoint-oriented.
 2. **Docs are live.** There is no separate "reference" and "explorer" — every
    documented endpoint renders as a page whose examples are working links into
    live data, and every explorer view displays the request that produced it
-   (`GET /v1/events?place=calaveras&layer=wildfire`) as copyable curl/URL. Reading
+   (`GET /v1/events?place=ebbetts-pass&layer=wildfire`) as copyable curl/URL. Reading
    the docs *is* using the API; using the explorer *teaches* the API.
 3. **URL-addressable state.** All explorer state (filters, time ranges, selected
    event) lives in the query string. Any view is shareable and bookmarkable —

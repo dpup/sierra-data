@@ -146,7 +146,7 @@ enum SourceStatus {
 }
 
 message Place {
-  string id = 1;        // "area:calaveras" — existing area ids preserved under a kind
+  string id = 1;        // "area:ebbetts-pass" — existing area ids preserved under a kind
   PlaceKind kind = 2;
   string name = 3;
   string slug = 4;

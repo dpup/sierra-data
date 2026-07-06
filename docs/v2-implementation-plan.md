@@ -185,7 +185,7 @@ Summary response shape (hand-built JSON, snake_case — the site codes against
 this):
 ```json
 {
-  "place": "calaveras", "place_id": "area:calaveras",
+  "place": "ebbetts-pass", "place_id": "area:ebbetts-pass",
   "place_name": "Calaveras County", "generated_at": "RFC3339",
   "mode": "QUIET|WATCH|ACTIVE",
   "summary": {

@@ -135,7 +135,7 @@ Content-Type: application/json
     </p>
     <ul>
       <li><strong>Canonical client sort</strong> for events: <code class="inline">severity_rank</code> descending, then <code class="inline">observed_at</code> descending.</li>
-      <li><strong>Places are addressable by slug or id</strong>: <code class="inline">calaveras</code> and <code class="inline">area:calaveras</code> both work anywhere a <code class="inline">{place}</code> appears. Slugs are globally unique (<a href="#places-scheme">§4</a>).</li>
+      <li><strong>Places are addressable by slug or id</strong>: <code class="inline">ebbetts-pass</code> and <code class="inline">area:ebbetts-pass</code> both work anywhere a <code class="inline">{place}</code> appears. Slugs are globally unique (<a href="#places-scheme">§4</a>).</li>
     </ul>
 
     <h3>CORS</h3>
@@ -180,7 +180,7 @@ Content-Type: application/json
       </tbody>
     </table></div>
     <div class="live-examples">
-      <a href="/v1/places/calaveras/summary">/v1/places/calaveras/summary</a>
+      <a href="/v1/places/ebbetts-pass/summary">/v1/places/ebbetts-pass/summary</a>
     </div>
 
     <!-- ---- map layers ---- -->
@@ -206,10 +206,10 @@ Content-Type: application/json
       </tbody>
     </table></div>
     <div class="live-examples">
-      <a href="/v1/places/calaveras/map/wildfire.geojson">/v1/places/calaveras/map/wildfire.geojson</a>
-      <a href="/v1/places/calaveras/map/evacuation.geojson">/v1/places/calaveras/map/evacuation.geojson</a>
-      <a href="/v1/places/calaveras/map/weather_alert.geojson">/v1/places/calaveras/map/weather_alert.geojson</a>
-      <a href="/v1/places/calaveras/map/chain_control.geojson">/v1/places/calaveras/map/chain_control.geojson</a>
+      <a href="/v1/places/ebbetts-pass/map/wildfire.geojson">/v1/places/ebbetts-pass/map/wildfire.geojson</a>
+      <a href="/v1/places/ebbetts-pass/map/evacuation.geojson">/v1/places/ebbetts-pass/map/evacuation.geojson</a>
+      <a href="/v1/places/ebbetts-pass/map/weather_alert.geojson">/v1/places/ebbetts-pass/map/weather_alert.geojson</a>
+      <a href="/v1/places/ebbetts-pass/map/chain_control.geojson">/v1/places/ebbetts-pass/map/chain_control.geojson</a>
     </div>
 
     <!-- ---- events ---- -->
@@ -235,9 +235,9 @@ Content-Type: application/json
       </tbody>
     </table></div>
     <div class="live-examples">
-      <a href="/v1/events?place=calaveras">/v1/events?place=calaveras</a>
+      <a href="/v1/events?place=ebbetts-pass">/v1/events?place=ebbetts-pass</a>
       <a href="/v1/events?layer=wildfire&amp;severity_min=MODERATE">/v1/events?layer=wildfire&amp;severity_min=MODERATE</a>
-      <a href="/v1/events?place=calaveras&amp;layer=road_incident">/v1/events?place=calaveras&amp;layer=road_incident</a>
+      <a href="/v1/events?place=ebbetts-pass&amp;layer=road_incident">/v1/events?place=ebbetts-pass&amp;layer=road_incident</a>
       <a href="/v1/events?layer=weather_alert&amp;status=ACTIVE&amp;status=SCHEDULED">/v1/events?layer=weather_alert&amp;status=ACTIVE&amp;status=SCHEDULED</a>
       <a href="/v1/events?status=RESOLVED&amp;status=EXPIRED&amp;page_size=10">/v1/events?status=RESOLVED&amp;status=EXPIRED&amp;page_size=10</a>
     </div>
@@ -285,7 +285,7 @@ Content-Type: application/json
       </tbody>
     </table></div>
     <div class="live-examples">
-      <a href="/v1/history?place=calaveras&amp;from=2026-07-01T00:00:00Z&amp;to=2026-07-05T00:00:00Z">/v1/history?place=calaveras&amp;from=2026-07-01T00:00:00Z&amp;to=2026-07-05T00:00:00Z</a>
+      <a href="/v1/history?place=ebbetts-pass&amp;from=2026-07-01T00:00:00Z&amp;to=2026-07-05T00:00:00Z">/v1/history?place=ebbetts-pass&amp;from=2026-07-01T00:00:00Z&amp;to=2026-07-05T00:00:00Z</a>
       <a href="/v1/history?layer=weather_alert&amp;from=2026-07-01T00:00:00Z">/v1/history?layer=weather_alert&amp;from=2026-07-01T00:00:00Z</a>
     </div>
 
@@ -303,7 +303,7 @@ Content-Type: application/json
       <a href="/v1/places">/v1/places</a>
       <a href="/v1/places?kind=COUNTY">/v1/places?kind=COUNTY</a>
       <a href="/v1/places?q=arnold">/v1/places?q=arnold</a>
-      <a href="/v1/places/calaveras">/v1/places/calaveras</a>
+      <a href="/v1/places/ebbetts-pass">/v1/places/ebbetts-pass</a>
       <a href="/v1/places/town:arnold">/v1/places/town:arnold</a>
     </div>
 
@@ -337,7 +337,7 @@ Content-Type: application/json
     </p>
     <div class="live-examples">
       <a href="/v1/roads">/v1/roads</a>
-      <a href="/v1/roads?place=calaveras">/v1/roads?place=calaveras</a>
+      <a href="/v1/roads?place=ebbetts-pass">/v1/roads?place=ebbetts-pass</a>
       <a href="/v1/roads/hwy4-arnold-bearvalley">/v1/roads/hwy4-arnold-bearvalley</a>
     </div>
 
@@ -363,7 +363,7 @@ Content-Type: application/json
       <code class="inline">?place=</code>.
     </p>
     <div class="live-examples">
-      <a href="/v1/scanners?place=calaveras">/v1/scanners?place=calaveras</a>
+      <a href="/v1/scanners?place=ebbetts-pass">/v1/scanners?place=ebbetts-pass</a>
     </div>
 
     <h3 class="endpoint-head" id="ep-sources"><span class="method">GET</span> /v1/sources</h3>
@@ -532,8 +532,8 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
     <p>
       Place ids are <code class="inline">{kind}:{slug}</code>. Slugs are
       globally unique, so every place is addressable by bare slug
-      (<code class="inline">calaveras</code>) or full id
-      (<code class="inline">area:calaveras</code>) anywhere a
+      (<code class="inline">ebbetts-pass</code>) or full id
+      (<code class="inline">area:ebbetts-pass</code>) anywhere a
       <code class="inline">{place}</code> path segment or
       <code class="inline">place=</code> parameter appears. Area slugs are
       carried over unchanged from the legacy
@@ -542,8 +542,8 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
     <div class="table-wrap"><table class="data-table">
       <thead><tr><th>Prefix</th><th>Kind</th><th class="num">#</th><th>What</th><th>Geometry</th><th>Example</th></tr></thead>
       <tbody>
-        <tr><td class="mono">area:</td><td class="mono">AREA</td><td class="num">1</td><td class="wrap">Configured service areas (the legacy hazard areas; org footprints live here too)</td><td>bbox polygon</td><td class="mono"><a href="/v1/places/area:calaveras">area:calaveras</a></td></tr>
-        <tr><td class="mono">county:</td><td class="mono">COUNTY</td><td class="num">2</td><td class="wrap">Service-area counties (Calaveras, Tuolumne, Amador, Alpine, Stanislaus, San&nbsp;Joaquin, El&nbsp;Dorado, Mariposa) — simplified Census TIGERweb polygons</td><td>polygon</td><td class="mono"><a href="/v1/places/county:calaveras">county:calaveras</a></td></tr>
+        <tr><td class="mono">area:</td><td class="mono">AREA</td><td class="num">1</td><td class="wrap">Configured service areas (the legacy hazard areas; org footprints live here too)</td><td>bbox polygon</td><td class="mono"><a href="/v1/places/area:ebbetts-pass">area:ebbetts-pass</a></td></tr>
+        <tr><td class="mono">county:</td><td class="mono">COUNTY</td><td class="num">2</td><td class="wrap">Service-area counties (Calaveras, Tuolumne, Amador, Alpine, Stanislaus, San&nbsp;Joaquin, El&nbsp;Dorado, Mariposa) — simplified Census TIGERweb polygons</td><td>polygon</td><td class="mono"><a href="/v1/places/county:calaveras-county">county:calaveras-county</a></td></tr>
         <tr><td class="mono">town:</td><td class="mono">TOWN</td><td class="num">3</td><td class="wrap">The monitored towns (the weather locations)</td><td>point</td><td class="mono"><a href="/v1/places/town:arnold">town:arnold</a></td></tr>
         <tr><td class="mono">evac_zone:</td><td class="mono">EVAC_ZONE</td><td class="num">4</td><td class="wrap">Evacuation zones (Zonehaven/Genasys scheme). Full zone-inventory import is pending; active zones appear as events in the meantime.</td><td>polygon</td><td class="mono">—</td></tr>
         <tr><td class="mono">corridor:</td><td class="mono">CORRIDOR</td><td class="num">5</td><td class="wrap">The monitored road corridors</td><td>linestring</td><td class="mono"><a href="/v1/places/corridor:hwy4-arnold-bearvalley">corridor:hwy4-arnold-bearvalley</a></td></tr>
@@ -579,7 +579,7 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
   "features": [ … ],
   "metadata": {
     "layer": "evacuation",
-    "area": "calaveras",
+    "area": "ebbetts-pass",
     "generated_at": "2026-07-05T15:42:11Z",
     "source_status": "OK",            // OK | STALE | UNAVAILABLE
     "last_source_update": "2026-07-05T15:38:00Z",
@@ -647,8 +647,8 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
       <li>Unit-bearing fields name their unit (<code class="inline">wind_gust_mph</code>, <code class="inline">depth_km</code>).</li>
     </ul>
     <div class="live-examples">
-      <a href="/v1/places/calaveras/map/wildfire.geojson">/v1/places/calaveras/map/wildfire.geojson</a>
-      <a href="/v1/places/calaveras/map/earthquake.geojson">/v1/places/calaveras/map/earthquake.geojson</a>
+      <a href="/v1/places/ebbetts-pass/map/wildfire.geojson">/v1/places/ebbetts-pass/map/wildfire.geojson</a>
+      <a href="/v1/places/ebbetts-pass/map/earthquake.geojson">/v1/places/ebbetts-pass/map/earthquake.geojson</a>
     </div>
   </section>
 
@@ -693,7 +693,7 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
       </p>
       <p>
         The same rule applies to the evacuation map layer
-        (<a href="/v1/places/calaveras/map/evacuation.geojson" class="mono">/v1/places/calaveras/map/evacuation.geojson</a>):
+        (<a href="/v1/places/ebbetts-pass/map/evacuation.geojson" class="mono">/v1/places/ebbetts-pass/map/evacuation.geojson</a>):
         <code class="inline">source_status: UNAVAILABLE</code> comes with empty
         features and must render as an unknown-state banner, never an empty
         (implicitly safe) map. <code class="inline">metadata.source_url</code>
@@ -708,7 +708,7 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
 
       <h3>The summary shape (quoted from the contract)</h3>
       <pre class="code">{
-  "place": "calaveras", "place_id": "area:calaveras",
+  "place": "ebbetts-pass", "place_id": "area:ebbetts-pass",
   "place_name": "Calaveras County", "generated_at": "RFC3339",
   "mode": "QUIET|WATCH|ACTIVE",
   "summary": {
@@ -722,7 +722,7 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
   "sources": [{"id","status","last_success_at"}]
 }</pre>
       <div class="live-examples">
-        <a href="/v1/places/calaveras/summary">/v1/places/calaveras/summary</a>
+        <a href="/v1/places/ebbetts-pass/summary">/v1/places/ebbetts-pass/summary</a>
       </div>
     </div>
   </section>
@@ -796,13 +796,13 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
     <div class="table-wrap"><table class="data-table">
       <thead><tr><th>Legacy</th><th>Becomes</th><th>Shape change</th></tr></thead>
       <tbody>
-        <tr><td class="mono">/api/v1/situation/{area}</td><td class="mono"><a href="/v1/places/calaveras/summary">/v1/places/{area}/summary</a></td><td class="wrap"><code>layers[]</code> → <code>domains[]</code>; adds <code>mode</code>; scanners removed. Evac fail-loud semantics identical.</td></tr>
-        <tr><td class="mono">/api/v1/hazards/{area}/{layer}.geojson</td><td class="mono"><a href="/v1/places/calaveras/map/wildfire.geojson">/v1/places/{area}/map/{layer}.geojson</a></td><td class="wrap">None — envelope unchanged, URL move only. Map cutover is a source-URL swap.</td></tr>
+        <tr><td class="mono">/api/v1/situation/{area}</td><td class="mono"><a href="/v1/places/ebbetts-pass/summary">/v1/places/{area}/summary</a></td><td class="wrap"><code>layers[]</code> → <code>domains[]</code>; adds <code>mode</code>; scanners removed. Evac fail-loud semantics identical.</td></tr>
+        <tr><td class="mono">/api/v1/hazards/{area}/{layer}.geojson</td><td class="mono"><a href="/v1/places/ebbetts-pass/map/wildfire.geojson">/v1/places/{area}/map/{layer}.geojson</a></td><td class="wrap">None — envelope unchanged, URL move only. Map cutover is a source-URL swap.</td></tr>
         <tr><td class="mono">/api/v1/incidents/{area}</td><td class="mono"><a href="/v1/events?place=mother-lode&amp;layer=road_incident">/v1/events?place={area}&amp;layer=road_incident</a></td><td class="wrap">Typed <code>Incident</code> → Event envelope + <code>road_incident</code> detail.</td></tr>
         <tr><td class="mono">/api/v1/weather/alerts</td><td class="mono"><a href="/v1/events?layer=weather_alert">/v1/events?layer=weather_alert</a></td><td class="wrap">Same envelope move.</td></tr>
         <tr><td class="mono">/api/v1/roads*</td><td class="mono"><a href="/v1/roads">/v1/roads*</a></td><td class="wrap">Conditions shape kept; <code>?place=</code> filter added.</td></tr>
         <tr><td class="mono">/api/v1/weather*</td><td class="mono"><a href="/v1/weather">/v1/weather*</a></td><td class="wrap">Same, minus alerts.</td></tr>
-        <tr><td class="mono">/api/v1/scanners/{area}</td><td class="mono"><a href="/v1/scanners?place=calaveras">/v1/scanners?place={area}</a></td><td class="wrap">Path → filter.</td></tr>
+        <tr><td class="mono">/api/v1/scanners/{area}</td><td class="mono"><a href="/v1/scanners?place=ebbetts-pass">/v1/scanners?place={area}</a></td><td class="wrap">Path → filter.</td></tr>
         <tr><td class="mono">GetProcessingMetrics</td><td class="mono">(removed)</td><td class="wrap">AI-pipeline metrics moved to an internal/admin ops surface.</td></tr>
       </tbody>
     </table></div>

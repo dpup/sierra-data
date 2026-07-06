@@ -1086,7 +1086,7 @@ func (x *Source) GetStatus() SourceStatus {
 
 type Place struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"` // "area:calaveras" — existing area ids preserved under a kind
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"` // "area:ebbetts-pass" — existing area ids preserved under a kind
 	Kind          PlaceKind              `protobuf:"varint,2,opt,name=kind,proto3,enum=grid.v1.PlaceKind" json:"kind,omitempty"`
 	Name          string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
 	Slug          string                 `protobuf:"bytes,4,opt,name=slug,proto3" json:"slug,omitempty"`

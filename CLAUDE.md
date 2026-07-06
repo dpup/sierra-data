@@ -308,7 +308,7 @@ everywhere. Everything is read from the grid event store.
   revision timeline.
 - `GET /v1/history` - cross-event revision archive (`place,from,to,layer`).
 - `GET /v1/places` / `GET /v1/places/{place}` - directory (`kind`,`q`); places
-  addressable by slug (`calaveras`) or id (`county:calaveras`), slugs globally
+  addressable by slug (`ebbetts-pass`) or id (`county:calaveras-county`), slugs globally
   unique.
 - `GET /v1/places/resolve?lat=&lng=` or `?address=` - point/address → containing
   places, most-specific first (address path geocodes via the keyless Census

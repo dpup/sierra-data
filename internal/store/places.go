@@ -84,7 +84,7 @@ func (s *Store) ListPlaces(ctx context.Context, kind gridv1.PlaceKind, q string)
 }
 
 // GetPlace looks up a place by id when the key contains ':' (ids are
-// namespaced, e.g. "area:calaveras"), otherwise by slug. Returns ErrNotFound
+// namespaced, e.g. "area:ebbetts-pass"), otherwise by slug. Returns ErrNotFound
 // when absent.
 func (s *Store) GetPlace(ctx context.Context, slugOrID string) (*gridv1.Place, error) {
 	column := "slug"

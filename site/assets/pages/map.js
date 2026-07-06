@@ -6,7 +6,7 @@
 // exact .geojson URL a third-party map client would use.
 //
 // All view state (place, layers, map view) lives in the query string:
-//   ?place=calaveras&layer=wildfire&layer=evacuation&view=38.20000,-120.55000,9.00
+//   ?place=ebbetts-pass&layer=wildfire&layer=evacuation&view=38.20000,-120.55000,9.00
 // (`layer` repeats, matching the /events and /history pages' URL state and
 // the API's repeatable `layer` parameter.)
 //
@@ -47,7 +47,7 @@ export const MAP_LAYERS = [
 ];
 
 /** Default map view when no layer has features and no ?view= is present:
- * Calaveras County, roughly centered. [lng, lat] per GeoJSON axis order. */
+ * Ebbetts Pass corridor, roughly centered. [lng, lat] per GeoJSON axis order. */
 export const DEFAULT_CENTER = [-120.55, 38.2];
 export const DEFAULT_ZOOM = 8.5;
 
@@ -56,9 +56,9 @@ export const PUBLIC_ORIGIN = 'https://data.sierragridteam.org';
 
 /**
  * Path for a layer's FeatureCollection.
- * @param {string} place layer place slug, e.g. "calaveras"
+ * @param {string} place layer place slug, e.g. "ebbetts-pass"
  * @param {string} layer e.g. "wildfire"
- * @returns {string} "/v1/places/calaveras/map/wildfire.geojson"
+ * @returns {string} "/v1/places/ebbetts-pass/map/wildfire.geojson"
  */
 export function geojsonPath(place, layer) {
   return `/v1/places/${encodeURIComponent(place)}/map/${encodeURIComponent(
@@ -788,8 +788,8 @@ function init() {
         slugs.push(urlState.place);
       }
       if (!urlState.place) {
-        urlState.place = slugs.includes('calaveras')
-          ? 'calaveras'
+        urlState.place = slugs.includes('ebbetts-pass')
+          ? 'ebbetts-pass'
           : slugs[0] || '';
       }
       els.place.value = urlState.place;

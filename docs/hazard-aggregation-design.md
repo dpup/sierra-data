@@ -205,7 +205,7 @@ RFC 7946 allows foreign top-level members, so each FeatureCollection carries a
   "features": [ ... ],
   "metadata": {
     "layer": "evacuation",
-    "area": "calaveras",
+    "area": "ebbetts-pass",
     "generated_at": "2026-06-26T15:42:11Z",
     "source_status": "OK",        // OK | STALE | UNAVAILABLE
     "last_source_update": "2026-06-26T15:38:00Z",
@@ -238,7 +238,7 @@ The safety property is that an error never collapses into a `0`.
 
 ```
 GET /api/v1/hazards/{area}/{layer}.geojson
-    e.g. /api/v1/hazards/calaveras/wildfire.geojson
+    e.g. /api/v1/hazards/ebbetts-pass/wildfire.geojson
 ```
 Returns one RFC 7946 FeatureCollection (+ `metadata`). This is what a map source
 points at. Each layer is independently cached and independently statused.
@@ -255,7 +255,7 @@ render its banner from one fetch.
 
 ```jsonc
 {
-  "area": "calaveras",
+  "area": "ebbetts-pass",
   "area_name": "Calaveras County",
   "generated_at": "2026-06-26T15:42:11Z",
   "summary": {
@@ -428,7 +428,7 @@ Extend the area pattern we already use (`roads.incidentAreas` bbox,
 ```yaml
 hazards:
   areas:
-    - id: calaveras
+    - id: ebbetts-pass
       name: "Calaveras County"
       bounds: { minLatitude: 37.8, maxLatitude: 38.55, minLongitude: -120.9, maxLongitude: -120.0 }
       center: { latitude: 38.20, longitude: -120.55 }   # map default view
@@ -461,7 +461,7 @@ Target **MapLibre GL JS** (and Leaflet) — both consume GeoJSON natively.
 
 ```js
 map.addSource('wildfire', { type: 'geojson',
-  data: 'https://info.ersn.net/api/v1/hazards/calaveras/wildfire.geojson' });
+  data: 'https://info.ersn.net/api/v1/hazards/ebbetts-pass/wildfire.geojson' });
 
 // polygons (perimeters / zones) colored by unified severity
 map.addLayer({ id: 'wildfire-fill', type: 'fill', source: 'wildfire',

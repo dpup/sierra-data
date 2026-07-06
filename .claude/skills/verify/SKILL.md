@@ -29,8 +29,8 @@ server exits at startup.
 ```bash
 curl -s localhost:8181/api/v1/weather | jq .
 curl -s localhost:8181/api/v1/weather/alerts
-curl -s localhost:8181/api/v1/hazards/calaveras/weather_alert.geojson
-curl -s localhost:8181/api/v1/situation/calaveras
+curl -s localhost:8181/api/v1/hazards/ebbetts-pass/weather_alert.geojson
+curl -s localhost:8181/api/v1/situation/ebbetts-pass
 curl -s localhost:8181/api/v1/roads
 ```
 Logs are structured JSON in `server.log` — grep for upstream fetches, e.g.

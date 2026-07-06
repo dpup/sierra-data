@@ -36,7 +36,7 @@ func (s *Service) servePlaces(w http.ResponseWriter, r *http.Request) {
 }
 
 // servePlace handles GET /v1/places/{place}; {place} is a slug or a
-// namespaced id ("area:calaveras") — the store disambiguates on ':'.
+// namespaced id ("area:ebbetts-pass") — the store disambiguates on ':'.
 func (s *Service) servePlace(w http.ResponseWriter, r *http.Request, key string) {
 	place, err := s.Store.GetPlace(r.Context(), key)
 	if errors.Is(err, store.ErrNotFound) {

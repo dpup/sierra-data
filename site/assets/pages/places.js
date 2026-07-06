@@ -35,7 +35,7 @@ export const KIND_ORDER = [
 
 /**
  * Read page state from a query string.
- * @param {string} search e.g. location.search ("?place=calaveras&lat=38.1")
+ * @param {string} search e.g. location.search ("?place=ebbetts-pass&lat=38.1")
  * @returns {{place:string, lat:string, lng:string, address:string}}
  */
 export function readState(search) {

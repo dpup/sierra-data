@@ -12,6 +12,28 @@ same binary over the same store (see the 2026-07-05 entry and its migration plan
 
 ## 2026-07-06
 
+### Changed — coverage area renamed `calaveras` → `ebbetts-pass` (**breaking** for `/api/v1` hazard URLs)
+
+The one configured coverage area was mis-named "Calaveras County" (slug `calaveras`)
+but actually spans **Calaveras and Tuolumne** along the Hwy 4 + Hwy 49 corridor, and
+its slug shadowed the real `county:calaveras-county` place. It is now
+**"Ebbetts Pass Corridor"**, slug/id `ebbetts-pass` (`area:ebbetts-pass`). Naming
+convention going forward: coverage areas are named for their corridor/region
+identity, never for an administrative unit they could be confused with.
+
+The area slug is the `{area}` path segment on the legacy hazard endpoints and the
+`{place}` segment on the new ones, so the URLs move:
+- `/api/v1/hazards/calaveras/{layer}.geojson` → `/api/v1/hazards/ebbetts-pass/{layer}.geojson`
+- `/api/v1/situation/calaveras` → `/api/v1/situation/ebbetts-pass`
+- `/api/v1/scanners/calaveras` → `/api/v1/scanners/ebbetts-pass`
+- `/v1/places/calaveras/*`, `?place=calaveras` → `ebbetts-pass`
+
+**Consumers hitting `/api/v1/hazards/calaveras/*` (e.g. ersn.net maps) must update
+the slug.** Done pre-deploy, so no stored-data migration (the dev DB is re-seeded).
+Also fixed a docs typo that showed the county id as `county:calaveras` (correct:
+`county:calaveras-county`).
+
+
 ### Changed — SQLite journal mode is configurable; default TRUNCATE (EFS-safe)
 
 The grid store's journal mode is now `grid.journalMode` (`PF__GRID__JOURNALMODE`),
@@ -95,7 +117,7 @@ everywhere. Full reference: the site's `/docs.html` (when deployed) and
 - `GET /v1/events/{id}/history` — that event's revision timeline.
 - `GET /v1/history` — cross-event revision archive (`place,from,to,layer`).
 - `GET /v1/places` / `GET /v1/places/{place}` — place directory (`kind`,`q`
-  filters); places addressable by slug (`calaveras`) or id (`county:calaveras`).
+  filters); places addressable by slug (`ebbetts-pass`) or id (`county:calaveras-county`).
 - `GET /v1/places/resolve?lat=&lng=` or `?address=` — point/address → containing
   places, most-specific first (address path geocodes via the keyless Census
   geocoder).
@@ -374,7 +396,7 @@ GeoJSON interface (see `docs/hazard-aggregation-design.md`):
 GET /api/v1/hazards/{area}/{layer}.geojson
 ```
 
-- Areas are configured under `hazards.areas` in `prefab.yaml` (first: `calaveras`).
+- Areas are configured under `hazards.areas` in `prefab.yaml` (first: `ebbetts-pass`).
 - M1 layers (re-project existing feeds): `road_incident`, `chain_control`,
   `road_segment` (LineString), `weather_alert` (null-geometry banner),
   `fire_weather` (null-geometry banner). Roadmap: `earthquake`, `wildfire`,

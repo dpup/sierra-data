@@ -215,8 +215,8 @@ weather:
 # GET /api/v1/hazards/{area}/{layer}.geojson — standardized GeoJSON for map clients.
 hazards:
   areas:
-    - id: "calaveras"
-      name: "Calaveras County"
+    - id: "ebbetts-pass"
+      name: "Ebbetts Pass Corridor"
       bounds:
         minLatitude: 37.8
         maxLatitude: 38.55

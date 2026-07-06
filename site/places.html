@@ -15,8 +15,8 @@
   <p>
     Every event and summary in the Grid Info Service is scoped to a
     <em>place</em> — an area, county, town, evacuation zone, corridor, or site.
-    Places are addressable by slug (<code class="inline">calaveras</code>) or id
-    (<code class="inline">county:calaveras</code>). This page is the directory,
+    Places are addressable by slug (<code class="inline">ebbetts-pass</code>) or id
+    (<code class="inline">county:calaveras-county</code>). This page is the directory,
     the per-place detail view, and the resolve tester that answers
     &ldquo;which places contain this point or address?&rdquo;
   </p>
@@ -27,7 +27,7 @@
       <dt><code>GET /v1/places</code></dt>
       <dd>Directory. Filters: <code>kind</code> (AREA, COUNTY, TOWN, EVAC_ZONE, CORRIDOR, SITE), <code>q</code> (name search). Try <a href="/v1/places?kind=COUNTY">/v1/places?kind=COUNTY</a>.</dd>
       <dt><code>GET /v1/places/{place}</code></dt>
-      <dd>One place by slug or id, including geometry (base64 GeoJSON in <code>geometry.geojson</code>) and <code>parent_id</code>. Try <a href="/v1/places/calaveras">/v1/places/calaveras</a>.</dd>
+      <dd>One place by slug or id, including geometry (base64 GeoJSON in <code>geometry.geojson</code>) and <code>parent_id</code>. Try <a href="/v1/places/ebbetts-pass">/v1/places/ebbetts-pass</a>.</dd>
       <dt><code>GET /v1/places/resolve</code></dt>
       <dd><code>?lat=&amp;lng=</code> or <code>?address=</code> &rarr; containing places, most-specific first (SITE &rarr; AREA). Try <a href="/v1/places/resolve?lat=38.0679&amp;lng=-120.5385">/v1/places/resolve?lat=38.0679&amp;lng=-120.5385</a>.</dd>
     </dl>

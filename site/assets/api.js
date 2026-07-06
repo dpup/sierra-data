@@ -55,7 +55,7 @@ export const API_REQUEST_EVENT = EVENT_NAME;
  *
  * @param {string} path   e.g. "/v1/events" (leading /v1 included by caller)
  * @param {Object=} params
- * @returns {string} path with query string, e.g. "/v1/events?place=calaveras"
+ * @returns {string} path with query string, e.g. "/v1/events?place=ebbetts-pass"
  */
 export function apiURL(path, params) {
   const search = new URLSearchParams();
