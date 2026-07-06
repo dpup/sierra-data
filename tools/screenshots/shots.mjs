@@ -54,13 +54,15 @@ const METRICS_JS = () => {
     const els = [root, ...root.querySelectorAll(':scope > *, :scope > * > *')];
     let i = 0;
     for (const el of els) {
-      if (++i > 120) break;
+      if (i++ > 120) break;
       const r = el.getBoundingClientRect();
       const cs = getComputedStyle(el);
       const box = {};
       for (const p of props) box[p] = cs[p];
       rows.push({
-        path: `${sel} :: ${label(el)}`,
+        // index-prefixed so generic tags (h2, div, p) get unique, position-
+        // stable keys that line up between before/after (parallel DOM order).
+        path: `${sel} [${String(i - 1).padStart(3, '0')}] ${label(el)}`,
         rect: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) },
         box,
       });
