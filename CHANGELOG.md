@@ -13,6 +13,26 @@ same binary over the same store (see the 2026-07-05 entry and its migration plan
 
 ## 2026-07-06
 
+### Changed — evacuation `source_url` now deep-links into the specific Genasys zone
+
+Evacuation events previously carried the generic Genasys viewer homepage
+(`https://protect.genasys.com/`) as their `source_url`. When the Cal OES
+`ZONE_ID` is a Genasys/Zonehaven-scheme id (`US-CA-X{county}-{agency}-{zone}`,
+e.g. `US-CA-XCA-CCU-153`), the per-event `source_url` now deep-links straight to
+that zone: `https://protect.genasys.com/zones/{ZONE_ID}`. This affects both
+`provenance.source_url` on `/v1/events` (`layer=evacuation`) and the per-feature
+`properties.source.url` in `/v1/places/{place}/map/evacuation.geojson` (and the
+legacy `/api/v1/hazards/{area}/evacuation.geojson`).
+
+- Counties **not** hosted on Genasys (e.g. Tuolumne, whose ids look like
+  `US-CA-Toulumne101`) keep the generic viewer URL — we don't map their bespoke
+  per-county viewers.
+- The **layer-level `metadata.source_url` is unchanged** (still the generic
+  viewer) — it must stay valid in the fail-loud UNAVAILABLE/empty states.
+
+No field names or shapes change; only the `source_url` value is now more
+specific. Consuming sites can link users directly to the affected zone.
+
 ### Changed — rebrand to **The Grid** + primary domain moves to `data.sierragridteam.org`
 
 The service is now **The Grid**, the S.I.E.R.R.A data service. Its primary home is

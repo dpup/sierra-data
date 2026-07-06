@@ -73,15 +73,18 @@ func projectWildfire(ev *gridv1.Event) hazards.Feature {
 // projectEvacuation mirrors the shipped evacuations builder. properties.status
 // is the coded evacuation LEVEL (ORDER|WARNING|ADVISORY|SHELTER_IN_PLACE), not
 // the event lifecycle — that is the shipped contract. Description is the
-// Cal OES PUBLIC_INFO carried verbatim (life-safety: never paraphrased), and
-// the source block always links the authoritative Genasys viewer.
+// Cal OES PUBLIC_INFO carried verbatim (life-safety: never paraphrased). The
+// per-feature source url deep-links into the specific Genasys zone when the
+// ZONE_ID is Genasys-hosted, else the generic viewer (caloes.ZoneURL) — the
+// same value the event's provenance carries. The layer-level
+// metadata.source_url stays generic for the fail-loud contract.
 func projectEvacuation(ev *gridv1.Event) hazards.Feature {
 	d := ev.GetEvacuation()
 	p := baseProps(ev, hazards.LayerEvacuation, "Evacuation")
 	p.Description = ev.GetDescription()
 	p.Status = d.GetLevel()
 	p.UpdatedAt = rfc3339(ev.GetObservedAt())
-	p.Source = hazards.Source{ID: "caloes", Name: "Cal OES", URL: caloes.SourceURL, Attribution: "Cal OES — reference only"}
+	p.Source = hazards.Source{ID: "caloes", Name: "Cal OES", URL: caloes.ZoneURL(d.GetZoneId()), Attribution: "Cal OES — reference only"}
 	p.Evacuation = &hazards.EvacuationProps{
 		ZoneID:    d.GetZoneId(),
 		Level:     d.GetLevel(),

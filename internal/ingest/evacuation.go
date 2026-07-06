@@ -122,7 +122,10 @@ func (n *EvacuationNormalizer) buildEvent(ctx context.Context, z caloes.EvacZone
 	ev.Description = z.PublicInfo
 	ev.AreaLabel = nonEmpty(z.ZoneName, z.County)
 	ev.ObservedAt = tsProto(z.LastUpdated)
-	ev.Provenance = NewProvenance("caloes", "Cal OES", "Cal OES — reference only", caloes.SourceURL)
+	// Deep-link the per-event source_url into the specific zone when it's a
+	// Genasys-hosted county (else the generic viewer). The layer-level
+	// metadata.source_url stays generic for the fail-loud contract.
+	ev.Provenance = NewProvenance("caloes", "Cal OES", "Cal OES — reference only", caloes.ZoneURL(z.ZoneID))
 	ev.Detail = &gridv1.Event_Evacuation{Evacuation: &gridv1.EvacuationDetail{
 		ZoneId:    z.ZoneID,
 		Level:     level,

@@ -16,6 +16,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"time"
 )
@@ -60,8 +61,31 @@ type EvacZone struct {
 	GeometryCoords json.RawMessage
 }
 
-// SourceURL is the authoritative public viewer, always surfaced to users.
+// SourceURL is the authoritative public viewer, always surfaced to users. It is
+// the generic entry point used as the layer-level source_url (fail-loud: it must
+// be valid even when there are zero zones) and as the per-event fallback for
+// zones we can't deep-link.
 const SourceURL = "https://protect.genasys.com/"
+
+// genasysZoneRe matches the Genasys/Zonehaven zone-id scheme
+// (US-CA-X{county}-{agency}-{zone}, e.g. US-CA-XCA-CCU-153 Calaveras,
+// US-CA-XTU-PVL-E032 Tulare) that protect.genasys.com/zones/{id} resolves. Cal
+// OES aggregates zones from several county platforms and passes each id through
+// verbatim, so only Genasys-scheme ids deep-link there — other counties (e.g.
+// Tuolumne's US-CA-Toulumne101, a different vendor) are not hosted on Genasys.
+var genasysZoneRe = regexp.MustCompile(`^US-CA-X[A-Z]+-`)
+
+// ZoneURL returns the most specific public viewer URL for a zone: a
+// protect.genasys.com deep link into the zone when ZONE_ID is a Genasys-scheme
+// id, otherwise the generic Genasys viewer (SourceURL). We deliberately do not
+// map the non-Genasys counties' bespoke viewers (opaque per-county ArcGIS apps)
+// — the generic viewer is the honest, maintainable fallback.
+func ZoneURL(zoneID string) string {
+	if genasysZoneRe.MatchString(zoneID) {
+		return "https://protect.genasys.com/zones/" + url.PathEscape(zoneID)
+	}
+	return SourceURL
+}
 
 // Bounds is a lat/lng bounding box for the spatial query.
 type Bounds struct {

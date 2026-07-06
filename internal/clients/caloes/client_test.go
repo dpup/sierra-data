@@ -91,3 +91,26 @@ func TestArcGISErrorEnvelopeAttacker(t *testing.T) {
 		t.Fatal("error envelope must surface even when a features array is present")
 	}
 }
+
+func TestZoneURL(t *testing.T) {
+	cases := []struct {
+		name, zoneID, want string
+	}{
+		// Genasys/Zonehaven-scheme ids deep-link into the zone (confirmed live:
+		// US-CA-XTU-PVL-E032 resolves on protect.genasys.com).
+		{"calaveras genasys", "US-CA-XCA-CCU-153", "https://protect.genasys.com/zones/US-CA-XCA-CCU-153"},
+		{"tulare genasys", "US-CA-XTU-PVL-E032", "https://protect.genasys.com/zones/US-CA-XTU-PVL-E032"},
+		// Non-Genasys counties (Tuolumne's own vendor) fall back to the viewer.
+		{"tuolumne non-genasys", "US-CA-Toulumne101", SourceURL},
+		// Legacy / other aggregation id shapes and blanks fall back too.
+		{"legacy short id", "CAL-E-046", SourceURL},
+		{"empty", "", SourceURL},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ZoneURL(tc.zoneID); got != tc.want {
+				t.Errorf("ZoneURL(%q) = %q, want %q", tc.zoneID, got, tc.want)
+			}
+		})
+	}
+}
