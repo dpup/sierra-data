@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Event — SIERRA Grid Data</title>
-  <meta name="description" content="One event, unpacked to the metal: the full protojson envelope and typed detail from GET /v1/events/{id}, geometry on a map, provenance, the AI enhancement shown beside the verbatim original it was built from, and the complete revision timeline with client-side field diffs from GET /v1/events/{id}/history.">
+  <title>Event · The Grid</title>
+  <meta name="description" content="Everything the store holds for one event: the full protojson envelope and typed detail from GET /v1/events/{id}, geometry on a map, provenance, the AI enhancement shown beside the verbatim original it was built from, and the complete revision timeline with client-side field diffs from GET /v1/events/{id}/history.">
   <link rel="stylesheet" href="/lib/maplibre-gl.css">
   <link rel="stylesheet" href="/assets/app.css">
   <style>
@@ -64,8 +64,15 @@
       font-family: var(--font-mono); font-size: 12.5px; line-height: 1.6;
       background: var(--bg-code); border: 1px solid var(--border);
       border-left: 3px solid var(--border-input); border-radius: var(--radius-sm);
-      padding: 10px 13px; margin: 6px 0 12px; color: #cfe6da;
+      padding: 10px 13px; margin: 0; color: #cfe6da;
     }
+    /* AI-enhancement section: one consistent vertical rhythm so the badge,
+       note, headings, and pre blocks don't stack with mismatched margins. */
+    .enh-body { display: flex; flex-direction: column; gap: 10px; align-items: stretch; }
+    .enh-body > * { margin: 0; }
+    .enh-body .ai-badge { align-self: flex-start; }
+    .enh-body h3 { margin-top: 4px; font-size: 12px; color: var(--text-2); }
+    .enh-body pre.code { margin: 0; }
 
     /* Revision timeline. */
     .timeline { display: flex; flex-direction: column; gap: 12px; }
@@ -100,14 +107,14 @@
   </header>
 
   <p class="lead" id="ed-lead">
-    One event, unpacked to the metal. Two live requests render everything below:
+    Everything the store holds for one event. Two live requests render the page:
     <code class="inline">/v1/events/{id}</code> for the current revision and
     <code class="inline">&hellip;/history</code> for every prior one. You get the
     full protojson envelope, the typed detail block, the geometry on a map,
-    provenance, and — where present — the AI enhancement shown <em>beside</em> the
-    verbatim source text it was built from. Nothing here is editorial: the model
-    translates, it never adds facts, and every revision is kept so you can watch
-    the record change. <strong>Replay either request yourself.</strong>
+    provenance, and — where present — the AI enhancement shown beside the verbatim
+    source text it was built from. The model translates the wording into plain
+    language; it never adds facts, and every revision is kept. Replay either
+    request yourself.
   </p>
 
   <div class="section-head" style="margin-top:22px;">

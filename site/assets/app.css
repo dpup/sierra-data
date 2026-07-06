@@ -268,8 +268,11 @@ main {
   padding: 36px 34px 56px;
 }
 
-/* Header row: title/lead on the left, pill badges on the right */
-.page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
+/* Header row: title/lead on the left, pill badges on the right. The bottom
+ * margin is the single source of the gap between a page's head/description and
+ * its first content block — every content page uses .page-head, so this spacing
+ * is set once here, not per page. */
+.page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; flex-wrap: wrap; margin-bottom: 26px; }
 .page-head > div { min-width: 0; }
 
 .site-footer {
@@ -443,11 +446,6 @@ main {
 
 .chip-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0; }
 
-.freshbar { flex: 1; max-width: 160px; height: 4px; background: var(--border-soft); border-radius: 2px; overflow: hidden; }
-.freshbar > span { display: block; height: 100%; background: var(--st-OK); }
-.freshbar.st-STALE > span { background: var(--st-STALE); }
-.freshbar.st-UNAVAILABLE > span { background: var(--st-UNAVAILABLE); }
-
 /* ------------------------------------------------------------------ */
 /* 8. Forms                                                           */
 /* ------------------------------------------------------------------ */
@@ -472,6 +470,13 @@ button:disabled { opacity: 0.5; cursor: default; }
 }
 .filter-bar { display: flex; flex-wrap: wrap; gap: 12px 18px; align-items: end; }
 .field { display: flex; flex-direction: column; gap: 4px; }
+
+/* Filter-grid row helpers, shared by every filter panel (Events, History):
+   the label sits in column 1, its control(s) in column 2 of the .filters grid. */
+.fcell { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.fcell-actions { gap: 10px; }
+.pill-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.lbl-note { display: block; margin-top: 3px; font-size: 9px; letter-spacing: 0.08em; color: var(--text-dim); text-transform: none; }
 
 /* ------------------------------------------------------------------ */
 /* 9. Errors, notices, fail-loud                                      */
@@ -595,7 +600,7 @@ button:disabled { opacity: 0.5; cursor: default; }
 .mission strong { color: var(--text); font-weight: 600; }
 
 /* three-up capability cards */
-.cap-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 20px; }
+.cap-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
 .cap-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; }
 .cap-card .cap-h { font-weight: 600; font-size: 13.5px; color: #eef2f4; margin-bottom: 6px; }
 .cap-card .cap-p { font-family: var(--font-sans); font-size: 12.5px; line-height: 1.6; color: #98a2ab; }
@@ -643,11 +648,32 @@ button:disabled { opacity: 0.5; cursor: default; }
   .content { margin-left: 0; }
   main { padding: 24px 16px 40px; }
   .context-bar { padding: 0 16px; }
-  .grid-2, .cap-grid { grid-template-columns: 1fr; }
+
+  /* Stack every two-column layout; let heads and chip rows wrap. */
+  .grid-2, .cap-grid, .filters { grid-template-columns: 1fr; }
+  .filter-bar { gap: 10px 14px; }
+  .section-head { flex-wrap: wrap; }
+  .section-head .cap { width: 100%; }
+  .page-head { gap: 14px; }
   .site-footer { padding: 16px; }
+
+  /* Endpoint rows: method + path on one line, description wraps beneath. */
+  .endpoint-row { grid-template-columns: 44px 1fr; gap: 6px 14px; }
+  .endpoint-row .desc { grid-column: 1 / -1; }
+
+  /* A sticky JSON inspector column has nothing to stick to once stacked. */
+  .inspector { position: static !important; top: auto !important; }
+
+  /* A fixed 560px map dominates a phone; shrink the shared map containers
+     (map.html's own #map-canvas already does this). */
+  .map-box, .map-canvas { height: 60vh; }
+  .map-box.small { height: 300px; }
 }
 
 @media (max-width: 560px) {
   h1 { font-size: 22px; }
-  .cap-grid { grid-template-columns: 1fr; }
+  .cap-grid, .stat-grid { grid-template-columns: 1fr; }
+  main { padding: 20px 12px 36px; }
+  .card, .panel { padding: 14px 15px; }
+  .data-table th, .data-table td { padding: 10px 12px; }
 }

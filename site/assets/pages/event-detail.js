@@ -451,7 +451,7 @@ export function initEventPage() {
 
     function renderEvent(ev) {
       headEl.hidden = false;
-      document.title = `${ev.headline || ev.id || id} — Event — SIERRA Grid Data`;
+      document.title = `${ev.headline || ev.id || id} · Event · The Grid`;
 
       chipsEl.textContent = '';
       chipsEl.append(sevChip(ev.severity || 'INFO'));
@@ -582,6 +582,7 @@ export function initEventPage() {
       if (ev.enhancement) {
         const enh = ev.enhancement;
         const sec = section('AI enhancement', undefined);
+        sec.body.classList.add('enh-body');
         const badge = el('div', 'ai-badge');
         badge.append(
           el('span', 'ai-badge-tag', 'AI-enhanced'),

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Grid Info Service — SIERRA Grid Data</title>
+  <title>The Grid — hazard, road &amp; weather data for the central Sierra</title>
   <meta name="description" content="Public, keyless, real-time hazard, road, and weather data for the central Sierra — wildfire, evacuation, weather, earthquake, and road incidents unified into one honest API. Run by S.I.E.R.R.A, a volunteer emergency-response alliance.">
   <link rel="stylesheet" href="/assets/app.css">
 </head>
@@ -12,15 +12,11 @@
   <div class="page-head">
     <div>
       <div class="hero-kicker">Signal Integrity &amp; Emergency Radio Response Alliance</div>
-      <h1>Grid Info Service</h1>
+      <h1>The Grid</h1>
       <p class="mission">
-        When a wildfire, evacuation, or highway closure hits the central Sierra, the people who
-        need the facts first are neighbors, ham operators, and responders spread across county
-        lines. The Grid Info Service pulls the authoritative feeds — <strong>CAL FIRE, Cal OES,
-        the National Weather Service, USGS, CHP, and Caltrans</strong> — into one real-time
-        picture and serves it to anyone, free, with no key and no strings. Every value on this
-        site is a live browser fetch of that public <code class="inline">/v1</code> API.
-        <strong>You can replay every request yourself.</strong>
+        Public hazard, road, and weather data for the central Sierra. Every value on this site is
+        a browser fetch of a public, read-only, CORS-open <code class="inline">/v1</code> endpoint
+        that any third-party client would use — you can replay every request yourself.
       </p>
     </div>
     <div class="badges">
@@ -72,19 +68,19 @@
       <h2>System status</h2>
       <span class="chip-get"><b>GET</b> /v1/sources</span>
     </div>
-    <span class="cap">poll → last success → freshness</span>
+    <span class="cap">poll → last success → status</span>
   </div>
   <div class="table-wrap">
     <table class="data-table">
       <thead>
         <tr>
-          <th style="width:150px">Source</th><th style="width:100px">Status</th>
-          <th style="width:110px">Poll</th><th style="width:130px">Last success</th>
-          <th>Freshness</th><th class="num" style="width:80px">Error</th>
+          <th style="width:170px">Source</th><th style="width:120px">Status</th>
+          <th style="width:110px">Poll</th><th>Last success</th>
+          <th class="num" style="width:90px">Error</th>
         </tr>
       </thead>
       <tbody id="sources-body">
-        <tr><td colspan="6"><span class="loading">Loading /v1/sources…</span></td></tr>
+        <tr><td colspan="5"><span class="loading">Loading /v1/sources…</span></td></tr>
       </tbody>
     </table>
   </div>
@@ -101,7 +97,7 @@
     <div class="card">
       <div class="stat-grid" id="rollup">
         <div><div class="stat-n">—</div><div class="stat-label">Active events</div></div>
-        <div><div class="stat-n">11</div><div class="stat-label">Layers</div></div>
+        <div><div class="stat-n">8</div><div class="stat-label">Layers</div></div>
         <div><div class="stat-n">—</div><div class="stat-label">Areas</div></div>
         <div><div class="stat-n">—</div><div class="stat-label">Active evac</div></div>
       </div>
@@ -145,13 +141,13 @@
 
   <!-- support -->
   <div class="support-card">
-    <h2>Keep a lifeline running</h2>
+    <h2>Keep this service running</h2>
     <p class="support-p">
       S.I.E.R.R.A is an all-volunteer 501(c)(3). This service runs on donated time and a small
-      cloud bill — the feeds, the servers, the radios that carry the signal when the power and the
-      towers go down. What you see on this page <em>is</em> the pitch: it's live, it's honest about
-      what it doesn't know, and anyone can verify or build on it. If a transparent, always-on data
-      lifeline for the central Sierra is worth having, help us keep it on.
+      cloud bill — the feeds, the servers, and the radio infrastructure behind them. The page
+      you're on is the case for support: it's live, it's honest about what it doesn't know, and
+      anyone can verify or build on it. If an open, always-on data source for the central Sierra
+      is worth keeping online, please help fund it.
     </p>
     <a class="btn-primary" href="https://sierragridteam.org/donate" rel="noopener">Donate</a>
     <a class="btn-ghost" href="/docs.html">Read the API reference</a>
@@ -211,9 +207,8 @@
       );
       body.textContent = '';
       if (!sources.length) {
-        const tr = el('tr'); const c = el('td', 'muted', 'No sources registered.'); c.colSpan = 6; tr.append(c); body.append(tr); return;
+        const tr = el('tr'); const c = el('td', 'muted', 'No sources registered.'); c.colSpan = 5; tr.append(c); body.append(tr); return;
       }
-      const nowS = Date.now() / 1000;
       for (const s of sources) {
         const st = String(s.status || '').toUpperCase() || 'UNKNOWN';
         const tr = el('tr');
@@ -230,16 +225,6 @@
         tr.append(el('td', undefined, secs(s.poll_interval_seconds)));
         tr.append(el('td', undefined, s.last_success_at ? timeAgo(s.last_success_at) : '—'));
 
-        const fCell = el('td');
-        let frac = st === 'OK' ? 1 : st === 'STALE' ? 0.35 : 0;
-        if (s.last_success_at && s.stale_after_seconds) {
-          const age = nowS - new Date(s.last_success_at).getTime() / 1000;
-          frac = Math.max(0, Math.min(1, 1 - age / s.stale_after_seconds));
-        }
-        const bar = el('span', 'freshbar st-' + st);
-        const fill = el('span'); fill.style.width = Math.round(frac * 100) + '%';
-        bar.append(fill); fCell.append(bar); tr.append(fCell);
-
         const errCell = el('td', 'num');
         if (s.last_error && st !== 'OK') { errCell.textContent = '!'; errCell.title = s.last_error; errCell.style.color = 'var(--st-UNAVAILABLE)'; }
         else { errCell.textContent = '—'; errCell.style.color = 'var(--text-dim)'; }
@@ -249,7 +234,7 @@
       }
     } catch (err) {
       body.textContent = '';
-      const tr = el('tr'); const c = el('td'); c.colSpan = 6; c.append(errBlock(err)); tr.append(c); body.append(tr);
+      const tr = el('tr'); const c = el('td'); c.colSpan = 5; c.append(errBlock(err)); tr.append(c); body.append(tr);
     }
   }
 

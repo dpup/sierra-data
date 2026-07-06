@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>API Reference — SIERRA Grid Data</title>
-  <meta name="description" content="Reference for the Grid Info Service /v1 API: endpoints, the Event envelope, severity scale, place id scheme, GeoJSON layer contract, and the evacuation fail-loud contract.">
+  <title>API Reference · The Grid</title>
+  <meta name="description" content="Reference for the Grid /v1 API: endpoints, the Event envelope, severity scale, place id scheme, GeoJSON layer contract, and the evacuation fail-loud contract.">
   <link rel="stylesheet" href="/assets/app.css">
   <style>
     /* Page-local structure for the reference. app.css is the design system and
@@ -69,25 +69,35 @@
       font-size: 11px;
       color: var(--text-dim);
     }
+
+    /* Reference tables: app.css sets .data-table to white-space:nowrap, which
+       blows wide tables out. Here every cell wraps except the leading name
+       column and the headers, so all tables read as calm, content-fit blocks
+       with one consistent shape (short left columns, a wrapping description). */
+    .data-table td { white-space: normal; vertical-align: top; line-height: 1.5; }
+    .data-table td:first-child { white-space: nowrap; }
+    .data-table th { white-space: nowrap; }
+    .data-table td.num { white-space: nowrap; }
   </style>
 </head>
 <body>
 <main>
   <div class="page-head">
     <div>
-      <div class="hero-kicker">Grid Info Service · /v1</div>
+      <div class="hero-kicker">The Grid · /v1</div>
       <h1>API reference</h1>
       <p class="lead">
-        The complete public contract of the Grid Info Service, on one page. Base URL
-        <code class="inline">https://data.sierragridteam.org</code> — everything lives
-        under <code class="inline">/v1/</code>. It is <strong>read-only, keyless, and
-        CORS-open</strong>: no registration, no token, nothing to sign. Every example
-        below is a live link into the running service, so <strong>reading these docs is
-        using the API</strong> — click any
-        <span class="chip-get"><b>GET</b> /v1/…</span> and you see the exact JSON your
-        client will get. And every feed answers honestly:
-        <span class="accent-orange">OK / STALE / UNAVAILABLE, never a fabricated
-        all-clear</span> — the honesty contract is written into §6, not bolted on.
+        The public contract of the Grid's <code class="inline">/v1</code> API. Base URL
+        <code class="inline">https://data.sierragridteam.org</code>; everything lives
+        under <code class="inline">/v1/</code>. Read-only, keyless, and CORS-open — no
+        registration or token. Responses are snake_case protojson, timestamps are
+        RFC&nbsp;3339, errors are <code class="inline">google.rpc.Status</code>, and every
+        response carries an ETag. Each example below is a live link into the running
+        service: click any <span class="chip-get"><b>GET</b> /v1/…</span> to see the exact
+        JSON a client receives. A feed's <code class="inline">source_status</code> is
+        <code class="inline">OK</code>, <code class="inline">STALE</code>, or
+        <code class="inline">UNAVAILABLE</code>; an unavailable feed is reported as such,
+        never as an all-clear (see §6).
       </p>
     </div>
     <div class="badges">
@@ -171,8 +181,8 @@ Content-Type: application/json
     <!-- ---- summary ---- -->
     <h3 class="endpoint-head" id="ep-summary"><span class="chip-get"><b>GET</b> /v1/places/{place}/summary</span></h3>
     <p>
-      The workhorse: one fetch renders a "now" page for a place. Returns a
-      hand-built JSON document (not a proto message) with the area
+      One fetch returns a place's current state. A hand-built JSON document
+      (not a proto message) with the area
       <code class="inline">mode</code>, a cross-layer summary, per-domain
       statuses, top events, and a source-health sidecar. Carries the evacuation
       fail-loud invariant — <code class="inline">active_evacuations</code> is
@@ -586,7 +596,7 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
       Each <code class="inline">/v1/places/{place}/map/{layer}.geojson</code>
       response is one RFC 7946 <code class="inline">FeatureCollection</code>
       with a foreign top-level <code class="inline">metadata</code> member
-      (allowed by the spec, ignored by map libraries, read by honest clients):
+      (allowed by RFC 7946, ignored by map libraries, available to clients that read it):
     </p>
     <pre class="code">{
   "type": "FeatureCollection",
@@ -603,7 +613,7 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
   }
 }</pre>
 
-    <h3><code class="inline">metadata.source_status</code> — the honesty mechanism</h3>
+    <h3><code class="inline">metadata.source_status</code></h3>
     <p>
       Layers are fail-loud: a source error never becomes a fabricated clear
       state. The three states render differently and <strong>must not be

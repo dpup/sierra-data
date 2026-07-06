@@ -456,7 +456,7 @@ export function initPlacesPage() {
     }
 
     const name = place.name || place.slug || place.id || ref;
-    document.title = `${name} — Places — SIERRA Grid Data`;
+    document.title = `${name} · Places · The Grid`;
     placeNameEl.textContent = '';
     placeNameEl.append(name, ' ', kindChip(place.kind || 'UNSPECIFIED'));
     placeDetailEl.textContent = '';

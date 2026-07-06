@@ -16,7 +16,7 @@ import { requests, API_REQUEST_EVENT, curlFor } from './api.js';
 
 // key → { label, href, hint, group, crumb }
 const NAV = [
-  { key: 'home', label: 'Grid Info', href: '/', hint: '/v1', group: 'OVERVIEW', crumb: 'Grid Info Service' },
+  { key: 'home', label: 'Grid Info', href: '/', hint: '/v1', group: 'OVERVIEW', crumb: 'The Grid' },
   { key: 'events', label: 'Events', href: '/events.html', hint: '/events', group: 'EXPLORE', crumb: 'Events' },
   { key: 'map', label: 'Map', href: '/map.html', hint: '/map', group: 'EXPLORE', crumb: 'Map' },
   { key: 'places', label: 'Places', href: '/places.html', hint: '/places', group: 'EXPLORE', crumb: 'Places' },
@@ -42,7 +42,7 @@ function buildSidebar(current) {
   const brand = el('a', 'brand-block');
   brand.href = '/';
   const line = el('div', 'brand-line');
-  line.append(el('span', 'brand-name', 'S.I.E.R.R.A'), el('span', 'brand-sub', 'Grid Data'));
+  line.append(el('span', 'brand-name', 'S.I.E.R.R.A'), el('span', 'brand-sub', 'The Grid'));
   brand.append(line, el('div', 'brand-host', 'data.sierragridteam.org'));
 
   // health chip (live)
@@ -97,7 +97,7 @@ function loadHealth(dot, text) {
 function buildContextBar(current) {
   const bar = el('div', 'context-bar');
   const crumb = el('div', 'crumb');
-  const here = (NAV.find((n) => n.key === current) || {}).crumb || 'Grid Info Service';
+  const here = (NAV.find((n) => n.key === current) || {}).crumb || 'The Grid';
   crumb.append(el('span', undefined, 'grid.v1'), ' ', el('span', 'sep', '/'), ' ', el('span', 'here', here));
 
   const right = el('div', 'ctx-right');
@@ -105,7 +105,7 @@ function buildContextBar(current) {
   const cdot = el('span', 'dot st-OK live');
   const ctime = el('span', undefined, '––:––:––Z');
   clock.append(cdot, ctime);
-  right.append(el('span', undefined, 'live · replayable'), clock);
+  right.append(clock);
   bar.append(crumb, right);
 
   const tick = () => {

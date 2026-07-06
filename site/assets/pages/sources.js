@@ -270,21 +270,9 @@ export function initSourcesPage() {
     'Status',
     'Poll',
     'Last success',
-    'Freshness',
     'Thresholds',
     'Last error',
   ];
-
-  /** Freshness fraction (1 = just fetched, 0 = at/over the stale threshold).
-   * Falls back to a status-derived level when thresholds are unknown. */
-  function freshFraction(s, status) {
-    const stale = Number(s.stale_after_seconds);
-    if (s.last_success_at && stale > 0) {
-      const age = Date.now() / 1000 - Date.parse(s.last_success_at) / 1000;
-      if (!Number.isNaN(age)) return Math.max(0, Math.min(1, 1 - age / stale));
-    }
-    return status === 'OK' ? 1 : status === 'STALE' ? 0.35 : 0;
-  }
 
   function renderRow(s) {
     const status = normStatus(s.status);
@@ -335,15 +323,6 @@ export function initSourcesPage() {
       lastTd.append(sub);
     }
     tr.append(lastTd);
-
-    // Freshness bar — colored by status, filled by proximity to stale_after.
-    const freshTd = el('td');
-    const bar = el('span', `freshbar st-${status}`);
-    const fill = el('span');
-    fill.style.width = `${Math.round(freshFraction(s, status) * 100)}%`;
-    bar.append(fill);
-    freshTd.append(bar);
-    tr.append(freshTd);
 
     // Thresholds — stale_after / expire_after.
     const thTd = el('td', 'num');

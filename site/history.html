@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>History — SIERRA Grid Data</title>
+  <title>History · The Grid</title>
   <meta name="description" content="Archive browser over GET /v1/history — the chronological, replayable feed of event revisions for after-action review.">
   <link rel="stylesheet" href="/assets/app.css">
   <style>
@@ -90,30 +90,25 @@
     days are grouped in UTC.
   </p>
 
-  <div class="filter-bar">
-    <div class="field">
-      <label for="hist-place">place</label>
-      <select id="hist-place"></select>
-    </div>
-    <div class="field">
-      <label id="hist-layers-label">layer (any of)</label>
-      <div id="hist-layers" class="layer-checks" role="group" aria-labelledby="hist-layers-label"></div>
-    </div>
-    <div class="field">
-      <label for="hist-from">from (local time)</label>
-      <input type="datetime-local" id="hist-from">
-    </div>
-    <div class="field">
-      <label for="hist-to">to (local time, blank = now)</label>
-      <input type="datetime-local" id="hist-to">
-    </div>
-    <div class="field">
-      <label for="hist-size">page_size</label>
-      <select id="hist-size"></select>
-    </div>
-    <div class="field">
-      <button type="button" id="hist-apply">Apply</button>
-    </div>
+  <!-- Filters: each control is one /v1/history query parameter. -->
+  <div class="filters">
+    <label for="hist-place">place</label>
+    <div class="fcell"><select id="hist-place"></select></div>
+
+    <label id="hist-layers-label">layer<span class="lbl-note">any of · empty = all layers</span></label>
+    <div id="hist-layers" class="layer-checks" role="group" aria-labelledby="hist-layers-label"></div>
+
+    <label for="hist-from">from<span class="lbl-note">local time</span></label>
+    <div class="fcell"><input type="datetime-local" id="hist-from"></div>
+
+    <label for="hist-to">to<span class="lbl-note">local time · blank = now</span></label>
+    <div class="fcell"><input type="datetime-local" id="hist-to"></div>
+
+    <label for="hist-size">page_size</label>
+    <div class="fcell"><select id="hist-size"></select></div>
+
+    <label></label>
+    <div class="fcell fcell-actions"><button type="button" id="hist-apply">Apply</button></div>
   </div>
 
   <div id="hist-query" class="query-line" aria-label="Request behind these results"></div>

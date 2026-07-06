@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Events — SIERRA Grid Data</title>
-  <meta name="description" content="Event explorer over GET /v1/events — the cross-layer query of every discrete occurrence the Grid Info Service tracks, with filters that map 1:1 to the endpoint's parameters and a URL that is the shareable permalink.">
+  <title>Events · The Grid</title>
+  <meta name="description" content="Event explorer over GET /v1/events — the cross-layer query of every discrete occurrence the Grid tracks, with filters that map 1:1 to the endpoint's parameters and a URL that is the shareable permalink.">
   <link rel="stylesheet" href="/assets/app.css">
   <style>
     /* Page-local: the query bar, the pill filter rows, and the two-column
@@ -20,11 +20,7 @@
     .qbar-curl { margin-top: 10px; overflow-x: auto; white-space: nowrap; }
     .qchip .x { user-select: none; }
 
-    /* Filter rows: label in col 1, control(s) in col 2 (.filters = auto 1fr). */
-    .fcell { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-    .fcell-actions { gap: 10px; }
-    .pill-row { display: flex; flex-wrap: wrap; gap: 8px; }
-    .lbl-note { display: block; margin-top: 3px; font-size: 9px; letter-spacing: 0.08em; color: var(--text-dim); }
+    /* .fcell / .fcell-actions / .pill-row / .lbl-note are shared components in app.css. */
     .fspacer { display: block; }
 
     /* Results + sticky inspector. */
@@ -63,7 +59,7 @@
       <div class="hero-kicker">grid.v1 · event explorer</div>
       <h1>Events</h1>
       <p class="lead">
-        Every discrete occurrence the Grid Info Service tracks — wildfire,
+        Every discrete occurrence the Grid tracks — wildfire,
         evacuation, weather alert, earthquake, road incident, and the rest — is
         reachable through <strong>one endpoint</strong>. The filters below map
         1:1 onto the query parameters of
@@ -71,7 +67,7 @@
         protojson of <code class="inline">grid.v1.EventList</code>, server-sorted
         <strong>severity-first, then newest-first</strong>. This page's whole
         filter state lives in its URL, so any view you compose here is a
-        shareable permalink — <strong>anyone can replay the exact request
+        shareable permalink — <strong>you can replay the exact request
         yourself.</strong>
       </p>
     </div>
