@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dpup/info.ersn.net/server/internal/lib/geojson"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	_ "modernc.org/sqlite" // pure-Go driver: CGO_ENABLED=0 cross-compile requirement
 )
@@ -47,6 +48,22 @@ var ErrNotFound = errors.New("store: not found")
 type Store struct {
 	db *sql.DB
 	mu sync.Mutex // single-writer discipline
+
+	// placesGeo caches parsed place geometries so matchPlaces (called per event
+	// on every ingest tick, including hash-equal no-ops) does not re-SELECT and
+	// re-parse every place polygon under the write mutex. Guarded by mu — both
+	// matchPlaces (inside inTx) and UpsertPlace (the only invalidator) hold it.
+	placesGeo      []parsedPlace
+	placesGeoValid bool
+}
+
+// parsedPlace is a place's geometry pre-parsed for point-in-place / bbox tests.
+type parsedPlace struct {
+	id                             string
+	geom                           *geojson.Geom
+	minLat, minLng, maxLat, maxLng float64
+	centLat, centLng               float64
+	polygonal                      bool
 }
 
 // Open opens (creating if needed) the database at path, applies pragmas via

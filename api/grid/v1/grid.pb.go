@@ -1318,12 +1318,12 @@ func (x *EvacuationDetail) GetCounty() string {
 //   - the sending office is `provenance.source_name`
 type WeatherAlertDetail struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	NwsSeverity   string                 `protobuf:"bytes,1,opt,name=nws_severity,json=nwsSeverity,proto3" json:"nws_severity,omitempty"` // raw NWS vocabulary (Extreme..Minor), distinct from unified severity
-	Certainty     string                 `protobuf:"bytes,2,opt,name=certainty,proto3" json:"certainty,omitempty"`
-	Urgency       string                 `protobuf:"bytes,3,opt,name=urgency,proto3" json:"urgency,omitempty"`
-	Instruction   string                 `protobuf:"bytes,4,opt,name=instruction,proto3" json:"instruction,omitempty"`
-	AreaDesc      string                 `protobuf:"bytes,5,opt,name=area_desc,json=areaDesc,proto3" json:"area_desc,omitempty"` // NWS free-text area (no envelope equivalent for zone alerts)
-	Zones         []string               `protobuf:"bytes,6,rep,name=zones,proto3" json:"zones,omitempty"`                       // NWS forecast zones, e.g. "CAZ064"
+	NwsSeverity   string                 `protobuf:"bytes,2,opt,name=nws_severity,json=nwsSeverity,proto3" json:"nws_severity,omitempty"` // raw NWS vocabulary (Extreme..Minor), distinct from unified severity
+	Certainty     string                 `protobuf:"bytes,3,opt,name=certainty,proto3" json:"certainty,omitempty"`
+	Urgency       string                 `protobuf:"bytes,4,opt,name=urgency,proto3" json:"urgency,omitempty"`
+	Instruction   string                 `protobuf:"bytes,5,opt,name=instruction,proto3" json:"instruction,omitempty"`
+	AreaDesc      string                 `protobuf:"bytes,7,opt,name=area_desc,json=areaDesc,proto3" json:"area_desc,omitempty"` // NWS free-text area (no envelope equivalent for zone alerts)
+	Zones         []string               `protobuf:"bytes,8,rep,name=zones,proto3" json:"zones,omitempty"`                       // NWS forecast zones, e.g. "CAZ064"
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1528,9 +1528,9 @@ func (x *EarthquakeDetail) GetFelt() int32 {
 type RoadIncidentDetail struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	LogNumber     string                 `protobuf:"bytes,1,opt,name=log_number,json=logNumber,proto3" json:"log_number,omitempty"`
-	Impact        string                 `protobuf:"bytes,2,opt,name=impact,proto3" json:"impact,omitempty"`                                                                               // AI-assessed: none | light | moderate | severe
-	Duration      string                 `protobuf:"bytes,3,opt,name=duration,proto3" json:"duration,omitempty"`                                                                           // AI-assessed: unknown | < 1 hour | several hours | ongoing
-	Metadata      map[string]string      `protobuf:"bytes,4,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // structured extras from AI analysis (internal keys stripped)
+	Impact        string                 `protobuf:"bytes,4,opt,name=impact,proto3" json:"impact,omitempty"`                                                                               // AI-assessed: none | light | moderate | severe
+	Duration      string                 `protobuf:"bytes,5,opt,name=duration,proto3" json:"duration,omitempty"`                                                                           // AI-assessed: unknown | < 1 hour | several hours | ongoing
+	Metadata      map[string]string      `protobuf:"bytes,7,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // structured extras from AI analysis (internal keys stripped)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1957,31 +1957,31 @@ const file_grid_proto_rawDesc = "" +
 	"\x05level\x18\x02 \x01(\tR\x05level\x12\x1d\n" +
 	"\n" +
 	"event_type\x18\x03 \x01(\tR\teventType\x12\x16\n" +
-	"\x06county\x18\x04 \x01(\tR\x06county\"\xc4\x01\n" +
+	"\x06county\x18\x04 \x01(\tR\x06county\"\xd0\x01\n" +
 	"\x12WeatherAlertDetail\x12!\n" +
-	"\fnws_severity\x18\x01 \x01(\tR\vnwsSeverity\x12\x1c\n" +
-	"\tcertainty\x18\x02 \x01(\tR\tcertainty\x12\x18\n" +
-	"\aurgency\x18\x03 \x01(\tR\aurgency\x12 \n" +
-	"\vinstruction\x18\x04 \x01(\tR\vinstruction\x12\x1b\n" +
-	"\tarea_desc\x18\x05 \x01(\tR\bareaDesc\x12\x14\n" +
-	"\x05zones\x18\x06 \x03(\tR\x05zones\"b\n" +
+	"\fnws_severity\x18\x02 \x01(\tR\vnwsSeverity\x12\x1c\n" +
+	"\tcertainty\x18\x03 \x01(\tR\tcertainty\x12\x18\n" +
+	"\aurgency\x18\x04 \x01(\tR\aurgency\x12 \n" +
+	"\vinstruction\x18\x05 \x01(\tR\vinstruction\x12\x1b\n" +
+	"\tarea_desc\x18\a \x01(\tR\bareaDesc\x12\x14\n" +
+	"\x05zones\x18\b \x03(\tR\x05zonesJ\x04\b\x01\x10\x02J\x04\b\x06\x10\a\"b\n" +
 	"\x11FireWeatherDetail\x12\x14\n" +
 	"\x05state\x18\x01 \x01(\tR\x05state\x12!\n" +
 	"\fsource_event\x18\x02 \x01(\tR\vsourceEvent\x12\x14\n" +
-	"\x05zones\x18\x03 \x03(\tR\x05zones\"_\n" +
+	"\x05zones\x18\x03 \x03(\tR\x05zones\"e\n" +
 	"\x10EarthquakeDetail\x12\x1c\n" +
 	"\tmagnitude\x18\x01 \x01(\x01R\tmagnitude\x12\x19\n" +
 	"\bdepth_km\x18\x02 \x01(\x01R\adepthKm\x12\x12\n" +
-	"\x04felt\x18\x03 \x01(\x05R\x04felt\"\xeb\x01\n" +
+	"\x04felt\x18\x03 \x01(\x05R\x04feltJ\x04\b\x04\x10\x05\"\xfd\x01\n" +
 	"\x12RoadIncidentDetail\x12\x1d\n" +
 	"\n" +
 	"log_number\x18\x01 \x01(\tR\tlogNumber\x12\x16\n" +
-	"\x06impact\x18\x02 \x01(\tR\x06impact\x12\x1a\n" +
-	"\bduration\x18\x03 \x01(\tR\bduration\x12E\n" +
-	"\bmetadata\x18\x04 \x03(\v2).grid.v1.RoadIncidentDetail.MetadataEntryR\bmetadata\x1a;\n" +
+	"\x06impact\x18\x04 \x01(\tR\x06impact\x12\x1a\n" +
+	"\bduration\x18\x05 \x01(\tR\bduration\x12E\n" +
+	"\bmetadata\x18\a \x03(\v2).grid.v1.RoadIncidentDetail.MetadataEntryR\bmetadata\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"[\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\x02\x10\x03J\x04\b\x03\x10\x04J\x04\b\x06\x10\a\"[\n" +
 	"\tEventList\x12&\n" +
 	"\x06events\x18\x01 \x03(\v2\x0e.grid.v1.EventR\x06events\x12&\n" +
 	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"\xcb\x01\n" +

@@ -383,3 +383,53 @@ func TestContentHashIgnoresVolatileFields(t *testing.T) {
 	statusChanged.Status = gridv1.EventStatus_RESOLVED
 	assert.NotEqual(t, base, ContentHash(statusChanged), "status is hashed content")
 }
+
+// An enhancement-only change (excluded from the content hash, so no new
+// revision) must still PERSIST to the stored blob — a re-run enhancement with
+// fresh enhanced_at/request/response is otherwise silently dropped on the
+// hash-equal path.
+func TestUpsertPersistsEnhancementOnHashEqual(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	seedSource(t, s, "usgs")
+
+	ev := testEvent("chp:i1", gridv1.Severity_MODERATE, gridv1.EventStatus_ACTIVE, "Vehicle fire on Hwy 4")
+	ev.Summary = "First AI narrative."
+	ev.Enhancement = &gridv1.Enhancement{
+		Model: "gpt-5-mini", EnhancedAt: timestamppb.New(baseTime),
+		Fields: []string{"headline", "summary"}, Request: "prompt v1", Response: `{"v":1}`,
+	}
+	_, err := s.UpsertEvent(ctx, ev)
+	require.NoError(t, err)
+
+	// Same hashed content (headline/severity/status/geometry unchanged) but a
+	// re-run enhancement: new time, request, response, and reworded summary.
+	reEnhanced := proto.Clone(ev).(*gridv1.Event)
+	reEnhanced.Summary = "Reworded AI narrative."
+	reEnhanced.Enhancement = &gridv1.Enhancement{
+		Model: "gpt-5-mini", EnhancedAt: timestamppb.New(baseTime.Add(24 * time.Hour)),
+		Fields: []string{"headline", "summary"}, Request: "prompt v2", Response: `{"v":2}`,
+	}
+	res, err := s.UpsertEvent(ctx, reEnhanced)
+	require.NoError(t, err)
+	assert.Equal(t, UpsertResult{Changed: false, Revision: 1}, res, "no new revision")
+	assert.Equal(t, 1, revisionCount(t, s, "chp:i1"))
+
+	got, err := s.GetEvent(ctx, "chp:i1")
+	require.NoError(t, err)
+	assert.Equal(t, "Reworded AI narrative.", got.GetSummary(), "reworded summary persisted")
+	assert.Equal(t, "prompt v2", got.GetEnhancement().GetRequest(), "fresh request persisted")
+	assert.Equal(t, `{"v":2}`, got.GetEnhancement().GetResponse(), "fresh response persisted")
+	assert.Equal(t, baseTime.Add(24*time.Hour).UTC(), got.GetEnhancement().GetEnhancedAt().AsTime(), "fresh enhanced_at persisted")
+
+	// A plain no-op poll that carries NO enhancement must not erase the stored one.
+	noEnh := proto.Clone(ev).(*gridv1.Event)
+	noEnh.Summary = ""
+	noEnh.Enhancement = nil
+	_, err = s.UpsertEvent(ctx, noEnh)
+	require.NoError(t, err)
+	got, err = s.GetEvent(ctx, "chp:i1")
+	require.NoError(t, err)
+	require.NotNil(t, got.GetEnhancement(), "a no-enhancement poll must not erase the stored enhancement")
+	assert.Equal(t, "prompt v2", got.GetEnhancement().GetRequest())
+}

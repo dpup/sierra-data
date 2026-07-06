@@ -41,6 +41,14 @@ func (n *WeatherAlertNormalizer) SourceIDs() []string { return []string{"nws"} }
 
 // Poll implements Normalizer.
 func (n *WeatherAlertNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult, error) {
+	// Empty scope is a hard error, never a success-empty poll. With no configured
+	// NWS zones, RawNWSAlerts short-circuits to (nil, now, nil) with no fetch; a
+	// success-empty PollResult would mark nws OK and let the sweep EXPIRE every
+	// stored active alert with no fetch ever made (fail-loud mechanism 4, matching
+	// the other pollers' errEmptyScope guard).
+	if len(n.cfg.Weather.NWS.Zones) == 0 {
+		return nil, errEmptyScope("nws zones")
+	}
 	alerts, _, err := n.weather.RawNWSAlerts(ctx)
 	if err != nil && alerts == nil {
 		// Fetch failed with no usable last-good list: hard error, every

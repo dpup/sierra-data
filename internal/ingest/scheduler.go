@@ -145,20 +145,28 @@ func (s *Scheduler) tick(ctx context.Context, spec PollerSpec) {
 	}
 	var polledIDs []string
 	for _, ev := range result.Events {
-		if ids, ok := polled[ev.GetProvenance().GetSourceId()]; ok {
+		src := ev.GetProvenance().GetSourceId()
+		if ids, ok := polled[src]; ok {
 			ids[ev.GetId()] = true
 		}
-		polledIDs = append(polledIDs, ev.GetId())
+		// Only ids from a source that fetched cleanly count as "confirmed seen".
+		// A stale-served event (its source has a PerSource error, e.g. NWS down
+		// and RawNWSAlerts returned the last-good list) was NOT confirmed this
+		// tick — bumping its last_seen_at would reset the expire grace off a poll
+		// that never reached the source, over-retaining an ended alert.
+		if result.PerSource[src] == nil {
+			polledIDs = append(polledIDs, ev.GetId())
+		}
 		s.maybeEnhance(ctx, ev, &budget)
 		if _, err := s.store.UpsertEvent(ctx, ev); err != nil {
 			logging.Errorw(ctx, "Ingest tick: upsert failed", "event", ev.GetId(), "error", err)
 		}
 	}
 
-	// Every id this successful poll returned was just confirmed by its
-	// source — including hash-equal no-op upserts, which write nothing.
-	// TouchSeen anchors the expire grace to this confirmation, so a stable
-	// event that later drops out of one poll is not expired instantly.
+	// Every id a clean poll returned was just confirmed by its source —
+	// including hash-equal no-op upserts, which write nothing. TouchSeen anchors
+	// the expire grace to this confirmation, so a stable event that later drops
+	// out of one poll is not expired instantly.
 	if err := s.store.TouchSeen(ctx, polledIDs, now); err != nil {
 		logging.Errorw(ctx, "Ingest tick: touch seen failed", "sources", sourceIDs, "error", err)
 	}

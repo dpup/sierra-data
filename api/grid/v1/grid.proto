@@ -186,12 +186,16 @@ message EvacuationDetail {
 //   - the NWS event name is the envelope `category`
 //   - the sending office is `provenance.source_name`
 message WeatherAlertDetail {
-  string nws_severity = 1;          // raw NWS vocabulary (Extreme..Minor), distinct from unified severity
-  string certainty = 2;
-  string urgency = 3;
-  string instruction = 4;
-  string area_desc = 5;             // NWS free-text area (no envelope equivalent for zone alerts)
-  repeated string zones = 6;        // NWS forecast zones, e.g. "CAZ064"
+  // Removed fields keep their original tag numbers reserved so persisted blobs
+  // decode correctly and the numbers are never reused: 1 = event (now the
+  // envelope `category`), 6 = sender_name (now `provenance.source_name`).
+  reserved 1, 6;
+  string nws_severity = 2;          // raw NWS vocabulary (Extreme..Minor), distinct from unified severity
+  string certainty = 3;
+  string urgency = 4;
+  string instruction = 5;
+  string area_desc = 7;             // NWS free-text area (no envelope equivalent for zone alerts)
+  repeated string zones = 8;        // NWS forecast zones, e.g. "CAZ064"
 }
 
 // fire_weather is condition-backed (a live projection, not an event); this
@@ -203,20 +207,24 @@ message FireWeatherDetail {
 }
 
 message EarthquakeDetail {
+  reserved 4;                       // was url (now the envelope `canonical_url`)
   double magnitude = 1;
   double depth_km = 2;
   int32 felt = 3;                   // USGS DYFI felt-report count
-  // The USGS event page is the envelope `canonical_url`.
 }
 
 // Kind-specific only. The incident type is the envelope `category`, the human
 // location is `area_label`, and the short line is the `headline` — none are
 // repeated here.
 message RoadIncidentDetail {
+  // Removed fields keep their original tags reserved: 2 = incident_type (now the
+  // envelope `category`), 3 = location_description (now `area_label`),
+  // 6 = condensed_summary (now the `headline`).
+  reserved 2, 3, 6;
   string log_number = 1;
-  string impact = 2;                // AI-assessed: none | light | moderate | severe
-  string duration = 3;              // AI-assessed: unknown | < 1 hour | several hours | ongoing
-  map<string, string> metadata = 4; // structured extras from AI analysis (internal keys stripped)
+  string impact = 4;                // AI-assessed: none | light | moderate | severe
+  string duration = 5;              // AI-assessed: unknown | < 1 hour | several hours | ongoing
+  map<string, string> metadata = 7; // structured extras from AI analysis (internal keys stripped)
 }
 
 // List / response wrappers for the hand-built /v1 handlers.

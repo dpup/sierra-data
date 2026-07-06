@@ -48,6 +48,9 @@ func (f *fakeDoer) Do(req *http.Request) (*http.Response, error) {
 func testConfig() *config.Config {
 	return &config.Config{
 		OpenAI: config.OpenAIClient{Model: "gpt-5-mini"},
+		Weather: config.WeatherConfig{
+			NWS: config.NWSConfig{Zones: []string{"CAZ064", "CAZ065", "CAZ258"}},
+		},
 		Roads: config.RoadsConfig{
 			IncidentAreas: []config.IncidentArea{
 				{ID: "mother-lode", Bounds: config.GeoBounds{MinLatitude: 37.9, MaxLatitude: 38.5, MinLongitude: -120.9, MaxLongitude: -120.0}},

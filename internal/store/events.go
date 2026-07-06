@@ -346,30 +346,50 @@ func (s *Store) refreshEventPlaces(tx *sql.Tx, ev *gridv1.Event) error {
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("store: iterate event_places %s: %w", ev.GetId(), err)
 	}
-	if slices.Equal(want, have) {
-		return nil
-	}
+	placesChanged := !slices.Equal(want, have)
 
-	if err := replaceEventPlaces(tx, ev.GetId(), want); err != nil {
-		return err
-	}
-	// Keep the canonical blob consistent with event_places so reads (which
-	// rehydrate from the blob) see the same attachments as place queries.
+	// Load the stored blob to compare the hash-excluded fields (place_ids and the
+	// AI enhancement/summary) against the incoming event.
 	var blob []byte
 	if err := tx.QueryRow(`SELECT proto FROM events WHERE id = ?`, ev.GetId()).Scan(&blob); err != nil {
-		return fmt.Errorf("store: load event %s for place refresh: %w", ev.GetId(), err)
+		return fmt.Errorf("store: load event %s for refresh: %w", ev.GetId(), err)
 	}
 	stored := &gridv1.Event{}
 	if err := proto.Unmarshal(blob, stored); err != nil {
-		return fmt.Errorf("store: unmarshal event %s for place refresh: %w", ev.GetId(), err)
+		return fmt.Errorf("store: unmarshal event %s for refresh: %w", ev.GetId(), err)
 	}
+
+	// enhancement/summary are excluded from the content hash, so a re-run
+	// enhancement (fresh enhanced_at/request/response, or a reworded summary)
+	// with otherwise-identical content lands on this hash-equal path. Persist the
+	// latest without a new revision. Only when the incoming actually carries a
+	// fresh enhancement — never erase a stored enhancement on a plain no-op poll
+	// (weather alerts don't re-enhance on hash-equal ticks, so ev.Enhancement is
+	// nil then and must not overwrite the stored one).
+	enhChanged := ev.GetEnhancement() != nil &&
+		(!proto.Equal(stored.GetEnhancement(), ev.GetEnhancement()) || stored.GetSummary() != ev.GetSummary())
+
+	if !placesChanged && !enhChanged {
+		return nil
+	}
+	if placesChanged {
+		if err := replaceEventPlaces(tx, ev.GetId(), want); err != nil {
+			return err
+		}
+	}
+	// Keep the canonical blob consistent (reads rehydrate from it): place_ids in
+	// lockstep with event_places, and the freshest enhancement/summary.
 	stored.PlaceIds = want
+	if enhChanged {
+		stored.Enhancement = ev.GetEnhancement()
+		stored.Summary = ev.GetSummary()
+	}
 	newBlob, err := proto.Marshal(stored)
 	if err != nil {
-		return fmt.Errorf("store: marshal event %s for place refresh: %w", ev.GetId(), err)
+		return fmt.Errorf("store: marshal event %s for refresh: %w", ev.GetId(), err)
 	}
 	if _, err := tx.Exec(`UPDATE events SET proto = ? WHERE id = ?`, newBlob, ev.GetId()); err != nil {
-		return fmt.Errorf("store: update event %s for place refresh: %w", ev.GetId(), err)
+		return fmt.Errorf("store: update event %s for refresh: %w", ev.GetId(), err)
 	}
 	return nil
 }
@@ -491,13 +511,58 @@ func (s *Store) matchPlaces(tx *sql.Tx, ev *gridv1.Event) ([]string, error) {
 	}
 	evPolygonal := evGeom != nil && (evGeom.Type == "Polygon" || evGeom.Type == "MultiPolygon")
 
+	places, err := s.loadPlaceGeoms(tx)
+	if err != nil {
+		return nil, err
+	}
+
+	var matched []string
+	for _, pl := range places {
+		if pointLike {
+			if geojson.PointInGeometry(centroid.GetLat(), centroid.GetLng(), pl.geom) {
+				matched = append(matched, pl.id)
+			}
+			continue
+		}
+		if !geojson.BboxIntersects(evMinLat, evMinLng, evMaxLat, evMaxLng,
+			pl.minLat, pl.minLng, pl.maxLat, pl.maxLng) {
+			continue
+		}
+		if geojson.PointInGeometry(centroid.GetLat(), centroid.GetLng(), pl.geom) {
+			matched = append(matched, pl.id)
+			continue
+		}
+		if !evPolygonal {
+			continue
+		}
+		if geojson.PointInGeometry(pl.centLat, pl.centLng, evGeom) {
+			matched = append(matched, pl.id)
+			continue
+		}
+		if pl.polygonal {
+			matched = append(matched, pl.id) // permissive polygon-polygon bbox overlap
+		}
+	}
+	return matched, nil
+}
+
+// loadPlaceGeoms returns the parsed place geometries, rebuilding the cache from
+// the places table only when it has been invalidated (UpsertPlace) or never
+// built. Called under the store mutex (matchPlaces runs inside inTx), so the
+// cache needs no separate lock. This avoids re-SELECTing and re-parsing every
+// place polygon on every per-event upsert — including hash-equal no-ops, which
+// dominate a steady-state tick.
+func (s *Store) loadPlaceGeoms(tx *sql.Tx) ([]parsedPlace, error) {
+	if s.placesGeoValid {
+		return s.placesGeo, nil
+	}
 	rows, err := tx.Query(`SELECT id, proto FROM places`)
 	if err != nil {
 		return nil, fmt.Errorf("store: load places: %w", err)
 	}
 	defer rows.Close()
 
-	var matched []string
+	var out []parsedPlace
 	for rows.Next() {
 		var id string
 		var blob []byte
@@ -512,41 +577,25 @@ func (s *Store) matchPlaces(tx *sql.Tx, ev *gridv1.Event) ([]string, error) {
 		if len(raw) == 0 {
 			continue
 		}
-		plGeom, err := geojson.Parse(raw)
+		g, err := geojson.Parse(raw)
 		if err != nil {
 			continue
 		}
-		if pointLike {
-			if geojson.PointInGeometry(centroid.GetLat(), centroid.GetLng(), plGeom) {
-				matched = append(matched, id)
-			}
-			continue
-		}
-		plMinLat, plMinLng, plMaxLat, plMaxLng := plGeom.Bbox()
-		if !geojson.BboxIntersects(evMinLat, evMinLng, evMaxLat, evMaxLng,
-			plMinLat, plMinLng, plMaxLat, plMaxLng) {
-			continue
-		}
-		if geojson.PointInGeometry(centroid.GetLat(), centroid.GetLng(), plGeom) {
-			matched = append(matched, id)
-			continue
-		}
-		if !evPolygonal {
-			continue
-		}
-		plCenterLat, plCenterLng := plGeom.Centroid()
-		if geojson.PointInGeometry(plCenterLat, plCenterLng, evGeom) {
-			matched = append(matched, id)
-			continue
-		}
-		if plGeom.Type == "Polygon" || plGeom.Type == "MultiPolygon" {
-			matched = append(matched, id) // permissive polygon-polygon bbox overlap
-		}
+		minLat, minLng, maxLat, maxLng := g.Bbox()
+		clat, clng := g.Centroid()
+		out = append(out, parsedPlace{
+			id: id, geom: g,
+			minLat: minLat, minLng: minLng, maxLat: maxLat, maxLng: maxLng,
+			centLat: clat, centLng: clng,
+			polygonal: g.Type == "Polygon" || g.Type == "MultiPolygon",
+		})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("store: iterate places: %w", err)
 	}
-	return matched, nil
+	s.placesGeo = out
+	s.placesGeoValid = true
+	return out, nil
 }
 
 // unionSorted merges two id lists, deduped and sorted for deterministic blobs.

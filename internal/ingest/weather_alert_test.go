@@ -156,3 +156,13 @@ func TestWeatherAlertPollError(t *testing.T) {
 	_, err := n.Poll(testCtx(), nil)
 	assert.Error(t, err)
 }
+
+// Empty NWS-zone config is a hard error, not a success-empty poll that would let
+// the sweep expire stored active alerts with no fetch (fail-loud mechanism 4).
+func TestWeatherAlertPoll_EmptyScopeHardError(t *testing.T) {
+	cfg := testConfig()
+	cfg.Weather.NWS.Zones = nil
+	n := NewWeatherAlertNormalizer(cfg, &fakeWeatherAPI{})
+	_, err := n.Poll(testCtx(), nil)
+	require.Error(t, err, "no configured NWS zones must be a hard error")
+}

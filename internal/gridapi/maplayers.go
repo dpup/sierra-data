@@ -161,7 +161,17 @@ func (s *Service) serveConditionLayer(w http.ResponseWriter, r *http.Request, hb
 		notImplemented(w, "condition-backed map layers are not wired")
 		return
 	}
-	area := s.resolveHazardArea(place)
+	area, covered := s.resolveHazardArea(place)
+	// fire_weather is zone-scoped; an out-of-coverage place has no fire-weather
+	// zone, so serve a clean empty layer rather than another region's product.
+	if layer == hazards.LayerFireWeather && !covered {
+		s.writeFeatureCollection(w, r, nil, &hazards.Metadata{
+			Layer: layer, Area: place.GetSlug(),
+			GeneratedAt:  s.Now().UTC().Format(time.RFC3339),
+			SourceStatus: "OK", SchemaVersion: mapSchemaVersion,
+		})
+		return
+	}
 	features, status, lastUpdate, attribution, sourceURL, ok := hb.BuildLayer(r.Context(), area, layer)
 	if !ok {
 		// Unreachable via the router (conditionLayers gates), kept for safety.
@@ -190,11 +200,18 @@ func (s *Service) serveConditionLayer(w http.ResponseWriter, r *http.Request, hb
 // by NWS zone, not coordinates) and IncidentArea from the first intersecting
 // area (the roads incident feed is per configured region). A stale AREA row
 // whose config entry was removed falls through to the same synthesis.
-func (s *Service) resolveHazardArea(place *gridv1.Place) config.HazardArea {
+// resolveHazardArea returns the config.HazardArea for a place and whether the
+// place is within the service's configured hazard coverage. `covered` is false
+// for a synthesized place (a non-AREA place, or an AREA with no matching config)
+// that intersects no configured area — such a place has no NWS-zone
+// relationship, so zone-scoped condition layers (fire_weather) must serve
+// nothing rather than fall through zonesMatch's empty-zones "match all" and
+// inherit an unrelated region's fire weather.
+func (s *Service) resolveHazardArea(place *gridv1.Place) (config.HazardArea, bool) {
 	if place.GetKind() == gridv1.PlaceKind_AREA {
 		for _, a := range s.Cfg.Hazards.Areas {
 			if a.ID == place.GetSlug() {
-				return a
+				return a, true
 			}
 		}
 	}
@@ -214,12 +231,14 @@ func (s *Service) resolveHazardArea(place *gridv1.Place) config.HazardArea {
 		},
 	}
 	seen := make(map[string]bool)
+	covered := false
 	for _, a := range s.Cfg.Hazards.Areas {
 		if !geojson.BboxIntersects(
 			a.Bounds.MinLatitude, a.Bounds.MinLongitude, a.Bounds.MaxLatitude, a.Bounds.MaxLongitude,
 			area.Bounds.MinLatitude, area.Bounds.MinLongitude, area.Bounds.MaxLatitude, area.Bounds.MaxLongitude) {
 			continue
 		}
+		covered = true
 		if area.IncidentArea == "" {
 			area.IncidentArea = a.IncidentArea
 		}
@@ -230,7 +249,7 @@ func (s *Service) resolveHazardArea(place *gridv1.Place) config.HazardArea {
 			}
 		}
 	}
-	return area
+	return area, covered
 }
 
 // LayerSourceStatus derives an event-backed layer's metadata.source_status

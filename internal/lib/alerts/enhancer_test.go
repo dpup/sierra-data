@@ -2,8 +2,10 @@ package alerts
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -158,5 +160,23 @@ func BenchmarkAlertEnhancer_EnhanceAlert(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, _ = enhancer.EnhanceAlert(ctx, rawAlert)
+	}
+}
+
+func TestTruncateRunes_NoInvalidUTF8(t *testing.T) {
+	// A byte-index cut at 147 would split the en-dash preceding byte 147; the
+	// rune-aware truncation must never emit invalid UTF-8 (which would fail
+	// protojson marshaling downstream).
+	s := strings.Repeat("a", 146) + "–tail" // en-dash straddles byte 147
+	out := truncateRunes(s, 147)
+	if !utf8.ValidString(out) {
+		t.Fatalf("truncateRunes produced invalid UTF-8: %q", out)
+	}
+	if len(s) <= 147 {
+		t.Fatal("test setup: input should exceed 147 bytes")
+	}
+	// Short strings pass through unchanged.
+	if got := truncateRunes("short", 147); got != "short" {
+		t.Fatalf("short string altered: %q", got)
 	}
 }

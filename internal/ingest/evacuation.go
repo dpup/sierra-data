@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 
@@ -100,7 +101,7 @@ func (n *EvacuationNormalizer) Poll(ctx context.Context, prior Prior) (*PollResu
 
 	var events []*gridv1.Event
 	for _, id := range idOrder {
-		events = append(events, resolveEvacIDCollisions(ctx, id, groups[id])...)
+		events = append(events, resolveEvacIDCollisions(ctx, prior, id, groups[id])...)
 	}
 	return &PollResult{Events: events}, nil
 }
@@ -186,11 +187,7 @@ func evacLevelRank(level string) int {
 //   - Residual collisions — genuinely different zones that still collided on
 //     the id — get deterministic -2/-3 suffixes in (county, centroid) order,
 //     so neither zone is dropped and ids are stable across polls.
-func resolveEvacIDCollisions(ctx context.Context, id string, cands []evacCand) []*gridv1.Event {
-	if len(cands) == 1 {
-		return []*gridv1.Event{cands[0].ev}
-	}
-
+func resolveEvacIDCollisions(ctx context.Context, prior Prior, id string, cands []evacCand) []*gridv1.Event {
 	// Cluster same-zone candidates, preserving encounter order.
 	var clusters [][]evacCand
 next:
@@ -222,13 +219,9 @@ next:
 		}
 		winners = append(winners, best.ev)
 	}
-	if len(winners) == 1 {
-		return winners
-	}
 
-	// Residual collision: distinct zones under one id. Deterministic -2/-3
-	// suffixes by (county, centroid lat, centroid lng) order — stable across
-	// polls regardless of upstream feature order.
+	// Deterministic base order by (county, centroid) so new zones get stable
+	// suffixes regardless of upstream feature order.
 	sort.SliceStable(winners, func(i, j int) bool {
 		ci, cj := winners[i].GetEvacuation().GetCounty(), winners[j].GetEvacuation().GetCounty()
 		if ci != cj {
@@ -240,12 +233,74 @@ next:
 		}
 		return gi.GetLng() < gj.GetLng()
 	})
-	for i, ev := range winners[1:] {
-		ev.Id = fmt.Sprintf("%s-%d", id, i+2)
+	// Assign ids with cross-poll continuity. This runs for a single winner too:
+	// a surviving zone whose colliding sibling was lifted must KEEP its suffixed
+	// id (matched from prior) rather than flip to the bare id — otherwise the
+	// resolve sweep reads the old id as disappeared and writes a spurious
+	// all-clear for a zone that is still actively evacuating.
+	assignEvacContinuityIDs(prior, id, winners)
+	if len(winners) > 1 {
+		logging.Warnw(ctx, "Distinct Cal OES zones collided on one id; suffixed with cross-poll continuity",
+			"id", id, "count", len(winners))
 	}
-	logging.Warnw(ctx, "Distinct Cal OES zones collided on one id; suffixed deterministically",
-		"id", id, "count", len(winners))
 	return winners
+}
+
+// assignEvacContinuityIDs gives each colliding winner a stable id ACROSS polls.
+// Positional suffixes alone are unstable: when one colliding zone is lifted, the
+// survivor's positional rank changes and its id flips (e.g. evac:X-2 → evac:X),
+// which the resolve-policy sweep reads as the old id disappearing and writes a
+// spurious RESOLVED all-clear into the history of a zone that is STILL actively
+// evacuating (a life-safety false all-clear). So each winner first inherits the
+// id of its nearest same-county prior event sharing this base id; only genuinely
+// new zones take the lowest free suffix. Mirrors the wildfire standalone-
+// perimeter continuity (standaloneContinuityID).
+func assignEvacContinuityIDs(prior Prior, base string, winners []*gridv1.Event) {
+	var priors []*gridv1.Event
+	for _, pe := range priorForSource(prior, "caloes") {
+		if pid := pe.GetId(); pid == base || strings.HasPrefix(pid, base+"-") {
+			priors = append(priors, pe)
+		}
+	}
+
+	takenPrior := make(map[string]bool)
+	assigned := make(map[*gridv1.Event]string, len(winners))
+	// Pass 1: each winner claims its nearest same-county unused prior id.
+	for _, w := range winners {
+		best, bestDist := "", math.MaxFloat64
+		for _, pe := range priors {
+			if takenPrior[pe.GetId()] || pe.GetEvacuation().GetCounty() != w.GetEvacuation().GetCounty() {
+				continue
+			}
+			if d := centroidDistSq(pe.GetGeometry(), w.GetGeometry()); d < bestDist {
+				best, bestDist = pe.GetId(), d
+			}
+		}
+		if best != "" {
+			takenPrior[best] = true
+			assigned[w] = best
+		}
+	}
+	// Pass 2: winners with no prior match take the lowest free suffix (bare id
+	// first, then -2, -3, …), avoiding any id already claimed from a prior.
+	taken := make(map[string]bool, len(winners))
+	for _, id := range assigned {
+		taken[id] = true
+	}
+	for _, w := range winners {
+		if _, ok := assigned[w]; ok {
+			continue
+		}
+		id := base
+		for i := 2; taken[id]; i++ {
+			id = fmt.Sprintf("%s-%d", base, i)
+		}
+		assigned[w] = id
+		taken[id] = true
+	}
+	for w, id := range assigned {
+		w.Id = id
+	}
 }
 
 // sameEvacZone reports whether two colliding rows describe the same physical

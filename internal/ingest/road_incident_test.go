@@ -137,7 +137,7 @@ func TestRoadIncidentPoll(t *testing.T) {
 	// model I/O (transparency) and the enhancement time (provenance).
 	require.NotNil(t, ev.Enhancement)
 	assert.Equal(t, "gpt-5-mini", ev.Enhancement.Model)
-	assert.Equal(t, []string{"headline", "summary", "impact"}, ev.Enhancement.Fields)
+	assert.Equal(t, []string{"headline", "summary", "severity"}, ev.Enhancement.Fields)
 	assert.Equal(t, "Parse this traffic incident report...", ev.Enhancement.Request)
 	assert.Equal(t, `{"details":"Vehicle fire blocking the right lane","impact":"severe"}`, ev.Enhancement.Response)
 	require.NotNil(t, ev.Enhancement.EnhancedAt)

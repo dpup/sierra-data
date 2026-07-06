@@ -49,6 +49,9 @@ func (s *Store) UpsertPlace(ctx context.Context, p *gridv1.Place) error {
 		); err != nil {
 			return fmt.Errorf("store: upsert place %s: %w", p.GetId(), err)
 		}
+		// Invalidate the parsed-geometry cache (held under mu, which inTx owns).
+		// Conservative on rollback: a stray invalidation only forces a rebuild.
+		s.placesGeoValid = false
 		return nil
 	})
 }

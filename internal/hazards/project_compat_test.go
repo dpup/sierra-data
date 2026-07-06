@@ -68,6 +68,9 @@ func compatConfig() *config.Config {
 	bounds := config.GeoBounds{MinLatitude: 37.7, MaxLatitude: 38.5, MinLongitude: -120.9, MaxLongitude: -119.2}
 	return &config.Config{
 		OpenAI: config.OpenAIClient{Model: "gpt-5-mini"},
+		Weather: config.WeatherConfig{
+			NWS: config.NWSConfig{Zones: []string{"CAZ064", "CAZ065"}},
+		},
 		Roads: config.RoadsConfig{
 			IncidentAreas: []config.IncidentArea{{ID: "mother-lode", Bounds: bounds}},
 		},

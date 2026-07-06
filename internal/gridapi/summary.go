@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	gridv1 "github.com/dpup/info.ersn.net/server/api/grid/v1"
@@ -219,12 +220,25 @@ func (s *Service) serveSummaryWith(w http.ResponseWriter, r *http.Request, hb ha
 	}
 
 	// Condition layers (live projections of the roads/weather services): fetch
-	// once each, feeding the roads/fire domain merges and the fire-weather
-	// mode signal.
-	area := s.resolveHazardArea(place)
-	condChain := buildCondition(r, hb, area, hazards.LayerChainControl)
-	condSegment := buildCondition(r, hb, area, hazards.LayerRoadSegment)
-	condFireWx := buildCondition(r, hb, area, hazards.LayerFireWeather)
+	// once each, feeding the roads/fire domain merges and the fire-weather mode
+	// signal. The three builds do independent upstream I/O, so fan them out
+	// concurrently (mirroring the /situation handler) rather than paying the sum
+	// of their latencies on the request path.
+	area, covered := s.resolveHazardArea(place)
+	// fire_weather is zone-scoped: an out-of-coverage place inherits no region's
+	// product — a confirmed-empty OK (not "" which worstStatus ranks UNAVAILABLE),
+	// contributing nothing to the fire domain or the mode signal.
+	condChain, condSegment := conditionResult{}, conditionResult{}
+	condFireWx := conditionResult{status: "OK"}
+	var cwg sync.WaitGroup
+	cwg.Add(2)
+	go func() { defer cwg.Done(); condChain = buildCondition(r, hb, area, hazards.LayerChainControl) }()
+	go func() { defer cwg.Done(); condSegment = buildCondition(r, hb, area, hazards.LayerRoadSegment) }()
+	if covered {
+		cwg.Add(1)
+		go func() { defer cwg.Done(); condFireWx = buildCondition(r, hb, area, hazards.LayerFireWeather) }()
+	}
+	cwg.Wait()
 
 	resp := summaryResponse{
 		Place:       place.GetSlug(),

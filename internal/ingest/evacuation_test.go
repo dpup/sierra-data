@@ -263,3 +263,41 @@ func TestHumanEvacLevel(t *testing.T) {
 	assert.Equal(t, "Advisory", humanEvacLevel("ADVISORY"))
 	assert.Equal(t, "Shelter In Place", humanEvacLevel("SHELTER_IN_PLACE"))
 }
+
+func eventByCounty(events []*gridv1.Event, county string) *gridv1.Event {
+	for _, ev := range events {
+		if ev.GetEvacuation().GetCounty() == county {
+			return ev
+		}
+	}
+	return nil
+}
+
+// A surviving zone must KEEP its suffixed id across polls when its colliding
+// sibling is lifted — never flip to the bare id, which the resolve sweep would
+// read as the old id disappearing and turn into a spurious RESOLVED all-clear
+// for a zone that is still actively evacuating.
+func TestEvacuationPoll_CollisionContinuityAcrossPolls(t *testing.T) {
+	// Poll 1: two zones share id "evac:Twin Zone" -> Calaveras keeps the bare id
+	// (county sort), Tuolumne gets the -2 suffix.
+	res1 := pollEvac(t, evacCollection(
+		evacFeature("", "Twin Zone", "Tuolumne", "Evacuation Warning", "", 38.0, -120.1),
+		evacFeature("", "Twin Zone", "Calaveras", "Evacuation Order", "", 38.1, -120.4),
+	))
+	require.Len(t, res1.Events, 2)
+	require.Equal(t, "evac:Twin Zone-2", eventByCounty(res1.Events, "Tuolumne").GetId())
+	prior := &scriptedPrior{events: res1.Events}
+
+	// Poll 2: the Calaveras zone is lifted; only Tuolumne remains (now the sole
+	// candidate for the base id). It must stay evac:Twin Zone-2, not become the
+	// bare evac:Twin Zone.
+	n := NewEvacuationNormalizer(testConfig(), caloes.NewClientWithHTTPDoer("https://caloes.test",
+		&fakeDoer{resp: evacCollection(
+			evacFeature("", "Twin Zone", "Tuolumne", "Evacuation Warning", "", 38.0, -120.1),
+		)}))
+	res2, err := n.Poll(testCtx(), prior)
+	require.NoError(t, err)
+	require.Len(t, res2.Events, 1)
+	assert.Equal(t, "evac:Twin Zone-2", res2.Events[0].Id,
+		"survivor must keep its suffixed id, not flip to bare (which fabricates an all-clear)")
+}

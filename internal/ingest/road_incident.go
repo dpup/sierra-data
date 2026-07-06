@@ -26,10 +26,12 @@ type roadsIncidentsAPI interface {
 }
 
 // enhancedFields are the Event fields the incident AI pipeline generates,
-// recorded in Enhancement provenance so clients can badge AI text. headline is
-// the AI condensed line, summary the AI narrative; description stays the
-// verbatim original (not listed — it is NOT AI-generated).
-var enhancedFields = []string{"headline", "summary", "impact"}
+// recorded in Enhancement provenance so clients can badge AI text: headline is
+// the AI condensed line, summary the AI narrative, and severity is derived from
+// the model's impact assessment (services/incidents.go). description stays the
+// verbatim original (not AI). These are Event-envelope field names — impact
+// lives on the detail block, not the Event, so it is not listed here.
+var enhancedFields = []string{"headline", "summary", "severity"}
 
 // RoadIncidentNormalizer ingests region-wide CHP/Caltrans incidents (id
 // namespace "chp:") from every configured incident area. One poller, two
@@ -89,7 +91,7 @@ func (n *RoadIncidentNormalizer) Poll(ctx context.Context, prior Prior) (*PollRe
 			// this tick: hash-equal => no revision, and it still counts as
 			// seen. Genuinely new incidents (no prior) emit raw immediately —
 			// availability first; the enhanced revision follows.
-			if in.GetImpact() == api.AlertImpact_ALERT_IMPACT_UNSPECIFIED {
+			if !incidentEnhanced(in) {
 				if pe := priorByID(prior, ev.Id); pe != nil && pe.GetEnhancement() != nil {
 					ev = pe
 				}
@@ -182,9 +184,8 @@ func (n *RoadIncidentNormalizer) buildEvent(in *api.Incident) *gridv1.Event {
 		Metadata:  publicMetadata(in.GetMetadata()),
 	}}
 	// Enhancement provenance only when the incident actually went through the
-	// AI pipeline — impact is set exclusively by the model's assessment
-	// (services/incidents.go), so UNSPECIFIED means structural fields only.
-	if in.GetImpact() != api.AlertImpact_ALERT_IMPACT_UNSPECIFIED {
+	// AI pipeline.
+	if incidentEnhanced(in) {
 		ev.Enhancement = &gridv1.Enhancement{
 			Model:      n.cfg.OpenAI.Model,
 			EnhancedAt: in.GetAiEnhancedAt(), // when the model ran (provenance)
@@ -230,6 +231,16 @@ func publicMetadata(m map[string]string) map[string]string {
 		return nil
 	}
 	return out
+}
+
+// incidentEnhanced reports whether an incident went through the AI pipeline,
+// keyed on the presence of the model response rather than on impact. The
+// incidents pipeline sets ai_response iff it successfully enhanced; impact can
+// legitimately map to UNSPECIFIED (an out-of-enum model value falls back to
+// "unknown"), so keying "was enhanced" off impact would drop provenance and
+// misfire the carry-forward on a genuinely-enhanced incident.
+func incidentEnhanced(in *api.Incident) bool {
+	return in.GetAiResponse() != ""
 }
 
 // impactSlug renders the AI-assessed impact enum as its wire slug

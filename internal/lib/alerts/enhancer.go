@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	openai "github.com/sashabaranov/go-openai"
 )
@@ -116,10 +117,7 @@ For the condensed summary, follow the examples provided - do NOT include locatio
 	// Use AI-generated condensed summary (trust the AI to follow instructions)
 	// Only fallback to a simple format if completely missing
 	if structured.CondensedSummary == "" {
-		structured.CondensedSummary = structured.Details // Simple fallback
-		if len(structured.CondensedSummary) > 147 {
-			structured.CondensedSummary = structured.CondensedSummary[:147] + "..."
-		}
+		structured.CondensedSummary = truncateRunes(structured.Details, 147) // Simple fallback
 	}
 
 	// Create enhanced alert. Request/Response record the exact model I/O (the
@@ -167,6 +165,22 @@ func (a *alertEnhancer) HealthCheck(ctx context.Context) error {
 }
 
 // Helper functions
+
+// truncateRunes returns s unchanged if it is within maxBytes, otherwise the
+// longest rune-aligned prefix that fits in maxBytes plus an ellipsis. Slicing
+// on a raw byte index can split a multi-byte UTF-8 rune, which would make the
+// value invalid UTF-8 and fail protojson/proto marshaling of the resulting
+// proto3 string field (headline/condensed_summary).
+func truncateRunes(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	cut := maxBytes
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "..."
+}
 
 // isReasoningModel reports whether the configured model is an OpenAI reasoning
 // model (gpt-5 family / o-series), which accepts the reasoning_effort param.
