@@ -155,7 +155,7 @@ h1, h2, h3 { color: var(--text-hi); font-weight: 600; line-height: 1.25; margin:
 h1 { font-size: 27px; letter-spacing: -0.01em; }
 h2 { font-size: 14px; color: #eef2f4; margin-top: 34px; }
 h2:first-child { margin-top: 0; }
-h3 { font-size: 13px; color: #eef2f4; margin-top: 20px; }
+h3 { font-size: 13px; color: #eef2f4; margin-top: 20px; margin-bottom: 8px; }
 
 p { margin: 0 0 12px; }
 
