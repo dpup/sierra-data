@@ -493,12 +493,12 @@ export function initPlacesPage() {
     const slug = placeRef(place) || ref;
     const links = el('p', 'row');
     const evLink = el('a', '', 'Active events here');
-    evLink.href = `/events.html?place=${encodeURIComponent(slug)}`;
+    evLink.href = `/events?place=${encodeURIComponent(slug)}`;
     const sumLink = el('a', 'mono', `GET /v1/places/${slug}/summary`);
     sumLink.href = `/v1/places/${encodeURIComponent(slug)}/summary`;
     sumLink.title = 'Raw summary JSON (mode, domains, evacuation status)';
     const mapLink = el('a', '', 'Map layers');
-    mapLink.href = `/map.html?place=${encodeURIComponent(slug)}`;
+    mapLink.href = `/map?place=${encodeURIComponent(slug)}`;
     links.append(evLink, ' · ', sumLink, ' · ', mapLink);
     placeDetailEl.append(links);
 

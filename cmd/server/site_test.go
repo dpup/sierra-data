@@ -54,11 +54,36 @@ func TestSiteHandler(t *testing.T) {
 		assert.NotEmpty(t, rec.Body.Bytes())
 	})
 
-	t.Run("html page no-cache", func(t *testing.T) {
-		rec := get("/sources.html")
+	t.Run("extensionless page serves the .html file, no-cache", func(t *testing.T) {
+		rec := get("/sources")
 		assert.Equal(t, http.StatusOK, rec.Code)
 		assert.Equal(t, "text/html; charset=utf-8", rec.Header().Get("Content-Type"))
 		assert.Equal(t, "no-cache", rec.Header().Get("Cache-Control"))
+		assert.NotEmpty(t, rec.Body.Bytes())
+	})
+
+	t.Run(".html redirects to the extensionless URL", func(t *testing.T) {
+		rec := get("/sources.html")
+		assert.Equal(t, http.StatusMovedPermanently, rec.Code)
+		assert.Equal(t, "/sources", rec.Header().Get("Location"))
+	})
+
+	t.Run("index.html redirects to /", func(t *testing.T) {
+		rec := get("/index.html")
+		assert.Equal(t, http.StatusMovedPermanently, rec.Code)
+		assert.Equal(t, "/", rec.Header().Get("Location"))
+	})
+
+	t.Run(".html redirect preserves the query string", func(t *testing.T) {
+		rec := get("/event.html?id=usgs:abc123")
+		assert.Equal(t, http.StatusMovedPermanently, rec.Code)
+		assert.Equal(t, "/event?id=usgs:abc123", rec.Header().Get("Location"))
+	})
+
+	t.Run("extensionless page keeps its query for the client", func(t *testing.T) {
+		rec := get("/event?id=usgs:abc123")
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Equal(t, "text/html; charset=utf-8", rec.Header().Get("Content-Type"))
 	})
 
 	t.Run("asset css content-type and 5m cache", func(t *testing.T) {

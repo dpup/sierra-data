@@ -268,7 +268,7 @@ Content-Type: application/json
       Ids are source-namespaced (<code class="inline">calfire:2026-salt-springs</code>,
       <code class="inline">usgs:nc12345678</code>) — take one from a
       <code class="inline">/v1/events</code> response. The
-      <a href="/events.html">event explorer</a> links every row here.
+      <a href="/events">event explorer</a> links every row here.
     </p>
     <div class="live-examples">
       <a href="/v1/events?page_size=1">/v1/events?page_size=1</a><span class="muted small"> — grab a live id, then <code class="inline">GET /v1/events/{id}</code></span>
@@ -393,7 +393,7 @@ Content-Type: application/json
       last successful fetch, last attempt, last error text, and derived status
       <code class="inline">OK | STALE | UNAVAILABLE</code>. Registry contents in
       <a href="#sources-registry">§7</a>; live board on the
-      <a href="/sources.html">Sources page</a>.
+      <a href="/sources">Sources page</a>.
     </p>
     <div class="live-examples">
       <a href="/v1/sources">/v1/sources</a>
@@ -765,7 +765,7 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
     <p>
       Every event and every layer traces to one of these sources — the registry
       behind <a href="/v1/sources" class="mono">/v1/sources</a> (live board:
-      <a href="/sources.html">Sources</a>). Each
+      <a href="/sources">Sources</a>). Each
       <code class="inline">Source</code> carries
       <code class="inline">id, name, attribution, homepage_url,
       poll_interval_seconds, stale_after_seconds, expire_after_seconds,

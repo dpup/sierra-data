@@ -40,6 +40,22 @@ func siteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Clean URLs: pages are addressed without the .html suffix. Any explicit
+	// ".html" request 301s to the extensionless form (/events.html -> /events,
+	// /index.html -> /) so there is one canonical URL, and old bookmarks and
+	// any stray links still resolve. Query strings are preserved.
+	if p := r.URL.Path; strings.HasSuffix(p, ".html") {
+		clean := strings.TrimSuffix(p, ".html")
+		if clean == "/index" {
+			clean = "/"
+		}
+		if r.URL.RawQuery != "" {
+			clean += "?" + r.URL.RawQuery
+		}
+		http.Redirect(w, r, clean, http.StatusMovedPermanently)
+		return
+	}
+
 	// Map the URL path to an embedded file. path.Clean collapses any ".."
 	// segments so traversal can't escape the embed root (embed.FS would
 	// reject such paths anyway; this keeps the 404 path tidy).
@@ -49,6 +65,13 @@ func siteHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	body, err := site.FS.ReadFile(name)
+	if err != nil && path.Ext(name) == "" {
+		// Extensionless page URL: /events -> events.html. Only files (not the
+		// asset/lib paths, which carry their own extensions) hit this fallback.
+		if b, e := site.FS.ReadFile(name + ".html"); e == nil {
+			name, body, err = name+".html", b, nil
+		}
+	}
 	if err != nil {
 		// Includes directory paths (ReadFile on a dir errors) — the site has
 		// no directory listings.

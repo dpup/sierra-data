@@ -107,32 +107,32 @@
   <!-- endpoints -->
   <h2 style="margin-top:34px;">Endpoints</h2>
   <div class="endpoint-list">
-    <a class="endpoint-row" href="/sources.html">
+    <a class="endpoint-row" href="/sources">
       <span class="chip-method">GET</span>
       <span class="path">/v1/sources</span>
       <span class="desc">Per-source feed health: poll interval, last success, staleness, last error.</span>
     </a>
-    <a class="endpoint-row" href="/events.html">
+    <a class="endpoint-row" href="/events">
       <span class="chip-method">GET</span>
       <span class="path">/v1/events</span>
       <span class="desc">Cross-layer event query — the one endpoint every occurrence is reachable through.</span>
     </a>
-    <a class="endpoint-row" href="/places.html">
+    <a class="endpoint-row" href="/places">
       <span class="chip-method">GET</span>
       <span class="path">/v1/places · /v1/places/resolve</span>
       <span class="desc">Areas, counties, towns, zones, corridors — plus lat·lng / address resolve.</span>
     </a>
-    <a class="endpoint-row" href="/map.html">
+    <a class="endpoint-row" href="/map">
       <span class="chip-method">GET</span>
       <span class="path">/v1/places/{place}/map/{layer}.geojson</span>
       <span class="desc">RFC 7946 FeatureCollection per hazard layer, with the honest-freshness metadata block.</span>
     </a>
-    <a class="endpoint-row" href="/history.html">
+    <a class="endpoint-row" href="/history">
       <span class="chip-method">GET</span>
       <span class="path">/v1/history</span>
       <span class="desc">Chronological revision feed over a time range — the after-action view.</span>
     </a>
-    <a class="endpoint-row" href="/docs.html">
+    <a class="endpoint-row" href="/docs">
       <span class="chip-method">GET</span>
       <span class="path">/v1</span>
       <span class="desc">Full reference: severity ramp, place id scheme, the evacuation fail-loud contract.</span>
@@ -150,7 +150,7 @@
       is worth keeping online, please help fund it.
     </p>
     <a class="btn-primary" href="https://sierragridteam.org/donate" rel="noopener">Donate</a>
-    <a class="btn-ghost" href="/docs.html">Read the API reference</a>
+    <a class="btn-ghost" href="/docs">Read the API reference</a>
   </div>
 
   <div id="page-errors"></div>
@@ -214,7 +214,7 @@
         const tr = el('tr');
 
         const nameCell = el('td');
-        const a = el('a', 'src', s.id || s.name || '?'); a.href = '/sources.html';
+        const a = el('a', 'src', s.id || s.name || '?'); a.href = '/sources';
         nameCell.append(a); tr.append(nameCell);
 
         const stCell = el('td');
@@ -256,7 +256,7 @@
     box.textContent = '';
     const nameRow = el('div', 'row'); nameRow.style.gap = '12px';
     const name = el('a', undefined, primary.name || primary.slug || '?');
-    name.href = `/places.html?place=${encodeURIComponent(primary.slug || primary.id)}`;
+    name.href = `/places?place=${encodeURIComponent(primary.slug || primary.id)}`;
     nameRow.append(name);
 
     const s = (summary && summary.summary) || {};

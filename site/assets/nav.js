@@ -17,12 +17,12 @@ import { requests, API_REQUEST_EVENT, curlFor } from './api.js';
 // key → { label, href, hint, group, crumb }
 const NAV = [
   { key: 'home', label: 'Grid Info', href: '/', hint: '/v1', group: 'OVERVIEW', crumb: 'The Grid' },
-  { key: 'events', label: 'Events', href: '/events.html', hint: '/events', group: 'EXPLORE', crumb: 'Events' },
-  { key: 'map', label: 'Map', href: '/map.html', hint: '/map', group: 'EXPLORE', crumb: 'Map' },
-  { key: 'places', label: 'Places', href: '/places.html', hint: '/places', group: 'EXPLORE', crumb: 'Places' },
-  { key: 'sources', label: 'Sources', href: '/sources.html', hint: '/sources', group: 'EXPLORE', crumb: 'Sources' },
-  { key: 'history', label: 'History', href: '/history.html', hint: '/history', group: 'EXPLORE', crumb: 'History' },
-  { key: 'docs', label: 'Docs', href: '/docs.html', hint: '/v1 ref', group: 'REFERENCE', crumb: 'Docs' },
+  { key: 'events', label: 'Events', href: '/events', hint: '/events', group: 'EXPLORE', crumb: 'Events' },
+  { key: 'map', label: 'Map', href: '/map', hint: '/map', group: 'EXPLORE', crumb: 'Map' },
+  { key: 'places', label: 'Places', href: '/places', hint: '/places', group: 'EXPLORE', crumb: 'Places' },
+  { key: 'sources', label: 'Sources', href: '/sources', hint: '/sources', group: 'EXPLORE', crumb: 'Sources' },
+  { key: 'history', label: 'History', href: '/history', hint: '/history', group: 'EXPLORE', crumb: 'History' },
+  { key: 'docs', label: 'Docs', href: '/docs', hint: '/v1 ref', group: 'REFERENCE', crumb: 'Docs' },
 ];
 const GROUPS = ['OVERVIEW', 'EXPLORE', 'REFERENCE'];
 

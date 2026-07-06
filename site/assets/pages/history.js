@@ -242,7 +242,7 @@ function revisionRow(rev) {
   const head = el('td', 'wrap');
   if (ev.id) {
     const link = document.createElement('a');
-    link.href = `/event.html?id=${encodeURIComponent(ev.id)}`;
+    link.href = `/event?id=${encodeURIComponent(ev.id)}`;
     link.textContent = ev.headline || ev.id; // textContent: upstream text is untrusted
     head.append(link);
   } else {

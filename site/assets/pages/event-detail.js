@@ -1,4 +1,4 @@
-// pages/event-detail.js — /event.html?id=... event detail (site spec §2
+// pages/event-detail.js — /event?id=... event detail (site spec §2
 // /events/{id}).
 //
 // Two requests: GET /v1/events/{id} (current revision) and
@@ -389,7 +389,7 @@ export function initEventPage() {
     block.append(el('div', '', 'Missing ?id= — no event selected.'));
     const back = el('div', '');
     const a = el('a', '', 'Open the /events explorer and pick an event.');
-    a.href = '/events.html';
+    a.href = '/events';
     back.append(a);
     block.append(back);
     errorsEl.append(block);

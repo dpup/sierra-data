@@ -258,7 +258,7 @@ function eventRow(ev, onSelect) {
   const head = el('div', 'ev-head');
   if (ev.id) {
     const link = document.createElement('a');
-    link.href = `/event.html?id=${encodeURIComponent(ev.id)}`;
+    link.href = `/event?id=${encodeURIComponent(ev.id)}`;
     link.textContent = ev.headline || ev.id; // textContent: upstream text is untrusted
     link.title = 'open event detail';
     link.addEventListener('click', (e) => e.stopPropagation());
