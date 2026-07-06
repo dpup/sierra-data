@@ -9,7 +9,6 @@
 
 import { get, ApiError, apiURL } from '../api.js';
 import { timeCell, timeAgo, timeAbs, sourceDot } from '../format.js';
-import { initChrome } from '../nav.js';
 
 /* ------------------------------------------------------------------ */
 /* Pure helpers (node-testable)                                       */
@@ -196,8 +195,6 @@ function errorBlock(err) {
 
 /** One-time page init. */
 export function initSourcesPage() {
-  initChrome('sources');
-
   const summaryBox = document.getElementById('summary-line');
   const alertBox = document.getElementById('degradation-alert');
   const errorBox = document.getElementById('page-errors');

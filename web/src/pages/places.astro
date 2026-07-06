@@ -1,50 +1,40 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Places · The Grid</title>
-  <meta name="description" content="Place directory for the Grid: areas, counties, towns, evacuation zones, corridors — with geometry on a map and a lat/lng and address resolve tester.">
-  <link rel="stylesheet" href="/assets/app.css">
-  <link rel="stylesheet" href="/lib/maplibre-gl.css">
-  <script src="/lib/maplibre-gl.js" defer></script>
-</head>
-<body>
-<main>
-  <div class="page-head">
-    <div>
-      <div class="hero-kicker">grid.v1 · place directory</div>
-      <h1>Places</h1>
-      <p class="lead">
-        Every event, alert, and summary in the Grid is scoped to a
-        <em>place</em> — an area, county, town, evacuation zone, or highway corridor.
-        Places are addressable by slug (<code class="inline">ebbetts-pass</code>) or by
-        <code class="inline">kind:slug</code> id (<code class="inline">county:calaveras-county</code>),
-        and <code class="inline">/resolve</code> turns a lat·lng or a street address into
-        the places that contain it, <strong>most-specific first</strong>. This is the live
-        directory, the per-place geometry, and the resolve tester — every row is a browser
-        fetch you can replay yourself.
-      </p>
-    </div>
-    <div class="badges">
-      <span class="chip chip-green">no key required</span>
-      <span class="chip chip-blue">CORS-open</span>
-    </div>
-  </div>
+---
+import Shell from '../layouts/Shell.astro';
+import PageHead from '../components/PageHead.astro';
+import SectionHead from '../components/SectionHead.astro';
+import GetChip from '../components/GetChip.astro';
+---
+<Shell
+  current="places"
+  title="Places · The Grid"
+  description="Place directory for the Grid: areas, counties, towns, evacuation zones, corridors — with geometry on a map and a lat/lng and address resolve tester."
+>
+  <Fragment slot="head">
+    <link rel="stylesheet" href="/lib/maplibre-gl.css" />
+    <script is:inline src="/lib/maplibre-gl.js" defer></script>
+  </Fragment>
+
+  <PageHead kicker="grid.v1 · place directory" title="Places">
+    <p class="lead">
+      Every event, alert, and summary in the Grid is scoped to a
+      <em>place</em> — an area, county, town, evacuation zone, or highway corridor.
+      Places are addressable by slug (<code class="inline">ebbetts-pass</code>) or by
+      <code class="inline">kind:slug</code> id (<code class="inline">county:calaveras-county</code>),
+      and <code class="inline">/resolve</code> turns a lat·lng or a street address into
+      the places that contain it, <strong>most-specific first</strong>. This is the live
+      directory, the per-place geometry, and the resolve tester — every row is a browser
+      fetch you can replay yourself.
+    </p>
+  </PageHead>
 
   <!-- endpoints reference -->
   <div class="section-gap"></div>
-  <div class="section-head">
-    <div class="left">
-      <h2>Three ways in</h2>
-    </div>
-    <span class="cap">directory · detail · resolve</span>
-  </div>
+  <SectionHead heading="Three ways in" cap="directory · detail · resolve" />
   <section class="card" aria-labelledby="endpoints-h">
     <h3 id="endpoints-h" style="margin-top:0">Endpoints</h3>
     <div style="display:flex;flex-direction:column;gap:16px;margin-top:12px;">
       <div>
-        <span class="chip-get"><b>GET</b> /v1/places</span>
+        <GetChip path="/v1/places" />
         <p class="prose" style="margin:8px 0 0;font-size:13px;">
           The directory. Filter by <code class="inline">kind</code>
           (AREA, COUNTY, TOWN, EVAC_ZONE, CORRIDOR, SITE) or <code class="inline">q</code>
@@ -52,7 +42,7 @@
         </p>
       </div>
       <div>
-        <span class="chip-get"><b>GET</b> /v1/places/{place}</span>
+        <GetChip path="/v1/places/{place}" />
         <p class="prose" style="margin:8px 0 0;font-size:13px;">
           One place by slug or id — geometry (base64 GeoJSON in
           <code class="inline">geometry.geojson</code>), centroid, bbox, and
@@ -60,7 +50,7 @@
         </p>
       </div>
       <div>
-        <span class="chip-get"><b>GET</b> /v1/places/resolve</span>
+        <GetChip path="/v1/places/resolve" />
         <p class="prose" style="margin:8px 0 0;font-size:13px;">
           <code class="inline">?lat=&amp;lng=</code> or <code class="inline">?address=</code>
           &rarr; the containing places, most-specific first (SITE&nbsp;&rarr;&nbsp;AREA).
@@ -79,26 +69,24 @@
 
   <!-- directory grouped by kind -->
   <section id="directory-view" aria-labelledby="directory-h">
-    <div class="section-head">
-      <div class="left">
+    <SectionHead cap="grouped by kind · most-specific to broadest">
+      <Fragment slot="left">
         <h2 id="directory-h">Directory</h2>
-        <span class="chip-get"><b>GET</b> /v1/places</span>
-      </div>
-      <span class="cap">grouped by kind · most-specific to broadest</span>
-    </div>
+        <GetChip path="/v1/places" />
+      </Fragment>
+    </SectionHead>
     <div id="directory"><span class="loading">Loading /v1/places&hellip;</span></div>
   </section>
 
   <!-- shared map + resolve tester -->
   <section id="resolve-section" aria-labelledby="resolve-h">
     <div class="section-gap"></div>
-    <div class="section-head">
-      <div class="left">
+    <SectionHead cap="click the map · or enter a point / address">
+      <Fragment slot="left">
         <h2 id="resolve-h">Map &amp; resolve</h2>
-        <span class="chip-get"><b>GET</b> /v1/places/resolve</span>
-      </div>
-      <span class="cap">click the map · or enter a point / address</span>
-    </div>
+        <GetChip path="/v1/places/resolve" />
+      </Fragment>
+    </SectionHead>
     <p id="map-hint" class="small muted">Click anywhere on the map to resolve that point to its containing places.</p>
     <div id="map" class="map-canvas" role="application" aria-label="Map. Click a point to resolve it to containing places."></div>
     <div class="filter-bar">
@@ -123,11 +111,9 @@
     </div>
     <div id="resolve-results"></div>
   </section>
-</main>
 
-<script type="module">
-  import { initPlacesPage } from '/assets/pages/places.js';
-  initPlacesPage();
-</script>
-</body>
-</html>
+  <script is:inline type="module">
+    import { initPlacesPage } from '/assets/pages/places.js';
+    initPlacesPage();
+  </script>
+</Shell>

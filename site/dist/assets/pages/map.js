@@ -26,7 +26,6 @@ import {
   layerLabel,
   SEVERITY_COLORS,
 } from '../format.js';
-import { initChrome } from '../nav.js';
 import { BASE_STYLE } from '../basemap.js';
 
 /* ------------------------------------------------------------------ */
@@ -238,7 +237,6 @@ export function safeHttpUrl(u) {
 /* ------------------------------------------------------------------ */
 
 function init() {
-  initChrome('map');
 
   const els = {
     place: document.getElementById('place-select'),

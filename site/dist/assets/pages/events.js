@@ -13,7 +13,6 @@
 
 import { get, apiURL, curlFor, ApiError } from '../api.js';
 import { sevChip, layerLabel, timeAgo, timeAbs, SEVERITY_COLORS } from '../format.js';
-import { initChrome } from '../nav.js';
 
 /**
  * Event layers accepted by /v1/events' `layer` param, as the lowercase
@@ -335,7 +334,6 @@ function highlightJSON(value) {
  * ev-more, ev-status-line, ev-insp-body).
  */
 export function initEventsPage() {
-  initChrome('events');
 
   const $ = (id) => document.getElementById(id);
   const placeSel = $('ev-place');

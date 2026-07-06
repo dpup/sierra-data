@@ -1,295 +1,152 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>The Grid — hazard, road &amp; weather data for the central Sierra</title>
-  <meta name="description" content="Public, keyless, real-time hazard, road, and weather data for the central Sierra — wildfire, evacuation, weather, earthquake, and road incidents unified into one honest API. Run by S.I.E.R.R.A, a volunteer emergency-response alliance.">
-  <link rel="stylesheet" href="/assets/app.css">
-</head>
-<body>
-<main>
-  <div class="page-head">
-    <div>
-      <div class="hero-kicker">Signal Integrity &amp; Emergency Radio Response Alliance</div>
-      <h1>The Grid</h1>
-      <p class="mission">
-        Public hazard, road, and weather data for the central Sierra. Every value on this site is
-        a browser fetch of a public, read-only, CORS-open <code class="inline">/v1</code> endpoint
-        that any third-party client would use — you can replay every request yourself.
-      </p>
-    </div>
-    <div class="badges">
-      <span class="chip chip-green">no key required</span>
-      <span class="chip chip-blue">CORS-open</span>
-    </div>
-  </div>
-
-  <!-- what we're building -->
-  <div class="cap-grid">
-    <div class="cap-card">
-      <div class="cap-h">One picture, every hazard</div>
-      <div class="cap-p">Wildfire, evacuation, weather alert, fire weather, earthquake, and road
+<!DOCTYPE html><html lang="en"> <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>The Grid — hazard, road &amp; weather data for the central Sierra</title><meta name="description" content="Public, keyless, real-time hazard, road, and weather data for the central Sierra — wildfire, evacuation, weather, earthquake, and road incidents unified into one honest API. Run by S.I.E.R.R.A, a volunteer emergency-response alliance."><!-- Preload the two primary faces (body defaults to mono) to cut FOUT reflow. --><link rel="preload" href="/lib/fonts/ibm-plex-mono-400.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/lib/fonts/ibm-plex-sans-400.woff2" as="font" type="font/woff2" crossorigin><link rel="stylesheet" href="/assets/app.css"></head> <body> <div class="app"> <aside class="sidebar"> <a class="brand-block" href="/"> <div class="brand-line"> <span class="brand-name">S.I.E.R.R.A</span><span class="brand-sub">The Grid</span> </div> <div class="brand-host">data.sierragridteam.org</div> </a> <div class="health-chip"> <div class="health-row"> <span class="dot st-OK live" id="health-dot"></span> <span id="health-text">checking sources…</span> </div> <div class="health-sub">read-only · CORS-open · no key</div> </div> <nav class="nav" aria-label="Sections">  <div class="nav-group-label">OVERVIEW</div> <a class="nav-item current" href="/" aria-current="page"> <span>Grid Info</span><span class="hint">/v1</span> </a> <div class="nav-group-label">EXPLORE</div> <a class="nav-item" href="/events"> <span>Events</span><span class="hint">/events</span> </a><a class="nav-item" href="/map"> <span>Map</span><span class="hint">/map</span> </a><a class="nav-item" href="/places"> <span>Places</span><span class="hint">/places</span> </a><a class="nav-item" href="/sources"> <span>Sources</span><span class="hint">/sources</span> </a><a class="nav-item" href="/history"> <span>History</span><span class="hint">/history</span> </a> <div class="nav-group-label">REFERENCE</div> <a class="nav-item" href="/docs"> <span>Docs</span><span class="hint">/v1 ref</span> </a> </nav> <div class="sidebar-foot"> <div>grid.v1 · schema 2026-07</div> <div>deploy from main · us-west</div> </div> </aside> <div class="content"> <div class="context-bar"> <div class="ctx-inner"> <div class="crumb"> <span>grid.v1</span> <span class="sep">/</span> <span class="here">The Grid</span> </div> <div class="ctx-right"> <span class="clock"><span class="dot st-OK live"></span><span id="ctx-clock">––:––:––Z</span></span> </div> </div> </div> <main>  <div class="page-head"> <div> <div class="hero-kicker">Signal Integrity &amp; Emergency Radio Response Alliance</div> <h1>The Grid</h1>  <p class="mission">
+Public hazard, road, and weather data for the central Sierra. Every value on this site is
+      a browser fetch of a public, read-only, CORS-open <code class="inline">/v1</code> endpoint
+      that any third-party client would use — you can replay every request yourself.
+</p>  </div> <div class="badges"> <span class="chip chip-green">no key required</span> <span class="chip chip-blue">CORS-open</span> </div> </div>  <div class="cap-grid"> <div class="cap-card"> <div class="cap-h">One picture, every hazard</div> <div class="cap-p">Wildfire, evacuation, weather alert, fire weather, earthquake, and road
         incidents — normalized from a dozen upstream feeds into one queryable event model with
-        full revision history. Ask once; get the whole region.</div>
-    </div>
-    <div class="cap-card">
-      <div class="cap-h">Honest by contract</div>
-      <div class="cap-p">Every feed reports <span class="mono">OK</span> /
-        <span class="mono">STALE</span> / <span class="mono">UNAVAILABLE</span>. A source that
+        full revision history. Ask once; get the whole region.</div> </div> <div class="cap-card"> <div class="cap-h">Honest by contract</div> <div class="cap-p">Every feed reports <span class="mono">OK</span> /
+<span class="mono">STALE</span> / <span class="mono">UNAVAILABLE</span>. A source that
         fails says so — <span class="accent-orange">absence is never shown as an all-clear.</span>
-        Life-safety data you can trust <em>because</em> it tells you when it can't.</div>
-    </div>
-    <div class="cap-card">
-      <div class="cap-h">Built to be built on</div>
-      <div class="cap-p">Public, keyless, CORS-open, RFC&nbsp;7946 GeoJSON. Any website, map client,
+Life-safety data you can trust <em>because</em> it tells you when it can't.</div> </div> <div class="cap-card"> <div class="cap-h">Built to be built on</div> <div class="cap-p">Public, keyless, CORS-open, RFC&nbsp;7946 GeoJSON. Any website, map client,
         or radio-room dashboard can consume it directly. This site is just one client of the same
-        API — nothing here is privileged.</div>
-    </div>
-  </div>
-
-  <!-- replay-it-yourself primer -->
-  <div class="primer">
-    <div class="tab-strip">
-      <div class="tabs">
-        <button class="tab on" data-snip="curl">curl</button>
-        <button class="tab" data-snip="fetch">fetch</button>
-        <button class="tab" data-snip="http">http</button>
-      </div>
-      <button class="copy-btn" id="primer-copy" type="button">copy</button>
-    </div>
-    <pre id="primer-code"></pre>
-  </div>
-
-  <!-- system status -->
-  <div class="section-gap"></div>
-  <div class="section-head">
-    <div class="left">
-      <h2>System status</h2>
-      <span class="chip-get"><b>GET</b> /v1/sources</span>
-    </div>
-    <span class="cap">poll → last success → status</span>
-  </div>
-  <div class="table-wrap">
-    <table class="data-table">
-      <thead>
-        <tr>
-          <th style="width:170px">Source</th><th style="width:120px">Status</th>
-          <th style="width:110px">Poll</th><th>Last success</th>
-          <th class="num" style="width:90px">Error</th>
-        </tr>
-      </thead>
-      <tbody id="sources-body">
-        <tr><td colspan="5"><span class="loading">Loading /v1/sources…</span></td></tr>
-      </tbody>
-    </table>
-  </div>
-
-  <!-- area mode + rollup -->
-  <div class="grid-2" style="margin-top:18px;">
-    <div class="card" id="area-card">
-      <div class="row" style="gap:11px;">
-        <span style="font-weight:600;font-size:13.5px;color:#eef2f4;">Area mode</span>
-        <span class="chip-get"><b>GET</b> /v1/places/{area}/summary</span>
-      </div>
-      <div id="area-body" style="margin-top:14px;"><span class="loading">Loading area summary…</span></div>
-    </div>
-    <div class="card">
-      <div class="stat-grid" id="rollup">
-        <div><div class="stat-n">—</div><div class="stat-label">Active events</div></div>
-        <div><div class="stat-n">8</div><div class="stat-label">Layers</div></div>
-        <div><div class="stat-n">—</div><div class="stat-label">Areas</div></div>
-        <div><div class="stat-n">—</div><div class="stat-label">Active evac</div></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- endpoints -->
-  <h2 style="margin-top:34px;">Endpoints</h2>
-  <div class="endpoint-list">
-    <a class="endpoint-row" href="/sources">
-      <span class="chip-method">GET</span>
-      <span class="path">/v1/sources</span>
-      <span class="desc">Per-source feed health: poll interval, last success, staleness, last error.</span>
-    </a>
-    <a class="endpoint-row" href="/events">
-      <span class="chip-method">GET</span>
-      <span class="path">/v1/events</span>
-      <span class="desc">Cross-layer event query — the one endpoint every occurrence is reachable through.</span>
-    </a>
-    <a class="endpoint-row" href="/places">
-      <span class="chip-method">GET</span>
-      <span class="path">/v1/places · /v1/places/resolve</span>
-      <span class="desc">Areas, counties, towns, zones, corridors — plus lat·lng / address resolve.</span>
-    </a>
-    <a class="endpoint-row" href="/map">
-      <span class="chip-method">GET</span>
-      <span class="path">/v1/places/{place}/map/{layer}.geojson</span>
-      <span class="desc">RFC 7946 FeatureCollection per hazard layer, with the honest-freshness metadata block.</span>
-    </a>
-    <a class="endpoint-row" href="/history">
-      <span class="chip-method">GET</span>
-      <span class="path">/v1/history</span>
-      <span class="desc">Chronological revision feed over a time range — the after-action view.</span>
-    </a>
-    <a class="endpoint-row" href="/docs">
-      <span class="chip-method">GET</span>
-      <span class="path">/v1</span>
-      <span class="desc">Full reference: severity ramp, place id scheme, the evacuation fail-loud contract.</span>
-    </a>
-  </div>
-
-  <!-- support -->
-  <div class="support-card">
-    <h2>Keep this service running</h2>
-    <p class="support-p">
-      S.I.E.R.R.A is an all-volunteer 501(c)(3). This service runs on donated time and a small
+        API — nothing here is privileged.</div> </div> </div>  <div class="primer"> <div class="tab-strip"> <div class="tabs"> <button class="tab on" data-snip="curl">curl</button> <button class="tab" data-snip="fetch">fetch</button> <button class="tab" data-snip="http">http</button> </div> <button class="copy-btn" id="primer-copy" type="button">copy</button> </div> <pre id="primer-code"></pre> </div>  <div class="section-gap"></div> <div class="section-head"> <div class="left">  <h2>System status</h2> <span class="chip-get"><b>GET</b> /v1/sources</span>  </div> <span class="cap">poll → last success → status</span> </div> <div class="table-wrap"> <table class="data-table"> <thead> <tr> <th style="width:170px">Source</th><th style="width:120px">Status</th> <th style="width:110px">Poll</th><th>Last success</th> <th class="num" style="width:90px">Error</th> </tr> </thead> <tbody id="sources-body"> <tr><td colspan="5"><span class="loading">Loading /v1/sources…</span></td></tr> </tbody> </table> </div>  <div class="grid-2" style="margin-top:18px;"> <div class="card" id="area-card"> <div class="row" style="gap:11px;"> <span style="font-weight:600;font-size:13.5px;color:#eef2f4;">Area mode</span> <span class="chip-get"><b>GET</b> /v1/places/&#123;area&#125;/summary</span> </div> <div id="area-body" style="margin-top:14px;"><span class="loading">Loading area summary…</span></div> </div> <div class="card"> <div class="stat-grid" id="rollup"> <div><div class="stat-n">—</div><div class="stat-label">Active events</div></div> <div><div class="stat-n">8</div><div class="stat-label">Layers</div></div> <div><div class="stat-n">—</div><div class="stat-label">Areas</div></div> <div><div class="stat-n">—</div><div class="stat-label">Active evac</div></div> </div> </div> </div>  <h2 style="margin-top:34px;">Endpoints</h2> <div class="endpoint-list"> <a class="endpoint-row" href="/sources"> <span class="chip-method">GET</span> <span class="path">/v1/sources</span> <span class="desc">Per-source feed health: poll interval, last success, staleness, last error.</span> </a> <a class="endpoint-row" href="/events"> <span class="chip-method">GET</span> <span class="path">/v1/events</span> <span class="desc">Cross-layer event query — the one endpoint every occurrence is reachable through.</span> </a> <a class="endpoint-row" href="/places"> <span class="chip-method">GET</span> <span class="path">/v1/places · /v1/places/resolve</span> <span class="desc">Areas, counties, towns, zones, corridors — plus lat·lng / address resolve.</span> </a> <a class="endpoint-row" href="/map"> <span class="chip-method">GET</span> <span class="path">/v1/places/&#123;place&#125;/map/&#123;layer&#125;.geojson</span> <span class="desc">RFC 7946 FeatureCollection per hazard layer, with the honest-freshness metadata block.</span> </a> <a class="endpoint-row" href="/history"> <span class="chip-method">GET</span> <span class="path">/v1/history</span> <span class="desc">Chronological revision feed over a time range — the after-action view.</span> </a> <a class="endpoint-row" href="/docs"> <span class="chip-method">GET</span> <span class="path">/v1</span> <span class="desc">Full reference: severity ramp, place id scheme, the evacuation fail-loud contract.</span> </a> </div>  <div class="support-card"> <h2>Keep this service running</h2> <p class="support-p">
+S.I.E.R.R.A is an all-volunteer 501(c)(3). This service runs on donated time and a small
       cloud bill — the feeds, the servers, and the radio infrastructure behind them. The page
       you're on is the case for support: it's live, it's honest about what it doesn't know, and
       anyone can verify or build on it. If an open, always-on data source for the central Sierra
       is worth keeping online, please help fund it.
-    </p>
-    <a class="btn-primary" href="https://sierragridteam.org/donate" rel="noopener">Donate</a>
-    <a class="btn-ghost" href="/docs">Read the API reference</a>
-  </div>
+</p> <a class="btn-primary" href="https://sierragridteam.org/donate" rel="noopener">Donate</a> <a class="btn-ghost" href="/docs">Read the API reference</a> </div> <div id="page-errors"></div> <script type="module">
+    import { get, ApiError } from '/assets/api.js';
+    import { timeAgo } from '/assets/format.js';
 
-  <div id="page-errors"></div>
-</main>
+    const $ = (id) => document.getElementById(id);
+    const el = (t, c, x) => { const n = document.createElement(t); if (c) n.className = c; if (x !== undefined) n.textContent = x; return n; };
+    const secs = (n) => (n == null ? '—' : n >= 3600 ? `${Math.round(n / 3600)}h` : n >= 60 ? `${Math.round(n / 60)}m` : `${n}s`);
 
-<script type="module">
-  import { get, ApiError } from '/assets/api.js';
-  import { timeAgo } from '/assets/format.js';
-  import { initChrome } from '/assets/nav.js';
+    function errBlock(err) {
+      const d = el('div', 'error-block');
+      d.append('request failed. ');
+      d.append(err instanceof ApiError ? `GET ${err.url} → ${err.status || 'network error'}` : String(err.message || err));
+      return d;
+    }
 
-  initChrome('home');
-  const $ = (id) => document.getElementById(id);
-  const el = (t, c, x) => { const n = document.createElement(t); if (c) n.className = c; if (x !== undefined) n.textContent = x; return n; };
-  const secs = (n) => (n == null ? '—' : n >= 3600 ? `${Math.round(n / 3600)}h` : n >= 60 ? `${Math.round(n / 60)}m` : `${n}s`);
-
-  function errBlock(err) {
-    const d = el('div', 'error-block');
-    d.append('request failed. ');
-    d.append(err instanceof ApiError ? `GET ${err.url} → ${err.status || 'network error'}` : String(err.message || err));
-    return d;
-  }
-
-  // ---- request primer (replay-it-yourself) ------------------------------
-  const SNIPPETS = {
-    curl: "curl -s https://data.sierragridteam.org/v1/events \\\n  | jq '.events[0]'",
-    fetch: "const r = await fetch(\n  'https://data.sierragridteam.org/v1/events'\n);\nconst { events } = await r.json();",
-    http: "GET /v1/events HTTP/1.1\nHost: data.sierragridteam.org\nAccept: application/json",
-  };
-  let snip = 'curl';
-  const setSnip = (k) => {
-    snip = k;
-    $('primer-code').textContent = SNIPPETS[k];
-    document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('on', t.dataset.snip === k));
-  };
-  document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => setSnip(t.dataset.snip)));
-  $('primer-copy').addEventListener('click', () => {
-    navigator.clipboard.writeText(SNIPPETS[snip]).then(() => {
-      $('primer-copy').textContent = 'copied';
-      setTimeout(() => ($('primer-copy').textContent = 'copy'), 1200);
+    // ---- request primer (replay-it-yourself) ------------------------------
+    const SNIPPETS = {
+      curl: "curl -s https://data.sierragridteam.org/v1/events \\\n  | jq '.events[0]'",
+      fetch: "const r = await fetch(\n  'https://data.sierragridteam.org/v1/events'\n);\nconst { events } = await r.json();",
+      http: "GET /v1/events HTTP/1.1\nHost: data.sierragridteam.org\nAccept: application/json",
+    };
+    let snip = 'curl';
+    const setSnip = (k) => {
+      snip = k;
+      $('primer-code').textContent = SNIPPETS[k];
+      document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('on', t.dataset.snip === k));
+    };
+    document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => setSnip(t.dataset.snip)));
+    $('primer-copy').addEventListener('click', () => {
+      navigator.clipboard.writeText(SNIPPETS[snip]).then(() => {
+        $('primer-copy').textContent = 'copied';
+        setTimeout(() => ($('primer-copy').textContent = 'copy'), 1200);
+      });
     });
-  });
-  setSnip('curl');
+    setSnip('curl');
 
-  // ---- System status: GET /v1/sources -----------------------------------
-  async function loadSources() {
-    const body = $('sources-body');
-    try {
-      const data = await get('/v1/sources');
-      const sources = Array.isArray(data.sources) ? data.sources : [];
-      const rank = { UNAVAILABLE: 0, STALE: 1, OK: 3 };
-      sources.sort((a, b) =>
-        (rank[String(a.status).toUpperCase()] ?? 2) - (rank[String(b.status).toUpperCase()] ?? 2) ||
-        String(a.id || a.name).localeCompare(String(b.id || b.name))
-      );
-      body.textContent = '';
-      if (!sources.length) {
-        const tr = el('tr'); const c = el('td', 'muted', 'No sources registered.'); c.colSpan = 5; tr.append(c); body.append(tr); return;
+    // ---- System status: GET /v1/sources -----------------------------------
+    async function loadSources() {
+      const body = $('sources-body');
+      try {
+        const data = await get('/v1/sources');
+        const sources = Array.isArray(data.sources) ? data.sources : [];
+        const rank = { UNAVAILABLE: 0, STALE: 1, OK: 3 };
+        sources.sort((a, b) =>
+          (rank[String(a.status).toUpperCase()] ?? 2) - (rank[String(b.status).toUpperCase()] ?? 2) ||
+          String(a.id || a.name).localeCompare(String(b.id || b.name))
+        );
+        body.textContent = '';
+        if (!sources.length) {
+          const tr = el('tr'); const c = el('td', 'muted', 'No sources registered.'); c.colSpan = 5; tr.append(c); body.append(tr); return;
+        }
+        for (const s of sources) {
+          const st = String(s.status || '').toUpperCase() || 'UNKNOWN';
+          const tr = el('tr');
+
+          const nameCell = el('td');
+          const a = el('a', 'src', s.id || s.name || '?'); a.href = '/sources';
+          nameCell.append(a); tr.append(nameCell);
+
+          const stCell = el('td');
+          const stWrap = el('span', 'dot-status st-' + st);
+          stWrap.append(el('span', 'dot st-' + st), st);
+          stCell.append(stWrap); tr.append(stCell);
+
+          tr.append(el('td', undefined, secs(s.poll_interval_seconds)));
+          tr.append(el('td', undefined, s.last_success_at ? timeAgo(s.last_success_at) : '—'));
+
+          const errCell = el('td', 'num');
+          if (s.last_error && st !== 'OK') { errCell.textContent = '!'; errCell.title = s.last_error; errCell.style.color = 'var(--st-UNAVAILABLE)'; }
+          else { errCell.textContent = '—'; errCell.style.color = 'var(--text-dim)'; }
+          tr.append(errCell);
+
+          body.append(tr);
+        }
+      } catch (err) {
+        body.textContent = '';
+        const tr = el('tr'); const c = el('td'); c.colSpan = 5; c.append(errBlock(err)); tr.append(c); body.append(tr);
       }
-      for (const s of sources) {
-        const st = String(s.status || '').toUpperCase() || 'UNKNOWN';
-        const tr = el('tr');
+    }
 
-        const nameCell = el('td');
-        const a = el('a', 'src', s.id || s.name || '?'); a.href = '/sources';
-        nameCell.append(a); tr.append(nameCell);
+    // ---- Area mode + rollup: /v1/places?kind=AREA → summary ----------------
+    async function loadAreas() {
+      const box = $('area-body');
+      let places = [];
+      try {
+        const data = await get('/v1/places', { kind: 'AREA' });
+        places = Array.isArray(data.places) ? data.places : [];
+      } catch (err) { box.textContent = ''; box.append(errBlock(err)); return; }
+      if (!places.length) { box.textContent = 'No areas configured.'; return; }
 
-        const stCell = el('td');
-        const stWrap = el('span', 'dot-status st-' + st);
-        stWrap.append(el('span', 'dot st-' + st), st);
-        stCell.append(stWrap); tr.append(stCell);
+      const primary = places[0];
+      let summary = null;
+      try { summary = await get(`/v1/places/${encodeURIComponent(primary.slug || primary.id)}/summary`); }
+      catch (err) { box.textContent = ''; box.append(errBlock(err)); }
 
-        tr.append(el('td', undefined, secs(s.poll_interval_seconds)));
-        tr.append(el('td', undefined, s.last_success_at ? timeAgo(s.last_success_at) : '—'));
+      box.textContent = '';
+      const nameRow = el('div', 'row'); nameRow.style.gap = '12px';
+      const name = el('a', undefined, primary.name || primary.slug || '?');
+      name.href = `/places?place=${encodeURIComponent(primary.slug || primary.id)}`;
+      nameRow.append(name);
 
-        const errCell = el('td', 'num');
-        if (s.last_error && st !== 'OK') { errCell.textContent = '!'; errCell.title = s.last_error; errCell.style.color = 'var(--st-UNAVAILABLE)'; }
-        else { errCell.textContent = '—'; errCell.style.color = 'var(--text-dim)'; }
-        tr.append(errCell);
-
-        body.append(tr);
+      const s = (summary && summary.summary) || {};
+      if (summary) {
+        const mode = String(summary.mode || 'UNKNOWN').toUpperCase();
+        nameRow.append(el('span', 'state-pill mode-' + mode, mode));
       }
-    } catch (err) {
-      body.textContent = '';
-      const tr = el('tr'); const c = el('td'); c.colSpan = 5; c.append(errBlock(err)); tr.append(c); body.append(tr);
+      box.append(nameRow);
+
+      const ev = el('p', 'prose'); ev.style.margin = '9px 0 0'; ev.style.fontSize = '13px';
+      const evac = s.active_evacuations;
+      if (evac === null || evac === undefined) {
+        ev.style.color = 'var(--st-UNAVAILABLE)';
+        ev.append('Evacuation status unknown — Cal OES did not answer. Check ');
+        const g = el('a', undefined, 'Genasys'); g.href = 'https://protect.genasys.com/search'; g.rel = 'noopener'; ev.append(g, '.');
+      } else if (Number(evac) === 0) {
+        ev.textContent = 'No active evacuations reported (per Cal OES). Absence of a warning is reported explicitly — never inferred from an empty response.';
+      } else {
+        ev.style.color = 'var(--st-UNAVAILABLE)'; ev.style.fontWeight = '600';
+        ev.textContent = `${evac} active evacuation(s) — see the map.`;
+      }
+      box.append(ev);
+
+      const counts = s.severity_counts || {};
+      const active = Object.values(counts).reduce((a, b) => a + (Number(b) || 0), 0);
+      const tiles = $('rollup').children;
+      tiles[0].firstChild.textContent = active || (summary ? '0' : '—');
+      tiles[2].firstChild.textContent = String(places.length);
+      tiles[3].firstChild.textContent = evac === null || evac === undefined ? '?' : String(evac);
     }
-  }
 
-  // ---- Area mode + rollup: /v1/places?kind=AREA → summary ----------------
-  async function loadAreas() {
-    const box = $('area-body');
-    let places = [];
-    try {
-      const data = await get('/v1/places', { kind: 'AREA' });
-      places = Array.isArray(data.places) ? data.places : [];
-    } catch (err) { box.textContent = ''; box.append(errBlock(err)); return; }
-    if (!places.length) { box.textContent = 'No areas configured.'; return; }
-
-    const primary = places[0];
-    let summary = null;
-    try { summary = await get(`/v1/places/${encodeURIComponent(primary.slug || primary.id)}/summary`); }
-    catch (err) { box.textContent = ''; box.append(errBlock(err)); }
-
-    box.textContent = '';
-    const nameRow = el('div', 'row'); nameRow.style.gap = '12px';
-    const name = el('a', undefined, primary.name || primary.slug || '?');
-    name.href = `/places?place=${encodeURIComponent(primary.slug || primary.id)}`;
-    nameRow.append(name);
-
-    const s = (summary && summary.summary) || {};
-    if (summary) {
-      const mode = String(summary.mode || 'UNKNOWN').toUpperCase();
-      nameRow.append(el('span', 'state-pill mode-' + mode, mode));
-    }
-    box.append(nameRow);
-
-    const ev = el('p', 'prose'); ev.style.margin = '9px 0 0'; ev.style.fontSize = '13px';
-    const evac = s.active_evacuations;
-    if (evac === null || evac === undefined) {
-      ev.style.color = 'var(--st-UNAVAILABLE)';
-      ev.append('Evacuation status unknown — Cal OES did not answer. Check ');
-      const g = el('a', undefined, 'Genasys'); g.href = 'https://protect.genasys.com/search'; g.rel = 'noopener'; ev.append(g, '.');
-    } else if (Number(evac) === 0) {
-      ev.textContent = 'No active evacuations reported (per Cal OES). Absence of a warning is reported explicitly — never inferred from an empty response.';
-    } else {
-      ev.style.color = 'var(--st-UNAVAILABLE)'; ev.style.fontWeight = '600';
-      ev.textContent = `${evac} active evacuation(s) — see the map.`;
-    }
-    box.append(ev);
-
-    const counts = s.severity_counts || {};
-    const active = Object.values(counts).reduce((a, b) => a + (Number(b) || 0), 0);
-    const tiles = $('rollup').children;
-    tiles[0].firstChild.textContent = active || (summary ? '0' : '—');
-    tiles[2].firstChild.textContent = String(places.length);
-    tiles[3].firstChild.textContent = evac === null || evac === undefined ? '?' : String(evac);
-  }
-
-  loadSources();
-  loadAreas();
-</script>
-</body>
-</html>
+    loadSources();
+    loadAreas();
+  </script>  </main> <footer class="site-footer"> <div class="footer-inner"> <details class="request-log"> <summary>View the <span class="request-count" id="req-count">0</span> request(s) behind this page</summary> <div class="request-log-list" id="req-log-list"></div> </details> <p class="footer-line">Signal Integrity &amp; Emergency Radio Response Alliance · P.O. Box 2071, Murphys, CA 95247 · a volunteer 501(c)(3). Every value on this site is a browser fetch of the public /v1 API — replay any of them yourself.</p> </div> </footer> </div> </div> <!-- Live shell behaviors: fill the static placeholders above. is:inline keeps
+     this as a plain external module (Astro won't re-bundle it), identical to how
+     the per-page scripts load their existing modules from /assets. --> <script type="module" src="/assets/chrome.js"></script> </body> </html>

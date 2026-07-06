@@ -1,12 +1,14 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Events · The Grid</title>
-  <meta name="description" content="Event explorer over GET /v1/events — the cross-layer query of every discrete occurrence the Grid tracks, with filters that map 1:1 to the endpoint's parameters and a URL that is the shareable permalink.">
-  <link rel="stylesheet" href="/assets/app.css">
-  <style>
+---
+import Shell from '../layouts/Shell.astro';
+import PageHead from '../components/PageHead.astro';
+import GetChip from '../components/GetChip.astro';
+---
+<Shell
+  current="events"
+  title="Events · The Grid"
+  description="Event explorer over GET /v1/events — the cross-layer query of every discrete occurrence the Grid tracks, with filters that map 1:1 to the endpoint's parameters and a URL that is the shareable permalink."
+>
+  <style is:global slot="head">
     /* Page-local: the query bar, the pill filter rows, and the two-column
        results + JSON inspector layout. Every color/size resolves to an
        app.css token — nothing here overrides the design system. */
@@ -51,35 +53,27 @@
       .results-grid .inspector { position: static; max-height: none; }
     }
   </style>
-</head>
-<body>
-<main>
-  <div class="page-head">
-    <div>
-      <div class="hero-kicker">grid.v1 · event explorer</div>
-      <h1>Events</h1>
-      <p class="lead">
-        Every discrete occurrence the Grid tracks — wildfire,
-        evacuation, weather alert, earthquake, road incident, and the rest — is
-        reachable through <strong>one endpoint</strong>. The filters below map
-        1:1 onto the query parameters of
-        <code class="inline">GET /v1/events</code>; results are the snake_case
-        protojson of <code class="inline">grid.v1.EventList</code>, server-sorted
-        <strong>severity-first, then newest-first</strong>. This page's whole
-        filter state lives in its URL, so any view you compose here is a
-        shareable permalink — <strong>you can replay the exact request
-        yourself.</strong>
-      </p>
-    </div>
-    <div class="badges">
-      <span class="chip-get"><b>GET</b> /v1/events</span>
-    </div>
-  </div>
+
+  <PageHead kicker="grid.v1 · event explorer" title="Events">
+    <p class="lead">
+      Every discrete occurrence the Grid tracks — wildfire,
+      evacuation, weather alert, earthquake, road incident, and the rest — is
+      reachable through <strong>one endpoint</strong>. The filters below map
+      1:1 onto the query parameters of
+      <code class="inline">GET /v1/events</code>; results are the snake_case
+      protojson of <code class="inline">grid.v1.EventList</code>, server-sorted
+      <strong>severity-first, then newest-first</strong>. This page's whole
+      filter state lives in its URL, so any view you compose here is a
+      shareable permalink — <strong>you can replay the exact request
+      yourself.</strong>
+    </p>
+    <GetChip slot="badges" path="/v1/events" />
+  </PageHead>
 
   <!-- The exact request behind the table: endpoint + active filter chips. -->
   <section class="panel qbar" aria-label="Request behind these results">
     <div class="qbar-line">
-      <span class="chip-get"><b>GET</b> /v1/events</span>
+      <GetChip path="/v1/events" />
       <span id="ev-qchips" class="qbar-chips"></span>
       <button type="button" id="ev-copyurl" class="copy-btn qbar-copy">copy url</button>
     </div>
@@ -146,11 +140,9 @@
       <pre id="ev-insp-body" class="ev-insp-body"></pre>
     </aside>
   </div>
-</main>
 
-<script type="module">
-  import { initEventsPage } from '/assets/pages/events.js';
-  initEventsPage();
-</script>
-</body>
-</html>
+  <script is:inline type="module">
+    import { initEventsPage } from '/assets/pages/events.js';
+    initEventsPage();
+  </script>
+</Shell>

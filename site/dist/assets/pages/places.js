@@ -15,7 +15,6 @@
 
 import { get, ApiError, apiURL } from '../api.js';
 import { layerLabel, decodeGeometry } from '../format.js';
-import { initChrome } from '../nav.js';
 import { BASE_STYLE } from '../basemap.js';
 
 // ------------------------------------------------------------------------
@@ -242,7 +241,6 @@ function kindChip(kind) {
 }
 
 export function initPlacesPage() {
-  initChrome('places');
 
   const $ = (id) => document.getElementById(id);
   const state = readState(location.search);

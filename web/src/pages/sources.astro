@@ -1,5 +1,7 @@
 ---
 import Shell from '../layouts/Shell.astro';
+import PageHead from '../components/PageHead.astro';
+import SectionHead from '../components/SectionHead.astro';
 ---
 <Shell
   current="sources"
@@ -19,35 +21,21 @@ import Shell from '../layouts/Shell.astro';
     .data-table td.err-cell { color: var(--st-UNAVAILABLE); }
   </style>
 
-  <div class="page-head">
-    <div>
-      <div class="hero-kicker">System status</div>
-      <h1>Sources</h1>
-      <p class="lead">
-        The board that makes the whole service trustworthy: every upstream feed
-        the Grid polls, reporting its own health out loud. For each
-        source you get the poll interval, the last successful fetch, how close it
-        is to going <span class="mono">STALE</span>, the staleness thresholds, and
-        the last error verbatim — the honest-freshness contract, exposed. A feed
-        that fails says so; <span class="accent-orange">absence of data is never
-        shown as an all-clear.</span> This whole page is one live fetch of
-        <code class="inline">/v1/sources</code> — replay it yourself.
-      </p>
-    </div>
-    <div class="badges">
-      <span class="chip chip-green">no key required</span>
-      <span class="chip chip-blue">CORS-open</span>
-    </div>
-  </div>
+  <PageHead kicker="System status" title="Sources">
+    <p class="lead">
+      The board that makes the whole service trustworthy: every upstream feed
+      the Grid polls, reporting its own health out loud. For each
+      source you get the poll interval, the last successful fetch, how close it
+      is to going <span class="mono">STALE</span>, the staleness thresholds, and
+      the last error verbatim — the honest-freshness contract, exposed. A feed
+      that fails says so; <span class="accent-orange">absence of data is never
+      shown as an all-clear.</span> This whole page is one live fetch of
+      <code class="inline">/v1/sources</code> — replay it yourself.
+    </p>
+  </PageHead>
 
   <div class="section-gap"></div>
-  <div class="section-head">
-    <div class="left">
-      <h2>Feed health</h2>
-      <span class="chip-get"><b>GET</b> /v1/sources</span>
-    </div>
-    <span class="cap">unhealthy first · poll → last success → freshness</span>
-  </div>
+  <SectionHead heading="Feed health" get="/v1/sources" cap="unhealthy first · poll → last success → freshness" />
 
   <div id="summary-line" class="chip-row" aria-live="polite"></div>
   <div id="degradation-alert"></div>
@@ -55,9 +43,6 @@ import Shell from '../layouts/Shell.astro';
   <div id="board"><div class="loading">Loading /v1/sources…</div></div>
   <p id="refresh-line" class="freshness"></p>
 
-  <!-- Live data island: the existing, unchanged module. is:inline keeps it a
-       plain external import from /assets (Astro does not re-bundle it), exactly
-       as the pre-Astro page loaded it. -->
   <script is:inline type="module">
     import { initSourcesPage } from '/assets/pages/sources.js';
     initSourcesPage();

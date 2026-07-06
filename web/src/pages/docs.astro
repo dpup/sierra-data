@@ -1,0 +1,89 @@
+---
+import Shell from '../layouts/Shell.astro';
+// The reference body is a large, fully-static HTML document dense with literal
+// braces (JSON snippets, {place}/{id} path templates). Importing it raw and
+// injecting via set:html keeps it verbatim and avoids Astro trying to evaluate
+// those braces as expressions — the pragmatic choice for a static doc page.
+import docsBody from '../partials/docs-body.html?raw';
+---
+<Shell
+  current="docs"
+  title="API Reference · The Grid"
+  description="Reference for the Grid /v1 API: endpoints, the Event envelope, severity scale, place id scheme, GeoJSON layer contract, and the evacuation fail-loud contract."
+>
+  <style is:global slot="head">
+    /* Page-local structure for the reference. app.css is the design system and
+       owns every color/token; these rules only add docs-specific layout on top
+       of it — no new palette, only the locked custom properties. */
+    .toc {
+      font-family: var(--font-mono);
+      font-size: 12.5px;
+      columns: 2;
+      column-gap: 2rem;
+      margin: 14px 0 26px;
+      padding-left: 1.25rem;
+      color: var(--text-2);
+    }
+    .toc li { margin: 3px 0; break-inside: avoid; }
+    @media (max-width: 640px) { .toc { columns: 1; } }
+
+    /* Endpoint heading: a GET /v1/... chip standing in for the h3, matching the
+       .chip-get idiom used across the portal (green GET, blue path). */
+    .endpoint-head { display: block; margin: 28px 0 8px; }
+    .endpoint-head .chip-get { font-size: 12.5px; }
+
+    /* Live example links — every one is a real, replayable GET into the API. */
+    .live-examples { margin: 4px 0 18px; }
+    .live-examples a {
+      display: inline-block;
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      color: var(--blu);
+      background: var(--blu-bg);
+      border: 1px solid var(--blu-border);
+      border-radius: var(--radius-sm);
+      padding: 2px 8px;
+      margin: 3px 5px 3px 0;
+      word-break: break-all;
+    }
+    .live-examples a:hover { text-decoration: none; border-color: var(--grn-line); }
+    .live-examples a::before { content: "GET "; color: var(--grn); }
+
+    /* The evac fail-loud contract gets the loudest chrome on the page. */
+    .contract-callout {
+      border: 1px solid var(--st-UNAVAILABLE);
+      border-left-width: 4px;
+      border-radius: var(--radius);
+      background: color-mix(in srgb, var(--st-UNAVAILABLE) 7%, var(--bg-card));
+      padding: 18px 22px;
+      margin: 16px 0 24px;
+    }
+    .contract-callout > h2:first-child { margin-top: 0; }
+    .contract-callout .invariant {
+      font-family: var(--font-mono);
+      font-weight: 700;
+      color: var(--text-hi);
+      font-size: 16px;
+      letter-spacing: 0.01em;
+      margin: 6px 0 12px;
+    }
+
+    section[id] { scroll-margin-top: 68px; }
+    .backtop {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+
+    /* Reference tables: app.css sets .data-table to white-space:nowrap, which
+       blows wide tables out. Here every cell wraps except the leading name
+       column and the headers, so all tables read as calm, content-fit blocks
+       with one consistent shape (short left columns, a wrapping description). */
+    .data-table td { white-space: normal; vertical-align: top; line-height: 1.5; }
+    .data-table td:first-child { white-space: nowrap; }
+    .data-table th { white-space: nowrap; }
+    .data-table td.num { white-space: nowrap; }
+  </style>
+
+  <Fragment set:html={docsBody} />
+</Shell>

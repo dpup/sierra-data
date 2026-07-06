@@ -1,12 +1,14 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>History · The Grid</title>
-  <meta name="description" content="Archive browser over GET /v1/history — the chronological, replayable feed of event revisions for after-action review.">
-  <link rel="stylesheet" href="/assets/app.css">
-  <style>
+---
+import Shell from '../layouts/Shell.astro';
+import PageHead from '../components/PageHead.astro';
+import GetChip from '../components/GetChip.astro';
+---
+<Shell
+  current="history"
+  title="History · The Grid"
+  description="Archive browser over GET /v1/history — the chronological, replayable feed of event revisions for after-action review."
+>
+  <style is:global slot="head">
     /* Page-local: the layer checkbox group, the request line, and the
        day-separator row inside the revision table. All colors/sizes come
        from app.css tokens — nothing here overrides the design system. */
@@ -58,32 +60,25 @@
       margin-bottom: 24px;
     }
   </style>
-</head>
-<body>
-<main>
-  <div class="page-head">
-    <div>
-      <h1>History</h1>
-      <p class="lead">
-        The after-action record. Every state transition an event passes through —
-        a wildfire's acreage revised upward, a warning escalated, and the
-        <strong>all-clear written the moment an event leaves its feed</strong> — is
-        stored as its own immutable revision. This is the chronological, replayable
-        archive over a time range: absence is recorded as deliberately as onset, so
-        "nothing here now" is a fact you can trace back to the revision that made it
-        true — never inferred from an empty screen.
-      </p>
-    </div>
-    <div class="badges">
-      <span class="chip-get"><b>GET</b> /v1/history</span>
-    </div>
-  </div>
+
+  <PageHead title="History">
+    <p class="lead">
+      The after-action record. Every state transition an event passes through —
+      a wildfire's acreage revised upward, a warning escalated, and the
+      <strong>all-clear written the moment an event leaves its feed</strong> — is
+      stored as its own immutable revision. This is the chronological, replayable
+      archive over a time range: absence is recorded as deliberately as onset, so
+      "nothing here now" is a fact you can trace back to the revision that made it
+      true — never inferred from an empty screen.
+    </p>
+    <GetChip slot="badges" path="/v1/history" />
+  </PageHead>
 
   <p class="muted small" style="margin-top:12px;max-width:96ch;">
     <code class="inline">GET /v1/history?place=&amp;layer=&amp;from=&amp;to=</code>
     returns every stored revision of every event in the range, newest first — the
     snake_case protojson of <code class="inline">grid.v1.EventRevisionList</code>
-    (<code class="inline">revisions[].{revision, observed_at, ingested_at, event}</code>).
+    (<code class="inline">revisions[].&#123;revision, observed_at, ingested_at, event&#125;</code>).
     Filters map 1:1 to the query parameters and live in this page's URL, so a
     date-range view of an incident's whole arc is a shareable permalink; paging
     follows <code class="inline">next_page_token</code>. Timestamps are RFC&nbsp;3339;
@@ -133,14 +128,9 @@
     <button type="button" id="hist-more" hidden>Load more</button>
     <span id="hist-status" class="loading">Loading…</span>
   </div>
-</main>
 
-<script type="module">
-  import { initChrome } from '/assets/nav.js';
-  import { initHistoryPage } from '/assets/pages/history.js';
-
-  initChrome('history');
-  initHistoryPage();
-</script>
-</body>
-</html>
+  <script is:inline type="module">
+    import { initHistoryPage } from '/assets/pages/history.js';
+    initHistoryPage();
+  </script>
+</Shell>

@@ -1,0 +1,28 @@
+---
+// SectionHead — a section title row: an <h2> with an optional GetChip on the
+// left, and an optional caption on the right.
+//
+//   <SectionHead heading="Feed health" get="/v1/sources"
+//                cap="unhealthy first · poll → last success → freshness" />
+//
+// For a non-default left side (extra chips, custom markup) pass a `left` slot,
+// which replaces the heading+get; a `cap` slot likewise overrides the caption.
+import GetChip from './GetChip.astro';
+
+interface Props {
+  heading?: string;
+  get?: string;
+  cap?: string;
+  class?: string;
+}
+const { heading, get, cap, class: className } = Astro.props;
+---
+<div class:list={['section-head', className]}>
+  <div class="left">
+    <slot name="left">
+      {heading && <h2>{heading}</h2>}
+      {get && <GetChip path={get} />}
+    </slot>
+  </div>
+  <slot name="cap">{cap && <span class="cap">{cap}</span>}</slot>
+</div>

@@ -1,146 +1,23 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>History · The Grid</title>
-  <meta name="description" content="Archive browser over GET /v1/history — the chronological, replayable feed of event revisions for after-action review.">
-  <link rel="stylesheet" href="/assets/app.css">
-  <style>
-    /* Page-local: the layer checkbox group, the request line, and the
-       day-separator row inside the revision table. All colors/sizes come
-       from app.css tokens — nothing here overrides the design system. */
-    .layer-checks {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 4px 18px;
-      max-width: 34rem;
-    }
-    .layer-check {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      text-transform: none;
-      letter-spacing: 0;
-      font-size: 12.5px;
-      color: var(--text);
-      cursor: pointer;
-      white-space: nowrap;
-    }
-    .query-line {
-      display: flex;
-      align-items: baseline;
-      gap: 12px;
-      font-family: var(--font-mono);
-      font-size: 12px;
-      margin: 2px 0 14px;
-      overflow-x: auto;
-      white-space: nowrap;
-    }
-    /* Day break inside the revision table: a full-width subhead row. */
-    tr.day-sep td {
-      background: var(--bg-header);
-      color: var(--text-fainter);
-      font-family: var(--font-mono);
-      font-size: 10px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.11em;
-      padding: 7px 20px;
-      white-space: nowrap;
-    }
-    .data-table td.rev-num { color: var(--text-faint); }
-    .data-table td.rev-status { color: var(--text-faint); }
-    .results-foot {
-      display: flex;
-      align-items: center;
-      gap: 16px;
-      margin-bottom: 24px;
-    }
-  </style>
-</head>
-<body>
-<main>
-  <div class="page-head">
-    <div>
-      <h1>History</h1>
-      <p class="lead">
-        The after-action record. Every state transition an event passes through —
-        a wildfire's acreage revised upward, a warning escalated, and the
-        <strong>all-clear written the moment an event leaves its feed</strong> — is
-        stored as its own immutable revision. This is the chronological, replayable
-        archive over a time range: absence is recorded as deliberately as onset, so
-        "nothing here now" is a fact you can trace back to the revision that made it
-        true — never inferred from an empty screen.
-      </p>
-    </div>
-    <div class="badges">
-      <span class="chip-get"><b>GET</b> /v1/history</span>
-    </div>
-  </div>
-
-  <p class="muted small" style="margin-top:12px;max-width:96ch;">
-    <code class="inline">GET /v1/history?place=&amp;layer=&amp;from=&amp;to=</code>
-    returns every stored revision of every event in the range, newest first — the
+<!DOCTYPE html><html lang="en"> <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>History · The Grid</title><meta name="description" content="Archive browser over GET /v1/history — the chronological, replayable feed of event revisions for after-action review."><!-- Preload the two primary faces (body defaults to mono) to cut FOUT reflow. --><link rel="preload" href="/lib/fonts/ibm-plex-mono-400.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/lib/fonts/ibm-plex-sans-400.woff2" as="font" type="font/woff2" crossorigin><link rel="stylesheet" href="/assets/app.css"><style>.layer-checks{display:flex;flex-wrap:wrap;gap:4px 18px;max-width:34rem}.layer-check{display:inline-flex;align-items:center;gap:6px;text-transform:none;letter-spacing:0;font-size:12.5px;color:var(--text);cursor:pointer;white-space:nowrap}.query-line{display:flex;align-items:baseline;gap:12px;font-family:var(--font-mono);font-size:12px;margin:2px 0 14px;overflow-x:auto;white-space:nowrap}tr.day-sep td{background:var(--bg-header);color:var(--text-fainter);font-family:var(--font-mono);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.11em;padding:7px 20px;white-space:nowrap}.data-table td.rev-num,.data-table td.rev-status{color:var(--text-faint)}.results-foot{display:flex;align-items:center;gap:16px;margin-bottom:24px}
+</style></head> <body> <div class="app"> <aside class="sidebar"> <a class="brand-block" href="/"> <div class="brand-line"> <span class="brand-name">S.I.E.R.R.A</span><span class="brand-sub">The Grid</span> </div> <div class="brand-host">data.sierragridteam.org</div> </a> <div class="health-chip"> <div class="health-row"> <span class="dot st-OK live" id="health-dot"></span> <span id="health-text">checking sources…</span> </div> <div class="health-sub">read-only · CORS-open · no key</div> </div> <nav class="nav" aria-label="Sections">  <div class="nav-group-label">OVERVIEW</div> <a class="nav-item" href="/"> <span>Grid Info</span><span class="hint">/v1</span> </a> <div class="nav-group-label">EXPLORE</div> <a class="nav-item" href="/events"> <span>Events</span><span class="hint">/events</span> </a><a class="nav-item" href="/map"> <span>Map</span><span class="hint">/map</span> </a><a class="nav-item" href="/places"> <span>Places</span><span class="hint">/places</span> </a><a class="nav-item" href="/sources"> <span>Sources</span><span class="hint">/sources</span> </a><a class="nav-item current" href="/history" aria-current="page"> <span>History</span><span class="hint">/history</span> </a> <div class="nav-group-label">REFERENCE</div> <a class="nav-item" href="/docs"> <span>Docs</span><span class="hint">/v1 ref</span> </a> </nav> <div class="sidebar-foot"> <div>grid.v1 · schema 2026-07</div> <div>deploy from main · us-west</div> </div> </aside> <div class="content"> <div class="context-bar"> <div class="ctx-inner"> <div class="crumb"> <span>grid.v1</span> <span class="sep">/</span> <span class="here">History</span> </div> <div class="ctx-right"> <span class="clock"><span class="dot st-OK live"></span><span id="ctx-clock">––:––:––Z</span></span> </div> </div> </div> <main>   <div class="page-head"> <div>  <h1>History</h1>  <p class="lead">
+The after-action record. Every state transition an event passes through —
+      a wildfire's acreage revised upward, a warning escalated, and the
+<strong>all-clear written the moment an event leaves its feed</strong> — is
+      stored as its own immutable revision. This is the chronological, replayable
+      archive over a time range: absence is recorded as deliberately as onset, so
+      "nothing here now" is a fact you can trace back to the revision that made it
+      true — never inferred from an empty screen.
+</p>   </div> <div class="badges"> <span class="chip-get"><b>GET</b> /v1/history</span> </div> </div> <p class="muted small" style="margin-top:12px;max-width:96ch;"> <code class="inline">GET /v1/history?place=&amp;layer=&amp;from=&amp;to=</code>
+returns every stored revision of every event in the range, newest first — the
     snake_case protojson of <code class="inline">grid.v1.EventRevisionList</code>
-    (<code class="inline">revisions[].{revision, observed_at, ingested_at, event}</code>).
+(<code class="inline">revisions[].&#123;revision, observed_at, ingested_at, event&#125;</code>).
     Filters map 1:1 to the query parameters and live in this page's URL, so a
     date-range view of an incident's whole arc is a shareable permalink; paging
     follows <code class="inline">next_page_token</code>. Timestamps are RFC&nbsp;3339;
     days are grouped in UTC.
-  </p>
-
-  <!-- Filters: each control is one /v1/history query parameter. -->
-  <div class="filters">
-    <label for="hist-place">place</label>
-    <div class="fcell"><select id="hist-place"></select></div>
-
-    <label id="hist-layers-label">layer<span class="lbl-note">any of · empty = all layers</span></label>
-    <div id="hist-layers" class="layer-checks" role="group" aria-labelledby="hist-layers-label"></div>
-
-    <label for="hist-from">from<span class="lbl-note">local time</span></label>
-    <div class="fcell"><input type="datetime-local" id="hist-from"></div>
-
-    <label for="hist-to">to<span class="lbl-note">local time · blank = now</span></label>
-    <div class="fcell"><input type="datetime-local" id="hist-to"></div>
-
-    <label for="hist-size">page_size</label>
-    <div class="fcell"><select id="hist-size"></select></div>
-
-    <label></label>
-    <div class="fcell fcell-actions"><button type="button" id="hist-apply">Apply</button></div>
-  </div>
-
-  <div id="hist-query" class="query-line" aria-label="Request behind these results"></div>
-
-  <div class="table-wrap">
-    <table class="data-table">
-      <thead>
-        <tr>
-          <th style="width:150px">Observed</th>
-          <th style="width:96px">Severity</th>
-          <th style="width:132px">Layer</th>
-          <th class="num" style="width:64px">Rev</th>
-          <th style="width:96px">Status</th>
-          <th>Event</th>
-        </tr>
-      </thead>
-      <tbody id="hist-feed" aria-live="polite"></tbody>
-    </table>
-  </div>
-
-  <div class="results-foot">
-    <button type="button" id="hist-more" hidden>Load more</button>
-    <span id="hist-status" class="loading">Loading…</span>
-  </div>
-</main>
-
-<script type="module">
-  import { initChrome } from '/assets/nav.js';
-  import { initHistoryPage } from '/assets/pages/history.js';
-
-  initChrome('history');
-  initHistoryPage();
-</script>
-</body>
-</html>
+</p>  <div class="filters"> <label for="hist-place">place</label> <div class="fcell"><select id="hist-place"></select></div> <label id="hist-layers-label">layer<span class="lbl-note">any of · empty = all layers</span></label> <div id="hist-layers" class="layer-checks" role="group" aria-labelledby="hist-layers-label"></div> <label for="hist-from">from<span class="lbl-note">local time</span></label> <div class="fcell"><input type="datetime-local" id="hist-from"></div> <label for="hist-to">to<span class="lbl-note">local time · blank = now</span></label> <div class="fcell"><input type="datetime-local" id="hist-to"></div> <label for="hist-size">page_size</label> <div class="fcell"><select id="hist-size"></select></div> <label></label> <div class="fcell fcell-actions"><button type="button" id="hist-apply">Apply</button></div> </div> <div id="hist-query" class="query-line" aria-label="Request behind these results"></div> <div class="table-wrap"> <table class="data-table"> <thead> <tr> <th style="width:150px">Observed</th> <th style="width:96px">Severity</th> <th style="width:132px">Layer</th> <th class="num" style="width:64px">Rev</th> <th style="width:96px">Status</th> <th>Event</th> </tr> </thead> <tbody id="hist-feed" aria-live="polite"></tbody> </table> </div> <div class="results-foot"> <button type="button" id="hist-more" hidden>Load more</button> <span id="hist-status" class="loading">Loading…</span> </div> <script type="module">
+    import { initHistoryPage } from '/assets/pages/history.js';
+    initHistoryPage();
+  </script>  </main> <footer class="site-footer"> <div class="footer-inner"> <details class="request-log"> <summary>View the <span class="request-count" id="req-count">0</span> request(s) behind this page</summary> <div class="request-log-list" id="req-log-list"></div> </details> <p class="footer-line">Signal Integrity &amp; Emergency Radio Response Alliance · P.O. Box 2071, Murphys, CA 95247 · a volunteer 501(c)(3). Every value on this site is a browser fetch of the public /v1 API — replay any of them yourself.</p> </div> </footer> </div> </div> <!-- Live shell behaviors: fill the static placeholders above. is:inline keeps
+     this as a plain external module (Astro won't re-bundle it), identical to how
+     the per-page scripts load their existing modules from /assets. --> <script type="module" src="/assets/chrome.js"></script> </body> </html>

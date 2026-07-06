@@ -1,0 +1,10 @@
+---
+// GetChip — the "GET /v1/…" method pill shown next to section headings and
+// endpoint references. Renders exactly the markup the pages used inline:
+//   <span class="chip-get"><b>GET</b> /v1/events</span>
+interface Props {
+  path: string;
+}
+const { path } = Astro.props;
+---
+<span class="chip-get"><b>GET</b> {path}</span>

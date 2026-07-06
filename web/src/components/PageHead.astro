@@ -1,0 +1,29 @@
+---
+// PageHead — the shared hero block: optional kicker, an <h1>, a lead paragraph
+// (default slot), and a badges column (defaults to the standard chip pair).
+//
+//   <PageHead kicker="grid.v1 · event explorer" title="Events">
+//     <p class="lead">…</p>
+//   </PageHead>
+//
+// The lead paragraph is passed as slot content (not a prop) so pages keep their
+// inline markup — <code>, <span class="mono">, links, etc. Override the badges
+// via the `badges` slot; omit it for the default Badges pair.
+import Badges from './Badges.astro';
+
+interface Props {
+  title: string;
+  kicker?: string;
+}
+const { title, kicker } = Astro.props;
+---
+<div class="page-head">
+  <div>
+    {kicker && <div class="hero-kicker">{kicker}</div>}
+    <h1>{title}</h1>
+    <slot />
+  </div>
+  <div class="badges">
+    <slot name="badges"><Badges /></slot>
+  </div>
+</div>

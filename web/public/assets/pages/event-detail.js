@@ -23,7 +23,6 @@ import {
   decodeGeometry,
   SEVERITY_COLORS,
 } from '../format.js';
-import { initChrome } from '../nav.js';
 import { diffObjects } from '../diff.js';
 import { BASE_STYLE } from '../basemap.js';
 
@@ -370,7 +369,6 @@ function renderEventMap(container, decoded, bounds, severity) {
  * ed-sub, ed-query, ed-sections).
  */
 export function initEventPage() {
-  initChrome('events');
 
   const $ = (id) => document.getElementById(id);
   const loadingEl = $('ed-loading');
