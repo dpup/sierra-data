@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io/fs"
 	"mime"
 	"net/http"
 	"path"
@@ -64,11 +65,11 @@ func siteHandler(w http.ResponseWriter, r *http.Request) {
 		name = "index.html"
 	}
 
-	body, err := site.FS.ReadFile(name)
+	body, err := fs.ReadFile(site.FS, name)
 	if err != nil && path.Ext(name) == "" {
 		// Extensionless page URL: /events -> events.html. Only files (not the
 		// asset/lib paths, which carry their own extensions) hit this fallback.
-		if b, e := site.FS.ReadFile(name + ".html"); e == nil {
+		if b, e := fs.ReadFile(site.FS, name+".html"); e == nil {
 			name, body, err = name+".html", b, nil
 		}
 	}

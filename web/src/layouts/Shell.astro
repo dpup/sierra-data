@@ -1,0 +1,120 @@
+---
+// Shell.astro — the shared app shell, rendered STATICALLY at build time.
+//
+// This replaces the old client-side initChrome() in assets/nav.js: the sidebar,
+// context bar, and footer are now in the HTML at first paint, so the page no
+// longer reflows ~250px after the shell is injected. The only live bits — the
+// source-health chip, the UTC clock, and the request-log drawer — stay as JS
+// (assets/chrome.js) that fills the static placeholders below.
+//
+// Page content is the default <slot/>. Pages pass a nav `current` key plus
+// <title>/description; page-scoped CSS goes in a `head` slot (use is:global for
+// rules that target runtime-built rows).
+
+interface Props {
+  current: string;
+  title: string;
+  description: string;
+}
+const { current, title, description } = Astro.props;
+
+const NAV = [
+  { key: 'home', label: 'Grid Info', href: '/', hint: '/v1', group: 'OVERVIEW', crumb: 'The Grid' },
+  { key: 'events', label: 'Events', href: '/events', hint: '/events', group: 'EXPLORE', crumb: 'Events' },
+  { key: 'map', label: 'Map', href: '/map', hint: '/map', group: 'EXPLORE', crumb: 'Map' },
+  { key: 'places', label: 'Places', href: '/places', hint: '/places', group: 'EXPLORE', crumb: 'Places' },
+  { key: 'sources', label: 'Sources', href: '/sources', hint: '/sources', group: 'EXPLORE', crumb: 'Sources' },
+  { key: 'history', label: 'History', href: '/history', hint: '/history', group: 'EXPLORE', crumb: 'History' },
+  { key: 'docs', label: 'Docs', href: '/docs', hint: '/v1 ref', group: 'REFERENCE', crumb: 'Docs' },
+];
+const GROUPS = ['OVERVIEW', 'EXPLORE', 'REFERENCE'];
+const here = (NAV.find((n) => n.key === current) || {}).crumb || 'The Grid';
+---
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{title}</title>
+  <meta name="description" content={description} />
+  <!-- Preload the two primary faces (body defaults to mono) to cut FOUT reflow. -->
+  <link rel="preload" href="/lib/fonts/ibm-plex-mono-400.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="preload" href="/lib/fonts/ibm-plex-sans-400.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="stylesheet" href="/assets/app.css" />
+  <slot name="head" />
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <a class="brand-block" href="/">
+      <div class="brand-line">
+        <span class="brand-name">S.I.E.R.R.A</span><span class="brand-sub">The Grid</span>
+      </div>
+      <div class="brand-host">data.sierragridteam.org</div>
+    </a>
+
+    <div class="health-chip">
+      <div class="health-row">
+        <span class="dot st-OK live" id="health-dot"></span>
+        <span id="health-text">checking sources…</span>
+      </div>
+      <div class="health-sub">read-only · CORS-open · no key</div>
+    </div>
+
+    <nav class="nav" aria-label="Sections">
+      {GROUPS.map((g) => (
+        <>
+          <div class="nav-group-label">{g}</div>
+          {NAV.filter((n) => n.group === g).map((item) => (
+            <a
+              class={'nav-item' + (item.key === current ? ' current' : '')}
+              href={item.href}
+              aria-current={item.key === current ? 'page' : undefined}
+            >
+              <span>{item.label}</span><span class="hint">{item.hint}</span>
+            </a>
+          ))}
+        </>
+      ))}
+    </nav>
+
+    <div class="sidebar-foot">
+      <div>grid.v1 · schema 2026-07</div>
+      <div>deploy from main · us-west</div>
+    </div>
+  </aside>
+
+  <div class="content">
+    <div class="context-bar">
+      <div class="ctx-inner">
+        <div class="crumb">
+          <span>grid.v1</span> <span class="sep">/</span> <span class="here">{here}</span>
+        </div>
+        <div class="ctx-right">
+          <span class="clock"><span class="dot st-OK live"></span><span id="ctx-clock">––:––:––Z</span></span>
+        </div>
+      </div>
+    </div>
+
+    <main>
+      <slot />
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <details class="request-log">
+          <summary>View the <span class="request-count" id="req-count">0</span> request(s) behind this page</summary>
+          <div class="request-log-list" id="req-log-list"></div>
+        </details>
+        <p class="footer-line">Signal Integrity &amp; Emergency Radio Response Alliance · P.O. Box 2071, Murphys, CA 95247 · a volunteer 501(c)(3). Every value on this site is a browser fetch of the public /v1 API — replay any of them yourself.</p>
+      </div>
+    </footer>
+  </div>
+</div>
+
+<!-- Live shell behaviors: fill the static placeholders above. is:inline keeps
+     this as a plain external module (Astro won't re-bundle it), identical to how
+     the per-page scripts load their existing modules from /assets. -->
+<script is:inline type="module" src="/assets/chrome.js"></script>
+</body>
+</html>

@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Events · The Grid</title>
+  <meta name="description" content="Event explorer over GET /v1/events — the cross-layer query of every discrete occurrence the Grid tracks, with filters that map 1:1 to the endpoint's parameters and a URL that is the shareable permalink.">
+  <link rel="stylesheet" href="/assets/app.css">
+  <style>
+    /* Page-local: the query bar, the pill filter rows, and the two-column
+       results + JSON inspector layout. Every color/size resolves to an
+       app.css token — nothing here overrides the design system. */
+
+    /* Query bar — the exact GET behind the table, bg = code surface. */
+    .qbar { background: var(--bg-code); }
+    .qbar-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .qbar-chips { display: flex; flex-wrap: wrap; gap: 8px; flex: 1; min-width: 0; }
+    .qbar-hint { font-size: 12px; color: var(--text-dim); }
+    .qbar-copy { margin-left: auto; }
+    .qbar-curl { margin-top: 10px; overflow-x: auto; white-space: nowrap; }
+    .qchip .x { user-select: none; }
+
+    /* .fcell / .fcell-actions / .pill-row / .lbl-note are shared components in app.css. */
+    .fspacer { display: block; }
+
+    /* Results + sticky inspector. */
+    .results-grid { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 16px; align-items: start; }
+    .results-col { min-width: 0; }
+    .results-grid .inspector {
+      position: sticky; top: 68px; align-self: start;
+      max-height: calc(100vh - 92px); overflow: auto;
+    }
+    .ev-insp-body { min-height: 140px; }
+    .insp-placeholder { color: var(--text-dim); }
+
+    /* Two-line event cell + selectable row. */
+    .events-table tbody tr { cursor: pointer; }
+    .events-table tbody tr.ev-selected { background: var(--bg-selected); }
+    .events-table tbody tr.ev-selected td:first-child {
+      box-shadow: inset 3px 0 0 var(--row-sev, var(--grn-line));
+    }
+    .ev-head { color: var(--text); font-size: 13.5px; line-height: 1.4; }
+    .ev-head a { color: var(--text-hi); }
+    .ev-sub { margin-top: 3px; font-size: 12px; color: var(--text-faint); white-space: normal; }
+    .ev-sub .sep { color: var(--text-dimmer); }
+
+    .results-foot { display: flex; align-items: center; gap: 16px; margin-top: 14px; margin-bottom: 8px; }
+
+    @media (max-width: 900px) {
+      .results-grid { grid-template-columns: 1fr; }
+      .results-grid .inspector { position: static; max-height: none; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <div class="page-head">
+    <div>
+      <div class="hero-kicker">grid.v1 · event explorer</div>
+      <h1>Events</h1>
+      <p class="lead">
+        Every discrete occurrence the Grid tracks — wildfire,
+        evacuation, weather alert, earthquake, road incident, and the rest — is
+        reachable through <strong>one endpoint</strong>. The filters below map
+        1:1 onto the query parameters of
+        <code class="inline">GET /v1/events</code>; results are the snake_case
+        protojson of <code class="inline">grid.v1.EventList</code>, server-sorted
+        <strong>severity-first, then newest-first</strong>. This page's whole
+        filter state lives in its URL, so any view you compose here is a
+        shareable permalink — <strong>you can replay the exact request
+        yourself.</strong>
+      </p>
+    </div>
+    <div class="badges">
+      <span class="chip-get"><b>GET</b> /v1/events</span>
+    </div>
+  </div>
+
+  <!-- The exact request behind the table: endpoint + active filter chips. -->
+  <section class="panel qbar" aria-label="Request behind these results">
+    <div class="qbar-line">
+      <span class="chip-get"><b>GET</b> /v1/events</span>
+      <span id="ev-qchips" class="qbar-chips"></span>
+      <button type="button" id="ev-copyurl" class="copy-btn qbar-copy">copy url</button>
+    </div>
+    <div id="ev-curl" class="qbar-curl mono small muted"></div>
+  </section>
+
+  <!-- Filters: each control is one /v1/events query parameter. -->
+  <div class="filters">
+    <label for="ev-place">place</label>
+    <div class="fcell"><select id="ev-place"></select></div>
+
+    <label id="ev-layers-label">layer<span class="lbl-note">any of · empty = all layers</span></label>
+    <div id="ev-layers" class="pill-row" role="group" aria-labelledby="ev-layers-label"></div>
+
+    <label id="ev-status-label">status<span class="lbl-note">default ACTIVE + SCHEDULED</span></label>
+    <div id="ev-status" class="pill-row" role="group" aria-labelledby="ev-status-label"></div>
+
+    <label for="ev-sev">severity_min</label>
+    <div class="fcell"><select id="ev-sev"></select></div>
+
+    <label for="ev-since">since<span class="lbl-note">local time</span></label>
+    <div class="fcell"><input type="datetime-local" id="ev-since"></div>
+
+    <label for="ev-size">page_size</label>
+    <div class="fcell"><select id="ev-size"></select></div>
+
+    <span class="fspacer" aria-hidden="true"></span>
+    <div class="fcell fcell-actions">
+      <button type="button" id="ev-apply">Apply filters</button>
+      <button type="button" id="ev-reset">Reset</button>
+    </div>
+  </div>
+
+  <div id="ev-errors"></div>
+
+  <!-- Results table (left) + sticky raw-JSON inspector (right). -->
+  <div class="results-grid">
+    <div class="results-col">
+      <div class="table-wrap">
+        <table class="data-table events-table">
+          <thead>
+            <tr>
+              <th style="width:104px">Severity</th>
+              <th>Event</th>
+              <th style="width:120px">Source</th>
+              <th class="num" style="width:64px">Rev</th>
+            </tr>
+          </thead>
+          <tbody id="ev-tbody" aria-live="polite"></tbody>
+        </table>
+      </div>
+      <div id="ev-empty"></div>
+      <div class="results-foot">
+        <button type="button" id="ev-more" hidden>Load more</button>
+        <span id="ev-status-line" class="loading">Loading…</span>
+      </div>
+    </div>
+
+    <aside class="inspector" id="ev-inspector" aria-label="Selected event JSON">
+      <div class="inspector-head">
+        <span>Response</span>
+        <span class="meta">application/json · grid.v1.Event</span>
+      </div>
+      <pre id="ev-insp-body" class="ev-insp-body"></pre>
+    </aside>
+  </div>
+</main>
+
+<script type="module">
+  import { initEventsPage } from '/assets/pages/events.js';
+  initEventsPage();
+</script>
+</body>
+</html>

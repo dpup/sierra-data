@@ -1,13 +1,29 @@
 // Package site embeds the data.sierragridteam.org static site
-// (docs/data-sites-spec.md) so the server binary is self-contained: no
-// runtime file dependencies, and the Docker image needs no separate site
-// COPY. The `all:` prefix includes every file under assets/ and lib/
-// (including subdirectories such as assets/pages/); the HTML pages are
-// listed explicitly so a missing page fails the build rather than 404ing
-// in production.
+// (docs/data-sites-spec.md) so the server binary is self-contained: no runtime
+// file dependencies, and the Docker image needs no separate site COPY.
+//
+// The site is now built by Astro (source in ../web) into dist/, which is a
+// committed build artifact — like the generated *.pb.go and *.swagger.json — so
+// the Docker `go build` stays Node-free. Regenerate with `make site` after
+// editing anything under web/. FS strips the dist/ prefix via fs.Sub, so callers
+// read "index.html", not "dist/index.html".
 package site
 
-import "embed"
+import (
+	"embed"
+	"io/fs"
+)
 
-//go:embed all:assets all:lib index.html sources.html events.html event.html places.html map.html history.html docs.html
-var FS embed.FS
+//go:embed all:dist
+var embedded embed.FS
+
+// FS is the site root: the built dist/ tree with its prefix removed.
+var FS = mustSub(embedded, "dist")
+
+func mustSub(fsys fs.FS, dir string) fs.FS {
+	sub, err := fs.Sub(fsys, dir)
+	if err != nil {
+		panic(err)
+	}
+	return sub
+}

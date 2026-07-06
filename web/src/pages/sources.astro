@@ -1,14 +1,15 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Sources · The Grid</title>
-  <meta name="description" content="The honest feed-health board for the Grid: per-source poll interval, last success, staleness, thresholds, and last error — live from GET /v1/sources. A failing feed says so; absence is never an all-clear.">
-  <link rel="stylesheet" href="/assets/app.css">
-  <style>
-    /* Page-scoped: non-OK row tinting so degradation is impossible to miss.
-       Tokens are the canonical --st-* status colors from app.css. */
+---
+import Shell from '../layouts/Shell.astro';
+---
+<Shell
+  current="sources"
+  title="Sources · The Grid"
+  description="The honest feed-health board for the Grid: per-source poll interval, last success, staleness, thresholds, and last error — live from GET /v1/sources. A failing feed says so; absence is never an all-clear."
+>
+  <!-- Page-scoped, but is:global because the rules target rows built at runtime
+       by sources.js (scoped styles would not match dynamically-created DOM).
+       Tokens are the canonical --st-* status colors from app.css. -->
+  <style is:global slot="head">
     .data-table tr.row-STALE {
       background: color-mix(in srgb, var(--st-STALE) 8%, transparent);
     }
@@ -17,9 +18,7 @@
     }
     .data-table td.err-cell { color: var(--st-UNAVAILABLE); }
   </style>
-</head>
-<body>
-<main>
+
   <div class="page-head">
     <div>
       <div class="hero-kicker">System status</div>
@@ -55,11 +54,12 @@
   <div id="page-errors"></div>
   <div id="board"><div class="loading">Loading /v1/sources…</div></div>
   <p id="refresh-line" class="freshness"></p>
-</main>
 
-<script type="module">
-  import { initSourcesPage } from '/assets/pages/sources.js';
-  initSourcesPage();
-</script>
-</body>
-</html>
+  <!-- Live data island: the existing, unchanged module. is:inline keeps it a
+       plain external import from /assets (Astro does not re-bundle it), exactly
+       as the pre-Astro page loaded it. -->
+  <script is:inline type="module">
+    import { initSourcesPage } from '/assets/pages/sources.js';
+    initSourcesPage();
+  </script>
+</Shell>

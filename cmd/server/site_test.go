@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -12,8 +13,8 @@ import (
 )
 
 // TestSiteEmbedContainsPages pins the embed manifest: every page the nav
-// links to must be in the binary — a missing page should fail here (and at
-// build time via the explicit go:embed list), not 404 in production.
+// links to must be in the Astro build output (site/dist, embedded via
+// go:embed all:dist) — a missing page should fail here, not 404 in production.
 func TestSiteEmbedContainsPages(t *testing.T) {
 	pages := []string{
 		"index.html",
@@ -27,12 +28,13 @@ func TestSiteEmbedContainsPages(t *testing.T) {
 		// Shared assets and the vendored map lib must embed too.
 		"assets/app.css",
 		"assets/api.js",
+		"assets/chrome.js",
 		"assets/pages/events.js",
 		"lib/maplibre-gl.js",
 		"lib/maplibre-gl.css",
 	}
 	for _, p := range pages {
-		body, err := site.FS.ReadFile(p)
+		body, err := fs.ReadFile(site.FS, p)
 		require.NoError(t, err, "embedded FS missing %s", p)
 		assert.NotEmpty(t, body, "embedded %s is empty", p)
 	}

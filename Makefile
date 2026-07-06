@@ -1,5 +1,5 @@
 # Live Data API Server - Build, Test, and Deployment Tasks
-.PHONY: build test proto clean server tools run dev lint fmt docker docker-build docker-run docker-run-dev docker-push docker-clean deploy install help
+.PHONY: build test proto clean server tools site site-install site-dev run dev lint fmt docker docker-build docker-run docker-run-dev docker-push docker-clean deploy install help
 
 # Go parameters
 GOCMD=go
@@ -56,6 +56,27 @@ $(TEST_CALTRANS_BINARY): proto
 $(TEST_WEATHER_BINARY): proto
 	$(GOBUILD) -o $(TEST_WEATHER_BINARY) ./$(CMD_DIR)/test-weather
 
+# Build the static site with Astro (source in web/) into site/dist. The output
+# is a COMMITTED artifact (like the generated *.pb.go) so the Docker `go build`
+# stays Node-free — run this after editing anything under web/, then commit
+# site/dist. Uses `npm ci` when a lockfile exists (reproducible), else `npm install`.
+site:
+	@echo "Building site (Astro → site/dist)..."
+	cd web && (test -f package-lock.json && npm ci || npm install) && npm run build
+	@# Astro's content layer emits empty `content-*.mjs` stubs even with no
+	@# collections; prune them so they aren't embedded/served.
+	rm -f site/dist/content-assets.mjs site/dist/content-modules.mjs
+	@echo "✅ Site built: site/dist"
+
+# Install site build dependencies only (no build).
+site-install:
+	cd web && npm install
+
+# Run the Astro dev server (hot reload) for local site development. Note: /v1 and
+# /api calls still need the Go server running — point the dev site at it or proxy.
+site-dev:
+	cd web && npm run dev
+
 # Generate protobuf code
 # Note: googleapis is a proto-only module (no Go code), so we download it explicitly with @latest.
 # Both googleapis and grpc-gateway are resolved via `go mod download -json` (not `go list -m`)
@@ -89,6 +110,7 @@ clean:
 	rm -f $(PROTO_DIR)/*_grpc.pb.go
 	rm -f $(PROTO_DIR)/*.swagger.json
 	rm -f $(GRID_PROTO_DIR)/*.pb.go
+	rm -rf site/dist web/node_modules web/.astro
 
 ## Testing Targets
 
@@ -397,6 +419,8 @@ help:
 	@echo "  server      - Build main server only"
 	@echo "  tools       - Build CLI testing tools only"
 	@echo "  proto       - Generate protobuf code"
+	@echo "  site        - Build the static site (Astro, web/ → site/dist; commit the output)"
+	@echo "  site-dev    - Run the Astro dev server (hot reload)"
 	@echo "  clean       - Clean build artifacts"
 	@echo ""
 	@echo "Testing targets:"

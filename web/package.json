@@ -1,0 +1,14 @@
+{
+  "name": "sierra-grid-site",
+  "type": "module",
+  "private": true,
+  "description": "Astro source for data.sierragridteam.org — builds static files into ../site/dist (embedded by the Go server).",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview"
+  },
+  "devDependencies": {
+    "astro": "^5.13.0"
+  }
+}
