@@ -7,8 +7,8 @@ import (
 
 	"github.com/dpup/prefab/logging"
 
-	"github.com/dpup/info.ersn.net/server/internal/cache"
-	"github.com/dpup/info.ersn.net/server/internal/config"
+	"github.com/dpup/sierra-data/internal/cache"
+	"github.com/dpup/sierra-data/internal/config"
 )
 
 // testCtx carries a logger so buildLayer's logging.Errorw/Warnw don't panic.

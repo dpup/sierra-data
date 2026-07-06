@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	gridv1 "github.com/dpup/info.ersn.net/server/api/grid/v1"
-	api "github.com/dpup/info.ersn.net/server/api/v1"
-	"github.com/dpup/info.ersn.net/server/internal/config"
-	"github.com/dpup/info.ersn.net/server/internal/hazards"
+	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
+	api "github.com/dpup/sierra-data/api/v1"
+	"github.com/dpup/sierra-data/internal/config"
+	"github.com/dpup/sierra-data/internal/hazards"
 )
 
 // roadsIncidentsAPI is the slice of RoadsService this normalizer consumes

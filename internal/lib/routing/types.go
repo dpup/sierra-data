@@ -3,7 +3,7 @@ package routing
 import (
 	"context"
 
-	"github.com/dpup/info.ersn.net/server/internal/lib/geo"
+	"github.com/dpup/sierra-data/internal/lib/geo"
 )
 
 // AlertClassification represents the relationship between an alert and monitored routes

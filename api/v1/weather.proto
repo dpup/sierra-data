@@ -7,22 +7,22 @@ import "google/protobuf/timestamp.proto";
 import "protoc-gen-openapiv2/options/annotations.proto";
 import "common.proto";
 
-option go_package = "github.com/dpup/info.ersn.net/server/api/v1";
+option go_package = "github.com/dpup/sierra-data/api/v1";
 
 // OpenAPI configuration
 option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
   info: {
-    title: "ERSN Weather API";
+    title: "The Grid — Weather API";
     version: "1.0";
     description: "Real-time weather conditions and alerts for the Ebbetts Pass region";
     contact: {
-      name: "ERSN Info Server";
-      url: "https://info.ersn.net";
+      name: "The Grid (S.I.E.R.R.A)";
+      url: "https://data.sierragridteam.org";
     };
   };
   external_docs: {
-    url: "https://github.com/dpup/info.ersn.net";
-    description: "More about ERSN Info Server";
+    url: "https://github.com/dpup/sierra-data";
+    description: "More about The Grid";
   };
   schemes: HTTPS;
   schemes: HTTP;

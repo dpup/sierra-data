@@ -1,6 +1,11 @@
-# ERSN Info Server Development Guidelines
+# The Grid — Development Guidelines
 
-Last updated: 2026-07-05
+The Grid is the S.I.E.R.R.A data service (primary domain `data.sierragridteam.org`;
+`info.ersn.net` is a legacy CNAME alias, ersn.net a consuming site). The Go module
+path and GitHub repo are `github.com/dpup/sierra-data` (renamed 2026-07-06 from
+`github.com/dpup/info.ersn.net/server`).
+
+Last updated: 2026-07-06
 
 ## Active Technologies
 

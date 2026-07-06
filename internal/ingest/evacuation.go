@@ -12,10 +12,10 @@ import (
 
 	"github.com/dpup/prefab/logging"
 
-	gridv1 "github.com/dpup/info.ersn.net/server/api/grid/v1"
-	"github.com/dpup/info.ersn.net/server/internal/clients/caloes"
-	"github.com/dpup/info.ersn.net/server/internal/config"
-	"github.com/dpup/info.ersn.net/server/internal/hazards"
+	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
+	"github.com/dpup/sierra-data/internal/clients/caloes"
+	"github.com/dpup/sierra-data/internal/config"
+	"github.com/dpup/sierra-data/internal/hazards"
 )
 
 // EvacuationNormalizer ingests Cal OES evacuation zones (id namespace

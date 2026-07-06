@@ -10,7 +10,7 @@ import (
 
 	"github.com/dpup/prefab/logging"
 
-	"github.com/dpup/info.ersn.net/server/internal/config"
+	"github.com/dpup/sierra-data/internal/config"
 )
 
 // SituationPrefix mounts the cross-layer situation aggregator.

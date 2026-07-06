@@ -17,9 +17,9 @@ import (
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	gridv1 "github.com/dpup/info.ersn.net/server/api/grid/v1"
-	"github.com/dpup/info.ersn.net/server/internal/config"
-	"github.com/dpup/info.ersn.net/server/internal/lib/geojson"
+	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
+	"github.com/dpup/sierra-data/internal/config"
+	"github.com/dpup/sierra-data/internal/lib/geojson"
 )
 
 // Normalizer is one poller's contract: fetch its upstream(s) and return the

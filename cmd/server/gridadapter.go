@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"time"
 
-	gridv1 "github.com/dpup/info.ersn.net/server/api/grid/v1"
-	"github.com/dpup/info.ersn.net/server/internal/gridapi"
-	"github.com/dpup/info.ersn.net/server/internal/hazards"
-	"github.com/dpup/info.ersn.net/server/internal/store"
+	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
+	"github.com/dpup/sierra-data/internal/gridapi"
+	"github.com/dpup/sierra-data/internal/hazards"
+	"github.com/dpup/sierra-data/internal/store"
 )
 
 // gridStoreBackend adapts the grid event store into hazards.StoreBackend —

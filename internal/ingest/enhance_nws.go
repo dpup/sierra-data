@@ -10,7 +10,7 @@ import (
 
 	openai "github.com/sashabaranov/go-openai"
 
-	"github.com/dpup/info.ersn.net/server/internal/config"
+	"github.com/dpup/sierra-data/internal/config"
 )
 
 // NWSEnhancement is the model output plus the I/O captured for transparency

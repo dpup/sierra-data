@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"net/http"
 
-	gridv1 "github.com/dpup/info.ersn.net/server/api/grid/v1"
-	"github.com/dpup/info.ersn.net/server/internal/config"
-	"github.com/dpup/info.ersn.net/server/internal/store"
+	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
+	"github.com/dpup/sierra-data/internal/config"
+	"github.com/dpup/sierra-data/internal/store"
 )
 
 // serveSources handles GET /v1/sources: the source registry with per-source

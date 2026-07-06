@@ -11,7 +11,7 @@ import (
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	api "github.com/dpup/info.ersn.net/server/api/v1"
+	api "github.com/dpup/sierra-data/api/v1"
 )
 
 // HTTPDoer interface for HTTP clients (for testability)

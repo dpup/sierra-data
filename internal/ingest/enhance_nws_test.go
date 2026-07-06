@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dpup/info.ersn.net/server/internal/config"
+	"github.com/dpup/sierra-data/internal/config"
 )
 
 // fakeRoundTripper injects a canned OpenAI response (the repo's fake-HTTP

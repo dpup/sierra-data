@@ -12,10 +12,10 @@ import (
 	"net/http"
 	"time"
 
-	api "github.com/dpup/info.ersn.net/server/api/v1"
-	"github.com/dpup/info.ersn.net/server/internal/config"
-	"github.com/dpup/info.ersn.net/server/internal/hazards"
-	"github.com/dpup/info.ersn.net/server/internal/store"
+	api "github.com/dpup/sierra-data/api/v1"
+	"github.com/dpup/sierra-data/internal/config"
+	"github.com/dpup/sierra-data/internal/hazards"
+	"github.com/dpup/sierra-data/internal/store"
 )
 
 // HandlerPrefix is where the /v1 API mounts. It must end in "/" so the

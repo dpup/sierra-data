@@ -1,4 +1,4 @@
-module github.com/dpup/info.ersn.net/server
+module github.com/dpup/sierra-data
 
 go 1.25.0
 

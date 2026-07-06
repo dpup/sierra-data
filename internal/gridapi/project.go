@@ -7,9 +7,9 @@ import (
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	gridv1 "github.com/dpup/info.ersn.net/server/api/grid/v1"
-	"github.com/dpup/info.ersn.net/server/internal/clients/caloes"
-	"github.com/dpup/info.ersn.net/server/internal/hazards"
+	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
+	"github.com/dpup/sierra-data/internal/clients/caloes"
+	"github.com/dpup/sierra-data/internal/hazards"
 )
 
 // ProjectEvents projects stored grid events onto the shipped GeoJSON envelope

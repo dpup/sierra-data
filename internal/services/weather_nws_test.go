@@ -9,12 +9,12 @@ import (
 	"testing"
 	"time"
 
-	api "github.com/dpup/info.ersn.net/server/api/v1"
+	api "github.com/dpup/sierra-data/api/v1"
 	"github.com/dpup/prefab/logging"
 
-	"github.com/dpup/info.ersn.net/server/internal/cache"
-	"github.com/dpup/info.ersn.net/server/internal/clients/nws"
-	"github.com/dpup/info.ersn.net/server/internal/config"
+	"github.com/dpup/sierra-data/internal/cache"
+	"github.com/dpup/sierra-data/internal/clients/nws"
+	"github.com/dpup/sierra-data/internal/config"
 )
 
 // failingDoer simulates an NWS outage: every request errors.

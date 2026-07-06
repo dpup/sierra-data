@@ -8,10 +8,10 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	api "github.com/dpup/info.ersn.net/server/api/v1"
-	"github.com/dpup/info.ersn.net/server/internal/config"
-	"github.com/dpup/info.ersn.net/server/internal/lib/geojson"
-	"github.com/dpup/info.ersn.net/server/internal/store"
+	api "github.com/dpup/sierra-data/api/v1"
+	"github.com/dpup/sierra-data/internal/config"
+	"github.com/dpup/sierra-data/internal/lib/geojson"
+	"github.com/dpup/sierra-data/internal/store"
 )
 
 // Conditions passthroughs (plan §2.3): /v1/roads and /v1/weather re-serve the

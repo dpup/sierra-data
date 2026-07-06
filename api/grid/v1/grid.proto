@@ -4,7 +4,7 @@ package grid.v1;
 
 import "google/protobuf/timestamp.proto";
 
-option go_package = "github.com/dpup/info.ersn.net/server/api/grid/v1;gridv1";
+option go_package = "github.com/dpup/sierra-data/api/grid/v1;gridv1";
 
 // Canonical grid event model (docs/v2-api-spec.md §3). Messages only — every
 // /v1 endpoint is a hand-built net/http handler; entity responses marshal

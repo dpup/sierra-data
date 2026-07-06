@@ -5,7 +5,7 @@ import (
 	"runtime/debug"
 	"time"
 
-	"github.com/dpup/info.ersn.net/server/internal/config"
+	"github.com/dpup/sierra-data/internal/config"
 	"github.com/dpup/prefab/errors"
 	"github.com/dpup/prefab/logging"
 )

@@ -10,11 +10,11 @@ import (
 
 	"github.com/dpup/prefab/logging"
 
-	gridv1 "github.com/dpup/info.ersn.net/server/api/grid/v1"
-	"github.com/dpup/info.ersn.net/server/internal/clients/calfire"
-	"github.com/dpup/info.ersn.net/server/internal/clients/wfigs"
-	"github.com/dpup/info.ersn.net/server/internal/config"
-	"github.com/dpup/info.ersn.net/server/internal/hazards"
+	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
+	"github.com/dpup/sierra-data/internal/clients/calfire"
+	"github.com/dpup/sierra-data/internal/clients/wfigs"
+	"github.com/dpup/sierra-data/internal/config"
+	"github.com/dpup/sierra-data/internal/hazards"
 )
 
 // WildfireNormalizer joins CAL FIRE incidents (id namespace "calfire:") with

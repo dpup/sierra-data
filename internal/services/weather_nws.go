@@ -9,8 +9,8 @@ import (
 	"github.com/dpup/prefab/logging"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	api "github.com/dpup/info.ersn.net/server/api/v1"
-	"github.com/dpup/info.ersn.net/server/internal/clients/nws"
+	api "github.com/dpup/sierra-data/api/v1"
+	"github.com/dpup/sierra-data/internal/clients/nws"
 )
 
 // fetchNWSAlerts returns the active NWS alerts for the configured service-area

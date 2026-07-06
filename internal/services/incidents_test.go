@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	api "github.com/dpup/info.ersn.net/server/api/v1"
-	"github.com/dpup/info.ersn.net/server/internal/cache"
-	"github.com/dpup/info.ersn.net/server/internal/clients/caltrans"
-	"github.com/dpup/info.ersn.net/server/internal/config"
-	"github.com/dpup/info.ersn.net/server/internal/lib/alerts"
+	api "github.com/dpup/sierra-data/api/v1"
+	"github.com/dpup/sierra-data/internal/cache"
+	"github.com/dpup/sierra-data/internal/clients/caltrans"
+	"github.com/dpup/sierra-data/internal/config"
+	"github.com/dpup/sierra-data/internal/lib/alerts"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

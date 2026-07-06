@@ -1,6 +1,6 @@
 # Hazard Aggregation & Unified Geo Feed — Technical Design
 
-Status: **Implemented (M0–M5)** · Owner: info.ersn.net · Last updated: 2026-06-26
+Status: **Implemented (M0–M5)** · Owner: The Grid (S.I.E.R.R.A) · Last updated: 2026-06-26
 
 ## 1. Summary
 

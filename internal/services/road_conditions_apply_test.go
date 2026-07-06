@@ -6,9 +6,9 @@ import (
 
 	"github.com/dpup/prefab/logging"
 
-	api "github.com/dpup/info.ersn.net/server/api/v1"
-	"github.com/dpup/info.ersn.net/server/internal/clients/caltrans"
-	"github.com/dpup/info.ersn.net/server/internal/config"
+	api "github.com/dpup/sierra-data/api/v1"
+	"github.com/dpup/sierra-data/internal/clients/caltrans"
+	"github.com/dpup/sierra-data/internal/config"
 )
 
 // TestApplyRoadConditions_OnlyOnRoute verifies a route-wide condition is attached

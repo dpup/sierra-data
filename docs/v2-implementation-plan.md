@@ -13,7 +13,7 @@ explicit; tasks at the same tier run in parallel on disjoint files.
 
 ## 0. Context (what the explorers established)
 
-- Module `github.com/dpup/info.ersn.net/server`, Go 1.24+, Prefab v0.2.2
+- Module `github.com/dpup/sierra-data`, Go 1.24+, Prefab v0.2.2
   (gRPC + grpc-gateway + hand-built `http.Handler`s via `prefab.WithHTTPHandler`).
 - Existing surface: `RoadsService`/`WeatherService` (grpc-gateway, `/api/v1/...`),
   hand-built GeoJSON hazards endpoints (`internal/hazards`, 8 layers, fail-loud

@@ -8,10 +8,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	gridv1 "github.com/dpup/info.ersn.net/server/api/grid/v1"
-	"github.com/dpup/info.ersn.net/server/internal/clients/calfire"
-	"github.com/dpup/info.ersn.net/server/internal/clients/wfigs"
-	"github.com/dpup/info.ersn.net/server/internal/store"
+	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
+	"github.com/dpup/sierra-data/internal/clients/calfire"
+	"github.com/dpup/sierra-data/internal/clients/wfigs"
+	"github.com/dpup/sierra-data/internal/store"
 )
 
 const calfireFixture = `[

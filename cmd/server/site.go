@@ -6,7 +6,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/dpup/info.ersn.net/server/site"
+	"github.com/dpup/sierra-data/site"
 )
 
 // siteContentTypes pins Content-Type for every extension the site ships.

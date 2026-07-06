@@ -8,12 +8,12 @@ import (
 	"net/http"
 	"time"
 
-	gridv1 "github.com/dpup/info.ersn.net/server/api/grid/v1"
-	"github.com/dpup/info.ersn.net/server/internal/clients/caloes"
-	"github.com/dpup/info.ersn.net/server/internal/config"
-	"github.com/dpup/info.ersn.net/server/internal/hazards"
-	"github.com/dpup/info.ersn.net/server/internal/lib/geojson"
-	"github.com/dpup/info.ersn.net/server/internal/store"
+	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
+	"github.com/dpup/sierra-data/internal/clients/caloes"
+	"github.com/dpup/sierra-data/internal/config"
+	"github.com/dpup/sierra-data/internal/hazards"
+	"github.com/dpup/sierra-data/internal/lib/geojson"
+	"github.com/dpup/sierra-data/internal/store"
 )
 
 // GET /v1/places/{place}/map/{layer}.geojson (plan §2.3, task T12b-1).

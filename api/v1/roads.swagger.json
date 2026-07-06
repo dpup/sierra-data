@@ -1,12 +1,12 @@
 {
   "swagger": "2.0",
   "info": {
-    "title": "ERSN Roads API",
+    "title": "The Grid — Roads API",
     "description": "Real-time road conditions and traffic information for the Ebbetts Pass region",
     "version": "1.0",
     "contact": {
-      "name": "ERSN Info Server",
-      "url": "https://info.ersn.net"
+      "name": "The Grid (S.I.E.R.R.A)",
+      "url": "https://data.sierragridteam.org"
     }
   },
   "tags": [
@@ -641,7 +641,7 @@
     }
   },
   "externalDocs": {
-    "description": "More about ERSN Info Server",
-    "url": "https://github.com/dpup/info.ersn.net"
+    "description": "More about The Grid",
+    "url": "https://github.com/dpup/sierra-data"
   }
 }

@@ -1,9 +1,9 @@
 ---
 name: verify
-description: Build, launch, and drive the ERSN info server locally to verify changes end-to-end.
+description: Build, launch, and drive The Grid (S.I.E.R.R.A data service) locally to verify changes end-to-end.
 ---
 
-# Verifying the ERSN Info Server
+# Verifying The Grid (S.I.E.R.R.A data service)
 
 ## Toolchain
 Go and protoc are NOT preinstalled in the sandbox. Install Go (arm64):

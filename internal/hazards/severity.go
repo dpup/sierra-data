@@ -3,7 +3,7 @@ package hazards
 import (
 	"strings"
 
-	api "github.com/dpup/info.ersn.net/server/api/v1"
+	api "github.com/dpup/sierra-data/api/v1"
 )
 
 // The unified severity scale (docs/hazard-aggregation-design.md §4.2). It

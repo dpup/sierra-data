@@ -12,15 +12,15 @@ import (
 
 	"github.com/dpup/prefab/logging"
 
-	api "github.com/dpup/info.ersn.net/server/api/v1"
-	"github.com/dpup/info.ersn.net/server/internal/cache"
-	"github.com/dpup/info.ersn.net/server/internal/clients/calfire"
-	"github.com/dpup/info.ersn.net/server/internal/clients/caloes"
-	"github.com/dpup/info.ersn.net/server/internal/clients/caltrans"
-	"github.com/dpup/info.ersn.net/server/internal/clients/usgs"
-	"github.com/dpup/info.ersn.net/server/internal/clients/wfigs"
-	"github.com/dpup/info.ersn.net/server/internal/config"
-	"github.com/dpup/info.ersn.net/server/internal/services"
+	api "github.com/dpup/sierra-data/api/v1"
+	"github.com/dpup/sierra-data/internal/cache"
+	"github.com/dpup/sierra-data/internal/clients/calfire"
+	"github.com/dpup/sierra-data/internal/clients/caloes"
+	"github.com/dpup/sierra-data/internal/clients/caltrans"
+	"github.com/dpup/sierra-data/internal/clients/usgs"
+	"github.com/dpup/sierra-data/internal/clients/wfigs"
+	"github.com/dpup/sierra-data/internal/config"
+	"github.com/dpup/sierra-data/internal/services"
 )
 
 // RoadsAPI / WeatherAPI are the slices of the existing services the hazard layer

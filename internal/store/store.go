@@ -22,7 +22,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dpup/info.ersn.net/server/internal/lib/geojson"
+	"github.com/dpup/sierra-data/internal/lib/geojson"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	_ "modernc.org/sqlite" // pure-Go driver: CGO_ENABLED=0 cross-compile requirement
 )

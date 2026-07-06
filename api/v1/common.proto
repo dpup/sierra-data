@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package api.v1;
 
-option go_package = "github.com/dpup/info.ersn.net/server/api/v1";
+option go_package = "github.com/dpup/sierra-data/api/v1";
 
 // Geographic coordinates in WGS84 decimal degrees
 message Coordinates {

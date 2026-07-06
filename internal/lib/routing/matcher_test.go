@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dpup/info.ersn.net/server/internal/lib/geo"
+	"github.com/dpup/sierra-data/internal/lib/geo"
 )
 
 // Contract tests for route-matcher library

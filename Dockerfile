@@ -1,4 +1,4 @@
-# Multi-stage build for ERSN Info Server
+# Multi-stage build for The Grid (S.I.E.R.R.A data service)
 
 ###############################################################################
 # Stage 1: Build the Go application

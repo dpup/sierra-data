@@ -34,17 +34,17 @@ import (
 	"github.com/dpup/prefab/logging"
 	"github.com/stretchr/testify/require"
 
-	gridv1 "github.com/dpup/info.ersn.net/server/api/grid/v1"
-	api "github.com/dpup/info.ersn.net/server/api/v1"
-	"github.com/dpup/info.ersn.net/server/internal/clients/calfire"
-	"github.com/dpup/info.ersn.net/server/internal/clients/caloes"
-	"github.com/dpup/info.ersn.net/server/internal/clients/caltrans"
-	"github.com/dpup/info.ersn.net/server/internal/clients/usgs"
-	"github.com/dpup/info.ersn.net/server/internal/clients/wfigs"
-	"github.com/dpup/info.ersn.net/server/internal/config"
-	"github.com/dpup/info.ersn.net/server/internal/gridapi"
-	"github.com/dpup/info.ersn.net/server/internal/hazards"
-	"github.com/dpup/info.ersn.net/server/internal/store"
+	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
+	api "github.com/dpup/sierra-data/api/v1"
+	"github.com/dpup/sierra-data/internal/clients/calfire"
+	"github.com/dpup/sierra-data/internal/clients/caloes"
+	"github.com/dpup/sierra-data/internal/clients/caltrans"
+	"github.com/dpup/sierra-data/internal/clients/usgs"
+	"github.com/dpup/sierra-data/internal/clients/wfigs"
+	"github.com/dpup/sierra-data/internal/config"
+	"github.com/dpup/sierra-data/internal/gridapi"
+	"github.com/dpup/sierra-data/internal/hazards"
+	"github.com/dpup/sierra-data/internal/store"
 )
 
 // rebackConfig has TWO areas so the scoping test can prove the second never

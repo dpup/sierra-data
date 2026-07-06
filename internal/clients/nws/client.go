@@ -31,10 +31,10 @@ type Client struct {
 }
 
 // NewClient creates a new NWS client. userAgent should identify the app and
-// include a contact, e.g. "info.ersn.net (contact@ersn.net)".
+// include a contact, e.g. "data.sierragridteam.org (contact@sierragridteam.org)".
 func NewClient(userAgent string) *Client {
 	if userAgent == "" {
-		userAgent = "info.ersn.net"
+		userAgent = "data.sierragridteam.org"
 	}
 	return &Client{
 		httpClient: &http.Client{Timeout: 30 * time.Second},
@@ -47,7 +47,7 @@ func NewClient(userAgent string) *Client {
 // (for testing).
 func NewClientWithHTTPDoer(userAgent, baseURL string, httpClient HTTPDoer) *Client {
 	if userAgent == "" {
-		userAgent = "info.ersn.net"
+		userAgent = "data.sierragridteam.org"
 	}
 	return &Client{
 		httpClient: httpClient,

@@ -11,25 +11,25 @@ import (
 	"github.com/dpup/prefab"
 	"github.com/dpup/prefab/logging"
 
-	api "github.com/dpup/info.ersn.net/server/api/v1"
-	"github.com/dpup/info.ersn.net/server/internal/cache"
-	"github.com/dpup/info.ersn.net/server/internal/clients/calfire"
-	"github.com/dpup/info.ersn.net/server/internal/clients/caloes"
-	"github.com/dpup/info.ersn.net/server/internal/clients/caltrans"
-	"github.com/dpup/info.ersn.net/server/internal/clients/census"
-	"github.com/dpup/info.ersn.net/server/internal/clients/google"
-	"github.com/dpup/info.ersn.net/server/internal/clients/nws"
-	"github.com/dpup/info.ersn.net/server/internal/clients/usgs"
-	"github.com/dpup/info.ersn.net/server/internal/clients/weather"
-	"github.com/dpup/info.ersn.net/server/internal/clients/wfigs"
-	"github.com/dpup/info.ersn.net/server/internal/config"
-	"github.com/dpup/info.ersn.net/server/internal/gridapi"
-	"github.com/dpup/info.ersn.net/server/internal/hazards"
-	"github.com/dpup/info.ersn.net/server/internal/ingest"
-	"github.com/dpup/info.ersn.net/server/internal/lib/alerts"
-	"github.com/dpup/info.ersn.net/server/internal/places"
-	"github.com/dpup/info.ersn.net/server/internal/services"
-	"github.com/dpup/info.ersn.net/server/internal/store"
+	api "github.com/dpup/sierra-data/api/v1"
+	"github.com/dpup/sierra-data/internal/cache"
+	"github.com/dpup/sierra-data/internal/clients/calfire"
+	"github.com/dpup/sierra-data/internal/clients/caloes"
+	"github.com/dpup/sierra-data/internal/clients/caltrans"
+	"github.com/dpup/sierra-data/internal/clients/census"
+	"github.com/dpup/sierra-data/internal/clients/google"
+	"github.com/dpup/sierra-data/internal/clients/nws"
+	"github.com/dpup/sierra-data/internal/clients/usgs"
+	"github.com/dpup/sierra-data/internal/clients/weather"
+	"github.com/dpup/sierra-data/internal/clients/wfigs"
+	"github.com/dpup/sierra-data/internal/config"
+	"github.com/dpup/sierra-data/internal/gridapi"
+	"github.com/dpup/sierra-data/internal/hazards"
+	"github.com/dpup/sierra-data/internal/ingest"
+	"github.com/dpup/sierra-data/internal/lib/alerts"
+	"github.com/dpup/sierra-data/internal/places"
+	"github.com/dpup/sierra-data/internal/services"
+	"github.com/dpup/sierra-data/internal/store"
 )
 
 func main() {
@@ -37,7 +37,7 @@ func main() {
 	logger := logging.NewProdLogger()
 	ctx := logging.With(context.Background(), logger)
 
-	logging.Info(ctx, "Starting ERSN Info Server")
+	logging.Info(ctx, "Starting The Grid (S.I.E.R.R.A data service)")
 
 	// Load configuration using Prefab's config system
 	appConfig := config.LoadConfig()

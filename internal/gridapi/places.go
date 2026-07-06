@@ -9,9 +9,9 @@ import (
 	"strconv"
 	"strings"
 
-	gridv1 "github.com/dpup/info.ersn.net/server/api/grid/v1"
-	"github.com/dpup/info.ersn.net/server/internal/clients/census"
-	"github.com/dpup/info.ersn.net/server/internal/store"
+	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
+	"github.com/dpup/sierra-data/internal/clients/census"
+	"github.com/dpup/sierra-data/internal/store"
 )
 
 // servePlaces handles GET /v1/places with the kind (enum name or lowercase,

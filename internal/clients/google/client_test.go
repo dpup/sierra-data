@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	api "github.com/dpup/info.ersn.net/server/api/v1"
+	api "github.com/dpup/sierra-data/api/v1"
 )
 
 // MockHTTPDoer is a mock implementation of HTTPDoer

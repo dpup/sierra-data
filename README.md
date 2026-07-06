@@ -1,6 +1,8 @@
-# ERSN Info Server
+# The Grid
 
-A real-time API server providing road, weather, and hazard information for the Ebbett's Pass region, combining data from Google Routes API, Caltrans feeds, OpenWeatherMap, USGS, CAL FIRE, and Cal OES.
+The data service behind **S.I.E.R.R.A** — a real-time, keyless API providing road, weather, and hazard information for the central Sierra (Ebbett's Pass corridor), combining data from Google Routes API, Caltrans feeds, OpenWeatherMap, USGS, CAL FIRE, and Cal OES.
+
+Primary home: **https://data.sierragridteam.org**. `info.ersn.net` remains a supported CNAME alias through the transition, and ersn.net is a consuming site ("powered by S.I.E.R.R.A").
 
 ## Overview
 
@@ -10,7 +12,7 @@ Weather data combines OpenWeatherMap current conditions (fetched per configured 
 
 The architecture is modular and location-agnostic, allowing easy adaptation to other regions or road networks by updating configuration.
 
-**Live API available at: https://info.ersn.net**
+**Live API: https://data.sierragridteam.org** (legacy alias: `https://info.ersn.net`)
 
 ## Features
 
@@ -481,8 +483,8 @@ beside `/v1` on the same store; it will be retired after consumers cut over (see
    curl http://localhost:8181/api/v1/weather
    
    # Or test the live API
-   curl https://info.ersn.net/api/v1/roads
-   curl https://info.ersn.net/api/v1/weather
+   curl https://data.sierragridteam.org/api/v1/roads
+   curl https://data.sierragridteam.org/api/v1/weather
    ```
 
 ### Configuration

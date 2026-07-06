@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/dpup/info.ersn.net/server/internal/clients/caltrans"
+	"github.com/dpup/sierra-data/internal/clients/caltrans"
 )
 
 func main() {

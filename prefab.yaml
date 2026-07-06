@@ -151,7 +151,7 @@ weather:
   # Calaveras & Tuolumne service area. NWS requires a descriptive User-Agent
   # (no API key). See https://www.weather.gov/documentation/services-web-api
   nws:
-    userAgent: "info.ersn.net (https://info.ersn.net)"
+    userAgent: "The Grid / S.I.E.R.R.A (https://data.sierragridteam.org)"
     zones:
       - CAZ064   # Calaveras foothills
       - CAZ065   # Calaveras mountains

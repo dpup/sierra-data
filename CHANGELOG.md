@@ -1,7 +1,8 @@
 # Changelog
 
-All notable **API-facing** changes to the ERSN Info Server. This is the document
-to read before updating a consuming site (e.g. ersn.net, sierragridteam.org).
+All notable **API-facing** changes to The Grid (the S.I.E.R.R.A data service at
+`data.sierragridteam.org`). This is the document to read before updating a
+consuming site (e.g. ersn.net, sierragridteam.org).
 
 There are no formal releases — the service deploys from `main`. Each entry below
 is timestamped; add a new dated section at the top when the API surface changes.
@@ -11,6 +12,22 @@ camelCase). As of 2026-07-05 there is a second, first-principles surface at
 same binary over the same store (see the 2026-07-05 entry and its migration plan).
 
 ## 2026-07-06
+
+### Changed — rebrand to **The Grid** + primary domain moves to `data.sierragridteam.org`
+
+The service is now **The Grid**, the S.I.E.R.R.A data service. Its primary home is
+**`https://data.sierragridteam.org`**; `info.ersn.net` remains a supported CNAME
+alias through the transition, and ersn.net is a consuming site ("powered by
+S.I.E.R.R.A"). **No endpoint paths, field names, or response shapes change** —
+consumers on either hostname keep working. Point new integrations at
+`data.sierragridteam.org`.
+
+Cosmetic metadata updated to match: the OpenAPI docs served at
+`/api/docs/{roads,weather}.swagger.json` now carry the title "The Grid — Roads/Weather
+API" and contact `data.sierragridteam.org`, and the NWS `User-Agent` identifies
+`data.sierragridteam.org`. The Go module path and GitHub repo were **renamed**
+`github.com/dpup/info.ersn.net/server` → **`github.com/dpup/sierra-data`**
+(internal identity only — no effect on the HTTP API or its consumers).
 
 ### Added — road geometry: `Road.polyline`, and `road_segment` follows the highway
 

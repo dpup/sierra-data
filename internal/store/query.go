@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	gridv1 "github.com/dpup/info.ersn.net/server/api/grid/v1"
+	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
