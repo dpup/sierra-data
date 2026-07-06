@@ -32,7 +32,7 @@ COPY . .
 
 # Cross-compile a static binary for the target platform.
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -ldflags="-s -w" -o /ersn-server ./cmd/server
+    go build -ldflags="-s -w" -o /sierra-server ./cmd/server
 
 ###############################################################################
 # Stage 2: Final lightweight runtime image
@@ -46,10 +46,10 @@ RUN apk add --no-cache ca-certificates tzdata && \
     apk upgrade
 
 # Create a non-root user to run the application
-RUN addgroup -S ersn && adduser -S ersn -G ersn
+RUN addgroup -S sierra && adduser -S sierra -G sierra
 
 # Copy the binary from the build stage
-COPY --from=go-builder /ersn-server /app/ersn-server
+COPY --from=go-builder /sierra-server /app/sierra-server
 
 # Copy the configuration file
 COPY --from=go-builder /app/prefab.yaml /app/prefab.yaml
@@ -61,18 +61,18 @@ COPY --from=go-builder /app/api/v1/*.swagger.json /app/api/v1/
 # and source health survive container replacement; prod mounts a persistent
 # filesystem (EFS) here. The store defaults to the TRUNCATE journal mode, which
 # works over NFS/EFS (WAL's -shm is memory-mapped and does not) — override with
-# PF__GRID__JOURNALMODE if the mount is a real local disk. Owned by ersn so the
+# PF__GRID__JOURNALMODE if the mount is a real local disk. Owned by sierra so the
 # db + rollback journal can be created (the runtime mount must also be writable
 # by this user — see docs when provisioning the volume).
-RUN mkdir -p /data && chown ersn:ersn /data
+RUN mkdir -p /data && chown sierra:sierra /data
 VOLUME ["/data"]
 ENV PF__GRID__DBPATH=/data/grid.db
 
 # Set ownership to the non-root user
-RUN chown -R ersn:ersn /app
+RUN chown -R sierra:sierra /app
 
 # Switch to the non-root user
-USER ersn
+USER sierra
 
 # Expose the application port
 EXPOSE 8080
@@ -89,4 +89,4 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD wget --no-verbose --tries=1 --spider http://localhost:8080/ || exit 1
 
 # Run the application
-ENTRYPOINT ["/app/ersn-server"]
+ENTRYPOINT ["/app/sierra-server"]

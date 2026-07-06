@@ -1,4 +1,4 @@
-# ERSN API Server - Current Architecture Flow
+# The Grid (S.I.E.R.R.A) API Server - Current Architecture Flow
 
 > **Note (2026-07-05):** The diagram below describes the original `/api/v1`
 > roads/weather/hazards request path. It is still accurate for those services,

@@ -26,7 +26,7 @@ TEST_ALERT_ENHANCER_BINARY=$(BUILD_DIR)/test-alert-enhancer
 TEST_ROUTE_MATCHER_BINARY=$(BUILD_DIR)/test-route-matcher
 
 # Docker parameters
-DOCKER_IMAGE_NAME=info-ersn
+DOCKER_IMAGE_NAME=sierra-data
 DOCKER_TAG?=latest
 DOCKER_REGISTRY?=
 
@@ -286,7 +286,7 @@ docker-run: docker-build
 		-e PF__GOOGLE_ROUTES__API_KEY=$(PF__GOOGLE_ROUTES__API_KEY) \
 		-e PF__OPENWEATHER__API_KEY=$(PF__OPENWEATHER__API_KEY) \
 		-e PF__OPENAI__API_KEY=$(PF__OPENAI__API_KEY) \
-		--name ersn-server \
+		--name sierra-server \
 		$(DOCKER_IMAGE_NAME):$(DOCKER_TAG)
 
 # Run Docker container in development mode with config mounted
@@ -297,7 +297,7 @@ docker-run-dev: docker-build
 		-e PF__OPENWEATHER__API_KEY=$(PF__OPENWEATHER__API_KEY) \
 		-e PF__OPENAI__API_KEY=$(PF__OPENAI__API_KEY) \
 		-v $(PWD)/prefab.yaml:/app/prefab.yaml:ro \
-		--name ersn-server-dev \
+		--name sierra-server-dev \
 		$(DOCKER_IMAGE_NAME):$(DOCKER_TAG)
 
 # Login to ECR and push Docker image
@@ -358,8 +358,8 @@ ecs-deploy: ecr-push
 # Clean up Docker artifacts
 docker-clean:
 	@echo "Cleaning up Docker artifacts..."
-	-docker stop ersn-server ersn-server-dev 2>/dev/null || true
-	-docker rm ersn-server ersn-server-dev 2>/dev/null || true
+	-docker stop sierra-server sierra-server-dev 2>/dev/null || true
+	-docker rm sierra-server sierra-server-dev 2>/dev/null || true
 	-docker rmi $(DOCKER_IMAGE_NAME):$(DOCKER_TAG) 2>/dev/null || true
 	-docker system prune -f
 	@echo "✅ Docker artifacts cleaned"

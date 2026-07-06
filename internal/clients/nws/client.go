@@ -1,6 +1,6 @@
 // Package nws provides a client for the National Weather Service (api.weather.gov)
 // public alerts API. It is the authoritative source for zone-based watches and
-// warnings (including fire-weather products) for the ERSN service area.
+// warnings (including fire-weather products) for the S.I.E.R.R.A service area.
 //
 // The NWS API requires no API key but does require a descriptive User-Agent
 // identifying the application (https://www.weather.gov/documentation/services-web-api).

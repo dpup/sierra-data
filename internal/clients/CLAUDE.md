@@ -50,4 +50,4 @@ even in a minimal container.
 - `ClassifyFireWeather` derives Normal → Elevated → Red Flag purely from active
   products (Fire Weather Watch → elevated, Red Flag Warning → red-flag). It never
   invents a Red Flag that NWS hasn't issued — see issue #5.
-- Zone codes used by ERSN: CAZ064/065 (Calaveras), CAZ258/259 (Tuolumne).
+- Zone codes for the service area: CAZ064/065 (Calaveras), CAZ258/259 (Tuolumne).

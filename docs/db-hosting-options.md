@@ -17,7 +17,7 @@ and stream continuously to S3 with Litestream (https://litestream.io).
   Lose the task/AZ/everything → next task restores the full DB (history and all)
   from S3 on boot. `restore -timestamp T` recovers to a past moment (corruption out).
 - **Clean deploy shape** — Fargate + default 20 GB ephemeral storage; run the app
-  *through* Litestream (`litestream replicate -exec "/app/ersn-server"`) so it's one
+  *through* Litestream (`litestream replicate -exec "/app/sierra-server"`) so it's one
   container (restore-then-supervise), no sidecar ordering. Needs an S3 bucket + a
   task role with `s3:Put/GetObject`. Cost: pennies.
 - **Caveat** — single-writer only (design already is): two tasks must never
@@ -29,7 +29,7 @@ Fresh task = empty local `/data`. Entrypoint runs restore BEFORE the app:
 #!/bin/sh
 set -e
 litestream restore -if-db-not-exists -if-replica-exists /data/grid.db
-exec litestream replicate -exec "/app/ersn-server"
+exec litestream replicate -exec "/app/sierra-server"
 ```
 ```yaml
 # /etc/litestream.yml
