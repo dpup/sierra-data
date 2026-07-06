@@ -293,6 +293,7 @@ export function initPlacesPage() {
       zoom: DEFAULT_ZOOM,
     });
     map.addControl(new maplibregl.NavigationControl(), 'top-right');
+    map.on('load', () => map.resize()); // fill the container once the style is ready
     mapReady = new Promise((resolve) => map.on('load', resolve));
     map.on('click', (e) => {
       const lat = Number(e.lngLat.lat.toFixed(5));
@@ -528,6 +529,17 @@ export function initPlacesPage() {
     try {
       const data = await get('/v1/places/resolve', params);
       places = Array.isArray(data.places) ? data.places : [];
+      // Drop a marker at the resolved point. For an address the geocoded
+      // lat/lng come back in the query block (the client never had them), so
+      // this is what puts a point on the map for the address path — and it
+      // reflects the coords in the inputs + URL for a shareable result.
+      const q = data && data.query;
+      if (q && Number.isFinite(q.lat) && Number.isFinite(q.lng)) {
+        setMarker(q.lng, q.lat);
+        if (map) map.flyTo({ center: [q.lng, q.lat], duration: 0 });
+        latInput.value = String(q.lat);
+        lngInput.value = String(q.lng);
+      }
     } catch (err) {
       resultsEl.textContent = '';
       resultsEl.append(errorBlock(err));

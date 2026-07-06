@@ -314,7 +314,10 @@ function renderEventMap(container, decoded, bounds, severity) {
       zoom: 9,
     });
     map.addControl(new lib.NavigationControl(), 'top-right');
+    // Insurance against a container that gains its final size just after init:
+    // resize once the style is ready so the canvas fills the 24rem box.
     map.on('load', () => {
+      map.resize();
       map.addSource('event-geom', {
         type: 'geojson',
         data: { type: 'Feature', geometry: decoded, properties: {} },
@@ -528,23 +531,30 @@ export function initEventPage() {
         );
         geomSec.body.append(gdl);
 
+        // The map is created AFTER the panel is attached to the document below,
+        // so MapLibre measures the container at its real laid-out size (24rem ×
+        // full width) rather than 0×0 on a detached node (which renders a tiny
+        // square). renderMap holds that deferred work.
+        var renderMap = null;
         if (decoded) {
           const mapBox = el('div', 'map-box ed-map');
           geomSec.body.append(mapBox);
-          const ok = renderEventMap(mapBox, decoded, bounds, ev.severity || 'INFO');
-          if (!ok) {
-            mapBox.remove();
-            geomSec.body.append(
-              el(
-                'p',
-                'muted small',
-                'Map unavailable (MapLibre failed to start in this browser) — bbox and centroid above are the geometry.'
-              )
-            );
-          }
+          renderMap = () => {
+            if (!renderEventMap(mapBox, decoded, bounds, ev.severity || 'INFO')) {
+              mapBox.remove();
+              geomSec.body.append(
+                el(
+                  'p',
+                  'muted small',
+                  'Map unavailable (MapLibre failed to start in this browser) — bbox and centroid above are the geometry.'
+                )
+              );
+            }
+          };
         }
       }
       sectionsEl.append(geomSec.panel);
+      if (typeof renderMap === 'function') renderMap();
 
       // Provenance.
       const prov = ev.provenance || {};
@@ -599,19 +609,15 @@ export function initEventPage() {
           );
         }
 
-        // Model I/O — the transparency payload: the exact prompt sent and the
-        // structured response returned (pretty-printed).
-        if (enh.request) {
-          sec.body.append(el('h3', '', 'Sent to model'));
-          sec.body.append(el('pre', 'code', enh.request));
-        }
+        // The structured model response, pretty-printed. The prompt is
+        // deliberately not shown here — the original text above plus the
+        // structured output is the useful before/after.
         if (enh.response) {
           sec.body.append(el('h3', '', 'Model response'));
           sec.body.append(el('pre', 'code', prettyJSON(enh.response)));
-        }
-        if (!enh.request && !enh.response) {
+        } else {
           sec.body.append(
-            el('p', 'muted small', '(model input/output not captured for this event)')
+            el('p', 'muted small', '(model response not captured for this event)')
           );
         }
         sectionsEl.append(sec.panel);

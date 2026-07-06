@@ -828,6 +828,7 @@ function init() {
   renderUnlocated();
 
   map.on('load', async () => {
+    map.resize(); // fill the container once the style is ready
     await loadPlaces();
     updateURL(); // canonicalize: resolved place (+ layers if non-default)
     await reloadAll();
