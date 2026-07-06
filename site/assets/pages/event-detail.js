@@ -241,6 +241,15 @@ function section(title, rawObj) {
   return { panel, body };
 }
 
+/** Pretty-print a JSON string if it parses; otherwise return it unchanged. */
+function prettyJSON(s) {
+  try {
+    return JSON.stringify(JSON.parse(s), null, 2);
+  } catch {
+    return s;
+  }
+}
+
 /** <details> raw toggle with pretty-printed protojson. */
 function rawToggle(obj) {
   const details = el('details', 'raw-toggle');
@@ -551,10 +560,12 @@ export function initEventPage() {
       provSec.body.append(pdl);
       sectionsEl.append(provSec.panel);
 
-      // AI enhancement — badge + verbatim original, only when present.
+      // AI enhancement — badge, the verbatim original, and the model I/O
+      // (what was sent / what came back), only when present. No whole-envelope
+      // raw dump: the request and response are rendered explicitly below.
       if (ev.enhancement) {
         const enh = ev.enhancement;
-        const sec = section('AI enhancement', enh);
+        const sec = section('AI enhancement', undefined);
         const badge = el('div', 'ai-badge');
         badge.append(
           el('span', 'ai-badge-tag', 'AI-summarized'),
@@ -571,14 +582,30 @@ export function initEventPage() {
           when.append('enhanced ', timeCell(enh.enhanced_at));
           sec.body.append(when);
         }
+
+        // Verbatim original (spec §3.1) — always alongside the AI text.
         sec.body.append(el('h3', '', 'Original text'));
         if (ev.description) {
-          // Verbatim, always alongside the enhanced fields (API policy §3.1:
-          // description preserves the original; never render AI text alone).
           sec.body.append(el('pre', 'original-text', ev.description));
         } else {
           sec.body.append(
             el('p', 'muted small', '(no original description text on this revision)')
+          );
+        }
+
+        // Model I/O — the transparency payload: the exact prompt sent and the
+        // structured response returned (pretty-printed).
+        if (enh.request) {
+          sec.body.append(el('h3', '', 'Sent to model'));
+          sec.body.append(el('pre', 'code', enh.request));
+        }
+        if (enh.response) {
+          sec.body.append(el('h3', '', 'Model response'));
+          sec.body.append(el('pre', 'code', prettyJSON(enh.response)));
+        }
+        if (!enh.request && !enh.response) {
+          sec.body.append(
+            el('p', 'muted small', '(model input/output not captured for this event)')
           );
         }
         sectionsEl.append(sec.panel);

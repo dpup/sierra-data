@@ -389,6 +389,18 @@
         "originalText": {
           "type": "string",
           "description": "Verbatim upstream text, before any AI enhancement (CHP radio codes /\nabbreviations). Preserved so a client can show the original alongside the\nenhanced text — the \"translate, never assert\" transparency contract\n(spec §3.1). Always set; `description` may be an AI narrative."
+        },
+        "aiRequest": {
+          "type": "string",
+          "description": "The AI enhancement I/O (transparency): `ai_request` is the incident-specific\nuser prompt sent to the model; `ai_response` is the raw structured JSON it\nreturned. Empty when the incident was not AI-enhanced."
+        },
+        "aiResponse": {
+          "type": "string"
+        },
+        "aiEnhancedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the enhancement was produced (the model run, not this fetch — cached\nenhancements keep their original time). Unset when not AI-enhanced."
         }
       },
       "description": "Incident is a region-wide CHP/Caltrans dispatch incident, surfaced\nindependently of any monitored road."

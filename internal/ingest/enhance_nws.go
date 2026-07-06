@@ -13,12 +13,20 @@ import (
 	"github.com/dpup/info.ersn.net/server/internal/config"
 )
 
+// NWSEnhancement is the model output plus the I/O captured for transparency
+// (what was sent / what came back), mirroring the incident enhancer.
+type NWSEnhancement struct {
+	Summary  string
+	Request  string // the incident-specific user prompt sent to the model
+	Response string // the raw structured JSON returned
+}
+
 // NWSEnhancer condenses an NWS alert into a short plain-language summary,
 // localized against the supplied place names (spec §3.1: the place directory
 // is the one permitted external grounding). Implementations must be safe for
 // concurrent use; a nil NWSEnhancer disables enhancement entirely.
 type NWSEnhancer interface {
-	Enhance(ctx context.Context, headline, description string, placeNames []string) (summary string, err error)
+	Enhance(ctx context.Context, headline, description string, placeNames []string) (NWSEnhancement, error)
 }
 
 // nwsSystemPrompt enforces the spec §3.1 enhancement policy: the model
@@ -73,7 +81,7 @@ func NewNWSEnhancer(cfg config.OpenAIClient) NWSEnhancer {
 }
 
 // Enhance implements NWSEnhancer.
-func (e *openaiNWSEnhancer) Enhance(ctx context.Context, headline, description string, placeNames []string) (string, error) {
+func (e *openaiNWSEnhancer) Enhance(ctx context.Context, headline, description string, placeNames []string) (NWSEnhancement, error) {
 	if e.timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, e.timeout)
@@ -89,8 +97,9 @@ func (e *openaiNWSEnhancer) Enhance(ctx context.Context, headline, description s
 		"place_names": placeNames,
 	})
 	if err != nil {
-		return "", fmt.Errorf("nws enhancer: encoding input: %w", err)
+		return NWSEnhancement{}, fmt.Errorf("nws enhancer: encoding input: %w", err)
 	}
+	userPrompt := "Summarize this NWS alert:\n" + string(input)
 
 	// gpt-5-family compatibility mirrors internal/lib/alerts/enhancer.go: no
 	// temperature, MaxCompletionTokens (budget also covers hidden reasoning
@@ -100,7 +109,7 @@ func (e *openaiNWSEnhancer) Enhance(ctx context.Context, headline, description s
 		Model: e.model,
 		Messages: []openai.ChatCompletionMessage{
 			{Role: openai.ChatMessageRoleSystem, Content: nwsSystemPrompt},
-			{Role: openai.ChatMessageRoleUser, Content: "Summarize this NWS alert:\n" + string(input)},
+			{Role: openai.ChatMessageRoleUser, Content: userPrompt},
 		},
 		ResponseFormat: &openai.ChatCompletionResponseFormat{
 			Type:       openai.ChatCompletionResponseFormatTypeJSONSchema,
@@ -114,22 +123,23 @@ func (e *openaiNWSEnhancer) Enhance(ctx context.Context, headline, description s
 
 	resp, err := e.client.CreateChatCompletion(ctx, req)
 	if err != nil {
-		return "", fmt.Errorf("nws enhancer: %w", err)
+		return NWSEnhancement{}, fmt.Errorf("nws enhancer: %w", err)
 	}
 	if len(resp.Choices) == 0 {
-		return "", errors.New("nws enhancer: no choices in response")
+		return NWSEnhancement{}, errors.New("nws enhancer: no choices in response")
 	}
 
+	rawResponse := resp.Choices[0].Message.Content
 	var out struct {
 		Summary string `json:"summary"`
 	}
-	if err := json.Unmarshal([]byte(resp.Choices[0].Message.Content), &out); err != nil {
-		return "", fmt.Errorf("nws enhancer: parsing response: %w", err)
+	if err := json.Unmarshal([]byte(rawResponse), &out); err != nil {
+		return NWSEnhancement{}, fmt.Errorf("nws enhancer: parsing response: %w", err)
 	}
 	if strings.TrimSpace(out.Summary) == "" {
-		return "", errors.New("nws enhancer: empty summary in response")
+		return NWSEnhancement{}, errors.New("nws enhancer: empty summary in response")
 	}
-	return out.Summary, nil
+	return NWSEnhancement{Summary: out.Summary, Request: userPrompt, Response: rawResponse}, nil
 }
 
 // isReasoningModel reports whether the model accepts reasoning_effort (gpt-5

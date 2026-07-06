@@ -58,12 +58,16 @@ func TestNWSEnhance(t *testing.T) {
 	}
 	e := newFakeNWSOpenAI("gpt-5-mini", rt)
 
-	summary, err := e.Enhance(testCtx(),
+	enh, err := e.Enhance(testCtx(),
 		"Red Flag Warning until 8 PM PDT",
 		"* WHAT...Gusty winds and low humidity.",
 		[]string{"Calaveras County", "Arnold, CA"})
 	require.NoError(t, err)
-	assert.Equal(t, "Gusty winds and low humidity near Arnold through Friday evening.", summary)
+	assert.Equal(t, "Gusty winds and low humidity near Arnold through Friday evening.", enh.Summary)
+	// I/O captured for transparency: the user prompt sent and the raw response.
+	assert.Contains(t, enh.Request, "Summarize this NWS alert:")
+	assert.Contains(t, enh.Request, "Red Flag Warning until 8 PM PDT")
+	assert.JSONEq(t, `{"summary":"Gusty winds and low humidity near Arnold through Friday evening."}`, enh.Response)
 
 	// Request assembly: model, low reasoning effort (gpt-5 family), the
 	// structured-output schema, the policy prompt, and the grounding inputs.

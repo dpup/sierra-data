@@ -881,10 +881,16 @@ func (x *Provenance) GetFetchedAt() *timestamppb.Timestamp {
 // AI-enhancement provenance so clients can badge AI-summarized text
 // (spec §3.1: translate, never assert; originals preserved in description).
 type Enhancement struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Model         string                 `protobuf:"bytes,1,opt,name=model,proto3" json:"model,omitempty"` // "gpt-4o-mini", "claude-haiku-4-5", ...
-	EnhancedAt    *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=enhanced_at,json=enhancedAt,proto3" json:"enhanced_at,omitempty"`
-	Fields        []string               `protobuf:"bytes,3,rep,name=fields,proto3" json:"fields,omitempty"` // which Event fields were generated
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	Model      string                 `protobuf:"bytes,1,opt,name=model,proto3" json:"model,omitempty"` // "gpt-4o-mini", "claude-haiku-4-5", ...
+	EnhancedAt *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=enhanced_at,json=enhancedAt,proto3" json:"enhanced_at,omitempty"`
+	Fields     []string               `protobuf:"bytes,3,rep,name=fields,proto3" json:"fields,omitempty"` // which Event fields were generated
+	// Transparency: the exact model input and output, so a client can show what
+	// was sent and what came back. `request` is the incident-specific user prompt
+	// (the static system prompt is not included); `response` is the raw structured
+	// JSON the model returned. Excluded from the event content hash.
+	Request       string `protobuf:"bytes,4,opt,name=request,proto3" json:"request,omitempty"`
+	Response      string `protobuf:"bytes,5,opt,name=response,proto3" json:"response,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -938,6 +944,20 @@ func (x *Enhancement) GetFields() []string {
 		return x.Fields
 	}
 	return nil
+}
+
+func (x *Enhancement) GetRequest() string {
+	if x != nil {
+		return x.Request
+	}
+	return ""
+}
+
+func (x *Enhancement) GetResponse() string {
+	if x != nil {
+		return x.Response
+	}
+	return ""
 }
 
 type Source struct {
@@ -1897,12 +1917,14 @@ const file_grid_proto_rawDesc = "" +
 	"\n" +
 	"source_url\x18\x04 \x01(\tR\tsourceUrl\x129\n" +
 	"\n" +
-	"fetched_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\tfetchedAt\"x\n" +
+	"fetched_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\tfetchedAt\"\xae\x01\n" +
 	"\vEnhancement\x12\x14\n" +
 	"\x05model\x18\x01 \x01(\tR\x05model\x12;\n" +
 	"\venhanced_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"enhancedAt\x12\x16\n" +
-	"\x06fields\x18\x03 \x03(\tR\x06fields\"\xdd\x03\n" +
+	"\x06fields\x18\x03 \x03(\tR\x06fields\x12\x18\n" +
+	"\arequest\x18\x04 \x01(\tR\arequest\x12\x1a\n" +
+	"\bresponse\x18\x05 \x01(\tR\bresponse\"\xdd\x03\n" +
 	"\x06Source\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12 \n" +

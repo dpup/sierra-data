@@ -43,6 +43,11 @@ type EnhancedAlert struct {
 	StructuredDescription StructuredDescription `json:"structured_description"`
 	CondensedSummary      string                `json:"condensed_summary"`
 	ProcessedAt           time.Time             `json:"processed_at"`
+	// Request/Response capture the model I/O for transparency (shown by clients).
+	// Request is the incident-specific user prompt; Response is the raw
+	// structured JSON returned. Cached alongside the rest so cache hits keep them.
+	Request  string `json:"request,omitempty"`
+	Response string `json:"response,omitempty"`
 }
 
 // AlertEnhancer interface defines AI-powered alert description enhancement

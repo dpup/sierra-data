@@ -127,6 +127,15 @@ message Incident {
   // enhanced text — the "translate, never assert" transparency contract
   // (spec §3.1). Always set; `description` may be an AI narrative.
   string original_text = 15;
+
+  // The AI enhancement I/O (transparency): `ai_request` is the incident-specific
+  // user prompt sent to the model; `ai_response` is the raw structured JSON it
+  // returned. Empty when the incident was not AI-enhanced.
+  string ai_request = 16;
+  string ai_response = 17;
+  // When the enhancement was produced (the model run, not this fetch — cached
+  // enhancements keep their original time). Unset when not AI-enhanced.
+  google.protobuf.Timestamp ai_enhanced_at = 18;
 }
 
 message ProcessingMetrics {

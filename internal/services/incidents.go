@@ -270,6 +270,14 @@ func (s *RoadsService) enhanceIncident(ctx context.Context, inc *api.Incident, i
 	if details := strings.TrimSpace(enhanced.StructuredDescription.Details); details != "" {
 		inc.Description = details
 	}
+	// Model I/O + timing for transparency/provenance (clients render "what was
+	// sent / what came back" and when). ProcessedAt is the original enhancement
+	// time and survives the 24h content-hash cache, so cache hits keep it.
+	inc.AiRequest = enhanced.Request
+	inc.AiResponse = enhanced.Response
+	if !enhanced.ProcessedAt.IsZero() {
+		inc.AiEnhancedAt = timestamppb.New(enhanced.ProcessedAt)
+	}
 	inc.CondensedSummary = enhanced.CondensedSummary
 	inc.Impact = mapAlertImpact(enhanced.StructuredDescription.Impact)
 	if sev := severityFromImpact(enhanced.StructuredDescription.Impact); sev != api.AlertSeverity_ALERT_SEVERITY_UNSPECIFIED {

@@ -43,13 +43,13 @@ type fakeNWSEnhancer struct {
 	err        error
 }
 
-func (f *fakeNWSEnhancer) Enhance(ctx context.Context, headline, description string, placeNames []string) (string, error) {
+func (f *fakeNWSEnhancer) Enhance(ctx context.Context, headline, description string, placeNames []string) (NWSEnhancement, error) {
 	f.calls++
 	f.lastPlaces = placeNames
 	if f.err != nil {
-		return "", f.err
+		return NWSEnhancement{}, f.err
 	}
-	return f.summary, nil
+	return NWSEnhancement{Summary: f.summary, Request: "req:" + headline, Response: `{"summary":"` + f.summary + `"}`}, nil
 }
 
 func newSchedStore(t *testing.T) *store.Store {
@@ -329,6 +329,9 @@ func TestTickEnhancementBudget(t *testing.T) {
 	require.NotNil(t, enhanced.GetEnhancement())
 	assert.Equal(t, "gpt-5-mini", enhanced.GetEnhancement().GetModel())
 	assert.Equal(t, []string{"summary"}, enhanced.GetEnhancement().GetFields())
+	// Model I/O captured for transparency.
+	assert.NotEmpty(t, enhanced.GetEnhancement().GetRequest())
+	assert.NotEmpty(t, enhanced.GetEnhancement().GetResponse())
 
 	raw, err := st.GetEvent(ctx, "wx:b")
 	require.NoError(t, err)

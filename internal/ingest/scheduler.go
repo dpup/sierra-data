@@ -250,17 +250,19 @@ func (s *Scheduler) maybeEnhance(ctx context.Context, ev *gridv1.Event, budget *
 		return
 	}
 	*budget-- // attempts spend budget, so failures can't loop the API
-	summary, err := s.enhancer.Enhance(ctx, ev.GetHeadline(), ev.GetDescription(), s.placeNames(ctx, ev))
+	enh, err := s.enhancer.Enhance(ctx, ev.GetHeadline(), ev.GetDescription(), s.placeNames(ctx, ev))
 	if err != nil {
 		logging.Warnw(ctx, "Ingest tick: enhancement failed; serving raw alert",
 			"event", ev.GetId(), "error", err)
 		return
 	}
-	ev.Summary = summary
+	ev.Summary = enh.Summary
 	ev.Enhancement = &gridv1.Enhancement{
 		Model:      s.enhancerModel,
 		EnhancedAt: timestamppb.New(s.now()),
 		Fields:     []string{"summary"},
+		Request:    enh.Request,
+		Response:   enh.Response,
 	}
 }
 

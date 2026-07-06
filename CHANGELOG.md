@@ -12,6 +12,18 @@ same binary over the same store (see the 2026-07-05 entry and its migration plan
 
 ## 2026-07-06
 
+### Added — AI enhancement transparency: model I/O on `Event.enhancement`
+
+`Event.enhancement` now carries `request` (the incident-specific prompt sent to
+the model), `response` (the raw structured JSON returned), and a populated
+`enhanced_at` (when the model ran — was previously unset on road incidents). So a
+client can show what was sent and what came back, not just that enhancement
+happened. Applies to both AI-enhanced layers (road incidents, weather alerts).
+The data is **persisted** with the event (stored per revision, survives restart,
+returned by `/v1/events/{id}` and `/history`) but **excluded from the content
+hash**, so capturing it never churns revisions. On `/api/v1/incidents`, the same
+I/O is exposed additively as `ai_request` / `ai_response` / `ai_enhanced_at`.
+
 ### Added — `/api/v1/incidents[].original_text` (verbatim pre-AI text)
 
 Each incident now carries `original_text`: the raw upstream feed text (CHP CAD

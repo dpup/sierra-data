@@ -116,6 +116,12 @@ message Enhancement {
   string model = 1;                          // "gpt-4o-mini", "claude-haiku-4-5", ...
   google.protobuf.Timestamp enhanced_at = 2;
   repeated string fields = 3;                // which Event fields were generated
+  // Transparency: the exact model input and output, so a client can show what
+  // was sent and what came back. `request` is the incident-specific user prompt
+  // (the static system prompt is not included); `response` is the raw structured
+  // JSON the model returned. Excluded from the event content hash.
+  string request = 4;
+  string response = 5;
 }
 
 message Source {

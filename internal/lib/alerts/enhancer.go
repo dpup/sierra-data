@@ -122,13 +122,17 @@ For the condensed summary, follow the examples provided - do NOT include locatio
 		}
 	}
 
-	// Create enhanced alert
+	// Create enhanced alert. Request/Response record the exact model I/O (the
+	// incident-specific user prompt and the raw structured response) so clients
+	// can show what was sent and what came back.
 	enhanced := EnhancedAlert{
 		ID:                    raw.ID,
 		OriginalDescription:   raw.Description,
 		StructuredDescription: structured,
 		CondensedSummary:      structured.CondensedSummary,
 		ProcessedAt:           time.Now(),
+		Request:               userPrompt,
+		Response:              jsonResponse,
 	}
 
 	return enhanced, nil

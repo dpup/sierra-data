@@ -708,7 +708,15 @@ type Incident struct {
 	// abbreviations). Preserved so a client can show the original alongside the
 	// enhanced text — the "translate, never assert" transparency contract
 	// (spec §3.1). Always set; `description` may be an AI narrative.
-	OriginalText  string `protobuf:"bytes,15,opt,name=original_text,json=originalText,proto3" json:"original_text,omitempty"`
+	OriginalText string `protobuf:"bytes,15,opt,name=original_text,json=originalText,proto3" json:"original_text,omitempty"`
+	// The AI enhancement I/O (transparency): `ai_request` is the incident-specific
+	// user prompt sent to the model; `ai_response` is the raw structured JSON it
+	// returned. Empty when the incident was not AI-enhanced.
+	AiRequest  string `protobuf:"bytes,16,opt,name=ai_request,json=aiRequest,proto3" json:"ai_request,omitempty"`
+	AiResponse string `protobuf:"bytes,17,opt,name=ai_response,json=aiResponse,proto3" json:"ai_response,omitempty"`
+	// When the enhancement was produced (the model run, not this fetch — cached
+	// enhancements keep their original time). Unset when not AI-enhanced.
+	AiEnhancedAt  *timestamppb.Timestamp `protobuf:"bytes,18,opt,name=ai_enhanced_at,json=aiEnhancedAt,proto3" json:"ai_enhanced_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -846,6 +854,27 @@ func (x *Incident) GetOriginalText() string {
 		return x.OriginalText
 	}
 	return ""
+}
+
+func (x *Incident) GetAiRequest() string {
+	if x != nil {
+		return x.AiRequest
+	}
+	return ""
+}
+
+func (x *Incident) GetAiResponse() string {
+	if x != nil {
+		return x.AiResponse
+	}
+	return ""
+}
+
+func (x *Incident) GetAiEnhancedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.AiEnhancedAt
+	}
+	return nil
 }
 
 type ProcessingMetrics struct {
@@ -1410,7 +1439,7 @@ const file_roads_proto_rawDesc = "" +
 	"\x15ListIncidentsResponse\x12.\n" +
 	"\tincidents\x18\x01 \x03(\v2\x10.api.v1.IncidentR\tincidents\x12=\n" +
 	"\flast_updated\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\vlastUpdated\x12\x12\n" +
-	"\x04area\x18\x03 \x01(\tR\x04area\"\xca\x05\n" +
+	"\x04area\x18\x03 \x01(\tR\x04area\"\xcc\x06\n" +
 	"\bIncident\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12%\n" +
 	"\x04type\x18\x02 \x01(\x0e2\x11.api.v1.AlertTypeR\x04type\x121\n" +
@@ -1428,7 +1457,12 @@ const file_roads_proto_rawDesc = "" +
 	"\x11condensed_summary\x18\f \x01(\tR\x10condensedSummary\x12+\n" +
 	"\x06impact\x18\r \x01(\x0e2\x13.api.v1.AlertImpactR\x06impact\x12:\n" +
 	"\bmetadata\x18\x0e \x03(\v2\x1e.api.v1.Incident.MetadataEntryR\bmetadata\x12#\n" +
-	"\roriginal_text\x18\x0f \x01(\tR\foriginalText\x1a;\n" +
+	"\roriginal_text\x18\x0f \x01(\tR\foriginalText\x12\x1d\n" +
+	"\n" +
+	"ai_request\x18\x10 \x01(\tR\taiRequest\x12\x1f\n" +
+	"\vai_response\x18\x11 \x01(\tR\n" +
+	"aiResponse\x12@\n" +
+	"\x0eai_enhanced_at\x18\x12 \x01(\v2\x1a.google.protobuf.TimestampR\faiEnhancedAt\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xf7\x01\n" +
@@ -1598,37 +1632,38 @@ var file_roads_proto_depIdxs = []int32{
 	21, // 11: api.v1.Incident.last_updated:type_name -> google.protobuf.Timestamp
 	25, // 12: api.v1.Incident.impact:type_name -> api.v1.AlertImpact
 	19, // 13: api.v1.Incident.metadata:type_name -> api.v1.Incident.MetadataEntry
-	0,  // 14: api.v1.Road.status:type_name -> api.v1.RoadStatus
-	3,  // 15: api.v1.Road.congestion_level:type_name -> api.v1.CongestionLevel
-	1,  // 16: api.v1.Road.chain_control:type_name -> api.v1.ChainControlStatus
-	17, // 17: api.v1.Road.alerts:type_name -> api.v1.RoadAlert
-	16, // 18: api.v1.Road.chain_control_info:type_name -> api.v1.ChainControlInfo
-	2,  // 19: api.v1.ChainControlInfo.level:type_name -> api.v1.ChainControlLevel
-	21, // 20: api.v1.ChainControlInfo.effective_time:type_name -> google.protobuf.Timestamp
-	4,  // 21: api.v1.RoadAlert.type:type_name -> api.v1.AlertType
-	22, // 22: api.v1.RoadAlert.severity:type_name -> api.v1.AlertSeverity
-	5,  // 23: api.v1.RoadAlert.classification:type_name -> api.v1.AlertClassification
-	21, // 24: api.v1.RoadAlert.start_time:type_name -> google.protobuf.Timestamp
-	21, // 25: api.v1.RoadAlert.end_time:type_name -> google.protobuf.Timestamp
-	21, // 26: api.v1.RoadAlert.last_updated:type_name -> google.protobuf.Timestamp
-	23, // 27: api.v1.RoadAlert.location:type_name -> api.v1.Coordinates
-	25, // 28: api.v1.RoadAlert.impact:type_name -> api.v1.AlertImpact
-	26, // 29: api.v1.RoadAlert.duration:type_name -> api.v1.AlertDuration
-	21, // 30: api.v1.RoadAlert.time_reported:type_name -> google.protobuf.Timestamp
-	20, // 31: api.v1.RoadAlert.metadata:type_name -> api.v1.RoadAlert.MetadataEntry
-	6,  // 32: api.v1.RoadsService.ListRoads:input_type -> api.v1.ListRoadsRequest
-	7,  // 33: api.v1.RoadsService.GetRoad:input_type -> api.v1.GetRoadRequest
-	8,  // 34: api.v1.RoadsService.GetProcessingMetrics:input_type -> api.v1.GetProcessingMetricsRequest
-	9,  // 35: api.v1.RoadsService.ListIncidents:input_type -> api.v1.ListIncidentsRequest
-	10, // 36: api.v1.RoadsService.ListRoads:output_type -> api.v1.ListRoadsResponse
-	11, // 37: api.v1.RoadsService.GetRoad:output_type -> api.v1.GetRoadResponse
-	14, // 38: api.v1.RoadsService.GetProcessingMetrics:output_type -> api.v1.ProcessingMetrics
-	12, // 39: api.v1.RoadsService.ListIncidents:output_type -> api.v1.ListIncidentsResponse
-	36, // [36:40] is the sub-list for method output_type
-	32, // [32:36] is the sub-list for method input_type
-	32, // [32:32] is the sub-list for extension type_name
-	32, // [32:32] is the sub-list for extension extendee
-	0,  // [0:32] is the sub-list for field type_name
+	21, // 14: api.v1.Incident.ai_enhanced_at:type_name -> google.protobuf.Timestamp
+	0,  // 15: api.v1.Road.status:type_name -> api.v1.RoadStatus
+	3,  // 16: api.v1.Road.congestion_level:type_name -> api.v1.CongestionLevel
+	1,  // 17: api.v1.Road.chain_control:type_name -> api.v1.ChainControlStatus
+	17, // 18: api.v1.Road.alerts:type_name -> api.v1.RoadAlert
+	16, // 19: api.v1.Road.chain_control_info:type_name -> api.v1.ChainControlInfo
+	2,  // 20: api.v1.ChainControlInfo.level:type_name -> api.v1.ChainControlLevel
+	21, // 21: api.v1.ChainControlInfo.effective_time:type_name -> google.protobuf.Timestamp
+	4,  // 22: api.v1.RoadAlert.type:type_name -> api.v1.AlertType
+	22, // 23: api.v1.RoadAlert.severity:type_name -> api.v1.AlertSeverity
+	5,  // 24: api.v1.RoadAlert.classification:type_name -> api.v1.AlertClassification
+	21, // 25: api.v1.RoadAlert.start_time:type_name -> google.protobuf.Timestamp
+	21, // 26: api.v1.RoadAlert.end_time:type_name -> google.protobuf.Timestamp
+	21, // 27: api.v1.RoadAlert.last_updated:type_name -> google.protobuf.Timestamp
+	23, // 28: api.v1.RoadAlert.location:type_name -> api.v1.Coordinates
+	25, // 29: api.v1.RoadAlert.impact:type_name -> api.v1.AlertImpact
+	26, // 30: api.v1.RoadAlert.duration:type_name -> api.v1.AlertDuration
+	21, // 31: api.v1.RoadAlert.time_reported:type_name -> google.protobuf.Timestamp
+	20, // 32: api.v1.RoadAlert.metadata:type_name -> api.v1.RoadAlert.MetadataEntry
+	6,  // 33: api.v1.RoadsService.ListRoads:input_type -> api.v1.ListRoadsRequest
+	7,  // 34: api.v1.RoadsService.GetRoad:input_type -> api.v1.GetRoadRequest
+	8,  // 35: api.v1.RoadsService.GetProcessingMetrics:input_type -> api.v1.GetProcessingMetricsRequest
+	9,  // 36: api.v1.RoadsService.ListIncidents:input_type -> api.v1.ListIncidentsRequest
+	10, // 37: api.v1.RoadsService.ListRoads:output_type -> api.v1.ListRoadsResponse
+	11, // 38: api.v1.RoadsService.GetRoad:output_type -> api.v1.GetRoadResponse
+	14, // 39: api.v1.RoadsService.GetProcessingMetrics:output_type -> api.v1.ProcessingMetrics
+	12, // 40: api.v1.RoadsService.ListIncidents:output_type -> api.v1.ListIncidentsResponse
+	37, // [37:41] is the sub-list for method output_type
+	33, // [33:37] is the sub-list for method input_type
+	33, // [33:33] is the sub-list for extension type_name
+	33, // [33:33] is the sub-list for extension extendee
+	0,  // [0:33] is the sub-list for field type_name
 }
 
 func init() { file_roads_proto_init() }

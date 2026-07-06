@@ -184,8 +184,11 @@ func (n *RoadIncidentNormalizer) buildEvent(in *api.Incident) *gridv1.Event {
 	// (services/incidents.go), so UNSPECIFIED means structural fields only.
 	if in.GetImpact() != api.AlertImpact_ALERT_IMPACT_UNSPECIFIED {
 		ev.Enhancement = &gridv1.Enhancement{
-			Model:  n.cfg.OpenAI.Model,
-			Fields: enhancedFields,
+			Model:      n.cfg.OpenAI.Model,
+			EnhancedAt: in.GetAiEnhancedAt(), // when the model ran (provenance)
+			Fields:     enhancedFields,
+			Request:    in.GetAiRequest(),  // the model input, for transparency
+			Response:   in.GetAiResponse(), // the raw structured model output
 		}
 	}
 	return ev

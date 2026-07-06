@@ -51,6 +51,9 @@ func testIncidents() (*api.Incident, *api.Incident, *api.Incident) {
 		LastUpdated:         updated,
 		CondensedSummary:    "Vehicle fire on Hwy 4",
 		Impact:              api.AlertImpact_IMPACT_SEVERE,
+		AiRequest:           "Parse this traffic incident report...",
+		AiResponse:          `{"details":"Vehicle fire blocking the right lane","impact":"severe"}`,
+		AiEnhancedAt:        timestamppb.New(time.Date(2026, 7, 4, 6, 30, 0, 0, time.UTC)),
 		Metadata: map[string]string{
 			"duration":           "several hours",
 			"emergency_services": "on scene",
@@ -130,10 +133,15 @@ func TestRoadIncidentPoll(t *testing.T) {
 		assert.False(t, present, "internal metadata key %q must be stripped", k)
 	}
 
-	// AI-enhanced (impact set) => Enhancement provenance from config.
+	// AI-enhanced (impact set) => Enhancement provenance from config, incl. the
+	// model I/O (transparency) and the enhancement time (provenance).
 	require.NotNil(t, ev.Enhancement)
 	assert.Equal(t, "gpt-5-mini", ev.Enhancement.Model)
 	assert.Equal(t, []string{"headline", "summary", "impact"}, ev.Enhancement.Fields)
+	assert.Equal(t, "Parse this traffic incident report...", ev.Enhancement.Request)
+	assert.Equal(t, `{"details":"Vehicle fire blocking the right lane","impact":"severe"}`, ev.Enhancement.Response)
+	require.NotNil(t, ev.Enhancement.EnhancedAt)
+	assert.Equal(t, time.Date(2026, 7, 4, 6, 30, 0, 0, time.UTC), ev.Enhancement.EnhancedAt.AsTime())
 
 	// Lane closures attribute to "caltrans"; not enhanced => no Enhancement.
 	cl := eventByID(t, res.Events, "chp:closure-hwy-4-avery")
