@@ -79,12 +79,13 @@ site-dev:
 	cd web && npm run dev
 
 # Screenshot + layout-metrics of the running site for spacing/layout diagnosis.
-# Needs Playwright + Chromium (baked into the container via moat.yaml hooks) and
+# Uses the container's Playwright + Chromium (the moat.yaml `playwright` dep) and
 # a server already running — point BASE_URL at it (default :8190). Set LABEL to
 # tag a run (e.g. before/after) for numeric diffs. Output lands under
-# tools/screenshots/out/<LABEL>/ (git-ignored).
+# tools/screenshots/out/<LABEL>/ (git-ignored). NODE_PATH points at the global
+# npm root so the ESM script's require() finds the globally-installed playwright.
 site-shots:
-	cd tools/screenshots && npm install && \
+	cd tools/screenshots && NODE_PATH=$$(npm root -g) \
 		BASE_URL=$(or $(BASE_URL),http://localhost:8190) LABEL=$(or $(LABEL),current) node shots.mjs
 
 # Generate protobuf code
