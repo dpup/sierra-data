@@ -26,8 +26,10 @@ type roadsIncidentsAPI interface {
 }
 
 // enhancedFields are the Event fields the incident AI pipeline generates,
-// recorded in Enhancement provenance so clients can badge AI text.
-var enhancedFields = []string{"summary", "description", "impact"}
+// recorded in Enhancement provenance so clients can badge AI text. headline is
+// the AI condensed line, summary the AI narrative; description stays the
+// verbatim original (not listed — it is NOT AI-generated).
+var enhancedFields = []string{"headline", "summary", "impact"}
 
 // RoadIncidentNormalizer ingests region-wide CHP/Caltrans incidents (id
 // namespace "chp:") from every configured incident area. One poller, two
@@ -130,22 +132,29 @@ func (n *RoadIncidentNormalizer) buildEvent(in *api.Incident) *gridv1.Event {
 		return nil
 	}
 
-	// Field roles (grid model §3): headline is the short, card-renderable line;
-	// description is the long form. The AI pipeline gives us exactly two texts —
-	// a short condensed_summary and a long description — so the short one is the
-	// headline and the long one is the description. There is no distinct middle
-	// tier, so summary stays empty for road incidents (it is populated for layers
-	// that have one, e.g. weather alerts). When there is no condensed summary (an
-	// unenhanced incident) the detail text is the only text, so it is the headline
-	// and description stays empty.
-	short := in.GetCondensedSummary()
-	long := in.GetDescription()
-	headline := short
-	description := ""
-	if short != "" {
-		description = long
+	// Field roles (grid model §3.1). Three texts flow from the incidents
+	// pipeline: a verbatim original (raw CHP text), and — for AI-enhanced
+	// incidents — a short condensed line and a longer narrative.
+	//   headline    = the short card line: the AI condensed summary, or the
+	//                 readable text when unenhanced.
+	//   summary     = the AI narrative (enhanced only) — badged AI text.
+	//   description = the verbatim original, ALWAYS preserved so a client can
+	//                 show it alongside the enhanced text ("translate, never
+	//                 assert" transparency). Dropped only when it would just
+	//                 duplicate the headline (unenhanced, no distinct original).
+	condensed := in.GetCondensedSummary() // AI short (enhanced only)
+	narrative := in.GetDescription()      // AI narrative (enhanced) or readable type line
+	original := in.GetOriginalText()      // raw verbatim feed text
+	var headline, summary string
+	if condensed != "" {
+		headline = condensed
+		summary = narrative
 	} else {
-		headline = long
+		headline = narrative
+	}
+	description := original
+	if description == headline {
+		description = "" // no distinct original to show beyond the headline
 	}
 
 	ev := NewEvent(
@@ -157,6 +166,7 @@ func (n *RoadIncidentNormalizer) buildEvent(in *api.Incident) *gridv1.Event {
 	)
 	category := strings.ToLower(strings.TrimPrefix(in.GetType().String(), "ALERT_TYPE_"))
 	ev.Category = category
+	ev.Summary = summary
 	ev.Description = description
 	ev.AreaLabel = in.GetLocationDescription()
 	ev.Geometry = GeometryFromPoint(loc.GetLatitude(), loc.GetLongitude())

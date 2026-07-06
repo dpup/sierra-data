@@ -385,6 +385,10 @@
             "type": "string"
           },
           "title": "Structured extras (vehicles involved, injuries, ...)"
+        },
+        "originalText": {
+          "type": "string",
+          "description": "Verbatim upstream text, before any AI enhancement (CHP radio codes /\nabbreviations). Preserved so a client can show the original alongside the\nenhanced text — the \"translate, never assert\" transparency contract\n(spec §3.1). Always set; `description` may be an AI narrative."
         }
       },
       "description": "Incident is a region-wide CHP/Caltrans dispatch incident, surfaced\nindependently of any monitored road."

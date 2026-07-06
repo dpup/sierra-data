@@ -142,7 +142,10 @@ func projectEarthquake(ev *gridv1.Event) hazards.Feature {
 func projectRoadIncident(ev *gridv1.Event) hazards.Feature {
 	d := ev.GetRoadIncident()
 	p := baseProps(ev, hazards.LayerRoadIncident, "Road incident")
-	p.Description = ev.GetDescription() // long detail text; empty for unenhanced incidents
+	// The GeoJSON envelope shows the readable narrative (event.summary), not the
+	// raw verbatim original (event.description) — map popups stay readable; the
+	// original is a /v1-event-only field. Matches the live builder's Description.
+	p.Description = ev.GetSummary()
 	p.Status = lifecycleStatus(ev)
 	p.Effective = rfc3339(ev.GetEffective())
 	p.UpdatedAt = rfc3339(ev.GetObservedAt())

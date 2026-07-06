@@ -330,9 +330,12 @@ func (s *RoadsService) buildIncident(in caltrans.CaltransIncident, area config.I
 		Location:            &api.Coordinates{Latitude: in.Coordinates.Latitude, Longitude: in.Coordinates.Longitude},
 		LocationDescription: locationDesc,
 		Description:         description,
-		Status:              api.IncidentStatus_ACTIVE,
-		LogNumber:           d.logNumber,
-		Area:                area.ID,
+		// Verbatim feed text, kept even when AI enhancement later overwrites
+		// Description — clients render the original alongside the enhanced text.
+		OriginalText: in.DescriptionText,
+		Status:       api.IncidentStatus_ACTIVE,
+		LogNumber:    d.logNumber,
+		Area:         area.ID,
 	}
 	if !d.started.IsZero() {
 		inc.Started = timestamppb.New(d.started)

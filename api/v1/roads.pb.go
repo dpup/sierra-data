@@ -704,8 +704,13 @@ type Incident struct {
 	CondensedSummary string            `protobuf:"bytes,12,opt,name=condensed_summary,json=condensedSummary,proto3" json:"condensed_summary,omitempty"`                                   // Short format for mobile
 	Impact           AlertImpact       `protobuf:"varint,13,opt,name=impact,proto3,enum=api.v1.AlertImpact" json:"impact,omitempty"`                                                      // AI-assessed impact (IMPACT_UNSPECIFIED when not enhanced)
 	Metadata         map[string]string `protobuf:"bytes,14,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // Structured extras (vehicles involved, injuries, ...)
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Verbatim upstream text, before any AI enhancement (CHP radio codes /
+	// abbreviations). Preserved so a client can show the original alongside the
+	// enhanced text — the "translate, never assert" transparency contract
+	// (spec §3.1). Always set; `description` may be an AI narrative.
+	OriginalText  string `protobuf:"bytes,15,opt,name=original_text,json=originalText,proto3" json:"original_text,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Incident) Reset() {
@@ -834,6 +839,13 @@ func (x *Incident) GetMetadata() map[string]string {
 		return x.Metadata
 	}
 	return nil
+}
+
+func (x *Incident) GetOriginalText() string {
+	if x != nil {
+		return x.OriginalText
+	}
+	return ""
 }
 
 type ProcessingMetrics struct {
@@ -1398,7 +1410,7 @@ const file_roads_proto_rawDesc = "" +
 	"\x15ListIncidentsResponse\x12.\n" +
 	"\tincidents\x18\x01 \x03(\v2\x10.api.v1.IncidentR\tincidents\x12=\n" +
 	"\flast_updated\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\vlastUpdated\x12\x12\n" +
-	"\x04area\x18\x03 \x01(\tR\x04area\"\xa5\x05\n" +
+	"\x04area\x18\x03 \x01(\tR\x04area\"\xca\x05\n" +
 	"\bIncident\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12%\n" +
 	"\x04type\x18\x02 \x01(\x0e2\x11.api.v1.AlertTypeR\x04type\x121\n" +
@@ -1415,7 +1427,8 @@ const file_roads_proto_rawDesc = "" +
 	"\x04area\x18\v \x01(\tR\x04area\x12+\n" +
 	"\x11condensed_summary\x18\f \x01(\tR\x10condensedSummary\x12+\n" +
 	"\x06impact\x18\r \x01(\x0e2\x13.api.v1.AlertImpactR\x06impact\x12:\n" +
-	"\bmetadata\x18\x0e \x03(\v2\x1e.api.v1.Incident.MetadataEntryR\bmetadata\x1a;\n" +
+	"\bmetadata\x18\x0e \x03(\v2\x1e.api.v1.Incident.MetadataEntryR\bmetadata\x12#\n" +
+	"\roriginal_text\x18\x0f \x01(\tR\foriginalText\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xf7\x01\n" +

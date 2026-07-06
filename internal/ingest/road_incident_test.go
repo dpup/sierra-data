@@ -45,6 +45,7 @@ func testIncidents() (*api.Incident, *api.Incident, *api.Incident) {
 		Location:            &api.Coordinates{Latitude: 38.2, Longitude: -120.35},
 		LocationDescription: "Hwy 4 at Avery",
 		Description:         "Vehicle fire blocking the right lane",
+		OriginalText:        "1141 VEH FIRE RHS SR4 E/O AVERY, 1 VEH INV",
 		LogNumber:           "250916ST0066",
 		Started:             started,
 		LastUpdated:         updated,
@@ -64,6 +65,7 @@ func testIncidents() (*api.Incident, *api.Incident, *api.Incident) {
 		Location:            &api.Coordinates{Latitude: 38.25, Longitude: -120.3},
 		LocationDescription: "Hwy 4 EB near Avery",
 		Description:         "One-way traffic control for utility work",
+		OriginalText:        "1WAY TC SR4 EB UTIL WK",
 	}
 	locationless := &api.Incident{
 		Id:          "no-location",
@@ -91,12 +93,12 @@ func TestRoadIncidentPoll(t *testing.T) {
 
 	ev := eventByID(t, res.Events, "chp:250916ST0066")
 	assert.Equal(t, gridv1.Layer_ROAD_INCIDENT, ev.Layer)
-	// Enhanced incident: the short condensed_summary is the headline; the long
-	// detail text is the description. summary stays empty for road incidents —
-	// there is no distinct middle tier (grid model §3).
+	// Enhanced incident (grid model §3.1): AI condensed line is the headline, the
+	// AI narrative is the summary, and description preserves the VERBATIM original
+	// so a client can show raw-vs-AI. headline/summary are AI; description is not.
 	assert.Equal(t, "Vehicle fire on Hwy 4", ev.Headline)
-	assert.Empty(t, ev.Summary)
-	assert.Equal(t, "Vehicle fire blocking the right lane", ev.Description)
+	assert.Equal(t, "Vehicle fire blocking the right lane", ev.Summary)
+	assert.Equal(t, "1141 VEH FIRE RHS SR4 E/O AVERY, 1 VEH INV", ev.Description)
 	assert.Equal(t, "incident", ev.Category)
 	assert.Equal(t, gridv1.Severity_SEVERE, ev.Severity)
 	assert.Equal(t, gridv1.EventStatus_ACTIVE, ev.Status)
@@ -131,15 +133,16 @@ func TestRoadIncidentPoll(t *testing.T) {
 	// AI-enhanced (impact set) => Enhancement provenance from config.
 	require.NotNil(t, ev.Enhancement)
 	assert.Equal(t, "gpt-5-mini", ev.Enhancement.Model)
-	assert.Equal(t, []string{"summary", "description", "impact"}, ev.Enhancement.Fields)
+	assert.Equal(t, []string{"headline", "summary", "impact"}, ev.Enhancement.Fields)
 
 	// Lane closures attribute to "caltrans"; not enhanced => no Enhancement.
 	cl := eventByID(t, res.Events, "chp:closure-hwy-4-avery")
-	// Unenhanced incident (no condensed_summary): the detail text is the only
-	// text, so it stays the headline and there is no separate summary/description.
+	// Unenhanced incident (no condensed_summary): the readable text is the
+	// headline, summary stays empty, and description preserves the verbatim
+	// original feed text so it is still available raw.
 	assert.Equal(t, "One-way traffic control for utility work", cl.Headline)
 	assert.Empty(t, cl.Summary)
-	assert.Empty(t, cl.Description)
+	assert.Equal(t, "1WAY TC SR4 EB UTIL WK", cl.Description)
 	assert.Equal(t, "closure", cl.Category)
 	assert.Equal(t, gridv1.Severity_MODERATE, cl.Severity)
 	assert.Equal(t, "caltrans", cl.Provenance.SourceId)

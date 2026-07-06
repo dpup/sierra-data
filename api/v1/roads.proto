@@ -121,6 +121,12 @@ message Incident {
   string condensed_summary = 12;          // Short format for mobile
   AlertImpact impact = 13;                // AI-assessed impact (IMPACT_UNSPECIFIED when not enhanced)
   map<string, string> metadata = 14;      // Structured extras (vehicles involved, injuries, ...)
+
+  // Verbatim upstream text, before any AI enhancement (CHP radio codes /
+  // abbreviations). Preserved so a client can show the original alongside the
+  // enhanced text — the "translate, never assert" transparency contract
+  // (spec §3.1). Always set; `description` may be an AI narrative.
+  string original_text = 15;
 }
 
 message ProcessingMetrics {

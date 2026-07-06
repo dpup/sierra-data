@@ -10,6 +10,26 @@ camelCase). As of 2026-07-05 there is a second, first-principles surface at
 `/v1/...` (field names snake_case — protojson `UseProtoNames`); both run on the
 same binary over the same store (see the 2026-07-05 entry and its migration plan).
 
+## 2026-07-06
+
+### Added — `/api/v1/incidents[].original_text` (verbatim pre-AI text)
+
+Each incident now carries `original_text`: the raw upstream feed text (CHP CAD
+log / radio codes) as received, **before** any AI enhancement. `description` may
+be an AI narrative; `original_text` is always the verbatim original, so a client
+can show both — the "translate, never assert" transparency contract. Additive
+field; existing consumers are unaffected.
+
+### Fixed — road incident text roles on `/v1` events
+
+For an AI-enhanced incident the `/v1` event now reads: `headline` = the short AI
+condensed line, `summary` = the AI narrative, `description` = the **verbatim
+original** (from `original_text`). `Event.enhancement.fields` accurately lists the
+AI-generated fields (`headline, summary, impact`) — previously it listed a
+`summary`/`description` that no longer matched the mapping. The
+`.geojson` map envelope is unchanged (it shows the readable narrative as
+`description`; byte-compatible).
+
 ## 2026-07-05 18:00 UTC
 
 ### Added — Grid Info Service v2: a `/v1` surface, a persistent event store, and a data site
@@ -118,17 +138,15 @@ changes (each also applies to the new `/v1/.../map/{layer}.geojson`):
   Enhancement (and the summary text) is content-hash-gated and persisted with the
   event, so an unchanged alert keeps its enhanced fields across polls instead of
   being re-generated per refresh cycle — fewer OpenAI calls, stable output.
-- **`road_incident` `headline` / `description` roles corrected.** For an
-  AI-enhanced incident, `headline` is now the short, card-renderable
-  `condensed_summary` and the long detail text moves to `description` (previously
-  `headline` held the long text and `description` was empty). This applies to both
-  the `/api/v1/hazards/{area}/road_incident.geojson` envelope and the `/v1` event
-  (`headline` short, `description` long; `summary` stays empty — road incidents
-  have no distinct middle tier). Unenhanced incidents (no
-  condensed summary) keep the detail text as the `headline`. Consuming sites that
-  render `headline` as a card title now get a proper short line; the full text is
-  under `description`. On deploy, existing stored incidents self-heal to the new
-  shape on their next enhanced poll.
+- **`road_incident` `headline` role corrected.** For an AI-enhanced incident,
+  `headline` is now the short, card-renderable `condensed_summary` (previously it
+  held the long detail text). The `/api/v1/hazards/{area}/road_incident.geojson`
+  envelope shows the short headline + the readable narrative as `description`;
+  the full `/v1` event field roles (`summary` = AI narrative, `description` =
+  verbatim original) are finalized in the 2026-07-06 entry above. Unenhanced
+  incidents (no condensed summary) keep the readable text as the `headline`. On
+  deploy, existing stored incidents self-heal to the new shape on their next
+  enhanced poll.
 
 ### Changed — weather alerts removed from `/v1/weather` (still on `/api/v1`)
 

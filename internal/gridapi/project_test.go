@@ -312,7 +312,8 @@ func TestProjectEvents_RoadIncident_ConstantSourceBlock(t *testing.T) {
 		Severity:    gridv1.Severity_SEVERE,
 		Status:      gridv1.EventStatus_ACTIVE,
 		Headline:    "Vehicle fire on Hwy 4",                // short condensed line
-		Description: "Vehicle fire blocking the right lane", // long detail text
+		Summary:     "Vehicle fire blocking the right lane", // AI narrative → GeoJSON description
+		Description: "1141 VEH FIRE RHS SR4",                // verbatim original — /v1-event only, not projected
 		AreaLabel:   "Hwy 4 at Avery",
 		Geometry:    geom(point),
 		Effective:   ts("2026-07-04T06:24:00Z"),
