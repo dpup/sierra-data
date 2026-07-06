@@ -1,137 +1,191 @@
-// nav.js — shared page chrome: header nav + unprivileged-client footer.
+// nav.js — shared app shell: fixed sidebar + sticky context bar + footer drawer.
 //
-// Pages call initChrome('events') after their <main> exists; the header is
-// prepended to <body>, the footer appended. The footer's request log renders
-// live from api.js `requests` and updates on every API_REQUEST_EVENT.
+// The shell wraps each page's <main>: pages ship a plain <main>…</main> and call
+// initChrome('<key>') once it exists. We move that <main> into a content column,
+// prepend the sidebar, and top/tail it with the context bar and footer.
 //
-// No DOM access at import time — everything happens inside initChrome().
+// The sidebar health chip and the context-bar clock are live chrome: the chip
+// fetches /v1/sources directly (a plain fetch, kept OUT of the per-page request
+// drawer so each drawer stays scoped to that page's own data), the clock ticks
+// once a second. The footer drawer reuses api.js's request log — every value a
+// page shows is a replayable GET.
+//
+// No DOM access at import time; everything runs inside initChrome().
 
 import { requests, API_REQUEST_EVENT, curlFor } from './api.js';
 
-const NAV_LINKS = [
-  { key: 'home', label: 'Home', href: '/' },
-  { key: 'sources', label: 'Sources', href: '/sources.html' },
-  { key: 'events', label: 'Events', href: '/events.html' },
-  { key: 'places', label: 'Places', href: '/places.html' },
-  { key: 'map', label: 'Map', href: '/map.html' },
-  { key: 'history', label: 'History', href: '/history.html' },
-  { key: 'docs', label: 'Docs', href: '/docs.html' },
+// key → { label, href, hint, group, crumb }
+const NAV = [
+  { key: 'home', label: 'Grid Info', href: '/', hint: '/v1', group: 'OVERVIEW', crumb: 'Grid Info Service' },
+  { key: 'events', label: 'Events', href: '/events.html', hint: '/events', group: 'EXPLORE', crumb: 'Events' },
+  { key: 'map', label: 'Map', href: '/map.html', hint: '/map', group: 'EXPLORE', crumb: 'Map' },
+  { key: 'places', label: 'Places', href: '/places.html', hint: '/places', group: 'EXPLORE', crumb: 'Places' },
+  { key: 'sources', label: 'Sources', href: '/sources.html', hint: '/sources', group: 'EXPLORE', crumb: 'Sources' },
+  { key: 'history', label: 'History', href: '/history.html', hint: '/history', group: 'EXPLORE', crumb: 'History' },
+  { key: 'docs', label: 'Docs', href: '/docs.html', hint: '/v1 ref', group: 'REFERENCE', crumb: 'Docs' },
 ];
+const GROUPS = ['OVERVIEW', 'EXPLORE', 'REFERENCE'];
 
-function buildHeader(current) {
-  const header = document.createElement('header');
-  header.className = 'site-header';
+function el(tag, className, text) {
+  const n = document.createElement(tag);
+  if (className) n.className = className;
+  if (text !== undefined) n.textContent = text;
+  return n;
+}
 
-  const brand = document.createElement('a');
-  brand.className = 'brand';
+/* -------------------------------------------------------------- sidebar */
+
+function buildSidebar(current) {
+  const aside = el('aside', 'sidebar');
+
+  // brand
+  const brand = el('a', 'brand-block');
   brand.href = '/';
-  const name = document.createElement('span');
-  name.className = 'brand-name';
-  name.textContent = 'SIERRA Grid Data';
-  const host = document.createElement('span');
-  host.className = 'brand-host';
-  host.textContent = 'data.sierragridteam.org';
-  brand.append(name, host);
+  const line = el('div', 'brand-line');
+  line.append(el('span', 'brand-name', 'S.I.E.R.R.A'), el('span', 'brand-sub', 'Grid Data'));
+  brand.append(line, el('div', 'brand-host', 'data.sierragridteam.org'));
 
-  const nav = document.createElement('nav');
-  nav.className = 'site-nav';
-  nav.setAttribute('aria-label', 'Site');
-  for (const link of NAV_LINKS) {
-    const a = document.createElement('a');
-    a.href = link.href;
-    a.textContent = link.label;
-    if (link.key === current) {
-      a.className = 'current';
-      a.setAttribute('aria-current', 'page');
+  // health chip (live)
+  const health = el('div', 'health-chip');
+  const hrow = el('div', 'health-row');
+  const hdot = el('span', 'dot st-OK live');
+  const htext = el('span', undefined, 'checking sources…');
+  hrow.append(hdot, htext);
+  health.append(hrow, el('div', 'health-sub', 'read-only · CORS-open · no key'));
+
+  // nav groups
+  const nav = el('nav', 'nav');
+  nav.setAttribute('aria-label', 'Sections');
+  for (const g of GROUPS) {
+    nav.append(el('div', 'nav-group-label', g));
+    for (const item of NAV.filter((n) => n.group === g)) {
+      const a = el('a', 'nav-item' + (item.key === current ? ' current' : ''));
+      a.href = item.href;
+      if (item.key === current) a.setAttribute('aria-current', 'page');
+      a.append(el('span', undefined, item.label), el('span', 'hint', item.hint));
+      nav.append(a);
     }
-    nav.appendChild(a);
   }
 
-  header.append(brand, nav);
-  return header;
+  const foot = el('div', 'sidebar-foot');
+  foot.append(el('div', undefined, 'grid.v1 · schema 2026-07'), el('div', undefined, 'deploy from main · us-west'));
+
+  aside.append(brand, health, nav, foot);
+  loadHealth(hdot, htext);
+  return aside;
 }
+
+// Fetch /v1/sources for the chip. Plain fetch (unlogged) — chrome, not page data.
+function loadHealth(dot, text) {
+  fetch('/v1/sources', { headers: { Accept: 'application/json' } })
+    .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+    .then((body) => {
+      const list = (body && body.sources) || [];
+      const total = list.length;
+      const ok = list.filter((s) => (s.status || s.source_status) === 'OK').length;
+      text.textContent = `${ok} / ${total} sources OK`;
+      dot.className = 'dot live ' + (ok === total ? 'st-OK' : ok === 0 ? 'st-UNAVAILABLE' : 'st-STALE');
+    })
+    .catch(() => {
+      text.textContent = 'source health unavailable';
+      dot.className = 'dot st-UNAVAILABLE';
+    });
+}
+
+/* ---------------------------------------------------------- context bar */
+
+function buildContextBar(current) {
+  const bar = el('div', 'context-bar');
+  const crumb = el('div', 'crumb');
+  const here = (NAV.find((n) => n.key === current) || {}).crumb || 'Grid Info Service';
+  crumb.append(el('span', undefined, 'grid.v1'), ' ', el('span', 'sep', '/'), ' ', el('span', 'here', here));
+
+  const right = el('div', 'ctx-right');
+  const clock = el('span', 'clock');
+  const cdot = el('span', 'dot st-OK live');
+  const ctime = el('span', undefined, '––:––:––Z');
+  clock.append(cdot, ctime);
+  right.append(el('span', undefined, 'live · replayable'), clock);
+  bar.append(crumb, right);
+
+  const tick = () => {
+    const d = new Date();
+    const p = (n) => String(n).padStart(2, '0');
+    ctime.textContent = `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}Z`;
+  };
+  tick();
+  setInterval(tick, 1000);
+  return bar;
+}
+
+/* --------------------------------------------------------------- footer */
 
 function renderRequestLog(listEl, countEl) {
   listEl.textContent = '';
   if (requests.length === 0) {
-    const empty = document.createElement('div');
-    empty.className = 'request-log-empty';
-    empty.textContent = 'No API requests made by this page yet.';
-    listEl.appendChild(empty);
+    listEl.append(el('div', 'request-log-empty', 'No API requests made by this page yet.'));
   }
   for (const entry of requests) {
-    const row = document.createElement('div');
-    row.className = 'request-log-row' + (entry.ok ? '' : ' failed');
-
-    const status = document.createElement('span');
-    status.className = 'request-log-status';
-    status.textContent =
-      entry.status === null ? '…' : entry.status === 0 ? 'ERR' : String(entry.status);
-
-    const code = document.createElement('code');
-    code.className = 'request-log-curl';
-    code.textContent = curlFor(entry.url);
-
-    const copy = document.createElement('button');
+    const row = el('div', 'request-log-row' + (entry.ok ? '' : ' failed'));
+    const status = el(
+      'span',
+      'request-log-status',
+      entry.status === null ? '…' : entry.status === 0 ? 'ERR' : String(entry.status)
+    );
+    const code = el('code', 'request-log-curl', curlFor(entry.url));
+    const copy = el('button', 'copy-btn', 'copy');
     copy.type = 'button';
-    copy.className = 'copy-btn';
-    copy.textContent = 'copy';
     copy.addEventListener('click', () => {
       navigator.clipboard.writeText(curlFor(entry.url)).then(
         () => {
           copy.textContent = 'copied';
           setTimeout(() => (copy.textContent = 'copy'), 1200);
         },
-        () => {
-          copy.textContent = 'failed';
-        }
+        () => (copy.textContent = 'failed')
       );
     });
-
     row.append(status, code, copy);
-    listEl.appendChild(row);
+    listEl.append(row);
   }
   countEl.textContent = String(requests.length);
 }
 
 function buildFooter() {
-  const footer = document.createElement('footer');
-  footer.className = 'site-footer';
+  const footer = el('footer', 'site-footer');
 
-  const line = document.createElement('p');
-  line.className = 'footer-line';
-  line.textContent =
-    'This site is an unprivileged client of the public API — every number on ' +
-    'this page came from a browser fetch of /v1/* that you can replay yourself.';
-
-  const details = document.createElement('details');
-  details.className = 'request-log';
-  const summary = document.createElement('summary');
-  summary.append('View the ');
-  const countEl = document.createElement('span');
-  countEl.className = 'request-count';
-  countEl.textContent = '0';
-  summary.append(countEl, ' request(s) behind this page');
-  const listEl = document.createElement('div');
-  listEl.className = 'request-log-list';
+  const details = el('details', 'request-log');
+  const summary = el('summary');
+  const countEl = el('span', 'request-count', '0');
+  summary.append('View the ', countEl, ' request(s) behind this page');
+  const listEl = el('div', 'request-log-list');
   details.append(summary, listEl);
 
-  footer.append(line, details);
-
-  renderRequestLog(listEl, countEl);
-  document.addEventListener(API_REQUEST_EVENT, () =>
-    renderRequestLog(listEl, countEl)
+  const legal = el(
+    'p',
+    'footer-line',
+    'Signal Integrity & Emergency Radio Response Alliance · P.O. Box 2071, Murphys, CA 95247 · ' +
+      'a volunteer 501(c)(3). Every value on this site is a browser fetch of the public /v1 API — replay any of them yourself.'
   );
 
+  footer.append(details, legal);
+  renderRequestLog(listEl, countEl);
+  document.addEventListener(API_REQUEST_EVENT, () => renderRequestLog(listEl, countEl));
   return footer;
 }
 
+/* ----------------------------------------------------------------- init */
+
 /**
- * Render the shared header and footer.
- * @param {string} current nav key of the current page:
- *   'home'|'sources'|'events'|'places'|'map'|'history'|'docs'
+ * Wrap the page's <main> in the app shell.
+ * @param {string} current nav key: home|events|map|places|sources|history|docs
  */
 export function initChrome(current) {
-  document.body.prepend(buildHeader(current));
-  document.body.append(buildFooter());
+  const main = document.querySelector('main');
+  const app = el('div', 'app');
+  const content = el('div', 'content');
+  content.append(buildContextBar(current));
+  if (main) content.append(main);
+  content.append(buildFooter());
+  app.append(buildSidebar(current), content);
+  document.body.prepend(app);
 }

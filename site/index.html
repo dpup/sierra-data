@@ -3,70 +3,158 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>SIERRA Grid Data — data.sierragridteam.org</title>
-  <meta name="description" content="Grid Info Service — public hazard, road, and weather data for the central Sierra. Live API docs and explorer.">
+  <title>Grid Info Service — SIERRA Grid Data</title>
+  <meta name="description" content="Public, keyless, real-time hazard, road, and weather data for the central Sierra — wildfire, evacuation, weather, earthquake, and road incidents unified into one honest API. Run by S.I.E.R.R.A, a volunteer emergency-response alliance.">
   <link rel="stylesheet" href="/assets/app.css">
 </head>
 <body>
 <main>
-  <h1>Grid Info Service</h1>
-  <p class="tagline">Public hazard, road, and weather data for the central Sierra.</p>
-  <p>
-    This site is the live documentation and explorer for the Grid Info Service
-    API at <code class="inline">data.sierragridteam.org/v1</code>. Everything on
-    every page is fetched in your browser from the same public, read-only,
-    CORS-open endpoints any third-party client would use — wildfire, evacuation,
-    weather-alert, earthquake, and road-incident events, plus place geometry and
-    per-source feed health. Each section below documents one endpoint and
-    explores its live data; the footer of every page lists the exact requests
-    behind it.
-  </p>
-
-  <h2>Live status</h2>
-  <div class="status-strip">
-    <section class="panel" aria-labelledby="sources-h">
-      <h3 id="sources-h">Source health <span class="muted small">— <code class="inline">GET /v1/sources</code></span></h3>
-      <div id="source-health" class="status-list"><span class="loading">Loading /v1/sources…</span></div>
-    </section>
-    <section class="panel" aria-labelledby="areas-h">
-      <h3 id="areas-h">Area mode <span class="muted small">— <code class="inline">GET /v1/places/{area}/summary</code></span></h3>
-      <div id="area-modes" class="status-list"><span class="loading">Loading area summaries…</span></div>
-    </section>
+  <div class="page-head">
+    <div>
+      <div class="hero-kicker">Signal Integrity &amp; Emergency Radio Response Alliance</div>
+      <h1>Grid Info Service</h1>
+      <p class="mission">
+        When a wildfire, evacuation, or highway closure hits the central Sierra, the people who
+        need the facts first are neighbors, ham operators, and responders spread across county
+        lines. The Grid Info Service pulls the authoritative feeds — <strong>CAL FIRE, Cal OES,
+        the National Weather Service, USGS, CHP, and Caltrans</strong> — into one real-time
+        picture and serves it to anyone, free, with no key and no strings. Every value on this
+        site is a live browser fetch of that public <code class="inline">/v1</code> API.
+        <strong>You can replay every request yourself.</strong>
+      </p>
+    </div>
+    <div class="badges">
+      <span class="chip chip-green">no key required</span>
+      <span class="chip chip-blue">CORS-open</span>
+    </div>
   </div>
-  <p id="freshness" class="freshness">Fetching…</p>
 
-  <h2>Sections</h2>
-  <div class="section-grid">
-    <a class="section-card" href="/sources.html">
-      <span class="card-title">Sources</span>
-      <span class="card-endpoint">GET /v1/sources</span>
-      <span class="card-desc">Feed health board: poll intervals, last success/attempt, staleness, last error. The ops dashboard.</span>
+  <!-- what we're building -->
+  <div class="cap-grid">
+    <div class="cap-card">
+      <div class="cap-h">One picture, every hazard</div>
+      <div class="cap-p">Wildfire, evacuation, weather alert, fire weather, earthquake, and road
+        incidents — normalized from a dozen upstream feeds into one queryable event model with
+        full revision history. Ask once; get the whole region.</div>
+    </div>
+    <div class="cap-card">
+      <div class="cap-h">Honest by contract</div>
+      <div class="cap-p">Every feed reports <span class="mono">OK</span> /
+        <span class="mono">STALE</span> / <span class="mono">UNAVAILABLE</span>. A source that
+        fails says so — <span class="accent-orange">absence is never shown as an all-clear.</span>
+        Life-safety data you can trust <em>because</em> it tells you when it can't.</div>
+    </div>
+    <div class="cap-card">
+      <div class="cap-h">Built to be built on</div>
+      <div class="cap-p">Public, keyless, CORS-open, RFC&nbsp;7946 GeoJSON. Any website, map client,
+        or radio-room dashboard can consume it directly. This site is just one client of the same
+        API — nothing here is privileged.</div>
+    </div>
+  </div>
+
+  <!-- replay-it-yourself primer -->
+  <div class="primer">
+    <div class="tab-strip">
+      <div class="tabs">
+        <button class="tab on" data-snip="curl">curl</button>
+        <button class="tab" data-snip="fetch">fetch</button>
+        <button class="tab" data-snip="http">http</button>
+      </div>
+      <button class="copy-btn" id="primer-copy" type="button">copy</button>
+    </div>
+    <pre id="primer-code"></pre>
+  </div>
+
+  <!-- system status -->
+  <div class="section-gap"></div>
+  <div class="section-head">
+    <div class="left">
+      <h2>System status</h2>
+      <span class="chip-get"><b>GET</b> /v1/sources</span>
+    </div>
+    <span class="cap">poll → last success → freshness</span>
+  </div>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th style="width:150px">Source</th><th style="width:100px">Status</th>
+          <th style="width:110px">Poll</th><th style="width:130px">Last success</th>
+          <th>Freshness</th><th class="num" style="width:80px">Error</th>
+        </tr>
+      </thead>
+      <tbody id="sources-body">
+        <tr><td colspan="6"><span class="loading">Loading /v1/sources…</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- area mode + rollup -->
+  <div class="grid-2" style="margin-top:18px;">
+    <div class="card" id="area-card">
+      <div class="row" style="gap:11px;">
+        <span style="font-weight:600;font-size:13.5px;color:#eef2f4;">Area mode</span>
+        <span class="chip-get"><b>GET</b> /v1/places/{area}/summary</span>
+      </div>
+      <div id="area-body" style="margin-top:14px;"><span class="loading">Loading area summary…</span></div>
+    </div>
+    <div class="card">
+      <div class="stat-grid" id="rollup">
+        <div><div class="stat-n">—</div><div class="stat-label">Active events</div></div>
+        <div><div class="stat-n">11</div><div class="stat-label">Layers</div></div>
+        <div><div class="stat-n">—</div><div class="stat-label">Areas</div></div>
+        <div><div class="stat-n">—</div><div class="stat-label">Active evac</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- endpoints -->
+  <h2 style="margin-top:34px;">Endpoints</h2>
+  <div class="endpoint-list">
+    <a class="endpoint-row" href="/sources.html">
+      <span class="chip-method">GET</span>
+      <span class="path">/v1/sources</span>
+      <span class="desc">Per-source feed health: poll interval, last success, staleness, last error.</span>
     </a>
-    <a class="section-card" href="/events.html">
-      <span class="card-title">Events</span>
-      <span class="card-endpoint">GET /v1/events — cross-layer query</span>
-      <span class="card-desc">Filter by place, layer, status, severity, time; event detail with revision timeline and diffs.</span>
+    <a class="endpoint-row" href="/events.html">
+      <span class="chip-method">GET</span>
+      <span class="path">/v1/events</span>
+      <span class="desc">Cross-layer event query — the one endpoint every occurrence is reachable through.</span>
     </a>
-    <a class="section-card" href="/places.html">
-      <span class="card-title">Places</span>
-      <span class="card-endpoint">GET /v1/places, /v1/places/resolve</span>
-      <span class="card-desc">Areas, counties, towns, zones, corridors; geometry on a map; lat/lng and address resolve tester.</span>
+    <a class="endpoint-row" href="/places.html">
+      <span class="chip-method">GET</span>
+      <span class="path">/v1/places · /v1/places/resolve</span>
+      <span class="desc">Areas, counties, towns, zones, corridors — plus lat·lng / address resolve.</span>
     </a>
-    <a class="section-card" href="/map.html">
-      <span class="card-title">Map</span>
-      <span class="card-endpoint">GET /v1/places/{place}/map/{layer}.geojson</span>
-      <span class="card-desc">Per-layer GeoJSON previews with the honest-freshness metadata block, on MapLibre.</span>
+    <a class="endpoint-row" href="/map.html">
+      <span class="chip-method">GET</span>
+      <span class="path">/v1/places/{place}/map/{layer}.geojson</span>
+      <span class="desc">RFC 7946 FeatureCollection per hazard layer, with the honest-freshness metadata block.</span>
     </a>
-    <a class="section-card" href="/history.html">
-      <span class="card-title">History</span>
-      <span class="card-endpoint">GET /v1/history</span>
-      <span class="card-desc">Archive browser: chronological revision feed over a time range — the after-action view.</span>
+    <a class="endpoint-row" href="/history.html">
+      <span class="chip-method">GET</span>
+      <span class="path">/v1/history</span>
+      <span class="desc">Chronological revision feed over a time range — the after-action view.</span>
     </a>
-    <a class="section-card" href="/docs.html">
-      <span class="card-title">Docs</span>
-      <span class="card-endpoint">/v1 reference</span>
-      <span class="card-desc">Endpoint reference, severity scale and color ramp, place id scheme, evacuation fail-loud contract.</span>
+    <a class="endpoint-row" href="/docs.html">
+      <span class="chip-method">GET</span>
+      <span class="path">/v1</span>
+      <span class="desc">Full reference: severity ramp, place id scheme, the evacuation fail-loud contract.</span>
     </a>
+  </div>
+
+  <!-- support -->
+  <div class="support-card">
+    <h2>Keep a lifeline running</h2>
+    <p class="support-p">
+      S.I.E.R.R.A is an all-volunteer 501(c)(3). This service runs on donated time and a small
+      cloud bill — the feeds, the servers, the radios that carry the signal when the power and the
+      towers go down. What you see on this page <em>is</em> the pitch: it's live, it's honest about
+      what it doesn't know, and anyone can verify or build on it. If a transparent, always-on data
+      lifeline for the central Sierra is worth having, help us keep it on.
+    </p>
+    <a class="btn-primary" href="https://sierragridteam.org/donate" rel="noopener">Donate</a>
+    <a class="btn-ghost" href="/docs.html">Read the API reference</a>
   </div>
 
   <div id="page-errors"></div>
@@ -74,174 +162,145 @@
 
 <script type="module">
   import { get, ApiError } from '/assets/api.js';
-  import { timeAgo, timeAbs, sourceDot } from '/assets/format.js';
+  import { timeAgo } from '/assets/format.js';
   import { initChrome } from '/assets/nav.js';
 
   initChrome('home');
-
   const $ = (id) => document.getElementById(id);
+  const el = (t, c, x) => { const n = document.createElement(t); if (c) n.className = c; if (x !== undefined) n.textContent = x; return n; };
+  const secs = (n) => (n == null ? '—' : n >= 3600 ? `${Math.round(n / 3600)}h` : n >= 60 ? `${Math.round(n / 60)}m` : `${n}s`);
 
-  function errorBlock(err) {
-    const div = document.createElement('div');
-    div.className = 'error-block';
-    const head = document.createElement('div');
-    head.textContent =
-      err instanceof ApiError
-        ? `Request failed (HTTP ${err.status || 'network error'}):`
-        : 'Request failed:';
-    const url = document.createElement('div');
-    url.className = 'error-url';
-    url.textContent = err instanceof ApiError ? `GET ${err.url}` : String(err.message || err);
-    div.append(head, url);
-    if (err instanceof ApiError && err.body && typeof err.body === 'object' && err.body.message) {
-      const msg = document.createElement('div');
-      msg.className = 'muted';
-      msg.textContent = err.body.message;
-      div.append(msg);
-    }
-    return div;
+  function errBlock(err) {
+    const d = el('div', 'error-block');
+    d.append('request failed. ');
+    d.append(err instanceof ApiError ? `GET ${err.url} → ${err.status || 'network error'}` : String(err.message || err));
+    return d;
   }
 
-  // ---- Source health: GET /v1/sources -----------------------------------
-  // Unhealthy sources first and loud; each dot titled with last_success_at.
-  const STATUS_ORDER = { UNAVAILABLE: 0, STALE: 1, UNKNOWN: 2, OK: 3 };
+  // ---- request primer (replay-it-yourself) ------------------------------
+  const SNIPPETS = {
+    curl: "curl -s https://data.sierragridteam.org/v1/events \\\n  | jq '.events[0]'",
+    fetch: "const r = await fetch(\n  'https://data.sierragridteam.org/v1/events'\n);\nconst { events } = await r.json();",
+    http: "GET /v1/events HTTP/1.1\nHost: data.sierragridteam.org\nAccept: application/json",
+  };
+  let snip = 'curl';
+  const setSnip = (k) => {
+    snip = k;
+    $('primer-code').textContent = SNIPPETS[k];
+    document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('on', t.dataset.snip === k));
+  };
+  document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => setSnip(t.dataset.snip)));
+  $('primer-copy').addEventListener('click', () => {
+    navigator.clipboard.writeText(SNIPPETS[snip]).then(() => {
+      $('primer-copy').textContent = 'copied';
+      setTimeout(() => ($('primer-copy').textContent = 'copy'), 1200);
+    });
+  });
+  setSnip('curl');
 
+  // ---- System status: GET /v1/sources -----------------------------------
   async function loadSources() {
-    const box = $('source-health');
+    const body = $('sources-body');
     try {
       const data = await get('/v1/sources');
       const sources = Array.isArray(data.sources) ? data.sources : [];
-      box.textContent = '';
-      if (sources.length === 0) {
-        const none = document.createElement('span');
-        none.className = 'muted';
-        none.textContent = 'No sources registered.';
-        box.append(none);
-        return;
+      const rank = { UNAVAILABLE: 0, STALE: 1, OK: 3 };
+      sources.sort((a, b) =>
+        (rank[String(a.status).toUpperCase()] ?? 2) - (rank[String(b.status).toUpperCase()] ?? 2) ||
+        String(a.id || a.name).localeCompare(String(b.id || b.name))
+      );
+      body.textContent = '';
+      if (!sources.length) {
+        const tr = el('tr'); const c = el('td', 'muted', 'No sources registered.'); c.colSpan = 6; tr.append(c); body.append(tr); return;
       }
-      const rank = (s) => STATUS_ORDER[String(s.status || '').toUpperCase()] ?? STATUS_ORDER.UNKNOWN;
-      sources.sort((a, b) => rank(a) - rank(b) || String(a.id).localeCompare(String(b.id)));
-
-      const unhealthy = sources.filter((s) => String(s.status || '').toUpperCase() !== 'OK');
-      if (unhealthy.length > 0) {
-        const warn = document.createElement('div');
-        warn.className = 'error-block';
-        warn.textContent =
-          `${unhealthy.length} source(s) unhealthy: ` +
-          unhealthy.map((s) => `${s.id || s.name || '?'} ${String(s.status || 'UNKNOWN').toUpperCase()}`).join(', ');
-        box.append(warn);
-      }
-
+      const nowS = Date.now() / 1000;
       for (const s of sources) {
-        const item = document.createElement('span');
-        item.className = 'status-item';
-        const dot = sourceDot(s.status);
-        dot.title = s.last_success_at
-          ? `last success ${timeAbs(s.last_success_at)} (${timeAgo(s.last_success_at)})`
-          : 'no successful fetch recorded';
-        const name = document.createElement('a');
-        name.href = '/sources.html';
-        name.textContent = s.id || s.name || '?';
-        item.append(name, dot);
-        if (s.last_error && String(s.status || '').toUpperCase() !== 'OK') {
-          item.title = s.last_error;
+        const st = String(s.status || '').toUpperCase() || 'UNKNOWN';
+        const tr = el('tr');
+
+        const nameCell = el('td');
+        const a = el('a', 'src', s.id || s.name || '?'); a.href = '/sources.html';
+        nameCell.append(a); tr.append(nameCell);
+
+        const stCell = el('td');
+        const stWrap = el('span', 'dot-status st-' + st);
+        stWrap.append(el('span', 'dot st-' + st), st);
+        stCell.append(stWrap); tr.append(stCell);
+
+        tr.append(el('td', undefined, secs(s.poll_interval_seconds)));
+        tr.append(el('td', undefined, s.last_success_at ? timeAgo(s.last_success_at) : '—'));
+
+        const fCell = el('td');
+        let frac = st === 'OK' ? 1 : st === 'STALE' ? 0.35 : 0;
+        if (s.last_success_at && s.stale_after_seconds) {
+          const age = nowS - new Date(s.last_success_at).getTime() / 1000;
+          frac = Math.max(0, Math.min(1, 1 - age / s.stale_after_seconds));
         }
-        box.append(item);
+        const bar = el('span', 'freshbar st-' + st);
+        const fill = el('span'); fill.style.width = Math.round(frac * 100) + '%';
+        bar.append(fill); fCell.append(bar); tr.append(fCell);
+
+        const errCell = el('td', 'num');
+        if (s.last_error && st !== 'OK') { errCell.textContent = '!'; errCell.title = s.last_error; errCell.style.color = 'var(--st-UNAVAILABLE)'; }
+        else { errCell.textContent = '—'; errCell.style.color = 'var(--text-dim)'; }
+        tr.append(errCell);
+
+        body.append(tr);
       }
     } catch (err) {
-      box.textContent = '';
-      box.append(errorBlock(err));
+      body.textContent = '';
+      const tr = el('tr'); const c = el('td'); c.colSpan = 6; c.append(errBlock(err)); tr.append(c); body.append(tr);
     }
   }
 
-  // ---- Area modes: /v1/places?kind=AREA then per-area summary ------------
+  // ---- Area mode + rollup: /v1/places?kind=AREA → summary ----------------
   async function loadAreas() {
-    const box = $('area-modes');
-    let places;
+    const box = $('area-body');
+    let places = [];
     try {
       const data = await get('/v1/places', { kind: 'AREA' });
       places = Array.isArray(data.places) ? data.places : [];
-    } catch (err) {
-      box.textContent = '';
-      box.append(errorBlock(err));
-      return;
-    }
+    } catch (err) { box.textContent = ''; box.append(errBlock(err)); return; }
+    if (!places.length) { box.textContent = 'No areas configured.'; return; }
+
+    const primary = places[0];
+    let summary = null;
+    try { summary = await get(`/v1/places/${encodeURIComponent(primary.slug || primary.id)}/summary`); }
+    catch (err) { box.textContent = ''; box.append(errBlock(err)); }
+
     box.textContent = '';
-    if (places.length === 0) {
-      const none = document.createElement('span');
-      none.className = 'muted';
-      none.textContent = 'No areas configured.';
-      box.append(none);
-      return;
+    const nameRow = el('div', 'row'); nameRow.style.gap = '12px';
+    const name = el('a', undefined, primary.name || primary.slug || '?');
+    name.href = `/places.html?place=${encodeURIComponent(primary.slug || primary.id)}`;
+    nameRow.append(name);
+
+    const s = (summary && summary.summary) || {};
+    if (summary) {
+      const mode = String(summary.mode || 'UNKNOWN').toUpperCase();
+      nameRow.append(el('span', 'state-pill mode-' + mode, mode));
     }
+    box.append(nameRow);
 
-    const generatedAts = [];
-    const results = await Promise.allSettled(
-      places.map((p) => get(`/v1/places/${encodeURIComponent(p.slug || p.id)}/summary`))
-    );
-
-    results.forEach((res, i) => {
-      const place = places[i];
-      const row = document.createElement('div');
-      row.className = 'status-item';
-
-      const name = document.createElement('a');
-      name.href = `/places.html?place=${encodeURIComponent(place.slug || place.id || '')}`;
-      name.textContent = place.name || place.slug || place.id || '?';
-      row.append(name);
-
-      if (res.status === 'rejected') {
-        row.append(errorBlock(res.reason));
-        box.append(row);
-        return;
-      }
-
-      const summary = res.value;
-      const mode = String(summary.mode || '').toUpperCase() || 'UNKNOWN';
-      const chip = document.createElement('span');
-      chip.className =
-        'chip ' + (['QUIET', 'WATCH', 'ACTIVE'].includes(mode) ? `mode-${mode}` : 'sev-unknown');
-      chip.textContent = mode;
-      row.append(chip);
-
-      // Evacuation status per the fail-loud contract: null is never all-clear.
-      const evac = document.createElement('span');
-      evac.className = 'small';
-      const s = summary.summary || {};
-      if (s.active_evacuations === null || s.active_evacuations === undefined) {
-        evac.classList.add('mono');
-        evac.style.color = 'var(--st-unavailable)';
-        evac.append('evacuations unknown — check ');
-        const link = document.createElement('a');
-        link.href = 'https://protect.genasys.com/search';
-        link.textContent = 'Genasys';
-        link.rel = 'noopener';
-        evac.append(link);
-      } else if (Number(s.active_evacuations) === 0) {
-        evac.className = 'small muted';
-        evac.textContent = 'no active evacuations reported (per Cal OES)';
-      } else {
-        evac.classList.add('mono');
-        evac.style.color = 'var(--st-unavailable)';
-        evac.style.fontWeight = '700';
-        evac.textContent = `${s.active_evacuations} active evacuation(s)`;
-      }
-      row.append(evac);
-
-      if (summary.generated_at) generatedAts.push(summary.generated_at);
-      box.append(row);
-    });
-
-    // Freshness line: oldest summary generated_at (the pessimistic read).
-    const fresh = $('freshness');
-    if (generatedAts.length > 0) {
-      generatedAts.sort();
-      const oldest = generatedAts[0];
-      fresh.textContent =
-        `Summaries generated ${timeAgo(oldest)} (${timeAbs(oldest)}); page loaded ${timeAbs(new Date().toISOString())}.`;
+    const ev = el('p', 'prose'); ev.style.margin = '9px 0 0'; ev.style.fontSize = '13px';
+    const evac = s.active_evacuations;
+    if (evac === null || evac === undefined) {
+      ev.style.color = 'var(--st-UNAVAILABLE)';
+      ev.append('Evacuation status unknown — Cal OES did not answer. Check ');
+      const g = el('a', undefined, 'Genasys'); g.href = 'https://protect.genasys.com/search'; g.rel = 'noopener'; ev.append(g, '.');
+    } else if (Number(evac) === 0) {
+      ev.textContent = 'No active evacuations reported (per Cal OES). Absence of a warning is reported explicitly — never inferred from an empty response.';
     } else {
-      fresh.textContent = `No summary freshness available; page loaded ${timeAbs(new Date().toISOString())}.`;
+      ev.style.color = 'var(--st-UNAVAILABLE)'; ev.style.fontWeight = '600';
+      ev.textContent = `${evac} active evacuation(s) — see the map.`;
     }
+    box.append(ev);
+
+    const counts = s.severity_counts || {};
+    const active = Object.values(counts).reduce((a, b) => a + (Number(b) || 0), 0);
+    const tiles = $('rollup').children;
+    tiles[0].firstChild.textContent = active || (summary ? '0' : '—');
+    tiles[2].firstChild.textContent = String(places.length);
+    tiles[3].firstChild.textContent = evac === null || evac === undefined ? '?' : String(evac);
   }
 
   loadSources();

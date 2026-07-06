@@ -11,43 +11,96 @@
 </head>
 <body>
 <main>
-  <h1>Places</h1>
-  <p>
-    Every event and summary in the Grid Info Service is scoped to a
-    <em>place</em> — an area, county, town, evacuation zone, corridor, or site.
-    Places are addressable by slug (<code class="inline">ebbetts-pass</code>) or id
-    (<code class="inline">county:calaveras-county</code>). This page is the directory,
-    the per-place detail view, and the resolve tester that answers
-    &ldquo;which places contain this point or address?&rdquo;
-  </p>
+  <div class="page-head">
+    <div>
+      <div class="hero-kicker">grid.v1 · place directory</div>
+      <h1>Places</h1>
+      <p class="lead">
+        Every event, alert, and summary in the Grid Info Service is scoped to a
+        <em>place</em> — an area, county, town, evacuation zone, or highway corridor.
+        Places are addressable by slug (<code class="inline">ebbetts-pass</code>) or by
+        <code class="inline">kind:slug</code> id (<code class="inline">county:calaveras-county</code>),
+        and <code class="inline">/resolve</code> turns a lat·lng or a street address into
+        the places that contain it, <strong>most-specific first</strong>. This is the live
+        directory, the per-place geometry, and the resolve tester — every row is a browser
+        fetch you can replay yourself.
+      </p>
+    </div>
+    <div class="badges">
+      <span class="chip chip-green">no key required</span>
+      <span class="chip chip-blue">CORS-open</span>
+    </div>
+  </div>
 
-  <section class="panel" aria-labelledby="endpoints-h">
-    <h3 id="endpoints-h">Endpoints</h3>
-    <dl class="kv">
-      <dt><code>GET /v1/places</code></dt>
-      <dd>Directory. Filters: <code>kind</code> (AREA, COUNTY, TOWN, EVAC_ZONE, CORRIDOR, SITE), <code>q</code> (name search). Try <a href="/v1/places?kind=COUNTY">/v1/places?kind=COUNTY</a>.</dd>
-      <dt><code>GET /v1/places/{place}</code></dt>
-      <dd>One place by slug or id, including geometry (base64 GeoJSON in <code>geometry.geojson</code>) and <code>parent_id</code>. Try <a href="/v1/places/ebbetts-pass">/v1/places/ebbetts-pass</a>.</dd>
-      <dt><code>GET /v1/places/resolve</code></dt>
-      <dd><code>?lat=&amp;lng=</code> or <code>?address=</code> &rarr; containing places, most-specific first (SITE &rarr; AREA). Try <a href="/v1/places/resolve?lat=38.0679&amp;lng=-120.5385">/v1/places/resolve?lat=38.0679&amp;lng=-120.5385</a>.</dd>
-    </dl>
+  <!-- endpoints reference -->
+  <div class="section-gap"></div>
+  <div class="section-head">
+    <div class="left">
+      <h2>Three ways in</h2>
+    </div>
+    <span class="cap">directory · detail · resolve</span>
+  </div>
+  <section class="card" aria-labelledby="endpoints-h">
+    <h3 id="endpoints-h" style="margin-top:0">Endpoints</h3>
+    <div style="display:flex;flex-direction:column;gap:16px;margin-top:12px;">
+      <div>
+        <span class="chip-get"><b>GET</b> /v1/places</span>
+        <p class="prose" style="margin:8px 0 0;font-size:13px;">
+          The directory. Filter by <code class="inline">kind</code>
+          (AREA, COUNTY, TOWN, EVAC_ZONE, CORRIDOR, SITE) or <code class="inline">q</code>
+          (name search). <a href="/v1/places?kind=COUNTY">Try&nbsp;?kind=COUNTY</a>.
+        </p>
+      </div>
+      <div>
+        <span class="chip-get"><b>GET</b> /v1/places/{place}</span>
+        <p class="prose" style="margin:8px 0 0;font-size:13px;">
+          One place by slug or id — geometry (base64 GeoJSON in
+          <code class="inline">geometry.geojson</code>), centroid, bbox, and
+          <code class="inline">parent_id</code>. <a href="/v1/places/ebbetts-pass">Try&nbsp;/ebbetts-pass</a>.
+        </p>
+      </div>
+      <div>
+        <span class="chip-get"><b>GET</b> /v1/places/resolve</span>
+        <p class="prose" style="margin:8px 0 0;font-size:13px;">
+          <code class="inline">?lat=&amp;lng=</code> or <code class="inline">?address=</code>
+          &rarr; the containing places, most-specific first (SITE&nbsp;&rarr;&nbsp;AREA).
+          <a href="/v1/places/resolve?lat=38.0679&amp;lng=-120.5385">Try&nbsp;a&nbsp;point</a>.
+        </p>
+      </div>
+    </div>
   </section>
 
+  <!-- selected place detail (hidden until a place is chosen) -->
   <section id="place-view" hidden aria-labelledby="place-name">
     <p class="small"><a href="/places.html">&larr; All places</a></p>
     <h2 id="place-name">Loading&hellip;</h2>
     <div id="place-detail"><span class="loading">Loading place&hellip;</span></div>
   </section>
 
+  <!-- directory grouped by kind -->
   <section id="directory-view" aria-labelledby="directory-h">
-    <h2 id="directory-h">Directory <span class="muted small">&mdash; <code class="inline">GET /v1/places</code></span></h2>
+    <div class="section-head">
+      <div class="left">
+        <h2 id="directory-h">Directory</h2>
+        <span class="chip-get"><b>GET</b> /v1/places</span>
+      </div>
+      <span class="cap">grouped by kind · most-specific to broadest</span>
+    </div>
     <div id="directory"><span class="loading">Loading /v1/places&hellip;</span></div>
   </section>
 
+  <!-- shared map + resolve tester -->
   <section id="resolve-section" aria-labelledby="resolve-h">
-    <h2 id="resolve-h">Resolve tester <span class="muted small">&mdash; <code class="inline">GET /v1/places/resolve</code></span></h2>
+    <div class="section-gap"></div>
+    <div class="section-head">
+      <div class="left">
+        <h2 id="resolve-h">Map &amp; resolve</h2>
+        <span class="chip-get"><b>GET</b> /v1/places/resolve</span>
+      </div>
+      <span class="cap">click the map · or enter a point / address</span>
+    </div>
     <p id="map-hint" class="small muted">Click anywhere on the map to resolve that point to its containing places.</p>
-    <div id="map" class="map-box" role="application" aria-label="Map. Click a point to resolve it to containing places."></div>
+    <div id="map" class="map-canvas" role="application" aria-label="Map. Click a point to resolve it to containing places."></div>
     <div class="filter-bar">
       <form id="point-form" class="row">
         <div class="field">

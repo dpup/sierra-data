@@ -221,30 +221,31 @@ export function initSourcesPage() {
     summaryBox.textContent = '';
     if (!state.sources) return;
     const counts = summarize(state.sources);
-    summaryBox.append(el('span', 'mono', `${counts.total} source${counts.total === 1 ? '' : 's'} — `));
+    summaryBox.append(
+      el('span', 'muted', `${counts.total} source${counts.total === 1 ? '' : 's'}`)
+    );
     const chips = [
       ['OK', `${counts.OK} ok`],
       ['STALE', `${counts.STALE} stale`],
       ['UNAVAILABLE', `${counts.UNAVAILABLE} unavailable`],
     ];
     if (counts.UNKNOWN > 0) chips.push(['UNKNOWN', `${counts.UNKNOWN} unknown`]);
-    chips.forEach(([status, label], i) => {
-      if (i > 0) summaryBox.append(el('span', 'muted mono', ', '));
-      const btn = el('button', `chip-filter st-${status}`, label);
+    chips.forEach(([status, label]) => {
+      const on = state.filter === status;
+      const btn = el('button', on ? 'pill on' : 'pill', label);
       btn.type = 'button';
-      btn.setAttribute('aria-pressed', state.filter === status ? 'true' : 'false');
-      btn.title =
-        state.filter === status
-          ? 'Click to clear this filter'
-          : `Show only ${status} sources (?status=${status})`;
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      btn.title = on
+        ? 'Click to clear this filter'
+        : `Show only ${status} sources (?status=${status})`;
       btn.addEventListener('click', () => setFilter(status));
       summaryBox.append(btn);
     });
     if (state.filter) {
-      const clear = el('button', 'chip-filter clear', 'clear filter');
+      const clear = el('button', 'pill', 'clear filter');
       clear.type = 'button';
       clear.addEventListener('click', () => setFilter(''));
-      summaryBox.append(el('span', 'muted mono', ' '), clear);
+      summaryBox.append(clear);
     }
   }
 
@@ -256,71 +257,111 @@ export function initSourcesPage() {
     const worst = normStatus(bad[0].status);
     const block = el('div', worst === 'UNAVAILABLE' ? 'error-block' : 'notice');
     block.setAttribute('role', 'alert');
+    // textContent: source ids/statuses rendered as plain text (fail-loud, safe).
     block.textContent =
-      `${bad.length} source${bad.length === 1 ? '' : 's'} degraded: ` +
-      bad.map((s) => `${s.id || s.name || '?'} ${normStatus(s.status)}`).join(', ');
+      `${bad.length} source${bad.length === 1 ? '' : 's'} degraded — ` +
+      bad.map((s) => `${s.id || s.name || '?'} ${normStatus(s.status)}`).join(', ') +
+      '. Their data may be stale or missing; absence is not an all-clear.';
     alertBox.append(block);
   }
 
   const COLUMNS = [
+    'Source',
     'Status',
-    'ID',
-    'Name',
     'Poll',
     'Last success',
-    'Last attempt',
+    'Freshness',
+    'Thresholds',
     'Last error',
-    'Attribution',
-    'Upstream',
   ];
+
+  /** Freshness fraction (1 = just fetched, 0 = at/over the stale threshold).
+   * Falls back to a status-derived level when thresholds are unknown. */
+  function freshFraction(s, status) {
+    const stale = Number(s.stale_after_seconds);
+    if (s.last_success_at && stale > 0) {
+      const age = Date.now() / 1000 - Date.parse(s.last_success_at) / 1000;
+      if (!Number.isNaN(age)) return Math.max(0, Math.min(1, 1 - age / stale));
+    }
+    return status === 'OK' ? 1 : status === 'STALE' ? 0.35 : 0;
+  }
 
   function renderRow(s) {
     const status = normStatus(s.status);
     const tr = el('tr', status === 'OK' ? '' : `row-${status}`);
 
+    // Source — name links to homepage_url when it's a real http(s) URL; the
+    // upstream id rides along as a muted code sub-line.
+    const srcTd = el('td');
+    const name = s.name || s.id || '—';
+    let nameEl;
+    if (isLinkableURL(s.homepage_url)) {
+      nameEl = el('a', 'src', name);
+      nameEl.href = s.homepage_url;
+      nameEl.rel = 'noopener';
+      nameEl.target = '_blank';
+      nameEl.title = s.homepage_url;
+    } else {
+      nameEl = el('span', 'src', name);
+    }
+    srcTd.append(nameEl);
+    if (s.id && s.id !== name) {
+      const sub = el('div', 'muted small');
+      sub.append(el('code', '', s.id));
+      srcTd.append(sub);
+    }
+    tr.append(srcTd);
+
+    // Status — colored dot + text label (color is never the only signal).
     const statusTd = el('td');
     statusTd.append(sourceDot(s.status));
     tr.append(statusTd);
 
-    const idTd = el('td');
-    idTd.append(el('code', '', s.id ?? '—'));
-    tr.append(idTd);
-
-    tr.append(el('td', 'wrap', s.name || '—'));
-
+    // Poll interval
     const pollTd = el('td', 'num', humanizeInterval(s.poll_interval_seconds));
     if (s.poll_interval_seconds !== undefined && s.poll_interval_seconds !== null) {
       pollTd.title = `${s.poll_interval_seconds}s`;
     }
     tr.append(pollTd);
 
-    for (const iso of [s.last_success_at, s.last_attempt_at]) {
-      const td = el('td');
-      if (iso) td.append(timeCell(iso));
-      else td.append(el('span', 'muted', 'never'));
-      tr.append(td);
+    // Last success — relative + absolute, with the last attempt as a sub-line
+    // so a source that is retrying but failing is visible.
+    const lastTd = el('td');
+    if (s.last_success_at) lastTd.append(timeCell(s.last_success_at));
+    else lastTd.append(el('span', 'muted', 'never'));
+    if (s.last_attempt_at && s.last_attempt_at !== s.last_success_at) {
+      const sub = el('div', 'muted small', `attempt ${timeAgo(s.last_attempt_at)}`);
+      sub.title = s.last_attempt_at;
+      lastTd.append(sub);
     }
+    tr.append(lastTd);
 
-    const errTd = el('td', 'wrap err-cell');
+    // Freshness bar — colored by status, filled by proximity to stale_after.
+    const freshTd = el('td');
+    const bar = el('span', `freshbar st-${status}`);
+    const fill = el('span');
+    fill.style.width = `${Math.round(freshFraction(s, status) * 100)}%`;
+    bar.append(fill);
+    freshTd.append(bar);
+    tr.append(freshTd);
+
+    // Thresholds — stale_after / expire_after.
+    const thTd = el('td', 'num');
+    thTd.append(el('span', '', `stale ${humanizeInterval(s.stale_after_seconds)}`));
+    thTd.append(el('div', 'muted small', `expire ${humanizeInterval(s.expire_after_seconds)}`));
+    thTd.title = 'stale_after / expire_after';
+    tr.append(thTd);
+
+    // Last error — prominent red cell when the source is not OK.
+    const errTd = el('td', 'wrap');
     if (s.last_error) {
+      errTd.classList.add('err-cell');
       errTd.textContent = truncate(s.last_error); // textContent: untrusted
       errTd.title = s.last_error;
+    } else {
+      errTd.append(el('span', 'muted', '—'));
     }
     tr.append(errTd);
-
-    tr.append(el('td', 'wrap muted', s.attribution || ''));
-
-    const linkTd = el('td');
-    if (isLinkableURL(s.homepage_url)) {
-      const a = el('a', '', hostOf(s.homepage_url));
-      a.href = s.homepage_url;
-      a.rel = 'noopener';
-      a.target = '_blank';
-      linkTd.append(a);
-    } else {
-      linkTd.append(el('span', 'muted', '—'));
-    }
-    tr.append(linkTd);
 
     return tr;
   }
@@ -338,7 +379,7 @@ export function initSourcesPage() {
       none.append(
         el('span', '', `No sources with status ${state.filter}. `),
         (() => {
-          const b = el('button', 'chip-filter clear', 'clear filter');
+          const b = el('button', 'pill', 'clear filter');
           b.type = 'button';
           b.addEventListener('click', () => setFilter(''));
           return b;
@@ -352,7 +393,8 @@ export function initSourcesPage() {
     const table = el('table', 'data-table');
     const thead = el('thead');
     const headRow = el('tr');
-    for (const c of COLUMNS) headRow.append(el('th', c === 'Poll' ? 'num' : '', c));
+    const numCols = new Set(['Poll', 'Thresholds']);
+    for (const c of COLUMNS) headRow.append(el('th', numCols.has(c) ? 'num' : '', c));
     thead.append(headRow);
     const tbody = el('tbody');
     for (const s of rows) tbody.append(renderRow(s));

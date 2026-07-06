@@ -457,7 +457,7 @@ export function initEventPage() {
       chipsEl.append(sevChip(ev.severity || 'INFO'));
       chipsEl.append(el('span', 'meta-chip mono', ev.status || 'EVENT_STATUS_UNSPECIFIED'));
       chipsEl.append(el('span', 'meta-chip mono', layerLabel(ev.layer || '')));
-      if (ev.enhancement) chipsEl.append(el('span', 'meta-chip ai-chip mono', 'AI-summarized'));
+      if (ev.enhancement) chipsEl.append(el('span', 'meta-chip ai-chip mono', 'AI-enhanced'));
 
       headlineEl.textContent = ev.headline || ev.id || '(no headline)';
       subEl.textContent = [ev.id, ev.category, ev.area_label].filter(Boolean).join(' · ');
@@ -537,7 +537,7 @@ export function initEventPage() {
         // square). renderMap holds that deferred work.
         var renderMap = null;
         if (decoded) {
-          const mapBox = el('div', 'map-box ed-map');
+          const mapBox = el('div', 'map-canvas');
           geomSec.body.append(mapBox);
           renderMap = () => {
             if (!renderEventMap(mapBox, decoded, bounds, ev.severity || 'INFO')) {
@@ -584,11 +584,11 @@ export function initEventPage() {
         const sec = section('AI enhancement', undefined);
         const badge = el('div', 'ai-badge');
         badge.append(
-          el('span', 'ai-badge-tag', 'AI-summarized'),
+          el('span', 'ai-badge-tag', 'AI-enhanced'),
           el(
             'span',
             'mono',
-            ` · ${enh.model || '(model unspecified)'} · fields: ` +
+            `${enh.model || '(model unspecified)'} · fields: ` +
               `${Array.isArray(enh.fields) && enh.fields.length ? enh.fields.join(', ') : '(unspecified)'}`
           )
         );
@@ -599,8 +599,21 @@ export function initEventPage() {
           sec.body.append(when);
         }
 
+        // Translate, never assert: the model rewrites the source text into plain
+        // language, it does not add facts. Verbatim original first, structured
+        // model output second, so the two can be checked against each other.
+        sec.body.append(
+          el(
+            'p',
+            'muted small',
+            'The model rewrites the source feed’s wording into plain language — it translates, it does not ' +
+              'add facts. The verbatim original is shown first; the structured model output follows, so you ' +
+              'can check one against the other.'
+          )
+        );
+
         // Verbatim original (spec §3.1) — always alongside the AI text.
-        sec.body.append(el('h3', '', 'Original text'));
+        sec.body.append(el('h3', '', 'Original text (verbatim, from the source)'));
         if (ev.description) {
           sec.body.append(el('pre', 'original-text', ev.description));
         } else {
@@ -613,7 +626,7 @@ export function initEventPage() {
         // deliberately not shown here — the original text above plus the
         // structured output is the useful before/after.
         if (enh.response) {
-          sec.body.append(el('h3', '', 'Model response'));
+          sec.body.append(el('h3', '', 'Model response (what the model returned)'));
           sec.body.append(el('pre', 'code', prettyJSON(enh.response)));
         } else {
           sec.body.append(

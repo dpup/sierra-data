@@ -4,110 +4,90 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>History — SIERRA Grid Data</title>
-  <meta name="description" content="Archive browser over GET /v1/history — chronological feed of event revisions for after-action review.">
+  <meta name="description" content="Archive browser over GET /v1/history — the chronological, replayable feed of event revisions for after-action review.">
   <link rel="stylesheet" href="/assets/app.css">
   <style>
-    /* Page-local styles for the revision feed. */
+    /* Page-local: the layer checkbox group, the request line, and the
+       day-separator row inside the revision table. All colors/sizes come
+       from app.css tokens — nothing here overrides the design system. */
     .layer-checks {
       display: flex;
       flex-wrap: wrap;
-      gap: 0.15rem 0.9rem;
+      gap: 4px 18px;
       max-width: 34rem;
     }
     .layer-check {
       display: inline-flex;
       align-items: center;
-      gap: 0.3rem;
+      gap: 6px;
       text-transform: none;
       letter-spacing: 0;
-      font-size: var(--fs-sm);
+      font-size: 12.5px;
       color: var(--text);
       cursor: pointer;
       white-space: nowrap;
     }
     .query-line {
+      display: flex;
+      align-items: baseline;
+      gap: 12px;
       font-family: var(--font-mono);
-      font-size: var(--fs-sm);
-      margin: 0.5rem 0 0.75rem;
+      font-size: 12px;
+      margin: 2px 0 14px;
       overflow-x: auto;
       white-space: nowrap;
     }
-    .feed {
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      background: var(--bg-raised);
-      margin-bottom: 0.75rem;
-    }
-    .day-sep {
-      position: sticky;
-      top: 0;
-      z-index: 2;
-      background: var(--bg-inset);
-      color: var(--text-dim);
+    /* Day break inside the revision table: a full-width subhead row. */
+    tr.day-sep td {
+      background: var(--bg-header);
+      color: var(--text-fainter);
       font-family: var(--font-mono);
-      font-size: var(--fs-xs);
+      font-size: 10px;
       font-weight: 600;
       text-transform: uppercase;
-      letter-spacing: 0.06em;
-      padding: 0.3rem 0.75rem;
-      border-top: 1px solid var(--border-strong);
-      border-bottom: 1px solid var(--border-strong);
-    }
-    .feed .day-sep:first-child {
-      border-top: none;
-    }
-    .rev-row {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: baseline;
-      gap: 0.35rem 0.8rem;
-      padding: 0.32rem 0.75rem;
-      border-bottom: 1px solid var(--border);
-      font-size: var(--fs-sm);
-    }
-    .rev-row:last-child {
-      border-bottom: none;
-    }
-    .rev-row:hover {
-      background: var(--bg-inset);
-    }
-    .rev-meta {
-      display: inline-flex;
-      gap: 0.8rem;
-      font-size: var(--fs-xs);
-      color: var(--text-dim);
+      letter-spacing: 0.11em;
+      padding: 7px 20px;
       white-space: nowrap;
     }
-    .rev-meta .rev-layer {
-      color: var(--text);
-    }
-    .rev-headline {
-      flex: 1 1 18rem;
-      min-width: 0;
-      overflow-wrap: anywhere;
-    }
-    .feed-foot {
+    .data-table td.rev-num { color: var(--text-faint); }
+    .data-table td.rev-status { color: var(--text-faint); }
+    .results-foot {
       display: flex;
       align-items: center;
-      gap: 1rem;
-      margin-bottom: 1.5rem;
+      gap: 16px;
+      margin-bottom: 24px;
     }
   </style>
 </head>
 <body>
 <main>
-  <h1>History — archive browser</h1>
-  <p>
-    Cross-event archive over
-    <code class="inline">GET /v1/history?place=&amp;layer=&amp;from=&amp;to=</code> —
-    every stored revision of every event in the time range, newest first: the
-    after-action review view. Filters map 1:1 to the endpoint's query
-    parameters and live in this page's URL, so a date-range view of an
-    incident's whole arc is a shareable permalink. Pagination follows
-    <code class="inline">next_page_token</code>. Timestamps are RFC&nbsp;3339;
-    the response is the snake_case protojson of
-    <code class="inline">grid.v1.EventRevisionList</code>
+  <div class="page-head">
+    <div>
+      <h1>History</h1>
+      <p class="lead">
+        The after-action record. Every state transition an event passes through —
+        a wildfire's acreage revised upward, a warning escalated, and the
+        <strong>all-clear written the moment an event leaves its feed</strong> — is
+        stored as its own immutable revision. This is the chronological, replayable
+        archive over a time range: absence is recorded as deliberately as onset, so
+        "nothing here now" is a fact you can trace back to the revision that made it
+        true — never inferred from an empty screen.
+      </p>
+    </div>
+    <div class="badges">
+      <span class="chip-get"><b>GET</b> /v1/history</span>
+    </div>
+  </div>
+
+  <p class="muted small" style="margin-top:12px;max-width:96ch;">
+    <code class="inline">GET /v1/history?place=&amp;layer=&amp;from=&amp;to=</code>
+    returns every stored revision of every event in the range, newest first — the
+    snake_case protojson of <code class="inline">grid.v1.EventRevisionList</code>
     (<code class="inline">revisions[].{revision, observed_at, ingested_at, event}</code>).
+    Filters map 1:1 to the query parameters and live in this page's URL, so a
+    date-range view of an incident's whole arc is a shareable permalink; paging
+    follows <code class="inline">next_page_token</code>. Timestamps are RFC&nbsp;3339;
+    days are grouped in UTC.
   </p>
 
   <div class="filter-bar">
@@ -138,8 +118,23 @@
 
   <div id="hist-query" class="query-line" aria-label="Request behind these results"></div>
 
-  <div id="hist-feed" class="feed" aria-live="polite"></div>
-  <div class="feed-foot">
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th style="width:150px">Observed</th>
+          <th style="width:96px">Severity</th>
+          <th style="width:132px">Layer</th>
+          <th class="num" style="width:64px">Rev</th>
+          <th style="width:96px">Status</th>
+          <th>Event</th>
+        </tr>
+      </thead>
+      <tbody id="hist-feed" aria-live="polite"></tbody>
+    </table>
+  </div>
+
+  <div class="results-foot">
     <button type="button" id="hist-more" hidden>Load more</button>
     <span id="hist-status" class="loading">Loading…</span>
   </div>

@@ -4,151 +4,94 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Event — SIERRA Grid Data</title>
-  <meta name="description" content="Event detail: full envelope and typed detail from GET /v1/events/{id}, geometry on a map, provenance, AI-enhancement badge with the verbatim original, and the revision timeline with client-side field diffs from GET /v1/events/{id}/history.">
+  <meta name="description" content="One event, unpacked to the metal: the full protojson envelope and typed detail from GET /v1/events/{id}, geometry on a map, provenance, the AI enhancement shown beside the verbatim original it was built from, and the complete revision timeline with client-side field diffs from GET /v1/events/{id}/history.">
   <link rel="stylesheet" href="/lib/maplibre-gl.css">
   <link rel="stylesheet" href="/assets/app.css">
   <style>
-    /* Page-local: header chip row, AI badge, revision cards + diff table,
-       raw toggles, request lines. */
-    .chip-row {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: 0.4rem;
-      margin-bottom: 0.4rem;
-    }
+    /* Page-local: meta chips, AI-enhancement panel, revision cards + diff
+       table, raw-protojson toggles, request lines. Everything else is the
+       shared design system in app.css. */
+
+    .crumb-back { margin-bottom: 14px; }
+
+    /* Neutral outlined chip for status / layer beside the severity badge. */
     .meta-chip {
-      font-size: var(--fs-xs);
-      border: 1px solid var(--border-strong);
-      border-radius: 2px;
-      padding: 0.1rem 0.5rem;
-      color: var(--text-dim);
+      font-size: 10.5px; letter-spacing: 0.04em; text-transform: uppercase;
+      border: 1px solid var(--border-input); border-radius: var(--radius-sm);
+      padding: 2px 7px; line-height: 1.4; color: var(--text-2);
     }
-    .ai-chip {
-      border-color: var(--accent);
-      color: var(--accent);
-    }
-    #ed-head h1 {
-      margin-bottom: 0.25rem;
-      overflow-wrap: anywhere;
-    }
-    .query-line {
-      font-family: var(--font-mono);
-      font-size: var(--fs-sm);
-      margin: 0.75rem 0 1rem;
-      overflow-x: auto;
-    }
+    .ai-chip { border-color: var(--grn-border-2); color: var(--grn); }
+
+    #ed-head { margin-bottom: 4px; }
+    #ed-head h1 { margin: 6px 0 6px; overflow-wrap: anywhere; }
+    #ed-lead { margin-top: 4px; }
+
+    /* The two GET lines that produced this page. */
+    .query-line { margin: 10px 0 4px; }
     .query-row {
-      display: flex;
-      align-items: baseline;
-      gap: 0.6rem;
-      padding: 0.12rem 0;
-      white-space: nowrap;
+      display: flex; align-items: baseline; gap: 10px;
+      padding: 3px 0; white-space: nowrap; overflow-x: auto;
+      font-family: var(--font-mono); font-size: 12.5px;
     }
 
-    .raw-toggle {
-      margin-top: 0.5rem;
-      font-family: var(--font-mono);
-      font-size: var(--fs-xs);
-    }
+    /* Raw-protojson disclosure at the foot of each section. */
+    .raw-toggle { margin-top: 12px; font-family: var(--font-mono); font-size: 11px; }
     .raw-toggle summary {
-      cursor: pointer;
-      color: var(--text-dim);
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
+      cursor: pointer; color: var(--text-dim); text-transform: uppercase;
+      letter-spacing: 0.09em; list-style: none;
     }
-    .raw-toggle[open] summary {
-      color: var(--accent);
-    }
-    .raw-toggle pre.code {
-      margin-top: 0.4rem;
-      max-height: 24rem;
-      overflow: auto;
-    }
+    .raw-toggle summary::-webkit-details-marker { display: none; }
+    .raw-toggle summary::before { content: "\25B8  "; color: var(--text-fainter); }
+    .raw-toggle[open] summary { color: var(--grn); }
+    .raw-toggle[open] summary::before { content: "\25BE  "; color: var(--grn); }
+    .raw-toggle pre.code { margin-top: 8px; max-height: 26rem; overflow: auto; }
 
-    .ed-map {
-      height: 20rem;
-      margin-top: 0.5rem;
-    }
-
+    /* AI enhancement — the model's structured output shown beside the verbatim
+       original. Green accent reads as "translation", never as authority. */
     .ai-badge {
-      display: inline-flex;
-      flex-wrap: wrap;
-      align-items: baseline;
-      gap: 0.15rem;
-      border: 1px solid var(--accent);
-      border-left-width: 4px;
-      border-radius: var(--radius);
-      background: color-mix(in srgb, var(--accent) 10%, var(--bg-raised));
-      padding: 0.35rem 0.7rem;
-      font-size: var(--fs-sm);
-      margin-bottom: 0.4rem;
+      display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 4px 9px;
+      border: 1px solid var(--grn-border); border-left: 3px solid var(--grn-line);
+      border-radius: var(--radius-sm);
+      background: color-mix(in srgb, var(--grn-bg) 70%, var(--bg-card));
+      padding: 7px 12px; font-size: 12px; margin: 4px 0 2px; color: var(--text-2);
     }
     .ai-badge-tag {
-      font-family: var(--font-mono);
-      font-weight: 700;
-      letter-spacing: 0.05em;
-      text-transform: uppercase;
-      font-size: var(--fs-xs);
-      color: var(--accent);
+      font-family: var(--font-mono); font-weight: 600; letter-spacing: 0.06em;
+      text-transform: uppercase; font-size: 10px; color: var(--grn);
     }
     .original-text {
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
-      font-family: var(--font-mono);
-      font-size: var(--fs-sm);
-      background: var(--bg-inset);
-      border: 1px solid var(--border);
-      border-left: 4px solid var(--border-strong);
-      border-radius: var(--radius);
-      padding: 0.55rem 0.75rem;
-      margin: 0.25rem 0 0.5rem;
+      white-space: pre-wrap; overflow-wrap: anywhere;
+      font-family: var(--font-mono); font-size: 12.5px; line-height: 1.6;
+      background: var(--bg-code); border: 1px solid var(--border);
+      border-left: 3px solid var(--border-input); border-radius: var(--radius-sm);
+      padding: 10px 13px; margin: 6px 0 12px; color: #cfe6da;
     }
 
-    .timeline {
-      display: flex;
-      flex-direction: column;
-      gap: 0.75rem;
-    }
+    /* Revision timeline. */
+    .timeline { display: flex; flex-direction: column; gap: 12px; }
     .rev-card {
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      background: var(--bg-inset);
-      padding: 0.55rem 0.75rem;
+      border: 1px solid var(--border); border-radius: var(--radius);
+      background: var(--bg-card); padding: 11px 14px;
     }
     .rev-card-head {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: baseline;
-      gap: 0.4rem 1rem;
-      margin-bottom: 0.35rem;
+      display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 16px;
+      margin-bottom: 8px;
     }
-    .diff-wrap {
-      margin-bottom: 0.25rem;
-      background: var(--bg-raised);
-    }
-    .diff-table td.diff-val {
-      max-width: 22rem;
-      overflow-wrap: anywhere;
-    }
-    .diff-kind {
-      font-family: var(--font-mono);
-      white-space: nowrap;
-    }
-    .k-added { color: var(--st-ok); }
-    .k-removed { color: var(--st-unavailable); }
-    .k-changed { color: var(--st-stale); }
-    .timeline-foot {
-      margin-top: 0.6rem;
-    }
+    .diff-wrap { margin: 4px 0; }
+    .diff-table td.diff-val { max-width: 22rem; overflow-wrap: anywhere; }
+    .diff-kind { font-family: var(--font-mono); white-space: nowrap; }
+    .k-added { color: var(--st-OK); }
+    .k-removed { color: var(--st-UNAVAILABLE); }
+    .k-changed { color: var(--st-STALE); }
+    .timeline-foot { margin-top: 12px; }
   </style>
 </head>
 <body>
 <main>
-  <p class="muted small mono"><a href="/events.html">&larr; events explorer</a></p>
+  <p class="crumb-back muted small mono"><a href="/events.html">&larr; events explorer</a></p>
 
   <div id="ed-errors"></div>
-  <div id="ed-loading" class="loading">Loading /v1/events/{id}…</div>
+  <div id="ed-loading" class="loading">Loading GET /v1/events/{id} &hellip;</div>
 
   <header id="ed-head" hidden>
     <div id="ed-chips" class="chip-row"></div>
@@ -156,6 +99,21 @@
     <div id="ed-sub" class="muted mono small"></div>
   </header>
 
+  <p class="lead" id="ed-lead">
+    One event, unpacked to the metal. Two live requests render everything below:
+    <code class="inline">/v1/events/{id}</code> for the current revision and
+    <code class="inline">&hellip;/history</code> for every prior one. You get the
+    full protojson envelope, the typed detail block, the geometry on a map,
+    provenance, and — where present — the AI enhancement shown <em>beside</em> the
+    verbatim source text it was built from. Nothing here is editorial: the model
+    translates, it never adds facts, and every revision is kept so you can watch
+    the record change. <strong>Replay either request yourself.</strong>
+  </p>
+
+  <div class="section-head" style="margin-top:22px;">
+    <div class="left"><h2>Requests behind this page</h2></div>
+    <span class="cap">two GETs &middot; replay either yourself</span>
+  </div>
   <div id="ed-query" class="query-line" aria-label="Requests behind this page"></div>
 
   <div id="ed-sections"></div>

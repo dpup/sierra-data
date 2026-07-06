@@ -4,71 +4,53 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Sources — SIERRA Grid Data</title>
-  <meta name="description" content="Feed-health board for the Grid Info Service: per-source poll intervals, last success/attempt, staleness state, and last error, live from GET /v1/sources.">
+  <meta name="description" content="The honest feed-health board for the Grid Info Service: per-source poll interval, last success, staleness, thresholds, and last error — live from GET /v1/sources. A failing feed says so; absence is never an all-clear.">
   <link rel="stylesheet" href="/assets/app.css">
   <style>
-    /* Page-scoped: non-OK row tinting (degradation must be impossible to miss)
-       and the summary-line filter chips. */
+    /* Page-scoped: non-OK row tinting so degradation is impossible to miss.
+       Tokens are the canonical --st-* status colors from app.css. */
     .data-table tr.row-STALE {
-      background: color-mix(in srgb, var(--st-stale) 9%, transparent);
+      background: color-mix(in srgb, var(--st-STALE) 8%, transparent);
     }
     .data-table tr.row-UNAVAILABLE {
-      background: color-mix(in srgb, var(--st-unavailable) 12%, transparent);
+      background: color-mix(in srgb, var(--st-UNAVAILABLE) 11%, transparent);
     }
-    .data-table tr.row-UNKNOWN {
-      background: color-mix(in srgb, var(--text-dim) 8%, transparent);
-    }
-    .data-table td.err-cell {
-      color: var(--st-unavailable);
-    }
-    .data-table td.wrap {
-      min-width: 10rem;
-      max-width: 24rem;
-    }
-
-    .summary-line {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: baseline;
-      gap: 0.35rem;
-      font-family: var(--font-mono);
-      font-size: var(--fs-base);
-      margin: 0.75rem 0;
-    }
-    .chip-filter {
-      font-family: var(--font-mono);
-      font-size: var(--fs-sm);
-      padding: 0.1rem 0.55rem;
-      border-radius: 999px;
-      border: 1px solid var(--border-strong);
-      background: var(--bg-raised);
-      cursor: pointer;
-    }
-    .chip-filter.st-OK { color: var(--st-ok); }
-    .chip-filter.st-STALE { color: var(--st-stale); }
-    .chip-filter.st-UNAVAILABLE { color: var(--st-unavailable); font-weight: 700; }
-    .chip-filter.st-UNKNOWN { color: var(--text-dim); }
-    .chip-filter.clear { color: var(--text-dim); }
-    .chip-filter[aria-pressed="true"] {
-      border-color: var(--accent);
-      box-shadow: inset 0 0 0 1px var(--accent);
-      background: var(--bg-inset);
-    }
+    .data-table td.err-cell { color: var(--st-UNAVAILABLE); }
   </style>
 </head>
 <body>
 <main>
-  <h1>Sources — feed health</h1>
-  <p>
-    Every upstream feed the Grid Info Service polls, with its poll interval,
-    last success/attempt, staleness state, and last error — live from
-    <code class="inline">GET /v1/sources</code>. Sorted unhealthy-first
-    (<span class="mono">UNAVAILABLE</span>, <span class="mono">STALE</span>,
-    then <span class="mono">OK</span>; longest-silent first within each group).
-    A browser tab on this page is the ops dashboard.
-  </p>
+  <div class="page-head">
+    <div>
+      <div class="hero-kicker">System status</div>
+      <h1>Sources</h1>
+      <p class="lead">
+        The board that makes the whole service trustworthy: every upstream feed
+        the Grid Info Service polls, reporting its own health out loud. For each
+        source you get the poll interval, the last successful fetch, how close it
+        is to going <span class="mono">STALE</span>, the staleness thresholds, and
+        the last error verbatim — the honest-freshness contract, exposed. A feed
+        that fails says so; <span class="accent-orange">absence of data is never
+        shown as an all-clear.</span> This whole page is one live fetch of
+        <code class="inline">/v1/sources</code> — replay it yourself.
+      </p>
+    </div>
+    <div class="badges">
+      <span class="chip chip-green">no key required</span>
+      <span class="chip chip-blue">CORS-open</span>
+    </div>
+  </div>
 
-  <div id="summary-line" class="summary-line" aria-live="polite"></div>
+  <div class="section-gap"></div>
+  <div class="section-head">
+    <div class="left">
+      <h2>Feed health</h2>
+      <span class="chip-get"><b>GET</b> /v1/sources</span>
+    </div>
+    <span class="cap">unhealthy first · poll → last success → freshness</span>
+  </div>
+
+  <div id="summary-line" class="chip-row" aria-live="polite"></div>
   <div id="degradation-alert"></div>
   <div id="page-errors"></div>
   <div id="board"><div class="loading">Loading /v1/sources…</div></div>

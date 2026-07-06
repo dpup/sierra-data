@@ -207,27 +207,39 @@ function errorBlock(err) {
   return div;
 }
 
-/** One feed row for an EventRevision (protojson, snake_case). */
+/** Full-width table row spanning all six columns (day separators, the empty
+ * notice, and error blocks all live inside the revision table body). */
+function spanRow(node) {
+  const tr = el('tr');
+  const td = el('td');
+  td.colSpan = 6;
+  td.append(node);
+  tr.append(td);
+  return tr;
+}
+
+/** One <tr> for an EventRevision (protojson, snake_case). Columns mirror the
+ * table header: Observed · Severity · Layer · Rev · Status · Event. */
 function revisionRow(rev) {
   const ev = rev.event || {};
-  const row = el('div', 'rev-row');
+  const row = el('tr', 'rev-row');
 
   // observed_at: revision-level stamp, falling back to the event's.
-  row.append(timeCell(rev.observed_at || ev.observed_at || ''));
+  const tdTime = el('td');
+  tdTime.append(timeCell(rev.observed_at || ev.observed_at || ''));
+  row.append(tdTime);
 
   // Default enum values are omitted by protojson: absent severity is INFO.
-  row.append(sevChip(ev.severity || 'INFO'));
+  const tdSev = el('td');
+  tdSev.append(sevChip(ev.severity || 'INFO'));
+  row.append(tdSev);
 
-  const meta = el('span', 'rev-meta mono');
-  meta.append(
-    el('span', 'rev-layer', layerLabel(ev.layer || '')),
-    // revision is a proto uint32; protojson omits 0.
-    el('span', 'rev-num', `rev ${rev.revision ?? 0}`),
-    el('span', 'rev-status muted', ev.status || '—')
-  );
-  row.append(meta);
+  row.append(el('td', 'mono', layerLabel(ev.layer || '')));
+  // revision is a proto uint32; protojson omits 0.
+  row.append(el('td', 'num rev-num', `r${rev.revision ?? 0}`));
+  row.append(el('td', 'rev-status', ev.status || '—'));
 
-  const head = el('span', 'rev-headline');
+  const head = el('td', 'wrap');
   if (ev.id) {
     const link = document.createElement('a');
     link.href = `/event.html?id=${encodeURIComponent(ev.id)}`;
@@ -378,7 +390,9 @@ export function initHistoryPage() {
       const key = dayKey(rev.observed_at || (rev.event && rev.event.observed_at));
       if (key !== lastDayKey) {
         lastDayKey = key;
-        feed.append(el('div', 'day-sep', dayLabel(key)));
+        const sep = spanRow(document.createTextNode(dayLabel(key)));
+        sep.className = 'day-sep';
+        feed.append(sep);
       }
       feed.append(revisionRow(rev));
       loadedCount++;
@@ -426,7 +440,7 @@ export function initHistoryPage() {
               '. Widen the time range or clear filters.'
           )
         );
-        feed.append(empty);
+        feed.append(spanRow(empty));
         statusEl.textContent = '0 revisions';
       } else {
         statusEl.textContent =
@@ -435,7 +449,7 @@ export function initHistoryPage() {
       statusEl.className = 'muted small mono';
     } catch (err) {
       // API error is never a blank page and never mistaken for "no data".
-      feed.append(errorBlock(err));
+      feed.append(spanRow(errorBlock(err)));
       statusEl.textContent = 'Request failed — see error above.';
       statusEl.className = 'small mono';
       moreBtn.hidden = true;

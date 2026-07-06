@@ -19,20 +19,22 @@ export function esc(s) {
     .replaceAll("'", '&#39;');
 }
 
-/** Canonical severity ramp (label → color). Order: worst first. */
+/** Canonical severity ramp (label → color). Order: worst first. These are the
+ * dark dev-console ramp values (brighter than print) — kept in sync with the
+ * --sev-* tokens in app.css and the map marker paint. */
 export const SEVERITY_COLORS = {
-  EXTREME: '#7f1d1d',
-  SEVERE: '#c2410c',
-  MODERATE: '#b45309',
-  MINOR: '#a16207',
-  INFO: '#6b7280',
+  EXTREME: '#e5544e',
+  SEVERE: '#e2673f',
+  MODERATE: '#d0a24a',
+  MINOR: '#6ba15a',
+  INFO: '#5aa6e8',
 };
 
-/** Source health colors (label → color). */
+/** Source health colors (label → color). In sync with --st-* in app.css. */
 export const STATUS_COLORS = {
-  OK: '#4ade80',
-  STALE: '#fbbf24',
-  UNAVAILABLE: '#f87171',
+  OK: '#3ec27f',
+  STALE: '#d0a24a',
+  UNAVAILABLE: '#e5544e',
 };
 
 /**

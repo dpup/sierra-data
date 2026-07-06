@@ -12,7 +12,7 @@
 // this module. All DOM work happens inside initEventsPage().
 
 import { get, apiURL, curlFor, ApiError } from '../api.js';
-import { timeCell, sevChip, layerLabel } from '../format.js';
+import { sevChip, layerLabel, timeAgo, timeAbs, SEVERITY_COLORS } from '../format.js';
 import { initChrome } from '../nav.js';
 
 /**
@@ -234,44 +234,105 @@ function errorBlock(err) {
   return div;
 }
 
-/** One results row for an Event (protojson, snake_case). */
-function eventRow(ev) {
-  const tr = document.createElement('tr');
+/**
+ * One results row for an Event (protojson, snake_case). Four columns:
+ * severity badge · two-line headline+subline (layer · area · relative time) ·
+ * source · r<rev>. Clicking the row runs `onSelect(ev, tr, sevColor)` to load
+ * the raw JSON into the inspector; the headline stays a deep link to the event
+ * detail page (stopPropagation so it navigates instead of inspecting).
+ * @param {Object} ev protojson Event
+ * @param {(ev:Object, tr:HTMLElement, sevColor:string)=>void} onSelect
+ */
+function eventRow(ev, onSelect) {
+  // protojson omits default enum values: absent severity is INFO.
+  const sev = String(ev.severity || 'INFO').toUpperCase();
+  const sevColor = SEVERITY_COLORS[sev] || 'var(--grn-line)';
+
+  const tr = el('tr', 'ev-row');
 
   const sevTd = document.createElement('td');
-  // protojson omits default enum values: absent severity is INFO.
-  sevTd.append(sevChip(ev.severity || 'INFO'));
+  sevTd.append(sevChip(sev));
   tr.append(sevTd);
 
   const headTd = el('td', 'wrap');
+  const head = el('div', 'ev-head');
   if (ev.id) {
     const link = document.createElement('a');
     link.href = `/event.html?id=${encodeURIComponent(ev.id)}`;
     link.textContent = ev.headline || ev.id; // textContent: upstream text is untrusted
-    headTd.append(link);
+    link.title = 'open event detail';
+    link.addEventListener('click', (e) => e.stopPropagation());
+    head.append(link);
   } else {
-    headTd.textContent = ev.headline || '(no headline)';
+    head.textContent = ev.headline || '(no headline)';
   }
+  const sub = el('div', 'ev-sub');
+  sub.append(document.createTextNode(layerLabel(ev.layer || '')));
+  sub.append(el('span', 'sep', ' · '));
+  sub.append(document.createTextNode(ev.area_label || '—'));
+  sub.append(el('span', 'sep', ' · '));
+  sub.append(document.createTextNode(timeAgo(ev.observed_at || '')));
+  sub.title = timeAbs(ev.observed_at || '');
+  headTd.append(head, sub);
   tr.append(headTd);
 
-  tr.append(el('td', '', layerLabel(ev.layer || '')));
-  tr.append(el('td', 'wrap', ev.area_label || '—'));
-  tr.append(el('td', 'mono', (ev.provenance && ev.provenance.source_id) || '—'));
-
-  const timeTd = document.createElement('td');
-  timeTd.append(timeCell(ev.observed_at || ''));
-  tr.append(timeTd);
-
+  tr.append(el('td', 'src', (ev.provenance && ev.provenance.source_id) || '—'));
   // revision is a proto uint32; protojson omits 0.
-  tr.append(el('td', 'num', String(ev.revision ?? 0)));
+  tr.append(el('td', 'num', 'r' + String(ev.revision ?? 0)));
 
+  tr._select = () => onSelect(ev, tr, sevColor);
+  tr.addEventListener('click', tr._select);
   return tr;
+}
+
+/** A syntax-highlight <span> (keys/strings/numbers/bools/punctuation). */
+function jspan(cls, text) {
+  const s = document.createElement('span');
+  s.className = cls;
+  s.textContent = text;
+  return s;
+}
+
+/**
+ * Pretty-print a value as syntax-colored JSON into a DocumentFragment, built
+ * entirely from text nodes and classed spans (never innerHTML). Keys, strings,
+ * numbers, and booleans/null are colored; whitespace and structural
+ * punctuation fall through to the .jpunc class.
+ * @param {*} value
+ * @returns {DocumentFragment}
+ */
+function highlightJSON(value) {
+  const frag = document.createDocumentFragment();
+  const text = JSON.stringify(value, null, 2);
+  if (text === undefined) {
+    frag.append(document.createTextNode(String(value)));
+    return frag;
+  }
+  const re = /("(?:\\.|[^"\\])*")(\s*:)?|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|\b(true|false|null)\b/g;
+  let last = 0;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) frag.append(jspan('jpunc', text.slice(last, m.index)));
+    if (m[1] !== undefined) {
+      const isKey = m[2] !== undefined;
+      frag.append(jspan(isKey ? 'jkey' : 'jstr', m[1]));
+      if (isKey) frag.append(jspan('jpunc', m[2]));
+    } else if (m[3] !== undefined) {
+      frag.append(jspan('jnum', m[3]));
+    } else if (m[4] !== undefined) {
+      frag.append(jspan('jbool', m[4]));
+    }
+    last = re.lastIndex;
+  }
+  if (last < text.length) frag.append(jspan('jpunc', text.slice(last)));
+  return frag;
 }
 
 /**
  * Wire up the /events page. Expects the element ids laid out in events.html
  * (ev-place, ev-layers, ev-status, ev-sev, ev-since, ev-size, ev-apply,
- * ev-query, ev-errors, ev-tbody, ev-empty, ev-more, ev-status-line).
+ * ev-reset, ev-qchips, ev-curl, ev-copyurl, ev-errors, ev-tbody, ev-empty,
+ * ev-more, ev-status-line, ev-insp-body).
  */
 export function initEventsPage() {
   initChrome('events');
@@ -284,34 +345,45 @@ export function initEventsPage() {
   const sinceInput = $('ev-since');
   const sizeSel = $('ev-size');
   const applyBtn = $('ev-apply');
-  const queryEl = $('ev-query');
+  const resetBtn = $('ev-reset');
+  const qchipsEl = $('ev-qchips');
+  const curlEl = $('ev-curl');
+  const copyUrlBtn = $('ev-copyurl');
   const errorsEl = $('ev-errors');
   const tbody = $('ev-tbody');
   const emptyEl = $('ev-empty');
   const moreBtn = $('ev-more');
   const statusLine = $('ev-status-line');
+  const inspBody = $('ev-insp-body');
 
   let state = readState(new URLSearchParams(location.search));
   let nextToken = '';
   let loadedCount = 0;
   let loading = false;
+  let lastReqUrl = '';
+  let selectedTr = null;
 
   // ---- controls ----------------------------------------------------
 
-  function makeChecks(box, values, checked, labelOf) {
+  // Layer and status are multi-select toggle pills (spec §2 /events): each
+  // pill is a button carrying its enum value; `.on` = selected.
+  function makePills(box, values, selected, labelOf) {
     for (const value of values) {
-      const label = el('label', 'opt-check');
-      const input = document.createElement('input');
-      input.type = 'checkbox';
-      input.value = value;
-      input.checked = checked.includes(value);
-      label.append(input, ' ', labelOf(value));
-      box.append(label);
+      const on = selected.includes(value);
+      const b = el('button', 'pill' + (on ? ' on' : ''), labelOf(value));
+      b.type = 'button';
+      b.dataset.value = value;
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      b.addEventListener('click', () => {
+        const now = b.classList.toggle('on');
+        b.setAttribute('aria-pressed', now ? 'true' : 'false');
+      });
+      box.append(b);
     }
   }
 
-  makeChecks(layersBox, LAYER_OPTIONS, state.layers, (v) => layerLabel(v));
-  makeChecks(statusBox, STATUS_OPTIONS, state.statuses, (v) => v);
+  makePills(layersBox, LAYER_OPTIONS, state.layers, (v) => layerLabel(v));
+  makePills(statusBox, STATUS_OPTIONS, state.statuses, (v) => v);
 
   const anySev = document.createElement('option');
   anySev.value = '';
@@ -385,17 +457,22 @@ export function initEventsPage() {
     }
   }
 
+  function setPill(b, on) {
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+  }
+
   function readControls() {
-    const statuses = [...statusBox.querySelectorAll('input:checked')].map((b) => b.value);
+    const statuses = [...statusBox.querySelectorAll('.pill.on')].map((b) => b.dataset.value);
     if (statuses.length === 0) {
-      // No boxes checked = the API default; reflect it back in the UI.
-      for (const box of statusBox.querySelectorAll('input[type=checkbox]')) {
-        box.checked = DEFAULT_STATUSES.includes(box.value);
+      // No pills lit = the API default; reflect it back in the UI.
+      for (const b of statusBox.querySelectorAll('.pill')) {
+        setPill(b, DEFAULT_STATUSES.includes(b.dataset.value));
       }
     }
     return {
       place: placeSel.value,
-      layers: [...layersBox.querySelectorAll('input:checked')].map((b) => b.value),
+      layers: [...layersBox.querySelectorAll('.pill.on')].map((b) => b.dataset.value),
       statuses: statuses.length ? statuses : [...DEFAULT_STATUSES],
       severityMin: sevSel.value,
       since: fromLocalInput(sinceInput.value) || '',
@@ -406,11 +483,11 @@ export function initEventsPage() {
 
   function syncControls() {
     placeSel.value = state.place;
-    for (const box of layersBox.querySelectorAll('input[type=checkbox]')) {
-      box.checked = state.layers.includes(box.value);
+    for (const b of layersBox.querySelectorAll('.pill')) {
+      setPill(b, state.layers.includes(b.dataset.value));
     }
-    for (const box of statusBox.querySelectorAll('input[type=checkbox]')) {
-      box.checked = state.statuses.includes(box.value);
+    for (const b of statusBox.querySelectorAll('.pill')) {
+      setPill(b, state.statuses.includes(b.dataset.value));
     }
     sevSel.value = state.severityMin;
     sinceInput.value = toLocalInput(state.since);
@@ -422,28 +499,129 @@ export function initEventsPage() {
     history.replaceState(null, '', qs ? `?${qs}` : location.pathname);
   }
 
-  // ---- results ------------------------------------------------------
+  // ---- query bar ----------------------------------------------------
 
-  function showQuery(params) {
-    const url = apiURL('/v1/events', params);
-    queryEl.textContent = '';
-    const code = el('code', 'inline', `GET ${url}`);
-    const copy = el('button', 'copy-btn', 'copy');
-    copy.type = 'button';
-    copy.addEventListener('click', () => {
-      navigator.clipboard.writeText(curlFor(url)).then(
-        () => {
-          copy.textContent = 'copied';
-          setTimeout(() => (copy.textContent = 'copy'), 1200);
-        },
-        () => {
-          copy.textContent = 'failed';
-        }
-      );
-    });
-    const curl = el('span', 'muted small mono', curlFor(url));
-    queryEl.append(code, ' ', copy, ' ', curl);
+  function absURL(url) {
+    return /^https?:\/\//.test(url) ? url : `https://data.sierragridteam.org${url}`;
   }
+
+  /**
+   * Removing a filter chip mutates state in place, resets pagination, mirrors
+   * the change back into the controls, rewrites the permalink, and re-runs the
+   * query from page one — the chip set is the live, editable query.
+   */
+  function removeFilter(mutate) {
+    mutate();
+    state.pageToken = '';
+    syncControls();
+    writeURL();
+    runQuery('', false);
+  }
+
+  /**
+   * Render the request behind the current results: the endpoint, one removable
+   * .qchip per active filter (status/layer repeat), and the copyable curl line.
+   * The default status set (ACTIVE,SCHEDULED) is omitted — it is the API's own
+   * default and never a chip, so the chips are exactly the URL's params.
+   */
+  function renderQueryBar(params) {
+    lastReqUrl = apiURL('/v1/events', params);
+    curlEl.textContent = curlFor(lastReqUrl);
+
+    qchipsEl.textContent = '';
+    const chip = (key, value, onRemove) => {
+      const c = el('span', 'qchip');
+      c.append(el('span', 'k', key + '='), document.createTextNode(value));
+      const x = el('span', 'x', '✕');
+      x.setAttribute('role', 'button');
+      x.setAttribute('tabindex', '0');
+      x.setAttribute('aria-label', `remove ${key}=${value} filter`);
+      x.title = `remove ${key} filter`;
+      x.addEventListener('click', onRemove);
+      x.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onRemove();
+        }
+      });
+      c.append(x);
+      qchipsEl.append(c);
+    };
+
+    if (state.place) {
+      chip('place', state.place, () => removeFilter(() => { state.place = ''; }));
+    }
+    for (const layer of state.layers) {
+      chip('layer', layer, () =>
+        removeFilter(() => {
+          state.layers = state.layers.filter((l) => l !== layer);
+        })
+      );
+    }
+    if (!isDefaultStatuses(state.statuses)) {
+      for (const st of state.statuses) {
+        chip('status', st, () =>
+          removeFilter(() => {
+            state.statuses = state.statuses.filter((s) => s !== st);
+            if (!state.statuses.length) state.statuses = [...DEFAULT_STATUSES];
+          })
+        );
+      }
+    }
+    if (state.severityMin) {
+      chip('severity_min', state.severityMin, () => removeFilter(() => { state.severityMin = ''; }));
+    }
+    if (state.since) {
+      chip('since', state.since, () => removeFilter(() => { state.since = ''; }));
+    }
+    if (state.pageSize) {
+      chip('page_size', state.pageSize, () => removeFilter(() => { state.pageSize = ''; }));
+    }
+    if (!qchipsEl.children.length) {
+      qchipsEl.append(el('span', 'qbar-hint', 'no filters · status defaults to ACTIVE,SCHEDULED'));
+    }
+  }
+
+  copyUrlBtn.addEventListener('click', () => {
+    navigator.clipboard.writeText(absURL(lastReqUrl)).then(
+      () => {
+        copyUrlBtn.textContent = 'copied';
+        setTimeout(() => (copyUrlBtn.textContent = 'copy url'), 1200);
+      },
+      () => {
+        copyUrlBtn.textContent = 'failed';
+      }
+    );
+  });
+
+  // ---- inspector ----------------------------------------------------
+
+  function inspectorPlaceholder() {
+    inspBody.textContent = '';
+    inspBody.append(
+      jspan(
+        'insp-placeholder',
+        'Select a row to inspect its raw grid.v1.Event JSON —\n' +
+          'the exact bytes GET /v1/events returned for that occurrence.'
+      )
+    );
+  }
+
+  function selectEvent(ev, tr, sevColor) {
+    if (selectedTr) {
+      selectedTr.classList.remove('ev-selected');
+      selectedTr.style.removeProperty('--row-sev');
+    }
+    selectedTr = tr;
+    tr.classList.add('ev-selected');
+    tr.style.setProperty('--row-sev', sevColor);
+    inspBody.textContent = '';
+    inspBody.append(highlightJSON(ev));
+  }
+
+  inspectorPlaceholder();
+
+  // ---- results ------------------------------------------------------
 
   /**
    * Fetch one page. `token` is the page_token to request ('' = first page);
@@ -460,18 +638,28 @@ export function initEventsPage() {
       emptyEl.textContent = '';
       loadedCount = 0;
       nextToken = '';
+      selectedTr = null;
+      inspectorPlaceholder();
     }
     errorsEl.textContent = '';
 
     const params = buildQuery(state, token);
-    showQuery(params);
+    renderQueryBar(params);
     statusLine.textContent = 'Loading /v1/events…';
     statusLine.className = 'loading';
 
     try {
       const data = await get('/v1/events', params);
       const events = Array.isArray(data.events) ? data.events : [];
-      for (const ev of events) tbody.append(eventRow(ev));
+      let firstRow = null;
+      for (const ev of events) {
+        const row = eventRow(ev, selectEvent);
+        if (!firstRow) firstRow = row;
+        tbody.append(row);
+      }
+      // Populate the inspector immediately with the top (highest-severity,
+      // newest) row, so the raw JSON is visible without a first click.
+      if (!append && firstRow) firstRow._select();
       loadedCount += events.length;
       nextToken = data.next_page_token || '';
       moreBtn.hidden = !nextToken;
@@ -481,12 +669,14 @@ export function initEventsPage() {
         // Distinct from an API error: the query succeeded, nothing matched.
         const empty = el('div', 'notice');
         empty.append(
-          el('div', 'mono', 'No events match.'),
+          el('div', 'mono', 'No events match — this is not an all-clear.'),
           el(
             'div',
             'muted small',
-            'The API responded OK but returned no events for these filters. ' +
-              'Loosen the status/severity filters, clear `since`, or widen the place.'
+            'The request succeeded (HTTP 200) and returned zero events for these ' +
+              'filters — an empty result, not a source failure. A failed feed surfaces ' +
+              'as an error above, never as a quiet empty table. Loosen the ' +
+              'status/severity filters, clear `since`, or widen the place.'
           )
         );
         emptyEl.append(empty);
@@ -515,6 +705,23 @@ export function initEventsPage() {
   applyBtn.addEventListener('click', () => {
     state = readControls();
     writeURL(); // the permalink is the artifact: Apply writes the full query
+    runQuery('', false);
+  });
+
+  resetBtn.addEventListener('click', () => {
+    // Clear layers/severity/since/place, restore the default status set, and
+    // rerun from page one — the canonical empty query.
+    state = {
+      place: '',
+      layers: [],
+      statuses: [...DEFAULT_STATUSES],
+      severityMin: '',
+      since: '',
+      pageSize: '',
+      pageToken: '',
+    };
+    syncControls();
+    writeURL();
     runQuery('', false);
   });
 

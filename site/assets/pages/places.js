@@ -192,7 +192,8 @@ export function placeRef(place) {
 
 const DEFAULT_CENTER = [-120.45, 38.1]; // central Sierra service area
 const DEFAULT_ZOOM = 8;
-const ACCENT = '#38bdf8';
+const ACCENT = '#5aa6e8'; // --blu: place geometry fill / outline
+const MARKER = '#7fdcab'; // --grn: dropped resolve pin (distinct from geometry)
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -306,7 +307,7 @@ export function initPlacesPage() {
 
   function setMarker(lng, lat) {
     if (!map) return;
-    if (!marker) marker = new maplibregl.Marker({ color: ACCENT });
+    if (!marker) marker = new maplibregl.Marker({ color: MARKER });
     marker.setLngLat([lng, lat]).addTo(map);
   }
 

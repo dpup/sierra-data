@@ -7,85 +7,94 @@
   <meta name="description" content="Reference for the Grid Info Service /v1 API: endpoints, the Event envelope, severity scale, place id scheme, GeoJSON layer contract, and the evacuation fail-loud contract.">
   <link rel="stylesheet" href="/assets/app.css">
   <style>
-    /* Page-local styles for the reference. app.css is the design system;
-       these only add docs-specific structure. */
+    /* Page-local structure for the reference. app.css is the design system and
+       owns every color/token; these rules only add docs-specific layout on top
+       of it — no new palette, only the locked custom properties. */
     .toc {
       font-family: var(--font-mono);
-      font-size: var(--fs-sm);
+      font-size: 12.5px;
       columns: 2;
       column-gap: 2rem;
-      margin: 0.5rem 0 1.5rem;
+      margin: 14px 0 26px;
       padding-left: 1.25rem;
+      color: var(--text-2);
     }
-    .toc li { margin: 0.15rem 0; break-inside: avoid; }
-    @media (max-width: 40rem) { .toc { columns: 1; } }
+    .toc li { margin: 3px 0; break-inside: avoid; }
+    @media (max-width: 640px) { .toc { columns: 1; } }
 
-    .endpoint-head {
-      font-family: var(--font-mono);
-      font-size: var(--fs-base);
-      margin-top: 1.5rem;
-    }
-    .endpoint-head .method { color: var(--st-ok); font-weight: 700; }
+    /* Endpoint heading: a GET /v1/... chip standing in for the h3, matching the
+       .chip-get idiom used across the portal (green GET, blue path). */
+    .endpoint-head { display: block; margin: 28px 0 8px; }
+    .endpoint-head .chip-get { font-size: 12.5px; }
 
-    .live-examples { margin: 0.25rem 0 1rem; }
+    /* Live example links — every one is a real, replayable GET into the API. */
+    .live-examples { margin: 4px 0 18px; }
     .live-examples a {
       display: inline-block;
       font-family: var(--font-mono);
-      font-size: var(--fs-xs);
-      background: var(--bg-inset);
-      border: 1px solid var(--border);
-      border-radius: 2px;
-      padding: 0.08rem 0.4rem;
-      margin: 0.12rem 0.25rem 0.12rem 0;
+      font-size: 11.5px;
+      color: var(--blu);
+      background: var(--blu-bg);
+      border: 1px solid var(--blu-border);
+      border-radius: var(--radius-sm);
+      padding: 2px 8px;
+      margin: 3px 5px 3px 0;
       word-break: break-all;
     }
-    .live-examples a::before { content: "GET "; color: var(--st-ok); }
-
-    .swatch {
-      display: inline-block;
-      width: 0.9rem;
-      height: 0.9rem;
-      border-radius: 2px;
-      vertical-align: -0.12rem;
-      margin-right: 0.4rem;
-      border: 1px solid var(--border-strong);
-    }
+    .live-examples a:hover { text-decoration: none; border-color: var(--grn-line); }
+    .live-examples a::before { content: "GET "; color: var(--grn); }
 
     /* The evac fail-loud contract gets the loudest chrome on the page. */
     .contract-callout {
-      border: 1px solid var(--st-unavailable);
-      border-left-width: 6px;
+      border: 1px solid var(--st-UNAVAILABLE);
+      border-left-width: 4px;
       border-radius: var(--radius);
-      background: color-mix(in srgb, var(--st-unavailable) 7%, var(--bg-raised));
-      padding: 0.9rem 1.1rem;
-      margin: 1rem 0 1.5rem;
+      background: color-mix(in srgb, var(--st-UNAVAILABLE) 7%, var(--bg-card));
+      padding: 18px 22px;
+      margin: 16px 0 24px;
     }
     .contract-callout > h2:first-child { margin-top: 0; }
     .contract-callout .invariant {
       font-family: var(--font-mono);
       font-weight: 700;
-      color: var(--text-loud);
-      font-size: var(--fs-lg);
-      margin: 0.25rem 0 0.75rem;
+      color: var(--text-hi);
+      font-size: 16px;
+      letter-spacing: 0.01em;
+      margin: 6px 0 12px;
     }
 
-    section[id] { scroll-margin-top: 1rem; }
+    section[id] { scroll-margin-top: 68px; }
     .backtop {
       font-family: var(--font-mono);
-      font-size: var(--fs-xs);
+      font-size: 11px;
       color: var(--text-dim);
     }
   </style>
 </head>
 <body>
 <main>
-  <h1>API reference — <code class="inline">/v1</code></h1>
-  <p>
-    The complete public contract of the Grid Info Service. Base URL:
-    <code class="inline">https://data.sierragridteam.org</code>. Every example
-    below is a live link into the running API — reading these docs is using the
-    API. The service is read-only, keyless, and CORS-open.
-  </p>
+  <div class="page-head">
+    <div>
+      <div class="hero-kicker">Grid Info Service · /v1</div>
+      <h1>API reference</h1>
+      <p class="lead">
+        The complete public contract of the Grid Info Service, on one page. Base URL
+        <code class="inline">https://data.sierragridteam.org</code> — everything lives
+        under <code class="inline">/v1/</code>. It is <strong>read-only, keyless, and
+        CORS-open</strong>: no registration, no token, nothing to sign. Every example
+        below is a live link into the running service, so <strong>reading these docs is
+        using the API</strong> — click any
+        <span class="chip-get"><b>GET</b> /v1/…</span> and you see the exact JSON your
+        client will get. And every feed answers honestly:
+        <span class="accent-orange">OK / STALE / UNAVAILABLE, never a fabricated
+        all-clear</span> — the honesty contract is written into §6, not bolted on.
+      </p>
+    </div>
+    <div class="badges">
+      <span class="chip chip-green">no key required</span>
+      <span class="chip chip-blue">CORS-open</span>
+    </div>
+  </div>
 
   <ol class="toc">
     <li><a href="#overview">1. Overview &amp; conventions</a></li>
@@ -160,7 +169,7 @@ Content-Type: application/json
     </p>
 
     <!-- ---- summary ---- -->
-    <h3 class="endpoint-head" id="ep-summary"><span class="method">GET</span> /v1/places/{place}/summary</h3>
+    <h3 class="endpoint-head" id="ep-summary"><span class="chip-get"><b>GET</b> /v1/places/{place}/summary</span></h3>
     <p>
       The workhorse: one fetch renders a "now" page for a place. Returns a
       hand-built JSON document (not a proto message) with the area
@@ -184,7 +193,7 @@ Content-Type: application/json
     </div>
 
     <!-- ---- map layers ---- -->
-    <h3 class="endpoint-head" id="ep-map"><span class="method">GET</span> /v1/places/{place}/map/{layer}.geojson</h3>
+    <h3 class="endpoint-head" id="ep-map"><span class="chip-get"><b>GET</b> /v1/places/{place}/map/{layer}.geojson</span></h3>
     <p>
       One RFC 7946 <code class="inline">FeatureCollection</code> per layer,
       ready for MapLibre / Leaflet / OpenLayers. The envelope is byte-identical
@@ -213,7 +222,7 @@ Content-Type: application/json
     </div>
 
     <!-- ---- events ---- -->
-    <h3 class="endpoint-head" id="ep-events"><span class="method">GET</span> /v1/events</h3>
+    <h3 class="endpoint-head" id="ep-events"><span class="chip-get"><b>GET</b> /v1/events</span></h3>
     <p>
       The cross-layer query: every discrete occurrence — wildfire, evacuation,
       weather alert, earthquake, road incident — through one surface. Returns
@@ -243,7 +252,7 @@ Content-Type: application/json
     </div>
 
     <!-- ---- event detail ---- -->
-    <h3 class="endpoint-head" id="ep-event"><span class="method">GET</span> /v1/events/{id}</h3>
+    <h3 class="endpoint-head" id="ep-event"><span class="chip-get"><b>GET</b> /v1/events/{id}</span></h3>
     <p>
       One <code class="inline">Event</code> (§3), current revision, as protojson.
       Ids are source-namespaced (<code class="inline">calfire:2026-salt-springs</code>,
@@ -255,7 +264,7 @@ Content-Type: application/json
       <a href="/v1/events?page_size=1">/v1/events?page_size=1</a><span class="muted small"> — grab a live id, then <code class="inline">GET /v1/events/{id}</code></span>
     </div>
 
-    <h3 class="endpoint-head" id="ep-event-history"><span class="method">GET</span> /v1/events/{id}/history</h3>
+    <h3 class="endpoint-head" id="ep-event-history"><span class="chip-get"><b>GET</b> /v1/events/{id}/history</span></h3>
     <p>
       The per-incident timeline: <code class="inline">EventRevisionList</code> —
       every revision of the event, newest first, each as
@@ -268,7 +277,7 @@ Content-Type: application/json
     </p>
 
     <!-- ---- history ---- -->
-    <h3 class="endpoint-head" id="ep-history"><span class="method">GET</span> /v1/history</h3>
+    <h3 class="endpoint-head" id="ep-history"><span class="chip-get"><b>GET</b> /v1/history</span></h3>
     <p>
       Cross-event archive and replay over all revisions — the after-action
       review query. Returns <code class="inline">EventRevisionList</code>.
@@ -290,7 +299,7 @@ Content-Type: application/json
     </div>
 
     <!-- ---- places ---- -->
-    <h3 class="endpoint-head" id="ep-places"><span class="method">GET</span> /v1/places &nbsp;·&nbsp; /v1/places/{place}</h3>
+    <h3 class="endpoint-head" id="ep-places"><span class="chip-get"><b>GET</b> /v1/places · /v1/places/{place}</span></h3>
     <p>
       The place directory (<code class="inline">PlaceList</code> /
       <code class="inline">Place</code>): areas, counties, towns, corridors —
@@ -307,7 +316,7 @@ Content-Type: application/json
       <a href="/v1/places/town:arnold">/v1/places/town:arnold</a>
     </div>
 
-    <h3 class="endpoint-head" id="ep-resolve"><span class="method">GET</span> /v1/places/resolve</h3>
+    <h3 class="endpoint-head" id="ep-resolve"><span class="chip-get"><b>GET</b> /v1/places/resolve</span></h3>
     <p>
       Point or address → containing places (<code class="inline">PlaceList</code>).
       Pass either <code class="inline">lat</code> + <code class="inline">lng</code>
@@ -325,7 +334,7 @@ Content-Type: application/json
     </div>
 
     <!-- ---- roads / weather ---- -->
-    <h3 class="endpoint-head" id="ep-roads"><span class="method">GET</span> /v1/roads &nbsp;·&nbsp; /v1/roads/{id}</h3>
+    <h3 class="endpoint-head" id="ep-roads"><span class="chip-get"><b>GET</b> /v1/roads · /v1/roads/{id}</span></h3>
     <p>
       <em>Conditions, not events</em>: travel time, congestion, chain control,
       and current alerts for the monitored corridors. The response shape is the
@@ -341,7 +350,7 @@ Content-Type: application/json
       <a href="/v1/roads/hwy4-arnold-bearvalley">/v1/roads/hwy4-arnold-bearvalley</a>
     </div>
 
-    <h3 class="endpoint-head" id="ep-weather"><span class="method">GET</span> /v1/weather &nbsp;·&nbsp; /v1/weather/{location}</h3>
+    <h3 class="endpoint-head" id="ep-weather"><span class="chip-get"><b>GET</b> /v1/weather · /v1/weather/{location}</span></h3>
     <p>
       Current weather conditions for the monitored locations, existing shape
       passed through (see the
@@ -356,7 +365,7 @@ Content-Type: application/json
     </div>
 
     <!-- ---- scanners / sources ---- -->
-    <h3 class="endpoint-head" id="ep-scanners"><span class="method">GET</span> /v1/scanners</h3>
+    <h3 class="endpoint-head" id="ep-scanners"><span class="chip-get"><b>GET</b> /v1/scanners</span></h3>
     <p>
       Broadcastify scanner-feed configuration (<code class="inline">ScannerList</code>)
       — link-out only, no audio rebroadcast. Filter with
@@ -366,7 +375,7 @@ Content-Type: application/json
       <a href="/v1/scanners?place=ebbetts-pass">/v1/scanners?place=ebbetts-pass</a>
     </div>
 
-    <h3 class="endpoint-head" id="ep-sources"><span class="method">GET</span> /v1/sources</h3>
+    <h3 class="endpoint-head" id="ep-sources"><span class="chip-get"><b>GET</b> /v1/sources</span></h3>
     <p>
       The provenance and health registry behind every
       <code class="inline">source_status</code> in the system
@@ -475,15 +484,20 @@ Content-Type: application/json
       — color is never the only signal.
     </p>
     <div class="table-wrap"><table class="data-table">
-      <thead><tr><th>Severity</th><th class="num">Rank</th><th>Color</th><th>Chip</th></tr></thead>
+      <thead><tr><th>Severity</th><th class="num">Rank</th><th>Color</th><th>Badge</th></tr></thead>
       <tbody>
-        <tr><td class="mono">EXTREME</td><td class="num">4</td><td class="mono"><span class="swatch" style="background:#7f1d1d"></span>#7f1d1d</td><td><span class="chip sev-EXTREME">EXTREME</span></td></tr>
-        <tr><td class="mono">SEVERE</td><td class="num">3</td><td class="mono"><span class="swatch" style="background:#c2410c"></span>#c2410c</td><td><span class="chip sev-SEVERE">SEVERE</span></td></tr>
-        <tr><td class="mono">MODERATE</td><td class="num">2</td><td class="mono"><span class="swatch" style="background:#b45309"></span>#b45309</td><td><span class="chip sev-MODERATE">MODERATE</span></td></tr>
-        <tr><td class="mono">MINOR</td><td class="num">1</td><td class="mono"><span class="swatch" style="background:#a16207"></span>#a16207</td><td><span class="chip sev-MINOR">MINOR</span></td></tr>
-        <tr><td class="mono">INFO</td><td class="num">0</td><td class="mono"><span class="swatch" style="background:#6b7280"></span>#6b7280</td><td><span class="chip sev-INFO">INFO</span></td></tr>
+        <tr><td class="mono">EXTREME</td><td class="num">4</td><td class="mono"><span class="swatch" style="background:var(--sev-EXTREME)"></span>#e5544e</td><td><span class="sev-badge sev-EXTREME">EXTREME</span></td></tr>
+        <tr><td class="mono">SEVERE</td><td class="num">3</td><td class="mono"><span class="swatch" style="background:var(--sev-SEVERE)"></span>#e2673f</td><td><span class="sev-badge sev-SEVERE">SEVERE</span></td></tr>
+        <tr><td class="mono">MODERATE</td><td class="num">2</td><td class="mono"><span class="swatch" style="background:var(--sev-MODERATE)"></span>#d0a24a</td><td><span class="sev-badge sev-MODERATE">MODERATE</span></td></tr>
+        <tr><td class="mono">MINOR</td><td class="num">1</td><td class="mono"><span class="swatch" style="background:var(--sev-MINOR)"></span>#6ba15a</td><td><span class="sev-badge sev-MINOR">MINOR</span></td></tr>
+        <tr><td class="mono">INFO</td><td class="num">0</td><td class="mono"><span class="swatch" style="background:var(--sev-INFO)"></span>#5aa6e8</td><td><span class="sev-badge sev-INFO">INFO</span></td></tr>
       </tbody>
     </table></div>
+    <p class="small muted">
+      Hexes are the canonical dark-console ramp
+      (<code class="inline">--sev-*</code> in the design system); the swatch is
+      only ever a second signal beside the always-present text label.
+    </p>
 
     <h3>Enum: EventStatus (lifecycle)</h3>
     <pre class="code">SCHEDULED ──▶ ACTIVE ──▶ RESOLVED   (upstream confirmed over)
@@ -657,6 +671,14 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
     <div class="contract-callout">
       <h2>6. The evacuation fail-loud contract</h2>
       <p class="invariant">An error never becomes a 0.</p>
+      <div class="fail-banner">
+        <strong>Absence ≠ all-clear.</strong> An empty evacuation response is not
+        a safe response. A source that errored returns
+        <code class="inline">null</code>, not <code class="inline">0</code> — and
+        your client must render <em>unknown</em>, never a blank and never a green
+        "no evacuations." This is a contractual obligation on every consumer, not
+        a styling suggestion.
+      </div>
       <p>
         Evacuation data is life-safety data, and it is <strong>reference
         only</strong>. This service surfaces the <em>presence</em> of orders
@@ -677,9 +699,9 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
       <div class="table-wrap"><table class="data-table">
         <thead><tr><th>active_evacuations</th><th>evacuation_status</th><th>Meaning</th><th>Required client rendering</th></tr></thead>
         <tbody>
-          <tr><td class="mono">null</td><td class="mono">UNAVAILABLE</td><td class="wrap">The Cal OES feed errored. <strong>Unknown — not zero.</strong></td><td class="wrap">"Evacuation status unknown — check <a href="https://protect.genasys.com/">Genasys Protect</a>" (or the <code>source_url</code> provided). Never an all-clear, never a blank.</td></tr>
-          <tr><td class="mono">0</td><td class="mono">OK</td><td class="wrap">Cal OES fetched cleanly and reports no active zones — a <em>caveated confirmed-empty</em>.</td><td class="wrap">"No active evacuations reported (per Cal OES)" — still linked to the source, never phrased as a guarantee.</td></tr>
-          <tr><td class="mono">n &gt; 0</td><td class="mono">OK / STALE</td><td class="wrap">Active zones exist (STALE = counted from the last good fetch).</td><td class="wrap">Show the count and the zones; if STALE, show data age.</td></tr>
+          <tr><td class="mono">null</td><td><span class="dot-status st-UNAVAILABLE"><span class="dot"></span>UNAVAILABLE</span></td><td class="wrap">The Cal OES feed errored. <strong>Unknown — not zero.</strong></td><td class="wrap">"Evacuation status unknown — check <a href="https://protect.genasys.com/">Genasys Protect</a>" (or the <code>source_url</code> provided). Never an all-clear, never a blank.</td></tr>
+          <tr><td class="mono">0</td><td><span class="dot-status st-OK"><span class="dot"></span>OK</span></td><td class="wrap">Cal OES fetched cleanly and reports no active zones — a <em>caveated confirmed-empty</em>.</td><td class="wrap">"No active evacuations reported (per Cal OES)" — still linked to the source, never phrased as a guarantee.</td></tr>
+          <tr><td class="mono">n &gt; 0</td><td><span class="dot-status st-OK"><span class="dot"></span>OK</span> / <span class="dot-status st-STALE"><span class="dot"></span>STALE</span></td><td class="wrap">Active zones exist (STALE = counted from the last good fetch).</td><td class="wrap">Show the count and the zones; if STALE, show data age.</td></tr>
         </tbody>
       </table></div>
       <p>
