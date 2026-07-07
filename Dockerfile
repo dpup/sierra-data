@@ -61,12 +61,19 @@ COPY --from=go-builder /app/api/v1/*.swagger.json /app/api/v1/
 # and source health survive container replacement; prod mounts a persistent
 # filesystem (EFS) here. The store defaults to the TRUNCATE journal mode, which
 # works over NFS/EFS (WAL's -shm is memory-mapped and does not) — override with
-# PF__GRID__JOURNALMODE if the mount is a real local disk. Owned by sierra so the
+# PF__GRID__JOURNAL_MODE if the mount is a real local disk. Owned by sierra so the
 # db + rollback journal can be created (the runtime mount must also be writable
 # by this user — see docs when provisioning the volume).
 RUN mkdir -p /data && chown sierra:sierra /data
 VOLUME ["/data"]
-ENV PF__GRID__DBPATH=/data/grid.db
+# The env var name MUST be PF__GRID__DB_PATH, not PF__GRID__DBPATH. prefab's
+# transformEnv maps PF__GRID__DB_PATH -> grid.dbPath (the "_" in DB_PATH is what
+# reconstructs the camelCase "dbPath" config key). Without it the var maps to
+# grid.dbpath, which never overrides grid.dbPath, so the store silently falls
+# back to prefab.yaml's relative "./data/grid.db" (= /app/data/grid.db on the
+# ephemeral layer) instead of this EFS mount — and all events/history are lost
+# on every task replacement. Same rule for PF__GRID__JOURNAL_MODE (-> journalMode).
+ENV PF__GRID__DB_PATH=/data/grid.db
 
 # Set ownership to the non-root user
 RUN chown -R sierra:sierra /app
