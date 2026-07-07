@@ -170,7 +170,7 @@ type NWSConfig struct {
 	// UserAgent identifies the app to api.weather.gov (required by NWS).
 	UserAgent string `koanf:"userAgent"`
 	// Zones is the set of NWS forecast zones covering the service area
-	// (e.g. CAZ064, CAZ065, CAZ258, CAZ259).
+	// (e.g. CAZ137, CAZ138, CAZ139 — verify with api.weather.gov/points).
 	Zones []string `koanf:"zones"`
 }
 

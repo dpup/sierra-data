@@ -152,61 +152,66 @@ weather:
   # (no API key). See https://www.weather.gov/documentation/services-web-api
   nws:
     userAgent: "The Grid / S.I.E.R.R.A (https://data.sierragridteam.org)"
+    # NWS Sacramento (STO) elevation-banded zones covering the Calaveras &
+    # Tuolumne service area. NOTE: verify any zone with
+    # api.weather.gov/points/{lat},{lng} — the previous codes (CAZ064/065/258/259)
+    # were wrong: CAZ065 is "San Gorgonio Pass Near Banning" (SoCal, office SGX)
+    # and leaked an Extreme Heat Warning; CAZ258/259 don't exist.
     zones:
-      - CAZ064   # Calaveras foothills
-      - CAZ065   # Calaveras mountains
-      - CAZ258   # Tuolumne foothills
-      - CAZ259   # Tuolumne mountains
+      - CAZ137   # Southern Motherlode 1000-3000 ft (Calaveras/Tuolumne foothills)
+      - CAZ138   # Sierra Nevada of Calaveras & Tuolumne 3000-5000 ft
+      - CAZ139   # Sierra Nevada of Calaveras-Tuolumne-S. Alpine above 5000 ft
 
   # Each location costs one /data/2.5/weather call per refresh interval (see
   # budget note above) — adding locations scales API usage linearly.
   # `zone` is the NWS forecast zone containing the location (must be listed in
   # nws.zones above); it scopes which NWS alerts attach to the location.
-  # Assignments are elevation-based: foothill towns → CAZ064/258, mountain
-  # towns → CAZ065/259.
+  # Assignments are elevation-based: 1000-3000 ft → CAZ137, 3000-5000 ft →
+  # CAZ138, above 5000 ft → CAZ139 (each verified via api.weather.gov/points).
   locations:
     - id: "murphys"
       name: "Murphys, CA"
-      zone: "CAZ064"
+      zone: "CAZ137"
       coordinates:
         latitude: 38.139117
         longitude: -120.456111
     - id: "arnold"
       name: "Arnold, CA"
-      zone: "CAZ065"
+      zone: "CAZ138"
       coordinates:
         latitude: 38.265006
         longitude: -120.333654
     - id: "bearvalley"
       name: "Bear Valley, CA"
-      # Bear Valley sits just over the Alpine County line; CAZ065 (Calaveras
-      # mountains) is the nearest configured zone and shares its weather.
-      zone: "CAZ065"
+      # Bear Valley is just over the Alpine County line at ~7000 ft; CAZ139
+      # (Sierra Nevada of Calaveras-Tuolumne-S. Alpine above 5000 ft) is the
+      # zone NWS /points returns for it.
+      zone: "CAZ139"
       coordinates:
         latitude: 38.461045
         longitude: -120.042368
     # Hwy 49 / Tuolumne corridor towns (issue #6).
     - id: "sonora"
       name: "Sonora, CA"
-      zone: "CAZ258"
+      zone: "CAZ137"
       coordinates:
         latitude: 37.984100
         longitude: -120.382700
     - id: "columbia"
       name: "Columbia, CA"
-      zone: "CAZ258"
+      zone: "CAZ137"
       coordinates:
         latitude: 38.034900
         longitude: -120.401600
     - id: "twainharte"
       name: "Twain Harte, CA"
-      zone: "CAZ259"
+      zone: "CAZ138"
       coordinates:
         latitude: 38.038300
         longitude: -120.229400
     - id: "dorrington"
       name: "Dorrington, CA"
-      zone: "CAZ065"
+      zone: "CAZ139"
       coordinates:
         latitude: 38.333800
         longitude: -120.271300
@@ -232,8 +237,8 @@ hazards:
       incidentArea: "mother-lode"   # reuse the roads incidents region filter
       # NWS forecast zones this area covers — scopes the weather_alert and
       # fire_weather layers (which carry zones, not coordinates). The Hwy 4 + Hwy
-      # 49 corridor spans Calaveras and Tuolumne, so all four service zones apply.
-      zones: ["CAZ064", "CAZ065", "CAZ258", "CAZ259"]
+      # 49 corridor spans Calaveras and Tuolumne across the elevation bands.
+      zones: ["CAZ137", "CAZ138", "CAZ139"]
       # Evacuation zones are filtered by the bounds above (spatial query), so any
       # in-area zone is caught regardless of which county Cal OES tags it to.
       scannerFeeds:

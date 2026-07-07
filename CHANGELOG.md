@@ -11,6 +11,25 @@ camelCase). As of 2026-07-05 there is a second, first-principles surface at
 `/v1/...` (field names snake_case — protojson `UseProtoNames`); both run on the
 same binary over the same store (see the 2026-07-05 entry and its migration plan).
 
+## 2026-07-07
+
+### Fixed — weather alerts were scoped to the wrong NWS zones (out-of-area alerts)
+
+The configured NWS forecast zones were incorrect, so `weather_alert` events (and
+the `fire_weather` classification) covered the wrong geography. `CAZ065` — used
+for Calaveras mountain towns — is actually **"San Gorgonio Pass Near Banning"**
+(a Southern California zone, NWS San Diego), which leaked an Extreme Heat Warning
+into the central-Sierra service area; `CAZ258/259` (labeled Tuolumne) don't
+exist. Corrected to the NWS Sacramento (STO) elevation-banded zones that actually
+cover Calaveras & Tuolumne, each verified against `api.weather.gov/points`:
+`CAZ137` (1000–3000 ft), `CAZ138` (3000–5000 ft), `CAZ139` (above 5000 ft).
+
+Effect on consumers: out-of-area (SoCal) weather alerts stop appearing on
+`/v1/events?layer=weather_alert`, `/api/v1/weather/alerts`, the map
+`weather_alert` layer, and per-location `alerts`; real Motherlode/Sierra alerts
+are now scoped correctly. Config-only change (`prefab.yaml`); no field or shape
+changes.
+
 ## 2026-07-06
 
 ### Changed — evacuation `source_url` now deep-links into the specific Genasys zone

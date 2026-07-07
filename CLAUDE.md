@@ -232,7 +232,11 @@ export PF__GRID__DBPATH=/data/grid.db
 **National Weather Service** (`api.weather.gov`):
 - Authoritative zone alerts (watches/warnings) and fire-weather products
 - No API key; requires a descriptive `User-Agent` (`weather.nws.userAgent`)
-- Zones for the service area: CAZ064/065 (Calaveras), CAZ258/259 (Tuolumne)
+- Zones for the service area (NWS Sacramento/STO, elevation-banded, cover both
+  Calaveras & Tuolumne): CAZ137 (1000–3000 ft), CAZ138 (3000–5000 ft), CAZ139
+  (above 5000 ft). Always verify a zone with `api.weather.gov/points/{lat},{lng}`
+  — do NOT guess codes (the old CAZ064/065/258/259 were wrong; CAZ065 is a SoCal
+  zone that leaked out-of-area alerts).
 - Powers `/weather/alerts` zone alerts and the `fire_weather` classification
 
 **OpenAI API** (Optional):
@@ -271,7 +275,7 @@ breaking change with a migration note.
 - `GET /api/v1/weather` - Current weather for all configured locations (each includes a `fire_weather` classification)
 - `GET /api/v1/weather/{location_id}` - Get specific location weather
 - `GET /api/v1/weather/alerts` - Active weather alerts (authoritative NWS zone alerts, `source: NWS`; OpenWeatherMap alerts removed 2026-07-04)
-- `GET /api/v1/weather/alerts?zones=CAZ064,CAZ065` - Filter to alerts in specific forecast zones
+- `GET /api/v1/weather/alerts?zones=CAZ137,CAZ138` - Filter to alerts in specific forecast zones
 - Returns: Temperature, conditions, visibility, wind, alerts, fire-weather state
 - Per-location `alerts` are the NWS alerts for the location's configured `zone` (prefab.yaml)
 
