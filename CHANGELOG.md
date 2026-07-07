@@ -13,6 +13,19 @@ same binary over the same store (see the 2026-07-05 entry and its migration plan
 
 ## 2026-07-07
 
+### Added — MCP endpoint for LLM agents at `/mcp`
+
+A read-only Model Context Protocol server (Streamable HTTP, JSON-RPC 2.0) exposes
+the `/v1` data to LLM agents (`docs/mcp-design.md`). Eight tools —
+`grid_situation`, `grid_events`, `grid_event`, `grid_conditions`, `grid_resolve`,
+`grid_places`, `grid_sources`, `grid_history` — plus a reference resource and a
+`hazard_briefing` prompt. It's a thin in-process adapter over `/v1`: geometry is
+stripped for token efficiency (a compact `location` centroid/bbox replaces it),
+and the fail-loud honesty contract is preserved (per-source status, evacuation
+`null`-vs-`0`, a reference-only disclaimer on every result). Tools accept a place
+slug, an address, or `lat,lng`. Read-only and unauthenticated, like the rest of
+the API. `GET /mcp` returns 405 (no server→client stream); clients POST JSON-RPC.
+
 ### Changed — wildfire severity now factors in fire size, not just containment
 
 Wildfire `severity` was derived from containment percentage alone, which capped

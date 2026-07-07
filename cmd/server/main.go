@@ -27,6 +27,7 @@ import (
 	"github.com/dpup/sierra-data/internal/hazards"
 	"github.com/dpup/sierra-data/internal/ingest"
 	"github.com/dpup/sierra-data/internal/lib/alerts"
+	"github.com/dpup/sierra-data/internal/mcp"
 	"github.com/dpup/sierra-data/internal/places"
 	"github.com/dpup/sierra-data/internal/services"
 	"github.com/dpup/sierra-data/internal/store"
@@ -142,6 +143,10 @@ func main() {
 	censusClient := census.NewClient()
 	gridapiService := gridapi.NewService(gridStore, roadsService, weatherService, censusClient, appConfig, hazardsService)
 
+	// MCP endpoint (docs/mcp-design.md): read-only tools for LLM agents over
+	// Streamable HTTP, adapting the /v1 surface in-process.
+	mcpHandler := mcp.NewHandler(gridapiService)
+
 	// Create Prefab server with GRPC reflection enabled
 	// Server configuration (port, etc.) will be loaded from prefab.yaml/env vars
 	server := prefab.New(
@@ -152,6 +157,7 @@ func main() {
 		prefab.WithHTTPHandlerFunc(hazards.ScannersPrefix, hazardsService.ServeScanners),
 		prefab.WithHTTPHandlerFunc(hazards.SituationPrefix, hazardsService.ServeSituation),
 		prefab.WithHTTPHandler(gridapi.HandlerPrefix, gridapiService),
+		prefab.WithHTTPHandlerFunc("/mcp", mcpHandler.ServeHTTP),
 		prefab.WithHTTPHandlerFunc("/", siteHandler),
 		prefab.WithHTTPHandlerFunc("/api/docs/roads.swagger.json", openAPIHandler("api/v1/roads.swagger.json")),
 		prefab.WithHTTPHandlerFunc("/api/docs/weather.swagger.json", openAPIHandler("api/v1/weather.swagger.json")),

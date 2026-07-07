@@ -1,4 +1,7 @@
-# MCP endpoint design (scoping — not built yet)
+# MCP endpoint design
+
+**Status: implemented** at `/mcp` (`internal/mcp`), all phases. This doc is the
+design of record; the notes below describe what shipped.
 
 How The Grid would expose its hazard/roads/weather data to LLM agents via the
 Model Context Protocol (MCP). The service is read-only and unauthenticated, so
