@@ -1,5 +1,5 @@
 # Live Data API Server - Build, Test, and Deployment Tasks
-.PHONY: build test proto clean server tools site site-install site-dev site-shots run dev lint fmt docker docker-build docker-run docker-run-dev docker-push docker-clean deploy install help
+.PHONY: build test proto clean server tools site site-install site-dev site-shots check-site run dev lint fmt docker docker-build docker-run docker-run-dev docker-push docker-clean deploy install help
 
 # Go parameters
 GOCMD=go
@@ -87,6 +87,20 @@ site-dev:
 site-shots:
 	cd tools/screenshots && NODE_PATH=$$(npm root -g) \
 		BASE_URL=$(or $(BASE_URL),http://localhost:8190) LABEL=$(or $(LABEL),current) node shots.mjs
+
+# Guard against deploying a stale site. The Docker image embeds the COMMITTED
+# site/dist (the image build is deliberately Node-free), so a change under web/
+# that wasn't rebuilt+committed would ship silently stale. This rebuilds the
+# site and fails if the committed site/dist drifted from source — run it before
+# building the deploy image (it's a docker-build prerequisite). Needs Node (the
+# build host has it); the image build itself still never runs Node.
+check-site:
+	@$(MAKE) --no-print-directory site >/dev/null
+	@git diff --quiet -- site/dist || { \
+		echo "❌ site/dist is stale — run 'make site' and commit before deploying:"; \
+		git --no-pager diff --stat -- site/dist; \
+		exit 1; }
+	@echo "✅ site/dist is in sync with web/ source"
 
 # Generate protobuf code
 # Note: googleapis is a proto-only module (no Go code), so we download it explicitly with @latest.
@@ -302,7 +316,7 @@ docker: docker-build
 # Depends on `proto` (regenerate the committed *.pb.go so the image is built
 # from code matching the current .proto) and `test` (never build/deploy a red
 # tree). The image itself only compiles - it does not regenerate or test.
-docker-build: proto test
+docker-build: proto test check-site
 	@echo "Building Docker image: $(DOCKER_IMAGE_NAME):$(DOCKER_TAG)"
 	docker build \
 		--platform linux/amd64 \
@@ -433,6 +447,7 @@ help:
 	@echo "  site        - Build the static site (Astro, web/ → site/dist; commit the output)"
 	@echo "  site-dev    - Run the Astro dev server (hot reload)"
 	@echo "  site-shots [BASE_URL=url] [LABEL=tag] - Screenshot + layout metrics of a running site (Playwright)"
+	@echo "  check-site  - Fail if committed site/dist drifted from web/ source (docker-build prerequisite)"
 	@echo "  clean       - Clean build artifacts"
 	@echo ""
 	@echo "Testing targets:"
