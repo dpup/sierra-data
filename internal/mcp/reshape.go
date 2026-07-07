@@ -8,26 +8,33 @@ import "encoding/json"
 // evacuation_status/active_evacuations, provenance/source_url, canonical_url)
 // are always preserved.
 
+// geometryToLocation replaces an object's base64 `geometry` with a compact
+// `location` (centroid + bbox). Shared by leanEvent and leanPlace.
+func geometryToLocation(obj map[string]interface{}) {
+	g, ok := obj["geometry"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	loc := map[string]interface{}{}
+	if c, ok := g["centroid"]; ok {
+		loc["centroid"] = c
+	}
+	if b, ok := g["bbox"]; ok {
+		loc["bbox"] = b
+	}
+	delete(obj, "geometry")
+	if len(loc) > 0 {
+		obj["location"] = loc
+	}
+}
+
 // leanEvent strips geometry from an event and, in list mode, drops the long
 // description. Mutates and returns the same map.
 func leanEvent(ev map[string]interface{}, full bool) map[string]interface{} {
 	if ev == nil {
 		return ev
 	}
-	if g, ok := ev["geometry"].(map[string]interface{}); ok {
-		// Replace the geometry object with just the centroid + bbox.
-		loc := map[string]interface{}{}
-		if c, ok := g["centroid"]; ok {
-			loc["centroid"] = c
-		}
-		if b, ok := g["bbox"]; ok {
-			loc["bbox"] = b
-		}
-		delete(ev, "geometry")
-		if len(loc) > 0 {
-			ev["location"] = loc
-		}
-	}
+	geometryToLocation(ev)
 	if !full {
 		// List view: the headline + summary carry the gist; the verbatim
 		// description can be long. Fetch the full event via grid_event for it.
@@ -51,19 +58,7 @@ func leanPlace(p map[string]interface{}) map[string]interface{} {
 	if p == nil {
 		return p
 	}
-	if g, ok := p["geometry"].(map[string]interface{}); ok {
-		loc := map[string]interface{}{}
-		if c, ok := g["centroid"]; ok {
-			loc["centroid"] = c
-		}
-		if b, ok := g["bbox"]; ok {
-			loc["bbox"] = b
-		}
-		delete(p, "geometry")
-		if len(loc) > 0 {
-			p["location"] = loc
-		}
-	}
+	geometryToLocation(p)
 	return p
 }
 

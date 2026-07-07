@@ -44,7 +44,9 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) rpcRespon
 		}
 	}
 	if t == nil {
-		return toolResult(map[string]interface{}{"error": "unknown tool: " + p.Name}, true)
+		// An unrecognized tool is a protocol error, not a tool-execution error
+		// (MCP splits the two channels) — return a JSON-RPC error, not isError.
+		return rpcResponse{Error: &rpcError{errBadParams, "unknown tool: " + p.Name}}
 	}
 	res, err := t.Handler(ctx, p.Arguments)
 	if err != nil {
@@ -142,17 +144,11 @@ func (s *Server) handleSituation(ctx context.Context, args map[string]interface{
 		return nil, err
 	}
 	if slug == "" {
-		return map[string]interface{}{
-			"resolved": false,
-			"message":  fmt.Sprintf("could not resolve %q to a covered place. This service only covers the central Sierra (Calaveras & Tuolumne). Try grid_places to see coverage.", loc),
-		}, nil
+		return unresolved(loc), nil
 	}
-	body, code, err := s.callV1(ctx, "/v1/places/"+url.PathEscape(slug)+"/summary")
+	body, err := s.callV1JSON(ctx, "/v1/places/"+url.PathEscape(slug)+"/summary")
 	if err != nil {
-		return nil, err
-	}
-	if code != 200 {
-		return nil, fmt.Errorf("summary for %q failed (HTTP %d)", slug, code)
+		return nil, fmt.Errorf("summary for %q unavailable: %w", slug, err)
 	}
 	body["resolved_place"] = slug
 	if len(resolved) > 1 {
@@ -169,7 +165,7 @@ func (s *Server) handleEvents(ctx context.Context, args map[string]interface{}) 
 			return nil, err
 		}
 		if slug == "" {
-			return map[string]interface{}{"events": []interface{}{}, "message": fmt.Sprintf("could not resolve %q to a covered place", loc)}, nil
+			return unresolved(loc), nil
 		}
 		q.Set("place", slug)
 	}
@@ -181,7 +177,7 @@ func (s *Server) handleEvents(ctx context.Context, args map[string]interface{}) 
 	if n := argInt(args, "limit"); n > 0 {
 		q.Set("page_size", strconv.Itoa(n))
 	}
-	body, _, err := s.callV1(ctx, "/v1/events?"+q.Encode())
+	body, err := s.callV1JSON(ctx, "/v1/events?"+q.Encode())
 	if err != nil {
 		return nil, err
 	}
@@ -214,17 +210,32 @@ func (s *Server) handleEvent(ctx context.Context, args map[string]interface{}) (
 func (s *Server) handleConditions(ctx context.Context, args map[string]interface{}) (map[string]interface{}, error) {
 	q := url.Values{}
 	if loc := argStr(args, "location"); loc != "" {
-		if slug, _, err := s.resolvePlace(ctx, loc); err == nil && slug != "" {
-			q.Set("place", slug)
+		slug, _, err := s.resolvePlace(ctx, loc)
+		if err != nil {
+			return nil, err
 		}
+		if slug == "" {
+			return unresolved(loc), nil
+		}
+		q.Set("place", slug)
 	}
 	suffix := ""
 	if e := q.Encode(); e != "" {
 		suffix = "?" + e
 	}
-	roads, _, _ := s.callV1(ctx, "/v1/roads"+suffix)
-	weather, _, _ := s.callV1(ctx, "/v1/weather"+suffix)
-	return map[string]interface{}{"roads": roads, "weather": weather}, nil
+	return map[string]interface{}{
+		"roads":   conditionResult(s.callV1JSON(ctx, "/v1/roads"+suffix)),
+		"weather": conditionResult(s.callV1JSON(ctx, "/v1/weather"+suffix)),
+	}, nil
+}
+
+// conditionResult renders one conditions sub-fetch: the body on success, else an
+// explicit unavailable marker — never a silent nil that reads as "no conditions".
+func conditionResult(body map[string]interface{}, err error) interface{} {
+	if err != nil {
+		return map[string]interface{}{"status": "unavailable", "error": err.Error()}
+	}
+	return body
 }
 
 func (s *Server) handleResolve(ctx context.Context, args map[string]interface{}) (map[string]interface{}, error) {
@@ -241,12 +252,9 @@ func (s *Server) handleResolve(ctx context.Context, args map[string]interface{})
 	} else {
 		return nil, fmt.Errorf("provide address, or lat and lng")
 	}
-	body, code, err := s.callV1(ctx, "/v1/places/resolve?"+q.Encode())
+	body, err := s.callV1JSON(ctx, "/v1/places/resolve?"+q.Encode())
 	if err != nil {
-		return nil, err
-	}
-	if code != 200 {
-		return body, nil // pass through the error status body (e.g. geocode failure)
+		return nil, err // surface geocode/lookup failure as a tool error (isError)
 	}
 	return map[string]interface{}{"places": leanPlaces(asArray(body["places"]))}, nil
 }
@@ -259,7 +267,7 @@ func (s *Server) handlePlaces(ctx context.Context, args map[string]interface{}) 
 	if qq := argStr(args, "q"); qq != "" {
 		q.Set("q", qq)
 	}
-	body, _, err := s.callV1(ctx, "/v1/places?"+q.Encode())
+	body, err := s.callV1JSON(ctx, "/v1/places?"+q.Encode())
 	if err != nil {
 		return nil, err
 	}
@@ -267,26 +275,29 @@ func (s *Server) handlePlaces(ctx context.Context, args map[string]interface{}) 
 }
 
 func (s *Server) handleSources(ctx context.Context, _ map[string]interface{}) (map[string]interface{}, error) {
-	body, _, err := s.callV1(ctx, "/v1/sources")
-	if err != nil {
-		return nil, err
-	}
-	return body, nil
+	// grid_sources exists to disclose feed health, so a failed /v1/sources call
+	// must surface as an error, not a body that looks like a health rollup.
+	return s.callV1JSON(ctx, "/v1/sources")
 }
 
 func (s *Server) handleHistory(ctx context.Context, args map[string]interface{}) (map[string]interface{}, error) {
 	q := url.Values{}
 	if loc := argStr(args, "location"); loc != "" {
-		if slug, _, err := s.resolvePlace(ctx, loc); err == nil && slug != "" {
-			q.Set("place", slug)
+		slug, _, err := s.resolvePlace(ctx, loc)
+		if err != nil {
+			return nil, err
 		}
+		if slug == "" {
+			return unresolved(loc), nil
+		}
+		q.Set("place", slug)
 	}
 	for _, k := range []string{"layer", "from", "to"} {
 		if v := argStr(args, k); v != "" {
 			q.Set(k, v)
 		}
 	}
-	body, _, err := s.callV1(ctx, "/v1/history?"+q.Encode())
+	body, err := s.callV1JSON(ctx, "/v1/history?"+q.Encode())
 	if err != nil {
 		return nil, err
 	}
@@ -323,13 +334,10 @@ func (s *Server) resolvePlace(ctx context.Context, location string) (string, []i
 		places := asArray(body["places"])
 		return firstSlug(places), places, nil
 	}
-	// 2. a place slug/id (single token, no spaces) — try a direct lookup
+	// 2. a place slug/id (single token, no spaces) — try a direct lookup. This is
+	// one candidate strategy, so a transient failure falls through to the next.
 	if !strings.ContainsAny(location, " ,") {
-		body, code, err := s.callV1(ctx, "/v1/places/"+url.PathEscape(location))
-		if err != nil {
-			return "", nil, err
-		}
-		if code == 200 {
+		if body, code, err := s.callV1(ctx, "/v1/places/"+url.PathEscape(location)); err == nil && code == 200 {
 			if slug := argStr(body, "slug"); slug != "" {
 				return slug, []interface{}{leanPlace(body)}, nil
 			}
@@ -353,6 +361,15 @@ func (s *Server) resolvePlace(ctx context.Context, location string) (string, []i
 	}
 	places := asArray(body["places"])
 	return firstSlug(places), places, nil
+}
+
+// unresolved is the standard result when a location argument can't be mapped to
+// a covered place — one shape across all location-scoped tools.
+func unresolved(loc string) map[string]interface{} {
+	return map[string]interface{}{
+		"resolved": false,
+		"message":  fmt.Sprintf("could not resolve %q to a covered place. This service only covers the central Sierra (Calaveras & Tuolumne). Try grid_places to see coverage.", loc),
+	}
 }
 
 func firstSlug(places []interface{}) string {

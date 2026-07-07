@@ -16,8 +16,33 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strconv"
+	"time"
+
+	"github.com/dpup/prefab/logging"
 )
+
+// requestTimeout bounds a single MCP call. resolvePlace can chain several
+// in-process /v1 calls including a ~10s Census geocode, and prefab sets no
+// server write timeout, so without this a slow request could hang indefinitely.
+const requestTimeout = 30 * time.Second
+
+// logWarn/logErr are panic-safe: prefab injects a request-context logger in
+// production, but a background/logger-less context (or the recover handler
+// itself) must never panic on a nil logger — that would defeat the recovery.
+func logWarn(ctx context.Context, msg string, kv ...interface{}) {
+	if logging.FromContext(ctx) != nil {
+		logging.Warnw(ctx, msg, kv...)
+	}
+}
+
+func logErr(ctx context.Context, msg string, kv ...interface{}) {
+	if logging.FromContext(ctx) != nil {
+		logging.Errorw(ctx, msg, kv...)
+	}
+}
 
 // protocolVersion is the MCP revision we implement.
 const protocolVersion = "2025-06-18"
@@ -72,6 +97,7 @@ const (
 	errParse     = -32700
 	errNoMethod  = -32601
 	errBadParams = -32602
+	errInternal  = -32603
 )
 
 /* --------------------------------------------------------------- HTTP */
@@ -87,7 +113,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	var req rpcRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
-		writeRPC(w, rpcResponse{JSONRPC: "2.0", Error: &rpcError{errParse, "parse error: " + err.Error()}})
+		// JSON-RPC 2.0: id MUST be null when it can't be determined.
+		writeRPC(w, rpcResponse{JSONRPC: "2.0", ID: json.RawMessage("null"), Error: &rpcError{errParse, "parse error: " + err.Error()}})
 		return
 	}
 	// Notifications (no id) get no response body, just a 202.
@@ -95,7 +122,17 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusAccepted)
 		return
 	}
-	resp := s.dispatch(r.Context(), req)
+	// Bound the call and contain panics as a clean JSON-RPC error — a tool (or
+	// the in-process /v1 handler it invokes) must not drop the connection.
+	ctx, cancel := context.WithTimeout(r.Context(), requestTimeout)
+	defer cancel()
+	defer func() {
+		if rec := recover(); rec != nil {
+			logErr(ctx, "MCP: recovered panic in handler", "method", req.Method, "panic", rec)
+			writeRPC(w, rpcResponse{JSONRPC: "2.0", ID: req.ID, Error: &rpcError{errInternal, "internal error"}})
+		}
+	}()
+	resp := s.dispatch(ctx, req)
 	resp.JSONRPC = "2.0"
 	resp.ID = req.ID
 	writeRPC(w, resp)
@@ -105,8 +142,10 @@ func writeRPC(w http.ResponseWriter, resp rpcResponse) {
 	if resp.JSONRPC == "" {
 		resp.JSONRPC = "2.0"
 	}
+	// CORS is owned by prefab's securityMiddleware (it wraps every mounted
+	// handler and sets Access-Control-* from server.security.corsOrigins, and
+	// handles OPTIONS preflight) — don't set it here (see internal/hazards/CLAUDE.md).
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
@@ -156,11 +195,36 @@ func (s *Server) callV1(ctx context.Context, path string) (map[string]interface{
 	}
 	cw := &captureWriter{header: http.Header{}, status: http.StatusOK}
 	s.grid.ServeHTTP(cw, req)
-	var body map[string]interface{}
+	body := map[string]interface{}{}
 	if cw.body.Len() > 0 {
-		_ = json.Unmarshal(cw.body.Bytes(), &body)
+		if err := json.Unmarshal(cw.body.Bytes(), &body); err != nil {
+			// A /v1 response that isn't a JSON object is a real fault — surface
+			// it, never a silent empty body (which would read as "no hazards").
+			return nil, cw.status, fmt.Errorf("decode %s response: %w", path, err)
+		}
 	}
 	return body, cw.status, nil
+}
+
+// callV1JSON is callV1 plus fail-loud status handling: a non-2xx status is an
+// error, not a silently-empty result. Tools that must not present a backend
+// failure as empty/no-hazard data use this; callers that need the raw status
+// (grid_event's 404) use callV1 directly.
+func (s *Server) callV1JSON(ctx context.Context, path string) (map[string]interface{}, error) {
+	body, code, err := s.callV1(ctx, path)
+	if err != nil {
+		logWarn(ctx, "MCP: /v1 call failed", "path", path, "error", err.Error())
+		return nil, err
+	}
+	if code < 200 || code >= 300 {
+		msg := "upstream returned HTTP " + strconv.Itoa(code)
+		if m, _ := body["message"].(string); m != "" {
+			msg += ": " + m
+		}
+		logWarn(ctx, "MCP: /v1 non-2xx", "path", path, "status", code)
+		return nil, fmt.Errorf("%s", msg)
+	}
+	return body, nil
 }
 
 // captureWriter is a tiny in-memory http.ResponseWriter for the in-process call
