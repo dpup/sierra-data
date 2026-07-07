@@ -26,6 +26,7 @@ const NAV = [
   { key: 'sources', label: 'Sources', href: '/sources', hint: '/sources', group: 'EXPLORE', crumb: 'Sources' },
   { key: 'history', label: 'History', href: '/history', hint: '/history', group: 'EXPLORE', crumb: 'History' },
   { key: 'docs', label: 'Docs', href: '/docs', hint: '/v1 ref', group: 'REFERENCE', crumb: 'Docs' },
+  { key: 'mcp', label: 'MCP', href: '/mcp-guide', hint: 'for agents', group: 'REFERENCE', crumb: 'MCP' },
 ];
 const GROUPS = ['OVERVIEW', 'EXPLORE', 'REFERENCE'];
 const here = (NAV.find((n) => n.key === current) || {}).crumb || 'The Grid';

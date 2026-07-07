@@ -1,0 +1,189 @@
+---
+import Shell from '../layouts/Shell.astro';
+import PageHead from '../components/PageHead.astro';
+import SectionHead from '../components/SectionHead.astro';
+
+// Code examples live as frontmatter strings so their literal `{ }` aren't parsed
+// as Astro expressions. Rendered via {const} inside <pre>.
+const ENDPOINT = 'https://data.sierragridteam.org/mcp';
+
+const clientConfig = `{
+  "mcpServers": {
+    "sierra-grid": {
+      "url": "https://data.sierragridteam.org/mcp"
+    }
+  }
+}`;
+
+const mcpRemote = `npx mcp-remote https://data.sierragridteam.org/mcp`;
+
+const curlInit = `curl -sX POST https://data.sierragridteam.org/mcp \\
+  -H 'Content-Type: application/json' \\
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize"}'`;
+
+const curlList = `curl -sX POST https://data.sierragridteam.org/mcp \\
+  -H 'Content-Type: application/json' \\
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'`;
+
+const curlSituation = `curl -sX POST https://data.sierragridteam.org/mcp \\
+  -H 'Content-Type: application/json' \\
+  -d '{
+    "jsonrpc": "2.0", "id": 3, "method": "tools/call",
+    "params": {
+      "name": "grid_situation",
+      "arguments": { "location": "Arnold, CA" }
+    }
+  }'`;
+
+const situationResult = `{
+  "resolved_place": "arnold",
+  "mode": "WATCH",
+  "summary": {
+    "highest_severity": "SEVERE",
+    "active_evacuations": null,          // null = UNKNOWN (Cal OES errored), not 0
+    "evacuation_status": "UNAVAILABLE"
+  },
+  "domains": [ { "domain": "fire", "status": "OK", "active_count": 1 }, ... ],
+  "disclaimer": "Reference only — verify with official sources ..."
+}`;
+
+const tools = [
+  ['grid_situation', 'location', 'Area mode (QUIET/WATCH/ACTIVE) + rollup for a place, address, or lat,lng. Start here.'],
+  ['grid_events', 'location?, layer?, severity_min?, status?, since?, limit?', 'List active events (wildfire, evacuation, weather alert, earthquake, road incident).'],
+  ['grid_event', 'id', 'Full detail on one event: summary, description, provenance, canonical link.'],
+  ['grid_conditions', 'location?', 'Road + weather conditions (travel times, chain control, fire weather).'],
+  ['grid_resolve', 'address | lat,lng', 'Resolve a location to the places that contain it, most-specific first.'],
+  ['grid_places', 'kind?, q?', 'The place directory — discover valid area / county / town / corridor slugs.'],
+  ['grid_sources', '—', 'Feed health (OK / STALE / UNAVAILABLE) for every upstream source.'],
+  ['grid_history', 'location?, layer?, from?, to?', 'Revision timeline — how an event evolved over a time range.'],
+];
+
+const examples = [
+  ['"Is it safe near Arnold right now?"', 'grid_situation { "location": "Arnold, CA" }'],
+  ['"Any active wildfires in Calaveras County?"', 'grid_events { "location": "Calaveras County", "layer": "wildfire" }'],
+  ['"What are road and weather conditions on Ebbetts Pass?"', 'grid_conditions { "location": "ebbetts-pass" }'],
+  ['"I\'m at 38.03, -120.40 — what hazards affect me?"', 'grid_situation { "location": "38.03,-120.40" }'],
+  ['"Which data feeds are currently down?"', 'grid_sources { }'],
+];
+---
+<Shell
+  current="mcp"
+  title="MCP — agent access · The Grid"
+  description="Connect an LLM agent to The Grid over the Model Context Protocol (MCP): a read-only, keyless endpoint at /mcp with tools for hazards, roads, weather, and evacuations across the central Sierra."
+>
+  <style is:global slot="head">
+    .tool-name { white-space: nowrap; }
+    .nl-example { color: var(--text-hi); }
+    .arrow-note { color: var(--text-dim); }
+  </style>
+
+  <PageHead kicker="The Grid · for LLM agents" title="MCP — agent access">
+    <p class="lead">
+      Point an LLM agent at The Grid over the <strong>Model Context Protocol</strong>.
+      It's the same public, read-only data as <code class="inline">/v1</code>, exposed as
+      agent tools: ask about hazards, evacuations, roads, and weather for the central Sierra
+      in natural language, and the model calls the right tool. <strong>No key, no auth,
+      read-only</strong> — like the rest of the API.
+    </p>
+  </PageHead>
+
+  <div class="section-gap"></div>
+  <SectionHead heading="The endpoint" cap="Streamable HTTP · JSON-RPC 2.0" />
+  <p class="prose">
+    One URL — <code class="inline">{ENDPOINT}</code> — speaking MCP over Streamable HTTP.
+    Clients <strong>POST</strong> JSON-RPC 2.0; there's no server-initiated stream, so a
+    <code class="inline">GET</code> returns <code class="inline">405</code>. It's a thin
+    adapter over <a href="/docs">the /v1 API</a>: geometry is stripped for token efficiency,
+    and the fail-loud honesty contract is preserved on every result.
+  </p>
+
+  <div class="section-gap"></div>
+  <SectionHead heading="Connect a client" cap="remote MCP server" />
+  <p class="prose">
+    Add it as a remote MCP server. Clients that speak Streamable HTTP directly take the URL:
+  </p>
+  <pre class="code">{clientConfig}</pre>
+  <p class="prose">
+    For a client that only supports stdio servers, bridge it with
+    <code class="inline">mcp-remote</code>:
+  </p>
+  <pre class="code">{mcpRemote}</pre>
+
+  <div class="section-gap"></div>
+  <SectionHead heading="Tools" cap="8 read-only tools" />
+  <p class="prose">
+    Every tool accepts a flexible <code class="inline">location</code> — a place slug
+    (<code class="inline">ebbetts-pass</code>), a street address, or <code class="inline">lat,lng</code>.
+  </p>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr><th style="width:150px">Tool</th><th style="width:280px">Arguments</th><th>What it returns</th></tr>
+      </thead>
+      <tbody>
+        {tools.map(([name, args, desc]) => (
+          <tr>
+            <td class="mono tool-name">{name}</td>
+            <td class="mono" style="font-size:12px;color:var(--text-2)">{args}</td>
+            <td class="wrap">{desc}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="section-gap"></div>
+  <SectionHead heading="Example questions" cap="natural language → tool call" />
+  <p class="prose">
+    You don't call tools by hand — the agent does. These are the kinds of questions that map
+    onto a single call:
+  </p>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead><tr><th style="width:46%">Ask</th><th>Tool call</th></tr></thead>
+      <tbody>
+        {examples.map(([q, call]) => (
+          <tr>
+            <td class="nl-example">{q}</td>
+            <td class="mono" style="font-size:12px">{call}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="section-gap"></div>
+  <SectionHead heading="Try it with curl" cap="replay any of these yourself" />
+  <p class="prose">Discover the tools:</p>
+  <pre class="code">{curlList}</pre>
+  <p class="prose">Ask what's happening near a town:</p>
+  <pre class="code">{curlSituation}</pre>
+  <p class="prose">A trimmed response — note the preserved honesty fields:</p>
+  <pre class="code">{situationResult}</pre>
+  <p class="prose">Handshake (what an MCP client sends first):</p>
+  <pre class="code">{curlInit}</pre>
+
+  <div class="section-gap"></div>
+  <SectionHead heading="Reading the data honestly" cap="required of every consumer" />
+  <p class="prose">
+    This is <strong class="accent-orange">reference-only, life-safety data</strong>. Every
+    result carries a <code class="inline">disclaimer</code>, and an agent relaying it must
+    respect the fail-loud contract:
+  </p>
+  <ul class="prose" style="max-width:80ch;">
+    <li>Every source reports <span class="mono">OK</span> / <span class="mono">STALE</span> /
+      <span class="mono">UNAVAILABLE</span>. <strong>UNAVAILABLE means the status is unknown,
+      not clear</strong> — never present absence of data as an all-clear.</li>
+    <li>Evacuations: <code class="inline">active_evacuations</code> is an explicit
+      <code class="inline">null</code> (source errored → unknown), <code class="inline">0</code>
+      (Cal OES healthy, no active zones — caveated, not a guarantee), or <code class="inline">N</code>
+      (active). <strong>null and 0 are different</strong> — never collapse them.</li>
+    <li>Evacuation orders and directive text are shown verbatim; link the authoritative source,
+      don't paraphrase.</li>
+  </ul>
+  <p class="prose">
+    The full model — severity scale, place ids, the evacuation contract — is in the
+    <a href="/docs">/v1 reference</a>. The MCP server also exposes it as an in-band resource
+    (<code class="inline">grid://reference</code>).
+  </p>
+</Shell>
