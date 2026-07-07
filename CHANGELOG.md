@@ -13,6 +13,22 @@ same binary over the same store (see the 2026-07-05 entry and its migration plan
 
 ## 2026-07-07
 
+### Changed — wildfire severity now factors in fire size, not just containment
+
+Wildfire `severity` was derived from containment percentage alone, which capped
+every fire at MODERATE once it reached ≥50% containment and never returned
+EXTREME — a 5,000-acre fire at 55% contained read MODERATE. Severity now also
+weighs fire **size** (NWCG fire size classes) and is biased to over-estimate
+active threat: it's the higher of the containment heuristic and a size
+escalation, so a fire is never rated *below* its old value. Large, still-active
+fires escalate — ≥1,000 ac and <50% contained → EXTREME, ≥100 ac → SEVERE;
+small/contained fires are unchanged (e.g. a 9.5-ac fire at 60% stays MODERATE).
+
+Affects `severity`/`severity_rank` on wildfire events (`/v1/events?layer=wildfire`,
+the `.geojson` wildfire layer) and, transitively, place `summary` rollups and the
+area `mode` (a large partly-contained fire can now push a place to ACTIVE). No
+field or shape changes; only the computed value.
+
 ### Fixed — weather alerts were scoped to the wrong NWS zones (out-of-area alerts)
 
 The configured NWS forecast zones were incorrect, so `weather_alert` events (and

@@ -161,7 +161,7 @@ func TestWildfirePoll_JoinAndStandalone(t *testing.T) {
 	// Adopted perimeter: polygon geometry + has_perimeter.
 	salt := eventByID(t, res.Events, "calfire:abc-123")
 	assert.Equal(t, "Salt Springs Fire — 1200 ac, 35% contained", salt.Headline) // shipped format, exact
-	assert.Equal(t, gridv1.Severity_SEVERE, salt.Severity)                       // <50% contained
+	assert.Equal(t, gridv1.Severity_EXTREME, salt.Severity)                      // 1200 ac (NWCG class F) & <50% contained
 	assert.Equal(t, gridv1.EventStatus_ACTIVE, salt.Status)
 	assert.Equal(t, "wildfire", salt.Category)
 	assert.Equal(t, "near Hwy 4", salt.AreaLabel)

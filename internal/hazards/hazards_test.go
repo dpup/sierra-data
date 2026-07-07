@@ -85,10 +85,26 @@ func TestNormFireName(t *testing.T) {
 }
 
 func TestFromWildfire(t *testing.T) {
-	cases := map[int32]string{0: SevSevere, 49: SevSevere, 50: SevModerate, 99: SevModerate, 100: SevMinor}
-	for c, want := range cases {
-		if got := fromWildfire(c); got != want {
-			t.Errorf("fromWildfire(%d) = %q, want %q", c, got, want)
+	cases := []struct {
+		acres      float64
+		contained  int32
+		want       string
+	}{
+		// Containment floor (small fires: size adds no escalation) — unchanged.
+		{5, 0, SevSevere},   // tiny, uncontained
+		{9.5, 60, SevModerate}, // Priest Fire: small, partly contained
+		{9.5, 100, SevMinor},   // small, fully contained
+		// Size escalation for larger fires (the new behavior; old capped at MODERATE).
+		{250, 10, SevSevere},    // class D, uncontained
+		{500, 60, SevSevere},    // class E, partly contained → SEVERE (was MODERATE)
+		{1200, 35, SevExtreme},  // class F, <50% contained → EXTREME (was SEVERE)
+		{5000, 55, SevSevere},   // class G, ≥50% contained → SEVERE (was MODERATE)
+		{8000, 20, SevExtreme},  // class G, uncontained → EXTREME
+		{15000, 100, SevMinor},  // huge but fully contained → containment floor MINOR
+	}
+	for _, c := range cases {
+		if got := fromWildfire(c.acres, c.contained); got != c.want {
+			t.Errorf("fromWildfire(%.0f ac, %d%%) = %q, want %q", c.acres, c.contained, got, c.want)
 		}
 	}
 }

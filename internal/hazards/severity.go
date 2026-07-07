@@ -139,10 +139,37 @@ func fromEvacLevel(level string) string {
 	}
 }
 
-// fromWildfire maps a fire's containment onto the unified scale (a configurable
-// heuristic; CAL FIRE doesn't expose growth rate). Active & <50% contained reads
-// SEVERE, partly contained MODERATE, fully contained MINOR.
-func fromWildfire(percentContained int32) string {
+// fromWildfire maps a fire onto the unified scale from its size AND containment,
+// deliberately biased to OVER-estimate active threat rather than under-estimate
+// it. It returns the worse (higher) of two heuristics, so a fire is never rated
+// below either:
+//
+//   - containment (kept as a floor; CAL FIRE doesn't expose growth rate):
+//     uncontained <50% (incl. unknown 0) → SEVERE, partly contained → MODERATE,
+//     fully contained → MINOR.
+//   - size, by NWCG fire size class (A ≤¼ac · B <10 · C <100 · D <300 · E <1,000
+//     · F <5,000 · G ≥5,000): a large, still-active fire escalates — ≥1,000 ac
+//     (class F/G) reads EXTREME while <50% contained, else SEVERE; ≥100 ac
+//     (class D/E) reads SEVERE. Smaller or fully contained fires add no size
+//     escalation (the containment floor governs).
+//
+// The old function looked at containment only, so it capped every fire at
+// MODERATE once ≥50% contained and never returned EXTREME — a 5,000-ac fire at
+// 55% read MODERATE. Now: a 5-ac new fire stays SEVERE (uncontained), Priest
+// (9.5 ac, 60%) stays MODERATE, a 1,200-ac fire at 35% is EXTREME, a 5,000-ac
+// fire at 55% is SEVERE.
+func fromWildfire(acres float64, percentContained int32) string {
+	cont := containmentSeverity(percentContained)
+	size := sizeSeverity(acres, percentContained)
+	if severityRank(size) > severityRank(cont) {
+		return size
+	}
+	return cont
+}
+
+// containmentSeverity is the original containment-only heuristic, kept as a floor
+// under fromWildfire (a fire is never rated below it).
+func containmentSeverity(percentContained int32) string {
 	switch {
 	case percentContained >= 100:
 		return SevMinor
@@ -150,6 +177,26 @@ func fromWildfire(percentContained int32) string {
 		return SevSevere
 	default:
 		return SevModerate
+	}
+}
+
+// sizeSeverity escalates large, still-active fires by NWCG fire size class.
+// Returns INFO (no escalation) for small (<100 ac) or fully contained fires — the
+// containment floor governs those.
+func sizeSeverity(acres float64, percentContained int32) string {
+	if percentContained >= 100 {
+		return SevInfo // contained — perimeter controlled, no size escalation
+	}
+	switch {
+	case acres >= 1000: // NWCG class F/G
+		if percentContained < 50 {
+			return SevExtreme
+		}
+		return SevSevere
+	case acres >= 100: // class D/E
+		return SevSevere
+	default: // class A–C — no size escalation
+		return SevInfo
 	}
 }
 

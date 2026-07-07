@@ -14,8 +14,10 @@ import (
 // SeverityFromMagnitude maps an earthquake magnitude onto the unified scale.
 func SeverityFromMagnitude(m float64) string { return fromMagnitude(m) }
 
-// SeverityFromWildfire maps a fire's containment onto the unified scale.
-func SeverityFromWildfire(percentContained int32) string { return fromWildfire(percentContained) }
+// SeverityFromWildfire maps a fire's size + containment onto the unified scale.
+func SeverityFromWildfire(acres float64, percentContained int32) string {
+	return fromWildfire(acres, percentContained)
+}
 
 // SeverityFromEvacLevel maps a coded evacuation level onto the unified scale.
 func SeverityFromEvacLevel(level string) string { return fromEvacLevel(level) }

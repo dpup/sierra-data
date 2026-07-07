@@ -122,7 +122,7 @@ func (n *WildfireNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult
 		ev := NewEvent(
 			"calfire:"+nonEmpty(in.UniqueID, hazards.NormFireName(in.Name)),
 			gridv1.Layer_WILDFIRE,
-			SeverityFromLabel(hazards.SeverityFromWildfire(in.PercentContained)),
+			SeverityFromLabel(hazards.SeverityFromWildfire(in.Acres, in.PercentContained)),
 			gridv1.EventStatus_ACTIVE,
 			fmt.Sprintf("%s — %.0f ac, %d%% contained", in.Name, in.Acres, in.PercentContained), // shipped headline format
 		)
@@ -265,7 +265,7 @@ func standalonePerimeterEvents(ctx context.Context, perims []wfigs.Perimeter, us
 		ev := NewEvent(
 			id,
 			gridv1.Layer_WILDFIRE,
-			SeverityFromLabel(hazards.SeverityFromWildfire(p.PercentContained)),
+			SeverityFromLabel(hazards.SeverityFromWildfire(p.Acres, p.PercentContained)),
 			gridv1.EventStatus_ACTIVE,
 			fmt.Sprintf("%s — %.0f ac, %d%% contained", p.Name, p.Acres, p.PercentContained), // shipped headline format
 		)

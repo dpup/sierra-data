@@ -816,7 +816,7 @@ func (s *Service) wildfires(ctx context.Context, area config.HazardArea) ([]Feat
 			Source:    Source{ID: "calfire", Name: "CAL FIRE", URL: safeURL(in.URL), Attribution: "CAL FIRE / WFIGS"},
 			Wildfire:  wf,
 		}
-		p.setSeverity(fromWildfire(in.PercentContained))
+		p.setSeverity(fromWildfire(in.Acres, in.PercentContained))
 		// Adopt the matching perimeter polygon if we have an unambiguous one; else
 		// a point. An ambiguous name (multiple distinct perimeters) is left for the
 		// standalone pass rather than risk adopting the wrong polygon.
@@ -847,7 +847,7 @@ func (s *Service) wildfires(ctx context.Context, area config.HazardArea) ([]Feat
 			Source:   Source{ID: "wfigs", Name: "NIFC WFIGS", Attribution: "NIFC / WFIGS"},
 			Wildfire: &WildfireProps{Acres: perim.Acres, Containment: perim.PercentContained, Cause: perim.Cause, HasPerimeter: true},
 		}
-		p.setSeverity(fromWildfire(perim.PercentContained))
+		p.setSeverity(fromWildfire(perim.Acres, perim.PercentContained))
 		out = append(out, Feature{Type: "Feature", Geometry: RawGeom(perim.GeometryType, perim.GeometryCoords), Properties: p})
 	}
 	if partialErr != nil {
