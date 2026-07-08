@@ -163,6 +163,49 @@ export function fmtDiffValue(v, max = 120) {
 }
 
 /**
+ * Full (untruncated) rendering of a diff value, matching fmtDiffValue's encoding.
+ * @param {*} v
+ * @returns {string} '' for undefined
+ */
+export function fmtDiffValueFull(v) {
+  return fmtDiffValue(v, Infinity);
+}
+
+/**
+ * Build an expandable diff-value <td>. Shows the truncated value; when the value
+ * is longer than the truncation, it carries a title tooltip and can be toggled
+ * to the full text (the caller wires the click/keydown so both cells in a row
+ * expand together). DOM-dependent — only called from the render path.
+ * @param {*} v
+ * @returns {{td: HTMLTableCellElement, truncated: boolean,
+ *   setExpanded: (on: boolean) => void, isExpanded: () => boolean}}
+ */
+function diffValueCell(v) {
+  const short = fmtDiffValue(v);
+  const full = fmtDiffValueFull(v);
+  const td = el('td', 'mono wrap diff-val', short);
+  const truncated = full !== short;
+  if (truncated) {
+    td.title = full;
+    td.classList.add('diff-expandable');
+    td.setAttribute('role', 'button');
+    td.tabIndex = 0;
+  }
+  return {
+    td,
+    truncated,
+    setExpanded(on) {
+      if (!truncated) return;
+      td.textContent = on ? full : short;
+      td.classList.toggle('is-expanded', on);
+    },
+    isExpanded() {
+      return td.classList.contains('is-expanded');
+    },
+  };
+}
+
+/**
  * Sort EventRevision messages newest-first by revision number (the API
  * already returns descending; this makes the ordering a client guarantee).
  * @param {Array<Object>} revisions
@@ -742,8 +785,29 @@ export function initEventPage() {
               const marks = { added: '+ added', removed: '− removed', changed: 'Δ changed' };
               tr.append(el('td', `diff-kind k-${entry.kind}`, marks[entry.kind] || entry.kind));
               tr.append(el('td', 'mono diff-path', entry.path));
-              tr.append(el('td', 'mono wrap diff-val', fmtDiffValue(entry.before)));
-              tr.append(el('td', 'mono wrap diff-val', fmtDiffValue(entry.after)));
+              // Long values (e.g. a verbatim description) are truncated; clicking
+              // either value cell expands both so the full before/after can be
+              // compared. A native title tooltip carries the full text too.
+              const before = diffValueCell(entry.before);
+              const after = diffValueCell(entry.after);
+              if (before.truncated || after.truncated) {
+                const toggle = () => {
+                  const on = !(before.isExpanded() || after.isExpanded());
+                  before.setExpanded(on);
+                  after.setExpanded(on);
+                };
+                for (const c of [before, after]) {
+                  if (!c.truncated) continue;
+                  c.td.addEventListener('click', toggle);
+                  c.td.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      toggle();
+                    }
+                  });
+                }
+              }
+              tr.append(before.td, after.td);
               tbody.append(tr);
             }
             table.append(tbody);

@@ -352,6 +352,12 @@ main {
 .data-table td.wrap { white-space: normal; min-width: 16rem; }
 .data-table .src { color: var(--grn); }
 
+/* Expandable diff value: truncated by default, click/Enter reveals the full
+   text (both before/after cells expand together). Dotted underline signals it. */
+.diff-val.diff-expandable { cursor: pointer; text-decoration: underline dotted var(--text-dim); text-underline-offset: 3px; }
+.diff-val.diff-expandable:hover { text-decoration-color: var(--text-2); }
+.diff-val.is-expanded { white-space: pre-wrap; word-break: break-word; text-decoration: none; }
+
 /* ------------------------------------------------------------------ */
 /* 6. Chips, badges, pills                                            */
 /* ------------------------------------------------------------------ */
