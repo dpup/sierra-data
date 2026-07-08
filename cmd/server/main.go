@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"log"
-	"net/http"
 	"sort"
 	"time"
 	_ "time/tzdata" // Embed the IANA tz database so America/Los_Angeles resolves in minimal containers
@@ -11,7 +10,6 @@ import (
 	"github.com/dpup/prefab"
 	"github.com/dpup/prefab/logging"
 
-	api "github.com/dpup/sierra-data/api/v1"
 	"github.com/dpup/sierra-data/internal/cache"
 	"github.com/dpup/sierra-data/internal/clients/calfire"
 	"github.com/dpup/sierra-data/internal/clients/caloes"
@@ -147,39 +145,19 @@ func main() {
 	// Streamable HTTP, adapting the /v1 surface in-process.
 	mcpHandler := mcp.NewHandler(gridapiService)
 
-	// Create Prefab server with GRPC reflection enabled
-	// Server configuration (port, etc.) will be loaded from prefab.yaml/env vars
+	// Prefab server. The /v1 grid API, the MCP endpoint, and the static site are
+	// all plain HTTP handlers (longest-prefix wins). The legacy /api/v1
+	// grpc-gateway surface (Roads/Weather REST, hazards/situation/scanners, and
+	// the swagger specs) was removed 2026-07-08 — see CHANGELOG. The underlying
+	// Roads/Weather/hazards services stay, consumed in-process by /v1 and ingest.
 	server := prefab.New(
 		prefab.WithContext(ctx),
-		prefab.WithGRPCReflection(),
-		prefab.WithGRPCInterceptor(cacheHeadersInterceptor),
-		prefab.WithHTTPHandler(hazards.HandlerPrefix, hazardsService),
-		prefab.WithHTTPHandlerFunc(hazards.ScannersPrefix, hazardsService.ServeScanners),
-		prefab.WithHTTPHandlerFunc(hazards.SituationPrefix, hazardsService.ServeSituation),
 		prefab.WithHTTPHandler(gridapi.HandlerPrefix, gridapiService),
 		prefab.WithHTTPHandlerFunc("/mcp", mcpHandler.ServeHTTP),
 		prefab.WithHTTPHandlerFunc("/", siteHandler),
-		prefab.WithHTTPHandlerFunc("/api/docs/roads.swagger.json", openAPIHandler("api/v1/roads.swagger.json")),
-		prefab.WithHTTPHandlerFunc("/api/docs/weather.swagger.json", openAPIHandler("api/v1/weather.swagger.json")),
-		prefab.WithHTTPHandlerFunc("/api/docs/common.swagger.json", openAPIHandler("api/v1/common.swagger.json")),
 	)
 
-	// Register gRPC services using Prefab's service registrar
-	api.RegisterRoadsServiceServer(server.ServiceRegistrar(), roadsService)
-	api.RegisterWeatherServiceServer(server.ServiceRegistrar(), weatherService)
-
-	// Register gateway handlers using Prefab's gateway args
-	if err := api.RegisterRoadsServiceHandlerFromEndpoint(server.GatewayArgs()); err != nil {
-		logging.Errorw(ctx, "Failed to register Roads service gateway", "error", err)
-		log.Fatalf("Failed to register Roads service gateway: %v", err)
-	}
-
-	if err := api.RegisterWeatherServiceHandlerFromEndpoint(server.GatewayArgs()); err != nil {
-		logging.Errorw(ctx, "Failed to register Weather service gateway", "error", err)
-		log.Fatalf("Failed to register Weather service gateway: %v", err)
-	}
-
-	logging.Info(ctx, "Server initialization complete, starting HTTP and gRPC services")
+	logging.Info(ctx, "Server initialization complete, starting HTTP services")
 
 	// Start the server (blocks until shutdown)
 	if err := server.Start(); err != nil {
@@ -251,19 +229,3 @@ func gridPollInterval(cfg *config.Config, sourceIDs ...string) time.Duration {
 	return best
 }
 
-// openAPIHandler serves OpenAPI specification files with proper headers
-func openAPIHandler(filename string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-
-		http.ServeFile(w, r, filename)
-	}
-}

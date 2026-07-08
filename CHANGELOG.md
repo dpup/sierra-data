@@ -13,6 +13,28 @@ same binary over the same store (see the 2026-07-05 entry and its migration plan
 
 ## 2026-07-08
 
+### Removed — legacy `/api/v1` surface (BREAKING)
+
+The original `/api/v1` REST surface and its OpenAPI specs have been **removed**;
+those paths now return `404`. Everything it served is available on `/v1` (same
+binary, same store, same data). Port old URLs with this map:
+
+| Removed | Use instead | Notes |
+|---|---|---|
+| `GET /api/v1/situation/{area}` | `GET /v1/places/{area}/summary` | `layers[]` → `domains[]`; adds `mode`; scanners moved to a sidecar. Evac fail-loud semantics identical. |
+| `GET /api/v1/hazards/{area}/{layer}.geojson` | `GET /v1/places/{area}/map/{layer}.geojson` | Envelope byte-unchanged — URL move only. |
+| `GET /api/v1/incidents/{area}` | `GET /v1/events?place={area}&layer=road_incident` | Typed `Incident` → Event envelope + `road_incident` detail. |
+| `GET /api/v1/weather/alerts` | `GET /v1/events?layer=weather_alert` | Same envelope move. |
+| `GET /api/v1/roads*` | `GET /v1/roads*` | Conditions shape kept; adds `?place=` filter. |
+| `GET /api/v1/weather*` | `GET /v1/weather*` | Same shape, minus alerts (alerts are events). |
+| `GET /api/v1/scanners/{area}` | `GET /v1/scanners?place={area}` | Path → query filter. |
+| `GET /api/v1/metrics` (`GetProcessingMetrics`) | *(removed)* | Internal/admin ops surface. |
+| `GET /api/docs/*.swagger.json` | *(removed)* | The gRPC-gateway/OpenAPI surface is gone; `/v1` is documented at `/docs`. |
+
+The underlying Roads/Weather/hazards services are unchanged — they're still
+consumed in-process by `/v1` and the ingest pollers; only the HTTP/gRPC-gateway
+exposure was removed.
+
 ### Changed — `ebbetts-pass` coverage is now a polygon, not a square
 
 The `ebbetts-pass` area footprint changed from a coarse square bounding box to a

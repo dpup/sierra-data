@@ -31,7 +31,6 @@
   <li><a href="#geojson">5. The GeoJSON layer contract</a></li>
   <li><a href="#evac">6. The evacuation fail-loud contract</a></li>
   <li><a href="#sources-registry">7. Source registry</a></li>
-  <li><a href="#legacy">8. Legacy <code class="inline">/api/v1</code> surface</a></li>
 </ol>
 
 <!-- ================================================================ -->
@@ -123,9 +122,7 @@ Content-Type: application/json
   <h3 class="endpoint-head" id="ep-map"><span class="chip-get"><b>GET</b> /v1/places/{place}/map/{layer}.geojson</span></h3>
   <p>
     One RFC 7946 <code class="inline">FeatureCollection</code> per layer,
-    ready for MapLibre / Leaflet / OpenLayers. The envelope is byte-identical
-    to the legacy <code class="inline">/api/v1/hazards/{area}/{layer}.geojson</code>
-    endpoints — only the URL moved. Full contract in <a href="#geojson">§5</a>.
+    ready for MapLibre / Leaflet / OpenLayers. Full contract in <a href="#geojson">§5</a>.
     <code class="inline">Cache-Control: max-age=60</code>.
   </p>
   <div class="table-wrap"><table class="data-table">
@@ -265,8 +262,7 @@ Content-Type: application/json
   <p>
     <em>Conditions, not events</em>: travel time, congestion, chain control,
     and current alerts for the monitored corridors. The response shape is the
-    existing roads shape passed through (see the
-    <a href="/api/docs/roads.swagger.json">legacy roads OpenAPI spec</a>);
+    existing roads conditions shape passed through;
     the <code class="inline">alerts</code> field is kept. Adds
     <code class="inline">?place=</code> — filter roads to those intersecting
     a place's bounding box.
@@ -280,9 +276,8 @@ Content-Type: application/json
   <h3 class="endpoint-head" id="ep-weather"><span class="chip-get"><b>GET</b> /v1/weather · /v1/weather/{location}</span></h3>
   <p>
     Current weather conditions for the monitored locations, existing shape
-    passed through (see the
-    <a href="/api/docs/weather.swagger.json">legacy weather OpenAPI spec</a>)
-    — <strong>with alerts stripped</strong>. Weather alerts are events: query
+    passed through — <strong>with alerts stripped</strong>. Weather alerts are
+    events: query
     <a href="/v1/events?layer=weather_alert">/v1/events?layer=weather_alert</a>
     instead.
   </p>
@@ -476,9 +471,8 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
     (<code class="inline">ebbetts-pass</code>) or full id
     (<code class="inline">area:ebbetts-pass</code>) anywhere a
     <code class="inline">{place}</code> path segment or
-    <code class="inline">place=</code> parameter appears. Area slugs are
-    carried over unchanged from the legacy
-    <code class="inline">/api/v1/.../{area}/...</code> segments.
+    <code class="inline">place=</code> parameter appears. Area slugs are short,
+    stable ids (e.g. <code class="inline">ebbetts-pass</code>).
   </p>
   <div class="table-wrap"><table class="data-table">
     <thead><tr><th>Prefix</th><th>Kind</th><th class="num">#</th><th>What</th><th>Geometry</th><th>Example</th></tr></thead>
@@ -722,39 +716,6 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
   <div class="live-examples">
     <a href="/v1/sources">/v1/sources</a>
   </div>
-</section>
-
-<!-- ================================================================ -->
-<section id="legacy">
-  <h2>8. Legacy <code class="inline">/api/v1</code> surface</h2>
-  <p>
-    The original typed surface at <code class="inline">/api/v1/…</code>
-    (roads, weather, incidents, hazards, situation, scanners) continues to
-    run beside <code class="inline">/v1</code> during the migration, backed
-    by the same store, and will be removed once access logs go quiet. New
-    integrations should use <code class="inline">/v1</code> only. The legacy
-    proto surfaces are machine-documented:
-  </p>
-  <div class="live-examples">
-    <a href="/api/docs/roads.swagger.json">/api/docs/roads.swagger.json</a>
-    <a href="/api/docs/weather.swagger.json">/api/docs/weather.swagger.json</a>
-    <a href="/api/docs/common.swagger.json">/api/docs/common.swagger.json</a>
-  </div>
-
-  <h3>Migration map (old → new)</h3>
-  <div class="table-wrap"><table class="data-table">
-    <thead><tr><th>Legacy</th><th>Becomes</th><th>Shape change</th></tr></thead>
-    <tbody>
-      <tr><td class="mono">/api/v1/situation/{area}</td><td class="mono"><a href="/v1/places/ebbetts-pass/summary">/v1/places/{area}/summary</a></td><td class="wrap"><code>layers[]</code> → <code>domains[]</code>; adds <code>mode</code>; scanners removed. Evac fail-loud semantics identical.</td></tr>
-      <tr><td class="mono">/api/v1/hazards/{area}/{layer}.geojson</td><td class="mono"><a href="/v1/places/ebbetts-pass/map/wildfire.geojson">/v1/places/{area}/map/{layer}.geojson</a></td><td class="wrap">None — envelope unchanged, URL move only. Map cutover is a source-URL swap.</td></tr>
-      <tr><td class="mono">/api/v1/incidents/{area}</td><td class="mono"><a href="/v1/events?place=mother-lode&amp;layer=road_incident">/v1/events?place={area}&amp;layer=road_incident</a></td><td class="wrap">Typed <code>Incident</code> → Event envelope + <code>road_incident</code> detail.</td></tr>
-      <tr><td class="mono">/api/v1/weather/alerts</td><td class="mono"><a href="/v1/events?layer=weather_alert">/v1/events?layer=weather_alert</a></td><td class="wrap">Same envelope move.</td></tr>
-      <tr><td class="mono">/api/v1/roads*</td><td class="mono"><a href="/v1/roads">/v1/roads*</a></td><td class="wrap">Conditions shape kept; <code>?place=</code> filter added.</td></tr>
-      <tr><td class="mono">/api/v1/weather*</td><td class="mono"><a href="/v1/weather">/v1/weather*</a></td><td class="wrap">Same, minus alerts.</td></tr>
-      <tr><td class="mono">/api/v1/scanners/{area}</td><td class="mono"><a href="/v1/scanners?place=ebbetts-pass">/v1/scanners?place={area}</a></td><td class="wrap">Path → filter.</td></tr>
-      <tr><td class="mono">GetProcessingMetrics</td><td class="mono">(removed)</td><td class="wrap">AI-pipeline metrics moved to an internal/admin ops surface.</td></tr>
-    </tbody>
-  </table></div>
 </section>
 
 <p class="backtop"><a href="#top">↑ top</a></p>
