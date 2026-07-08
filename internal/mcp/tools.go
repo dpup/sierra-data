@@ -88,8 +88,15 @@ func (s *Server) registerTools() []tool {
 			Name: "grid_events",
 			Description: "List active hazard events (wildfire, evacuation, weather alert, earthquake, road " +
 				"incident) — optionally scoped to a location and filtered by layer/severity/status/time. " +
-				"Compact rows; call grid_event for full detail on one. Geometry is omitted (a location " +
-				"centroid is included).",
+				"Compact rows; call grid_event for full detail (incl. the verbatim report) on one. " +
+				"Geometry is omitted (a location centroid is included). " +
+				"There is no per-road or per-incident-type filter: to answer \"what happened on <a road>?\", " +
+				"a sub-type question (collisions vs. hazards vs. closures), or a count/tally, scope broadly " +
+				"— pass a county/area name or a corridor slug (e.g. location \"Calaveras County\", layer " +
+				"\"road_incident\") — and filter or count the returned rows yourself; each row's headline and " +
+				"area_label carry the road name and incident type. Raise limit (max 200) and follow " +
+				"next_page_token to get the full set. (grid_situation already gives per-domain active counts " +
+				"for a single place.)",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"location":{"type":"string","description":"place slug/id, address, or lat,lng to scope to"},"layer":{"type":"string","description":"wildfire|evacuation|weather_alert|earthquake|road_incident"},"severity_min":{"type":"string","description":"INFO|MINOR|MODERATE|SEVERE|EXTREME"},"status":{"type":"string","description":"default ACTIVE,SCHEDULED; pass RESOLVED/EXPIRED to see closed"},"since":{"type":"string","description":"RFC3339; only events observed at/after"},"limit":{"type":"integer"},"page_token":{"type":"string"}}}`),
 			Handler:     s.handleEvents,
 		},

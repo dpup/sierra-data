@@ -27,6 +27,22 @@ Public, read-only, keyless hazard/road/weather data for the central Sierra
 INFO < MINOR < MODERATE < SEVERE < EXTREME. Editorial response-urgency, not
 magnitude — an Evacuation Order (EXTREME) outranks an M5 earthquake (SEVERE).
 
+## Query patterns (how to answer common questions)
+There is no per-road or per-incident-type filter. Answer those by scoping the
+list broadly and processing the rows yourself:
+- "What happened on <a specific road>?" — call grid_events with
+  layer=road_incident scoped to the containing county/area/corridor (e.g.
+  location "Calaveras County"), then filter the rows on the road name (it's in
+  each row's headline / area_label). For the verbatim CHP report on a match,
+  call grid_event(id).
+- "How many <X> / how many collisions?" — grid_situation gives per-domain active
+  counts for one place. For a count by sub-type or across an area, list with
+  grid_events and tally locally; raise limit (max 200) and follow
+  next_page_token for the full set.
+- Scope with the broadest place that covers the question (county/area), not a
+  street: an address resolves to its containing places, so it scopes to the
+  county/area, not to that one street.
+
 ## The honesty contract (must respect when relaying)
 - Every source reports OK | STALE | UNAVAILABLE. UNAVAILABLE means the status is
   UNKNOWN, not clear. Never present absence of data as an all-clear.

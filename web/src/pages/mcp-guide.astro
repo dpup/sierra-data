@@ -17,6 +17,20 @@ const clientConfig = `{
 
 const mcpRemote = `npx mcp-remote https://data.sierragridteam.org/mcp`;
 
+const claudeCLI = `claude mcp add --transport http sierra-grid https://data.sierragridteam.org/mcp`;
+
+const openaiResponses = `# OpenAI Responses API — the endpoint as a hosted MCP tool
+client.responses.create(
+    model="gpt-5",
+    tools=[{
+        "type": "mcp",
+        "server_label": "sierra_grid",
+        "server_url": "https://data.sierragridteam.org/mcp",
+        "require_approval": "never",
+    }],
+    input="Is it safe near Arnold, CA right now?",
+)`;
+
 const curlInit = `curl -sX POST https://data.sierragridteam.org/mcp \\
   -H 'Content-Type: application/json' \\
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize"}'`;
@@ -75,6 +89,7 @@ const examples = [
     .tool-name { white-space: nowrap; }
     .nl-example { color: var(--text-hi); }
     .arrow-note { color: var(--text-dim); }
+    .subhead { font-size: 15px; margin-top: 28px; margin-bottom: 10px; }
   </style>
 
   <PageHead kicker="The Grid · for LLM agents" title="MCP — agent access">
@@ -108,6 +123,42 @@ const examples = [
     <code class="inline">mcp-remote</code>:
   </p>
   <pre class="code">{mcpRemote}</pre>
+
+  <div class="section-gap"></div>
+  <SectionHead heading="Add it to Claude or ChatGPT" cap="tested and working" />
+  <p class="prose">
+    Because it's keyless and read-only, there's nothing to authorize — you just point the
+    client at the URL and go.
+  </p>
+
+  <h3 class="subhead">Claude</h3>
+  <p class="prose">
+    <strong>Claude.ai / Claude Desktop.</strong> On a paid plan, open
+    <span class="mono">Settings → Connectors → Add custom connector</span>, give it a name
+    (<code class="inline">Sierra Grid</code>), and paste the endpoint URL:
+  </p>
+  <pre class="code">{ENDPOINT}</pre>
+  <p class="prose">
+    It connects with no OAuth step — the eight tools appear in the composer's tool menu, and
+    you can ask questions like the ones below in plain language.
+  </p>
+  <p class="prose">
+    <strong>Claude Code.</strong> Add it as a remote HTTP server from the CLI:
+  </p>
+  <pre class="code">{claudeCLI}</pre>
+
+  <h3 class="subhead">OpenAI / ChatGPT</h3>
+  <p class="prose">
+    <strong>ChatGPT.</strong> On Pro, Business, or Enterprise, enable
+    <span class="mono">Settings → Connectors</span> (developer mode), add a custom MCP
+    connector, and paste the same <code class="inline">{ENDPOINT}</code> URL — no
+    authentication.
+  </p>
+  <p class="prose">
+    <strong>OpenAI API.</strong> The Responses API takes a remote MCP server as a hosted
+    <code class="inline">mcp</code> tool — the model calls the Grid's tools directly, server-side:
+  </p>
+  <pre class="code">{openaiResponses}</pre>
 
   <div class="section-gap"></div>
   <SectionHead heading="Tools" cap="8 read-only tools" />
