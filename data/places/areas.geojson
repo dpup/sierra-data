@@ -1,0 +1,30 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "ebbetts-pass",
+        "name": "Ebbetts Pass Corridor",
+        "note": "Hand-drawn coverage wedge (replaces the coarse square bbox). Follows the Hwy 4 corridor Angels Camp -> Bear Valley, bulges NW to the Tiger Creek forest above Arnold, and extends SE up Hwy 108 into the Stanislaus NF (Pinecrest/Dodge Ridge). Excludes San Andreas & Jackson (NW) and Farmington (SW). Exterior ring is CCW per RFC 7946. Coordinates are [lng, lat]."
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-120.600, 38.130],
+            [-120.560, 37.980],
+            [-120.440, 37.900],
+            [-120.280, 37.900],
+            [-120.030, 37.980],
+            [-119.900, 38.220],
+            [-119.980, 38.500],
+            [-120.140, 38.530],
+            [-120.470, 38.450],
+            [-120.600, 38.130]
+          ]
+        ]
+      }
+    }
+  ]
+}

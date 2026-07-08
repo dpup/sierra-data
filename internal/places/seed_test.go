@@ -147,3 +147,60 @@ func TestSeedSlugCollision(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, all)
 }
+
+// TestLoadAreaPolygons_EbbettsPassCoverage validates the shipped coverage wedge:
+// the corridor towns fall inside, and the corners the old square over-reached
+// (San Andreas/Jackson NW, Farmington SW) fall outside.
+func TestLoadAreaPolygons_EbbettsPassCoverage(t *testing.T) {
+	polys, err := loadAreaPolygons()
+	require.NoError(t, err)
+	raw, ok := polys["ebbetts-pass"]
+	require.True(t, ok, "ebbetts-pass polygon must be present in areas.geojson")
+	g, err := geojson.Parse(raw)
+	require.NoError(t, err)
+	require.Equal(t, "Polygon", g.Type)
+
+	inside := map[string][2]float64{ // lat, lng
+		"Arnold":      {38.265, -120.334},
+		"Bear Valley": {38.461, -120.042},
+		"Sonora":      {37.984, -120.383},
+		"Pinecrest":   {38.193, -119.983},
+	}
+	for name, ll := range inside {
+		assert.Truef(t, geojson.PointInGeometry(ll[0], ll[1], g), "%s should be inside the wedge", name)
+	}
+	outside := map[string][2]float64{
+		"San Andreas": {38.196, -120.681},
+		"Jackson":     {38.349, -120.774},
+		"Farmington":  {37.930, -120.900},
+	}
+	for name, ll := range outside {
+		assert.Falsef(t, geojson.PointInGeometry(ll[0], ll[1], g), "%s should be outside the wedge", name)
+	}
+}
+
+// TestSeed_AreaPrefersPolygon: when a checked-in polygon exists for an area id,
+// the seeded geometry is the polygon (tight bbox), not the config bbox rectangle.
+func TestSeed_AreaPrefersPolygon(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	cfg := testConfig()
+	cfg.Hazards.Areas[0].ID = "ebbetts-pass"
+	cfg.Hazards.Areas[0].Name = "Ebbetts Pass Corridor"
+	// A deliberately huge config bbox that the polygon must override.
+	cfg.Hazards.Areas[0].Bounds = config.GeoBounds{
+		MinLatitude: 30, MaxLatitude: 45, MinLongitude: -125, MaxLongitude: -115,
+	}
+	require.NoError(t, Seed(ctx, s, cfg))
+
+	p, err := s.GetPlace(ctx, "ebbetts-pass")
+	require.NoError(t, err)
+	g, err := geojson.Parse(p.GetGeometry().GetGeojson())
+	require.NoError(t, err)
+	require.Equal(t, "Polygon", g.Type)
+	bb := p.GetGeometry().GetBbox()
+	assert.InDelta(t, 37.90, bb.GetMinLat(), 0.001)
+	assert.InDelta(t, 38.53, bb.GetMaxLat(), 0.001)
+	assert.InDelta(t, -120.60, bb.GetMinLng(), 0.001)
+	assert.InDelta(t, -119.90, bb.GetMaxLng(), 0.001)
+}

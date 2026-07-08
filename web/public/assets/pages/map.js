@@ -379,6 +379,59 @@ function init() {
     }
   }
 
+  /* ---- area boundary (coverage footprint) ---- */
+
+  // Decode a Place's geometry.geojson (protojson base64 bytes) into a GeoJSON
+  // geometry object, or null if absent/unparseable.
+  function decodePlaceGeometry(place) {
+    const raw = place && place.geometry && place.geometry.geojson;
+    if (!raw) return null;
+    try {
+      const geom = typeof raw === 'string' ? JSON.parse(atob(raw)) : raw;
+      if (geom && geom.type && geom.coordinates) return geom;
+    } catch {
+      /* decorative only — a bad decode just means no outline */
+    }
+    return null;
+  }
+
+  function removeAreaBoundary() {
+    if (map.getLayer('grid-area-boundary-line')) map.removeLayer('grid-area-boundary-line');
+    if (map.getSource('grid-area-boundary')) map.removeSource('grid-area-boundary');
+  }
+
+  // Draw the selected place's coverage polygon as a faint dashed outline. The
+  // boundary is decorative context — its fetch never blocks or errors the hazard
+  // layers, and a place without polygon geometry simply shows none.
+  async function loadAreaBoundary(token) {
+    removeAreaBoundary();
+    if (!urlState.place) return;
+    let geom;
+    try {
+      const place = await get(`/v1/places/${encodeURIComponent(urlState.place)}`);
+      if (token !== state.loadToken) return;
+      geom = decodePlaceGeometry(place);
+    } catch {
+      return;
+    }
+    if (!geom || token !== state.loadToken || map.getSource('grid-area-boundary')) return;
+    map.addSource('grid-area-boundary', {
+      type: 'geojson',
+      data: { type: 'Feature', geometry: geom, properties: {} },
+    });
+    map.addLayer({
+      id: 'grid-area-boundary-line',
+      type: 'line',
+      source: 'grid-area-boundary',
+      paint: {
+        'line-color': '#4b6b78',
+        'line-width': 1.5,
+        'line-dasharray': [3, 2],
+        'line-opacity': 0.65,
+      },
+    });
+  }
+
   /** Popup: headline, severity chip (canonical ramp + label), source
    * attribution, updated_at. All upstream text via textContent. */
   function onFeatureClick(e) {
@@ -718,6 +771,7 @@ function init() {
     for (const layer of MAP_LAYERS) removeLayerFromMap(layer);
     renderPanel();
     renderUnlocated();
+    loadAreaBoundary(token); // coverage footprint — independent of hazard layers
     if (!urlState.place || selected.length === 0) return;
     await Promise.allSettled(selected.map((l) => loadLayer(l, token)));
     if (token === state.loadToken) fitToFirstNonEmptyLayer();

@@ -10,3 +10,10 @@ import _ "embed"
 //
 //go:embed counties.geojson
 var CountiesGeoJSON []byte
+
+// AreasGeoJSON holds hand-drawn coverage polygons for hazard areas, keyed by the
+// area id in each feature's properties. Optional per area: an area with no
+// feature here falls back to its configured bbox rectangle. See README.md.
+//
+//go:embed areas.geojson
+var AreasGeoJSON []byte

@@ -32,12 +32,24 @@ type county struct {
 func Seed(ctx context.Context, s *store.Store, cfg *config.Config) error {
 	var places []*gridv1.Place
 
+	areaPolys, err := loadAreaPolygons()
+	if err != nil {
+		return err
+	}
 	for _, a := range cfg.Hazards.Areas {
-		b := a.Bounds
-		geom, err := makeGeometry(geojson.BboxPolygonGeoJSON(
-			b.MinLatitude, b.MinLongitude, b.MaxLatitude, b.MaxLongitude))
+		// Prefer a hand-drawn coverage polygon (data/places/areas.geojson) over
+		// the coarse config bbox: the polygon is what drives both point-in-polygon
+		// event attribution and the map footprint, so a tight boundary keeps
+		// out-of-area corners from attaching. Areas without a polygon fall back to
+		// the bbox rectangle.
+		raw := areaPolys[a.ID]
+		if raw == nil {
+			b := a.Bounds
+			raw = geojson.BboxPolygonGeoJSON(b.MinLatitude, b.MinLongitude, b.MaxLatitude, b.MaxLongitude)
+		}
+		geom, err := makeGeometry(raw)
 		if err != nil {
-			return fmt.Errorf("places: area %s bounds: %w", a.ID, err)
+			return fmt.Errorf("places: area %s geometry: %w", a.ID, err)
 		}
 		places = append(places, &gridv1.Place{
 			Id:       "area:" + a.ID,
@@ -137,6 +149,39 @@ func loadCounties() ([]county, error) {
 			},
 			geom: g,
 		})
+	}
+	return out, nil
+}
+
+// loadAreaPolygons parses areas.geojson into a map of area id -> raw geometry
+// JSON. Each feature's properties.id keys the polygon to a configured hazard
+// area. Returns an empty (non-nil) map when the file has no features.
+func loadAreaPolygons() (map[string]json.RawMessage, error) {
+	var fc struct {
+		Features []struct {
+			Properties struct {
+				ID string `json:"id"`
+			} `json:"properties"`
+			Geometry json.RawMessage `json:"geometry"`
+		} `json:"features"`
+	}
+	if err := json.Unmarshal(placesdata.AreasGeoJSON, &fc); err != nil {
+		return nil, fmt.Errorf("places: parse areas.geojson: %w", err)
+	}
+	out := make(map[string]json.RawMessage, len(fc.Features))
+	for _, f := range fc.Features {
+		if f.Properties.ID == "" {
+			return nil, fmt.Errorf("places: areas.geojson feature missing properties.id")
+		}
+		if _, dup := out[f.Properties.ID]; dup {
+			return nil, fmt.Errorf("places: areas.geojson duplicate area id %q", f.Properties.ID)
+		}
+		// Validate the geometry parses now so a bad polygon fails the seed loudly
+		// rather than at first use.
+		if _, err := geojson.Parse(f.Geometry); err != nil {
+			return nil, fmt.Errorf("places: area %s geometry: %w", f.Properties.ID, err)
+		}
+		out[f.Properties.ID] = f.Geometry
 	}
 	return out, nil
 }

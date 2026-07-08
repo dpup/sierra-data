@@ -13,6 +13,24 @@ same binary over the same store (see the 2026-07-05 entry and its migration plan
 
 ## 2026-07-08
 
+### Changed — `ebbetts-pass` coverage is now a polygon, not a square
+
+The `ebbetts-pass` area footprint changed from a coarse square bounding box to a
+hand-drawn coverage polygon (`data/places/areas.geojson`): a wedge along the
+Hwy 4 corridor (Angels Camp → Bear Valley), bulging northwest to the Tiger Creek
+forest above Arnold and extending southeast up Hwy 108 into the Stanislaus
+National Forest (Pinecrest / Dodge Ridge), with the corners the square
+over-reached cut off — San Andreas & Jackson (NW) and Farmington (SW). Because
+area membership is point-in-polygon, events in those trimmed corners no longer
+attach to `ebbetts-pass`, so `/v1/places/ebbetts-pass/*`,
+`/v1/events?place=ebbetts-pass`, and `/api/v1/hazards/ebbetts-pass/*` return a
+tighter, more relevant set; `/v1/places/ebbetts-pass` geometry is now the polygon
+rather than a rectangle. The coarse fetch `bounds` were retightened to the
+polygon's bounding box (they now reach slightly further east to cover the Hwy 108
+/ Stanislaus extension, and no longer reach the far NW/SW). Memberships
+re-converge within one poll cycle after deploy. The `/map` page now draws the
+area outline so the footprint is visible.
+
 ### Changed — road-incident `original_text` no longer carries the "Last updated" stamp
 
 The verbatim Caltrans/CHP incident text (`original_text` on `/api/v1/incidents`
