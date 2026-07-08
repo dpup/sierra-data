@@ -341,9 +341,17 @@ func (s *RoadsService) buildIncident(in caltrans.CaltransIncident, area config.I
 
 	d := parseIncidentDetail(in)
 
+	// The 2026 quickmap infowindow layout embeds a "Last updated: <time>" stamp
+	// in the description; Caltrans re-stamps it every poll, so leaving it in the
+	// verbatim text churns the stored event description and mints a spurious
+	// grid revision each poll (with observed_at advancing alongside it). The
+	// stamp is already captured structurally (parseLastUpdatedTime -> LastUpdated
+	// -> observed_at), so drop it from the display/verbatim text.
+	cleanText := stripVolatileStamp(in.DescriptionText)
+
 	description := humanizeIncidentType(d.title)
 	if description == "" {
-		description = in.DescriptionText
+		description = cleanText
 	}
 	locationDesc := d.location
 	if locationDesc == "" {
@@ -359,7 +367,9 @@ func (s *RoadsService) buildIncident(in caltrans.CaltransIncident, area config.I
 		Description:         description,
 		// Verbatim feed text, kept even when AI enhancement later overwrites
 		// Description — clients render the original alongside the enhanced text.
-		OriginalText: in.DescriptionText,
+		// The volatile "Last updated" stamp is stripped (see cleanText above) so
+		// re-stamps don't churn the stored event.
+		OriginalText: cleanText,
 		Status:       api.IncidentStatus_ACTIVE,
 		LogNumber:    d.logNumber,
 		Area:         area.ID,
@@ -486,7 +496,20 @@ var (
 	brRe          = regexp.MustCompile(`(?i)<br\s*/?>`)
 	tagRe         = regexp.MustCompile(`<[^>]*>`)
 	lastUpdatedRe = regexp.MustCompile(`(?i)Last updated:\s*(?:<strong>\s*)?([0-9]{1,2}/[0-9]{1,2}/[0-9]{4})(?:\s*</strong>)?\s*([0-9]{1,2}:[0-9]{2}[ap]m)`)
+
+	// lastUpdatedTextRe matches the "Last updated: MM/DD/YYYY HH:MMam" stamp in
+	// the plain-text (post HTML→text) description. Distinct from lastUpdatedRe,
+	// which parses the HTML for the structured timestamp — this one strips the
+	// volatile stamp out of the verbatim display text so a re-stamp doesn't churn
+	// the stored event (see buildIncident).
+	lastUpdatedTextRe = regexp.MustCompile(`(?i)\s*Last updated:\s*[0-9]{1,2}/[0-9]{1,2}/[0-9]{4}\s+[0-9]{1,2}:[0-9]{2}[ap]m\.?`)
 )
+
+// stripVolatileStamp removes the "Last updated: <date> <time>" stamp from
+// plain-text description text and trims surrounding whitespace.
+func stripVolatileStamp(text string) string {
+	return strings.TrimSpace(lastUpdatedTextRe.ReplaceAllString(text, ""))
+}
 
 // parseIncidentDetail extracts structured fields from a Caltrans incident,
 // handling both the 2026 iw-* markup and the legacy format.

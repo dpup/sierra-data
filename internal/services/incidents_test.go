@@ -672,3 +672,46 @@ func TestEnhanceIncident_BudgetCap(t *testing.T) {
 		t.Errorf("capped incident should keep structural fields: %+v", inc)
 	}
 }
+
+func TestStripVolatileStamp(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "strips trailing last-updated stamp",
+			in:   "Route 16 One-way Traffic Operation From Route 124 to Route 49 Due to Electrical Works. Last updated: 07/08/2026 4:23pm",
+			want: "Route 16 One-way Traffic Operation From Route 124 to Route 49 Due to Electrical Works.",
+		},
+		{
+			name: "two re-stamps normalize to the same text",
+			in:   "Lane Closure. Last updated: 07/08/2026 4:25pm",
+			want: "Lane Closure.",
+		},
+		{
+			name: "different stamp, same body -> identical result (no churn)",
+			in:   "Lane Closure. Last updated: 07/08/2026 4:15pm",
+			want: "Lane Closure.",
+		},
+		{
+			name: "leaves text without a stamp untouched",
+			in:   "Two-vehicle collision, injuries unknown, tow en route.",
+			want: "Two-vehicle collision, injuries unknown, tow en route.",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := stripVolatileStamp(tc.in); got != tc.want {
+				t.Fatalf("stripVolatileStamp(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+	// The core anti-churn property: two polls whose only difference is the
+	// re-stamped time must yield identical verbatim text.
+	a := stripVolatileStamp("Lane Closure. Last updated: 07/08/2026 4:15pm")
+	b := stripVolatileStamp("Lane Closure. Last updated: 07/08/2026 4:25pm")
+	if a != b {
+		t.Fatalf("re-stamp still churns: %q != %q", a, b)
+	}
+}

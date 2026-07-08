@@ -11,6 +11,21 @@ camelCase). As of 2026-07-05 there is a second, first-principles surface at
 `/v1/...` (field names snake_case — protojson `UseProtoNames`); both run on the
 same binary over the same store (see the 2026-07-05 entry and its migration plan).
 
+## 2026-07-08
+
+### Changed — road-incident `original_text` no longer carries the "Last updated" stamp
+
+The verbatim Caltrans/CHP incident text (`original_text` on `/api/v1/incidents`
+and the road-incident event `description` on `/v1`) previously included the
+feed's `Last updated: <date> <time>` line. Caltrans re-stamps that line every
+poll, so it churned the stored event and minted a spurious grid revision each
+poll (with `observed_at` advancing alongside it, since `observed_at` tracks the
+content-observed time). The stamp is already captured structurally (it drives
+the incident's last-updated / `observed_at`), so it's now stripped from the
+verbatim text. Effect for consumers: `original_text` is slightly shorter (no
+trailing "Last updated…"), and road-incident revision history stops showing
+no-op revisions — a new revision now reflects a genuine content change.
+
 ## 2026-07-07
 
 ### Added — MCP endpoint for LLM agents at `/mcp`
