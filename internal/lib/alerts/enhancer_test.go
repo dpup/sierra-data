@@ -180,3 +180,78 @@ func TestTruncateRunes_NoInvalidUTF8(t *testing.T) {
 		t.Fatalf("short string altered: %q", got)
 	}
 }
+
+func TestStripStyleNote(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "strips the observed leak",
+			in:   "An animal was reported in the roadway. Traffic is flowing but use caution. (Style: general traffic alert - no lane closures or one-way control indicated.)",
+			want: "An animal was reported in the roadway. Traffic is flowing but use caution.",
+		},
+		{
+			name: "case-insensitive on the style token",
+			in:   "Two lanes blocked, tow en route. (style: lane closure)",
+			want: "Two lanes blocked, tow en route.",
+		},
+		{
+			name: "leaves a clean description untouched",
+			in:   "Overturned vehicle off the roadway, EMS and fire en route.",
+			want: "Overturned vehicle off the roadway, EMS and fire en route.",
+		},
+		{
+			name: "keeps a legitimate non-style trailing parenthetical",
+			in:   "Debris in the right lane (a shredded tire), traffic slowing.",
+			want: "Debris in the right lane (a shredded tire), traffic slowing.",
+		},
+		{
+			name: "only strips the trailing note, not mid-sentence text",
+			in:   "Report mentions style guide compliance and then continues normally.",
+			want: "Report mentions style guide compliance and then continues normally.",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, stripStyleNote(tc.in))
+		})
+	}
+}
+
+func TestStripAttribution(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "strips courtesy-of attribution",
+			in:   "An animal is in the roadway; CHP is on scene. Information courtesy of CHP.",
+			want: "An animal is in the roadway; CHP is on scene.",
+		},
+		{
+			name: "strips provided-by attribution",
+			in:   "Two lanes blocked northbound. Provided by Caltrans.",
+			want: "Two lanes blocked northbound.",
+		},
+		{
+			name: "leaves prose without attribution untouched",
+			in:   "Overturned vehicle off the roadway, EMS en route.",
+			want: "Overturned vehicle off the roadway, EMS en route.",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, stripAttribution(tc.in))
+		})
+	}
+}
+
+func TestCleanDetails_StripsBoth(t *testing.T) {
+	// The exact reported leak: style note AND CHP attribution, both removed.
+	in := "An animal was reported in the roadway at Phoenix Lake Road and Longeway Road. CHP responded and was on scene. No lanes reported blocked; traffic is flowing but motorists should use caution while the animal is removed or contained. Information courtesy of CHP. (Style: general traffic alert - no lane closures or one-way control indicated.)"
+	want := "An animal was reported in the roadway at Phoenix Lake Road and Longeway Road. CHP responded and was on scene. No lanes reported blocked; traffic is flowing but motorists should use caution while the animal is removed or contained."
+	assert.Equal(t, want, cleanDetails(in))
+}

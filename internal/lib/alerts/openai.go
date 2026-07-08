@@ -13,6 +13,7 @@ Instructions:
 - Parse the input carefully, extracting only factual details.
 - Remove jargon and abbreviations (e.g., "1183-Trfc Collision-Unkn Inj" → "Traffic collision, injuries unknown").
 - Provide concise, human-readable text for travelers.
+- Do NOT add source attribution (e.g. "Information courtesy of CHP", "provided by Caltrans"). The data source is displayed separately — describe only the incident itself.
 - Infer impact from the details (use judgment).
 - Populate all fields exactly as specified in the schema.
 
@@ -42,6 +43,8 @@ StyleUrl Definitions (KML styles from Caltrans data):
 - #incidentIcon: Traffic incident - accident, hazard, or emergency response
 - #constructionIcon: Construction zone - ongoing work, expect lane restrictions or closures
 - Other values: General traffic alert
+
+IMPORTANT: These style categories are INTERNAL classification hints. Use them to set road_status and to phrase the description naturally — NEVER surface the style name or append a meta note like "(Style: ...)" to details, condensed_summary, or any other field. The reader wants the situation, not its category.
 
 Road Status Determination:
 - Analyze the incident title and description to determine road_status:

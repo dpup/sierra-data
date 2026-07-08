@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -45,7 +46,7 @@ Raw Alert: %s
 
 Extract structured information following the schema.
 Focus on making the details field human-readable by removing technical abbreviations and jargon.
-If a style_url is provided, incorporate the relevant traffic flow context from the StyleUrl definitions into your description (e.g., mention one-way control, lane restrictions, etc.).
+If a style_url is provided, use the StyleUrl definitions ONLY to set road_status and to phrase the description naturally (e.g. mention one-way control or lane restrictions when they actually apply). Never name the KML style or append a meta/classification note such as "(Style: ...)" to details or any other field — describe the situation, not its category.
 For the condensed summary, follow the examples provided - do NOT include location, keep it under 120 characters.`,
 		string(rawAlertJSON))
 
@@ -96,6 +97,14 @@ For the condensed summary, follow the examples provided - do NOT include locatio
 	if err := json.Unmarshal([]byte(jsonResponse), &structured); err != nil {
 		return EnhancedAlert{}, fmt.Errorf("failed to parse OpenAI JSON response: %w", err)
 	}
+
+	// Defense-in-depth: despite the prompt, the model occasionally decorates
+	// details with an internal style classification ("... (Style: general
+	// traffic alert - no lane closures indicated.)") or a redundant source
+	// attribution ("... Information courtesy of CHP.") — the latter duplicates
+	// the source tag shown separately. Strip both before details reaches
+	// traveler-facing text.
+	structured.Details = cleanDetails(structured.Details)
 
 	// Validate required fields
 	if structured.Details == "" {
@@ -165,6 +174,35 @@ func (a *alertEnhancer) HealthCheck(ctx context.Context) error {
 }
 
 // Helper functions
+
+// styleNoteRe matches a trailing "(Style: ...)" meta annotation the model
+// sometimes appends to details (the KML style is an internal classification
+// input, not traveler-facing text). Anchored to the end and gated on a leading
+// "style" so genuine parentheticals elsewhere in the prose are left intact.
+var styleNoteRe = regexp.MustCompile(`(?i)\s*\(style\b[^)]*\)\s*$`)
+
+// attributionRe matches a redundant source-attribution sentence the model
+// sometimes adds ("Information courtesy of CHP.", "Provided by Caltrans.") — the
+// source is already shown as a tag, so this is duplication. Gated on the
+// attribution lead-in and a sentence-ending period to avoid touching prose.
+var attributionRe = regexp.MustCompile(`(?i)\s*(?:information\s+)?(?:courtesy of|provided by)\b[^.]*\.`)
+
+// stripStyleNote removes a single trailing "(Style: ...)" note.
+func stripStyleNote(s string) string {
+	return strings.TrimSpace(styleNoteRe.ReplaceAllString(s, ""))
+}
+
+// stripAttribution removes redundant "courtesy of / provided by <source>"
+// attribution sentences.
+func stripAttribution(s string) string {
+	return strings.TrimSpace(attributionRe.ReplaceAllString(s, ""))
+}
+
+// cleanDetails removes the model's occasional style-note and source-attribution
+// decorations from the traveler-facing details text.
+func cleanDetails(s string) string {
+	return strings.TrimSpace(stripAttribution(stripStyleNote(s)))
+}
 
 // truncateRunes returns s unchanged if it is within maxBytes, otherwise the
 // longest rune-aligned prefix that fits in maxBytes plus an ellipsis. Slicing
