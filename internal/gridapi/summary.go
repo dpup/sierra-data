@@ -32,9 +32,6 @@ const (
 	ModeActive = "ACTIVE"
 )
 
-// summaryDomains is the fixed domain order on the wire (plan §2.4).
-var summaryDomains = []string{"fire", "evacuation", "weather", "roads", "seismic"}
-
 // summaryResponse is the exact plan §2.3 JSON shape the site codes against.
 type summaryResponse struct {
 	Place       string         `json:"place"`

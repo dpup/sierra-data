@@ -5,9 +5,9 @@ import (
 	"runtime/debug"
 	"time"
 
-	"github.com/dpup/sierra-data/internal/config"
 	"github.com/dpup/prefab/errors"
 	"github.com/dpup/prefab/logging"
+	"github.com/dpup/sierra-data/internal/config"
 )
 
 // PeriodicRefreshService simulates regular API requests to maintain cache warmth
@@ -65,17 +65,6 @@ func (p *PeriodicRefreshService) StartPeriodicRefresh(ctx context.Context) error
 	return nil
 }
 
-// Stop gracefully stops the periodic refresh
-func (p *PeriodicRefreshService) Stop() {
-	if !p.running {
-		return
-	}
-
-	p.running = false
-	close(p.stopChan)
-	logging.Info(context.Background(), "Stopped periodic refresh service")
-}
-
 // refreshLoop runs the periodic refresh in background
 func (p *PeriodicRefreshService) refreshLoop(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
@@ -121,9 +110,4 @@ func (p *PeriodicRefreshService) refreshCacheData(ctx context.Context) {
 	} else {
 		logging.Infow(ctx, "Periodic refresh: successfully cached roads", "road_count", len(roads))
 	}
-}
-
-// IsRunning returns whether periodic refresh is active
-func (p *PeriodicRefreshService) IsRunning() bool {
-	return p.running
 }

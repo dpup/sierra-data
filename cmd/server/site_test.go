@@ -13,8 +13,8 @@ import (
 )
 
 // TestSiteEmbedContainsPages pins the embed manifest: every page the nav
-// links to must be in the Astro build output (site/dist, embedded via
-// go:embed all:dist) — a missing page should fail here, not 404 in production.
+// links to must be in the Astro build output (site/dist, embedded via the
+// all:dist embed directive) — a missing page should fail here, not 404 in production.
 func TestSiteEmbedContainsPages(t *testing.T) {
 	pages := []string{
 		"index.html",

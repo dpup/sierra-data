@@ -377,22 +377,6 @@ func (g *geoUtils) closestPointOnSegment(point, segmentStart, segmentEnd Point) 
 	return segmentEnd
 }
 
-// Coordinate Conversion Utilities
-
-// NewPoint creates a Point from latitude and longitude values with validation
-func NewPoint(latitude, longitude float64) (Point, error) {
-	point := Point{Latitude: latitude, Longitude: longitude}
-	if !isValidCoordinate(point) {
-		return Point{}, errors.New("invalid coordinates: latitude must be [-90, 90], longitude must be [-180, 180]")
-	}
-	return point, nil
-}
-
-// NewPointUnsafe creates a Point without validation (for performance-critical paths)
-func NewPointUnsafe(latitude, longitude float64) Point {
-	return Point{Latitude: latitude, Longitude: longitude}
-}
-
 // FilterPointsByDistance filters points to those within specified distance of center point
 func (g *geoUtils) FilterPointsByDistance(points []Point, center Point, maxDistanceMeters float64) ([]Point, error) {
 	if !isValidCoordinate(center) {
