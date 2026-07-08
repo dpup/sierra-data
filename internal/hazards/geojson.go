@@ -10,10 +10,6 @@ import (
 	"math"
 )
 
-// schemaVersion is surfaced in FeatureCollection metadata; bump on a breaking
-// change to the properties contract.
-const schemaVersion = 1
-
 // FeatureCollection is an RFC 7946 FeatureCollection. The non-standard
 // `metadata` member is a foreign member (allowed by RFC 7946 §6.1) carrying
 // provenance/freshness; map libraries ignore it.
@@ -48,15 +44,6 @@ type Metadata struct {
 	Attribution      string `json:"attribution,omitempty"`
 	SourceURL        string `json:"source_url,omitempty"`
 	SchemaVersion    int    `json:"schema_version"`
-}
-
-// newCollection builds a FeatureCollection, guaranteeing a non-nil features
-// slice so the JSON is `[]` not `null`.
-func newCollection(features []Feature, md *Metadata) FeatureCollection {
-	if features == nil {
-		features = []Feature{}
-	}
-	return FeatureCollection{Type: "FeatureCollection", Features: features, Metadata: md}
 }
 
 // --- Geometry constructors (handle the lat/lng -> lon,lat swap + precision) ---
@@ -103,21 +90,4 @@ func RawGeom(geomType string, coords json.RawMessage) *Geometry {
 		return nil
 	}
 	return &Geometry{Type: geomType, Coordinates: coords}
-}
-
-// PolygonGeom builds a single-ring Polygon from internal {lat,lng} points,
-// closing the ring if needed. Returns nil if the ring is degenerate.
-func PolygonGeom(ring []LatLng) *Geometry {
-	if len(ring) < 3 {
-		return nil
-	}
-	coords := make([][]float64, 0, len(ring)+1)
-	for _, p := range ring {
-		coords = append(coords, lonLat(p.Lat, p.Lng))
-	}
-	// Close the ring (first == last) per RFC 7946.
-	if first, last := coords[0], coords[len(coords)-1]; first[0] != last[0] || first[1] != last[1] {
-		coords = append(coords, coords[0])
-	}
-	return &Geometry{Type: "Polygon", Coordinates: [][][]float64{coords}}
 }

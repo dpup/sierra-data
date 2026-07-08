@@ -105,11 +105,10 @@ func main() {
 		log.Fatalf("Failed to seed grid places: %v", err)
 	}
 
-	// Unified hazard/situation GeoJSON feed (re-projects the feeds above).
-	// The store backend re-backs the five event-backed layers (wildfire,
-	// evacuation, weather_alert, earthquake, road_incident) onto the grid
-	// event store (plan T14); conditions layers stay live projections.
-	hazardsService := hazards.NewServiceWithAPIs(appConfig, roadsService, weatherService, caltransClient, cacheInstance, newGridStoreBackend(gridStore))
+	// Hazard condition-layer projector: gridapi calls BuildLayer for the live
+	// condition layers (road_segment, chain_control, fire_weather). The event
+	// layers are projected from the grid store by gridapi itself.
+	hazardsService := hazards.NewServiceWithAPIs(appConfig, roadsService, weatherService, caltransClient, cacheInstance)
 
 	// NWS weather-alert enhancement is optional: nil when disabled or keyless
 	// (the scheduler then serves raw alerts — enhancement never gates ingest).
@@ -228,4 +227,3 @@ func gridPollInterval(cfg *config.Config, sourceIDs ...string) time.Duration {
 	}
 	return best
 }
-

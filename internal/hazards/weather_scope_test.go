@@ -28,44 +28,11 @@ func TestZonesMatch(t *testing.T) {
 
 // fakeWeather implements WeatherAPI for builder tests.
 type fakeWeather struct {
-	alerts []*api.WeatherAlert
-	fw     *api.FireWeather
+	fw *api.FireWeather
 }
 
 func (f fakeWeather) ListWeather(context.Context, *api.ListWeatherRequest) (*api.ListWeatherResponse, error) {
 	return &api.ListWeatherResponse{FireWeather: f.fw}, nil
-}
-func (f fakeWeather) ListWeatherAlerts(context.Context, *api.ListWeatherAlertsRequest) (*api.ListWeatherAlertsResponse, error) {
-	return &api.ListWeatherAlertsResponse{Alerts: f.alerts}, nil
-}
-
-// TestWeatherAlerts_AreaScoping: an area only surfaces alerts for its own NWS
-// zones, but zoneless (OpenWeatherMap) alerts are kept since they can't be scoped.
-func TestWeatherAlerts_AreaScoping(t *testing.T) {
-	s := &Service{weather: fakeWeather{alerts: []*api.WeatherAlert{
-		{Id: "calaveras", Source: api.AlertSource_NWS, Severity: api.AlertSeverity_WARNING, Event: "Winter Storm Warning", Zones: []string{"CAZ064"}},
-		{Id: "tuolumne", Source: api.AlertSource_NWS, Severity: api.AlertSeverity_CRITICAL, Event: "Red Flag Warning", Zones: []string{"CAZ258"}},
-		{Id: "owm", Source: api.AlertSource_OPENWEATHERMAP, Severity: api.AlertSeverity_INFO, Event: "Heat Advisory"},
-	}}}
-	area := config.HazardArea{Zones: []string{"CAZ064", "CAZ065"}}
-
-	feats, err := s.weatherAlerts(context.Background(), area)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := map[string]bool{}
-	for _, f := range feats {
-		got[f.Properties.ID] = true
-	}
-	if !got["wx:calaveras"] {
-		t.Error("in-zone NWS alert should be present")
-	}
-	if got["wx:tuolumne"] {
-		t.Error("out-of-zone NWS alert must be dropped (the multi-area bug)")
-	}
-	if !got["wx:owm"] {
-		t.Error("zoneless OWM alert should be kept (can't be scoped)")
-	}
 }
 
 // TestFireWeather_AreaScoping: fire weather only surfaces for areas whose zones

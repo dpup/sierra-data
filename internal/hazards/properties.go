@@ -1,7 +1,5 @@
 package hazards
 
-import "strings"
-
 // Layer identifiers (docs/hazard-aggregation-design.md §4.4).
 const (
 	LayerRoadIncident = "road_incident"
@@ -117,15 +115,4 @@ type EvacuationProps struct {
 func (p *Properties) setSeverity(s string) {
 	p.Severity = s
 	p.SeverityRank = severityRank(s)
-}
-
-// safeURL returns u only if it is an http(s) URL; upstream data is untrusted and
-// a javascript:/data: URL rendered in a popup is an XSS/open-redirect vector
-// (design §4.1).
-func safeURL(u string) string {
-	u = strings.TrimSpace(u)
-	if strings.HasPrefix(u, "https://") || strings.HasPrefix(u, "http://") {
-		return u
-	}
-	return ""
 }

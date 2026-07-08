@@ -1,116 +1,81 @@
-# Hazard Aggregation (unified GeoJSON feed)
+# Hazard model + condition-layer projection
 
-Implements the design in `docs/hazard-aggregation-design.md`. Aggregates the
-service's hazard sources into ONE standardized, map-ready interface:
+Originally this package served the unified GeoJSON hazard feed at
+`GET /api/v1/hazards/{area}/{layer}.geojson` (plus `/api/v1/situation` and
+`/api/v1/scanners`). **That HTTP surface was removed on 2026-07-08** along with
+the rest of `/api/v1`. What remains, and what this package is now, is two things:
 
-```
-GET /api/v1/hazards/{area}/{layer}.geojson
-```
-
-Returns an RFC 7946 `FeatureCollection` (+ a `metadata` foreign member) that an
-open maps client (MapLibre GL, Leaflet, OpenLayers) layers directly.
+1. **The shared hazard model** (`geojson.go`, `properties.go`, `severity.go`) —
+   RFC 7946 GeoJSON types, the common `Properties` envelope + per-kind blocks,
+   and the one severity scale. `internal/gridapi` reuses these to project the
+   grid store's events into map layers, so the envelope stays identical to what
+   the old feed emitted.
+2. **The live condition-layer builder** (`(*Service).BuildLayer`) — the only
+   runtime entry point now. `internal/gridapi` calls it for the three
+   **condition** layers only: `road_segment`, `chain_control`, `fire_weather`
+   (see `conditionLayers` in `internal/gridapi/maplayers.go`). The five
+   **event** layers (wildfire, evacuation, weather_alert, earthquake,
+   road_incident) are projected from the grid store by
+   `internal/gridapi.ProjectEvents` / the per-kind `project*` helpers — **not
+   here**. The live event builders and the store-backed path that used to live
+   in this package were deleted with the endpoints.
 
 ## The model (don't break the envelope)
 
 - `geojson.go` — RFC 7946 types + geometry constructors. **Coordinates are
   `[longitude, latitude]`** (the inverse of the service's internal
-  `{latitude, longitude}`); always build geometry via `PointGeom`/
-  `LineStringGeom`/`PolygonGeom`, which do the swap and trim to 5 decimals.
+  `{latitude, longitude}`); build geometry via `PointGeom` / `LineStringGeom`
+  (or `RawGeom` to pass upstream `[lon,lat]` GeoJSON through), which do the swap
+  and trim to 5 decimals.
 - `properties.go` — the common `Properties` envelope shared by every layer, plus
   a namespaced per-kind block (`incident`, `road`, `chain_control`, `weather`,
-  `fire_weather`). The envelope is identical across layers — that's the
-  unification; a client renders any card from `headline/severity/source`.
+  `fire_weather`, `earthquake`, `wildfire`, `evacuation`). The envelope is
+  identical across layers — that's the unification; a client renders any card
+  from `headline/severity/source`. `gridapi`'s projection builds these same
+  structs.
 - `severity.go` — the one severity scale (`INFO..EXTREME`, rank 0–4) every source
-  maps onto. It's editorial response-urgency, not magnitude. Use `setSeverity`
-  so `severity_rank` stays in sync.
+  maps onto. Editorial response-urgency, not magnitude. Use `setSeverity` so
+  `severity_rank` stays in sync. The `SeverityFrom*` / `NormFireName` /
+  `NormalizeEvacLevel` wrappers in `severity_export.go` are the exported seam the
+  ingest normalizers (`internal/ingest`) use.
 
-## Served outside grpc-gateway, but CORS is automatic
+## Fail-loud (still enforced for the condition layers)
 
-These endpoints are hand-built GeoJSON via `prefab.WithHTTPHandler` (GeoJSON's
-polymorphic geometry fights proto). Prefab still wraps every `WithHTTPHandler`
-with `securityMiddleware` (verified in `builder.go`), so **CORS / the
-`*.ersn.net` allowlist apply automatically — do not add manual `SecurityHeaders`
-calls.** Each response sets `Content-Type: application/geo+json` and
-`Cache-Control`.
-
-## Fail-loud
-
-If a layer's source **errors**, the handler returns `metadata.source_status =
-UNAVAILABLE` with empty features — never a fabricated clear state. The
-load-bearing safety property is **"an error never becomes a 0"**: `UNAVAILABLE`
-means the source genuinely failed (consumer shows "unknown / check the official
-source"), distinct from `OK` + 0 features, which means the source is healthy and
-currently reports nothing (e.g. no active evacuation zones). A confirmed-empty is
-**not** UNAVAILABLE — but it's still caveated (evac always carries the Genasys
-`source_url` + "reference only" attribution); "no active zones per Cal OES" is
-never a guarantee.
-
-`buildLayer` is the one place all this is enforced (both the single-layer and
-`/situation` paths go through it). Status resolution:
+`buildLayer` applies the fail-loud rules for the three condition layers. On a
+source **error** it returns `source_status = UNAVAILABLE` with empty features —
+never a fabricated clear state. The load-bearing property is **"an error never
+becomes a 0"**: `UNAVAILABLE` means the source genuinely failed (consumer shows
+"unknown / check the official source"), distinct from `OK` + 0 features (source
+healthy, currently reports nothing). Status resolution:
 
 - fresh cache hit → `OK` (no upstream call)
 - builder OK (incl. a clean empty) → `OK`; non-empty results cached for `layerTTL`
-- builder returns `partialData(err)` → `STALE`, features kept (a multi-source
-  layer like wildfire lost one source — don't present partial data as complete)
+- builder returns `partialData(err)` → `STALE`, features kept
 - builder hard error **with** a cached value → `STALE`, last-good features served
-  (`last_source_update` = fetch time); transient upstream blips don't go dark
 - builder hard error, nothing cached → `UNAVAILABLE`, empty
 
-Caching uses the shared `internal/cache` (passed to `NewService`); `layerTTL`
-returns 0 for the road/weather layers that are already cached by their underlying
-services (no double-caching), and a short TTL for the new upstreams + the live
-Caltrans chain-control fetch. Empty results are **never** cached — that keeps the
-safety property: a later fetch error falls through to `UNAVAILABLE` instead of
-replaying a stale "0".
+Empty results are **never** cached — a later fetch error then falls through to
+`UNAVAILABLE` instead of replaying a stale "0". Caching uses the shared
+`internal/cache`; `layerTTL` returns 0 for layers already cached by their
+underlying service (no double-caching).
 
-## Adding a layer
+## Served through prefab's HTTP security wrapper
 
-1. Add the `layer` const in `properties.go` and a per-kind block struct.
-2. Add the severity mapping in `severity.go` (cover every enum value).
-3. Write a `builder` method `func (s *Service) <layer>(ctx, area) ([]Feature, error)`
-   and add it to `layerRegistry()` (the single source of truth — it feeds BOTH
-   the dispatch map and the `/situation` iteration order; there is no separate
-   `layerOrder` to keep in sync). Give it a `layerTTL` if it hits a new upstream.
-   A builder with multiple independent sources should return `partialData(err)`
-   when one fails so the layer degrades to STALE, not a silent OK.
-   **Scope to the area.** A builder MUST filter to the requested `area`, or a
-   second configured area inherits the first's data. Use `area.Bounds.Contains`
-   for geocoded sources (chain_control, earthquake, wildfire), the area's
-   `incidentArea`/spatial query for incidents/evac, and `zonesMatch(area.Zones,
-   …)` for the zone-based weather_alert / fire_weather layers (their data carries
-   NWS zones, not coordinates). Returning everything regardless of `area` is the
-   bug to avoid.
-4. New upstreams get a client under `internal/clients/`, mirroring `nws`
-   (HTTPDoer, no key where possible) and a `LimitReader` body cap.
-5. M1 re-projects existing feeds only (road_incident, chain_control,
-   road_segment, weather_alert null-geom, fire_weather null-geom). Roadmap:
-   M2 earthquake (USGS) + scanners config; M3 wildfire (CAL FIRE + WFIGS
-   perimeters); M4 evacuation (Cal OES, fail-loud); M5 `/situation/{area}`
-   aggregator. Update the design doc's milestone table as each lands.
+The package no longer registers any handler itself; `gridapi` mounts `/v1` and
+calls `BuildLayer` in-process. CORS / the `*.ersn.net` allowlist are applied by
+prefab's `securityMiddleware` on the `/v1` handler — do not add manual
+`SecurityHeaders` calls.
 
-## /situation/{area} — the one-call rollup (M5)
+## Changing a condition layer
 
-`situation.go` fans out over every layer concurrently (`buildLayer` per layer,
-same fail-loud rules as the GeoJSON endpoints) and returns a JSON summary, not
-GeoJSON: per-layer `source_status` + `feature_count`, a cross-layer
-`highest_severity`, severity histogram, the most-severe `top_headlines`, and the
-scanner sidecar. The map still fetches `*.geojson` per layer; this is the
-dashboard's single status fetch.
-
-**Evacuation posture — health vs. content (don't regress):**
-`summary.active_evacuations` distinguishes the two on purpose:
-
-- `evacuation_status: OK`, `active_evacuations: 0` — Cal OES is healthy and
-  reports no active zones (confirmed-empty; a client renders "no active
-  evacuations reported — verify at Genasys", **not** a guaranteed all-clear).
-- `evacuation_status: OK`/`STALE`, `active_evacuations: N>0` — active zones.
-- `evacuation_status: UNAVAILABLE`, `active_evacuations: null` — Cal OES errored;
-  a client MUST render `null` as "unknown — check Genasys", never as zero.
-
-The safety property is **an error never becomes a 0** (a fetch failure is
-`UNAVAILABLE`/`null`, a confirmed-empty is `OK`/`0`). The rollup math lives in the
-pure `summarize()` (unit-tested in `situation_test.go`): it sets the count for
-`OK`/`STALE` and leaves it `null` for `UNAVAILABLE`.
-
-Status: **M0–M5 shipped.** All eight layers + `/situation/{area}` +
-`/scanners/{area}` are live. See the design doc's milestone table.
+1. If it needs a new per-kind block, add it in `properties.go` and the severity
+   mapping in `severity.go` (cover every enum value; use `setSeverity`).
+2. Write/adjust the `builder` method `func (s *Service) <layer>(ctx, area)
+   ([]Feature, error)` and its `layerRegistry()` entry (the single source of
+   truth for the dispatch map). Give it a `layerTTL` if it hits a new upstream.
+   **Scope to the area** — `area.Bounds.Contains` for geocoded sources,
+   `zonesMatch(area.Zones, …)` for zone-based data — or a second configured area
+   inherits the first's data.
+3. **Event layers do not live here.** A new event-shaped source is a normalizer
+   in `internal/ingest` + a projection case in `internal/gridapi` (see those
+   packages' guides), not a builder in this package.

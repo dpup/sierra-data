@@ -2,148 +2,65 @@ package hazards
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
-	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/dpup/prefab/logging"
 
 	api "github.com/dpup/sierra-data/api/v1"
 	"github.com/dpup/sierra-data/internal/cache"
-	"github.com/dpup/sierra-data/internal/clients/calfire"
 	"github.com/dpup/sierra-data/internal/clients/caloes"
 	"github.com/dpup/sierra-data/internal/clients/caltrans"
-	"github.com/dpup/sierra-data/internal/clients/usgs"
-	"github.com/dpup/sierra-data/internal/clients/wfigs"
 	"github.com/dpup/sierra-data/internal/config"
-	"github.com/dpup/sierra-data/internal/services"
 )
 
-// RoadsAPI / WeatherAPI are the slices of the existing services the hazard layer
-// re-projects. Interfaces keep the package testable; exported so external
-// consumers (the /v1 grid API, the store→GeoJSON byte-compat harness) can
-// construct the service with fakes via NewServiceWithAPIs.
+// RoadsAPI / WeatherAPI are the narrow slices of the roads/weather services the
+// surviving condition builders need — road_segment reads ListRoads, fire_weather
+// reads ListWeather. Interfaces keep the package testable and let the /v1 grid
+// API construct the service with fakes via NewServiceWithAPIs.
 type RoadsAPI interface {
 	ListRoads(context.Context, *api.ListRoadsRequest) (*api.ListRoadsResponse, error)
-	ListIncidents(context.Context, *api.ListIncidentsRequest) (*api.ListIncidentsResponse, error)
 }
 type WeatherAPI interface {
 	ListWeather(context.Context, *api.ListWeatherRequest) (*api.ListWeatherResponse, error)
-	ListWeatherAlerts(context.Context, *api.ListWeatherAlertsRequest) (*api.ListWeatherAlertsResponse, error)
 }
 
-// StoreBackend serves an event-backed layer's already-projected features from
-// the persistent grid event store (internal/store through the shared T13
-// projection — see cmd/server/gridadapter.go). It is the strangler seam of
-// docs/v2-implementation-plan.md T14: nil = live mode (builders + TTL cache,
-// the shipped behavior); non-nil re-backs the five event-backed layers
-// (wildfire, evacuation, weather_alert, earthquake, road_incident) onto the
-// store. Conditions layers (road_segment, chain_control, fire_weather) never
-// consult it.
-//
-// placeID is a place-directory id — configured hazard areas are seeded as
-// "area:{id}", so the event_places join gives per-area scoping. status is the
-// layer's source-registry health (OK | STALE | UNAVAILABLE); lastSourceUpdate
-// is the most recent successful source fetch (zero when OK, or when the
-// source never succeeded). features must be only ACTIVE/SCHEDULED events (the
-// live-map read); err is reserved for the store itself being unreadable.
-type StoreBackend interface {
-	QueryActive(ctx context.Context, placeID, layer string) (features []Feature, status string, lastSourceUpdate time.Time, err error)
-}
-
-// Service re-projects the service's existing feeds into the unified GeoJSON
-// hazard model and serves them at /api/v1/hazards/{area}/{layer}.geojson.
+// Service projects the roads/weather feeds into the unified GeoJSON hazard
+// model. Since the /api/v1 hazards surface was removed, its only consumer is the
+// /v1 grid API (internal/gridapi), which calls BuildLayer for the three
+// condition layers (road_segment, chain_control, fire_weather); the event
+// layers are projected directly from the store by gridapi.
 type Service struct {
 	cfg      *config.Config
 	roads    RoadsAPI
 	weather  WeatherAPI
 	caltrans *caltrans.FeedParser
-	usgs     *usgs.Client
-	calfire  *calfire.Client
-	wfigs    *wfigs.Client
-	caloes   *caloes.Client
 	cache    *cache.Cache
 
-	// storeBackend, when non-nil, re-backs the event-backed layers onto the
-	// grid event store (T14); nil keeps every layer on its live builder.
-	storeBackend StoreBackend
-
-	// layerBuilders and layerOrder are derived once from layerRegistry() so the
-	// dispatch map and the situation iteration order share one source of truth.
+	// layerBuilders is derived once from layerRegistry() so the dispatch map has
+	// one source of truth.
 	layerBuilders map[string]builder
-	layerOrder    []string
 }
 
-// NewService wires the hazard service to the existing services + clients. The
-// new-upstream clients (USGS, CAL FIRE, WFIGS, ...) are keyless and constructed
-// here. The shared cache is reused for stale-on-error resilience on the new
-// upstreams (see buildLayer); pass nil to disable hazard-layer caching.
-// No store backend is passed (nil = live mode); production wiring uses
-// NewServiceWithAPIs to re-back the event layers onto the grid store.
-func NewService(cfg *config.Config, roads *services.RoadsService, weather *services.WeatherService, ct *caltrans.FeedParser, c *cache.Cache) *Service {
-	return NewServiceWithAPIs(cfg, roads, weather, ct, c)
-}
-
-// NewServiceWithAPIs is NewService with the roads/weather dependencies as
-// their narrow interfaces, so consumers outside this package (the /v1 grid
-// API, the byte-compat harness) can construct the service with fakes.
-//
-// storeBackend is an optional trailing argument (at most one is used): a
-// non-nil backend serves the event-backed layers from the grid store instead
-// of their live builders (see buildLayerFromStore). Omitting it — every
-// pre-T14 call site — keeps live mode, byte-identical shipped behavior.
-func NewServiceWithAPIs(cfg *config.Config, roads RoadsAPI, weather WeatherAPI, ct *caltrans.FeedParser, c *cache.Cache, storeBackend ...StoreBackend) *Service {
+// NewServiceWithAPIs constructs the service with the roads/weather dependencies
+// as their narrow interfaces, so consumers outside this package (the /v1 grid
+// API) can construct it with fakes.
+func NewServiceWithAPIs(cfg *config.Config, roads RoadsAPI, weather WeatherAPI, ct *caltrans.FeedParser, c *cache.Cache) *Service {
 	s := &Service{
 		cfg:      cfg,
 		roads:    roads,
 		weather:  weather,
 		caltrans: ct,
-		usgs:     usgs.NewClient(),
-		calfire:  calfire.NewClient(),
-		wfigs:    wfigs.NewClient(),
-		caloes:   caloes.NewClient(),
 		cache:    c,
-	}
-	if len(storeBackend) > 0 {
-		s.storeBackend = storeBackend[0]
 	}
 	reg := s.layerRegistry()
 	s.layerBuilders = make(map[string]builder, len(reg))
-	s.layerOrder = make([]string, 0, len(reg))
 	for _, e := range reg {
 		s.layerBuilders[e.name] = e.build
-		s.layerOrder = append(s.layerOrder, e.name)
 	}
 	return s
 }
-
-// WithClients overrides the keyless upstream clients (nil keeps the default)
-// and returns s for chaining. The client fields are unexported, so this is
-// the injection seam external tests use — the store→GeoJSON byte-compat
-// harness feeds the real builders fixture HTTPDoer-backed clients through it.
-// Not for production wiring: NewService's defaults are the real upstreams.
-func (s *Service) WithClients(u *usgs.Client, cf *calfire.Client, wf *wfigs.Client, co *caloes.Client) *Service {
-	if u != nil {
-		s.usgs = u
-	}
-	if cf != nil {
-		s.calfire = cf
-	}
-	if wf != nil {
-		s.wfigs = wf
-	}
-	if co != nil {
-		s.caloes = co
-	}
-	return s
-}
-
-// HandlerPrefix is where the layer endpoints mount.
-const HandlerPrefix = "/api/v1/hazards/"
 
 // builder produces a layer's features for an area. Returning an error makes the
 // layer fail-loud (UNAVAILABLE metadata, empty features) rather than fabricating
@@ -152,8 +69,7 @@ const HandlerPrefix = "/api/v1/hazards/"
 type builder func(ctx context.Context, area config.HazardArea) ([]Feature, error)
 
 // layerEntry binds a layer name to its builder. layerRegistry is the single
-// canonical list — both the dispatch map and the situation order derive from it,
-// in this order.
+// canonical list the dispatch map derives from.
 type layerEntry struct {
 	name  string
 	build builder
@@ -161,95 +77,10 @@ type layerEntry struct {
 
 func (s *Service) layerRegistry() []layerEntry {
 	return []layerEntry{
-		{LayerEvacuation, s.evacuations},
-		{LayerWildfire, s.wildfires},
-		{LayerRoadIncident, s.roadIncidents},
 		{LayerChainControl, s.chainControls},
-		{LayerWeatherAlert, s.weatherAlerts},
 		{LayerFireWeather, s.fireWeather},
-		{LayerEarthquake, s.earthquakes},
 		{LayerRoadSegment, s.roadSegments},
 	}
-}
-
-// ServeHTTP handles GET /api/v1/hazards/{area}/{layer}.geojson.
-func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", "GET")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	rest := strings.TrimPrefix(r.URL.Path, HandlerPrefix)
-	parts := strings.Split(rest, "/")
-	if len(parts) != 2 || !strings.HasSuffix(parts[1], ".geojson") {
-		http.Error(w, "not found: expected /api/v1/hazards/{area}/{layer}.geojson", http.StatusNotFound)
-		return
-	}
-	areaID := parts[0]
-	layer := strings.TrimSuffix(parts[1], ".geojson")
-
-	area, ok := s.resolveArea(areaID)
-	if !ok {
-		http.Error(w, fmt.Sprintf("unknown hazard area: %q", areaID), http.StatusNotFound)
-		return
-	}
-	build, ok := s.layerBuilders[layer]
-	if !ok {
-		http.Error(w, fmt.Sprintf("unknown hazard layer: %q", layer), http.StatusNotFound)
-		return
-	}
-
-	ctx := r.Context()
-	res := s.buildLayer(ctx, area, layer, build)
-
-	fc := newCollection(res.features, &Metadata{
-		Layer:            layer,
-		Area:             areaID,
-		GeneratedAt:      time.Now().UTC().Format(time.RFC3339),
-		SourceStatus:     res.status,
-		LastSourceUpdate: tsOrEmpty(res.lastSourceUpdate),
-		Attribution:      res.meta.attribution,
-		SourceURL:        res.meta.sourceURL,
-		SchemaVersion:    schemaVersion,
-	})
-
-	w.Header().Set("Content-Type", "application/geo+json")
-	w.Header().Set("Cache-Control", "public, max-age=60")
-	if err := json.NewEncoder(w).Encode(fc); err != nil {
-		logging.Errorw(ctx, "Failed to encode hazard GeoJSON", "error", err)
-	}
-}
-
-// ScannersPrefix is where the scanner-config endpoint mounts.
-const ScannersPrefix = "/api/v1/scanners/"
-
-// scannerOut is the response shape for GET /api/v1/scanners/{area}. Note: no
-// raw HTML `embed` field (the client builds the official Broadcastify iframe
-// from feed_id) — see the security review.
-type scannerOut struct {
-	FeedID          string `json:"feed_id"`
-	ChannelLabel    string `json:"channel_label"`
-	Agency          string `json:"agency,omitempty"`
-	BroadcastifyURL string `json:"broadcastify_url"`
-}
-
-// ServeScanners handles GET /api/v1/scanners/{area} from operator config.
-func (s *Service) ServeScanners(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", "GET")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	areaID := parseAreaID(r.URL.Path, ScannersPrefix)
-	area, ok := s.resolveArea(areaID)
-	if !ok {
-		http.Error(w, fmt.Sprintf("unknown hazard area: %q", areaID), http.StatusNotFound)
-		return
-	}
-	out := s.scanners(area)
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "public, max-age=3600")
-	_ = json.NewEncoder(w).Encode(out)
 }
 
 // layerMetadata carries per-layer collection metadata.
@@ -309,14 +140,8 @@ func layerTTL(layer string) time.Duration {
 }
 
 // buildLayer runs one layer's builder and applies the fail-loud rules uniformly.
-// Both the single-layer endpoint and the situation aggregator go through here so
-// the "empty never means all-clear" semantics can't drift between them.
 //
-// When a StoreBackend is configured, the event-backed layers short-circuit to
-// buildLayerFromStore — the store replaces both the live builder AND the TTL
-// cache for those layers (the store is the persisted last-good state).
-//
-// Live-mode status resolution:
+// Status resolution:
 //   - fresh cache hit            -> OK (served from cache, no upstream call)
 //   - builder OK                 -> OK (and the non-empty result is cached)
 //   - builder partialData(err)   -> STALE, features kept (one source degraded)
@@ -327,13 +152,9 @@ func layerTTL(layer string) time.Duration {
 // life-safety property is "an error never becomes a 0": UNAVAILABLE means the
 // source genuinely failed (so a consumer shows "unknown / check the official
 // source"), while OK + 0 means the source is healthy and currently reports
-// nothing (e.g. no active evacuation zones — still caveated via attribution +
-// source_url, never a guarantee). The two are deliberately distinguishable.
+// nothing. The two are deliberately distinguishable.
 func (s *Service) buildLayer(ctx context.Context, area config.HazardArea, layer string, build builder) layerResult {
 	meta := layerMeta(layer)
-	if s.storeBackend != nil && eventBackedLayer(layer) {
-		return s.buildLayerFromStore(ctx, area, layer, meta)
-	}
 	ttl := layerTTL(layer)
 	key := "hazard:" + area.ID + ":" + layer
 
@@ -372,64 +193,6 @@ func (s *Service) buildLayer(ctx context.Context, area config.HazardArea, layer 
 		_ = s.cache.Set(key, features, ttl, "hazard:"+layer)
 	}
 	return finalize(meta, features, "OK", time.Time{})
-}
-
-// eventBackedLayer reports whether a layer is served from the grid event
-// store when a StoreBackend is configured (plan decision 5: the conditions
-// layers — road_segment, chain_control, fire_weather — stay live projections
-// of the roads/weather services and never touch the store).
-func eventBackedLayer(layer string) bool {
-	switch layer {
-	case LayerWildfire, LayerEvacuation, LayerWeatherAlert, LayerEarthquake, LayerRoadIncident:
-		return true
-	}
-	return false
-}
-
-// buildLayerFromStore serves an event-backed layer from the grid event store
-// — the T14 strangler path replacing the live builder + TTL cache. The store
-// persists the last-good state (richer than the old 5m in-memory cache: it
-// survives restarts and never expires), and per-source registry health
-// replaces the live fetch error as the fail-loud signal. Status mapping,
-// implemented EXACTLY against the fail-loud table in CLAUDE.md:
-//
-//   - backend OK          -> OK. A clean empty is OK + 0 features (the
-//     caveated confirmed-empty — "no active zones per Cal OES"), never
-//     UNAVAILABLE. Mirrors "builder OK (incl. a clean empty) -> OK".
-//   - backend STALE       -> STALE + last_source_update (the last good source
-//     fetch). Mirrors "partialData / stale-on-error -> STALE, features kept".
-//   - backend UNAVAILABLE + stored features -> STALE + last_source_update:
-//     the store serves the persisted last-good data while the source is down.
-//     Mirrors "builder hard error WITH a cached value -> STALE, last-good
-//     features served" — the store IS that cache now.
-//   - backend UNAVAILABLE, no stored features -> UNAVAILABLE + empty. The
-//     source never succeeded, so nothing vouches for an empty feed. Mirrors
-//     "builder hard error, nothing cached -> UNAVAILABLE, empty".
-//   - backend error (store unreadable) -> UNAVAILABLE + empty (fail loud).
-//
-// This preserves "an error never becomes a 0": emptiness is only ever
-// OK-empty (clean fetch reporting nothing) or UNAVAILABLE-empty
-// (never-succeeded) — a source failure with stored data degrades to STALE
-// with its data intact instead of fabricating a clear state.
-func (s *Service) buildLayerFromStore(ctx context.Context, area config.HazardArea, layer string, meta layerMetadata) layerResult {
-	// Configured hazard areas are seeded into the place directory as
-	// "area:{id}" (plan decision 11: slug preserved), so the event_places
-	// join scopes the query to this area — a second area never inherits the
-	// first's events.
-	features, status, lastUpdate, err := s.storeBackend.QueryActive(ctx, "area:"+area.ID, layer)
-	if err != nil {
-		logging.Errorw(ctx, "Store-backed hazard layer query failed", "layer", layer, "area", area.ID, "error", err)
-		return finalize(meta, nil, "UNAVAILABLE", time.Time{})
-	}
-	mapped, mappedUpdate := DegradeStoreStatus(status, len(features) > 0, lastUpdate)
-	if mapped == "UNAVAILABLE" {
-		return finalize(meta, nil, "UNAVAILABLE", time.Time{})
-	}
-	if mapped == "STALE" && status != "STALE" {
-		logging.Warnw(ctx, "Serving stored last-good hazard layer; source unavailable",
-			"layer", layer, "area", area.ID, "last_source_update", tsOrEmpty(lastUpdate))
-	}
-	return finalize(meta, features, mapped, mappedUpdate)
 }
 
 // DegradeStoreStatus maps a store-derived source status onto the SERVED
@@ -482,61 +245,7 @@ func (s *Service) BuildLayer(ctx context.Context, area config.HazardArea, layer 
 	return res.features, res.status, res.lastSourceUpdate, res.meta.attribution, res.meta.sourceURL, true
 }
 
-func (s *Service) resolveArea(id string) (config.HazardArea, bool) {
-	for _, a := range s.cfg.Hazards.Areas {
-		if a.ID == id {
-			return a, true
-		}
-	}
-	return config.HazardArea{}, false
-}
-
 // --- layer builders (re-project existing feeds) ---
-
-func (s *Service) roadIncidents(ctx context.Context, area config.HazardArea) ([]Feature, error) {
-	resp, err := s.roads.ListIncidents(ctx, &api.ListIncidentsRequest{Area: area.IncidentArea})
-	if err != nil {
-		return nil, err
-	}
-	var out []Feature
-	for _, in := range resp.GetIncidents() {
-		loc := in.GetLocation()
-		if loc == nil {
-			continue
-		}
-		// Prefer the short condensed_summary as the headline; the long detail
-		// text moves to description. Unenhanced incidents have no condensed
-		// summary, so their detail text stays the headline (see the grid
-		// road_incident normalizer — the two must agree for byte-compat).
-		short := in.GetCondensedSummary()
-		long := in.GetDescription()
-		headline := short
-		desc := ""
-		if short != "" {
-			desc = long
-		} else {
-			headline = long
-		}
-		p := Properties{
-			ID:          "chp:" + in.GetId(),
-			Layer:       LayerRoadIncident,
-			Kind:        "Road incident",
-			Category:    strings.ToLower(strings.TrimPrefix(in.GetType().String(), "ALERT_TYPE_")),
-			Headline:    headline,
-			Description: desc,
-			Status:      strings.ToLower(strings.TrimPrefix(in.GetStatus().String(), "INCIDENT_STATUS_")),
-			AreaLabel:   in.GetLocationDescription(),
-			Source:      Source{ID: "chp", Name: "CHP / Caltrans", Attribution: "quickmap.dot.ca.gov"},
-			Incident:    &IncidentProps{LogNumber: in.GetLogNumber()},
-			Effective:   tsToRFC3339(in.GetStarted()),
-			UpdatedAt:   tsToRFC3339(in.GetLastUpdated()),
-		}
-		p.setSeverity(fromAlertSeverity(in.GetSeverity()))
-		out = append(out, Feature{Type: "Feature", Geometry: PointGeom(loc.GetLatitude(), loc.GetLongitude()), Properties: p})
-	}
-	return out, nil
-}
-
 func (s *Service) chainControls(ctx context.Context, area config.HazardArea) ([]Feature, error) {
 	controls, err := s.caltrans.ParseChainControlsDetailed(ctx)
 	if err != nil {
@@ -628,43 +337,6 @@ func (s *Service) roadSegments(ctx context.Context, area config.HazardArea) ([]F
 	}
 	return out, nil
 }
-
-func (s *Service) weatherAlerts(ctx context.Context, area config.HazardArea) ([]Feature, error) {
-	resp, err := s.weather.ListWeatherAlerts(ctx, &api.ListWeatherAlertsRequest{})
-	if err != nil {
-		return nil, err
-	}
-	var out []Feature
-	for _, a := range resp.GetAlerts() {
-		// Scope to this area's NWS zones (alerts carry zones, not geometry). A
-		// zoneless alert (e.g. OpenWeatherMap) can't be scoped, so it's kept.
-		if !zonesMatch(area.Zones, a.GetZones()) {
-			continue
-		}
-		// M1: NWS zone polygons aren't fetched yet, so these are null-geometry
-		// banner features (valid per the model).
-		p := Properties{
-			ID:          "wx:" + a.GetId(),
-			Layer:       LayerWeatherAlert,
-			Kind:        "Weather alert",
-			Category:    a.GetEvent(),
-			Headline:    nonEmpty(a.GetHeadline(), a.GetEvent()),
-			Description: a.GetDescription(),
-			Effective:   tsToRFC3339(a.GetStartTime()),
-			Expires:     tsToRFC3339(a.GetEndTime()),
-			Source:      Source{ID: strings.ToLower(a.GetSource().String()), Name: a.GetSenderName()},
-			Weather: &WeatherProps{
-				Event:  a.GetEvent(),
-				Source: a.GetSource().String(),
-				Zones:  a.GetZones(),
-			},
-		}
-		p.setSeverity(fromAlertSeverity(a.GetSeverity()))
-		out = append(out, Feature{Type: "Feature", Geometry: nil, Properties: p})
-	}
-	return out, nil
-}
-
 func (s *Service) fireWeather(ctx context.Context, area config.HazardArea) ([]Feature, error) {
 	resp, err := s.weather.ListWeather(ctx, &api.ListWeatherRequest{})
 	if err != nil {
@@ -699,203 +371,6 @@ func (s *Service) fireWeather(ctx context.Context, area config.HazardArea) ([]Fe
 	p.setSeverity(fromFireWeatherState(state))
 	// Region-wide, so null geometry (banner).
 	return []Feature{{Type: "Feature", Geometry: nil, Properties: p}}, nil
-}
-
-func (s *Service) earthquakes(ctx context.Context, area config.HazardArea) ([]Feature, error) {
-	quakes, err := s.usgs.GetEarthquakes(ctx, usgs.Bounds{
-		MinLatitude:  area.Bounds.MinLatitude,
-		MaxLatitude:  area.Bounds.MaxLatitude,
-		MinLongitude: area.Bounds.MinLongitude,
-		MaxLongitude: area.Bounds.MaxLongitude,
-	}, 2.5, 7*24*time.Hour)
-	if err != nil {
-		return nil, err
-	}
-	var out []Feature
-	for _, q := range quakes {
-		p := Properties{
-			ID:        "usgs:" + q.ID,
-			Layer:     LayerEarthquake,
-			Kind:      "Earthquake",
-			Category:  "earthquake",
-			Headline:  fmt.Sprintf("M%.1f — %s", q.Magnitude, q.Place),
-			AreaLabel: q.Place,
-			Source:    Source{ID: "usgs", Name: "USGS", URL: safeURL(q.URL), Attribution: "U.S. Geological Survey"},
-			Earthquake: &EarthquakeProps{
-				Magnitude: q.Magnitude,
-				DepthKm:   q.DepthKm,
-				Felt:      q.Felt,
-			},
-		}
-		if !q.Time.IsZero() {
-			p.Effective = q.Time.Format(time.RFC3339)
-		}
-		if !q.Updated.IsZero() {
-			p.UpdatedAt = q.Updated.Format(time.RFC3339)
-		}
-		p.setSeverity(fromMagnitude(q.Magnitude))
-		out = append(out, Feature{Type: "Feature", Geometry: PointGeom(q.Lat, q.Lng), Properties: p})
-	}
-	return out, nil
-}
-
-func (s *Service) wildfires(ctx context.Context, area config.HazardArea) ([]Feature, error) {
-	bounds := wfigs.Bounds{
-		MinLatitude:  area.Bounds.MinLatitude,
-		MaxLatitude:  area.Bounds.MaxLatitude,
-		MinLongitude: area.Bounds.MinLongitude,
-		MaxLongitude: area.Bounds.MaxLongitude,
-	}
-	// Fetch the two independent sources concurrently — sequential fetches stack
-	// their timeouts (up to ~45s) inside the /situation fan-out.
-	var (
-		incidents  []calfire.Incident
-		perims     []wfigs.Perimeter
-		ierr, perr error
-		wg         sync.WaitGroup
-	)
-	wg.Add(2)
-	go func() { defer wg.Done(); incidents, ierr = s.calfire.GetActiveIncidents(ctx) }()
-	go func() { defer wg.Done(); perims, perr = s.wfigs.GetPerimeters(ctx, bounds) }()
-	wg.Wait()
-
-	if ierr != nil && perr != nil {
-		return nil, fmt.Errorf("both wildfire sources failed: calfire=%v wfigs=%v", ierr, perr)
-	}
-	// One source failed: build from the survivor but flag the layer STALE
-	// (degraded) via partialData so consumers don't read partial data as complete.
-	var partialErr error
-	if ierr != nil {
-		logging.Warnw(ctx, "CAL FIRE incident source failed; wildfire layer is partial (WFIGS perimeters only)", "error", ierr)
-		partialErr = fmt.Errorf("CAL FIRE incidents unavailable: %w", ierr)
-	}
-	if perr != nil {
-		logging.Warnw(ctx, "WFIGS perimeter source failed; wildfire layer is partial (CAL FIRE incidents only)", "error", perr)
-		partialErr = fmt.Errorf("WFIGS perimeters unavailable: %w", perr)
-	}
-
-	// Index perimeters by normalized name so a CAL FIRE incident can adopt its
-	// polygon geometry (join on incident name).
-	byName := make(map[string]wfigs.Perimeter, len(perims))
-	ambiguous := make(map[string]bool)
-	for _, p := range perims {
-		n := normFireName(p.Name)
-		if _, seen := byName[n]; seen {
-			// Two distinct perimeters normalize to the same name — don't let an
-			// incident adopt an arbitrary one (wrong-geometry risk); emit both as
-			// standalone polygons instead.
-			ambiguous[n] = true
-		}
-		byName[n] = p
-	}
-	used := make(map[string]bool)
-
-	var out []Feature
-	for _, in := range incidents {
-		if in.Lat == 0 && in.Lng == 0 {
-			continue
-		}
-		if !area.Bounds.Contains(in.Lat, in.Lng) {
-			continue
-		}
-		wf := &WildfireProps{
-			Acres:       in.Acres,
-			Containment: in.PercentContained,
-			County:      in.County,
-		}
-		p := Properties{
-			ID:        "calfire:" + nonEmpty(in.UniqueID, normFireName(in.Name)),
-			Layer:     LayerWildfire,
-			Kind:      "Wildfire",
-			Category:  "wildfire",
-			Headline:  fmt.Sprintf("%s — %.0f ac, %d%% contained", in.Name, in.Acres, in.PercentContained),
-			AreaLabel: nonEmpty(in.Location, in.County),
-			Status:    "active",
-			Effective: tsOrEmpty(in.Started),
-			UpdatedAt: tsOrEmpty(in.Updated),
-			Source:    Source{ID: "calfire", Name: "CAL FIRE", URL: safeURL(in.URL), Attribution: "CAL FIRE / WFIGS"},
-			Wildfire:  wf,
-		}
-		p.setSeverity(fromWildfire(in.Acres, in.PercentContained))
-		// Adopt the matching perimeter polygon if we have an unambiguous one; else
-		// a point. An ambiguous name (multiple distinct perimeters) is left for the
-		// standalone pass rather than risk adopting the wrong polygon.
-		n := normFireName(in.Name)
-		if perim, ok := byName[n]; ok && !ambiguous[n] {
-			used[n] = true
-			wf.HasPerimeter = true
-			out = append(out, Feature{Type: "Feature", Geometry: RawGeom(perim.GeometryType, perim.GeometryCoords), Properties: p})
-		} else {
-			out = append(out, Feature{Type: "Feature", Geometry: PointGeom(in.Lat, in.Lng), Properties: p})
-		}
-	}
-
-	// Emit perimeters that didn't match a CAL FIRE incident as standalone
-	// polygons (don't drop mapped fires CAL FIRE's curated list omits). Index the
-	// ID so two perimeters sharing a normalized name stay distinct.
-	for i, perim := range perims {
-		if used[normFireName(perim.Name)] || perim.GeometryType == "" {
-			continue
-		}
-		p := Properties{
-			ID:       fmt.Sprintf("wfigs:%s:%d", normFireName(perim.Name), i),
-			Layer:    LayerWildfire,
-			Kind:     "Wildfire",
-			Category: "wildfire",
-			Headline: fmt.Sprintf("%s — %.0f ac, %d%% contained", perim.Name, perim.Acres, perim.PercentContained),
-			Status:   "active",
-			Source:   Source{ID: "wfigs", Name: "NIFC WFIGS", Attribution: "NIFC / WFIGS"},
-			Wildfire: &WildfireProps{Acres: perim.Acres, Containment: perim.PercentContained, Cause: perim.Cause, HasPerimeter: true},
-		}
-		p.setSeverity(fromWildfire(perim.Acres, perim.PercentContained))
-		out = append(out, Feature{Type: "Feature", Geometry: RawGeom(perim.GeometryType, perim.GeometryCoords), Properties: p})
-	}
-	if partialErr != nil {
-		return out, partialData(partialErr)
-	}
-	return out, nil
-}
-
-func (s *Service) evacuations(ctx context.Context, area config.HazardArea) ([]Feature, error) {
-	zones, err := s.caloes.GetActiveEvacuations(ctx, caloes.Bounds{
-		MinLatitude:  area.Bounds.MinLatitude,
-		MaxLatitude:  area.Bounds.MaxLatitude,
-		MinLongitude: area.Bounds.MinLongitude,
-		MaxLongitude: area.Bounds.MaxLongitude,
-	})
-	if err != nil {
-		return nil, err
-	}
-	var out []Feature
-	for _, z := range zones {
-		level := normalizeEvacLevel(z.Status)
-		if level == "" {
-			continue // only surface active Order/Warning/Advisory/SIP zones
-		}
-		if !evacStatusRecognized(z.Status) {
-			// Conservatively classified as WARNING by the fail-loud default. Log so
-			// the phrasing can be added to normalizeEvacLevel explicitly.
-			logging.Warnw(ctx, "Unrecognized Cal OES evacuation STATUS; defaulted to WARNING",
-				"status", z.Status, "zone", nonEmpty(z.ZoneID, z.ZoneName), "county", z.County)
-		}
-		human := titleCase(strings.ToLower(strings.ReplaceAll(level, "_", " ")))
-		p := Properties{
-			ID:          "evac:" + nonEmpty(z.ZoneID, z.ZoneName),
-			Layer:       LayerEvacuation,
-			Kind:        "Evacuation",
-			Category:    strings.ToLower(level),
-			Headline:    fmt.Sprintf("Evacuation %s — %s", human, nonEmpty(z.ZoneName, z.County)),
-			Description: z.PublicInfo,
-			Status:      level,
-			AreaLabel:   nonEmpty(z.ZoneName, z.County),
-			UpdatedAt:   tsOrEmpty(z.LastUpdated),
-			Source:      Source{ID: "caloes", Name: "Cal OES", URL: caloes.SourceURL, Attribution: "Cal OES — reference only"},
-			Evacuation:  &EvacuationProps{ZoneID: z.ZoneID, Level: level, EventType: z.EventType, County: z.County},
-		}
-		p.setSeverity(fromEvacLevel(level))
-		out = append(out, Feature{Type: "Feature", Geometry: RawGeom(z.GeometryType, z.GeometryCoords), Properties: p})
-	}
-	return out, nil
 }
 
 // normFireName normalizes an incident/perimeter name for joining CAL FIRE and
@@ -942,14 +417,6 @@ func tsToRFC3339(ts interface{ GetSeconds() int64 }) string {
 	return time.Unix(secs, 0).UTC().Format(time.RFC3339)
 }
 
-// tsOrEmpty formats a time.Time as RFC3339, or "" if zero.
-func tsOrEmpty(t time.Time) string {
-	if t.IsZero() {
-		return ""
-	}
-	return t.UTC().Format(time.RFC3339)
-}
-
 // i32ptr returns a pointer to v (for optional JSON numerics).
 func i32ptr(v int32) *int32 { return &v }
 
@@ -972,23 +439,6 @@ func zonesMatch(areaZones, alertZones []string) bool {
 	}
 	return false
 }
-
-// parseAreaID extracts the {area} segment from a single-segment endpoint path
-// (the /scanners/ and /situation/ handlers; /hazards/ is two-segment).
-func parseAreaID(path, prefix string) string {
-	return strings.Trim(strings.TrimPrefix(path, prefix), "/")
-}
-
-// titleCase upper-cases the first letter of each space-separated word (ASCII).
-// Replaces the deprecated strings.Title; inputs are known evac-level words.
-func titleCase(s string) string {
-	words := strings.Fields(s)
-	for i, w := range words {
-		words[i] = strings.ToUpper(w[:1]) + w[1:]
-	}
-	return strings.Join(words, " ")
-}
-
 func nonEmpty(vals ...string) string {
 	for _, v := range vals {
 		if strings.TrimSpace(v) != "" {
