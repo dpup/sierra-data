@@ -9,6 +9,8 @@ import (
 
 	"github.com/dpup/prefab"
 	"github.com/dpup/prefab/logging"
+	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
+	"google.golang.org/grpc"
 
 	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
 	"github.com/dpup/sierra-data/internal/cache"
@@ -160,7 +162,13 @@ func main() {
 		// conditional GET (ETag/If-None-Match->304) across gateway + .geojson.
 		// prefab.WithETag(),
 		prefab.WithGRPCService(&gridv1.GridService_ServiceDesc, gridServer),
-		prefab.WithGRPCGateway(gridv1.RegisterGridServiceHandlerFromEndpoint),
+		prefab.WithGRPCGateway(func(ctx context.Context, mux *runtime.ServeMux, endpoint string, opts []grpc.DialOption) error {
+			if err := gridv1.RegisterGridServiceHandlerFromEndpoint(ctx, mux, endpoint, opts); err != nil {
+				return err
+			}
+			// Mount the hand-built summary + .geojson endpoints on the same mux.
+			return gridServer.RegisterGatewayRoutes(mux)
+		}),
 		prefab.WithHTTPHandler(gridapi.HandlerPrefix, gridapiService),
 		prefab.WithHTTPHandlerFunc("/mcp", mcpHandler.ServeHTTP),
 		prefab.WithHTTPHandlerFunc("/", siteHandler),

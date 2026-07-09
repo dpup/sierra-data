@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"math"
+	"net/http"
 	"strconv"
+	"strings"
 
+	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -14,6 +17,29 @@ import (
 	"github.com/dpup/sierra-data/internal/clients/census"
 	"github.com/dpup/sierra-data/internal/store"
 )
+
+// RegisterGatewayRoutes mounts the two endpoints that stay hand-built (not proto)
+// directly on the gateway mux, so they live under /api/v1 beside the proto RPCs
+// with no routing collision:
+//   - the place summary rollup — hand-built because active_evacuations must
+//     serialize as an explicit JSON null (the life-safety invariant);
+//   - the .geojson map layers — RFC 7946 geometry, which proto3 models poorly.
+//
+// Both keep their snake_case bodies (the plan summary shape; GeoJSON's RFC
+// contract). Call from a prefab.WithGRPCGateway callback after registering the
+// GridService handler.
+func (g *GridServer) RegisterGatewayRoutes(mux *runtime.ServeMux) error {
+	if err := mux.HandlePath("GET", "/api/v1/places/{place}/summary",
+		func(w http.ResponseWriter, r *http.Request, pp map[string]string) {
+			g.svc.serveSummary(w, r, pp["place"])
+		}); err != nil {
+		return err
+	}
+	return mux.HandlePath("GET", "/api/v1/places/{place}/map/{layer}",
+		func(w http.ResponseWriter, r *http.Request, pp map[string]string) {
+			g.svc.serveMapLayer(w, r, pp["place"], strings.TrimSuffix(pp["layer"], ".geojson"))
+		})
+}
 
 // notFoundErr / invalidErr / internalErr map store/parse failures to grpc status
 // codes (the gateway renders these as google.rpc.Status with the mapped HTTP
