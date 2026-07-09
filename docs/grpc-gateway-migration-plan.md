@@ -52,7 +52,7 @@ consumer set, so breakage is acceptable.
 | `Cache-Control` header | ✅ unary interceptor → response metadata → header | reuse the old pattern |
 | gRPC reflection, CORS/security | ✅ | `WithGRPCReflection`, automatic |
 | GeoJSON dedicated handlers | ✅ `WithHTTPHandler` | keep |
-| **ETag + `If-None-Match`→304** | ❌ | **needs a Prefab change (§4)** |
+| **ETag + `If-None-Match`→304** | ✅ (prefab 0.6.0 `etag` plugin) | handler-managed `etag.Guard` (§4 Resolved) |
 | application/proto | ❌ | dropped |
 
 **The single gap:** ETag requires hashing the marshaled response body and
@@ -99,9 +99,19 @@ consumers get correct conditional GET with one line and zero maintenance
 tests, push, tag `vX.Y.Z`; `replace` in `sierra-data/go.mod` while iterating,
 then bump and drop the `replace`.
 
-**Deferred for now (this repo):** we assume `WithETag` lands later. SIERRA wires a
-commented `// prefab.WithETag()` with a `TODO` and ships `Cache-Control`-only
-(native interceptor) until the Prefab release is available.
+**Resolved (2026-07-09, prefab 0.6.0):** Prefab shipped conditional GET as a
+**handler-managed** `etag` plugin, not the body-hashing server-wide middleware
+sketched above — deliberately, because protojson's whitespace is non-deterministic
+so a marshaled-body hash is a poor validator (the very reason §4's `WithETag`
+default was awkward). The shape instead is: `prefab.WithPlugin(etag.Plugin())`
+plus, in each handler that opts in, `etag.Guard(ctx, etag.Weak(version))` where
+`version` is a **cheap domain value** the handler can read without materializing
+the body. On an `If-None-Match` hit `Guard` returns `ErrNotModified`, the plugin's
+interceptor renders it as `304` (Gateway) / a not-modified metadata flag (native
+gRPC), and the handler skips the expensive load. SIERRA wired this for
+`GetEvent`/`GetEventHistory` (validator = the cheap `store.EventVersion(id)`
+revision); the hand-built `summary`/`.geojson` keep their body-hash `ETag`. Other
+list/query RPCs are un-instrumented for now (no ETag) and can opt in later.
 
 ## 5. Target architecture (as built)
 
@@ -194,11 +204,12 @@ Port the logic out of the hand-built handlers into RPC methods:
 - **Cache-Control:** a unary interceptor sets `cache-control: public, max-age=60`
   on the read RPCs via response metadata (the mechanism the deleted
   `cacheHeadersInterceptor` used). Native.
-- **ETag/304:** `prefab.WithETag()` (§4) applies conditional GET **server-wide**,
-  covering both the gateway JSON responses and the `.geojson` `WithHTTPHandler`
-  mounts uniformly — no per-handler ETag code, and no separate application to
-  GeoJSON. Deferred until the Prefab release; wired as a commented `// prefab.WithETag()`
-  + TODO in the meantime.
+- **ETag/304:** prefab 0.6.0's `etag` plugin (`prefab.WithPlugin(etag.Plugin())`)
+  is **handler-managed**, not server-wide (see §4 "Resolved"): each opted-in RPC
+  calls `etag.Guard(ctx, etag.Weak(version))` with a cheap domain version. Wired
+  on `GetEvent`/`GetEventHistory` (validator = `store.EventVersion(id)`); the
+  hand-built `summary`/`.geojson` keep their own body-hash `ETag`. Other RPCs are
+  un-instrumented for now.
 - **GeoJSON routing:** the gateway and the GeoJSON handler both live under
   `/api/v1/` — mount the GeoJSON handler at the more specific `/api/v1/places/`
   (or a `.geojson`-suffix check) so the two don't fight in `http.ServeMux`;
@@ -229,10 +240,12 @@ to camelCase — update the MCP guide page examples accordingly.
 
 ## 13. Phased execution & checklist
 
-**Phase 0 — Prefab enablement (DEFERRED)**
-- [ ] Clone `dpup/prefab`; add `WithMiddleware` + `WithETag` + tests; push/tag.
-- [ ] Bump `sierra-data/go.mod`; replace the commented `// prefab.WithETag()`.
-- Until then: SIERRA ships `Cache-Control`-only and leaves the ETag TODO.
+**Phase 0 — Prefab enablement (DONE, 2026-07-09)**
+- [x] Prefab 0.6.0 shipped conditional GET as the handler-managed `etag` plugin
+      (`etag.Plugin()` + `etag.Guard`), not the body-hash middleware §4 sketched.
+- [x] Bumped `sierra-data/go.mod` to `prefab v0.6.0`; registered
+      `prefab.WithPlugin(etag.Plugin())` and wired `GetEvent`/`GetEventHistory`
+      off the cheap `store.EventVersion(id)` validator.
 
 **Phase 1 — Spike (prove the whole path on one endpoint)**
 - [ ] `GridService` proto with just `ListSources` + `google.api.http`; `make proto`.

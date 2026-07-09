@@ -10,6 +10,7 @@ import (
 
 	"github.com/dpup/prefab"
 	"github.com/dpup/prefab/logging"
+	"github.com/dpup/prefab/plugins/etag"
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"google.golang.org/grpc"
 
@@ -161,9 +162,11 @@ func main() {
 	server := prefab.New(
 		prefab.WithContext(ctx),
 		prefab.WithGRPCReflection(),
-		// TODO(grpc-gateway-migration §4): enable once prefab ships WithETag —
-		// conditional GET (ETag/If-None-Match->304) across gateway + .geojson.
-		// prefab.WithETag(),
+		// Conditional GET (ETag/If-None-Match -> 304) for RPCs that call
+		// etag.Guard — GetEvent/GetEventHistory today, keyed off the cheap event
+		// revision so a match skips the blob load. The hand-built summary/.geojson
+		// routes bypass the gRPC interceptor and keep their own body-hash ETag.
+		prefab.WithPlugin(etag.Plugin()),
 		prefab.WithGRPCService(&gridv1.GridService_ServiceDesc, gridServer),
 		prefab.WithGRPCGateway(func(ctx context.Context, mux *runtime.ServeMux, endpoint string, opts []grpc.DialOption) error {
 			if err := gridv1.RegisterGridServiceHandlerFromEndpoint(ctx, mux, endpoint, opts); err != nil {

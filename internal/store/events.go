@@ -299,6 +299,21 @@ func (s *Store) GetEvent(ctx context.Context, id string) (*gridv1.Event, error) 
 	return ev, nil
 }
 
+// EventVersion returns an event's current revision without rehydrating its proto
+// blob — a cheap index-only read (the revision column bumps on every content
+// change or lifecycle transition). ok is false for an unknown id. Callers use it
+// as an ETag validator to answer a conditional GET before the expensive load.
+func (s *Store) EventVersion(ctx context.Context, id string) (revision int64, ok bool, err error) {
+	err = s.db.QueryRowContext(ctx, `SELECT revision FROM events WHERE id = ?`, id).Scan(&revision)
+	if err == sql.ErrNoRows {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf("store: event version %s: %w", id, err)
+	}
+	return revision, true, nil
+}
+
 // --- internals ---
 
 func insertRevision(tx *sql.Tx, id string, rev uint32, observedAt, ingestedAt int64, blob []byte) error {

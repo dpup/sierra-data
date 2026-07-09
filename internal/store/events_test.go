@@ -13,6 +13,38 @@ import (
 	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
 )
 
+func TestEventVersion(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	seedSource(t, s, "usgs")
+
+	// Unknown id: ok=false, no error (the ETag validator seam for a 404).
+	rev, ok, err := s.EventVersion(ctx, "usgs:missing")
+	require.NoError(t, err)
+	assert.False(t, ok)
+	assert.Zero(t, rev)
+
+	ev := testEvent("usgs:q1", gridv1.Severity_MODERATE, gridv1.EventStatus_ACTIVE, "M4.2 near Murphys")
+	_, err = s.UpsertEvent(ctx, ev)
+	require.NoError(t, err)
+
+	rev, ok, err = s.EventVersion(ctx, "usgs:q1")
+	require.NoError(t, err)
+	assert.True(t, ok)
+	assert.Equal(t, int64(1), rev)
+
+	// A content change bumps the revision the validator keys off.
+	changed := proto.Clone(ev).(*gridv1.Event)
+	changed.Headline = "M4.3 near Murphys (revised)"
+	_, err = s.UpsertEvent(ctx, changed)
+	require.NoError(t, err)
+
+	rev, ok, err = s.EventVersion(ctx, "usgs:q1")
+	require.NoError(t, err)
+	assert.True(t, ok)
+	assert.Equal(t, int64(2), rev)
+}
+
 func TestUpsertRevisionGating(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
