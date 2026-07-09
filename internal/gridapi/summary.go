@@ -306,7 +306,7 @@ func topEventsFrom(events []*gridv1.Event, n int) []*gridv1.SummaryTopEvent {
 	for _, ev := range sorted {
 		out = append(out, &gridv1.SummaryTopEvent{
 			Id:           ev.GetId(),
-			Layer:        strings.ToLower(ev.GetLayer().String()),
+			Layer:        ev.GetLayer().String(),
 			Severity:     ev.GetSeverity().String(),
 			SeverityRank: int32(ev.GetSeverity().Number()),
 			Headline:     ev.GetHeadline(),

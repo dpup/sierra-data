@@ -1232,7 +1232,7 @@
         "activeEvacuations": {
           "type": "integer",
           "format": "int32",
-          "title": "null = UNAVAILABLE (see PlaceSummary)"
+          "description": "NULLABLE: serializes as JSON `null` (not 0) when evacuation data is\nUNAVAILABLE. The OpenAPI type is `integer` only because Swagger 2.0 cannot\nexpress a nullable scalar — do NOT coerce null→0 (an error must never become\na 0). null = UNAVAILABLE, 0 = confirmed no active zones, N = active."
         },
         "evacuationStatus": {
           "type": "string",

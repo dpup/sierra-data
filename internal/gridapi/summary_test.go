@@ -306,14 +306,14 @@ func TestSummary_Shape(t *testing.T) {
 	// provenance source ids.
 	require.Len(t, out.Summary.TopEvents, 3)
 	assert.Equal(t, "calfire:f1", out.Summary.TopEvents[0].ID)
-	assert.Equal(t, "wildfire", out.Summary.TopEvents[0].Layer)
+	assert.Equal(t, "WILDFIRE", out.Summary.TopEvents[0].Layer)
 	assert.Equal(t, "SEVERE", out.Summary.TopEvents[0].Severity)
 	assert.Equal(t, 3, out.Summary.TopEvents[0].SeverityRank)
 	assert.Equal(t, "calfire", out.Summary.TopEvents[0].Source)
 	assert.Equal(t, "usgs:q1", out.Summary.TopEvents[1].ID)
-	assert.Equal(t, "earthquake", out.Summary.TopEvents[1].Layer)
+	assert.Equal(t, "EARTHQUAKE", out.Summary.TopEvents[1].Layer)
 	assert.Equal(t, "wx:a1", out.Summary.TopEvents[2].ID)
-	assert.Equal(t, "weather_alert", out.Summary.TopEvents[2].Layer)
+	assert.Equal(t, "WEATHER_ALERT", out.Summary.TopEvents[2].Layer)
 
 	// Domains in the fixed order, condition-dependent ones UNAVAILABLE (the
 	// hazards service is unwired — fail loud, no fabricated OK).

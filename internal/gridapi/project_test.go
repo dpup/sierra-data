@@ -67,13 +67,13 @@ func TestProjectEvents_Wildfire_CalfireAdoptedPerimeter(t *testing.T) {
 	  "geometry": `+multiPoly+`,
 	  "properties": {
 	    "id": "calfire:abc-123",
-	    "layer": "wildfire",
+	    "layer": "WILDFIRE",
 	    "kind": "Wildfire",
 	    "category": "wildfire",
 	    "severity": "SEVERE",
 	    "severityRank": 3,
 	    "headline": "Salt Springs Fire — 1200 ac, 35% contained",
-	    "status": "active",
+	    "status": "ACTIVE",
 	    "effective": "2026-07-01T10:00:00Z",
 	    "updatedAt": "2026-07-04T08:00:00Z",
 	    "areaLabel": "near Hwy 4",
@@ -113,13 +113,13 @@ func TestProjectEvents_Wildfire_StandaloneWfigsPerimeter(t *testing.T) {
 	  "geometry": `+poly+`,
 	  "properties": {
 	    "id": "wfigs:lonely",
-	    "layer": "wildfire",
+	    "layer": "WILDFIRE",
 	    "kind": "Wildfire",
 	    "category": "wildfire",
 	    "severity": "SEVERE",
 	    "severityRank": 3,
 	    "headline": "Lonely — 250 ac, 10% contained",
-	    "status": "active",
+	    "status": "ACTIVE",
 	    "source": {"id": "wfigs", "name": "NIFC WFIGS", "attribution": "NIFC / WFIGS"},
 	    "wildfire": {"acres": 250.4, "containment": 10, "cause": "Human", "hasPerimeter": true}
 	  }
@@ -165,7 +165,7 @@ func TestProjectEvents_Evacuation_LevelBecomesStatus(t *testing.T) {
 	  "geometry": `+poly+`,
 	  "properties": {
 	    "id": "evac:CAL-E-046",
-	    "layer": "evacuation",
+	    "layer": "EVACUATION",
 	    "kind": "Evacuation",
 	    "category": "order",
 	    "severity": "EXTREME",
@@ -219,7 +219,7 @@ func TestProjectEvents_WeatherAlert_ZonelessNullGeometry(t *testing.T) {
 	  "geometry": null,
 	  "properties": {
 	    "id": "wx:urn:oid:2.49.0.1.840.0.abc",
-	    "layer": "weather_alert",
+	    "layer": "WEATHER_ALERT",
 	    "kind": "Weather alert",
 	    "category": "Red Flag Warning",
 	    "severity": "SEVERE",
@@ -278,7 +278,7 @@ func TestProjectEvents_Earthquake_UpdatedAtRule(t *testing.T) {
 	  "geometry": `+point+`,
 	  "properties": {
 	    "id": "usgs:nc75095123",
-	    "layer": "earthquake",
+	    "layer": "EARTHQUAKE",
 	    "kind": "Earthquake",
 	    "category": "earthquake",
 	    "severity": "MODERATE",
@@ -347,14 +347,14 @@ func TestProjectEvents_RoadIncident_ConstantSourceBlock(t *testing.T) {
 	  "geometry": `+point+`,
 	  "properties": {
 	    "id": "chp:250916ST0066",
-	    "layer": "road_incident",
+	    "layer": "ROAD_INCIDENT",
 	    "kind": "Road incident",
 	    "category": "incident",
 	    "severity": "SEVERE",
 	    "severityRank": 3,
 	    "headline": "Vehicle fire on Hwy 4",
 	    "description": "Vehicle fire blocking the right lane",
-	    "status": "active",
+	    "status": "ACTIVE",
 	    "effective": "2026-07-04T06:24:00Z",
 	    "updatedAt": "2026-07-04T07:00:00Z",
 	    "areaLabel": "Hwy 4 at Avery",
@@ -370,7 +370,7 @@ func TestProjectEvents_RoadIncident_ConstantSourceBlock(t *testing.T) {
 	require.NotNil(t, cl.Properties.Incident)
 	assert.Empty(t, cl.Properties.Incident.LogNumber)
 	assert.Empty(t, cl.Properties.Effective)
-	assert.Equal(t, "active", cl.Properties.Status)
+	assert.Equal(t, "ACTIVE", cl.Properties.Status)
 }
 
 func TestProjectEvents_SkipsUnknownLayer(t *testing.T) {

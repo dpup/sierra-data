@@ -343,7 +343,11 @@ message SummaryStats {
   int32 highest_severity_rank = 2;
   map<string, int32> severity_counts = 3;
   int32 total_active = 4;
-  google.protobuf.Int32Value active_evacuations = 5; // null = UNAVAILABLE (see PlaceSummary)
+  // NULLABLE: serializes as JSON `null` (not 0) when evacuation data is
+  // UNAVAILABLE. The OpenAPI type is `integer` only because Swagger 2.0 cannot
+  // express a nullable scalar — do NOT coerce null→0 (an error must never become
+  // a 0). null = UNAVAILABLE, 0 = confirmed no active zones, N = active.
+  google.protobuf.Int32Value active_evacuations = 5;
   string evacuation_status = 6; // OK | STALE | UNAVAILABLE
   repeated SummaryTopEvent top_events = 7;
 }

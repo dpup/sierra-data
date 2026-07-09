@@ -93,7 +93,7 @@ func TestMapLayer_EventLayerEnvelope(t *testing.T) {
 	f := fc.Features[0]
 	assert.Equal(t, "Feature", f.Type)
 	assert.Equal(t, "usgs:q1", f.Properties.ID)
-	assert.Equal(t, "earthquake", f.Properties.Layer)
+	assert.Equal(t, "EARTHQUAKE", f.Properties.Layer)
 	assert.Equal(t, "MODERATE", f.Properties.Severity)
 	assert.Equal(t, 2, f.Properties.SeverityRank)
 	assert.JSONEq(t, `{"type":"Point","coordinates":[-120.1,38.4]}`, string(f.Geometry))

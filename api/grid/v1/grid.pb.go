@@ -2011,11 +2011,15 @@ type SummaryStats struct {
 	HighestSeverityRank int32                  `protobuf:"varint,2,opt,name=highest_severity_rank,json=highestSeverityRank,proto3" json:"highest_severity_rank,omitempty"`
 	SeverityCounts      map[string]int32       `protobuf:"bytes,3,rep,name=severity_counts,json=severityCounts,proto3" json:"severity_counts,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
 	TotalActive         int32                  `protobuf:"varint,4,opt,name=total_active,json=totalActive,proto3" json:"total_active,omitempty"`
-	ActiveEvacuations   *wrapperspb.Int32Value `protobuf:"bytes,5,opt,name=active_evacuations,json=activeEvacuations,proto3" json:"active_evacuations,omitempty"` // null = UNAVAILABLE (see PlaceSummary)
-	EvacuationStatus    string                 `protobuf:"bytes,6,opt,name=evacuation_status,json=evacuationStatus,proto3" json:"evacuation_status,omitempty"`    // OK | STALE | UNAVAILABLE
-	TopEvents           []*SummaryTopEvent     `protobuf:"bytes,7,rep,name=top_events,json=topEvents,proto3" json:"top_events,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	// NULLABLE: serializes as JSON `null` (not 0) when evacuation data is
+	// UNAVAILABLE. The OpenAPI type is `integer` only because Swagger 2.0 cannot
+	// express a nullable scalar — do NOT coerce null→0 (an error must never become
+	// a 0). null = UNAVAILABLE, 0 = confirmed no active zones, N = active.
+	ActiveEvacuations *wrapperspb.Int32Value `protobuf:"bytes,5,opt,name=active_evacuations,json=activeEvacuations,proto3" json:"active_evacuations,omitempty"`
+	EvacuationStatus  string                 `protobuf:"bytes,6,opt,name=evacuation_status,json=evacuationStatus,proto3" json:"evacuation_status,omitempty"` // OK | STALE | UNAVAILABLE
+	TopEvents         []*SummaryTopEvent     `protobuf:"bytes,7,rep,name=top_events,json=topEvents,proto3" json:"top_events,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *SummaryStats) Reset() {

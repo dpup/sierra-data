@@ -16,6 +16,35 @@ proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 
 ## 2026-07-09
 
+### Changed — enum values are UPPERCASE on the `.geojson` and `summary` surfaces (BREAKING for map clients)
+
+The `.geojson` map layers and the place `summary` previously lowercased a few enum
+values that the proto RPCs already emitted as UPPERCASE. They are now consistent:
+**every enum value in a response body is the UPPERCASE proto enum name, on every
+endpoint.** The lowercase slug form now appears **only** in URLs and the geojson
+`metadata` block (resource addressing).
+
+What changes for a consumer:
+
+- **`.geojson` `properties.layer`:** `"wildfire"` → `"WILDFIRE"` (now matches
+  `event.layer`). Applies to all eight map layers.
+- **`.geojson` `properties.status`:** the event-lifecycle value is now UPPERCASE
+  (`"active"`→`"ACTIVE"`, `"scheduled"`→`"SCHEDULED"`) on the `wildfire` and
+  `road_incident` layers; the `road_segment` road status too
+  (`"open"`/`"closed"`/`"restricted"` → `"OPEN"`/`"CLOSED"`/`"RESTRICTED"`).
+  (Evacuation `status` was already the UPPERCASE level `ORDER`/`WARNING`/….)
+- **`summary` `topEvents[].layer`:** `"wildfire"` → `"WILDFIRE"`.
+- **Unchanged — already consistent across both surfaces:** `severity`/`severityRank`;
+  `fireWeather.state` and the `fire_weather` `category` (lowercase-hyphenated
+  `normal`/`elevated`/`red-flag`); the per-kind `category` field (free-form source
+  slug); the `{layer}` URL path segment and `?layer=` query value (still accepted
+  case-insensitively); and `metadata.layer`/`metadata.area` (lowercase slugs).
+
+**Migration:** a map client that string-compared `properties.layer` or
+`properties.status` against a lowercase literal must compare case-insensitively
+(or against the UPPERCASE name). One rule now holds everywhere: **enum values are
+UPPERCASE; slugs — URLs and the geojson `metadata` block — are lowercase.**
+
 ### Added — the OpenAPI spec is now published
 
 `GET /api/openapi.json` serves the generated OpenAPI (Swagger 2.0) description of
@@ -86,11 +115,15 @@ consumer from `/v1/*` to `/api/v1/*` and update field casing.
   change, plus the filter set); `places` + `places/{place}` (the directory is
   static within a deploy); and the hand-built `.geojson` (body-hash). Not yet
   instrumented: `conditions`, `sources`, `places:resolve`, `scanners`.
-- **`summary` caching regressed:** moving to the `GetPlaceSummary` proto RPC
-  dropped both its body-hash `ETag` **and** its `Cache-Control: public, max-age=30`
-  — the endpoint is now uncached (no conditional GET, no max-age). A summary
-  `ETag` would have to key off event **and** live-condition freshness, so it was
-  deferred; expect higher backend load on this endpoint until it's re-added.
+- **`summary` conditional-GET (`ETag`) regressed:** moving to the
+  `GetPlaceSummary` proto RPC dropped its body-hash `ETag` (a summary `ETag`
+  would have to key off event **and** live-condition freshness, so it was
+  deferred). It still carries `Cache-Control: public, max-age=30` — a blanket
+  30-second freshness lifetime that in fact applies to **every** GridService RPC,
+  including the other not-yet-`ETag`ged reads (`conditions`, `sources`,
+  `places:resolve`, `scanners`): proxies/CDN may serve them up to 30&nbsp;s stale,
+  and past that window a client gets a full re-download rather than a cheap `304`
+  until an `ETag` is added.
 - **`sources[].lastSuccessAt` (summary) shape change:** for a never-succeeded
   source it is now an explicit `null` (was an omitted key) — a consequence of the
   proto move (protojson `EmitUnpopulated`).
@@ -125,6 +158,11 @@ in-process instead of `/v1`. Conditional-GET / ETag support is not yet wired
 The original `/api/v1` REST surface and its OpenAPI specs have been **removed**;
 those paths now return `404`. Everything it served is available on `/v1` (same
 binary, same store, same data). Port old URLs with this map:
+
+> **Superseded (2026-07-09):** the `/v1/...` targets in the "Use instead" column
+> below were themselves folded back onto `/api/v1/...` on 2026-07-09 — replace
+> `/v1/` with `/api/v1/` and see that entry for the current field casing and
+> shape. `/v1` now `404`s.
 
 | Removed | Use instead | Notes |
 |---|---|---|

@@ -13,9 +13,11 @@
       <code class="inline">.geojson</code> layers via matching camelCase keys.
       Timestamps are RFC&nbsp;3339, errors are gRPC-standard
       <code class="inline">{code, codeName, message, details}</code>, and most reads
-      carry an ETag (<code class="inline">If-None-Match</code> → 304). The full
-      machine-readable contract is the OpenAPI spec at
-      <a href="/api/openapi.json"><code class="inline">/api/openapi.json</code></a>.
+      carry an ETag (<code class="inline">If-None-Match</code> → 304). The proto RPCs
+      are described by the OpenAPI spec at
+      <a href="/api/openapi.json"><code class="inline">/api/openapi.json</code></a>;
+      the hand-built <code class="inline">.geojson</code> map layers are not in it
+      (see §5), so read those from this page.
       Each example below is a live link into the running
       service: click any <span class="chip-get"><b>GET</b> /api/v1/…</span> to see the exact
       JSON a client receives. A feed's <code class="inline">sourceStatus</code> is
@@ -60,9 +62,9 @@
     <li><strong>Timestamps</strong> are RFC 3339 strings (e.g. <code class="inline">2026-07-05T14:02:00Z</code>).</li>
     <li><strong>Enum values</strong> render as their proto names (<code class="inline">WILDFIRE</code>, <code class="inline">ACTIVE</code>, <code class="inline">SEVERE</code>). Query parameters accept them case-insensitively, and <code class="inline">layer</code> parameters additionally accept the lowercase layer slugs used in <code class="inline">.geojson</code> paths (<code class="inline">wildfire</code>).</li>
     <li><strong>Repeatable filters</strong>: parameters documented as <em>repeatable</em> may appear multiple times — <code class="inline">?layer=wildfire&amp;layer=evacuation</code>.</li>
-    <li><strong>Pagination</strong> is cursor-based: pass the opaque <code class="inline">nextPageToken</code> from a response as the <code class="inline">page_token</code> query parameter on the next request. Tokens are base64-encoded keyset cursors; treat them as opaque.</li>
+    <li><strong>Pagination</strong> is cursor-based on the <em>event</em> lists — <code class="inline">events</code>, <code class="inline">events/{id}/history</code>, and <code class="inline">history</code>: pass the opaque <code class="inline">nextPageToken</code> from a response as the <code class="inline">page_token</code> query parameter on the next request (base64 keyset cursors; treat them as opaque). The directory lists — <code class="inline">places</code>, <code class="inline">sources</code>, and <code class="inline">scanners</code> — are <strong>not paginated</strong>: each returns its complete set in one response by design (a bounded, slowly-changing directory), with no <code class="inline">nextPageToken</code>. Read them whole; don't build paging logic for them.</li>
     <li><strong>Query parameters</strong> stay snake_case regardless of response casing: <code class="inline">severity_min</code>, <code class="inline">page_token</code>, <code class="inline">page_size</code> (camelCase forms are also accepted).</li>
-    <li><strong>ETags</strong>: <em>most</em> read endpoints carry a weak <code class="inline">ETag</code>; a conditional request with a matching <code class="inline">If-None-Match</code> gets <code class="inline">304 Not Modified</code> and skips the work. Coverage: <code class="inline">events/{id}</code> + <code class="inline">.../history</code>, the <code class="inline">events</code> and <code class="inline">history</code> lists, <code class="inline">places</code> + <code class="inline">places/{place}</code>, and the <code class="inline">.geojson</code> layers (body-hash). Not yet instrumented: <code class="inline">conditions</code>, <code class="inline">sources</code>, <code class="inline">places:resolve</code>, <code class="inline">scanners</code>, and <code class="inline">summary</code>.</li>
+    <li><strong>ETags</strong>: <em>most</em> read endpoints carry a weak <code class="inline">ETag</code>; a conditional request with a matching <code class="inline">If-None-Match</code> gets <code class="inline">304 Not Modified</code> and skips the work. Coverage: <code class="inline">events/{id}</code> + <code class="inline">.../history</code>, the <code class="inline">events</code> and <code class="inline">history</code> lists, <code class="inline">places</code> + <code class="inline">places/{place}</code>, and the <code class="inline">.geojson</code> layers (body-hash). Not yet instrumented: <code class="inline">conditions</code>, <code class="inline">sources</code>, <code class="inline">places:resolve</code>, <code class="inline">scanners</code>, and <code class="inline">summary</code>. Independently, every proto RPC carries <code class="inline">Cache-Control: public, max-age=30</code>, so a proxy/CDN may serve any of them up to 30&nbsp;s stale (the <code class="inline">.geojson</code> layers use <code class="inline">max-age=60</code>).</li>
     <li><strong>Errors</strong> from the proto RPCs are gRPC-standard <code class="inline">{code, codeName, message, details}</code> alongside the mapped HTTP status; the one hand-built endpoint (<code class="inline">.geojson</code>) emits the older <code class="inline">google.rpc.Status</code> shape (<code class="inline">{code, message, details}</code>, no <code class="inline">codeName</code>):</li>
   </ul>
   <pre class="code">HTTP/1.1 404 Not Found
@@ -554,14 +556,14 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
   "properties": {
     // ---- common envelope (present on every feature) ----
     "id": "calfire:2026-salt-springs",   // globally unique, source-namespaced
-    "layer": "wildfire",
+    "layer": "WILDFIRE",                 // Layer enum name (same value as event.layer)
     "kind": "Wildfire",                  // human label
-    "category": "active",                // source sub-type / status slug
+    "category": "active",                // source sub-type slug (free-form, lowercase)
     "severity": "SEVERE",                // unified scale, §3
     "severityRank": 3,                   // 0..4, for sort/color
     "headline": "Salt Springs Fire — 1,377 ac, 20% contained",
     "description": "…",                  // optional, long
-    "status": "active",
+    "status": "ACTIVE",                  // EventStatus enum name (lifecycle)
     "effective": "2026-07-05T14:02:00Z", // RFC 3339, nullable
     "expires": null,
     "updatedAt": "2026-07-05T15:40:00Z",
@@ -582,6 +584,8 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
     <li><strong>Null geometry is valid</strong> (e.g. a county-wide advisory): the feature has <code class="inline">"geometry": null</code> with the same properties envelope. Exclude it from the map layer and render it as a full-width banner/list card sorted by <code class="inline">severityRank</code> alongside located features, showing <code class="inline">headline</code>, <code class="inline">source.name</code>, <code class="inline">updatedAt</code>, and <code class="inline">source.url</code>.</li>
     <li><strong>URL fields are scheme-validated upstream</strong>: any upstream-sourced URL that is not <code class="inline">https://</code>/<code class="inline">http://</code> is dropped before it reaches the response. Treat all upstream text (headlines, descriptions) as untrusted anyway.</li>
     <li>Unit-bearing fields name their unit (<code class="inline">windGustMph</code>, <code class="inline">depthKm</code>).</li>
+    <li><strong><code class="inline">layer</code> has two forms, by role.</strong> As a <em>value</em> — <code class="inline">properties.layer</code> here, and <code class="inline">event.layer</code> / <code class="inline">topEvents[].layer</code> elsewhere — it is the UPPERCASE Layer enum name (<code class="inline">WILDFIRE</code>). As an <em>address</em> — the <code class="inline">{layer}</code> path segment, the <code class="inline">?layer=</code> query value, and the <code class="inline">metadata.layer</code> / <code class="inline">metadata.area</code> echoes above — it is the lowercase slug (<code class="inline">wildfire</code>). One rule: values are enum names, URLs and the metadata block are slugs.</li>
+    <li><strong>This endpoint is not in the <a href="/api/openapi.json">OpenAPI spec</a>.</strong> The <code class="inline">.geojson</code> layers are hand-built (RFC 7946 geometry doesn't model cleanly in proto3), so a client generated from the spec alone will be missing all eight map layers — integrate them from this section.</li>
   </ul>
   <div class="live-examples">
     <a href="/api/v1/places/ebbetts-pass/map/wildfire.geojson">/api/v1/places/ebbetts-pass/map/wildfire.geojson</a>

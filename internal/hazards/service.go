@@ -258,7 +258,7 @@ func (s *Service) chainControls(ctx context.Context, area config.HazardArea) ([]
 		}
 		p := Properties{
 			ID:           "cc:" + nonEmpty(c.MessageID, c.LocationName),
-			Layer:        LayerChainControl,
+			Layer:        strings.ToUpper(LayerChainControl),
 			Kind:         "Chain control",
 			Category:     strings.ToLower(c.Level),
 			Headline:     strings.TrimSpace(c.Highway + " chain control " + c.Level),
@@ -313,7 +313,7 @@ func (s *Service) roadSegments(ctx context.Context, area config.HazardArea) ([]F
 
 		p := Properties{
 			ID:        "road:" + mr.ID,
-			Layer:     LayerRoadSegment,
+			Layer:     strings.ToUpper(LayerRoadSegment),
 			Kind:      "Road segment",
 			Headline:  strings.TrimSpace(mr.Name + " — " + mr.Section),
 			AreaLabel: mr.Section,
@@ -322,7 +322,7 @@ func (s *Service) roadSegments(ctx context.Context, area config.HazardArea) ([]F
 		}
 		sev := SevInfo
 		if rd != nil {
-			p.Status = strings.ToLower(strings.TrimPrefix(rd.GetStatus().String(), "ROAD_STATUS_"))
+			p.Status = strings.TrimPrefix(rd.GetStatus().String(), "ROAD_STATUS_")
 			p.Road.Congestion = strings.TrimPrefix(rd.GetCongestionLevel().String(), "CONGESTION_LEVEL_")
 			p.Road.DelayMinutes = i32ptr(rd.GetDelayMinutes())
 			p.Road.DurationMinutes = i32ptr(rd.GetDurationMinutes())
@@ -355,7 +355,7 @@ func (s *Service) fireWeather(ctx context.Context, area config.HazardArea) ([]Fe
 	state = strings.ReplaceAll(state, "_", "-")
 	p := Properties{
 		ID:        "fw:region",
-		Layer:     LayerFireWeather,
+		Layer:     strings.ToUpper(LayerFireWeather),
 		Kind:      "Fire weather",
 		Category:  state,
 		Headline:  nonEmpty(fw.GetHeadline(), "Fire weather: "+state),

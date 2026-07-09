@@ -52,7 +52,7 @@ func ProjectEvents(layer string, events []*gridv1.Event) []hazards.Feature {
 func projectWildfire(ev *gridv1.Event) hazards.Feature {
 	d := ev.GetWildfire()
 	p := baseProps(ev, hazards.LayerWildfire, "Wildfire")
-	p.Status = lifecycleStatus(ev) // shipped hardcoded "active"; ACTIVE renders identically
+	p.Status = lifecycleStatus(ev) // UPPERCASE lifecycle (ACTIVE/SCHEDULED/…); matches Event.status
 	p.Effective = rfc3339(ev.GetEffective())
 	p.UpdatedAt = rfc3339(ev.GetObservedAt())
 	if ev.GetProvenance().GetSourceId() == "wfigs" {
@@ -140,8 +140,8 @@ func projectEarthquake(ev *gridv1.Event) hazards.Feature {
 // projectRoadIncident mirrors the shipped roadIncidents builder. The source
 // block is the shipped per-layer CONSTANT for ALL road incidents — store
 // provenance keeps the chp/caltrans split for source health, but the envelope
-// never varied by feed (plan §5 item 5). properties.status is the lowercase
-// lifecycle ("active" for the live feeds).
+// never varied by feed (plan §5 item 5). properties.status is the UPPERCASE
+// lifecycle enum ("ACTIVE" for the live feeds).
 func projectRoadIncident(ev *gridv1.Event) hazards.Feature {
 	d := ev.GetRoadIncident()
 	p := baseProps(ev, hazards.LayerRoadIncident, "Road incident")
@@ -162,11 +162,14 @@ func projectRoadIncident(ev *gridv1.Event) hazards.Feature {
 // baseProps fills the envelope fields every layer derives the same way:
 // id/category/headline/area_label pass through from the event, severity is the
 // enum name (the proto enum IS the shipped INFO..EXTREME scale) and its rank
-// is the enum value (INFO=0 .. EXTREME=4, pinned by the proto).
+// is the enum value (INFO=0 .. EXTREME=4, pinned by the proto). layer is the
+// UPPERCASE enum name (ToUpper of the routing slug) so properties.layer reads
+// identically to Event.layer on the /events RPCs; the lowercase slug lives only
+// in URLs and the metadata block.
 func baseProps(ev *gridv1.Event, layer, kind string) hazards.Properties {
 	return hazards.Properties{
 		ID:           ev.GetId(),
-		Layer:        layer,
+		Layer:        strings.ToUpper(layer),
 		Kind:         kind,
 		Category:     ev.GetCategory(),
 		Severity:     ev.GetSeverity().String(),
@@ -203,10 +206,12 @@ func geometryFromEvent(ev *gridv1.Event) *hazards.Geometry {
 	return hazards.RawGeom(g.Type, g.Coordinates)
 }
 
-// lifecycleStatus renders the event lifecycle as the shipped lowercase status
-// slug ("active", "scheduled", "resolved", "expired").
+// lifecycleStatus renders the event lifecycle as the proto enum name
+// (UPPERCASE "ACTIVE", "SCHEDULED", "RESOLVED", "EXPIRED") — the same value
+// Event.status carries on the /events RPCs, so `status` reads identically
+// across the JSON and GeoJSON surfaces.
 func lifecycleStatus(ev *gridv1.Event) string {
-	return strings.ToLower(ev.GetStatus().String())
+	return ev.GetStatus().String()
 }
 
 // rfc3339 formats a proto timestamp as the shipped RFC 3339 string, "" for
