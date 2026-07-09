@@ -296,6 +296,13 @@ service GridService {
   rpc ListScanners(ListScannersRequest) returns (ScannerList) {
     option (google.api.http) = {get: "/api/v1/scanners"};
   }
+  // GetConditions returns current, non-event state: per-location weather and
+  // the region's fire-weather classification, optionally scoped to a place.
+  // (Weather alerts are events; road conditions are the road_segment /
+  // chain_control GeoJSON layers.)
+  rpc GetConditions(GetConditionsRequest) returns (Conditions) {
+    option (google.api.http) = {get: "/api/v1/conditions"};
+  }
   // ListSources returns the source registry with per-source health — the
   // honesty mechanism clients key layer trust off.
   rpc ListSources(ListSourcesRequest) returns (SourceList) {
@@ -369,5 +376,31 @@ message Scanner {
 }
 message ScannerList {
   repeated Scanner scanners = 1;
+}
+message GetConditionsRequest {
+  string place = 1;
+}
+message WeatherConditions {
+  string location_id = 1;
+  string location_name = 2;
+  string weather_main = 3;
+  string weather_description = 4;
+  string weather_icon = 5;
+  int32 temperature_celsius = 6;
+  int32 feels_like_celsius = 7;
+  int32 humidity_percent = 8;
+  int32 wind_speed_kmh = 9;
+  int32 wind_direction_degrees = 10;
+  int32 visibility_km = 11;
+}
+message FireWeatherConditions {
+  string state = 1; // normal | elevated | red-flag
+  string headline = 2;
+  repeated string zones = 3;
+}
+message Conditions {
+  repeated WeatherConditions weather = 1;
+  FireWeatherConditions fire_weather = 2;
+  google.protobuf.Timestamp last_updated = 3;
 }
 message ListSourcesRequest {}

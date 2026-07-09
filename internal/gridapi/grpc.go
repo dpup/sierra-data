@@ -10,6 +10,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
+	api "github.com/dpup/sierra-data/api/v1"
 	"github.com/dpup/sierra-data/internal/clients/census"
 	"github.com/dpup/sierra-data/internal/store"
 )
@@ -20,8 +21,8 @@ import (
 func notFoundErr(format string, args ...any) error {
 	return status.Errorf(codes.NotFound, format, args...)
 }
-func invalidErr(err error) error   { return status.Error(codes.InvalidArgument, err.Error()) }
-func internalErr(err error) error  { return status.Error(codes.Internal, err.Error()) }
+func invalidErr(err error) error  { return status.Error(codes.InvalidArgument, err.Error()) }
+func internalErr(err error) error { return status.Error(codes.Internal, err.Error()) }
 func tokenOrInternal(err error) error {
 	if isBadToken(err) {
 		return status.Error(codes.InvalidArgument, "invalid page_token")
@@ -265,6 +266,66 @@ func (g *GridServer) ListScanners(ctx context.Context, req *gridv1.ListScannersR
 			Agency:          f.Agency,
 			BroadcastifyUrl: "https://www.broadcastify.com/listen/feed/" + f.FeedID,
 		})
+	}
+	return out, nil
+}
+
+// fireWeatherSlug maps the api FireWeatherState enum to the wire slug.
+func fireWeatherSlug(s api.FireWeatherState) string {
+	switch s {
+	case api.FireWeatherState_NORMAL:
+		return "normal"
+	case api.FireWeatherState_ELEVATED:
+		return "elevated"
+	case api.FireWeatherState_RED_FLAG:
+		return "red-flag"
+	default:
+		return ""
+	}
+}
+
+// GetConditions returns current non-event state: per-location weather + the
+// region's fire-weather classification, optionally scoped to a place's bbox.
+// Weather alerts are dropped — they are events (/api/v1/events?layer=weather_alert).
+func (g *GridServer) GetConditions(ctx context.Context, req *gridv1.GetConditionsRequest) (*gridv1.Conditions, error) {
+	resp, err := g.svc.Weather.ListWeather(ctx, &api.ListWeatherRequest{})
+	if err != nil {
+		return nil, internalErr(err)
+	}
+	data := resp.GetWeatherData()
+	if p := req.GetPlace(); p != "" {
+		box, ok, err := g.svc.placeBbox(ctx, p)
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, notFoundErr("unknown place: %q", p)
+		}
+		if err != nil {
+			return nil, internalErr(err)
+		}
+		data = filterWeather(data, g.svc.Cfg.Weather.Locations, box, ok)
+	}
+
+	out := &gridv1.Conditions{LastUpdated: resp.GetLastUpdated()}
+	for _, wd := range data {
+		out.Weather = append(out.Weather, &gridv1.WeatherConditions{
+			LocationId:           wd.GetLocationId(),
+			LocationName:         wd.GetLocationName(),
+			WeatherMain:          wd.GetWeatherMain(),
+			WeatherDescription:   wd.GetWeatherDescription(),
+			WeatherIcon:          wd.GetWeatherIcon(),
+			TemperatureCelsius:   wd.GetTemperatureCelsius(),
+			FeelsLikeCelsius:     wd.GetFeelsLikeCelsius(),
+			HumidityPercent:      wd.GetHumidityPercent(),
+			WindSpeedKmh:         wd.GetWindSpeedKmh(),
+			WindDirectionDegrees: wd.GetWindDirectionDegrees(),
+			VisibilityKm:         wd.GetVisibilityKm(),
+		})
+	}
+	if fw := resp.GetFireWeather(); fw != nil {
+		out.FireWeather = &gridv1.FireWeatherConditions{
+			State:    fireWeatherSlug(fw.GetState()),
+			Headline: fw.GetHeadline(),
+			Zones:    fw.GetZones(),
+		}
 	}
 	return out, nil
 }

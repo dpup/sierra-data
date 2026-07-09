@@ -16,6 +16,37 @@
     "application/json"
   ],
   "paths": {
+    "/api/v1/conditions": {
+      "get": {
+        "summary": "GetConditions returns current, non-event state: per-location weather and\nthe region's fire-weather classification, optionally scoped to a place.\n(Weather alerts are events; road conditions are the road_segment /\nchain_control GeoJSON layers.)",
+        "operationId": "GridService_GetConditions",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1Conditions"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "place",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "GridService"
+        ]
+      }
+    },
     "/api/v1/events": {
       "get": {
         "summary": "ListEvents returns store-backed events filtered by place, layer, status,\nseverity_min, and since, with keyset pagination.",
@@ -476,6 +507,25 @@
         }
       }
     },
+    "v1Conditions": {
+      "type": "object",
+      "properties": {
+        "weather": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1WeatherConditions"
+          }
+        },
+        "fireWeather": {
+          "$ref": "#/definitions/v1FireWeatherConditions"
+        },
+        "lastUpdated": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
     "v1EarthquakeDetail": {
       "type": "object",
       "properties": {
@@ -703,6 +753,24 @@
       ],
       "default": "EVENT_STATUS_UNSPECIFIED",
       "title": "- SCHEDULED: planned PSPS, forecast closures\n - RESOLVED: upstream confirmed over\n - EXPIRED: aged out per-source policy; upstream went quiet"
+    },
+    "v1FireWeatherConditions": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "type": "string",
+          "title": "normal | elevated | red-flag"
+        },
+        "headline": {
+          "type": "string"
+        },
+        "zones": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
     },
     "v1FireWeatherDetail": {
       "type": "object",
@@ -1039,6 +1107,50 @@
         }
       },
       "title": "Detail messages carry only KIND-SPECIFIC fields not already in the Event\nenvelope. Fields that duplicate an envelope field are NOT repeated here:\n  - the NWS event name is the envelope `category`\n  - the sending office is `provenance.source_name`"
+    },
+    "v1WeatherConditions": {
+      "type": "object",
+      "properties": {
+        "locationId": {
+          "type": "string"
+        },
+        "locationName": {
+          "type": "string"
+        },
+        "weatherMain": {
+          "type": "string"
+        },
+        "weatherDescription": {
+          "type": "string"
+        },
+        "weatherIcon": {
+          "type": "string"
+        },
+        "temperatureCelsius": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "feelsLikeCelsius": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "humidityPercent": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "windSpeedKmh": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "windDirectionDegrees": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "visibilityKm": {
+          "type": "integer",
+          "format": "int32"
+        }
+      }
     },
     "v1WildfireDetail": {
       "type": "object",

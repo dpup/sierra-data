@@ -27,6 +27,7 @@ const (
 	GridService_ResolvePlace_FullMethodName    = "/grid.v1.GridService/ResolvePlace"
 	GridService_GetPlace_FullMethodName        = "/grid.v1.GridService/GetPlace"
 	GridService_ListScanners_FullMethodName    = "/grid.v1.GridService/ListScanners"
+	GridService_GetConditions_FullMethodName   = "/grid.v1.GridService/GetConditions"
 	GridService_ListSources_FullMethodName     = "/grid.v1.GridService/ListSources"
 )
 
@@ -57,6 +58,11 @@ type GridServiceClient interface {
 	// ListScanners returns Broadcastify scanner feeds, optionally scoped to a
 	// place (an area serves its feeds; otherwise every area's feeds, deduped).
 	ListScanners(ctx context.Context, in *ListScannersRequest, opts ...grpc.CallOption) (*ScannerList, error)
+	// GetConditions returns current, non-event state: per-location weather and
+	// the region's fire-weather classification, optionally scoped to a place.
+	// (Weather alerts are events; road conditions are the road_segment /
+	// chain_control GeoJSON layers.)
+	GetConditions(ctx context.Context, in *GetConditionsRequest, opts ...grpc.CallOption) (*Conditions, error)
 	// ListSources returns the source registry with per-source health — the
 	// honesty mechanism clients key layer trust off.
 	ListSources(ctx context.Context, in *ListSourcesRequest, opts ...grpc.CallOption) (*SourceList, error)
@@ -150,6 +156,16 @@ func (c *gridServiceClient) ListScanners(ctx context.Context, in *ListScannersRe
 	return out, nil
 }
 
+func (c *gridServiceClient) GetConditions(ctx context.Context, in *GetConditionsRequest, opts ...grpc.CallOption) (*Conditions, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Conditions)
+	err := c.cc.Invoke(ctx, GridService_GetConditions_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *gridServiceClient) ListSources(ctx context.Context, in *ListSourcesRequest, opts ...grpc.CallOption) (*SourceList, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SourceList)
@@ -187,6 +203,11 @@ type GridServiceServer interface {
 	// ListScanners returns Broadcastify scanner feeds, optionally scoped to a
 	// place (an area serves its feeds; otherwise every area's feeds, deduped).
 	ListScanners(context.Context, *ListScannersRequest) (*ScannerList, error)
+	// GetConditions returns current, non-event state: per-location weather and
+	// the region's fire-weather classification, optionally scoped to a place.
+	// (Weather alerts are events; road conditions are the road_segment /
+	// chain_control GeoJSON layers.)
+	GetConditions(context.Context, *GetConditionsRequest) (*Conditions, error)
 	// ListSources returns the source registry with per-source health — the
 	// honesty mechanism clients key layer trust off.
 	ListSources(context.Context, *ListSourcesRequest) (*SourceList, error)
@@ -223,6 +244,9 @@ func (UnimplementedGridServiceServer) GetPlace(context.Context, *GetPlaceRequest
 }
 func (UnimplementedGridServiceServer) ListScanners(context.Context, *ListScannersRequest) (*ScannerList, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListScanners not implemented")
+}
+func (UnimplementedGridServiceServer) GetConditions(context.Context, *GetConditionsRequest) (*Conditions, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetConditions not implemented")
 }
 func (UnimplementedGridServiceServer) ListSources(context.Context, *ListSourcesRequest) (*SourceList, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListSources not implemented")
@@ -392,6 +416,24 @@ func _GridService_ListScanners_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _GridService_GetConditions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetConditionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GridServiceServer).GetConditions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GridService_GetConditions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GridServiceServer).GetConditions(ctx, req.(*GetConditionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _GridService_ListSources_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListSourcesRequest)
 	if err := dec(in); err != nil {
@@ -448,6 +490,10 @@ var GridService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListScanners",
 			Handler:    _GridService_ListScanners_Handler,
+		},
+		{
+			MethodName: "GetConditions",
+			Handler:    _GridService_GetConditions_Handler,
 		},
 		{
 			MethodName: "ListSources",
