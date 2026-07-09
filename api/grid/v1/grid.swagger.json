@@ -1,0 +1,141 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "grid.proto",
+    "version": "version not set"
+  },
+  "tags": [
+    {
+      "name": "GridService"
+    }
+  ],
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "paths": {
+    "/api/v1/sources": {
+      "get": {
+        "summary": "ListSources returns the source registry with per-source health — the\nhonesty mechanism clients key layer trust off.",
+        "operationId": "GridService_ListSources",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1SourceList"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "GridService"
+        ]
+      }
+    }
+  },
+  "definitions": {
+    "protobufAny": {
+      "type": "object",
+      "properties": {
+        "@type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": {}
+    },
+    "rpcStatus": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "message": {
+          "type": "string"
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/protobufAny"
+          }
+        }
+      }
+    },
+    "v1Source": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "attribution": {
+          "type": "string"
+        },
+        "homepageUrl": {
+          "type": "string"
+        },
+        "pollIntervalSeconds": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "staleAfterSeconds": {
+          "type": "integer",
+          "format": "int64",
+          "title": "per-source tunable; default 3x poll interval"
+        },
+        "expireAfterSeconds": {
+          "type": "integer",
+          "format": "int64",
+          "title": "per-source tunable; missing-from-feed → EXPIRED"
+        },
+        "lastSuccessAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "lastAttemptAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "lastError": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/v1SourceStatus",
+          "title": "shipped semantics, now per-source not per-layer"
+        }
+      }
+    },
+    "v1SourceList": {
+      "type": "object",
+      "properties": {
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1Source"
+          }
+        }
+      }
+    },
+    "v1SourceStatus": {
+      "type": "string",
+      "enum": [
+        "SOURCE_STATUS_UNSPECIFIED",
+        "OK",
+        "STALE",
+        "UNAVAILABLE"
+      ],
+      "default": "SOURCE_STATUS_UNSPECIFIED"
+    }
+  }
+}

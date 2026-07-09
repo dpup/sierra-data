@@ -10,6 +10,7 @@ import (
 	"github.com/dpup/prefab"
 	"github.com/dpup/prefab/logging"
 
+	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
 	"github.com/dpup/sierra-data/internal/cache"
 	"github.com/dpup/sierra-data/internal/clients/calfire"
 	"github.com/dpup/sierra-data/internal/clients/caloes"
@@ -144,13 +145,22 @@ func main() {
 	// Streamable HTTP, adapting the /v1 surface in-process.
 	mcpHandler := mcp.NewHandler(gridapiService)
 
-	// Prefab server. The /v1 grid API, the MCP endpoint, and the static site are
-	// all plain HTTP handlers (longest-prefix wins). The legacy /api/v1
-	// grpc-gateway surface (Roads/Weather REST, hazards/situation/scanners, and
-	// the swagger specs) was removed 2026-07-08 — see CHANGELOG. The underlying
-	// Roads/Weather/hazards services stay, consumed in-process by /v1 and ingest.
+	// GridService: the proto-defined /api/v1 entity/query surface over
+	// gRPC-Gateway (docs/grpc-gateway-migration-plan.md). Being ported endpoint
+	// by endpoint; the hand-built /v1 handlers remain until each RPC reaches
+	// parity. Gateway annotations mount under /api/, which Prefab already serves.
+	gridServer := gridapi.NewGridServer(gridStore)
+
+	// Prefab server. gRPC + gateway serve the /api/v1 GridService; the hand-built
+	// /v1 grid API, MCP, and the static site are plain HTTP handlers.
 	server := prefab.New(
 		prefab.WithContext(ctx),
+		prefab.WithGRPCReflection(),
+		// TODO(grpc-gateway-migration §4): enable once prefab ships WithETag —
+		// conditional GET (ETag/If-None-Match->304) across gateway + .geojson.
+		// prefab.WithETag(),
+		prefab.WithGRPCService(&gridv1.GridService_ServiceDesc, gridServer),
+		prefab.WithGRPCGateway(gridv1.RegisterGridServiceHandlerFromEndpoint),
 		prefab.WithHTTPHandler(gridapi.HandlerPrefix, gridapiService),
 		prefab.WithHTTPHandlerFunc("/mcp", mcpHandler.ServeHTTP),
 		prefab.WithHTTPHandlerFunc("/", siteHandler),

@@ -138,7 +138,12 @@ proto: proto-tools
 		--openapiv2_out=$(PROTO_DIR) --openapiv2_opt=logtostderr=true \
 		$(PROTO_DIR)/*.proto
 	@PATH="$(shell go env GOPATH)/bin:$(PATH)" protoc --proto_path=$(GRID_PROTO_DIR) \
+		--proto_path=$(GOOGLEAPIS_DIR) \
+		--proto_path=$(GRPC_GATEWAY_DIR) \
 		--go_out=$(GRID_PROTO_DIR) --go_opt=paths=source_relative \
+		--go-grpc_out=$(GRID_PROTO_DIR) --go-grpc_opt=paths=source_relative \
+		--grpc-gateway_out=$(GRID_PROTO_DIR) --grpc-gateway_opt=paths=source_relative \
+		--openapiv2_out=$(GRID_PROTO_DIR) --openapiv2_opt=logtostderr=true \
 		$(GRID_PROTO_DIR)/*.proto
 	@echo "Protobuf code generation completed."
 	@echo "OpenAPI specifications generated in $(PROTO_DIR)/"

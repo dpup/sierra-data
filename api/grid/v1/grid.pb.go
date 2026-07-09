@@ -7,6 +7,7 @@
 package gridv1
 
 import (
+	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
@@ -1853,12 +1854,48 @@ func (x *SourceList) GetSources() []*Source {
 	return nil
 }
 
+type ListSourcesRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListSourcesRequest) Reset() {
+	*x = ListSourcesRequest{}
+	mi := &file_grid_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListSourcesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListSourcesRequest) ProtoMessage() {}
+
+func (x *ListSourcesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_grid_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListSourcesRequest.ProtoReflect.Descriptor instead.
+func (*ListSourcesRequest) Descriptor() ([]byte, []int) {
+	return file_grid_proto_rawDescGZIP(), []int{19}
+}
+
 var File_grid_proto protoreflect.FileDescriptor
 
 const file_grid_proto_rawDesc = "" +
 	"\n" +
 	"\n" +
-	"grid.proto\x12\agrid.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x9b\t\n" +
+	"grid.proto\x12\agrid.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x9b\t\n" +
 	"\x05Event\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12$\n" +
 	"\x05layer\x18\x02 \x01(\x0e2\x0e.grid.v1.LayerR\x05layer\x12\x1a\n" +
@@ -1999,7 +2036,8 @@ const file_grid_proto_rawDesc = "" +
 	"\x06places\x18\x01 \x03(\v2\x0e.grid.v1.PlaceR\x06places\"7\n" +
 	"\n" +
 	"SourceList\x12)\n" +
-	"\asources\x18\x01 \x03(\v2\x0f.grid.v1.SourceR\asources*\xca\x01\n" +
+	"\asources\x18\x01 \x03(\v2\x0f.grid.v1.SourceR\asources\"\x14\n" +
+	"\x12ListSourcesRequest*\xca\x01\n" +
 	"\x05Layer\x12\x15\n" +
 	"\x11LAYER_UNSPECIFIED\x10\x00\x12\f\n" +
 	"\bWILDFIRE\x10\x01\x12\x0e\n" +
@@ -2043,7 +2081,9 @@ const file_grid_proto_rawDesc = "" +
 	"\x04TOWN\x10\x03\x12\r\n" +
 	"\tEVAC_ZONE\x10\x04\x12\f\n" +
 	"\bCORRIDOR\x10\x05\x12\b\n" +
-	"\x04SITE\x10\x06B0Z.github.com/dpup/sierra-data/api/grid/v1;gridv1b\x06proto3"
+	"\x04SITE\x10\x062g\n" +
+	"\vGridService\x12X\n" +
+	"\vListSources\x12\x1b.grid.v1.ListSourcesRequest\x1a\x13.grid.v1.SourceList\"\x17\x82\xd3\xe4\x93\x02\x11\x12\x0f/api/v1/sourcesB0Z.github.com/dpup/sierra-data/api/grid/v1;gridv1b\x06proto3"
 
 var (
 	file_grid_proto_rawDescOnce sync.Once
@@ -2058,7 +2098,7 @@ func file_grid_proto_rawDescGZIP() []byte {
 }
 
 var file_grid_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
-var file_grid_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
+var file_grid_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
 var file_grid_proto_goTypes = []any{
 	(Layer)(0),                    // 0: grid.v1.Layer
 	(Severity)(0),                 // 1: grid.v1.Severity
@@ -2084,8 +2124,9 @@ var file_grid_proto_goTypes = []any{
 	(*EventRevisionList)(nil),     // 21: grid.v1.EventRevisionList
 	(*PlaceList)(nil),             // 22: grid.v1.PlaceList
 	(*SourceList)(nil),            // 23: grid.v1.SourceList
-	nil,                           // 24: grid.v1.RoadIncidentDetail.MetadataEntry
-	(*timestamppb.Timestamp)(nil), // 25: google.protobuf.Timestamp
+	(*ListSourcesRequest)(nil),    // 24: grid.v1.ListSourcesRequest
+	nil,                           // 25: grid.v1.RoadIncidentDetail.MetadataEntry
+	(*timestamppb.Timestamp)(nil), // 26: google.protobuf.Timestamp
 }
 var file_grid_proto_depIdxs = []int32{
 	0,  // 0: grid.v1.Event.layer:type_name -> grid.v1.Layer
@@ -2093,10 +2134,10 @@ var file_grid_proto_depIdxs = []int32{
 	2,  // 2: grid.v1.Event.status:type_name -> grid.v1.EventStatus
 	6,  // 3: grid.v1.Event.geometry:type_name -> grid.v1.Geometry
 	9,  // 4: grid.v1.Event.provenance:type_name -> grid.v1.Provenance
-	25, // 5: grid.v1.Event.effective:type_name -> google.protobuf.Timestamp
-	25, // 6: grid.v1.Event.expires:type_name -> google.protobuf.Timestamp
-	25, // 7: grid.v1.Event.observed_at:type_name -> google.protobuf.Timestamp
-	25, // 8: grid.v1.Event.ingested_at:type_name -> google.protobuf.Timestamp
+	26, // 5: grid.v1.Event.effective:type_name -> google.protobuf.Timestamp
+	26, // 6: grid.v1.Event.expires:type_name -> google.protobuf.Timestamp
+	26, // 7: grid.v1.Event.observed_at:type_name -> google.protobuf.Timestamp
+	26, // 8: grid.v1.Event.ingested_at:type_name -> google.protobuf.Timestamp
 	10, // 9: grid.v1.Event.enhancement:type_name -> grid.v1.Enhancement
 	13, // 10: grid.v1.Event.wildfire:type_name -> grid.v1.WildfireDetail
 	14, // 11: grid.v1.Event.evacuation:type_name -> grid.v1.EvacuationDetail
@@ -2106,23 +2147,25 @@ var file_grid_proto_depIdxs = []int32{
 	18, // 15: grid.v1.Event.road_incident:type_name -> grid.v1.RoadIncidentDetail
 	7,  // 16: grid.v1.Geometry.bbox:type_name -> grid.v1.BoundingBox
 	8,  // 17: grid.v1.Geometry.centroid:type_name -> grid.v1.LatLng
-	25, // 18: grid.v1.Provenance.fetched_at:type_name -> google.protobuf.Timestamp
-	25, // 19: grid.v1.Enhancement.enhanced_at:type_name -> google.protobuf.Timestamp
-	25, // 20: grid.v1.Source.last_success_at:type_name -> google.protobuf.Timestamp
-	25, // 21: grid.v1.Source.last_attempt_at:type_name -> google.protobuf.Timestamp
+	26, // 18: grid.v1.Provenance.fetched_at:type_name -> google.protobuf.Timestamp
+	26, // 19: grid.v1.Enhancement.enhanced_at:type_name -> google.protobuf.Timestamp
+	26, // 20: grid.v1.Source.last_success_at:type_name -> google.protobuf.Timestamp
+	26, // 21: grid.v1.Source.last_attempt_at:type_name -> google.protobuf.Timestamp
 	3,  // 22: grid.v1.Source.status:type_name -> grid.v1.SourceStatus
 	4,  // 23: grid.v1.Place.kind:type_name -> grid.v1.PlaceKind
 	6,  // 24: grid.v1.Place.geometry:type_name -> grid.v1.Geometry
-	24, // 25: grid.v1.RoadIncidentDetail.metadata:type_name -> grid.v1.RoadIncidentDetail.MetadataEntry
+	25, // 25: grid.v1.RoadIncidentDetail.metadata:type_name -> grid.v1.RoadIncidentDetail.MetadataEntry
 	5,  // 26: grid.v1.EventList.events:type_name -> grid.v1.Event
-	25, // 27: grid.v1.EventRevision.observed_at:type_name -> google.protobuf.Timestamp
-	25, // 28: grid.v1.EventRevision.ingested_at:type_name -> google.protobuf.Timestamp
+	26, // 27: grid.v1.EventRevision.observed_at:type_name -> google.protobuf.Timestamp
+	26, // 28: grid.v1.EventRevision.ingested_at:type_name -> google.protobuf.Timestamp
 	5,  // 29: grid.v1.EventRevision.event:type_name -> grid.v1.Event
 	20, // 30: grid.v1.EventRevisionList.revisions:type_name -> grid.v1.EventRevision
 	12, // 31: grid.v1.PlaceList.places:type_name -> grid.v1.Place
 	11, // 32: grid.v1.SourceList.sources:type_name -> grid.v1.Source
-	33, // [33:33] is the sub-list for method output_type
-	33, // [33:33] is the sub-list for method input_type
+	24, // 33: grid.v1.GridService.ListSources:input_type -> grid.v1.ListSourcesRequest
+	23, // 34: grid.v1.GridService.ListSources:output_type -> grid.v1.SourceList
+	34, // [34:35] is the sub-list for method output_type
+	33, // [33:34] is the sub-list for method input_type
 	33, // [33:33] is the sub-list for extension type_name
 	33, // [33:33] is the sub-list for extension extendee
 	0,  // [0:33] is the sub-list for field type_name
@@ -2147,9 +2190,9 @@ func file_grid_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_grid_proto_rawDesc), len(file_grid_proto_rawDesc)),
 			NumEnums:      5,
-			NumMessages:   20,
+			NumMessages:   21,
 			NumExtensions: 0,
-			NumServices:   0,
+			NumServices:   1,
 		},
 		GoTypes:           file_grid_proto_goTypes,
 		DependencyIndexes: file_grid_proto_depIdxs,

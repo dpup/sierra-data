@@ -2,13 +2,14 @@ syntax = "proto3";
 
 package grid.v1;
 
+import "google/api/annotations.proto";
 import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/dpup/sierra-data/api/grid/v1;gridv1";
 
-// Canonical grid event model (docs/v2-api-spec.md §3). Messages only — every
-// /v1 endpoint is a hand-built net/http handler; entity responses marshal
-// these messages with protojson.
+// Canonical grid event model (docs/v2-api-spec.md §3) plus GridService, the
+// read-only entity/query API exposed as JSON over gRPC-Gateway at /api/v1/...
+// (docs/grpc-gateway-migration-plan.md). The messages are the wire responses.
 
 message Event {
   string id = 1;                    // "{source_id}:{native_id}" — matches shipped ids
@@ -253,3 +254,16 @@ message PlaceList {
 message SourceList {
   repeated Source sources = 1;
 }
+
+// GridService is the read-only /api/v1 entity + query surface (gRPC-Gateway).
+// Ported endpoint-by-endpoint from the hand-built /v1 handlers; see
+// docs/grpc-gateway-migration-plan.md §7 for the full endpoint map.
+service GridService {
+  // ListSources returns the source registry with per-source health — the
+  // honesty mechanism clients key layer trust off.
+  rpc ListSources(ListSourcesRequest) returns (SourceList) {
+    option (google.api.http) = {get: "/api/v1/sources"};
+  }
+}
+
+message ListSourcesRequest {}
