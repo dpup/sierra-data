@@ -8,7 +8,12 @@ dependencies:
   - git
   - go
   - go-extras
-  - protoc
+  # Proto codegen. protoc is a native binary pinned here; the plugin *versions*
+  # are pinned by `make proto-tools` (go install into GOPATH/bin, which the proto
+  # recipe prepends to PATH) so they stay aligned with go.mod regardless of what
+  # the container ships. These named plugins are a convenience fallback.
+  - protoc@29.3
+  - protoc-gen-go
   - protoc-gen-go-grpc
   - protoc-gen-grpc-gateway
   - protoc-gen-doc

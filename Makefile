@@ -1,5 +1,5 @@
 # Live Data API Server - Build, Test, and Deployment Tasks
-.PHONY: build test proto clean server tools site site-install site-dev site-shots check-site run dev lint fmt docker docker-build docker-run docker-run-dev docker-push docker-clean deploy install help
+.PHONY: build test proto proto-tools clean server tools site site-install site-dev site-shots check-site run dev lint fmt docker docker-build docker-run docker-run-dev docker-push docker-clean deploy install help
 
 # Go parameters
 GOCMD=go
@@ -14,6 +14,15 @@ GOFMT=$(GOCMD) fmt
 BUILD_DIR=bin
 PROTO_DIR=api/v1
 GRID_PROTO_DIR=api/grid/v1
+
+# Pinned proto codegen toolchain — keep aligned with go.mod so regenerating is
+# reproducible. protoc itself is a native binary, pinned in moat.yaml
+# (protoc@29.3); the plugins below are installed by `make proto-tools` into
+# GOPATH/bin, which the proto recipe prepends to PATH (so they win over any
+# floating container-provided versions).
+PROTOC_GEN_GO_VERSION=v1.36.8       # == google.golang.org/protobuf
+PROTOC_GEN_GO_GRPC_VERSION=v1.5.1
+GRPC_GATEWAY_VERSION=v2.27.2        # == github.com/grpc-ecosystem/grpc-gateway/v2 (gateway + openapiv2)
 CMD_DIR=cmd
 
 # Binary names
@@ -108,7 +117,14 @@ check-site:
 # because that guarantees the module source is extracted on disk before we point protoc at it.
 # `go list -m` returns an empty .Dir for a module that hasn't been downloaded yet, which makes
 # protoc fail with "Import protoc-gen-openapiv2/options/annotations.proto was not found".
-proto:
+proto-tools:
+	@echo "Installing pinned protoc plugins (see Makefile version vars / go.mod)..."
+	@go install google.golang.org/protobuf/cmd/protoc-gen-go@$(PROTOC_GEN_GO_VERSION)
+	@go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@$(PROTOC_GEN_GO_GRPC_VERSION)
+	@go install github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway@$(GRPC_GATEWAY_VERSION)
+	@go install github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2@$(GRPC_GATEWAY_VERSION)
+
+proto: proto-tools
 	@echo "Generating protobuf code..."
 	@mkdir -p $(BUILD_DIR) $(PROTO_DIR)
 	$(eval GOOGLEAPIS_DIR := $(shell go mod download -json github.com/googleapis/googleapis@latest | grep '"Dir"' | head -1 | sed 's/.*"Dir": "//;s/".*//'))

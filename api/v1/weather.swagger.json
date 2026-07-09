@@ -1,0 +1,406 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "The Grid — Weather API",
+    "description": "Real-time weather conditions and alerts for the Ebbetts Pass region",
+    "version": "1.0",
+    "contact": {
+      "name": "The Grid (S.I.E.R.R.A)",
+      "url": "https://data.sierragridteam.org"
+    }
+  },
+  "tags": [
+    {
+      "name": "WeatherService"
+    }
+  ],
+  "schemes": [
+    "https",
+    "http"
+  ],
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "paths": {
+    "/api/v1/weather": {
+      "get": {
+        "summary": "ListWeather returns current weather for all configured locations",
+        "operationId": "WeatherService_ListWeather",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListWeatherResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "WeatherService"
+        ]
+      }
+    },
+    "/api/v1/weather/alerts": {
+      "get": {
+        "summary": "ListWeatherAlerts returns active weather alerts for all locations",
+        "operationId": "WeatherService_ListWeatherAlerts",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListWeatherAlertsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "zones",
+            "description": "Optional NWS forecast zone filter (e.g. \"CAZ064\"). When provided, NWS alerts\nare narrowed to these zones; non-NWS alerts (OpenWeatherMap) are not\nzone-scoped and are unaffected. Repeat the param (?zones=CAZ064\u0026zones=CAZ065)\nor pass a comma-separated value.",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "collectionFormat": "multi"
+          }
+        ],
+        "tags": [
+          "WeatherService"
+        ]
+      }
+    },
+    "/api/v1/weather/{locationId}": {
+      "get": {
+        "summary": "GetLocationWeather returns weather for a specific location",
+        "operationId": "WeatherService_GetLocationWeather",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1GetLocationWeatherResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "locationId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "WeatherService"
+        ]
+      }
+    }
+  },
+  "definitions": {
+    "protobufAny": {
+      "type": "object",
+      "properties": {
+        "@type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": {}
+    },
+    "rpcStatus": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "message": {
+          "type": "string"
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/protobufAny"
+          }
+        }
+      }
+    },
+    "v1AlertSeverity": {
+      "type": "string",
+      "enum": [
+        "ALERT_SEVERITY_UNSPECIFIED",
+        "INFO",
+        "WARNING",
+        "CRITICAL"
+      ],
+      "default": "ALERT_SEVERITY_UNSPECIFIED",
+      "description": "AlertSeverity grades how serious an alert is. Used by road alerts, region\nincidents, and weather alerts (NWS severity is mapped onto this scale)."
+    },
+    "v1AlertSource": {
+      "type": "string",
+      "enum": [
+        "ALERT_SOURCE_UNSPECIFIED",
+        "NWS",
+        "OPENWEATHERMAP"
+      ],
+      "default": "ALERT_SOURCE_UNSPECIFIED",
+      "description": "AlertSource identifies which upstream feed produced a weather alert.\n\n - NWS: National Weather Service (authoritative)\n - OPENWEATHERMAP: OpenWeatherMap One Call API"
+    },
+    "v1FireWeather": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "$ref": "#/definitions/v1FireWeatherState",
+          "title": "normal | elevated | red-flag"
+        },
+        "sourceEvent": {
+          "type": "string",
+          "title": "Driving NWS product (e.g. \"Red Flag Warning\"); empty when normal"
+        },
+        "headline": {
+          "type": "string",
+          "title": "Headline of the governing alert"
+        },
+        "senderName": {
+          "type": "string",
+          "title": "Issuing NWS office"
+        },
+        "effective": {
+          "type": "string",
+          "format": "date-time",
+          "title": "Start of the governing product"
+        },
+        "expires": {
+          "type": "string",
+          "format": "date-time",
+          "title": "End of the governing product"
+        },
+        "zones": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "NWS zones the classification is based on"
+        }
+      },
+      "description": "FireWeather classifies fire-weather risk derived from authoritative NWS\nfire-weather products. It escalates Normal -\u003e Elevated -\u003e Red Flag. Red Flag\nis only reported when an NWS Red Flag Warning is actually in effect."
+    },
+    "v1FireWeatherState": {
+      "type": "string",
+      "enum": [
+        "FIRE_WEATHER_STATE_UNSPECIFIED",
+        "NORMAL",
+        "ELEVATED",
+        "RED_FLAG"
+      ],
+      "default": "FIRE_WEATHER_STATE_UNSPECIFIED",
+      "description": "FireWeatherState escalates Normal -\u003e Elevated -\u003e Red Flag.\n\n - NORMAL: No fire-weather product in effect\n - ELEVATED: Fire Weather Watch in effect\n - RED_FLAG: Red Flag Warning in effect"
+    },
+    "v1GetLocationWeatherResponse": {
+      "type": "object",
+      "properties": {
+        "weatherData": {
+          "$ref": "#/definitions/v1WeatherData"
+        },
+        "lastUpdated": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "fireWeather": {
+          "$ref": "#/definitions/v1FireWeather",
+          "title": "Region-wide fire-weather classification (NWS-derived)"
+        }
+      }
+    },
+    "v1ListWeatherAlertsResponse": {
+      "type": "object",
+      "properties": {
+        "alerts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1WeatherAlert"
+          }
+        },
+        "lastUpdated": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "v1ListWeatherResponse": {
+      "type": "object",
+      "properties": {
+        "weatherData": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1WeatherData"
+          }
+        },
+        "lastUpdated": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "fireWeather": {
+          "$ref": "#/definitions/v1FireWeather",
+          "title": "Region-wide fire-weather classification (NWS-derived)"
+        }
+      },
+      "title": "Response messages"
+    },
+    "v1WeatherAlert": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "title": "Generated unique identifier"
+        },
+        "senderName": {
+          "type": "string",
+          "title": "Alert issuing organization"
+        },
+        "event": {
+          "type": "string",
+          "title": "Alert event type (\"Heat Advisory\", \"Winter Storm Warning\")"
+        },
+        "description": {
+          "type": "string",
+          "title": "Original NWS alert description (preserved for reference)"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "OpenWeatherMap alert tags"
+        },
+        "headline": {
+          "type": "string",
+          "description": "Single sentence summary, \u003c100 chars",
+          "title": "AI-enhanced fields for improved readability"
+        },
+        "summary": {
+          "type": "string",
+          "title": "2-3 sentences, plain text, traveler-focused"
+        },
+        "details": {
+          "type": "string",
+          "title": "Full description with minimal markdown formatting"
+        },
+        "source": {
+          "$ref": "#/definitions/v1AlertSource",
+          "description": "Which upstream feed produced the alert",
+          "title": "Provenance / NWS fields"
+        },
+        "severity": {
+          "$ref": "#/definitions/v1AlertSeverity",
+          "title": "Severity (NWS levels mapped onto the shared scale)"
+        },
+        "zones": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "NWS forecast zones this alert applies to (e.g. \"CAZ064\")"
+        },
+        "startTime": {
+          "type": "string",
+          "format": "date-time",
+          "title": "When the alert becomes effective"
+        },
+        "endTime": {
+          "type": "string",
+          "format": "date-time",
+          "title": "When the alert expires"
+        }
+      }
+    },
+    "v1WeatherData": {
+      "type": "object",
+      "properties": {
+        "locationId": {
+          "type": "string"
+        },
+        "locationName": {
+          "type": "string"
+        },
+        "weatherMain": {
+          "type": "string",
+          "description": "\"Clear\", \"Rain\", \"Snow\", etc."
+        },
+        "weatherDescription": {
+          "type": "string",
+          "description": "\"light rain\", \"clear sky\", etc."
+        },
+        "weatherIcon": {
+          "type": "string",
+          "title": "Icon code for display"
+        },
+        "temperatureCelsius": {
+          "type": "integer",
+          "format": "int32",
+          "title": "Temperature in Celsius (rounded)"
+        },
+        "feelsLikeCelsius": {
+          "type": "integer",
+          "format": "int32",
+          "title": "Feels like temperature in Celsius (rounded)"
+        },
+        "humidityPercent": {
+          "type": "integer",
+          "format": "int32",
+          "title": "Humidity percentage (0-100)"
+        },
+        "windSpeedKmh": {
+          "type": "integer",
+          "format": "int32",
+          "title": "Wind speed in km/h (more user-friendly)"
+        },
+        "windDirectionDegrees": {
+          "type": "integer",
+          "format": "int32",
+          "title": "Wind direction in degrees (0-360)"
+        },
+        "visibilityKm": {
+          "type": "integer",
+          "format": "int32",
+          "title": "Visibility distance in kilometers"
+        },
+        "alerts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1WeatherAlert"
+          },
+          "title": "Active weather alerts"
+        }
+      },
+      "title": "Data models"
+    }
+  },
+  "externalDocs": {
+    "description": "More about The Grid",
+    "url": "https://github.com/dpup/sierra-data"
+  }
+}

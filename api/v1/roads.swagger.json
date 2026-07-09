@@ -1,0 +1,647 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "The Grid — Roads API",
+    "description": "Real-time road conditions and traffic information for the Ebbetts Pass region",
+    "version": "1.0",
+    "contact": {
+      "name": "The Grid (S.I.E.R.R.A)",
+      "url": "https://data.sierragridteam.org"
+    }
+  },
+  "tags": [
+    {
+      "name": "RoadsService"
+    }
+  ],
+  "schemes": [
+    "https",
+    "http"
+  ],
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "paths": {
+    "/api/v1/incidents/{area}": {
+      "get": {
+        "summary": "ListIncidents returns region-wide CHP/Caltrans dispatch incidents for a\nconfigured area, e.g. /api/v1/incidents/mother-lode. The area is a path\nparam (an identity, like a road or location id) for consistency with\nGetRoad/GetLocationWeather. Unlike the alerts embedded in each Road, this is\nnot scoped to a monitored route - it surfaces every incident within the\narea as a flat, structured list without per-route classification or AI\nenhancement (kept lightweight for a region-wide view).",
+        "operationId": "RoadsService_ListIncidents",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListIncidentsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "area",
+            "description": "Area id path param (e.g. \"mother-lode\"). Unknown id -\u003e 404.",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "enhancementIo",
+            "description": "Include the AI model I/O (`ai_request` / `ai_response`) in the response.\nDefault false — those fields are large, so they are omitted unless asked\nfor (query param `?enhancement_io=true`). The lightweight `ai_enhanced_at`\nprovenance is always included.",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "tags": [
+          "RoadsService"
+        ]
+      }
+    },
+    "/api/v1/metrics": {
+      "get": {
+        "summary": "GetProcessingMetrics returns alert processing metrics.\nMapped to /api/v1/metrics (not /api/v1/roads/metrics) so it does not collide\nwith the /api/v1/roads/{road_id} id space.",
+        "operationId": "RoadsService_GetProcessingMetrics",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ProcessingMetrics"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "RoadsService"
+        ]
+      }
+    },
+    "/api/v1/roads": {
+      "get": {
+        "summary": "ListRoads returns current conditions for all configured roads",
+        "operationId": "RoadsService_ListRoads",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListRoadsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "RoadsService"
+        ]
+      }
+    },
+    "/api/v1/roads/{roadId}": {
+      "get": {
+        "summary": "GetRoad returns current conditions for a specific road",
+        "operationId": "RoadsService_GetRoad",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1GetRoadResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "roadId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "RoadsService"
+        ]
+      }
+    }
+  },
+  "definitions": {
+    "protobufAny": {
+      "type": "object",
+      "properties": {
+        "@type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": {}
+    },
+    "rpcStatus": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "message": {
+          "type": "string"
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/protobufAny"
+          }
+        }
+      }
+    },
+    "v1AlertClassification": {
+      "type": "string",
+      "enum": [
+        "ALERT_CLASSIFICATION_UNSPECIFIED",
+        "ON_ROUTE",
+        "NEARBY",
+        "DISTANT"
+      ],
+      "default": "ALERT_CLASSIFICATION_UNSPECIFIED",
+      "title": "- ON_ROUTE: Directly affects route path (\u003c 100m from route)\n - NEARBY: In surrounding area but not blocking route (\u003c route threshold)\n - DISTANT: Too far from route to be relevant (\u003e route threshold)"
+    },
+    "v1AlertDuration": {
+      "type": "string",
+      "enum": [
+        "ALERT_DURATION_UNSPECIFIED",
+        "DURATION_UNKNOWN",
+        "DURATION_UNDER_ONE_HOUR",
+        "DURATION_SEVERAL_HOURS",
+        "DURATION_ONGOING"
+      ],
+      "default": "ALERT_DURATION_UNSPECIFIED",
+      "description": "AlertDuration is the AI-assessed duration of a road alert."
+    },
+    "v1AlertImpact": {
+      "type": "string",
+      "enum": [
+        "ALERT_IMPACT_UNSPECIFIED",
+        "IMPACT_NONE",
+        "IMPACT_LIGHT",
+        "IMPACT_MODERATE",
+        "IMPACT_SEVERE"
+      ],
+      "default": "ALERT_IMPACT_UNSPECIFIED",
+      "description": "AlertImpact is the AI-assessed impact of a road alert."
+    },
+    "v1AlertSeverity": {
+      "type": "string",
+      "enum": [
+        "ALERT_SEVERITY_UNSPECIFIED",
+        "INFO",
+        "WARNING",
+        "CRITICAL"
+      ],
+      "default": "ALERT_SEVERITY_UNSPECIFIED",
+      "description": "AlertSeverity grades how serious an alert is. Used by road alerts, region\nincidents, and weather alerts (NWS severity is mapped onto this scale)."
+    },
+    "v1AlertType": {
+      "type": "string",
+      "enum": [
+        "ALERT_TYPE_UNSPECIFIED",
+        "CLOSURE",
+        "CONSTRUCTION",
+        "INCIDENT",
+        "WEATHER"
+      ],
+      "default": "ALERT_TYPE_UNSPECIFIED"
+    },
+    "v1ChainControlInfo": {
+      "type": "object",
+      "properties": {
+        "level": {
+          "$ref": "#/definitions/v1ChainControlLevel",
+          "title": "R1, R2, or NONE"
+        },
+        "locationName": {
+          "type": "string",
+          "title": "Where chain control starts (e.g., \"Twin Bridges\")"
+        },
+        "latitude": {
+          "type": "number",
+          "format": "double",
+          "title": "Latitude of chain control checkpoint"
+        },
+        "longitude": {
+          "type": "number",
+          "format": "double",
+          "title": "Longitude of chain control checkpoint"
+        },
+        "effectiveTime": {
+          "type": "string",
+          "format": "date-time",
+          "title": "When chain control went into effect"
+        },
+        "direction": {
+          "type": "string",
+          "title": "Direction of travel (e.g., \"Eastbound\")"
+        },
+        "description": {
+          "type": "string",
+          "title": "Human-readable requirements description"
+        }
+      },
+      "title": "ChainControlInfo provides detailed chain control status for a road"
+    },
+    "v1ChainControlLevel": {
+      "type": "string",
+      "enum": [
+        "CHAIN_CONTROL_LEVEL_UNSPECIFIED",
+        "CHAIN_CONTROL_LEVEL_NONE",
+        "CHAIN_CONTROL_LEVEL_R1",
+        "CHAIN_CONTROL_LEVEL_R2",
+        "CHAIN_CONTROL_LEVEL_R3"
+      ],
+      "default": "CHAIN_CONTROL_LEVEL_UNSPECIFIED",
+      "description": "- CHAIN_CONTROL_LEVEL_NONE: No chain control in effect\n - CHAIN_CONTROL_LEVEL_R1: Chains required except vehicles with snow tires\n - CHAIN_CONTROL_LEVEL_R2: Chains required except 4WD/AWD with snow tires on all wheels\n - CHAIN_CONTROL_LEVEL_R3: Chains required on all vehicles, no exceptions",
+      "title": "ChainControlLevel indicates the specific chain control requirement level"
+    },
+    "v1ChainControlStatus": {
+      "type": "string",
+      "enum": [
+        "CHAIN_CONTROL_UNSPECIFIED",
+        "NONE",
+        "ADVISED",
+        "REQUIRED",
+        "PROHIBITED"
+      ],
+      "default": "CHAIN_CONTROL_UNSPECIFIED"
+    },
+    "v1CongestionLevel": {
+      "type": "string",
+      "enum": [
+        "CONGESTION_LEVEL_UNSPECIFIED",
+        "CLEAR",
+        "LIGHT",
+        "MODERATE",
+        "HEAVY",
+        "SEVERE"
+      ],
+      "default": "CONGESTION_LEVEL_UNSPECIFIED"
+    },
+    "v1Coordinates": {
+      "type": "object",
+      "properties": {
+        "latitude": {
+          "type": "number",
+          "format": "double",
+          "title": "Latitude in decimal degrees (-90 to 90)"
+        },
+        "longitude": {
+          "type": "number",
+          "format": "double",
+          "title": "Longitude in decimal degrees (-180 to 180)"
+        }
+      },
+      "title": "Geographic coordinates in WGS84 decimal degrees"
+    },
+    "v1GetRoadResponse": {
+      "type": "object",
+      "properties": {
+        "road": {
+          "$ref": "#/definitions/v1Road"
+        },
+        "lastUpdated": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "v1Incident": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "title": "Stable id (CHP log number when available)"
+        },
+        "type": {
+          "$ref": "#/definitions/v1AlertType",
+          "title": "INCIDENT, CLOSURE, CONSTRUCTION"
+        },
+        "severity": {
+          "$ref": "#/definitions/v1AlertSeverity",
+          "title": "Heuristic severity from incident text"
+        },
+        "location": {
+          "$ref": "#/definitions/v1Coordinates",
+          "title": "Point location"
+        },
+        "locationDescription": {
+          "type": "string",
+          "title": "Human-readable location (e.g. \"Sr132 Ofr / I580 E\")"
+        },
+        "description": {
+          "type": "string",
+          "title": "Incident detail text (AI-enhanced for high-severity incidents)"
+        },
+        "status": {
+          "$ref": "#/definitions/v1IncidentStatus",
+          "title": "Lifecycle state (feeds only list active incidents)"
+        },
+        "logNumber": {
+          "type": "string",
+          "title": "CHP/CAD log number (e.g. \"250916ST0066\")"
+        },
+        "started": {
+          "type": "string",
+          "format": "date-time",
+          "title": "When the incident was first reported"
+        },
+        "lastUpdated": {
+          "type": "string",
+          "format": "date-time",
+          "title": "Last update from the feed"
+        },
+        "area": {
+          "type": "string",
+          "title": "Area id this incident was matched to"
+        },
+        "condensedSummary": {
+          "type": "string",
+          "description": "AI-enhancement fields, populated only for high-severity (CRITICAL)\nincidents — fires, injury collisions, overturns, full closures. Other\nincidents keep the structural fields above and leave these empty/unset.\n\nShort format for mobile"
+        },
+        "impact": {
+          "$ref": "#/definitions/v1AlertImpact",
+          "title": "AI-assessed impact (IMPACT_UNSPECIFIED when not enhanced)"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Structured extras (vehicles involved, injuries, ...)"
+        },
+        "originalText": {
+          "type": "string",
+          "description": "Verbatim upstream text, before any AI enhancement (CHP radio codes /\nabbreviations). Preserved so a client can show the original alongside the\nenhanced text — the \"translate, never assert\" transparency contract\n(spec §3.1). Always set; `description` may be an AI narrative."
+        },
+        "aiRequest": {
+          "type": "string",
+          "description": "The AI enhancement I/O (transparency): `ai_request` is the incident-specific\nuser prompt sent to the model; `ai_response` is the raw structured JSON it\nreturned. Empty when the incident was not AI-enhanced."
+        },
+        "aiResponse": {
+          "type": "string"
+        },
+        "aiEnhancedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the enhancement was produced (the model run, not this fetch — cached\nenhancements keep their original time). Unset when not AI-enhanced."
+        }
+      },
+      "description": "Incident is a region-wide CHP/Caltrans dispatch incident, surfaced\nindependently of any monitored road."
+    },
+    "v1IncidentStatus": {
+      "type": "string",
+      "enum": [
+        "INCIDENT_STATUS_UNSPECIFIED",
+        "ACTIVE"
+      ],
+      "default": "INCIDENT_STATUS_UNSPECIFIED",
+      "description": "IncidentStatus is the lifecycle state of a region-wide incident. The feeds\nonly list active incidents today."
+    },
+    "v1ListIncidentsResponse": {
+      "type": "object",
+      "properties": {
+        "incidents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1Incident"
+          }
+        },
+        "lastUpdated": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "area": {
+          "type": "string",
+          "title": "Echoes the resolved area id"
+        }
+      }
+    },
+    "v1ListRoadsResponse": {
+      "type": "object",
+      "properties": {
+        "roads": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1Road"
+          }
+        },
+        "lastUpdated": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "title": "Response messages"
+    },
+    "v1ProcessingMetrics": {
+      "type": "object",
+      "properties": {
+        "totalRawAlerts": {
+          "type": "string",
+          "format": "int64"
+        },
+        "filteredAlerts": {
+          "type": "string",
+          "format": "int64"
+        },
+        "enhancedAlerts": {
+          "type": "string",
+          "format": "int64"
+        },
+        "enhancementFailures": {
+          "type": "string",
+          "format": "int64"
+        },
+        "avgProcessingTimeMs": {
+          "type": "number",
+          "format": "double"
+        }
+      }
+    },
+    "v1Road": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string",
+          "title": "Highway/road name (e.g., \"Hwy 4\")"
+        },
+        "section": {
+          "type": "string",
+          "title": "Section description (e.g., \"Arnold to Bear Valley\")"
+        },
+        "status": {
+          "$ref": "#/definitions/v1RoadStatus",
+          "title": "Current road status"
+        },
+        "statusExplanation": {
+          "type": "string",
+          "title": "Explanation when status is RESTRICTED or CLOSED"
+        },
+        "durationMinutes": {
+          "type": "integer",
+          "format": "int32",
+          "title": "Current travel time in minutes"
+        },
+        "distanceKm": {
+          "type": "integer",
+          "format": "int32",
+          "title": "Route distance in kilometers"
+        },
+        "congestionLevel": {
+          "$ref": "#/definitions/v1CongestionLevel",
+          "title": "Traffic congestion level"
+        },
+        "delayMinutes": {
+          "type": "integer",
+          "format": "int32",
+          "title": "Additional time due to traffic (0 = no delays)"
+        },
+        "chainControl": {
+          "$ref": "#/definitions/v1ChainControlStatus",
+          "title": "Chain control requirements (legacy, use chain_control_info)"
+        },
+        "alerts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1RoadAlert"
+          },
+          "title": "Combined from multiple sources"
+        },
+        "chainControlInfo": {
+          "$ref": "#/definitions/v1ChainControlInfo",
+          "title": "Detailed chain control information"
+        },
+        "polyline": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1Coordinates"
+          },
+          "description": "Ordered route path — the decoded Google Routes polyline following the actual\nhighway. Falls back to a straight [origin, destination] line when the routing\ncall is unavailable (e.g. no API key). Empty only if the road can't be built."
+        }
+      },
+      "title": "Data models"
+    },
+    "v1RoadAlert": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "$ref": "#/definitions/v1AlertType"
+        },
+        "severity": {
+          "$ref": "#/definitions/v1AlertSeverity"
+        },
+        "classification": {
+          "$ref": "#/definitions/v1AlertClassification",
+          "title": "On route vs nearby vs distant"
+        },
+        "title": {
+          "type": "string",
+          "title": "Actual Caltrans title (e.g., \"CHP Incident 250911GG0206\")"
+        },
+        "description": {
+          "type": "string",
+          "title": "AI-processed description"
+        },
+        "condensedSummary": {
+          "type": "string",
+          "title": "Short format for mobile"
+        },
+        "startTime": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "endTime": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "lastUpdated": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "location": {
+          "$ref": "#/definitions/v1Coordinates",
+          "title": "Structured location with lat/lon"
+        },
+        "locationDescription": {
+          "type": "string",
+          "title": "Human-friendly location description"
+        },
+        "impact": {
+          "$ref": "#/definitions/v1AlertImpact",
+          "title": "AI-assessed impact"
+        },
+        "duration": {
+          "$ref": "#/definitions/v1AlertDuration",
+          "title": "AI-assessed duration"
+        },
+        "timeReported": {
+          "type": "string",
+          "format": "date-time",
+          "title": "When incident was first reported"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Additional AI-generated key-value pairs only"
+        },
+        "distanceToRouteMeters": {
+          "type": "number",
+          "format": "double",
+          "title": "Distance from alert location to route in meters (for NEARBY alerts)"
+        },
+        "id": {
+          "type": "string",
+          "title": "Stable CHP log / closure id; matches Incident.id for the same event (empty if none)"
+        }
+      }
+    },
+    "v1RoadStatus": {
+      "type": "string",
+      "enum": [
+        "ROAD_STATUS_UNSPECIFIED",
+        "OPEN",
+        "CLOSED",
+        "RESTRICTED",
+        "MAINTENANCE"
+      ],
+      "default": "ROAD_STATUS_UNSPECIFIED",
+      "title": "Enumerations"
+    }
+  },
+  "externalDocs": {
+    "description": "More about The Grid",
+    "url": "https://github.com/dpup/sierra-data"
+  }
+}
