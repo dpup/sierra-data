@@ -70,6 +70,13 @@ node_modules/
 # purpose — like the generated *.pb.go — so the Docker `go build` stays Node-free.
 web/.astro/
 
+# ...except Astro's content-layer stubs, which the build emits inconsistently
+# (empty `new Map()` modules, unreferenced by the served site) and which
+# otherwise churn site/dist in and out of every commit. go:embed all:dist picks
+# them up when present and is fine without them.
+site/dist/content-assets.mjs
+site/dist/content-modules.mjs
+
 # Screenshot/layout-diagnosis artifacts (tools/screenshots) — regenerated.
 tools/screenshots/out/
 
