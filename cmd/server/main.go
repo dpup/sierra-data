@@ -162,6 +162,10 @@ func main() {
 	server := prefab.New(
 		prefab.WithContext(ctx),
 		prefab.WithGRPCReflection(),
+		// Cache-Control: public, max-age=30 on every (read-only) GridService
+		// response — the freshness lifetime that complements the ETag revalidation
+		// below. Restores what the hand-built /v1 handlers set before the migration.
+		prefab.WithGRPCInterceptor(gridapi.CacheControlInterceptor(30)),
 		// Conditional GET (ETag/If-None-Match -> 304) for RPCs that call
 		// etag.Guard — event detail (revision), the event/history lists
 		// (DataVersion + filters), and places (per-process nonce) — so a match

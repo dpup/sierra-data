@@ -125,7 +125,14 @@ func TestSeed(t *testing.T) {
 		g, err := geojson.Parse(p.GetGeometry().GetGeojson())
 		require.NoError(t, err)
 		assert.Equal(t, "LineString", g.Type)
-		require.Len(t, g.Points, 2)
+		// Prefers the checked-in real road path (data/places/corridors.geojson)
+		// over the 2-point chord — many points following Hwy 4.
+		require.Greater(t, len(g.Points), 2, "should use the real road polyline, not the straight chord")
+		first, last := g.Points[0], g.Points[len(g.Points)-1]
+		assert.InDelta(t, 38.0678, first.Lat(), 0.01, "path starts at Angels Camp")
+		assert.InDelta(t, -120.5402, first.Lng(), 0.01)
+		assert.InDelta(t, 38.1377, last.Lat(), 0.01, "path ends at Murphys")
+		assert.InDelta(t, -120.4561, last.Lng(), 0.01)
 	})
 }
 
