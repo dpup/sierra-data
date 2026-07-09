@@ -464,17 +464,18 @@ func TestSummary_DomainRollups(t *testing.T) {
 	}}
 	out := decodeSummary(t, getSummaryWith(t, s, hb, "calaveras"))
 
-	// roads: 1 event + 3 condition features merged for status/severity/count;
-	// headlines are the top 3 by severity (events before conditions on ties).
+	// roads: 1 event + a MODERATE chain control + 2 INFO road segments. The two
+	// clear (INFO) segments are baseline monitoring, not active hazards, so they
+	// drop from active_count and headlines; the event and the chain control
+	// remain. Headlines are top-3 by severity (events before conditions on ties).
 	roads := out.domain(t, "roads")
 	assert.Equal(t, "OK", roads.Status)
-	assert.Equal(t, 4, roads.ActiveCount)
+	assert.Equal(t, 2, roads.ActiveCount)
 	assert.Equal(t, "MODERATE", roads.HighestSeverity)
-	require.Len(t, roads.Headlines, 3, "top-3 cap")
+	require.Len(t, roads.Headlines, 2, "the two clear INFO segments are excluded")
 	assert.Equal(t, "chain:hwy-4", roads.Headlines[0].ID)
 	assert.Equal(t, "MODERATE", roads.Headlines[0].Severity)
 	assert.Equal(t, "chp:i2", roads.Headlines[1].ID)
-	assert.Equal(t, "road:hwy-4", roads.Headlines[2].ID)
 
 	// fire: wildfire event + fire_weather banner merged.
 	fire := out.domain(t, "fire")
@@ -512,6 +513,43 @@ func TestSummary_DomainRollups(t *testing.T) {
 	out = decodeSummary(t, getSummaryWith(t, s, hb, "calaveras"))
 	assert.Equal(t, "STALE", out.domain(t, "fire").Status)
 	assert.Equal(t, "UNAVAILABLE", out.domain(t, "roads").Status)
+}
+
+// TestSummary_BaselineConditionsAreNotActive locks the Ebbetts Pass case: on a
+// genuinely QUIET area, baseline INFO condition features (OPEN road segments, a
+// "normal" fire-weather banner) must NOT count as active or surface as
+// headlines, even though the layers are healthy (OK). Regression for the summary
+// reporting roads active_count 4 / fire 1 while total_active was 0.
+func TestSummary_BaselineConditionsAreNotActive(t *testing.T) {
+	s := newTestService(t) // seeds a SEVERE wildfire event (calfire:f1), no road incident
+	allSourcesOK(t, s.Store)
+	hb := &fakeCondBuilder{byLayer: map[string]condFake{
+		hazards.LayerChainControl: {status: "OK"},
+		hazards.LayerRoadSegment: {status: "OK", features: []hazards.Feature{
+			condFeature("road:hwy-4", hazards.LayerRoadSegment, "INFO", "Hwy 4 clear", nil),
+			condFeature("road:hwy-108", hazards.LayerRoadSegment, "INFO", "Hwy 108 clear", nil),
+		}},
+		hazards.LayerFireWeather: {status: "OK", features: []hazards.Feature{
+			condFeature("fw:region", hazards.LayerFireWeather, "INFO", "Fire weather: normal",
+				&hazards.FireWeatherProps{State: "normal"}),
+		}},
+	}}
+	out := decodeSummary(t, getSummaryWith(t, s, hb, "calaveras"))
+
+	// roads: no incident, two clear (INFO) segments → nothing active.
+	roads := out.domain(t, "roads")
+	assert.Equal(t, "OK", roads.Status, "healthy sources stay OK even with nothing active")
+	assert.Equal(t, 0, roads.ActiveCount, "clear INFO road segments are baseline, not active")
+	assert.Empty(t, roads.Headlines)
+	assert.Equal(t, "INFO", roads.HighestSeverity)
+
+	// fire: the seeded SEVERE wildfire event counts; the normal fire-weather
+	// banner does not (it is baseline, not a hazard).
+	fire := out.domain(t, "fire")
+	assert.Equal(t, 1, fire.ActiveCount, "the event counts; the normal fire-weather banner does not")
+	assert.Equal(t, "SEVERE", fire.HighestSeverity)
+	require.Len(t, fire.Headlines, 1)
+	assert.Equal(t, "calfire:f1", fire.Headlines[0].ID, "baseline fw:region banner excluded from headlines")
 }
 
 // TestSummary_TopEventsOrderingAndCap: severity_rank desc, then observed_at

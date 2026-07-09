@@ -317,11 +317,16 @@ func topEventsFrom(events []*gridv1.Event, n int) []*gridv1.SummaryTopEvent {
 }
 
 // mergedItem is the domain-rollup view of an event or condition feature.
+// isCondition marks the item as a condition-layer projection (road_segment,
+// chain_control, fire_weather) rather than a discrete event — condition layers
+// are always present (a monitored road, the region's fire-weather state), so a
+// baseline INFO one is monitoring, not an active hazard (see buildDomain).
 type mergedItem struct {
-	id       string
-	severity string
-	rank     int
-	headline string
+	id          string
+	severity    string
+	rank        int
+	headline    string
+	isCondition bool
 }
 
 func eventItems(events []*gridv1.Event) []mergedItem {
@@ -341,10 +346,11 @@ func featureItems(features []hazards.Feature) []mergedItem {
 	out := make([]mergedItem, 0, len(features))
 	for _, f := range features {
 		out = append(out, mergedItem{
-			id:       f.Properties.ID,
-			severity: f.Properties.Severity,
-			rank:     f.Properties.SeverityRank,
-			headline: f.Properties.Headline,
+			id:          f.Properties.ID,
+			severity:    f.Properties.Severity,
+			rank:        f.Properties.SeverityRank,
+			headline:    f.Properties.Headline,
+			isCondition: true,
 		})
 	}
 	return out
@@ -352,25 +358,42 @@ func featureItems(features []hazards.Feature) []mergedItem {
 
 // buildDomain rolls merged items into one domain block: status is the WORST
 // source_status across the domain's layers (partial data must not present as
-// complete), active_count is the merged item count, headlines are the top 3
-// by severity (stable on ties, preserving events-before-conditions order).
+// complete), active_count is the count of *active* items, headlines are the top
+// 3 of those by severity (stable on ties, preserving events-before-conditions
+// order).
+//
+// "Active" excludes baseline conditions. An always-present condition feature at
+// INFO severity — an OPEN road segment, a "normal" fire-weather banner — is
+// monitoring, not a hazard, so counting it made a genuinely QUIET area report
+// e.g. roads active_count 4 for four clear segments (and fire 1 for normal fire
+// weather) alongside total_active 0. Events always count (matching
+// total_active); condition features count only above INFO. The unfiltered set
+// still drives the map layers and source health — this filter is the summary
+// rollup only.
 func buildDomain(name string, statuses []string, items []mergedItem) *gridv1.SummaryDomain {
+	active := make([]mergedItem, 0, len(items))
+	for _, it := range items {
+		if it.isCondition && it.rank <= int(gridv1.Severity_INFO.Number()) {
+			continue
+		}
+		active = append(active, it)
+	}
 	d := &gridv1.SummaryDomain{
 		Domain:          name,
 		Status:          worstStatus(statuses),
 		HighestSeverity: gridv1.Severity_INFO.String(),
-		ActiveCount:     int32(len(items)),
+		ActiveCount:     int32(len(active)),
 		Headlines:       []*gridv1.SummaryDomainHeadline{},
 	}
 	topRank := -1
-	for _, it := range items {
+	for _, it := range active {
 		if it.rank > topRank {
 			topRank = it.rank
 			d.HighestSeverity = it.severity
 		}
 	}
-	sorted := make([]mergedItem, len(items))
-	copy(sorted, items)
+	sorted := make([]mergedItem, len(active))
+	copy(sorted, active)
 	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].rank > sorted[j].rank })
 	if len(sorted) > 3 {
 		sorted = sorted[:3]

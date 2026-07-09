@@ -16,6 +16,22 @@ proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 
 ## 2026-07-09
 
+### Fixed — `summary` domains no longer count baseline conditions as active
+
+`GET /api/v1/places/{place}/summary` domains previously set `activeCount` (and
+`headlines`) to the raw count of every merged item, including always-present
+baseline condition features. On a genuinely quiet area this produced a
+self-contradicting rollup — e.g. `mode: QUIET`, `summary.totalActive: 0`,
+`topEvents: []`, yet `domains[roads].activeCount: 4` (four OPEN road segments)
+and `domains[fire].activeCount: 1` (a "normal" fire-weather banner), all at
+`INFO` severity. Now `activeCount`/`headlines` count **active** items only:
+every event, but a condition feature (`road_segment`, `chain_control`,
+`fire_weather`) only when it is **above `INFO`**. Baseline monitoring (an open
+road, normal fire weather) is excluded, so a quiet domain reports
+`activeCount: 0` with no headlines. `status`, `highestSeverity`, and the map
+layers are unchanged — the full feature set still drives the `.geojson` layers.
+A consumer that rendered `activeCount` will now show fewer (accurate) items.
+
 ### Changed — enum values are UPPERCASE on the `.geojson` and `summary` surfaces (BREAKING for map clients)
 
 The `.geojson` map layers and the place `summary` previously lowercased a few enum
