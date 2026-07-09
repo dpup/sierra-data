@@ -108,10 +108,16 @@ plus, in each handler that opts in, `etag.Guard(ctx, etag.Weak(version))` where
 `version` is a **cheap domain value** the handler can read without materializing
 the body. On an `If-None-Match` hit `Guard` returns `ErrNotModified`, the plugin's
 interceptor renders it as `304` (Gateway) / a not-modified metadata flag (native
-gRPC), and the handler skips the expensive load. SIERRA wired this for
+gRPC), and the handler skips the expensive load. SIERRA wired the high-value set:
 `GetEvent`/`GetEventHistory` (validator = the cheap `store.EventVersion(id)`
-revision); the hand-built `summary`/`.geojson` keep their body-hash `ETag`. Other
-list/query RPCs are un-instrumented for now (no ETag) and can opt in later.
+revision); `ListEvents`/`ListHistory` (a cheap monotonic `store.DataVersion()` —
+`COUNT(*)` over the append-only `event_revisions`, which bumps on any change so it
+never yields a stale `304` — plus the filter set); and `ListPlaces`/`GetPlace` (a
+per-process nonce, since the directory is seeded at boot and static thereafter).
+The nonce is also folded into the event-list validators so a redeploy that
+changes place polygons invalidates them too. The hand-built `summary`/`.geojson`
+keep their body-hash `ETag`. Still un-instrumented: `GetConditions`,
+`ListSources`, `ResolvePlace`, `ListScanners`.
 
 ## 5. Target architecture (as built)
 
@@ -207,9 +213,10 @@ Port the logic out of the hand-built handlers into RPC methods:
 - **ETag/304:** prefab 0.6.0's `etag` plugin (`prefab.WithPlugin(etag.Plugin())`)
   is **handler-managed**, not server-wide (see §4 "Resolved"): each opted-in RPC
   calls `etag.Guard(ctx, etag.Weak(version))` with a cheap domain version. Wired
-  on `GetEvent`/`GetEventHistory` (validator = `store.EventVersion(id)`); the
-  hand-built `summary`/`.geojson` keep their own body-hash `ETag`. Other RPCs are
-  un-instrumented for now.
+  on event detail (`EventVersion`), the event/history lists (`DataVersion` +
+  filters), and places (per-process nonce); the hand-built `summary`/`.geojson`
+  keep their own body-hash `ETag`. `conditions`/`sources`/`resolve`/`scanners`
+  are un-instrumented for now.
 - **GeoJSON routing:** the gateway and the GeoJSON handler both live under
   `/api/v1/` — mount the GeoJSON handler at the more specific `/api/v1/places/`
   (or a `.geojson`-suffix check) so the two don't fight in `http.ServeMux`;

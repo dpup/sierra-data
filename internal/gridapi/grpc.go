@@ -2,6 +2,9 @@ package gridapi
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
@@ -88,11 +91,37 @@ func (g *GridServer) resolvePlaceID(ctx context.Context, key string) (string, er
 type GridServer struct {
 	gridv1.UnimplementedGridServiceServer
 	svc *Service
+	// placesVersion is a per-process nonce mixed into the place and event-list
+	// ETag validators. The place directory is seeded once at boot and never
+	// mutates mid-process, so a fresh nonce per start IS its version. Folding it
+	// into the event-list validators too invalidates them on redeploy, covering
+	// the rare case where a changed place polygon reattaches events without a new
+	// revision (which DataVersion alone would miss).
+	placesVersion string
 }
 
 // NewGridServer wires the gRPC service over the existing gridapi Service.
 func NewGridServer(svc *Service) *GridServer {
-	return &GridServer{svc: svc}
+	return &GridServer{svc: svc, placesVersion: randomNonce()}
+}
+
+// randomNonce returns a short random hex string. On the (practically
+// impossible) crypto/rand failure it returns a fixed value — the validators
+// then stay stable-but-weak rather than panicking at startup.
+func randomNonce() string {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "boot"
+	}
+	return hex.EncodeToString(b[:])
+}
+
+// weakListTag builds a weak ETag from a version prefix plus the request's filter
+// values, hashed so the header stays clean and collision-resistant regardless of
+// what the values contain.
+func weakListTag(version string, parts ...string) string {
+	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
+	return etag.Weak(version + "-" + hex.EncodeToString(sum[:8]))
 }
 
 // ListEvents returns store-backed events with the place/layer/status/severity/
@@ -122,6 +151,20 @@ func (g *GridServer) ListEvents(ctx context.Context, req *gridv1.ListEventsReque
 	}
 	eq.PageSize = int(req.GetPageSize())
 	eq.PageToken = req.GetPageToken()
+
+	// Filters are validated above (400/404 first); guard on a cheap global data
+	// version + the filter set so a match skips the query entirely.
+	dv, err := g.svc.Store.DataVersion(ctx)
+	if err != nil {
+		return nil, internalErr(ctx, err)
+	}
+	tag := weakListTag(g.placesVersion+"."+strconv.FormatInt(dv, 10),
+		req.GetPlace(), strings.Join(req.GetLayer(), ","), strings.Join(req.GetStatus(), ","),
+		req.GetSeverityMin(), req.GetSince(),
+		strconv.Itoa(int(req.GetPageSize())), req.GetPageToken(), strconv.FormatBool(req.GetEnhancementIo()))
+	if err := etag.Guard(ctx, tag); err != nil {
+		return nil, err // 304 — skip the query
+	}
 
 	events, next, err := g.svc.Store.QueryEvents(ctx, eq)
 	if err != nil {
@@ -207,6 +250,17 @@ func (g *GridServer) ListHistory(ctx context.Context, req *gridv1.ListHistoryReq
 	hq.PageSize = int(req.GetPageSize())
 	hq.PageToken = req.GetPageToken()
 
+	dv, err := g.svc.Store.DataVersion(ctx)
+	if err != nil {
+		return nil, internalErr(ctx, err)
+	}
+	tag := weakListTag(g.placesVersion+"."+strconv.FormatInt(dv, 10),
+		req.GetPlace(), strings.Join(req.GetLayer(), ","), req.GetFrom(), req.GetTo(),
+		strconv.Itoa(int(req.GetPageSize())), req.GetPageToken(), strconv.FormatBool(req.GetEnhancementIo()))
+	if err := etag.Guard(ctx, tag); err != nil {
+		return nil, err // 304 — skip the query
+	}
+
 	revs, next, err := g.svc.Store.QueryHistory(ctx, hq)
 	if err != nil {
 		return nil, tokenOrInternal(ctx, err)
@@ -226,6 +280,11 @@ func (g *GridServer) ListPlaces(ctx context.Context, req *gridv1.ListPlacesReque
 		}
 		kind = k
 	}
+	// The directory is static within a process; a match skips building the
+	// (geometry-heavy) list.
+	if err := etag.Guard(ctx, weakListTag(g.placesVersion, "kind="+req.GetKind(), "q="+req.GetQ())); err != nil {
+		return nil, err
+	}
 	places, err := g.svc.Store.ListPlaces(ctx, kind, req.GetQ())
 	if err != nil {
 		return nil, internalErr(ctx, err)
@@ -241,6 +300,11 @@ func (g *GridServer) GetPlace(ctx context.Context, req *gridv1.GetPlaceRequest) 
 	}
 	if err != nil {
 		return nil, internalErr(ctx, err)
+	}
+	// Places are static within a process; the load above is a single indexed row,
+	// so guard after it — a match still saves re-sending the geometry blob.
+	if err := etag.Guard(ctx, etag.Weak(g.placesVersion+":"+place.GetId())); err != nil {
+		return nil, err
 	}
 	return place, nil
 }

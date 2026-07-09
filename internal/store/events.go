@@ -314,6 +314,24 @@ func (s *Store) EventVersion(ctx context.Context, id string) (revision int64, ok
 	return revision, true, nil
 }
 
+// DataVersion is a cheap, monotonically-increasing global counter of stored
+// event revisions. event_revisions is append-only (a snapshot is written on
+// every content change and every lifecycle transition, never deleted), so this
+// count strictly increases whenever any event's content or status changes — and
+// stays put when nothing does. That makes it a safe conservative ETag validator
+// for the cross-event list/query endpoints: a query's result cannot change
+// without a revision write, so an unchanged count guarantees an unchanged result
+// (it never yields a stale 304). It is deliberately coarse — any write anywhere
+// invalidates every list validator — which is the correct bias for life-safety
+// data.
+func (s *Store) DataVersion(ctx context.Context) (int64, error) {
+	var n int64
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_revisions`).Scan(&n); err != nil {
+		return 0, fmt.Errorf("store: data version: %w", err)
+	}
+	return n, nil
+}
+
 // --- internals ---
 
 func insertRevision(tx *sql.Tx, id string, rev uint32, observedAt, ingestedAt int64, blob []byte) error {

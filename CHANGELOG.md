@@ -44,11 +44,14 @@ consumer from `/v1/*` to `/api/v1/*` and update field casing.
   non-numeric) is now silently clamped to `1..200` rather than rejected with
   `400`; the `Accept: application/proto` binary rendering (never widely used) is
   gone — responses are JSON only.
-- **Conditional GET (`ETag`/`If-None-Match` → `304`):** the hand-built `summary`
-  and `.geojson` endpoints carry a body-hash `ETag`; `GET /api/v1/events/{id}` and
-  `.../history` carry a weak `ETag` keyed on the event revision (a match returns
-  `304` and skips the load). The other list/query RPCs do not advertise an `ETag`
-  yet. (Wired via prefab 0.6.0's `etag` plugin.)
+- **Conditional GET (`ETag`/`If-None-Match` → `304`):** most read endpoints now
+  carry a weak `ETag`; a matching `If-None-Match` returns `304` and skips the
+  work. Coverage: `events/{id}` + `.../history` (keyed on the event revision);
+  `events` + `history` lists (a global data-version that bumps on any event
+  change, plus the filter set); `places` + `places/{place}` (the directory is
+  static within a deploy); and the hand-built `summary` + `.geojson` (body-hash).
+  Not yet instrumented: `conditions`, `sources`, `places:resolve`, `scanners`.
+  (Wired via prefab 0.6.0's `etag` plugin.)
 
 **Endpoint map (`/v1` → `/api/v1`):**
 
