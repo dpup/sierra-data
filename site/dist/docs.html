@@ -1,16 +1,21 @@
-<!DOCTYPE html><html lang="en"> <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>API Reference · The Grid</title><meta name="description" content="Reference for the Grid /v1 API: endpoints, the Event envelope, severity scale, place id scheme, GeoJSON layer contract, and the evacuation fail-loud contract."><!-- Preload the two primary faces (body defaults to mono) to cut FOUT reflow. --><link rel="preload" href="/lib/fonts/ibm-plex-mono-400.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/lib/fonts/ibm-plex-sans-400.woff2" as="font" type="font/woff2" crossorigin><link rel="stylesheet" href="/assets/app.css"><style>.toc{font-family:var(--font-mono);font-size:12.5px;columns:2;column-gap:2rem;margin:14px 0 26px;padding-left:1.25rem;color:var(--text-2)}.toc li{margin:3px 0;break-inside:avoid}@media(max-width:640px){.toc{columns:1}}.endpoint-head{display:block;margin:28px 0 8px}.endpoint-head .chip-get{font-size:12.5px}.live-examples{margin:4px 0 18px}.live-examples a{display:inline-block;font-family:var(--font-mono);font-size:11.5px;color:var(--blu);background:var(--blu-bg);border:1px solid var(--blu-border);border-radius:var(--radius-sm);padding:2px 8px;margin:3px 5px 3px 0;word-break:break-all}.live-examples a:hover{text-decoration:none;border-color:var(--grn-line)}.live-examples a:before{content:"GET ";color:var(--grn)}.contract-callout{border:1px solid var(--st-UNAVAILABLE);border-left-width:4px;border-radius:var(--radius);background:color-mix(in srgb,var(--st-UNAVAILABLE) 7%,var(--bg-card));padding:18px 22px;margin:16px 0 24px}.contract-callout>h2:first-child{margin-top:0}.contract-callout .invariant{font-family:var(--font-mono);font-weight:700;color:var(--text-hi);font-size:16px;letter-spacing:.01em;margin:6px 0 12px}section[id]{scroll-margin-top:68px}.backtop{font-family:var(--font-mono);font-size:11px;color:var(--text-dim)}.data-table td{white-space:normal;vertical-align:top;line-height:1.5}.data-table td:first-child,.data-table th,.data-table td.num{white-space:nowrap}
-</style></head> <body> <div class="app"> <aside class="sidebar"> <a class="brand-block" href="/"> <div class="brand-line"> <span class="brand-name">S.I.E.R.R.A</span><span class="brand-sub">The Grid</span> </div> <div class="brand-host">data.sierragridteam.org</div> </a> <div class="health-chip"> <div class="health-row"> <span class="dot st-OK live" id="health-dot"></span> <span id="health-text">checking sources…</span> </div> <div class="health-sub">read-only · CORS-open · no key</div> </div> <nav class="nav" aria-label="Sections">  <div class="nav-group-label">OVERVIEW</div> <a class="nav-item" href="/"> <span>Grid Info</span><span class="hint">/v1</span> </a> <div class="nav-group-label">EXPLORE</div> <a class="nav-item" href="/events"> <span>Events</span><span class="hint">/events</span> </a><a class="nav-item" href="/map"> <span>Map</span><span class="hint">/map</span> </a><a class="nav-item" href="/places"> <span>Places</span><span class="hint">/places</span> </a><a class="nav-item" href="/sources"> <span>Sources</span><span class="hint">/sources</span> </a><a class="nav-item" href="/history"> <span>History</span><span class="hint">/history</span> </a> <div class="nav-group-label">REFERENCE</div> <a class="nav-item current" href="/docs" aria-current="page"> <span>Docs</span><span class="hint">/v1 ref</span> </a><a class="nav-item" href="/mcp-guide"> <span>MCP</span><span class="hint">for agents</span> </a> </nav> <div class="sidebar-foot"> <div>grid.v1 · schema 2026-07</div> <div>deploy from main · us-west</div> </div> </aside> <div class="content"> <div class="context-bar"> <div class="ctx-inner"> <div class="crumb"> <span>grid.v1</span> <span class="sep">/</span> <span class="here">Docs</span> </div> <div class="ctx-right"> <span class="clock"><span class="dot st-OK live"></span><span id="ctx-clock">––:––:––Z</span></span> </div> </div> </div> <main>   <div class="page-head">
+<!DOCTYPE html><html lang="en"> <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>API Reference · The Grid</title><meta name="description" content="Reference for the Grid /api/v1 API: endpoints, the Event envelope, severity scale, place id scheme, GeoJSON layer contract, and the evacuation fail-loud contract."><!-- Preload the two primary faces (body defaults to mono) to cut FOUT reflow. --><link rel="preload" href="/lib/fonts/ibm-plex-mono-400.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/lib/fonts/ibm-plex-sans-400.woff2" as="font" type="font/woff2" crossorigin><link rel="stylesheet" href="/assets/app.css"><style>.toc{font-family:var(--font-mono);font-size:12.5px;columns:2;column-gap:2rem;margin:14px 0 26px;padding-left:1.25rem;color:var(--text-2)}.toc li{margin:3px 0;break-inside:avoid}@media(max-width:640px){.toc{columns:1}}.endpoint-head{display:block;margin:28px 0 8px}.endpoint-head .chip-get{font-size:12.5px}.live-examples{margin:4px 0 18px}.live-examples a{display:inline-block;font-family:var(--font-mono);font-size:11.5px;color:var(--blu);background:var(--blu-bg);border:1px solid var(--blu-border);border-radius:var(--radius-sm);padding:2px 8px;margin:3px 5px 3px 0;word-break:break-all}.live-examples a:hover{text-decoration:none;border-color:var(--grn-line)}.live-examples a:before{content:"GET ";color:var(--grn)}.contract-callout{border:1px solid var(--st-UNAVAILABLE);border-left-width:4px;border-radius:var(--radius);background:color-mix(in srgb,var(--st-UNAVAILABLE) 7%,var(--bg-card));padding:18px 22px;margin:16px 0 24px}.contract-callout>h2:first-child{margin-top:0}.contract-callout .invariant{font-family:var(--font-mono);font-weight:700;color:var(--text-hi);font-size:16px;letter-spacing:.01em;margin:6px 0 12px}section[id]{scroll-margin-top:68px}.backtop{font-family:var(--font-mono);font-size:11px;color:var(--text-dim)}.data-table td{white-space:normal;vertical-align:top;line-height:1.5}.data-table td:first-child,.data-table th,.data-table td.num{white-space:nowrap}
+</style></head> <body> <div class="app"> <aside class="sidebar"> <a class="brand-block" href="/"> <div class="brand-line"> <span class="brand-name">S.I.E.R.R.A</span><span class="brand-sub">The Grid</span> </div> <div class="brand-host">data.sierragridteam.org</div> </a> <div class="health-chip"> <div class="health-row"> <span class="dot st-OK live" id="health-dot"></span> <span id="health-text">checking sources…</span> </div> <div class="health-sub">read-only · CORS-open · no key</div> </div> <nav class="nav" aria-label="Sections">  <div class="nav-group-label">OVERVIEW</div> <a class="nav-item" href="/"> <span>Grid Info</span><span class="hint">/api/v1</span> </a> <div class="nav-group-label">EXPLORE</div> <a class="nav-item" href="/events"> <span>Events</span><span class="hint">/events</span> </a><a class="nav-item" href="/map"> <span>Map</span><span class="hint">/map</span> </a><a class="nav-item" href="/places"> <span>Places</span><span class="hint">/places</span> </a><a class="nav-item" href="/sources"> <span>Sources</span><span class="hint">/sources</span> </a><a class="nav-item" href="/history"> <span>History</span><span class="hint">/history</span> </a> <div class="nav-group-label">REFERENCE</div> <a class="nav-item current" href="/docs" aria-current="page"> <span>Docs</span><span class="hint">/api/v1 ref</span> </a><a class="nav-item" href="/mcp-guide"> <span>MCP</span><span class="hint">for agents</span> </a> </nav> <div class="sidebar-foot"> <div>grid.v1 · schema 2026-07</div> <div>deploy from main · us-west</div> </div> </aside> <div class="content"> <div class="context-bar"> <div class="ctx-inner"> <div class="crumb"> <span>grid.v1</span> <span class="sep">/</span> <span class="here">Docs</span> </div> <div class="ctx-right"> <span class="clock"><span class="dot st-OK live"></span><span id="ctx-clock">––:––:––Z</span></span> </div> </div> </div> <main>   <div class="page-head">
   <div>
-    <div class="hero-kicker">The Grid · /v1</div>
+    <div class="hero-kicker">The Grid · /api/v1</div>
     <h1>API reference</h1>
     <p class="lead">
-      The public contract of the Grid's <code class="inline">/v1</code> API. Base URL
+      The public contract of the Grid's <code class="inline">/api/v1</code> API. Base URL
       <code class="inline">https://data.sierragridteam.org</code>; everything lives
-      under <code class="inline">/v1/</code>. Read-only, keyless, and CORS-open — no
-      registration or token. Responses are snake_case protojson, timestamps are
+      under <code class="inline">/api/v1/</code>. Read-only, keyless, and CORS-open — no
+      registration or token. The gRPC RPC endpoints (events, history, places,
+      <code class="inline">places:resolve</code>, sources) return <strong>camelCase</strong>
+      protojson (<code class="inline">observedAt</code>, <code class="inline">nextPageToken</code>);
+      the hand-built <code class="inline">summary</code> and <code class="inline">.geojson</code>
+      responses stay <strong>snake_case</strong> (<code class="inline">source_status</code>,
+      <code class="inline">severity_rank</code>). Timestamps are
       RFC&nbsp;3339, errors are <code class="inline">google.rpc.Status</code>, and every
       response carries an ETag. Each example below is a live link into the running
-      service: click any <span class="chip-get"><b>GET</b> /v1/…</span> to see the exact
+      service: click any <span class="chip-get"><b>GET</b> /api/v1/…</span> to see the exact
       JSON a client receives. A feed's <code class="inline">source_status</code> is
       <code class="inline">OK</code>, <code class="inline">STALE</code>, or
       <code class="inline">UNAVAILABLE</code>; an unavailable feed is reported as such,
@@ -40,9 +45,9 @@
   <h3>Base URL and media types</h3>
   <div class="kv">
     <dt>Base URL</dt>
-    <dd>https://data.sierragridteam.org — all endpoints under <code class="inline">/v1/</code></dd>
+    <dd>https://data.sierragridteam.org — all endpoints under <code class="inline">/api/v1/</code></dd>
     <dt>Default format</dt>
-    <dd>protojson with <strong>snake_case</strong> field names (<code class="inline">severity_rank</code>, <code class="inline">observed_at</code>) — proto field names hit the wire as-is</dd>
+    <dd>protojson. The gRPC RPC endpoints emit <strong>camelCase</strong> field names (<code class="inline">observedAt</code>, <code class="inline">areaLabel</code>, <code class="inline">nextPageToken</code>); the hand-built <code class="inline">/api/v1/places/{place}/summary</code> and <code class="inline">.geojson</code> responses keep <strong>snake_case</strong> (<code class="inline">source_status</code>, <code class="inline">severity_rank</code>)</dd>
     <dt>Binary protobuf</dt>
     <dd><code class="inline">Accept: application/proto</code> on entity endpoints returns the <code class="inline">grid.v1</code> messages as binary protobuf</dd>
     <dt>GeoJSON</dt>
@@ -54,8 +59,8 @@
     <li><strong>Timestamps</strong> are RFC 3339 strings (e.g. <code class="inline">2026-07-05T14:02:00Z</code>).</li>
     <li><strong>Enum values</strong> render as their proto names (<code class="inline">WILDFIRE</code>, <code class="inline">ACTIVE</code>, <code class="inline">SEVERE</code>). Query parameters accept them case-insensitively, and <code class="inline">layer</code> parameters additionally accept the lowercase layer slugs used in <code class="inline">.geojson</code> paths (<code class="inline">wildfire</code>).</li>
     <li><strong>Repeatable filters</strong>: parameters documented as <em>repeatable</em> may appear multiple times — <code class="inline">?layer=wildfire&amp;layer=evacuation</code>.</li>
-    <li><strong>Pagination</strong> is cursor-based: pass the opaque <code class="inline">next_page_token</code> from a response as <code class="inline">page_token</code> on the next request. Tokens are base64-encoded keyset cursors; treat them as opaque.</li>
-    <li><strong>Query parameters</strong> are snake_case: <code class="inline">severity_min</code>, <code class="inline">page_token</code>, <code class="inline">page_size</code>.</li>
+    <li><strong>Pagination</strong> is cursor-based: pass the opaque <code class="inline">nextPageToken</code> from a response as the <code class="inline">page_token</code> query parameter on the next request. Tokens are base64-encoded keyset cursors; treat them as opaque.</li>
+    <li><strong>Query parameters</strong> stay snake_case regardless of response casing: <code class="inline">severity_min</code>, <code class="inline">page_token</code>, <code class="inline">page_size</code> (camelCase forms are also accepted).</li>
     <li><strong>ETags</strong>: every response carries a strong ETag (hash of the body); conditional requests with <code class="inline">If-None-Match</code> get <code class="inline">304 Not Modified</code>.</li>
     <li><strong>Errors</strong> are <code class="inline">google.rpc.Status</code> protojson alongside the matching HTTP status code:</li>
   </ul>
@@ -69,13 +74,13 @@ Content-Type: application/json
     HTTP status and surface <code class="inline">message</code>.
   </p>
   <ul>
-    <li><strong>Canonical client sort</strong> for events: <code class="inline">severity_rank</code> descending, then <code class="inline">observed_at</code> descending.</li>
+    <li><strong>Canonical client sort</strong> for events: <code class="inline">severity</code> descending, then <code class="inline">observedAt</code> descending.</li>
     <li><strong>Places are addressable by slug or id</strong>: <code class="inline">ebbetts-pass</code> and <code class="inline">area:ebbetts-pass</code> both work anywhere a <code class="inline">{place}</code> appears. Slugs are globally unique (<a href="#places-scheme">§4</a>).</li>
   </ul>
 
   <h3>CORS</h3>
   <p>
-    All <code class="inline">/v1</code> endpoints are served with open CORS —
+    All <code class="inline">/api/v1</code> endpoints are served with open CORS —
     any origin can fetch them from a browser. This site is itself an
     unprivileged client of that same surface: every number on every page here
     is a same-origin browser fetch you can replay with curl (see the footer of
@@ -95,7 +100,7 @@ Content-Type: application/json
   </p>
 
   <!-- ---- summary ---- -->
-  <h3 class="endpoint-head" id="ep-summary"><span class="chip-get"><b>GET</b> /v1/places/{place}/summary</span></h3>
+  <h3 class="endpoint-head" id="ep-summary"><span class="chip-get"><b>GET</b> /api/v1/places/{place}/summary</span></h3>
   <p>
     One fetch returns a place's current state. A hand-built JSON document
     (not a proto message) with the area
@@ -115,11 +120,11 @@ Content-Type: application/json
     </tbody>
   </table></div>
   <div class="live-examples">
-    <a href="/v1/places/ebbetts-pass/summary">/v1/places/ebbetts-pass/summary</a>
+    <a href="/api/v1/places/ebbetts-pass/summary">/api/v1/places/ebbetts-pass/summary</a>
   </div>
 
   <!-- ---- map layers ---- -->
-  <h3 class="endpoint-head" id="ep-map"><span class="chip-get"><b>GET</b> /v1/places/{place}/map/{layer}.geojson</span></h3>
+  <h3 class="endpoint-head" id="ep-map"><span class="chip-get"><b>GET</b> /api/v1/places/{place}/map/{layer}.geojson</span></h3>
   <p>
     One RFC 7946 <code class="inline">FeatureCollection</code> per layer,
     ready for MapLibre / Leaflet / OpenLayers. Full contract in <a href="#geojson">§5</a>.
@@ -139,21 +144,21 @@ Content-Type: application/json
     </tbody>
   </table></div>
   <div class="live-examples">
-    <a href="/v1/places/ebbetts-pass/map/wildfire.geojson">/v1/places/ebbetts-pass/map/wildfire.geojson</a>
-    <a href="/v1/places/ebbetts-pass/map/evacuation.geojson">/v1/places/ebbetts-pass/map/evacuation.geojson</a>
-    <a href="/v1/places/ebbetts-pass/map/weather_alert.geojson">/v1/places/ebbetts-pass/map/weather_alert.geojson</a>
-    <a href="/v1/places/ebbetts-pass/map/chain_control.geojson">/v1/places/ebbetts-pass/map/chain_control.geojson</a>
+    <a href="/api/v1/places/ebbetts-pass/map/wildfire.geojson">/api/v1/places/ebbetts-pass/map/wildfire.geojson</a>
+    <a href="/api/v1/places/ebbetts-pass/map/evacuation.geojson">/api/v1/places/ebbetts-pass/map/evacuation.geojson</a>
+    <a href="/api/v1/places/ebbetts-pass/map/weather_alert.geojson">/api/v1/places/ebbetts-pass/map/weather_alert.geojson</a>
+    <a href="/api/v1/places/ebbetts-pass/map/chain_control.geojson">/api/v1/places/ebbetts-pass/map/chain_control.geojson</a>
   </div>
 
   <!-- ---- events ---- -->
-  <h3 class="endpoint-head" id="ep-events"><span class="chip-get"><b>GET</b> /v1/events</span></h3>
+  <h3 class="endpoint-head" id="ep-events"><span class="chip-get"><b>GET</b> /api/v1/events</span></h3>
   <p>
     The cross-layer query: every discrete occurrence — wildfire, evacuation,
     weather alert, earthquake, road incident — through one surface. Returns
     <code class="inline">EventList</code>
-    (<code class="inline">{"events": [Event…], "next_page_token": "…"}</code>).
+    (<code class="inline">{"events": [Event…], "nextPageToken": "…"}</code>).
     Results are keyset-paginated in canonical order (severity desc,
-    observed_at desc, id).
+    observedAt desc, id).
   </p>
   <div class="table-wrap"><table class="data-table">
     <thead><tr><th>Param</th><th>Type</th><th>Semantics</th><th>Default</th></tr></thead>
@@ -164,35 +169,35 @@ Content-Type: application/json
       <tr><td class="mono">severity_min</td><td>Severity enum</td><td class="wrap">Inclusive floor on the unified scale (§3)</td><td class="mono">INFO (no floor)</td></tr>
       <tr><td class="mono">since</td><td>RFC 3339</td><td class="wrap">Only events observed at or after this time</td><td>no time floor</td></tr>
       <tr><td class="mono">page_size</td><td>int</td><td class="wrap">Max events per page</td><td>server default</td></tr>
-      <tr><td class="mono">page_token</td><td>opaque string</td><td class="wrap">Cursor from a previous response's <code>next_page_token</code></td><td>first page</td></tr>
+      <tr><td class="mono">page_token</td><td>opaque string</td><td class="wrap">Cursor from a previous response's <code>nextPageToken</code></td><td>first page</td></tr>
     </tbody>
   </table></div>
   <div class="live-examples">
-    <a href="/v1/events?place=ebbetts-pass">/v1/events?place=ebbetts-pass</a>
-    <a href="/v1/events?layer=wildfire&amp;severity_min=MODERATE">/v1/events?layer=wildfire&amp;severity_min=MODERATE</a>
-    <a href="/v1/events?place=ebbetts-pass&amp;layer=road_incident">/v1/events?place=ebbetts-pass&amp;layer=road_incident</a>
-    <a href="/v1/events?layer=weather_alert&amp;status=ACTIVE&amp;status=SCHEDULED">/v1/events?layer=weather_alert&amp;status=ACTIVE&amp;status=SCHEDULED</a>
-    <a href="/v1/events?status=RESOLVED&amp;status=EXPIRED&amp;page_size=10">/v1/events?status=RESOLVED&amp;status=EXPIRED&amp;page_size=10</a>
+    <a href="/api/v1/events?place=ebbetts-pass">/api/v1/events?place=ebbetts-pass</a>
+    <a href="/api/v1/events?layer=wildfire&amp;severity_min=MODERATE">/api/v1/events?layer=wildfire&amp;severity_min=MODERATE</a>
+    <a href="/api/v1/events?place=ebbetts-pass&amp;layer=road_incident">/api/v1/events?place=ebbetts-pass&amp;layer=road_incident</a>
+    <a href="/api/v1/events?layer=weather_alert&amp;status=ACTIVE&amp;status=SCHEDULED">/api/v1/events?layer=weather_alert&amp;status=ACTIVE&amp;status=SCHEDULED</a>
+    <a href="/api/v1/events?status=RESOLVED&amp;status=EXPIRED&amp;page_size=10">/api/v1/events?status=RESOLVED&amp;status=EXPIRED&amp;page_size=10</a>
   </div>
 
   <!-- ---- event detail ---- -->
-  <h3 class="endpoint-head" id="ep-event"><span class="chip-get"><b>GET</b> /v1/events/{id}</span></h3>
+  <h3 class="endpoint-head" id="ep-event"><span class="chip-get"><b>GET</b> /api/v1/events/{id}</span></h3>
   <p>
     One <code class="inline">Event</code> (§3), current revision, as protojson.
     Ids are source-namespaced (<code class="inline">calfire:2026-salt-springs</code>,
     <code class="inline">usgs:nc12345678</code>) — take one from a
-    <code class="inline">/v1/events</code> response. The
+    <code class="inline">/api/v1/events</code> response. The
     <a href="/events">event explorer</a> links every row here.
   </p>
   <div class="live-examples">
-    <a href="/v1/events?page_size=1">/v1/events?page_size=1</a><span class="muted small"> — grab a live id, then <code class="inline">GET /v1/events/{id}</code></span>
+    <a href="/api/v1/events?page_size=1">/api/v1/events?page_size=1</a><span class="muted small"> — grab a live id, then <code class="inline">GET /api/v1/events/{id}</code></span>
   </div>
 
-  <h3 class="endpoint-head" id="ep-event-history"><span class="chip-get"><b>GET</b> /v1/events/{id}/history</span></h3>
+  <h3 class="endpoint-head" id="ep-event-history"><span class="chip-get"><b>GET</b> /api/v1/events/{id}/history</span></h3>
   <p>
     The per-incident timeline: <code class="inline">EventRevisionList</code> —
     every revision of the event, newest first, each as
-    <code class="inline">{"revision": n, "observed_at": …, "ingested_at": …,
+    <code class="inline">{"revision": n, "observedAt": …, "ingestedAt": …,
     "event": Event}</code>. A revision is written only when content actually
     changes (upstream re-stamps with identical content produce no revision),
     and lifecycle transitions — including the all-clear to
@@ -201,7 +206,7 @@ Content-Type: application/json
   </p>
 
   <!-- ---- history ---- -->
-  <h3 class="endpoint-head" id="ep-history"><span class="chip-get"><b>GET</b> /v1/history</span></h3>
+  <h3 class="endpoint-head" id="ep-history"><span class="chip-get"><b>GET</b> /api/v1/history</span></h3>
   <p>
     Cross-event archive and replay over all revisions — the after-action
     review query. Returns <code class="inline">EventRevisionList</code>.
@@ -214,16 +219,16 @@ Content-Type: application/json
       <tr><td class="mono">to</td><td>RFC 3339</td><td class="wrap">End of the time range</td><td>open</td></tr>
       <tr><td class="mono">layer</td><td>Layer enum, repeatable</td><td class="wrap">Filter by layer</td><td>all layers</td></tr>
       <tr><td class="mono">page_size</td><td>int</td><td class="wrap">Max revisions per page</td><td>server default</td></tr>
-      <tr><td class="mono">page_token</td><td>opaque string</td><td class="wrap">Cursor from a previous response's <code>next_page_token</code></td><td>first page</td></tr>
+      <tr><td class="mono">page_token</td><td>opaque string</td><td class="wrap">Cursor from a previous response's <code>nextPageToken</code></td><td>first page</td></tr>
     </tbody>
   </table></div>
   <div class="live-examples">
-    <a href="/v1/history?place=ebbetts-pass&amp;from=2026-07-01T00:00:00Z&amp;to=2026-07-05T00:00:00Z">/v1/history?place=ebbetts-pass&amp;from=2026-07-01T00:00:00Z&amp;to=2026-07-05T00:00:00Z</a>
-    <a href="/v1/history?layer=weather_alert&amp;from=2026-07-01T00:00:00Z">/v1/history?layer=weather_alert&amp;from=2026-07-01T00:00:00Z</a>
+    <a href="/api/v1/history?place=ebbetts-pass&amp;from=2026-07-01T00:00:00Z&amp;to=2026-07-05T00:00:00Z">/api/v1/history?place=ebbetts-pass&amp;from=2026-07-01T00:00:00Z&amp;to=2026-07-05T00:00:00Z</a>
+    <a href="/api/v1/history?layer=weather_alert&amp;from=2026-07-01T00:00:00Z">/api/v1/history?layer=weather_alert&amp;from=2026-07-01T00:00:00Z</a>
   </div>
 
   <!-- ---- places ---- -->
-  <h3 class="endpoint-head" id="ep-places"><span class="chip-get"><b>GET</b> /v1/places · /v1/places/{place}</span></h3>
+  <h3 class="endpoint-head" id="ep-places"><span class="chip-get"><b>GET</b> /api/v1/places · /api/v1/places/{place}</span></h3>
   <p>
     The place directory (<code class="inline">PlaceList</code> /
     <code class="inline">Place</code>): areas, counties, towns, corridors —
@@ -233,14 +238,14 @@ Content-Type: application/json
     <code class="inline">q</code> (text filter on place names).
   </p>
   <div class="live-examples">
-    <a href="/v1/places">/v1/places</a>
-    <a href="/v1/places?kind=COUNTY">/v1/places?kind=COUNTY</a>
-    <a href="/v1/places?q=arnold">/v1/places?q=arnold</a>
-    <a href="/v1/places/ebbetts-pass">/v1/places/ebbetts-pass</a>
-    <a href="/v1/places/town:arnold">/v1/places/town:arnold</a>
+    <a href="/api/v1/places">/api/v1/places</a>
+    <a href="/api/v1/places?kind=COUNTY">/api/v1/places?kind=COUNTY</a>
+    <a href="/api/v1/places?q=arnold">/api/v1/places?q=arnold</a>
+    <a href="/api/v1/places/ebbetts-pass">/api/v1/places/ebbetts-pass</a>
+    <a href="/api/v1/places/town:arnold">/api/v1/places/town:arnold</a>
   </div>
 
-  <h3 class="endpoint-head" id="ep-resolve"><span class="chip-get"><b>GET</b> /v1/places/resolve</span></h3>
+  <h3 class="endpoint-head" id="ep-resolve"><span class="chip-get"><b>GET</b> /api/v1/places:resolve</span></h3>
   <p>
     Point or address → containing places (<code class="inline">PlaceList</code>).
     Pass either <code class="inline">lat</code> + <code class="inline">lng</code>
@@ -253,12 +258,12 @@ Content-Type: application/json
     <code class="inline">AREA</code>.
   </p>
   <div class="live-examples">
-    <a href="/v1/places/resolve?lat=38.265006&amp;lng=-120.333654">/v1/places/resolve?lat=38.265006&amp;lng=-120.333654</a>
-    <a href="/v1/places/resolve?address=1234%20Highway%204%2C%20Arnold%2C%20CA">/v1/places/resolve?address=1234 Highway 4, Arnold, CA</a>
+    <a href="/api/v1/places:resolve?lat=38.265006&amp;lng=-120.333654">/api/v1/places:resolve?lat=38.265006&amp;lng=-120.333654</a>
+    <a href="/api/v1/places:resolve?address=1234%20Highway%204%2C%20Arnold%2C%20CA">/api/v1/places:resolve?address=1234 Highway 4, Arnold, CA</a>
   </div>
 
   <!-- ---- roads / weather ---- -->
-  <h3 class="endpoint-head" id="ep-roads"><span class="chip-get"><b>GET</b> /v1/roads · /v1/roads/{id}</span></h3>
+  <h3 class="endpoint-head" id="ep-roads"><span class="chip-get"><b>GET</b> /api/v1/roads · /api/v1/roads/{id}</span></h3>
   <p>
     <em>Conditions, not events</em>: travel time, congestion, chain control,
     and current alerts for the monitored corridors. The response shape is the
@@ -268,36 +273,36 @@ Content-Type: application/json
     a place's bounding box.
   </p>
   <div class="live-examples">
-    <a href="/v1/roads">/v1/roads</a>
-    <a href="/v1/roads?place=ebbetts-pass">/v1/roads?place=ebbetts-pass</a>
-    <a href="/v1/roads/hwy4-arnold-bearvalley">/v1/roads/hwy4-arnold-bearvalley</a>
+    <a href="/api/v1/roads">/api/v1/roads</a>
+    <a href="/api/v1/roads?place=ebbetts-pass">/api/v1/roads?place=ebbetts-pass</a>
+    <a href="/api/v1/roads/hwy4-arnold-bearvalley">/api/v1/roads/hwy4-arnold-bearvalley</a>
   </div>
 
-  <h3 class="endpoint-head" id="ep-weather"><span class="chip-get"><b>GET</b> /v1/weather · /v1/weather/{location}</span></h3>
+  <h3 class="endpoint-head" id="ep-weather"><span class="chip-get"><b>GET</b> /api/v1/weather · /api/v1/weather/{location}</span></h3>
   <p>
     Current weather conditions for the monitored locations, existing shape
     passed through — <strong>with alerts stripped</strong>. Weather alerts are
     events: query
-    <a href="/v1/events?layer=weather_alert">/v1/events?layer=weather_alert</a>
+    <a href="/api/v1/events?layer=weather_alert">/api/v1/events?layer=weather_alert</a>
     instead.
   </p>
   <div class="live-examples">
-    <a href="/v1/weather">/v1/weather</a>
-    <a href="/v1/weather/arnold">/v1/weather/arnold</a>
+    <a href="/api/v1/weather">/api/v1/weather</a>
+    <a href="/api/v1/weather/arnold">/api/v1/weather/arnold</a>
   </div>
 
   <!-- ---- scanners / sources ---- -->
-  <h3 class="endpoint-head" id="ep-scanners"><span class="chip-get"><b>GET</b> /v1/scanners</span></h3>
+  <h3 class="endpoint-head" id="ep-scanners"><span class="chip-get"><b>GET</b> /api/v1/scanners</span></h3>
   <p>
     Broadcastify scanner-feed configuration (<code class="inline">ScannerList</code>)
     — link-out only, no audio rebroadcast. Filter with
     <code class="inline">?place=</code>.
   </p>
   <div class="live-examples">
-    <a href="/v1/scanners?place=ebbetts-pass">/v1/scanners?place=ebbetts-pass</a>
+    <a href="/api/v1/scanners?place=ebbetts-pass">/api/v1/scanners?place=ebbetts-pass</a>
   </div>
 
-  <h3 class="endpoint-head" id="ep-sources"><span class="chip-get"><b>GET</b> /v1/sources</span></h3>
+  <h3 class="endpoint-head" id="ep-sources"><span class="chip-get"><b>GET</b> /api/v1/sources</span></h3>
   <p>
     The provenance and health registry behind every
     <code class="inline">source_status</code> in the system
@@ -308,7 +313,7 @@ Content-Type: application/json
     <a href="/sources">Sources page</a>.
   </p>
   <div class="live-examples">
-    <a href="/v1/sources">/v1/sources</a>
+    <a href="/api/v1/sources">/api/v1/sources</a>
   </div>
 </section>
 
@@ -319,7 +324,7 @@ Content-Type: application/json
     Every discrete occurrence is one <code class="inline">grid.v1.Event</code>
     message. The common envelope is identical across layers — a client can
     render any event's card from
-    <code class="inline">headline / severity / provenance / observed_at</code>
+    <code class="inline">headline / severity / provenance / observedAt</code>
     without knowing its kind. Typed per-kind data lives in exactly one
     <code class="inline">detail</code> block.
   </p>
@@ -336,17 +341,17 @@ Content-Type: application/json
       <tr><td class="mono">headline</td><td class="mono">string</td><td class="wrap">Card-renderable one-liner, kind-agnostic</td></tr>
       <tr><td class="mono">summary</td><td class="mono">string</td><td class="wrap">AI-enhanced 2–3 sentences where applicable (see <code>enhancement</code>)</td></tr>
       <tr><td class="mono">description</td><td class="mono">string</td><td class="wrap">Long form / <strong>original upstream text, always preserved verbatim</strong></td></tr>
-      <tr><td class="mono">area_label</td><td class="mono">string</td><td class="wrap">Human area label ("Hathaway Pines &amp; Avery")</td></tr>
-      <tr><td class="mono">canonical_url</td><td class="mono">string</td><td class="wrap">Upstream detail URL; scheme-validated — only <code>https://</code>/<code>http://</code> survive</td></tr>
+      <tr><td class="mono">areaLabel</td><td class="mono">string</td><td class="wrap">Human area label ("Hathaway Pines &amp; Avery")</td></tr>
+      <tr><td class="mono">canonicalUrl</td><td class="mono">string</td><td class="wrap">Upstream detail URL; scheme-validated — only <code>https://</code>/<code>http://</code> survive</td></tr>
       <tr><td class="mono">geometry</td><td class="mono">Geometry</td><td class="wrap">May be absent (county-wide advisories). See the base64 note below.</td></tr>
-      <tr><td class="mono">place_ids</td><td class="mono">repeated string</td><td class="wrap">Place intersections, precomputed at ingest (§4 ids)</td></tr>
-      <tr><td class="mono">provenance</td><td class="mono">Provenance</td><td class="wrap"><code>source_id</code>, <code>source_name</code>, <code>attribution</code>, <code>source_url</code>, <code>fetched_at</code></td></tr>
+      <tr><td class="mono">placeIds</td><td class="mono">repeated string</td><td class="wrap">Place intersections, precomputed at ingest (§4 ids)</td></tr>
+      <tr><td class="mono">provenance</td><td class="mono">Provenance</td><td class="wrap"><code>sourceId</code>, <code>sourceName</code>, <code>attribution</code>, <code>sourceUrl</code>, <code>fetchedAt</code></td></tr>
       <tr><td class="mono">effective</td><td class="mono">Timestamp</td><td class="wrap">When the event takes effect (future for SCHEDULED)</td></tr>
       <tr><td class="mono">expires</td><td class="mono">Timestamp</td><td class="wrap">Upstream expiry, when the source provides one</td></tr>
-      <tr><td class="mono">observed_at</td><td class="mono">Timestamp</td><td class="wrap">Upstream last-update time</td></tr>
-      <tr><td class="mono">ingested_at</td><td class="mono">Timestamp</td><td class="wrap">When this service ingested the current revision</td></tr>
+      <tr><td class="mono">observedAt</td><td class="mono">Timestamp</td><td class="wrap">Upstream last-update time</td></tr>
+      <tr><td class="mono">ingestedAt</td><td class="mono">Timestamp</td><td class="wrap">When this service ingested the current revision</td></tr>
       <tr><td class="mono">revision</td><td class="mono">uint32</td><td class="wrap">Monotonic per event; a new revision is written only on content change</td></tr>
-      <tr><td class="mono">enhancement</td><td class="mono">Enhancement</td><td class="wrap">AI-enhancement provenance: <code>model</code>, <code>enhanced_at</code>, <code>fields</code> (which Event fields were generated), and the model I/O — <code>request</code> (the prompt sent) and <code>response</code> (the raw structured JSON returned). Present only on enhanced events — clients badge AI-summarized text, show what was sent/returned, and can always fall back to the verbatim <code>description</code>. Persisted with the event (in every revision); excluded from the content hash. The heavy <code>request</code>/<code>response</code> are <strong>omitted unless</strong> <code class="inline">?enhancement_io=true</code> is passed (event endpoints); the lightweight fields are always present.</td></tr>
+      <tr><td class="mono">enhancement</td><td class="mono">Enhancement</td><td class="wrap">AI-enhancement provenance: <code>model</code>, <code>enhancedAt</code>, <code>fields</code> (which Event fields were generated), and the model I/O — <code>request</code> (the prompt sent) and <code>response</code> (the raw structured JSON returned). Present only on enhanced events — clients badge AI-summarized text, show what was sent/returned, and can always fall back to the verbatim <code>description</code>. Persisted with the event (in every revision); excluded from the content hash. The heavy <code>request</code>/<code>response</code> are <strong>omitted unless</strong> <code class="inline">?enhancement_io=true</code> is passed (event endpoints); the lightweight fields are always present.</td></tr>
       <tr><td class="mono">detail</td><td class="mono">oneof</td><td class="wrap">Exactly one typed block, keyed by kind (below)</td></tr>
     </tbody>
   </table></div>
@@ -355,22 +360,22 @@ Content-Type: application/json
   <p class="muted small">Each block carries only <em>kind-specific</em> fields. Anything
     already in the envelope is not repeated: the incident/alert type is
     <code class="inline">category</code>, the human location is
-    <code class="inline">area_label</code>, the short line is
+    <code class="inline">areaLabel</code>, the short line is
     <code class="inline">headline</code>, the sending office is
-    <code class="inline">provenance.source_name</code>, and the source page is
-    <code class="inline">canonical_url</code>.</p>
+    <code class="inline">provenance.sourceName</code>, and the source page is
+    <code class="inline">canonicalUrl</code>.</p>
   <div class="table-wrap"><table class="data-table">
     <thead><tr><th>Key</th><th>Fields</th></tr></thead>
     <tbody>
-      <tr><td class="mono">wildfire</td><td class="wrap mono">acres (double), containment (int32), county, cause (string), has_perimeter (bool)</td></tr>
-      <tr><td class="mono">evacuation</td><td class="wrap mono">zone_id, level (ORDER | WARNING | ADVISORY | SHELTER_IN_PLACE, as string), event_type, county (string)</td></tr>
-      <tr><td class="mono">weather_alert</td><td class="wrap mono">nws_severity, certainty, urgency, instruction, area_desc (string), zones (repeated string)</td></tr>
-      <tr><td class="mono">earthquake</td><td class="wrap mono">magnitude (double), depth_km (double), felt (int32)</td></tr>
-      <tr><td class="mono">road_incident</td><td class="wrap mono">log_number (string), impact, duration (string), metadata (map&lt;string,string&gt;)</td></tr>
+      <tr><td class="mono">wildfire</td><td class="wrap mono">acres (double), containment (int32), county, cause (string), hasPerimeter (bool)</td></tr>
+      <tr><td class="mono">evacuation</td><td class="wrap mono">zoneId, level (ORDER | WARNING | ADVISORY | SHELTER_IN_PLACE, as string), eventType, county (string)</td></tr>
+      <tr><td class="mono">weatherAlert</td><td class="wrap mono">nwsSeverity, certainty, urgency, instruction, areaDesc (string), zones (repeated string)</td></tr>
+      <tr><td class="mono">earthquake</td><td class="wrap mono">magnitude (double), depthKm (double), felt (int32)</td></tr>
+      <tr><td class="mono">roadIncident</td><td class="wrap mono">logNumber (string), impact, duration (string), metadata (map&lt;string,string&gt;)</td></tr>
     </tbody>
   </table></div>
   <p class="small muted">
-    Unit-bearing fields name their unit (<code class="inline">depth_km</code>).
+    Unit-bearing fields name their unit (<code class="inline">depthKm</code>).
     A <code class="inline">fire_weather</code> detail slot is reserved in the
     schema but fire weather is condition-backed (a map layer, not an event
     stream). Slots are also reserved for future layers: power, gauge,
@@ -394,7 +399,7 @@ Content-Type: application/json
     <code class="inline">road_segment</code> and
     <code class="inline">chain_control</code> are condition-backed map-layer
     slugs only — they are projections of live road state, not Layer enum
-    values, and never appear in <code class="inline">/v1/events</code>.
+    values, and never appear in <code class="inline">/api/v1/events</code>.
   </p>
 
   <h3>Enum: Severity (the canonical scale + color ramp)</h3>
@@ -435,17 +440,17 @@ Content-Type: application/json
   </table></div>
   <p class="small">
     Every status transition writes a revision — the all-clear is part of
-    history. By default <code class="inline">/v1/events</code> returns only
+    history. By default <code class="inline">/api/v1/events</code> returns only
     <code class="inline">ACTIVE,SCHEDULED</code>; closed events remain
     queryable by passing <code class="inline">status=</code> explicitly and
-    through <a href="#ep-history">/v1/history</a>.
+    through <a href="#ep-history">/api/v1/history</a>.
   </p>
 
   <h3 id="geometry-b64">Geometry and the base64 note</h3>
   <p>
     <code class="inline">Event.geometry</code> is
-    <code class="inline">{geojson: bytes, bbox: {min_lat, min_lng, max_lat,
-    max_lng}, centroid: {lat, lng}}</code>. The
+    <code class="inline">{geojson: bytes, bbox: {minLat, minLng, maxLat,
+    maxLng}, centroid: {lat, lng}}</code>. The
     <code class="inline">geojson</code> field is a raw RFC 7946 geometry
     object stored as proto <code class="inline">bytes</code> — protojson
     renders bytes as <strong>base64</strong>, so decode before parsing:
@@ -477,26 +482,26 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
   <div class="table-wrap"><table class="data-table">
     <thead><tr><th>Prefix</th><th>Kind</th><th class="num">#</th><th>What</th><th>Geometry</th><th>Example</th></tr></thead>
     <tbody>
-      <tr><td class="mono">area:</td><td class="mono">AREA</td><td class="num">1</td><td class="wrap">Configured service areas (the legacy hazard areas; org footprints live here too)</td><td>bbox polygon</td><td class="mono"><a href="/v1/places/area:ebbetts-pass">area:ebbetts-pass</a></td></tr>
-      <tr><td class="mono">county:</td><td class="mono">COUNTY</td><td class="num">2</td><td class="wrap">Service-area counties (Calaveras, Tuolumne, Amador, Alpine, Stanislaus, San&nbsp;Joaquin, El&nbsp;Dorado, Mariposa) — simplified Census TIGERweb polygons</td><td>polygon</td><td class="mono"><a href="/v1/places/county:calaveras-county">county:calaveras-county</a></td></tr>
-      <tr><td class="mono">town:</td><td class="mono">TOWN</td><td class="num">3</td><td class="wrap">The monitored towns (the weather locations)</td><td>point</td><td class="mono"><a href="/v1/places/town:arnold">town:arnold</a></td></tr>
+      <tr><td class="mono">area:</td><td class="mono">AREA</td><td class="num">1</td><td class="wrap">Configured service areas (the legacy hazard areas; org footprints live here too)</td><td>bbox polygon</td><td class="mono"><a href="/api/v1/places/area:ebbetts-pass">area:ebbetts-pass</a></td></tr>
+      <tr><td class="mono">county:</td><td class="mono">COUNTY</td><td class="num">2</td><td class="wrap">Service-area counties (Calaveras, Tuolumne, Amador, Alpine, Stanislaus, San&nbsp;Joaquin, El&nbsp;Dorado, Mariposa) — simplified Census TIGERweb polygons</td><td>polygon</td><td class="mono"><a href="/api/v1/places/county:calaveras-county">county:calaveras-county</a></td></tr>
+      <tr><td class="mono">town:</td><td class="mono">TOWN</td><td class="num">3</td><td class="wrap">The monitored towns (the weather locations)</td><td>point</td><td class="mono"><a href="/api/v1/places/town:arnold">town:arnold</a></td></tr>
       <tr><td class="mono">evac_zone:</td><td class="mono">EVAC_ZONE</td><td class="num">4</td><td class="wrap">Evacuation zones (Zonehaven/Genasys scheme). Full zone-inventory import is pending; active zones appear as events in the meantime.</td><td>polygon</td><td class="mono">—</td></tr>
-      <tr><td class="mono">corridor:</td><td class="mono">CORRIDOR</td><td class="num">5</td><td class="wrap">The monitored road corridors</td><td>linestring</td><td class="mono"><a href="/v1/places/corridor:hwy4-arnold-bearvalley">corridor:hwy4-arnold-bearvalley</a></td></tr>
+      <tr><td class="mono">corridor:</td><td class="mono">CORRIDOR</td><td class="num">5</td><td class="wrap">The monitored road corridors</td><td>linestring</td><td class="mono"><a href="/api/v1/places/corridor:hwy4-arnold-bearvalley">corridor:hwy4-arnold-bearvalley</a></td></tr>
       <tr><td class="mono">site:</td><td class="mono">SITE</td><td class="num">6</td><td class="wrap">Specific sites (reserved)</td><td>point</td><td class="mono">—</td></tr>
     </tbody>
   </table></div>
   <p>
     Each <code class="inline">Place</code> carries
-    <code class="inline">id, kind, name, slug, geometry, parent_id</code>.
+    <code class="inline">id, kind, name, slug, geometry, parentId</code>.
     Parent links: towns point at their county; areas have no parent.
-    <code class="inline">/v1/places/resolve</code> returns containing places
+    <code class="inline">/api/v1/places:resolve</code> returns containing places
     ordered most-specific-first:
     <code class="inline">SITE, EVAC_ZONE, TOWN, CORRIDOR, COUNTY, AREA</code>.
   </p>
   <div class="live-examples">
-    <a href="/v1/places?kind=AREA">/v1/places?kind=AREA</a>
-    <a href="/v1/places?kind=TOWN">/v1/places?kind=TOWN</a>
-    <a href="/v1/places?kind=CORRIDOR">/v1/places?kind=CORRIDOR</a>
+    <a href="/api/v1/places?kind=AREA">/api/v1/places?kind=AREA</a>
+    <a href="/api/v1/places?kind=TOWN">/api/v1/places?kind=TOWN</a>
+    <a href="/api/v1/places?kind=CORRIDOR">/api/v1/places?kind=CORRIDOR</a>
   </div>
 </section>
 
@@ -504,7 +509,7 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
 <section id="geojson">
   <h2>5. The GeoJSON layer contract</h2>
   <p>
-    Each <code class="inline">/v1/places/{place}/map/{layer}.geojson</code>
+    Each <code class="inline">/api/v1/places/{place}/map/{layer}.geojson</code>
     response is one RFC 7946 <code class="inline">FeatureCollection</code>
     with a foreign top-level <code class="inline">metadata</code> member
     (allowed by RFC 7946, ignored by map libraries, available to clients that read it):
@@ -582,8 +587,8 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
     <li>Unit-bearing fields name their unit (<code class="inline">wind_gust_mph</code>, <code class="inline">depth_km</code>).</li>
   </ul>
   <div class="live-examples">
-    <a href="/v1/places/ebbetts-pass/map/wildfire.geojson">/v1/places/ebbetts-pass/map/wildfire.geojson</a>
-    <a href="/v1/places/ebbetts-pass/map/earthquake.geojson">/v1/places/ebbetts-pass/map/earthquake.geojson</a>
+    <a href="/api/v1/places/ebbetts-pass/map/wildfire.geojson">/api/v1/places/ebbetts-pass/map/wildfire.geojson</a>
+    <a href="/api/v1/places/ebbetts-pass/map/earthquake.geojson">/api/v1/places/ebbetts-pass/map/earthquake.geojson</a>
   </div>
 </section>
 
@@ -611,7 +616,7 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
 
     <h3>The invariant, mechanically</h3>
     <p>
-      In <code class="inline">/v1/places/{place}/summary</code>,
+      In <code class="inline">/api/v1/places/{place}/summary</code>,
       <code class="inline">summary.active_evacuations</code> is
       <code class="inline">int | null</code> and
       <code class="inline">summary.evacuation_status</code> is
@@ -636,7 +641,7 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
     </p>
     <p>
       The same rule applies to the evacuation map layer
-      (<a href="/v1/places/ebbetts-pass/map/evacuation.geojson" class="mono">/v1/places/ebbetts-pass/map/evacuation.geojson</a>):
+      (<a href="/api/v1/places/ebbetts-pass/map/evacuation.geojson" class="mono">/api/v1/places/ebbetts-pass/map/evacuation.geojson</a>):
       <code class="inline">source_status: UNAVAILABLE</code> comes with empty
       features and must render as an unknown-state banner, never an empty
       (implicitly safe) map. <code class="inline">metadata.source_url</code>
@@ -665,7 +670,7 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
   "sources": [{"id","status","last_success_at"}]
 }</pre>
     <div class="live-examples">
-      <a href="/v1/places/ebbetts-pass/summary">/v1/places/ebbetts-pass/summary</a>
+      <a href="/api/v1/places/ebbetts-pass/summary">/api/v1/places/ebbetts-pass/summary</a>
     </div>
   </div>
 </section>
@@ -675,14 +680,14 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
   <h2>7. Source registry</h2>
   <p>
     Every event and every layer traces to one of these sources — the registry
-    behind <a href="/v1/sources" class="mono">/v1/sources</a> (live board:
+    behind <a href="/api/v1/sources" class="mono">/api/v1/sources</a> (live board:
     <a href="/sources">Sources</a>). Each
     <code class="inline">Source</code> carries
-    <code class="inline">id, name, attribution, homepage_url,
-    poll_interval_seconds, stale_after_seconds, expire_after_seconds,
-    last_success_at, last_attempt_at, last_error, status</code>.
+    <code class="inline">id, name, attribution, homepageUrl,
+    pollIntervalSeconds, staleAfterSeconds, expireAfterSeconds,
+    lastSuccessAt, lastAttemptAt, lastError, status</code>.
     A source is <code class="inline">STALE</code> once its last success is
-    older than <code class="inline">stale_after_seconds</code> (default 3×
+    older than <code class="inline">staleAfterSeconds</code> (default 3×
     its poll interval) and <code class="inline">UNAVAILABLE</code> on
     persistent failure.
   </p>
@@ -704,21 +709,21 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
     the incidents tick updates <code class="inline">chp</code> +
     <code class="inline">caltrans</code>) — poller ≠ source. Poll intervals
     and staleness thresholds are server configuration; read the live values
-    from <a href="/v1/sources" class="mono">/v1/sources</a> rather than
+    from <a href="/api/v1/sources" class="mono">/api/v1/sources</a> rather than
     hard-coding this table.
   </p>
   <h3>Attribution requirements</h3>
   <ul>
     <li>Display the <code class="inline">attribution</code> string (from <code class="inline">Source.attribution</code>, <code class="inline">Event.provenance.attribution</code>, or <code class="inline">metadata.attribution</code> on GeoJSON layers) wherever you render the data.</li>
-    <li>Link the upstream: <code class="inline">provenance.source_url</code> / <code class="inline">metadata.source_url</code> on records, <code class="inline">homepage_url</code> on the source.</li>
+    <li>Link the upstream: <code class="inline">provenance.sourceUrl</code> (events) / <code class="inline">metadata.source_url</code> (GeoJSON) on records, <code class="inline">homepageUrl</code> on the source.</li>
     <li>Evacuation data must carry its reference-only framing and the Genasys link in every state (§6).</li>
   </ul>
   <div class="live-examples">
-    <a href="/v1/sources">/v1/sources</a>
+    <a href="/api/v1/sources">/api/v1/sources</a>
   </div>
 </section>
 
 <p class="backtop"><a href="#top">↑ top</a></p>
-  </main> <footer class="site-footer"> <div class="footer-inner"> <details class="request-log"> <summary>View the <span class="request-count" id="req-count">0</span> request(s) behind this page</summary> <div class="request-log-list" id="req-log-list"></div> </details> <p class="footer-line">Signal Integrity &amp; Emergency Radio Response Alliance · P.O. Box 2071, Murphys, CA 95247 · a volunteer 501(c)(3). Every value on this site is a browser fetch of the public /v1 API — replay any of them yourself.</p> </div> </footer> </div> </div> <!-- Live shell behaviors: fill the static placeholders above. is:inline keeps
+  </main> <footer class="site-footer"> <div class="footer-inner"> <details class="request-log"> <summary>View the <span class="request-count" id="req-count">0</span> request(s) behind this page</summary> <div class="request-log-list" id="req-log-list"></div> </details> <p class="footer-line">Signal Integrity &amp; Emergency Radio Response Alliance · P.O. Box 2071, Murphys, CA 95247 · a volunteer 501(c)(3). Every value on this site is a browser fetch of the public /api/v1 API — replay any of them yourself.</p> </div> </footer> </div> </div> <!-- Live shell behaviors: fill the static placeholders above. is:inline keeps
      this as a plain external module (Astro won't re-bundle it), identical to how
      the per-page scripts load their existing modules from /assets. --> <script type="module" src="/assets/chrome.js"></script> </body> </html>

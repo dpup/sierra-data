@@ -5,8 +5,8 @@
 // tester needs a recognizable backdrop to click against, and the layer previews
 // need muted geographic context under the brightly-colored hazard geometry.
 // Tiles are map furniture (images), not API data — the site principle that DATA
-// is only ever fetched from same-origin /v1/* through api.js still holds; every
-// /v1 call goes through api.js and nothing else talks to the API.
+// is only ever fetched from same-origin /api/v1/* through api.js still holds; every
+// /api/v1 call goes through api.js and nothing else talks to the API.
 //
 // Attribution (OSM + CARTO) is required by the tile usage policies and is
 // rendered by MapLibre's default AttributionControl from the source's

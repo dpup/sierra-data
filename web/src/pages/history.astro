@@ -6,7 +6,7 @@ import GetChip from '../components/GetChip.astro';
 <Shell
   current="history"
   title="History · The Grid"
-  description="Archive browser over GET /v1/history — the chronological, replayable feed of event revisions for after-action review."
+  description="Archive browser over GET /api/v1/history — the chronological, replayable feed of event revisions for after-action review."
 >
   <style is:global slot="head">
     /* Page-local: the layer checkbox group, the request line, and the
@@ -71,21 +71,21 @@ import GetChip from '../components/GetChip.astro';
       "nothing here now" is a fact you can trace back to the revision that made it
       true — never inferred from an empty screen.
     </p>
-    <GetChip slot="badges" path="/v1/history" />
+    <GetChip slot="badges" path="/api/v1/history" />
   </PageHead>
 
   <p class="muted small" style="margin-top:12px;max-width:96ch;">
-    <code class="inline">GET /v1/history?place=&amp;layer=&amp;from=&amp;to=</code>
+    <code class="inline">GET /api/v1/history?place=&amp;layer=&amp;from=&amp;to=</code>
     returns every stored revision of every event in the range, newest first — the
-    snake_case protojson of <code class="inline">grid.v1.EventRevisionList</code>
-    (<code class="inline">revisions[].&#123;revision, observed_at, ingested_at, event&#125;</code>).
+    camelCase protojson of <code class="inline">grid.v1.EventRevisionList</code>
+    (<code class="inline">revisions[].&#123;revision, observedAt, ingestedAt, event&#125;</code>).
     Filters map 1:1 to the query parameters and live in this page's URL, so a
     date-range view of an incident's whole arc is a shareable permalink; paging
     follows <code class="inline">next_page_token</code>. Timestamps are RFC&nbsp;3339;
     days are grouped in UTC.
   </p>
 
-  <!-- Filters: each control is one /v1/history query parameter. -->
+  <!-- Filters: each control is one /api/v1/history query parameter. -->
   <div class="filters">
     <label for="hist-place">place</label>
     <div class="fcell"><select id="hist-place"></select></div>

@@ -19,13 +19,13 @@ interface Props {
 const { current, title, description } = Astro.props;
 
 const NAV = [
-  { key: 'home', label: 'Grid Info', href: '/', hint: '/v1', group: 'OVERVIEW', crumb: 'The Grid' },
+  { key: 'home', label: 'Grid Info', href: '/', hint: '/api/v1', group: 'OVERVIEW', crumb: 'The Grid' },
   { key: 'events', label: 'Events', href: '/events', hint: '/events', group: 'EXPLORE', crumb: 'Events' },
   { key: 'map', label: 'Map', href: '/map', hint: '/map', group: 'EXPLORE', crumb: 'Map' },
   { key: 'places', label: 'Places', href: '/places', hint: '/places', group: 'EXPLORE', crumb: 'Places' },
   { key: 'sources', label: 'Sources', href: '/sources', hint: '/sources', group: 'EXPLORE', crumb: 'Sources' },
   { key: 'history', label: 'History', href: '/history', hint: '/history', group: 'EXPLORE', crumb: 'History' },
-  { key: 'docs', label: 'Docs', href: '/docs', hint: '/v1 ref', group: 'REFERENCE', crumb: 'Docs' },
+  { key: 'docs', label: 'Docs', href: '/docs', hint: '/api/v1 ref', group: 'REFERENCE', crumb: 'Docs' },
   { key: 'mcp', label: 'MCP', href: '/mcp-guide', hint: 'for agents', group: 'REFERENCE', crumb: 'MCP' },
 ];
 const GROUPS = ['OVERVIEW', 'EXPLORE', 'REFERENCE'];
@@ -107,7 +107,7 @@ const here = (NAV.find((n) => n.key === current) || {}).crumb || 'The Grid';
           <summary>View the <span class="request-count" id="req-count">0</span> request(s) behind this page</summary>
           <div class="request-log-list" id="req-log-list"></div>
         </details>
-        <p class="footer-line">Signal Integrity &amp; Emergency Radio Response Alliance · P.O. Box 2071, Murphys, CA 95247 · a volunteer 501(c)(3). Every value on this site is a browser fetch of the public /v1 API — replay any of them yourself.</p>
+        <p class="footer-line">Signal Integrity &amp; Emergency Radio Response Alliance · P.O. Box 2071, Murphys, CA 95247 · a volunteer 501(c)(3). Every value on this site is a browser fetch of the public /api/v1 API — replay any of them yourself.</p>
       </div>
     </footer>
   </div>

@@ -95,7 +95,7 @@ const examples = [
   <PageHead kicker="The Grid · for LLM agents" title="MCP — agent access">
     <p class="lead">
       Point an LLM agent at The Grid over the <strong>Model Context Protocol</strong>.
-      It's the same public, read-only data as <code class="inline">/v1</code>, exposed as
+      It's the same public, read-only data as <code class="inline">/api/v1</code>, exposed as
       agent tools: ask about hazards, evacuations, roads, and weather for the central Sierra
       in natural language, and the model calls the right tool. <strong>No key, no auth,
       read-only</strong> — like the rest of the API.
@@ -108,7 +108,7 @@ const examples = [
     One URL — <code class="inline">{ENDPOINT}</code> — speaking MCP over Streamable HTTP.
     Clients <strong>POST</strong> JSON-RPC 2.0; there's no server-initiated stream, so a
     <code class="inline">GET</code> returns <code class="inline">405</code>. It's a thin
-    adapter over <a href="/docs">the /v1 API</a>: geometry is stripped for token efficiency,
+    adapter over <a href="/docs">the /api/v1 API</a>: geometry is stripped for token efficiency,
     and the fail-loud honesty contract is preserved on every result.
   </p>
 
@@ -234,7 +234,7 @@ const examples = [
   </ul>
   <p class="prose">
     The full model — severity scale, place ids, the evacuation contract — is in the
-    <a href="/docs">/v1 reference</a>. The MCP server also exposes it as an in-band resource
+    <a href="/docs">/api/v1 reference</a>. The MCP server also exposes it as an in-band resource
     (<code class="inline">grid://reference</code>).
   </p>
 </Shell>

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -245,7 +246,11 @@ func newTestService(t *testing.T) *Service {
 	return svc
 }
 
-// get issues a GET through the router and returns the recorder.
+// get issues a GET against the hand-built /v1 routes still backed by the
+// Service — place summary and per-layer map GeoJSON — and returns the
+// recorder. The /v1 HTTP router retired when the entity endpoints moved to the
+// gRPC GridServer; this helper dispatches the two surviving hand-built
+// handlers directly so their tests keep exercising them.
 func get(t *testing.T, s *Service, path string, hdr ...string) *httptest.ResponseRecorder {
 	t.Helper()
 	require.Zero(t, len(hdr)%2, "hdr must be key/value pairs")
@@ -254,7 +259,16 @@ func get(t *testing.T, s *Service, path string, hdr ...string) *httptest.Respons
 		req.Header.Set(hdr[i], hdr[i+1])
 	}
 	rec := httptest.NewRecorder()
-	s.ServeHTTP(rec, req)
+	parts := strings.Split(strings.TrimPrefix(req.URL.Path, "/v1/"), "/")
+	switch {
+	case len(parts) == 3 && parts[0] == "places" && parts[2] == "summary":
+		s.serveSummary(rec, req, parts[1])
+	case len(parts) == 4 && parts[0] == "places" && parts[2] == "map" &&
+		strings.HasSuffix(parts[3], ".geojson"):
+		s.serveMapLayer(rec, req, parts[1], strings.TrimSuffix(parts[3], ".geojson"))
+	default:
+		notFound(rec, "not found: "+req.URL.Path)
+	}
 	return rec
 }
 
@@ -280,20 +294,4 @@ func requireStatus(t *testing.T, rec *httptest.ResponseRecorder, httpCode, grpcC
 	require.Equal(t, grpcCode, sb.Code)
 	require.NotEmpty(t, sb.Message)
 	return sb
-}
-
-// eventIDs decodes an EventList body into its ordered event ids.
-func eventIDs(t *testing.T, rec *httptest.ResponseRecorder) (ids []string, nextToken string) {
-	t.Helper()
-	var out struct {
-		Events []struct {
-			ID string `json:"id"`
-		} `json:"events"`
-		NextPageToken string `json:"next_page_token"`
-	}
-	decode(t, rec, &out)
-	for _, e := range out.Events {
-		ids = append(ids, e.ID)
-	}
-	return ids, out.NextPageToken
 }

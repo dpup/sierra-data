@@ -153,7 +153,7 @@ func (s *Server) handleSituation(ctx context.Context, args map[string]interface{
 	if slug == "" {
 		return unresolved(loc), nil
 	}
-	body, err := s.callV1JSON(ctx, "/v1/places/"+url.PathEscape(slug)+"/summary")
+	body, err := s.callV1JSON(ctx, "/api/v1/places/"+url.PathEscape(slug)+"/summary")
 	if err != nil {
 		return nil, fmt.Errorf("summary for %q unavailable: %w", slug, err)
 	}
@@ -184,13 +184,13 @@ func (s *Server) handleEvents(ctx context.Context, args map[string]interface{}) 
 	if n := argInt(args, "limit"); n > 0 {
 		q.Set("page_size", strconv.Itoa(n))
 	}
-	body, err := s.callV1JSON(ctx, "/v1/events?"+q.Encode())
+	body, err := s.callV1JSON(ctx, "/api/v1/events?"+q.Encode())
 	if err != nil {
 		return nil, err
 	}
 	events := leanEvents(asArray(body["events"]))
 	out := map[string]interface{}{"events": events, "count": len(events)}
-	if t, ok := body["next_page_token"]; ok && t != "" {
+	if t, ok := body["nextPageToken"]; ok && t != "" {
 		out["next_page_token"] = t
 	}
 	return out, nil
@@ -201,7 +201,7 @@ func (s *Server) handleEvent(ctx context.Context, args map[string]interface{}) (
 	if id == "" {
 		return nil, fmt.Errorf("id is required")
 	}
-	body, code, err := s.callV1(ctx, "/v1/events/"+url.PathEscape(id))
+	body, code, err := s.callV1(ctx, "/api/v1/events/"+url.PathEscape(id))
 	if err != nil {
 		return nil, err
 	}
@@ -226,23 +226,11 @@ func (s *Server) handleConditions(ctx context.Context, args map[string]interface
 		}
 		q.Set("place", slug)
 	}
-	suffix := ""
+	path := "/api/v1/conditions"
 	if e := q.Encode(); e != "" {
-		suffix = "?" + e
+		path += "?" + e
 	}
-	return map[string]interface{}{
-		"roads":   conditionResult(s.callV1JSON(ctx, "/v1/roads"+suffix)),
-		"weather": conditionResult(s.callV1JSON(ctx, "/v1/weather"+suffix)),
-	}, nil
-}
-
-// conditionResult renders one conditions sub-fetch: the body on success, else an
-// explicit unavailable marker — never a silent nil that reads as "no conditions".
-func conditionResult(body map[string]interface{}, err error) interface{} {
-	if err != nil {
-		return map[string]interface{}{"status": "unavailable", "error": err.Error()}
-	}
-	return body
+	return s.callV1JSON(ctx, path)
 }
 
 func (s *Server) handleResolve(ctx context.Context, args map[string]interface{}) (map[string]interface{}, error) {
@@ -259,7 +247,7 @@ func (s *Server) handleResolve(ctx context.Context, args map[string]interface{})
 	} else {
 		return nil, fmt.Errorf("provide address, or lat and lng")
 	}
-	body, err := s.callV1JSON(ctx, "/v1/places/resolve?"+q.Encode())
+	body, err := s.callV1JSON(ctx, "/api/v1/places:resolve?"+q.Encode())
 	if err != nil {
 		return nil, err // surface geocode/lookup failure as a tool error (isError)
 	}
@@ -274,7 +262,7 @@ func (s *Server) handlePlaces(ctx context.Context, args map[string]interface{}) 
 	if qq := argStr(args, "q"); qq != "" {
 		q.Set("q", qq)
 	}
-	body, err := s.callV1JSON(ctx, "/v1/places?"+q.Encode())
+	body, err := s.callV1JSON(ctx, "/api/v1/places?"+q.Encode())
 	if err != nil {
 		return nil, err
 	}
@@ -284,7 +272,7 @@ func (s *Server) handlePlaces(ctx context.Context, args map[string]interface{}) 
 func (s *Server) handleSources(ctx context.Context, _ map[string]interface{}) (map[string]interface{}, error) {
 	// grid_sources exists to disclose feed health, so a failed /v1/sources call
 	// must surface as an error, not a body that looks like a health rollup.
-	return s.callV1JSON(ctx, "/v1/sources")
+	return s.callV1JSON(ctx, "/api/v1/sources")
 }
 
 func (s *Server) handleHistory(ctx context.Context, args map[string]interface{}) (map[string]interface{}, error) {
@@ -304,7 +292,7 @@ func (s *Server) handleHistory(ctx context.Context, args map[string]interface{})
 			q.Set(k, v)
 		}
 	}
-	body, err := s.callV1JSON(ctx, "/v1/history?"+q.Encode())
+	body, err := s.callV1JSON(ctx, "/api/v1/history?"+q.Encode())
 	if err != nil {
 		return nil, err
 	}
@@ -317,7 +305,7 @@ func (s *Server) handleHistory(ctx context.Context, args map[string]interface{})
 		}
 	}
 	out := map[string]interface{}{"revisions": revs, "count": len(revs)}
-	if t, ok := body["next_page_token"]; ok && t != "" {
+	if t, ok := body["nextPageToken"]; ok && t != "" {
 		out["next_page_token"] = t
 	}
 	return out, nil
@@ -334,7 +322,7 @@ func (s *Server) resolvePlace(ctx context.Context, location string) (string, []i
 	}
 	// 1. "lat,lng"
 	if lat, lng, ok := parseLatLng(location); ok {
-		body, _, err := s.callV1(ctx, "/v1/places/resolve?"+url.Values{"lat": {lat}, "lng": {lng}}.Encode())
+		body, _, err := s.callV1(ctx, "/api/v1/places:resolve?"+url.Values{"lat": {lat}, "lng": {lng}}.Encode())
 		if err != nil {
 			return "", nil, err
 		}
@@ -344,7 +332,7 @@ func (s *Server) resolvePlace(ctx context.Context, location string) (string, []i
 	// 2. a place slug/id (single token, no spaces) — try a direct lookup. This is
 	// one candidate strategy, so a transient failure falls through to the next.
 	if !strings.ContainsAny(location, " ,") {
-		if body, code, err := s.callV1(ctx, "/v1/places/"+url.PathEscape(location)); err == nil && code == 200 {
+		if body, code, err := s.callV1(ctx, "/api/v1/places/"+url.PathEscape(location)); err == nil && code == 200 {
 			if slug := argStr(body, "slug"); slug != "" {
 				return slug, []interface{}{leanPlace(body)}, nil
 			}
@@ -353,7 +341,7 @@ func (s *Server) resolvePlace(ctx context.Context, location string) (string, []i
 	// 3. name search in the directory — resolves town/county/area names like
 	// "Arnold" or "Calaveras County" that the street-address geocoder can't.
 	for _, term := range nameTerms(location) {
-		body, _, err := s.callV1(ctx, "/v1/places?"+url.Values{"q": {term}}.Encode())
+		body, _, err := s.callV1(ctx, "/api/v1/places?"+url.Values{"q": {term}}.Encode())
 		if err != nil {
 			return "", nil, err
 		}
@@ -362,7 +350,7 @@ func (s *Server) resolvePlace(ctx context.Context, location string) (string, []i
 		}
 	}
 	// 4. street-address geocode (Census)
-	body, _, err := s.callV1(ctx, "/v1/places/resolve?"+url.Values{"address": {location}}.Encode())
+	body, _, err := s.callV1(ctx, "/api/v1/places:resolve?"+url.Values{"address": {location}}.Encode())
 	if err != nil {
 		return "", nil, err
 	}

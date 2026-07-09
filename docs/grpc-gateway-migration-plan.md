@@ -103,53 +103,56 @@ then bump and drop the `replace`.
 commented `// prefab.WithETag()` with a `TODO` and ships `Cache-Control`-only
 (native interceptor) until the Prefab release is available.
 
-## 5. Target architecture
+## 5. Target architecture (as built)
 
-Standard Prefab wiring in `cmd/server/main.go`:
+Standard Prefab wiring in `cmd/server/main.go` — one `GridService`, one gateway
+callback:
 
 ```
 prefab.New(
   prefab.WithContext(ctx),
   prefab.WithGRPCReflection(),
-  prefab.WithGRPCInterceptor(cacheControlInterceptor),          // Cache-Control
   // prefab.WithETag(),                                         // TODO: enable once prefab WithETag lands (§4)
-  prefab.WithGRPCService(&apiv1.GridService_ServiceDesc, gridImpl),
-  prefab.WithGRPCService(&apiv1.RoadsService_ServiceDesc, roadsService),   // re-exposed
-  prefab.WithGRPCService(&apiv1.WeatherService_ServiceDesc, weatherService), // re-exposed
-  prefab.WithGRPCGateway(apiv1.RegisterGridServiceHandlerFromEndpoint),
-  prefab.WithGRPCGateway(apiv1.RegisterRoadsServiceHandlerFromEndpoint),
-  prefab.WithGRPCGateway(apiv1.RegisterWeatherServiceHandlerFromEndpoint),
-  prefab.WithHTTPHandler("/api/v1/", mapLayersHandler),   // .geojson only (see §9 routing note)
-  prefab.WithHTTPHandlerFunc("/mcp", mcpHandler.ServeHTTP),
+  prefab.WithGRPCService(&gridv1.GridService_ServiceDesc, gridServer),
+  prefab.WithGRPCGateway(func(ctx, mux, endpoint, opts) error {
+    gridv1.RegisterGridServiceHandlerFromEndpoint(ctx, mux, endpoint, opts) // the proto RPCs
+    return gridServer.RegisterGatewayRoutes(mux)                            // summary + .geojson, hand-built on the same mux
+  }),
+  prefab.WithHTTPHandlerFunc("/mcp", mcpHandler.ServeHTTP),  // MCP calls the gateway mux in-process
   prefab.WithHTTPHandlerFunc("/", siteHandler),
 )
 ```
 
-The gateway dials the in-process gRPC server; the grid RPC impl reads the store;
-GeoJSON stays hand-built.
+The gateway dials the in-process gRPC server; the RPC impl (`gridapi.GridServer`)
+wraps the existing `gridapi.Service`, which reads the store. The two endpoints
+that stay hand-built — the place `summary` (evac `active_evacuations` must
+serialize as an explicit JSON `null`) and the `.geojson` map layers (RFC 7946
+geometry) — are mounted on the **same gateway mux** via `mux.HandlePath`
+(`RegisterGatewayRoutes`), so there is no second HTTP handler competing for
+`/api/v1/` and no routing-precedence problem.
 
-## 6. Proto contract
+## 6. Proto contract (as built)
 
 - **Messages:** reuse `api/grid/v1` (`Event`, `Place`, `EventRevision`, `Source`,
   …) unchanged.
-- **New service:** `GridService` carrying the event/place/source/history surface,
-  with `google.api.http` annotations under `/api/v1/`. Recommended placement: a
-  new `api/v1/grid.proto` (package `api`, alongside the existing gateway
-  services) importing `api/grid/v1` messages — keeps `grid.v1` messages-only and
-  reuses the already-wired gateway/openapi generation for `api/v1`. (Alternative:
-  add the service to `api/grid/v1` and enable gateway/openapi there; decide at
-  implementation time to minimize `Makefile`/`buf` churn.)
-- **Roads/Weather:** the existing `RoadsService`/`WeatherService` protos are still
-  present and gateway-annotated — **re-register them** rather than reinventing.
-  Add the `?place=` bbox filter as a request field. (Decision: whether re-exposed
-  `/api/v1/weather` keeps per-location alerts, or drops them to match the grid
-  model where alerts are events — resolve during Phase 3.)
+- **One service:** `GridService`, added to **`api/grid/v1/grid.proto`** (gateway +
+  openapi generation enabled there via `make proto`) rather than a separate
+  `api/v1` service — a single service is the simpler organization and keeps the
+  event model and its query surface in one proto. It carries the
+  event/place/source/history surface **plus** `GetConditions` and `ListScanners`,
+  all with `google.api.http` annotations under `/api/v1/`.
+- **No re-exposed Roads/Weather services.** The event model is the core: road
+  incidents are events (`ListEvents` with a corridor `place` + `layer=road_incident`),
+  so there is no dedicated `/api/v1/roads`. Current, non-event conditions (weather
+  + the region's fire-weather state) are served by a single small `GetConditions`
+  RPC (`/api/v1/conditions`), which reads the in-process Weather service and
+  **drops per-location alerts** (alerts are events: `/api/v1/events?layer=weather_alert`).
 - **Regenerate** `*.pb.go`, `*_grpc.pb.go`, `*.pb.gw.go`, and `*.swagger.json`
-  via `make proto` (protoc + the plugins per root `CLAUDE.md`).
+  via `make proto` (protoc + the pinned plugins per root `CLAUDE.md`).
 
-## 7. Endpoint mapping (current hand-built `/v1` → new gateway `/api/v1`)
+## 7. Endpoint mapping (removed hand-built `/v1` → new gateway `/api/v1`)
 
-| Current `/v1` | New RPC | New HTTP |
+| Old `/v1` | New RPC | New HTTP |
 |---|---|---|
 | `GET /v1/events` | `GridService.ListEvents` | `GET /api/v1/events` |
 | `GET /v1/events/{id}` | `GetEvent` | `GET /api/v1/events/{id}` |
@@ -157,16 +160,19 @@ GeoJSON stays hand-built.
 | `GET /v1/history` | `ListHistory` | `GET /api/v1/history` |
 | `GET /v1/places` | `ListPlaces` | `GET /api/v1/places` |
 | `GET /v1/places/{place}` | `GetPlace` | `GET /api/v1/places/{place}` |
-| `GET /v1/places/resolve` | `ResolvePlace` | `GET /api/v1/places/resolve` |
-| `GET /v1/places/{place}/summary` | `GetPlaceSummary` | `GET /api/v1/places/{place}/summary` |
+| `GET /v1/places/resolve` | `ResolvePlace` | `GET /api/v1/places:resolve` (AIP colon custom-verb — avoids the `{place}` collision) |
 | `GET /v1/sources` | `ListSources` | `GET /api/v1/sources` |
 | `GET /v1/scanners` | `ListScanners` | `GET /api/v1/scanners` |
-| `GET /v1/roads`,`/v1/roads/{id}` | `RoadsService` (re-exposed, +`place`) | `GET /api/v1/roads[/{id}]` |
-| `GET /v1/weather` | `WeatherService` (re-exposed, +`place`) | `GET /api/v1/weather` |
-| `GET /v1/places/{place}/map/{layer}.geojson` | — (stays HTTP) | unchanged path under `/api/v1` |
+| `GET /v1/roads`, `/v1/roads/{id}` | *(none — roads are events)* | `GET /api/v1/events?place={corridor}&layer=road_incident` |
+| `GET /v1/weather` | `GetConditions` (weather + fire-weather, no alerts) | `GET /api/v1/conditions` |
+| `GET /v1/places/{place}/summary` | *(hand-built on the gateway mux)* | `GET /api/v1/places/{place}/summary` (snake_case) |
+| `GET /v1/places/{place}/map/{layer}.geojson` | *(hand-built on the gateway mux)* | `GET /api/v1/places/{place}/map/{layer}.geojson` (snake_case) |
 
-Shape changes for every row: field names camelCase; error bodies become
-`CustomErrorResponse`; `page_token`/`next_page_token` stay as message fields.
+Shape changes for the proto RPC rows: field names camelCase; error bodies become
+`CustomErrorResponse` (`{code, codeName, message, details}`);
+`page_token`/`next_page_token` stay as message fields (`nextPageToken` on the
+wire). The two hand-built rows keep their snake_case bodies (the summary shape;
+GeoJSON's RFC 7946 contract).
 
 ## 8. Service implementation
 
@@ -236,14 +242,16 @@ to camelCase — update the MCP guide page examples accordingly.
       `sources.swagger.json` regenerates. Boot smoke test.
 
 **Phase 2 — Full proto contract**
-- [ ] Add the remaining `GridService` RPCs (§7); re-register Roads/Weather with `place`.
+- [ ] Add the remaining `GridService` RPCs (§7), including `GetConditions` (weather + fire-weather, no alerts) and `ListScanners` — no re-exposed Roads/Weather.
 - [ ] `make proto`; commit generated code + swagger.
 
 **Phase 3 — Implement + cut over**
 - [ ] Port each RPC from the hand-built handler; parity test old vs new (§14).
-- [ ] Resolve the GeoJSON routing precedence and the weather-alerts decision.
+- [x] GeoJSON routing precedence resolved: `summary` + `.geojson` mount on the
+      gateway mux via `mux.HandlePath` (no second `/api/v1/` handler). Weather-alerts
+      decision: `GetConditions` drops per-location alerts (alerts are events).
 - [ ] Delete `internal/gridapi` router/handlers as each RPC lands (keep store/
-      projection helpers + GeoJSON handlers).
+      projection helpers + the summary/GeoJSON handlers, which stay hand-built).
 
 **Phase 4 — MCP + docs + consumers**
 - [ ] Rewire MCP to call the impl directly; update MCP guide examples.
@@ -277,6 +285,8 @@ to camelCase — update the MCP guide page examples accordingly.
   consumer.
 - **Non-goals:** `application/proto` responses; compact JSON; moving GeoJSON onto
   proto; any change to the store, ingest, or the hazard/severity model.
-- **Prefab exposure:** exactly one new option (`WithServeMuxOption`). If we later
-  want compact JSON, that's a second small Prefab tweak (per-server marshaler
-  config), tracked separately — not part of this plan.
+- **Prefab exposure:** the migration needed **no** new Prefab option — the
+  existing `WithGRPCService` / `WithGRPCGateway` / `mux.HandlePath` surface covers
+  it. The one deferred addition is first-class `WithETag` (§4), left as a
+  commented `// prefab.WithETag()` + TODO. If we later want compact JSON, that's a
+  separate small Prefab tweak (per-server marshaler config) — not part of this plan.

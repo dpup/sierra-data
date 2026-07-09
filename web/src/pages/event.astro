@@ -4,7 +4,7 @@ import Shell from '../layouts/Shell.astro';
 <Shell
   current="events"
   title="Event · The Grid"
-  description="Everything the store holds for one event: the full protojson envelope and typed detail from GET /v1/events/{id}, geometry on a map, provenance, the AI enhancement shown beside the verbatim original it was built from, and the complete revision timeline with client-side field diffs from GET /v1/events/{id}/history."
+  description="Everything the store holds for one event: the full protojson envelope and typed detail from GET /api/v1/events/{id}, geometry on a map, provenance, the AI enhancement shown beside the verbatim original it was built from, and the complete revision timeline with client-side field diffs from GET /api/v1/events/{id}/history."
 >
   <Fragment slot="head">
     <link rel="stylesheet" href="/lib/maplibre-gl.css" />
@@ -98,7 +98,7 @@ import Shell from '../layouts/Shell.astro';
   <p class="crumb-back muted small mono"><a href="/events">&larr; events explorer</a></p>
 
   <div id="ed-errors"></div>
-  <div id="ed-loading" class="loading">Loading GET /v1/events/&#123;id&#125; &hellip;</div>
+  <div id="ed-loading" class="loading">Loading GET /api/v1/events/&#123;id&#125; &hellip;</div>
 
   <header id="ed-head" hidden>
     <div id="ed-chips" class="chip-row"></div>
@@ -108,7 +108,7 @@ import Shell from '../layouts/Shell.astro';
 
   <p class="lead" id="ed-lead">
     Everything the store holds for one event. Two live requests render the page:
-    <code class="inline">/v1/events/&#123;id&#125;</code> for the current revision and
+    <code class="inline">/api/v1/events/&#123;id&#125;</code> for the current revision and
     <code class="inline">&hellip;/history</code> for every prior one. You get the
     full protojson envelope, the typed detail block, the geometry on a map,
     provenance, and — where present — the AI enhancement shown beside the verbatim

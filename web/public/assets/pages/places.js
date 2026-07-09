@@ -6,7 +6,7 @@
 //   ?lat=&lng=         resolve-tester point (map click or manual input)
 //   ?address=          resolve-tester address
 //
-// All network I/O goes through the shared api.js wrapper (same-origin /v1/*
+// All network I/O goes through the shared api.js wrapper (same-origin /api/v1/*
 // GETs only). Upstream-derived text is inserted via textContent — never HTML.
 //
 // Pure helpers (readState, writeState, parseCoord, groupByKind, geomBBox,
@@ -158,7 +158,7 @@ export function geomBBox(geom) {
 }
 
 /**
- * Convert a protojson BoundingBox ({min_lat,min_lng,max_lat,max_lng}) to
+ * Convert a protojson BoundingBox ({minLat,minLng,maxLat,maxLng}) to
  * [minLng, minLat, maxLng, maxLat]; null when absent/incomplete. protojson
  * may omit zero-valued doubles, so missing members default to 0 only if at
  * least one member is present.
@@ -167,7 +167,7 @@ export function geomBBox(geom) {
  */
 export function protoBBox(bbox) {
   if (!bbox || typeof bbox !== 'object') return null;
-  const keys = ['min_lng', 'min_lat', 'max_lng', 'max_lat'];
+  const keys = ['minLng', 'minLat', 'maxLng', 'maxLat'];
   if (!keys.some((k) => bbox[k] !== undefined)) return null;
   const v = keys.map((k) => Number(bbox[k] ?? 0));
   if (v.some((n) => !Number.isFinite(n))) return null;
@@ -284,7 +284,7 @@ export function initPlacesPage() {
     }
     // Shared OSM raster basemap (basemap.js) for geographic context — the
     // resolve tester needs a recognizable backdrop to click against. API data
-    // is still only ever fetched same-origin from /v1/* through api.js.
+    // is still only ever fetched same-origin from /api/v1/* through api.js.
     map = new maplibregl.Map({
       container,
       style: BASE_STYLE,
@@ -361,11 +361,11 @@ export function initPlacesPage() {
     }
   }
 
-  // ---- Directory view: GET /v1/places ------------------------------------
+  // ---- Directory view: GET /api/v1/places ------------------------------------
   async function loadDirectory() {
     let places;
     try {
-      const data = await get('/v1/places');
+      const data = await get('/api/v1/places');
       places = Array.isArray(data.places) ? data.places : [];
     } catch (err) {
       directoryEl.textContent = '';
@@ -416,15 +416,15 @@ export function initPlacesPage() {
         tr.append(el('td', 'mono', p.id || '—'));
 
         const parentTd = el('td');
-        if (p.parent_id) {
-          const parent = byId.get(p.parent_id);
+        if (p.parentId) {
+          const parent = byId.get(p.parentId);
           const a = el(
             'a',
             '',
-            parent ? parent.name || placeRef(parent) : p.parent_id
+            parent ? parent.name || placeRef(parent) : p.parentId
           );
-          a.href = hrefFor(parent ? placeRef(parent) : p.parent_id);
-          a.title = p.parent_id;
+          a.href = hrefFor(parent ? placeRef(parent) : p.parentId);
+          a.title = p.parentId;
           parentTd.append(a);
         } else {
           parentTd.textContent = '—';
@@ -439,13 +439,13 @@ export function initPlacesPage() {
     }
   }
 
-  // ---- Selected view: GET /v1/places/{place} ------------------------------
+  // ---- Selected view: GET /api/v1/places/{place} ------------------------------
   async function loadPlace(ref) {
     placeView.hidden = false;
     directoryView.hidden = true;
     let place;
     try {
-      place = await get(`/v1/places/${encodeURIComponent(ref)}`);
+      place = await get(`/api/v1/places/${encodeURIComponent(ref)}`);
     } catch (err) {
       placeNameEl.textContent = ref;
       placeDetailEl.textContent = '';
@@ -470,9 +470,9 @@ export function initPlacesPage() {
     row('id', place.id || '—');
     row('slug', place.slug || '—');
     row('kind', String(place.kind || 'PLACE_KIND_UNSPECIFIED'));
-    if (place.parent_id) {
-      const a = el('a', '', place.parent_id);
-      a.href = hrefFor(place.parent_id);
+    if (place.parentId) {
+      const a = el('a', '', place.parentId);
+      a.href = hrefFor(place.parentId);
       row('parent', a);
     } else {
       row('parent', '—');
@@ -492,8 +492,8 @@ export function initPlacesPage() {
     const links = el('p', 'row');
     const evLink = el('a', '', 'Active events here');
     evLink.href = `/events?place=${encodeURIComponent(slug)}`;
-    const sumLink = el('a', 'mono', `GET /v1/places/${slug}/summary`);
-    sumLink.href = `/v1/places/${encodeURIComponent(slug)}/summary`;
+    const sumLink = el('a', 'mono', `GET /api/v1/places/${slug}/summary`);
+    sumLink.href = `/api/v1/places/${encodeURIComponent(slug)}/summary`;
     sumLink.title = 'Raw summary JSON (mode, domains, evacuation status)';
     const mapLink = el('a', '', 'Map layers');
     mapLink.href = `/map?place=${encodeURIComponent(slug)}`;
@@ -519,14 +519,14 @@ export function initPlacesPage() {
     }
   }
 
-  // ---- Resolve tester: GET /v1/places/resolve -----------------------------
+  // ---- Resolve tester: GET /api/v1/places:resolve -------------------------
   async function runResolve(params, emptyText) {
     resultsEl.textContent = '';
     resultsEl.append(el('div', 'loading', 'Resolving…'));
-    const url = apiURL('/v1/places/resolve', params);
+    const url = apiURL('/api/v1/places:resolve', params);
     let places;
     try {
-      const data = await get('/v1/places/resolve', params);
+      const data = await get('/api/v1/places:resolve', params);
       places = Array.isArray(data.places) ? data.places : [];
       // Drop a marker at the resolved point. For an address the geocoded
       // lat/lng come back in the query block (the client never had them), so

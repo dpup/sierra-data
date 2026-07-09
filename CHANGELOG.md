@@ -6,10 +6,59 @@ consuming site (e.g. ersn.net, sierragridteam.org).
 
 There are no formal releases — the service deploys from `main`. Each entry below
 is timestamped; add a new dated section at the top when the API surface changes.
-The API is JSON over HTTP. The original surface is `/api/v1/...` (field names
-camelCase). As of 2026-07-05 there is a second, first-principles surface at
-`/v1/...` (field names snake_case — protojson `UseProtoNames`); both run on the
-same binary over the same store (see the 2026-07-05 entry and its migration plan).
+The API is JSON over HTTP. As of 2026-07-09 there is a single surface,
+`/api/v1/...`, served by gRPC + gRPC-Gateway (field names **camelCase**;
+errors are gRPC-standard `{code, codeName, message, details}`). Two endpoints stay
+hand-built and **snake_case** — the place `summary` and the `.geojson` map layers.
+(History: `/api/v1` originally hosted a different hand-built REST surface, replaced
+by a snake_case `/v1` surface on 2026-07-05, which was in turn folded back onto the
+proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
+
+## 2026-07-09
+
+### Changed — the data API is now proto-defined gRPC + gRPC-Gateway at `/api/v1` (BREAKING)
+
+The hand-built snake_case `/v1` surface (added 2026-07-05) has been **removed** and
+its endpoints re-defined as a Protocol Buffers `GridService` served over
+gRPC-Gateway at `/api/v1`. This is the "real prefab project" shape: proto
+messages + service definitions, auto-generated OpenAPI, gRPC reflection. Move any
+consumer from `/v1/*` to `/api/v1/*` and update field casing.
+
+**What changes for a consumer:**
+
+- **Path prefix:** `/v1/...` → `/api/v1/...`. Query parameters are unchanged (the
+  gateway accepts both snake_case and camelCase param names).
+- **Field casing:** proto RPC responses are now **camelCase** (was snake_case):
+  `next_page_token`→`nextPageToken`, `parent_id`→`parentId`, `observed_at`→`observedAt`,
+  `area_label`→`areaLabel`, `matched_address`→`matchedAddress`, `homepage_url`→`homepageUrl`,
+  `poll_interval_seconds`→`pollIntervalSeconds`, `last_success_at`→`lastSuccessAt`, etc.
+- **Errors:** now gRPC-standard `{code, codeName, message, details}` (was
+  `google.rpc.Status`-style `{code, message, details}`) with the mapped HTTP status.
+- **`summary` and `.geojson` are unchanged** — they stay hand-built and
+  **snake_case** (the summary shape; GeoJSON's RFC 7946 contract), just under the
+  new prefix.
+
+**Endpoint map (`/v1` → `/api/v1`):**
+
+| Old `/v1` | New `/api/v1` | Notes |
+|---|---|---|
+| `GET /v1/events` | `GET /api/v1/events` | `ListEvents`; `{events, nextPageToken}`. |
+| `GET /v1/events/{id}` | `GET /api/v1/events/{id}` | `GetEvent`. |
+| `GET /v1/events/{id}/history` | `GET /api/v1/events/{id}/history` | `GetEventHistory`; `{revisions, nextPageToken}`. |
+| `GET /v1/history` | `GET /api/v1/history` | `ListHistory`. |
+| `GET /v1/places` | `GET /api/v1/places` | `ListPlaces`. |
+| `GET /v1/places/{place}` | `GET /api/v1/places/{place}` | `GetPlace`. |
+| `GET /v1/places/resolve` | `GET /api/v1/places:resolve` | **Path changed** to an AIP colon custom-verb (avoids the `{place}` route collision). `query.matched_address`→`query.matchedAddress`. |
+| `GET /v1/sources` | `GET /api/v1/sources` | `ListSources`; a source's health field is `status`. |
+| `GET /v1/scanners` | `GET /api/v1/scanners` | `ListScanners`. |
+| `GET /v1/roads`, `/v1/roads/{id}` | *(removed)* | Roads are events: `GET /api/v1/events?place={corridor}&layer=road_incident`. |
+| `GET /v1/weather` | `GET /api/v1/conditions` | `GetConditions` — current weather + fire-weather only. **Per-location alerts dropped** (alerts are events: `GET /api/v1/events?layer=weather_alert`). |
+| `GET /v1/places/{place}/summary` | `GET /api/v1/places/{place}/summary` | Unchanged shape, snake_case; evac fail-loud (`active_evacuations` null vs 0 vs N) intact. |
+| `GET /v1/places/{place}/map/{layer}.geojson` | `GET /api/v1/places/{place}/map/{layer}.geojson` | Unchanged envelope, snake_case. |
+
+The MCP endpoint (`/mcp`) is unchanged for its clients — it now calls `/api/v1`
+in-process instead of `/v1`. Conditional-GET / ETag support is not yet wired
+(deferred behind a future prefab `WithETag`).
 
 ## 2026-07-08
 

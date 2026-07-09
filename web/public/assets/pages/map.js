@@ -1,6 +1,6 @@
 // map.js — /map layer previews (spec §2 /map, T19).
 //
-// Renders per-layer GeoJSON from GET /v1/places/{place}/map/{layer}.geojson on
+// Renders per-layer GeoJSON from GET /api/v1/places/{place}/map/{layer}.geojson on
 // a MapLibre map, with the honesty panel — each layer's `metadata` member
 // (source_status / generated_at / attribution) displayed prominently, plus the
 // exact .geojson URL a third-party map client would use.
@@ -57,10 +57,10 @@ export const PUBLIC_ORIGIN = 'https://data.sierragridteam.org';
  * Path for a layer's FeatureCollection.
  * @param {string} place layer place slug, e.g. "ebbetts-pass"
  * @param {string} layer e.g. "wildfire"
- * @returns {string} "/v1/places/ebbetts-pass/map/wildfire.geojson"
+ * @returns {string} "/api/v1/places/ebbetts-pass/map/wildfire.geojson"
  */
 export function geojsonPath(place, layer) {
-  return `/v1/places/${encodeURIComponent(place)}/map/${encodeURIComponent(
+  return `/api/v1/places/${encodeURIComponent(place)}/map/${encodeURIComponent(
     layer
   )}.geojson`;
 }
@@ -295,7 +295,7 @@ function init() {
   /* ---- map ---- */
 
   // Shared OSM raster basemap (basemap.js) under the hazard geometry. API data
-  // is still only ever fetched same-origin from /v1/* through api.js.
+  // is still only ever fetched same-origin from /api/v1/* through api.js.
   const map = new maplibregl.Map({
     container: 'map-canvas',
     style: BASE_STYLE,
@@ -408,7 +408,7 @@ function init() {
     if (!urlState.place) return;
     let geom;
     try {
-      const place = await get(`/v1/places/${encodeURIComponent(urlState.place)}`);
+      const place = await get(`/api/v1/places/${encodeURIComponent(urlState.place)}`);
       if (token !== state.loadToken) return;
       geom = decodePlaceGeometry(place);
     } catch {
@@ -818,7 +818,7 @@ function init() {
 
   async function loadPlaces() {
     try {
-      const data = await get('/v1/places', { kind: 'AREA' });
+      const data = await get('/api/v1/places', { kind: 'AREA' });
       const places = Array.isArray(data.places) ? data.places : [];
       const slugs = [];
       els.place.textContent = '';
@@ -848,7 +848,7 @@ function init() {
       els.place.disabled = slugs.length === 0;
       if (slugs.length === 0) {
         pageError(
-          'No AREA places returned by /v1/places?kind=AREA — nothing to map.',
+          'No AREA places returned by /api/v1/places?kind=AREA — nothing to map.',
           new Error('empty place list')
         );
       }

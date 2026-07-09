@@ -1,15 +1,16 @@
-// Package mcp exposes The Grid's read-only /v1 data to LLM agents via the Model
-// Context Protocol (MCP) over Streamable HTTP, mounted at /mcp
-// (docs/mcp-design.md). It is a thin adapter: each tool calls the existing
-// gridapi /v1 handler in-process and reshapes the JSON for LLMs — geometry is
-// stripped (a polygon is a token bomb and useless to a model), and the fail-loud
-// honesty contract (source_status, evacuation null-vs-0, a reference-only
-// disclaimer) is preserved so a model can never render "unknown" as "all-clear".
+// Package mcp exposes The Grid's read-only /api/v1 data to LLM agents via the
+// Model Context Protocol (MCP) over Streamable HTTP, mounted at /mcp
+// (docs/mcp-design.md). It is a thin adapter: each tool issues an in-process GET
+// against the /api/v1 gRPC-Gateway mux and reshapes the JSON for LLMs — geometry
+// is stripped (a polygon is a token bomb and useless to a model), and the
+// fail-loud honesty contract (source_status, evacuation null-vs-0, a
+// reference-only disclaimer) is preserved so a model can never render "unknown"
+// as "all-clear".
 //
 // The transport is deliberately minimal: JSON-RPC 2.0 over HTTP POST with a JSON
 // response. We serve no server-initiated SSE stream (the tools are stateless
 // reads), so GET /mcp returns 405 per the Streamable HTTP spec. This mirrors the
-// project's hand-built /v1 handlers rather than pulling in an MCP SDK.
+// project's hand-built handlers rather than pulling in an MCP SDK.
 package mcp
 
 import (
@@ -53,19 +54,20 @@ const disclaimer = "Reference only — verify with official sources (linked in e
 	"result). Absence of data is not an all-clear; a source marked UNAVAILABLE " +
 	"means its status is unknown, not zero."
 
-// gridHandler is the /v1 handler the tools call in-process (gridapi.Service).
+// gridHandler is the /api/v1 handler the tools call in-process — the prefab
+// gRPC-Gateway mux, which serves the whole /api/v1 surface.
 type gridHandler interface {
 	ServeHTTP(w http.ResponseWriter, r *http.Request)
 }
 
-// Server is the MCP endpoint. It holds the /v1 handler and the tool registry.
+// Server is the MCP endpoint. It holds the /api/v1 handler and the tool registry.
 type Server struct {
 	grid  gridHandler
 	tools []tool
 }
 
-// NewHandler builds the MCP handler mounted at /mcp. grid is the gridapi /v1
-// service (an http.Handler) the tools query in-process.
+// NewHandler builds the MCP handler mounted at /mcp. grid is the /api/v1
+// gRPC-Gateway mux (an http.Handler) the tools query in-process.
 func NewHandler(grid gridHandler) *Server {
 	s := &Server{grid: grid}
 	s.tools = s.registerTools()
@@ -193,6 +195,12 @@ func (s *Server) callV1(ctx context.Context, path string) (map[string]interface{
 	if err != nil {
 		return nil, 0, err
 	}
+	// The /api/v1 surface is served by prefab's gRPC-Gateway, which guards
+	// mutating requests with CSRF. These are trusted, read-only, in-process
+	// calls: prefab's custom-header exemption (the OWASP XHR/API pattern) — the
+	// mere presence of x-csrf-protection — is the intended path for a
+	// programmatic client, so set it rather than thread a token/cookie.
+	req.Header.Set("X-CSRF-Protection", "1")
 	cw := &captureWriter{header: http.Header{}, status: http.StatusOK}
 	s.grid.ServeHTTP(cw, req)
 	body := map[string]interface{}{}

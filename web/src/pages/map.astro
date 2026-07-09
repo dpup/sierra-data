@@ -72,7 +72,7 @@ import SectionHead from '../components/SectionHead.astro';
   <PageHead kicker="Layer previews" title="Map — layer previews">
     <p class="lead">
       Each hazard layer is one RFC&nbsp;7946 FeatureCollection from
-      <code class="inline">GET /v1/places/&#123;place&#125;/map/&#123;layer&#125;.geojson</code> — exactly what a
+      <code class="inline">GET /api/v1/places/&#123;place&#125;/map/&#123;layer&#125;.geojson</code> — exactly what a
       MapLibre, Leaflet, or QGIS source points at. Every response carries a
       <code class="inline">metadata.source_status</code> of OK, STALE, or UNAVAILABLE, and the
       ledger below renders it verbatim.
@@ -87,7 +87,7 @@ import SectionHead from '../components/SectionHead.astro';
           <div class="left"><h2 id="controls-h" style="margin:0;">Controls</h2></div>
         </div>
         <div class="field" style="margin-bottom:12px;">
-          <label for="place-select">Place — GET /v1/places?kind=AREA</label>
+          <label for="place-select">Place — GET /api/v1/places?kind=AREA</label>
           <select id="place-select"><option value="">loading places…</option></select>
         </div>
         <label>Layers</label>

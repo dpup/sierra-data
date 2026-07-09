@@ -1,6 +1,6 @@
 // api.js — the single network surface of data.sierragridteam.org.
 //
-// Every data fetch on this site is a same-origin browser GET of a /v1/* path
+// Every data fetch on this site is a same-origin browser GET of a /api/v1/* path
 // through this module. Each request is recorded in `requests` and announced
 // via a "grid:api-request" CustomEvent so the shared footer can render the
 // live "requests behind this page" log. No other module performs network I/O.
@@ -53,9 +53,9 @@ export const API_REQUEST_EVENT = EVENT_NAME;
  * Empty/null/undefined param values are skipped so URLs stay canonical and
  * shareable. Array values become repeated params (?layer=a&layer=b).
  *
- * @param {string} path   e.g. "/v1/events" (leading /v1 included by caller)
+ * @param {string} path   e.g. "/api/v1/events" (leading /api/v1 included by caller)
  * @param {Object=} params
- * @returns {string} path with query string, e.g. "/v1/events?place=ebbetts-pass"
+ * @returns {string} path with query string, e.g. "/api/v1/events?place=ebbetts-pass"
  */
 export function apiURL(path, params) {
   const search = new URLSearchParams();
@@ -95,7 +95,7 @@ export function curlFor(url) {
  * Throws ApiError on non-2xx or network failure — callers render the error
  * inline (never a blank page).
  *
- * @param {string} path    e.g. "/v1/sources"
+ * @param {string} path    e.g. "/api/v1/sources"
  * @param {Object=} params query params; empty values skipped
  * @returns {Promise<*>} parsed JSON body
  */

@@ -6,7 +6,7 @@ import GetChip from '../components/GetChip.astro';
 <Shell
   current="events"
   title="Events · The Grid"
-  description="Event explorer over GET /v1/events — the cross-layer query of every discrete occurrence the Grid tracks, with filters that map 1:1 to the endpoint's parameters and a URL that is the shareable permalink."
+  description="Event explorer over GET /api/v1/events — the cross-layer query of every discrete occurrence the Grid tracks, with filters that map 1:1 to the endpoint's parameters and a URL that is the shareable permalink."
 >
   <style is:global slot="head">
     /* Page-local: the query bar, the pill filter rows, and the two-column
@@ -60,27 +60,27 @@ import GetChip from '../components/GetChip.astro';
       evacuation, weather alert, earthquake, road incident, and the rest — is
       reachable through <strong>one endpoint</strong>. The filters below map
       1:1 onto the query parameters of
-      <code class="inline">GET /v1/events</code>; results are the snake_case
+      <code class="inline">GET /api/v1/events</code>; results are the camelCase
       protojson of <code class="inline">grid.v1.EventList</code>, server-sorted
       <strong>severity-first, then newest-first</strong>. This page's whole
       filter state lives in its URL, so any view you compose here is a
       shareable permalink — <strong>you can replay the exact request
       yourself.</strong>
     </p>
-    <GetChip slot="badges" path="/v1/events" />
+    <GetChip slot="badges" path="/api/v1/events" />
   </PageHead>
 
   <!-- The exact request behind the table: endpoint + active filter chips. -->
   <section class="panel qbar" aria-label="Request behind these results">
     <div class="qbar-line">
-      <GetChip path="/v1/events" />
+      <GetChip path="/api/v1/events" />
       <span id="ev-qchips" class="qbar-chips"></span>
       <button type="button" id="ev-copyurl" class="copy-btn qbar-copy">copy url</button>
     </div>
     <div id="ev-curl" class="qbar-curl mono small muted"></div>
   </section>
 
-  <!-- Filters: each control is one /v1/events query parameter. -->
+  <!-- Filters: each control is one /api/v1/events query parameter. -->
   <div class="filters">
     <label for="ev-place">place</label>
     <div class="fcell"><select id="ev-place"></select></div>

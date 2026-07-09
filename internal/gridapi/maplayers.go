@@ -16,7 +16,7 @@ import (
 	"github.com/dpup/sierra-data/internal/store"
 )
 
-// GET /v1/places/{place}/map/{layer}.geojson (plan §2.3, task T12b-1).
+// GET /api/v1/places/{place}/map/{layer}.geojson (plan §2.3, task T12b-1).
 //
 // Event-backed layers (wildfire, evacuation, weather_alert, earthquake,
 // road_incident) are served from the store via the shared T13 projection, with
@@ -70,7 +70,7 @@ type hazardsBuilder interface {
 
 var _ hazardsBuilder = (*hazards.Service)(nil)
 
-// serveMapLayer handles GET /v1/places/{place}/map/{layer}.geojson.
+// serveMapLayer handles GET /api/v1/places/{place}/map/{layer}.geojson.
 func (s *Service) serveMapLayer(w http.ResponseWriter, r *http.Request, placeKey, layer string) {
 	ctx := r.Context()
 	place, err := s.Store.GetPlace(ctx, placeKey)
@@ -101,7 +101,7 @@ func (s *Service) serveMapLayer(w http.ResponseWriter, r *http.Request, placeKey
 
 // serveEventLayer serves an event-backed layer from the store: the place's
 // ACTIVE+SCHEDULED events (the live-map lifecycle read — resolved/expired
-// events belong to /v1/history), projected onto the shipped envelope.
+// events belong to /api/v1/history), projected onto the shipped envelope.
 func (s *Service) serveEventLayer(w http.ResponseWriter, r *http.Request, place *gridv1.Place, layer string) {
 	ctx := r.Context()
 	q := store.EventQuery{

@@ -8,23 +8,27 @@ import (
 	"testing"
 )
 
-// fakeGrid stands in for the gridapi /v1 handler with canned responses.
+// fakeGrid stands in for the /api/v1 gRPC-Gateway mux with canned responses.
+// Proto RPC endpoints return camelCase (nextPageToken, canonicalUrl); the
+// hand-built summary stays snake_case.
 type fakeGrid struct{}
 
 func (fakeGrid) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	switch {
-	case r.URL.Path == "/v1/events/e1":
-		_, _ = w.Write([]byte(`{"id":"e1","layer":"wildfire","severity":"EXTREME","headline":"Big Fire — 5000 ac","description":"verbatim long text","geometry":{"geojson":"HUGE_BASE64_BLOB","centroid":{"lat":38.1,"lng":-120.4},"bbox":{"min_lat":38}},"canonical_url":"https://fire.ca.gov/x"}`))
-	case r.URL.Path == "/v1/events":
-		_, _ = w.Write([]byte(`{"events":[{"id":"e1","layer":"wildfire","headline":"Big Fire","description":"long","geometry":{"geojson":"HUGE","centroid":{"lat":38,"lng":-120}}}],"next_page_token":""}`))
-	case r.URL.Path == "/v1/places/ebbetts-pass":
+	case r.URL.Path == "/api/v1/events/e1":
+		_, _ = w.Write([]byte(`{"id":"e1","layer":"wildfire","severity":"EXTREME","headline":"Big Fire — 5000 ac","description":"verbatim long text","geometry":{"geojson":"HUGE_BASE64_BLOB","centroid":{"lat":38.1,"lng":-120.4},"bbox":{"minLat":38}},"canonicalUrl":"https://fire.ca.gov/x"}`))
+	case r.URL.Path == "/api/v1/events":
+		_, _ = w.Write([]byte(`{"events":[{"id":"e1","layer":"wildfire","headline":"Big Fire","description":"long","geometry":{"geojson":"HUGE","centroid":{"lat":38,"lng":-120}}}],"nextPageToken":""}`))
+	case r.URL.Path == "/api/v1/places/ebbetts-pass":
 		_, _ = w.Write([]byte(`{"id":"area:ebbetts-pass","slug":"ebbetts-pass","kind":"AREA","name":"Ebbetts Pass","geometry":{"geojson":"POLY","centroid":{"lat":38.2,"lng":-120.1}}}`))
-	case strings.HasPrefix(r.URL.Path, "/v1/places/") && strings.HasSuffix(r.URL.Path, "/summary"):
+	case strings.HasPrefix(r.URL.Path, "/api/v1/places/") && strings.HasSuffix(r.URL.Path, "/summary"):
 		_, _ = w.Write([]byte(`{"mode":"ACTIVE","summary":{"active_evacuations":null,"evacuation_status":"UNAVAILABLE"}}`))
-	case r.URL.Path == "/v1/places/resolve":
+	case r.URL.Path == "/api/v1/places:resolve":
 		_, _ = w.Write([]byte(`{"places":[{"slug":"arnold","kind":"TOWN","name":"Arnold","geometry":{"geojson":"PT"}},{"slug":"calaveras-county","kind":"COUNTY","name":"Calaveras County"}]}`))
-	case r.URL.Path == "/v1/sources":
+	case r.URL.Path == "/api/v1/conditions":
+		_, _ = w.Write([]byte(`{"weather":[{"locationId":"arnold","temperatureCelsius":21}],"fireWeather":{"state":"normal"}}`))
+	case r.URL.Path == "/api/v1/sources":
 		_, _ = w.Write([]byte(`{"sources":[{"id":"nws","status":"OK"}]}`))
 	default:
 		w.WriteHeader(http.StatusNotFound)
@@ -163,11 +167,11 @@ func callRaw(t *testing.T, s *Server, body string) map[string]interface{} {
 
 func TestUpstreamErrorSurfacesAsToolError(t *testing.T) {
 	s := NewHandler(failGrid{})
-	// grid_sources must NOT return an empty/success body when /v1/sources fails —
+	// grid_sources must NOT return an empty/success body when /api/v1/sources fails —
 	// it must report the failure (fail-loud: an error is never a clean result).
 	res := call(t, s, "tools/call", `{"name":"grid_sources","arguments":{}}`)
 	if res["isError"] != true {
-		t.Fatalf("failed /v1/sources should yield isError:true, got %v", res["isError"])
+		t.Fatalf("failed /api/v1/sources should yield isError:true, got %v", res["isError"])
 	}
 	sc := res["structuredContent"].(map[string]interface{})
 	if sc["error"] == nil {
@@ -176,16 +180,28 @@ func TestUpstreamErrorSurfacesAsToolError(t *testing.T) {
 	// grid_events must not collapse an upstream 500 into events:[] / count:0.
 	ev := call(t, s, "tools/call", `{"name":"grid_events","arguments":{}}`)
 	if ev["isError"] != true {
-		t.Errorf("failed /v1/events should be isError, not an empty list; got %v", ev["isError"])
+		t.Errorf("failed /api/v1/events should be isError, not an empty list; got %v", ev["isError"])
 	}
 }
 
-func TestConditionsMarksSubfetchUnavailable(t *testing.T) {
-	s := NewHandler(failGrid{})
+func TestConditionsSuccess(t *testing.T) {
+	s := NewHandler(fakeGrid{})
 	out := structured(t, s, "grid_conditions", `{}`)
-	roads, ok := out["roads"].(map[string]interface{})
-	if !ok || roads["status"] != "unavailable" {
-		t.Errorf("roads should be marked unavailable, got %v", out["roads"])
+	if _, ok := out["weather"].([]interface{}); !ok {
+		t.Errorf("weather array should be present, got %v", out["weather"])
+	}
+	if fw, ok := out["fireWeather"].(map[string]interface{}); !ok || fw["state"] != "normal" {
+		t.Errorf("fireWeather.state should survive, got %v", out["fireWeather"])
+	}
+}
+
+func TestConditionsFailsLoud(t *testing.T) {
+	// grid_conditions is a single /api/v1/conditions call; an upstream failure
+	// must surface as a tool error, never a silently-empty "conditions" body.
+	s := NewHandler(failGrid{})
+	res := call(t, s, "tools/call", `{"name":"grid_conditions","arguments":{}}`)
+	if res["isError"] != true {
+		t.Errorf("failed /api/v1/conditions should be isError, got %v", res["isError"])
 	}
 }
 

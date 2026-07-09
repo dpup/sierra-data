@@ -6,7 +6,7 @@ import SectionHead from '../components/SectionHead.astro';
 <Shell
   current="sources"
   title="Sources · The Grid"
-  description="The honest feed-health board for the Grid: per-source poll interval, last success, staleness, thresholds, and last error — live from GET /v1/sources. A failing feed says so; absence is never an all-clear."
+  description="The honest feed-health board for the Grid: per-source poll interval, last success, staleness, thresholds, and last error — live from GET /api/v1/sources. A failing feed says so; absence is never an all-clear."
 >
   <!-- Page-scoped, but is:global because the rules target rows built at runtime
        by sources.js (scoped styles would not match dynamically-created DOM).
@@ -30,17 +30,17 @@ import SectionHead from '../components/SectionHead.astro';
       the last error verbatim — the honest-freshness contract, exposed. A feed
       that fails says so; <span class="accent-orange">absence of data is never
       shown as an all-clear.</span> This whole page is one live fetch of
-      <code class="inline">/v1/sources</code> — replay it yourself.
+      <code class="inline">/api/v1/sources</code> — replay it yourself.
     </p>
   </PageHead>
 
   <div class="section-gap"></div>
-  <SectionHead heading="Feed health" get="/v1/sources" cap="unhealthy first · poll → last success → freshness" />
+  <SectionHead heading="Feed health" get="/api/v1/sources" cap="unhealthy first · poll → last success → freshness" />
 
   <div id="summary-line" class="chip-row" aria-live="polite"></div>
   <div id="degradation-alert"></div>
   <div id="page-errors"></div>
-  <div id="board"><div class="loading">Loading /v1/sources…</div></div>
+  <div id="board"><div class="loading">Loading /api/v1/sources…</div></div>
   <p id="refresh-line" class="freshness"></p>
 
   <script is:inline type="module">

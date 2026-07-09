@@ -4,7 +4,7 @@
 //
 // Three live bits, matching the previous behavior exactly:
 //   - sidebar health chip  → #health-dot / #health-text (a plain, unlogged fetch
-//     of /v1/sources; kept OUT of the per-page request drawer since it's chrome)
+//     of /api/v1/sources; kept OUT of the per-page request drawer since it's chrome)
 //   - context-bar clock    → #ctx-clock (ticks once a second)
 //   - footer request log    → #req-log-list / #req-count (the api.js request log;
 //     every value a page shows is a replayable GET)
@@ -25,12 +25,12 @@ function loadHealth() {
   const dot = $('health-dot');
   const text = $('health-text');
   if (!dot || !text) return;
-  fetch('/v1/sources', { headers: { Accept: 'application/json' } })
+  fetch('/api/v1/sources', { headers: { Accept: 'application/json' } })
     .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
     .then((body) => {
       const list = (body && body.sources) || [];
       const total = list.length;
-      const ok = list.filter((s) => (s.status || s.source_status) === 'OK').length;
+      const ok = list.filter((s) => s.status === 'OK').length;
       text.textContent = `${ok} / ${total} sources OK`;
       dot.className = 'dot live ' + (ok === total ? 'st-OK' : ok === 0 ? 'st-UNAVAILABLE' : 'st-STALE');
     })

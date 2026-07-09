@@ -22,7 +22,7 @@ Last updated: 2026-07-06
 │   ├── roads.proto            # gRPC service for road conditions
 │   ├── weather.proto          # gRPC service for weather data
 │   └── common.proto           # Shared proto definitions
-├── api/grid/v1/                # grid.v1 messages-only protos (no service) — the /v1 event model
+├── api/grid/v1/                # grid.v1 messages (Event/Place/...) + the GridService /api/v1 surface
 ├── bin/                        # Compiled binaries
 ├── cmd/                       # CLI applications
 │   ├── server/                # Main API server (main.go, site.go, gridadapter.go)
@@ -37,7 +37,7 @@ Last updated: 2026-07-06
 │   ├── hazards/               # /api/v1 unified GeoJSON hazard layers
 │   ├── store/                 # SQLite grid event store (events, revisions, places, sources)
 │   ├── ingest/                # Poller scheduler + per-source normalizers → the store
-│   ├── gridapi/               # Hand-built /v1 HTTP handlers + store→GeoJSON projection
+│   ├── gridapi/               # /api/v1 GridService impl (gRPC) + hand-built summary/GeoJSON
 │   ├── places/                # Grid place directory seeder (areas/counties/towns/corridors)
 │   └── lib/                   # Shared libraries (incl. lib/geojson: geometry + PIP)
 ├── data/places/               # Checked-in Census county polygons (counties.geojson)
@@ -57,11 +57,14 @@ discuss with the operator improvements to the makefile commands.
 **Toolchain note**: The sandbox does not ship Go or protoc preinstalled. To build
 or run tests you need Go 1.25+ on `PATH`. `make proto` additionally requires
 `protoc` plus the plugins `protoc-gen-go`, `protoc-gen-go-grpc`,
-`protoc-gen-grpc-gateway`, and `protoc-gen-openapiv2` (install the plugins with
-`go install`). Proto generation is deterministic — regenerating unchanged protos
-produces no diff. `make proto` generates both `api/v1` (grpc-gateway services)
-and `api/grid/v1` (the `grid.v1` messages-only protos, no gateway/openapi).
-Generated `*.pb.go` are committed. The grid store uses the pure-Go SQLite driver
+`protoc-gen-grpc-gateway`, and `protoc-gen-openapiv2` — installed at pinned
+versions by `make proto-tools` (a prerequisite of `make proto`; versions are
+declared as vars in the `Makefile`, aligned to `go.mod`). Proto generation is
+deterministic — regenerating unchanged protos produces no diff. `make proto`
+generates both `api/v1` (the older grpc-gateway services) and `api/grid/v1`, which
+now carries the `grid.v1` messages **and** the `GridService` (gateway + openapi) —
+the proto-defined `/api/v1` data surface. Generated `*.pb.go` (incl.
+`*_grpc.pb.go`, `*.pb.gw.go`, `*.swagger.json`) are committed. The grid store uses the pure-Go SQLite driver
 `modernc.org/sqlite`, so the `CGO_ENABLED=0` cross-compile in the Dockerfile
 still works — do not introduce a cgo SQLite driver.
 
@@ -134,11 +137,11 @@ make test-unit
 ### API Testing
 ```bash
 # Test live endpoints (local dev defaults to port 8181)
-curl http://localhost:8181/api/v1/roads
-curl http://localhost:8181/api/v1/weather
+curl http://localhost:8181/api/v1/events
+curl http://localhost:8181/api/v1/conditions
 
 # Format JSON responses
-curl -s http://localhost:8181/api/v1/roads | jq .
+curl -s http://localhost:8181/api/v1/events?layer=road_incident | jq .
 ```
 
 ## Code Style
@@ -256,107 +259,86 @@ timestamped). That's how consuming sites (ersn.net, sierragridteam.org) learn
 what to update. Flag anything that changes an existing response shape as a
 breaking change with a migration note.
 
-**Roads Service** (`/api/v1/roads`):
-- `GET /api/v1/roads` - List all configured roads with current conditions
-- `GET /api/v1/roads/{road_id}` - Get specific road details
-- `GET /api/v1/metrics` - Alert processing metrics (currently returns 501 Unimplemented; not yet wired to real counters)
-- `GET /api/v1/incidents/{area}` - Region-wide CHP/Caltrans incident feed for an area, e.g. `/api/v1/incidents/mother-lode` (flat, not route-scoped; areas configured under `roads.incidentAreas` in `prefab.yaml`). All incidents are AI-enhanced (`description`, `condensed_summary`, `impact`, `metadata`), with `severity` driven by the model's impact assessment; keyword-heuristic severity is only the pre-enhancement placeholder.
-- Returns: Road status, status explanations, traffic conditions, chain controls, AI-enhanced alerts
+**One surface: `/api/v1`, proto-defined gRPC + gRPC-Gateway** (migrated 2026-07-09;
+see `docs/grpc-gateway-migration-plan.md`, `docs/v2-api-spec.md`). The `GridService`
+proto (`api/grid/v1/grid.proto`) is served over the gateway that Prefab mounts at
+`/api/`; the impl is `internal/gridapi` (`GridServer` wrapping `Service`), reading
+everything from the grid event store. Field names are **camelCase** (protojson
+`UseProtoNames:false`), timestamps RFC 3339, errors gRPC-standard
+`{code, codeName, message, details}` with the mapped HTTP status. gRPC reflection
+is on. Conditional-GET/ETag is not yet wired (deferred behind a future prefab
+`WithETag`). The prior hand-built REST surfaces (the old `/api/v1/roads|weather|
+hazards|situation|incidents` and the snake_case `/v1`) have all been **removed** —
+they fold into the endpoints below.
 
-**Key API Response Fields**:
-- `status`: Current road status (OPEN/RESTRICTED/CLOSED/MAINTENANCE)
-- `status_explanation`: AI-generated explanation when status is RESTRICTED or CLOSED
-- `alerts[].description`: AI-enhanced human-readable alert descriptions
-- `alerts[].condensed_summary`: Mobile-optimized short summaries
-- `alerts[].impact`: AI-assessed impact levels (none/light/moderate/severe)
-- `alerts[].metadata`: Structured additional information from AI analysis
+**Two endpoints stay hand-built and `snake_case`** (mounted on the same gateway mux
+via `mux.HandlePath`, `gridapi.RegisterGatewayRoutes`): the place `summary` (evac
+`active_evacuations` must serialize as an explicit JSON `null`, which proto3 models
+poorly) and the `.geojson` map layers (RFC 7946 geometry).
 
-**Weather Service** (`/api/v1/weather`):
-- `GET /api/v1/weather` - Current weather for all configured locations (each includes a `fire_weather` classification)
-- `GET /api/v1/weather/{location_id}` - Get specific location weather
-- `GET /api/v1/weather/alerts` - Active weather alerts (authoritative NWS zone alerts, `source: NWS`; OpenWeatherMap alerts removed 2026-07-04)
-- `GET /api/v1/weather/alerts?zones=CAZ137,CAZ138` - Filter to alerts in specific forecast zones
-- Returns: Temperature, conditions, visibility, wind, alerts, fire-weather state
-- Per-location `alerts` are the NWS alerts for the location's configured `zone` (prefab.yaml)
+**Grid Info Service** (`/api/v1/...`), the `GridService` RPCs:
+- `GET /api/v1/events` - cross-layer event query
+  (`place,layer,status,severity_min,since,page_token,page_size`; default status
+  `ACTIVE,SCHEDULED`; keyset pagination → `{events, nextPageToken}`). This is the
+  road-incident feed (`layer=road_incident`, scope by corridor `place`) and the
+  weather-alert listing (`layer=weather_alert`) — there is no separate roads or
+  incidents endpoint. All road incidents are AI-enhanced (`enhancement`:
+  description/summary/impact/metadata), with `severity` driven by the model's
+  impact assessment.
+- `GET /api/v1/events/{id}` / `GET /api/v1/events/{id}/history` - current revision /
+  revision timeline.
+- `GET /api/v1/history` - cross-event revision archive (`place,from,to,layer`).
+- `GET /api/v1/places` / `GET /api/v1/places/{place}` - directory (`kind`,`q`);
+  places addressable by slug (`ebbetts-pass`) or id (`county:calaveras-county`),
+  slugs globally unique.
+- `GET /api/v1/places:resolve?lat=&lng=` or `?address=` - point/address →
+  containing places, most-specific first (AIP colon custom-verb, so it doesn't
+  collide with `/places/{place}`; address path geocodes via the keyless Census
+  geocoder, `internal/clients/census`). Response `query.matchedAddress`.
+- `GET /api/v1/conditions` - `GetConditions`: current weather + the region's
+  `fireWeather` classification, optional `?place=` bbox filter. **Drops
+  per-location alerts** — alerts are events (`/api/v1/events?layer=weather_alert`).
+  There is no roads-conditions passthrough (road conditions are the `road_segment`
+  / `chain_control` geojson layers).
+- `GET /api/v1/scanners?place=` - Broadcastify feed config.
+- `GET /api/v1/sources` - the source registry + per-source health (a source's own
+  health is `status`: `OK|STALE|UNAVAILABLE`, last success/attempt, poll interval,
+  last error).
 
-**Fire-weather** (`weather_data[].fire_weather`): `state` escalates `normal` →
-`elevated` (Fire Weather Watch) → `red-flag` (Red Flag Warning), derived only
-from authoritative NWS products — never a Red Flag NWS hasn't issued.
-
-**Hazards Service** (`/api/v1/hazards`, `/api/v1/situation`, `/api/v1/scanners`):
-a unified, map-ready aggregation layer. See `docs/hazard-aggregation-design.md`
-and `internal/hazards/CLAUDE.md` for the full model; these endpoints are
-hand-built GeoJSON/JSON (not grpc-gateway), so field names are `snake_case`.
-- `GET /api/v1/hazards/{area}/{layer}.geojson` - one RFC 7946 `FeatureCollection`
-  per layer for a maps client (MapLibre/Leaflet). Layers: `road_incident`,
-  `chain_control`, `road_segment`, `weather_alert`, `fire_weather`, `earthquake`,
-  `wildfire`, `evacuation`. Every feature shares a `properties` envelope
-  (`id, layer, kind, severity, severity_rank, headline, source, …`) on the unified
-  severity scale `INFO..EXTREME` (rank 0–4). Coordinates are `[lng, lat]`.
-- **Event layers are store-backed.** The five event-backed layers (`wildfire`,
-  `evacuation`, `weather_alert`, `earthquake`, `road_incident`) are now projected
-  from the grid event store (`internal/gridapi.ProjectEvents`) — same envelope,
-  byte-compatible with the former live builders except the deliberate deviations
-  in the 2026-07-05 CHANGELOG (stabilized wfigs ids; NWS "Extreme" → `EXTREME`;
-  earthquake `updated_at` omit rule; outages serve `STALE` last-good, not
-  `UNAVAILABLE`-empty, when events are stored; enhancement no longer regenerated
-  per poll). The three condition layers (`road_segment`, `chain_control`,
-  `fire_weather`) stay live projections of the roads/weather services.
-- `GET /api/v1/situation/{area}` - one-call rollup: per-layer status +
-  cross-layer `summary` (`highest_severity`, `severity_counts`, `top_headlines`,
-  `active_evacuations`) + a `scanners` sidecar.
-- `GET /api/v1/scanners/{area}` - Broadcastify scanner feeds (link-out only).
-- **`metadata.source_status`** is `OK | STALE | UNAVAILABLE` — the honesty
-  mechanism. A layer is fail-loud: on source error it returns `UNAVAILABLE` with
-  empty features (or `STALE` + `last_source_update` when serving a cached last-good
-  fetch), never a fabricated clear state.
-- **Evacuation is life-safety / fail-loud**: the invariant is *an error never
-  becomes a `0`*. A Cal OES failure is `UNAVAILABLE` → `situation.active_evacuations:
-  null` (render "unknown — check Genasys"); a clean fetch with no active zones is
-  `OK` → `active_evacuations: 0` (render "no active evacuations reported", a
-  caveated confirmed-empty, not a guarantee). `metadata.source_url` always links
-  the authoritative Genasys viewer in every state. Areas are configured under
-  `hazards.areas` in `prefab.yaml`.
-
-**Grid Info Service** (`/v1/...`): the v2 surface (see
-`docs/v2-implementation-plan.md` for the build, `docs/v2-api-spec.md` for the
-contract). Hand-built `net/http` handlers (`internal/gridapi`, mounted at `/v1/`,
-not grpc-gateway), so field names are `snake_case` (protojson `UseProtoNames`),
-timestamps RFC 3339, errors `google.rpc.Status`, ETags/`If-None-Match`
-everywhere. Everything is read from the grid event store.
-- `GET /v1/places/{place}/summary` - one-fetch place rollup: `mode`
+**Map + summary** (hand-built, `snake_case`):
+- `GET /api/v1/places/{place}/summary` - one-fetch place rollup: `mode`
   (QUIET/WATCH/ACTIVE), a cross-layer `summary`, per-`domains[]` status
   (`fire`/`evacuation`/`weather`/`roads`/`seismic`), `top_events`, and a
-  `sources[]` health sidecar. Replaces `/api/v1/situation/{area}`.
-- `GET /v1/places/{place}/map/{layer}.geojson` - per-layer FeatureCollection,
-  envelope identical to `/api/v1/hazards/{area}/{layer}.geojson` (event layers
-  from the store, condition layers live). Serves the place's ACTIVE+SCHEDULED
-  events.
-- `GET /v1/events` - cross-layer event query
-  (`place,layer,status,severity_min,since,page_token,page_size`; default status
-  `ACTIVE,SCHEDULED`; keyset pagination). Subsumes `/api/v1/incidents/{area}`
-  (`layer=road_incident`) and weather-alert listing (`layer=weather_alert`).
-- `GET /v1/events/{id}` / `GET /v1/events/{id}/history` - current revision /
-  revision timeline.
-- `GET /v1/history` - cross-event revision archive (`place,from,to,layer`).
-- `GET /v1/places` / `GET /v1/places/{place}` - directory (`kind`,`q`); places
-  addressable by slug (`ebbetts-pass`) or id (`county:calaveras-county`), slugs globally
-  unique.
-- `GET /v1/places/resolve?lat=&lng=` or `?address=` - point/address → containing
-  places, most-specific first (address path geocodes via the keyless Census
-  geocoder, `internal/clients/census`).
-- `GET /v1/roads` / `GET /v1/weather` - conditions passthrough with optional
-  `?place=` bbox filter. **`/v1/weather` drops per-location alerts** — alerts are
-  events (`/v1/events?layer=weather_alert`); `fire_weather` stays. (`/api/v1`
-  weather keeps its alerts, unchanged.)
-- `GET /v1/scanners?place=` - Broadcastify feed config.
-- `GET /v1/sources` - the source registry + per-source health
-  (`OK|STALE|UNAVAILABLE`, last success/attempt, poll interval, last error).
-- **Evacuation fail-loud on `/v1/places/{place}/summary`**: same life-safety
-  contract as `/api/v1/situation` — `summary.active_evacuations` is an explicit
-  JSON `null` (with `evacuation_status: UNAVAILABLE`) when Cal OES errored,
-  `0` when Cal OES is healthy with no active zones (`OK`), and `N>0` for active
-  zones. An error never becomes a `0`.
+  `sources[]` health sidecar.
+- `GET /api/v1/places/{place}/map/{layer}.geojson` - one RFC 7946
+  `FeatureCollection` per layer for a maps client (MapLibre/Leaflet). Layers:
+  `road_incident`, `chain_control`, `road_segment`, `weather_alert`,
+  `fire_weather`, `earthquake`, `wildfire`, `evacuation`. Every feature shares a
+  `properties` envelope (`id, layer, kind, severity, severity_rank, headline,
+  source, …`) on the unified severity scale `INFO..EXTREME` (rank 0–4). Coordinates
+  are `[lng, lat]`. Event layers project from the store
+  (`internal/gridapi.ProjectEvents`); the three condition layers (`road_segment`,
+  `chain_control`, `fire_weather`) are live projections of the roads/weather
+  services. See `docs/hazard-aggregation-design.md` and `internal/hazards/CLAUDE.md`.
+
+**Fire-weather** (`conditions.fireWeather`, and the `fire_weather` geojson layer):
+`state` escalates `normal` → `elevated` (Fire Weather Watch) → `red-flag` (Red Flag
+Warning), derived only from authoritative NWS products — never a Red Flag NWS
+hasn't issued.
+
+**`source_status` honesty (geojson `metadata`, summary `domains[]`)** is
+`OK | STALE | UNAVAILABLE` — a layer is fail-loud: on source error it returns
+`UNAVAILABLE` with empty features (or `STALE` + `last_source_update` when serving a
+cached last-good fetch), never a fabricated clear state.
+
+- **Evacuation is life-safety / fail-loud** on `summary`: the invariant is *an error
+  never becomes a `0`*. A Cal OES failure is `UNAVAILABLE` →
+  `summary.active_evacuations: null` (with `evacuation_status: UNAVAILABLE`; render
+  "unknown — check Genasys"); a clean fetch with no active zones is `OK` →
+  `active_evacuations: 0` (render "no active evacuations reported", a caveated
+  confirmed-empty, not a guarantee); `N>0` for active zones. `metadata.source_url`
+  always links the authoritative Genasys viewer. Areas configured under
+  `hazards.areas` in `prefab.yaml`.
 
 **Persistence** (`internal/store`, SQLite at `grid.dbPath`, WAL mode): **the
 store is the system of record** for grid events. The canonical value is the proto
@@ -399,14 +381,15 @@ restart rehydrates events + history with no re-fetch. The in-memory TTL caches
 1. Update `prefab.yaml` with new road coordinates
 2. Test with `./bin/test-google` using new coordinates
 3. Restart server to pick up configuration changes
-4. Verify new road appears in `/api/v1/roads` response
+4. Restart server; verify the road's incidents/segments appear via
+   `/api/v1/events?layer=road_incident` and the `road_segment` map layer
 
 **Adding New Weather Locations**:
 1. Update `prefab.yaml` weather locations section, including the `zone` field
    (the NWS forecast zone containing the location — must also be listed in
    `weather.nws.zones`, or the location gets no alerts)
 2. Test with `./bin/test-weather` using new coordinates
-3. Restart server and verify in `/api/v1/weather` response
+3. Restart server and verify in the `/api/v1/conditions` response
 4. Note each location adds one `/data/2.5/weather` call per refresh interval
 
 ## AI Enhancement System

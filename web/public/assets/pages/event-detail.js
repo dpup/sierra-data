@@ -1,8 +1,8 @@
 // pages/event-detail.js — /event?id=... event detail (site spec §2
 // /events/{id}).
 //
-// Two requests: GET /v1/events/{id} (current revision) and
-// GET /v1/events/{id}/history (revisions, newest first). Renders the full
+// Two requests: GET /api/v1/events/{id} (current revision) and
+// GET /api/v1/events/{id}/history (revisions, newest first). Renders the full
 // envelope and the typed detail block as .kv definition lists, geometry on
 // a small MapLibre map (textual bbox/centroid fallback), the provenance
 // block, the AI-enhancement badge with the verbatim original text, and the
@@ -28,19 +28,19 @@ import { BASE_STYLE } from '../basemap.js';
 
 /**
  * The Event.detail oneof's protojson field names (grid.proto fields 20–30).
- * Exactly one may be present on an event; protojson uses the snake_case
+ * Exactly one may be present on an event; protojson uses the lowerCamelCase
  * proto field name as the JSON key.
  */
 export const DETAIL_FIELDS = [
   'wildfire',
   'evacuation',
-  'weather_alert',
-  'fire_weather',
+  'weatherAlert',
+  'fireWeather',
   'earthquake',
-  'road_incident',
+  'roadIncident',
   'power',
   'gauge',
-  'air_quality',
+  'airQuality',
   'network',
   'announcement',
 ];
@@ -58,19 +58,19 @@ export const ENVELOPE_FIELDS = [
   ['headline', 'text'],
   ['summary', 'text'],
   ['description', 'text'],
-  ['area_label', 'text'],
-  ['canonical_url', 'link'],
-  ['place_ids', 'list'],
+  ['areaLabel', 'text'],
+  ['canonicalUrl', 'link'],
+  ['placeIds', 'list'],
   ['effective', 'time'],
   ['expires', 'time'],
-  ['observed_at', 'time'],
-  ['ingested_at', 'time'],
+  ['observedAt', 'time'],
+  ['ingestedAt', 'time'],
   ['revision', 'number'],
 ];
 
 /**
  * Find the populated detail oneof field on an event.
- * @param {Object} event protojson Event (snake_case)
+ * @param {Object} event protojson Event (camelCase)
  * @returns {{field: string, value: Object}|null}
  */
 export function detailOf(event) {
@@ -116,10 +116,10 @@ export function geometryBounds(geometry, decoded) {
   const bbox = geometry && geometry.bbox;
   if (bbox && typeof bbox === 'object') {
     const b = {
-      minLat: Number(bbox.min_lat ?? 0),
-      minLng: Number(bbox.min_lng ?? 0),
-      maxLat: Number(bbox.max_lat ?? 0),
-      maxLng: Number(bbox.max_lng ?? 0),
+      minLat: Number(bbox.minLat ?? 0),
+      minLng: Number(bbox.minLng ?? 0),
+      maxLat: Number(bbox.maxLat ?? 0),
+      maxLng: Number(bbox.maxLng ?? 0),
     };
     const values = [b.minLat, b.minLng, b.maxLat, b.maxLng];
     if (values.every(Number.isFinite) && values.some((v) => v !== 0)) return b;
@@ -348,7 +348,7 @@ function renderEventMap(container, decoded, bounds, severity) {
       : [-120.35, 38.2];
     // Shared OSM raster basemap (basemap.js) for geographic context under the
     // event geometry; the bbox/centroid text above the map is the fallback when
-    // the map library fails to load. API data stays same-origin /v1/* via api.js.
+    // the map library fails to load. API data stays same-origin /api/v1/* via api.js.
     const map = new lib.Map({
       container,
       style: BASE_STYLE,
@@ -437,8 +437,8 @@ export function initEventPage() {
     return;
   }
 
-  const eventPath = `/v1/events/${encodeURIComponent(id)}`;
-  const historyPath = `/v1/events/${encodeURIComponent(id)}/history`;
+  const eventPath = `/api/v1/events/${encodeURIComponent(id)}`;
+  const historyPath = `/api/v1/events/${encodeURIComponent(id)}/history`;
   // Opt into the model I/O (enhancement.request/response) — the detail page
   // shows it; list endpoints omit it by default to stay lean.
   const ioParams = { enhancement_io: 'true' };
@@ -460,7 +460,7 @@ export function initEventPage() {
     let event = evRes.status === 'fulfilled' ? evRes.value : null;
     const hist = histRes.status === 'fulfilled' ? histRes.value : null;
     let revisions = sortRevisionsDesc(hist && Array.isArray(hist.revisions) ? hist.revisions : []);
-    let histNext = (hist && hist.next_page_token) || '';
+    let histNext = (hist && hist.nextPageToken) || '';
 
     if (evRes.status === 'rejected') {
       errorsEl.append(errorBlock(evRes.reason, 'Could not load the current revision.'));
@@ -472,7 +472,7 @@ export function initEventPage() {
           el(
             'div',
             'notice',
-            'Showing the newest revision from /history instead of the /events/{id} response.'
+            'Showing the newest revision from /api/v1/history instead of the /api/v1/events/{id} response.'
           )
         );
       }
@@ -501,7 +501,7 @@ export function initEventPage() {
       if (ev.enhancement) chipsEl.append(el('span', 'meta-chip ai-chip mono', 'AI-enhanced'));
 
       headlineEl.textContent = ev.headline || ev.id || '(no headline)';
-      subEl.textContent = [ev.id, ev.category, ev.area_label].filter(Boolean).join(' · ');
+      subEl.textContent = [ev.id, ev.category, ev.areaLabel].filter(Boolean).join(' · ');
 
       // Envelope — every common field, in proto order.
       const envelope = section('Envelope', ev);
@@ -601,19 +601,19 @@ export function initEventPage() {
       const prov = ev.provenance || {};
       const provSec = section('Provenance', ev.provenance);
       const pdl = el('dl', 'kv');
-      kvRow(pdl, 'source_id', prov.source_id || '—');
-      kvRow(pdl, 'source_name', prov.source_name || '—');
+      kvRow(pdl, 'sourceId', prov.sourceId || '—');
+      kvRow(pdl, 'sourceName', prov.sourceName || '—');
       kvRow(pdl, 'attribution', prov.attribution || '—');
-      if (typeof prov.source_url === 'string' && /^https?:\/\//i.test(prov.source_url)) {
-        const a = el('a', '', prov.source_url);
-        a.href = prov.source_url;
+      if (typeof prov.sourceUrl === 'string' && /^https?:\/\//i.test(prov.sourceUrl)) {
+        const a = el('a', '', prov.sourceUrl);
+        a.href = prov.sourceUrl;
         a.rel = 'noopener';
         a.target = '_blank';
-        kvRow(pdl, 'source_url', a);
+        kvRow(pdl, 'sourceUrl', a);
       } else {
-        kvRow(pdl, 'source_url', prov.source_url || '—');
+        kvRow(pdl, 'sourceUrl', prov.sourceUrl || '—');
       }
-      kvRow(pdl, 'fetched_at', prov.fetched_at ? timeCell(prov.fetched_at) : '—');
+      kvRow(pdl, 'fetchedAt', prov.fetchedAt ? timeCell(prov.fetchedAt) : '—');
       provSec.body.append(pdl);
       sectionsEl.append(provSec.panel);
 
@@ -635,9 +635,9 @@ export function initEventPage() {
           )
         );
         sec.body.append(badge);
-        if (enh.enhanced_at) {
+        if (enh.enhancedAt) {
           const when = el('div', 'muted small');
-          when.append('enhanced ', timeCell(enh.enhanced_at));
+          when.append('enhanced ', timeCell(enh.enhancedAt));
           sec.body.append(when);
         }
 
@@ -725,7 +725,7 @@ export function initEventPage() {
           revisions = sortRevisionsDesc(
             revisions.concat(Array.isArray(more.revisions) ? more.revisions : [])
           );
-          histNext = more.next_page_token || '';
+          histNext = more.nextPageToken || '';
           draw();
         } catch (err) {
           foot.append(errorBlock(err, 'Could not load more revisions.'));
@@ -744,9 +744,9 @@ export function initEventPage() {
         const head = el('div', 'rev-card-head');
         head.append(el('strong', 'mono', `rev ${rev.revision ?? 0}`));
         const observed = el('span', 'muted small');
-        observed.append('observed ', timeCell(rev.observed_at || ''));
+        observed.append('observed ', timeCell(rev.observedAt || ''));
         const ingested = el('span', 'muted small');
-        ingested.append('ingested ', timeCell(rev.ingested_at || ''));
+        ingested.append('ingested ', timeCell(rev.ingestedAt || ''));
         head.append(observed, ingested);
         const revEvent = rev.event || {};
         head.append(sevChip(revEvent.severity || 'INFO'));

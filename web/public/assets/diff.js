@@ -36,7 +36,7 @@ function joinPath(path, key) {
  * @returns {Array<{path: string, before: *, after: *, kind: 'added'|'removed'|'changed'}>}
  *   Empty array when the values are deeply equal. `before` is undefined for
  *   `added` entries; `after` is undefined for `removed` entries. Paths are
- *   dotted with bracketed indices, e.g. "geometry.bbox.min_lat", "place_ids[2]".
+ *   dotted with bracketed indices, e.g. "geometry.bbox.minLat", "placeIds[2]".
  */
 export function diffObjects(a, b) {
   const out = [];

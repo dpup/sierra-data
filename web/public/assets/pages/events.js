@@ -1,9 +1,9 @@
 // pages/events.js — /events explorer (site spec §2 /events).
 //
-// Filter bar maps 1:1 onto GET /v1/events query parameters (place, layer
+// Filter bar maps 1:1 onto GET /api/v1/events query parameters (place, layer
 // repeated, status repeated, severity_min, since, page_size, page_token —
 // v2-implementation-plan §2.3/§2.4). All filter state lives in the page URL
-// so any view is a shareable permalink; "Load more" follows next_page_token
+// so any view is a shareable permalink; "Load more" follows nextPageToken
 // and records the token of the current tail in the URL. The exact GET URL
 // behind the table renders above the results as a copyable curl line.
 //
@@ -15,10 +15,10 @@ import { get, apiURL, curlFor, ApiError } from '../api.js';
 import { sevChip, layerLabel, timeAgo, timeAbs, SEVERITY_COLORS } from '../format.js';
 
 /**
- * Event layers accepted by /v1/events' `layer` param, as the lowercase
+ * Event layers accepted by /api/v1/events' `layer` param, as the lowercase
  * slugs the API also accepts (locked in v2-implementation-plan §2.4).
  * Condition-backed layers (road_segment, chain_control) are projections,
- * not events, and never appear in /v1/events.
+ * not events, and never appear in /api/v1/events.
  */
 export const LAYER_OPTIONS = [
   'wildfire',
@@ -147,12 +147,12 @@ export function stateToSearch(state) {
 }
 
 /**
- * State -> params object for api.get('/v1/events', ...). Empty values are
+ * State -> params object for api.get('/api/v1/events', ...). Empty values are
  * skipped by apiURL; layers/statuses become repeated params. The default
  * status set is omitted (it is the server's documented default).
  * @param {{place:string, layers:string[], statuses:string[], severityMin:string,
  *          since:string, pageSize:string}} state
- * @param {string=} pageToken cursor from a previous response's next_page_token
+ * @param {string=} pageToken cursor from a previous response's nextPageToken
  * @returns {Object}
  */
 export function buildQuery(state, pageToken) {
@@ -170,7 +170,7 @@ export function buildQuery(state, pageToken) {
 /**
  * Group a PlaceList's places by kind for the place <select>, in KIND_ORDER
  * (unknown kinds last, in first-seen order), each group name-sorted.
- * @param {Array<Object>} places protojson Place messages (snake_case)
+ * @param {Array<Object>} places protojson Place messages (camelCase)
  * @returns {Array<{kind: string, places: Array<Object>}>}
  */
 export function groupPlaces(places) {
@@ -234,7 +234,7 @@ function errorBlock(err) {
 }
 
 /**
- * One results row for an Event (protojson, snake_case). Four columns:
+ * One results row for an Event (protojson, camelCase). Four columns:
  * severity badge · two-line headline+subline (layer · area · relative time) ·
  * source · r<rev>. Clicking the row runs `onSelect(ev, tr, sevColor)` to load
  * the raw JSON into the inspector; the headline stays a deep link to the event
@@ -268,14 +268,14 @@ function eventRow(ev, onSelect) {
   const sub = el('div', 'ev-sub');
   sub.append(document.createTextNode(layerLabel(ev.layer || '')));
   sub.append(el('span', 'sep', ' · '));
-  sub.append(document.createTextNode(ev.area_label || '—'));
+  sub.append(document.createTextNode(ev.areaLabel || '—'));
   sub.append(el('span', 'sep', ' · '));
-  sub.append(document.createTextNode(timeAgo(ev.observed_at || '')));
-  sub.title = timeAbs(ev.observed_at || '');
+  sub.append(document.createTextNode(timeAgo(ev.observedAt || '')));
+  sub.title = timeAbs(ev.observedAt || '');
   headTd.append(head, sub);
   tr.append(headTd);
 
-  tr.append(el('td', 'src', (ev.provenance && ev.provenance.source_id) || '—'));
+  tr.append(el('td', 'src', (ev.provenance && ev.provenance.sourceId) || '—'));
   // revision is a proto uint32; protojson omits 0.
   tr.append(el('td', 'num', 'r' + String(ev.revision ?? 0)));
 
@@ -405,7 +405,7 @@ export function initEventsPage() {
 
   sinceInput.value = toLocalInput(state.since);
 
-  // Place select: "(any place)" first; options filled from /v1/places.
+  // Place select: "(any place)" first; options filled from /api/v1/places.
   // Until (or if) that load fails, the URL-provided place is kept as a
   // provisional option so shared links never lose their filter.
   const anyPlace = document.createElement('option');
@@ -422,7 +422,7 @@ export function initEventsPage() {
 
   async function loadPlaces() {
     try {
-      const data = await get('/v1/places');
+      const data = await get('/api/v1/places');
       const groups = groupPlaces(Array.isArray(data.places) ? data.places : []);
       const current = placeSel.value;
       placeSel.textContent = '';
@@ -523,7 +523,7 @@ export function initEventsPage() {
    * default and never a chip, so the chips are exactly the URL's params.
    */
   function renderQueryBar(params) {
-    lastReqUrl = apiURL('/v1/events', params);
+    lastReqUrl = apiURL('/api/v1/events', params);
     curlEl.textContent = curlFor(lastReqUrl);
 
     qchipsEl.textContent = '';
@@ -600,7 +600,7 @@ export function initEventsPage() {
       jspan(
         'insp-placeholder',
         'Select a row to inspect its raw grid.v1.Event JSON —\n' +
-          'the exact bytes GET /v1/events returned for that occurrence.'
+          'the exact bytes GET /api/v1/events returned for that occurrence.'
       )
     );
   }
@@ -643,11 +643,11 @@ export function initEventsPage() {
 
     const params = buildQuery(state, token);
     renderQueryBar(params);
-    statusLine.textContent = 'Loading /v1/events…';
+    statusLine.textContent = 'Loading /api/v1/events…';
     statusLine.className = 'loading';
 
     try {
-      const data = await get('/v1/events', params);
+      const data = await get('/api/v1/events', params);
       const events = Array.isArray(data.events) ? data.events : [];
       let firstRow = null;
       for (const ev of events) {
@@ -659,7 +659,7 @@ export function initEventsPage() {
       // newest) row, so the raw JSON is visible without a first click.
       if (!append && firstRow) firstRow._select();
       loadedCount += events.length;
-      nextToken = data.next_page_token || '';
+      nextToken = data.nextPageToken || '';
       moreBtn.hidden = !nextToken;
       moreBtn.disabled = false;
 

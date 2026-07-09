@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"net/http"
 	"sort"
 	"time"
 	_ "time/tzdata" // Embed the IANA tz database so America/Los_Angeles resolves in minimal containers
@@ -87,7 +88,7 @@ func main() {
 
 	// Grid event store + ingest scheduler (docs/v2-implementation-plan.md):
 	// normalized hazard events persisted with revision history, per-source
-	// health, and the place directory — the /v1 foundation.
+	// health, and the place directory — the /api/v1 foundation.
 	if appConfig.Grid.DBPath == "" {
 		logging.Error(ctx, "grid.dbPath is required (default ./data/grid.db in prefab.yaml)")
 		log.Fatal("grid.dbPath is required (default ./data/grid.db in prefab.yaml)")
@@ -137,24 +138,26 @@ func main() {
 	})
 	scheduler.Start(ctx)
 
-	// /v1 entity + map API over the grid store (hand-built handlers; the
-	// census geocoder backs /v1/places/resolve?address=). Mounted at /v1/ —
-	// longest-prefix wins, so /api/ (gateway) and / (site) are unaffected.
+	// Grid API service: backs the /api/v1 GridService RPCs and the hand-built
+	// summary + .geojson gateway routes (the census geocoder powers
+	// /api/v1/places:resolve?address=).
 	censusClient := census.NewClient()
 	gridapiService := gridapi.NewService(gridStore, roadsService, weatherService, censusClient, appConfig, hazardsService)
 
 	// MCP endpoint (docs/mcp-design.md): read-only tools for LLM agents over
-	// Streamable HTTP, adapting the /v1 surface in-process.
-	mcpHandler := mcp.NewHandler(gridapiService)
+	// Streamable HTTP. The tools call the /api/v1 surface in-process against the
+	// gRPC-Gateway mux, which only exists after prefab.New wires the gateway — so
+	// MCP holds a deferred handler we point at that mux below.
+	gatewayMux := &deferredHandler{}
+	mcpHandler := mcp.NewHandler(gatewayMux)
 
 	// GridService: the proto-defined /api/v1 entity/query surface over
-	// gRPC-Gateway (docs/grpc-gateway-migration-plan.md). Being ported endpoint
-	// by endpoint; the hand-built /v1 handlers remain until each RPC reaches
-	// parity. Gateway annotations mount under /api/, which Prefab already serves.
+	// gRPC-Gateway (docs/grpc-gateway-migration-plan.md). Gateway annotations
+	// mount under /api/, which Prefab already serves.
 	gridServer := gridapi.NewGridServer(gridapiService)
 
-	// Prefab server. gRPC + gateway serve the /api/v1 GridService; the hand-built
-	// /v1 grid API, MCP, and the static site are plain HTTP handlers.
+	// Prefab server. gRPC + gateway serve the /api/v1 GridService; MCP and the
+	// static site are plain HTTP handlers.
 	server := prefab.New(
 		prefab.WithContext(ctx),
 		prefab.WithGRPCReflection(),
@@ -167,9 +170,14 @@ func main() {
 				return err
 			}
 			// Mount the hand-built summary + .geojson endpoints on the same mux.
-			return gridServer.RegisterGatewayRoutes(mux)
+			if err := gridServer.RegisterGatewayRoutes(mux); err != nil {
+				return err
+			}
+			// Point MCP at the fully-wired gateway so its tools query /api/v1
+			// in-process (same mux prefab serves at /api/).
+			gatewayMux.h = mux
+			return nil
 		}),
-		prefab.WithHTTPHandler(gridapi.HandlerPrefix, gridapiService),
 		prefab.WithHTTPHandlerFunc("/mcp", mcpHandler.ServeHTTP),
 		prefab.WithHTTPHandlerFunc("/", siteHandler),
 	)
@@ -183,9 +191,23 @@ func main() {
 	}
 }
 
+// deferredHandler is an http.Handler whose delegate is set after construction.
+// MCP needs the gRPC-Gateway mux, but that mux only exists once prefab.New wires
+// the gateway (in the WithGRPCGateway callback) — later than mcp.NewHandler runs.
+// Until the delegate is set, requests fail loud rather than silently 404.
+type deferredHandler struct{ h http.Handler }
+
+func (d *deferredHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if d.h == nil {
+		http.Error(w, "gateway not ready", http.StatusServiceUnavailable)
+		return
+	}
+	d.h.ServeHTTP(w, r)
+}
+
 // gridSourceInfo is the static registry of source display names and
 // attributions. It must match the normalizers' provenance constants (which
-// in turn match the shipped hazards Source blocks) so /v1/sources and event
+// in turn match the shipped hazards Source blocks) so /api/v1/sources and event
 // provenance agree.
 var gridSourceInfo = map[string]struct{ name, attribution string }{
 	"usgs":     {"USGS", "U.S. Geological Survey"},
@@ -200,7 +222,7 @@ var gridSourceInfo = map[string]struct{ name, attribution string }{
 // gridSourceSeeds builds the source registry rows: ids + tuning from
 // grid.sources config, names/attributions from the static registry (a
 // config id without a registry entry is seeded with its id as the name so it
-// still shows up in /v1/sources rather than failing silently).
+// still shows up in /api/v1/sources rather than failing silently).
 func gridSourceSeeds(cfg *config.Config) []store.SourceSeed {
 	ids := make([]string, 0, len(cfg.Grid.Sources))
 	for id := range cfg.Grid.Sources {

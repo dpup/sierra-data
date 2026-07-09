@@ -1,6 +1,6 @@
 // pages/sources.js — the /sources feed-health board (T16).
 //
-// Fetches GET /v1/sources (SourceList protojson, snake_case) and renders the
+// Fetches GET /api/v1/sources (SourceList protojson, camelCase) and renders the
 // ops table: unhealthy-first, row-tinted for non-OK, auto-refreshing every
 // 30s while the tab is visible. Filter state lives in the URL (?status=).
 //
@@ -34,7 +34,7 @@ export function normStatus(s) {
 }
 
 /**
- * Humanize poll_interval_seconds: 300 -> "5m", 5400 -> "1h 30m",
+ * Humanize pollIntervalSeconds: 300 -> "5m", 5400 -> "1h 30m",
  * 90 -> "1m 30s", 45 -> "45s", 172800 -> "2d". "—" for missing/invalid.
  * @param {number|string|null|undefined} seconds
  * @returns {string}
@@ -60,7 +60,7 @@ export function humanizeInterval(seconds) {
 
 /**
  * Comparator: unhealthy first (UNAVAILABLE, STALE, UNKNOWN, OK); within a
- * status group by last_success_at ascending — the longest-silent source
+ * status group by lastSuccessAt ascending — the longest-silent source
  * first, and never-succeeded (missing stamp) ahead of everything in its
  * group. Ties break on id for stable ordering across refreshes.
  * @param {Object} a Source
@@ -71,8 +71,8 @@ export function compareSources(a, b) {
   const ra = STATUS_RANK[normStatus(a.status)];
   const rb = STATUS_RANK[normStatus(b.status)];
   if (ra !== rb) return ra - rb;
-  const ta = a.last_success_at ? Date.parse(a.last_success_at) : -Infinity;
-  const tb = b.last_success_at ? Date.parse(b.last_success_at) : -Infinity;
+  const ta = a.lastSuccessAt ? Date.parse(a.lastSuccessAt) : -Infinity;
+  const tb = b.lastSuccessAt ? Date.parse(b.lastSuccessAt) : -Infinity;
   const na = Number.isNaN(ta) ? -Infinity : ta;
   const nb = Number.isNaN(tb) ? -Infinity : tb;
   if (na !== nb) return na - nb;
@@ -145,7 +145,7 @@ export function truncate(text, max = 90) {
 }
 
 /**
- * Only http(s) URLs are linkable — homepage_url is upstream-derived.
+ * Only http(s) URLs are linkable — homepageUrl is upstream-derived.
  * @param {string} url
  * @returns {boolean}
  */
@@ -280,12 +280,12 @@ export function initSourcesPage() {
     const srcTd = el('td');
     const name = s.name || s.id || '—';
     let nameEl;
-    if (isLinkableURL(s.homepage_url)) {
+    if (isLinkableURL(s.homepageUrl)) {
       nameEl = el('a', 'src', name);
-      nameEl.href = s.homepage_url;
+      nameEl.href = s.homepageUrl;
       nameEl.rel = 'noopener';
       nameEl.target = '_blank';
-      nameEl.title = s.homepage_url;
+      nameEl.title = s.homepageUrl;
     } else {
       nameEl = el('span', 'src', name);
     }
@@ -303,37 +303,37 @@ export function initSourcesPage() {
     tr.append(statusTd);
 
     // Poll interval
-    const pollTd = el('td', 'num', humanizeInterval(s.poll_interval_seconds));
-    if (s.poll_interval_seconds !== undefined && s.poll_interval_seconds !== null) {
-      pollTd.title = `${s.poll_interval_seconds}s`;
+    const pollTd = el('td', 'num', humanizeInterval(s.pollIntervalSeconds));
+    if (s.pollIntervalSeconds !== undefined && s.pollIntervalSeconds !== null) {
+      pollTd.title = `${s.pollIntervalSeconds}s`;
     }
     tr.append(pollTd);
 
     // Last success — relative + absolute, with the last attempt as a sub-line
     // so a source that is retrying but failing is visible.
     const lastTd = el('td');
-    if (s.last_success_at) lastTd.append(timeCell(s.last_success_at));
+    if (s.lastSuccessAt) lastTd.append(timeCell(s.lastSuccessAt));
     else lastTd.append(el('span', 'muted', 'never'));
-    if (s.last_attempt_at && s.last_attempt_at !== s.last_success_at) {
-      const sub = el('div', 'muted small', `attempt ${timeAgo(s.last_attempt_at)}`);
-      sub.title = s.last_attempt_at;
+    if (s.lastAttemptAt && s.lastAttemptAt !== s.lastSuccessAt) {
+      const sub = el('div', 'muted small', `attempt ${timeAgo(s.lastAttemptAt)}`);
+      sub.title = s.lastAttemptAt;
       lastTd.append(sub);
     }
     tr.append(lastTd);
 
     // Thresholds — stale_after / expire_after.
     const thTd = el('td', 'num');
-    thTd.append(el('span', '', `stale ${humanizeInterval(s.stale_after_seconds)}`));
-    thTd.append(el('div', 'muted small', `expire ${humanizeInterval(s.expire_after_seconds)}`));
+    thTd.append(el('span', '', `stale ${humanizeInterval(s.staleAfterSeconds)}`));
+    thTd.append(el('div', 'muted small', `expire ${humanizeInterval(s.expireAfterSeconds)}`));
     thTd.title = 'stale_after / expire_after';
     tr.append(thTd);
 
     // Last error — prominent red cell when the source is not OK.
     const errTd = el('td', 'wrap');
-    if (s.last_error) {
+    if (s.lastError) {
       errTd.classList.add('err-cell');
-      errTd.textContent = truncate(s.last_error); // textContent: untrusted
-      errTd.title = s.last_error;
+      errTd.textContent = truncate(s.lastError); // textContent: untrusted
+      errTd.title = s.lastError;
     } else {
       errTd.append(el('span', 'muted', '—'));
     }
@@ -388,7 +388,7 @@ export function initSourcesPage() {
           '',
           `Loaded ${timeAgo(state.loadedAt)} (${timeAbs(state.loadedAt)}) from `
         ),
-        el('code', 'inline', apiURL('/v1/sources')),
+        el('code', 'inline', apiURL('/api/v1/sources')),
         el('span', '', ` — auto-refreshes every ${REFRESH_MS / 1000}s while this tab is visible.`)
       );
     } else {
@@ -407,7 +407,7 @@ export function initSourcesPage() {
     if (state.loading) return;
     state.loading = true;
     try {
-      const data = await get('/v1/sources');
+      const data = await get('/api/v1/sources');
       state.sources = Array.isArray(data.sources) ? data.sources : [];
       state.loadedAt = new Date().toISOString();
       errorBox.textContent = '';

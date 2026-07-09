@@ -1,6 +1,6 @@
 // pages/history.js — /history archive browser (site spec §2 /history).
 //
-// Query controls map 1:1 onto GET /v1/history (place, layer, from, to,
+// Query controls map 1:1 onto GET /api/v1/history (place, layer, from, to,
 // page_size — v2-implementation-plan §2.3/§2.4); results render as a
 // chronological feed of event revisions, newest first, grouped by calendar
 // day (UTC, matching timeAbs). All query state lives in the URL so a
@@ -14,7 +14,7 @@ import { get, apiURL, curlFor, ApiError } from '../api.js';
 import { timeCell, sevChip, layerLabel } from '../format.js';
 
 /**
- * Event layers accepted by /v1/history's `layer` param, as the lowercase
+ * Event layers accepted by /api/v1/history's `layer` param, as the lowercase
  * slugs the API also accepts (locked in v2-implementation-plan §2.4).
  * Condition-backed layers (road_segment, chain_control) are projections,
  * not events, so they never appear in revision history.
@@ -124,10 +124,10 @@ export function stateToSearch(state) {
 }
 
 /**
- * State -> params object for api.get('/v1/history', ...). Empty values are
+ * State -> params object for api.get('/api/v1/history', ...). Empty values are
  * skipped by apiURL; layers become repeated `layer` params.
  * @param {{place:string, layers:string[], from:string, to:string, pageSize:string}} state
- * @param {string=} pageToken cursor from a previous response's next_page_token
+ * @param {string=} pageToken cursor from a previous response's nextPageToken
  * @returns {Object}
  */
 export function buildQuery(state, pageToken) {
@@ -218,15 +218,15 @@ function spanRow(node) {
   return tr;
 }
 
-/** One <tr> for an EventRevision (protojson, snake_case). Columns mirror the
+/** One <tr> for an EventRevision (protojson, camelCase). Columns mirror the
  * table header: Observed · Severity · Layer · Rev · Status · Event. */
 function revisionRow(rev) {
   const ev = rev.event || {};
   const row = el('tr', 'rev-row');
 
-  // observed_at: revision-level stamp, falling back to the event's.
+  // observedAt: revision-level stamp, falling back to the event's.
   const tdTime = el('td');
-  tdTime.append(timeCell(rev.observed_at || ev.observed_at || ''));
+  tdTime.append(timeCell(rev.observedAt || ev.observedAt || ''));
   row.append(tdTime);
 
   // Default enum values are omitted by protojson: absent severity is INFO.
@@ -301,7 +301,7 @@ export function initHistoryPage() {
   fromInput.value = toLocalInput(state.from);
   toInput.value = toLocalInput(state.to);
 
-  // Place select: "(any place)" first; options filled from /v1/places.
+  // Place select: "(any place)" first; options filled from /api/v1/places.
   // Until (or if) that load fails, the URL-provided place is kept as a
   // provisional option so shared links never lose their filter.
   const anyOpt = document.createElement('option');
@@ -318,7 +318,7 @@ export function initHistoryPage() {
 
   async function loadPlaces() {
     try {
-      const data = await get('/v1/places');
+      const data = await get('/api/v1/places');
       const places = Array.isArray(data.places) ? data.places : [];
       // Group by kind for scanability; PlaceKind renders as proto enum names.
       const byKind = new Map();
@@ -378,7 +378,7 @@ export function initHistoryPage() {
   }
 
   function showQuery(params) {
-    const url = apiURL('/v1/history', params);
+    const url = apiURL('/api/v1/history', params);
     queryEl.textContent = '';
     const code = el('code', 'inline', `GET ${url}`);
     const curl = el('span', 'muted small mono', `  ${curlFor(url)}`);
@@ -387,7 +387,7 @@ export function initHistoryPage() {
 
   function appendRevisions(revisions) {
     for (const rev of revisions) {
-      const key = dayKey(rev.observed_at || (rev.event && rev.event.observed_at));
+      const key = dayKey(rev.observedAt || (rev.event && rev.event.observedAt));
       if (key !== lastDayKey) {
         lastDayKey = key;
         const sep = spanRow(document.createTextNode(dayLabel(key)));
@@ -415,14 +415,14 @@ export function initHistoryPage() {
     }
     const params = buildQuery(state, pageToken);
     showQuery(params);
-    statusEl.textContent = 'Loading /v1/history…';
+    statusEl.textContent = 'Loading /api/v1/history…';
     statusEl.className = 'loading';
 
     try {
-      const data = await get('/v1/history', params);
+      const data = await get('/api/v1/history', params);
       const revisions = Array.isArray(data.revisions) ? data.revisions : [];
       appendRevisions(revisions);
-      nextToken = data.next_page_token || '';
+      nextToken = data.nextPageToken || '';
       moreBtn.hidden = !nextToken;
       moreBtn.disabled = false;
 

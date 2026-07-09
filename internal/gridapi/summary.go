@@ -16,7 +16,7 @@ import (
 	"github.com/dpup/sierra-data/internal/store"
 )
 
-// GET /v1/places/{place}/summary (plan §2.3/§2.4, task T12b-2): the one-call
+// GET /api/v1/places/{place}/summary (plan §2.3/§2.4, task T12b-2): the one-call
 // place rollup — mode (QUIET/WATCH/ACTIVE), a severity summary over the
 // place's live events, per-domain rollups (event layers merged with the live
 // condition layers), the evacuation invariant (int MAY be 0; UNAVAILABLE is an
@@ -164,7 +164,7 @@ func ComputeMode(in ModeInputs) string {
 	return ModeQuiet
 }
 
-// serveSummary handles GET /v1/places/{place}/summary, binding the concrete
+// serveSummary handles GET /api/v1/places/{place}/summary, binding the concrete
 // hazards service; serveSummaryWith carries the fakeable seam (the
 // serveConditionLayer convention).
 func (s *Service) serveSummary(w http.ResponseWriter, r *http.Request, placeKey string) {
