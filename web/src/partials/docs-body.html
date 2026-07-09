@@ -6,16 +6,19 @@
       The public contract of the Grid's <code class="inline">/api/v1</code> API. Base URL
       <code class="inline">https://data.sierragridteam.org</code>; everything lives
       under <code class="inline">/api/v1/</code>. Read-only, keyless, and CORS-open — no
-      registration or token. The gRPC RPC endpoints (events, history, places,
-      <code class="inline">places:resolve</code>, sources) return <strong>camelCase</strong>
-      protojson (<code class="inline">observedAt</code>, <code class="inline">nextPageToken</code>);
-      the hand-built <code class="inline">summary</code> and <code class="inline">.geojson</code>
-      responses stay <strong>snake_case</strong> (<code class="inline">source_status</code>,
-      <code class="inline">severity_rank</code>). Timestamps are
-      RFC&nbsp;3339, errors are <code class="inline">google.rpc.Status</code>, and every
-      response carries an ETag. Each example below is a live link into the running
+      registration or token. Responses are <strong>camelCase</strong> throughout
+      (<code class="inline">observedAt</code>, <code class="inline">nextPageToken</code>,
+      <code class="inline">sourceStatus</code>, <code class="inline">severityRank</code>) —
+      the proto RPCs via the gRPC-Gateway marshaler, the hand-built
+      <code class="inline">.geojson</code> layers via matching camelCase keys.
+      Timestamps are RFC&nbsp;3339, errors are gRPC-standard
+      <code class="inline">{code, codeName, message, details}</code>, and most reads
+      carry an ETag (<code class="inline">If-None-Match</code> → 304). The full
+      machine-readable contract is the OpenAPI spec at
+      <a href="/api/openapi.json"><code class="inline">/api/openapi.json</code></a>.
+      Each example below is a live link into the running
       service: click any <span class="chip-get"><b>GET</b> /api/v1/…</span> to see the exact
-      JSON a client receives. A feed's <code class="inline">source_status</code> is
+      JSON a client receives. A feed's <code class="inline">sourceStatus</code> is
       <code class="inline">OK</code>, <code class="inline">STALE</code>, or
       <code class="inline">UNAVAILABLE</code>; an unavailable feed is reported as such,
       never as an all-clear (see §6).
@@ -24,6 +27,7 @@
   <div class="badges">
     <span class="chip chip-green">no key required</span>
     <span class="chip chip-blue">CORS-open</span>
+    <a class="chip chip-blue" href="/api/openapi.json">OpenAPI spec</a>
   </div>
 </div>
 

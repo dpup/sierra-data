@@ -16,6 +16,14 @@ proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 
 ## 2026-07-09
 
+### Added — the OpenAPI spec is now published
+
+`GET /api/openapi.json` serves the generated OpenAPI (Swagger 2.0) description of
+the `/api/v1` surface (protoc-gen-openapiv2, embedded). The `/docs` page links it.
+Previously the spec was only a repo artifact.
+
+## 2026-07-09
+
 ### Fixed — road incidents now attach to road corridors
 
 `GET /api/v1/events?place={corridor}&layer=road_incident` (the "road alerts on a

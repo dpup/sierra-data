@@ -189,6 +189,13 @@ func main() {
 			return nil
 		}),
 		prefab.WithHTTPHandlerFunc("/mcp", mcpHandler.ServeHTTP),
+		// Publish the generated OpenAPI spec for /api/v1 (protoc-gen-openapiv2).
+		// Exact path, so it wins over the gateway's /api/ subtree mount.
+		prefab.WithHTTPHandlerFunc("/api/openapi.json", func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Cache-Control", "public, max-age=300")
+			_, _ = w.Write(gridv1.OpenAPISpec)
+		}),
 		prefab.WithHTTPHandlerFunc("/", siteHandler),
 	)
 

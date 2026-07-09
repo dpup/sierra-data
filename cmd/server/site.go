@@ -26,9 +26,9 @@ var siteContentTypes = map[string]string{
 	".ico":     "image/x-icon",
 }
 
-// siteHandler serves the embedded site at "/". It only ever sees paths that
-// no longer prefab mount claimed (/api/, /v1/, the swagger docs are separate
-// longer-prefix mounts), so it doesn't need to route around them.
+// siteHandler serves the embedded site at "/". It only ever sees paths that no
+// more-specific prefab mount claimed (/api/ gateway, /mcp, /api/openapi.json),
+// so it doesn't need to route around them.
 //
 // Caching: HTML is no-cache (pages are the deploy unit — a new deploy must
 // show up on reload); /assets/* revalidates every 5 minutes (app code
