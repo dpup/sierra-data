@@ -1,13 +1,13 @@
 // Package gridapi holds the shared backing logic for the /api/v1 data API
 // (docs/grpc-gateway-migration-plan.md, docs/v2-api-spec.md). The Service type
-// carries the dependencies and hand-built handlers that both the gRPC GridServer
-// (grpc.go, the proto RPCs served camelCase over gRPC-Gateway) and the two
-// hand-built gateway routes — the place summary and the .geojson map layers —
-// delegate to. The Service is no longer itself an http.Handler. The hand-built
-// summary/map-layer responses are protojson with UseProtoNames (snake_case on the
-// wire, per those endpoints' contracts); the proto RPCs are marshaled by the
-// gateway (camelCase). ETag/If-None-Match is not yet wired (deferred; see the
-// migration plan §4).
+// carries the dependencies and helpers that both the gRPC GridServer (grpc.go,
+// the proto RPCs served camelCase over gRPC-Gateway — including GetPlaceSummary
+// and GetConditions) and the one remaining hand-built gateway route (the
+// .geojson map layers) delegate to. The Service is no longer itself an
+// http.Handler. The whole surface is camelCase — the proto RPCs via the gateway
+// marshaler, the hand-built .geojson via camelCase json struct tags. Conditional
+// GET (ETag/If-None-Match -> 304) is wired via prefab's etag plugin on most read
+// RPCs (see grpc.go) and the .geojson keeps its own body-hash ETag.
 package gridapi
 
 import (
@@ -20,14 +20,10 @@ import (
 	"github.com/dpup/sierra-data/internal/store"
 )
 
-// Cache-Control max-age for the two hand-built endpoints that write through
-// writeJSON: the place summary (entities) and the .geojson map layers
-// (conditions cadence). Store-backed reads revalidate fast (ingest ticks are
-// 2–5 min).
-const (
-	maxAgeEntities   = 30
-	maxAgeConditions = 60
-)
+// maxAgeConditions is the Cache-Control max-age for the .geojson map layers (the
+// one hand-built endpoint that writes through writeJSON) — the conditions
+// cadence; store-backed reads revalidate fast (ingest ticks are 2–5 min).
+const maxAgeConditions = 60
 
 // WeatherAPI is the slice of WeatherService the GetConditions RPC and the
 // fire_weather map layer consume.

@@ -2,6 +2,16 @@ package geojson
 
 import "github.com/dpup/sierra-data/internal/lib/geo"
 
+// PointInOrNearGeometry reports whether (lat, lng) is inside a polygon geometry
+// (exact point-in-polygon) OR within meters of a line geometry (corridor
+// proximity). It is how a point event attaches to a place whether that place is
+// an area polygon or a road-corridor LineString — used by both the ingest-time
+// attachment (store.matchPlaces) and resolve (store.PlacesContaining), keeping
+// the two in lockstep.
+func PointInOrNearGeometry(lat, lng float64, g *Geom, meters float64) bool {
+	return PointInGeometry(lat, lng, g) || PointNearLine(lat, lng, g, meters)
+}
+
 // PointNearLine reports whether (lat, lng) is within meters of a LineString or
 // MultiLineString geometry — the minimum great-circle distance from the point to
 // any of the line's segments is <= meters. Other geometry types return false

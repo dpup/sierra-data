@@ -266,8 +266,11 @@ proto (`api/grid/v1/grid.proto`) is served over the gateway that Prefab mounts a
 everything from the grid event store. Field names are **camelCase** (protojson
 `UseProtoNames:false`), timestamps RFC 3339, errors gRPC-standard
 `{code, codeName, message, details}` with the mapped HTTP status. gRPC reflection
-is on. Conditional-GET/ETag is not yet wired (deferred behind a future prefab
-`WithETag`). The prior hand-built REST surfaces (the old `/api/v1/roads|weather|
+is on. Conditional GET (ETag/If-None-Match -> 304) is wired via prefab's `etag`
+plugin on most read RPCs — event detail, the event/history lists, and places
+(`GetPlaceSummary`/`GetConditions`/`ListSources`/`ResolvePlace`/`ListScanners`
+are not yet guarded); the `.geojson` keeps its own body-hash ETag. The prior
+hand-built REST surfaces (the old `/api/v1/roads|weather|
 hazards|situation|incidents` and the snake_case `/v1`) have all been **removed** —
 they fold into the endpoints below.
 
@@ -347,7 +350,7 @@ cached last-good fetch), never a fabricated clear state.
   `summary.activeEvacuations: null` (with `evacuationStatus: UNAVAILABLE`; render
   "unknown — check Genasys"); a clean fetch with no active zones is `OK` →
   `activeEvacuations: 0` (render "no active evacuations reported", a caveated
-  confirmed-empty, not a guarantee); `N>0` for active zones. `metadata.source_url`
+  confirmed-empty, not a guarantee); `N>0` for active zones. `metadata.sourceUrl`
   always links the authoritative Genasys viewer. Areas configured under
   `hazards.areas` in `prefab.yaml`.
 

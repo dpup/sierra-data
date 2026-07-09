@@ -45,6 +45,50 @@ func TestEventVersion(t *testing.T) {
 	assert.Equal(t, int64(2), rev)
 }
 
+func TestDataVersion(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	seedSource(t, s, "usgs")
+
+	v0, err := s.DataVersion(ctx)
+	require.NoError(t, err)
+	assert.Zero(t, v0, "empty store")
+
+	ev := testEvent("usgs:q1", gridv1.Severity_MODERATE, gridv1.EventStatus_ACTIVE, "M4.2 near Murphys")
+	_, err = s.UpsertEvent(ctx, ev)
+	require.NoError(t, err)
+	v1, err := s.DataVersion(ctx)
+	require.NoError(t, err)
+	assert.Greater(t, v1, v0, "a new event bumps the version")
+
+	// Hash-equal no-op re-upsert: the version must NOT move (else every idle poll
+	// would invalidate every list ETag).
+	same := proto.Clone(ev).(*gridv1.Event)
+	same.ObservedAt = timestamppb.New(baseTime.Add(time.Minute))
+	same.Provenance.FetchedAt = timestamppb.New(baseTime.Add(time.Minute))
+	_, err = s.UpsertEvent(ctx, same)
+	require.NoError(t, err)
+	v2, err := s.DataVersion(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, v1, v2, "a hash-equal no-op must not bump the version")
+
+	// A content change bumps it.
+	changed := proto.Clone(ev).(*gridv1.Event)
+	changed.Headline = "M4.3 near Murphys (revised)"
+	_, err = s.UpsertEvent(ctx, changed)
+	require.NoError(t, err)
+	v3, err := s.DataVersion(ctx)
+	require.NoError(t, err)
+	assert.Greater(t, v3, v2, "a content change bumps the version")
+
+	// A pure status transition (resolve) also bumps it — this is the never-stale-304
+	// guarantee: a list result changing because an event resolved must invalidate.
+	require.NoError(t, s.TransitionEvents(ctx, []string{"usgs:q1"}, gridv1.EventStatus_RESOLVED, baseTime.Add(time.Hour)))
+	v4, err := s.DataVersion(ctx)
+	require.NoError(t, err)
+	assert.Greater(t, v4, v3, "a lifecycle transition bumps the version")
+}
+
 func TestUpsertRevisionGating(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)

@@ -15,15 +15,8 @@ import (
 	"github.com/dpup/sierra-data/internal/store"
 )
 
-// GetPlaceSummary (GET /api/v1/places/{place}/summary): the one-call place
-// rollup — mode (QUIET/WATCH/ACTIVE), a severity summary over the place's live
-// events, per-domain rollups (event layers merged with the live condition
-// layers), the evacuation invariant (int MAY be 0; UNAVAILABLE is an explicit
-// null — an error never becomes a 0), and a source-health sidecar.
-//
-// It is a proto RPC (gRPC-Gateway, camelCase) like the rest of the surface;
-// active_evacuations is a google.protobuf.Int32Value so it serializes as an
-// explicit JSON null under the gateway's EmitUnpopulated marshaler.
+// This file holds the place-summary projection (buildPlaceSummary) and the pure
+// ComputeMode rule table. GetPlaceSummary (the RPC) lives in grpc.go.
 
 // Mode values (plan §2.4). Ordered by escalation; the string is the wire value.
 const (

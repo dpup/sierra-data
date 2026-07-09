@@ -139,8 +139,7 @@ func (s *Store) PlacesContaining(ctx context.Context, lat, lng float64) ([]*grid
 			lng < minLng-corridorBufferDeg || lng > maxLng+corridorBufferDeg {
 			continue
 		}
-		if geojson.PointInGeometry(lat, lng, g) ||
-			geojson.PointNearLine(lat, lng, g, corridorBufferMeters) {
+		if geojson.PointInOrNearGeometry(lat, lng, g, corridorBufferMeters) {
 			matched = append(matched, p)
 		}
 	}

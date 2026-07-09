@@ -266,9 +266,9 @@ func evacEvent(id, level string, status gridv1.EventStatus) *gridv1.Event {
 	}
 }
 
-// TestSummary_ShapeThroughRouter: full router path (Hazards unwired) — the
-// exact plan §2.3 shape, snake_case spot checks on the raw JSON, the seeded
-// fixture rollup, and the ETag/Cache-Control policy.
+// TestSummary_Shape: buildPlaceSummary rendered through the gateway marshaler
+// (Hazards unwired) — the camelCase wire shape, the explicit evac null, and the
+// seeded-fixture rollup (severity summary, top events, domains, source health).
 func TestSummary_Shape(t *testing.T) {
 	s := newTestService(t) // Hazards nil => condition layers UNAVAILABLE
 	rec := getSummaryWith(t, s, nil, "calaveras")
@@ -409,8 +409,12 @@ func TestSummary_EvacInvariant(t *testing.T) {
 		s := newTestService(t)
 		seedSource(t, s.Store, "caloes")
 		recordErr(t, s.Store, "caloes")
-		out := decodeSummary(t, getSummaryWith(t, s, condOKBuilder("normal"), "calaveras"))
+		rec := getSummaryWith(t, s, condOKBuilder("normal"), "calaveras")
+		out := decodeSummary(t, rec)
 		assert.Nil(t, out.Summary.ActiveEvacuations)
+		// A *int decodes both JSON null and an omitted key to nil, so assert the
+		// raw bytes: UNAVAILABLE must be an EXPLICIT null, never an absent field.
+		assert.Contains(t, rec.Body.String(), `"activeEvacuations":null`, "null must be explicit, not omitted")
 		assert.Equal(t, "UNAVAILABLE", out.Summary.EvacuationStatus)
 		assert.NotEqual(t, ModeQuiet, out.Mode, "unknown evac state is never quiet")
 	})

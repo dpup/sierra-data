@@ -324,6 +324,13 @@ func (s *Store) EventVersion(ctx context.Context, id string) (revision int64, ok
 // (it never yields a stale 304). It is deliberately coarse — any write anywhere
 // invalidates every list validator — which is the correct bias for life-safety
 // data.
+//
+// TODO(perf): COUNT(*) scans, so its cost grows with the unbounded revision
+// history. MAX(rowid) would be O(log n) and equally monotonic (rowid strictly
+// increases on append, no deletes), but it trips a modernc.org/sqlite
+// "database disk image is malformed" quirk on the sandbox's overlay filesystem
+// that COUNT(*) does not — so the swap needs validating on a real disk/EFS
+// before it lands. At current history size the COUNT is sub-millisecond.
 func (s *Store) DataVersion(ctx context.Context) (int64, error) {
 	var n int64
 	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_revisions`).Scan(&n); err != nil {
@@ -507,12 +514,16 @@ func upsertGeo(tx *sql.Tx, ev *gridv1.Event) error {
 // origin->destination chord (not the road's true path), so the buffer has to
 // absorb both the chord-vs-road deviation on these short mountain sections and
 // the few-hundred-metre slop in CHP/Caltrans incident coordinates. Tune here.
-// corridorBufferDeg is a loose degree-margin (>= the buffer, ~1° ≈ 111 km) used
-// only to widen the cheap bbox prefilter so a point near a zero-width line still
-// reaches the exact PointNearLine test.
+// corridorBufferDeg is a loose degree-margin used only to widen the cheap bbox
+// prefilter (in PlacesContaining) so a point near a zero-width corridor line
+// still reaches the exact PointNearLine test. ~1° of latitude ≈ 111 km; the 1.3
+// factor is deliberate slack (covers the ~cos(lat) shrink of a longitude degree
+// at the service-area latitude and keeps the prefilter safely inclusive — the
+// exact test is authoritative, so an over-wide prefilter only costs a few extra
+// distance checks, never a missed attachment).
 const (
 	corridorBufferMeters = 1500
-	corridorBufferDeg    = corridorBufferMeters/111000.0*1.3 + 0.0
+	corridorBufferDeg    = corridorBufferMeters / 111000.0 * 1.3
 )
 
 // matchPlaces computes the geometric event->place attachments.
@@ -566,10 +577,8 @@ func (s *Store) matchPlaces(tx *sql.Tx, ev *gridv1.Event) ([]string, error) {
 	for _, pl := range places {
 		if pointLike {
 			// Polygon places: exact point-in-polygon. Corridor (LineString) places:
-			// attach when the point is within corridorBufferMeters of the road line
-			// (PointNearLine is a no-op for non-line geoms, so this is safe for all).
-			if geojson.PointInGeometry(centroid.GetLat(), centroid.GetLng(), pl.geom) ||
-				geojson.PointNearLine(centroid.GetLat(), centroid.GetLng(), pl.geom, corridorBufferMeters) {
+			// within corridorBufferMeters of the road line. Same test resolve uses.
+			if geojson.PointInOrNearGeometry(centroid.GetLat(), centroid.GetLng(), pl.geom, corridorBufferMeters) {
 				matched = append(matched, pl.id)
 			}
 			continue

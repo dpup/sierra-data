@@ -76,9 +76,16 @@ consumer from `/v1/*` to `/api/v1/*` and update field casing.
   work. Coverage: `events/{id}` + `.../history` (keyed on the event revision);
   `events` + `history` lists (a global data-version that bumps on any event
   change, plus the filter set); `places` + `places/{place}` (the directory is
-  static within a deploy); and the hand-built `.geojson` (body-hash). The
-  `summary` endpoint dropped its body-hash `ETag` when it moved to a proto RPC.
-  Not yet instrumented: `conditions`, `sources`, `places:resolve`, `scanners`.
+  static within a deploy); and the hand-built `.geojson` (body-hash). Not yet
+  instrumented: `conditions`, `sources`, `places:resolve`, `scanners`.
+- **`summary` caching regressed:** moving to the `GetPlaceSummary` proto RPC
+  dropped both its body-hash `ETag` **and** its `Cache-Control: public, max-age=30`
+  — the endpoint is now uncached (no conditional GET, no max-age). A summary
+  `ETag` would have to key off event **and** live-condition freshness, so it was
+  deferred; expect higher backend load on this endpoint until it's re-added.
+- **`sources[].lastSuccessAt` (summary) shape change:** for a never-succeeded
+  source it is now an explicit `null` (was an omitted key) — a consequence of the
+  proto move (protojson `EmitUnpopulated`).
   (Wired via prefab 0.6.0's `etag` plugin.)
 
 **Endpoint map (`/v1` → `/api/v1`):**

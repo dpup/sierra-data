@@ -8,10 +8,6 @@ import (
 	"strings"
 )
 
-// contentTypeJSON is the content type the hand-built summary endpoint writes
-// through writeJSON (the .geojson map layers pass "application/geo+json").
-const contentTypeJSON = "application/json"
-
 // writeJSON writes body with Cache-Control public,max-age and a strong ETag,
 // answering If-None-Match with 304. It writes any content type — the ETag input
 // includes the content type so two renderings never share a validator.

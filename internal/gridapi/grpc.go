@@ -176,8 +176,11 @@ func (g *GridServer) GetEvent(ctx context.Context, req *gridv1.GetEventRequest) 
 		return nil, notFoundErr("unknown event: %q", req.GetId())
 	}
 	// The body depends on the revision and whether the large enhancement I/O
-	// fields are included, so both key the validator.
-	if err := etag.Guard(ctx, etag.Weak(fmt.Sprintf("%s:%d:%t", req.GetId(), rev, req.GetEnhancementIo()))); err != nil {
+	// fields are included; placesVersion is folded in too so a redeploy that
+	// re-attaches this event to different places (place_ids live in the body but
+	// can change without a revision bump — see store.refreshEventPlaces) doesn't
+	// serve a stale 304.
+	if err := etag.Guard(ctx, etag.Weak(fmt.Sprintf("%s:%s:%d:%t", g.placesVersion, req.GetId(), rev, req.GetEnhancementIo()))); err != nil {
 		return nil, err // 304 Not Modified — the blob load below is skipped
 	}
 	ev, err := g.svc.Store.GetEvent(ctx, req.GetId())
@@ -205,7 +208,9 @@ func (g *GridServer) GetEventHistory(ctx context.Context, req *gridv1.GetEventHi
 	if !ok {
 		return nil, notFoundErr("unknown event: %q", req.GetId())
 	}
-	tag := etag.Weak(fmt.Sprintf("%s:%d:%d:%s:%t", req.GetId(), rev, req.GetPageSize(), req.GetPageToken(), req.GetEnhancementIo()))
+	// placesVersion folded in for the same reason as GetEvent (revision alone
+	// misses a place re-attachment that rewrites the blob without a revision).
+	tag := etag.Weak(fmt.Sprintf("%s:%s:%d:%d:%s:%t", g.placesVersion, req.GetId(), rev, req.GetPageSize(), req.GetPageToken(), req.GetEnhancementIo()))
 	if err := etag.Guard(ctx, tag); err != nil {
 		return nil, err // 304 — skip the history query + blob rehydrate
 	}

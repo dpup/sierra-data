@@ -14,7 +14,12 @@ Every row stores the full `grid.v1` proto as a `BLOB`; the scalar columns
 `observed_at`, …) exist **only as query indexes** and are always re-derivable from
 the blob. Every read path (`GetEvent`, `QueryEvents`, `EventHistory`, place/source
 reads) rehydrates from the blob, never from the columns — so a column and the blob
-can never drift into two answers. When you add a filterable field, add a column
+can never drift into two answers. (The two deliberate exceptions are the ETag
+validators `EventVersion` — `SELECT revision` — and `DataVersion` —
+`MAX(rowid)` over `event_revisions`: they read a column/rowid *on purpose*, never
+rehydrating, because they must be cheap and they only ever feed an opaque
+change-detection tag, never a response body. The `revision` column is written
+atomically with the blob, so it can't drift from it.) When you add a filterable field, add a column
 **and** keep writing it from the blob at upsert; never let a column become the only
 home of a value. `event_geo` (R*Tree) + `event_geo_map` index geometry bboxes for
 spatial queries; `event_places` is the precomputed event→place join so the hot
@@ -75,7 +80,7 @@ instantly. Rows predating the `last_seen_at` migration (value 0) fall back to
 
 ## `event_places` recompute — including the hash-equal path
 
-`matchPlaces` computes geometric attachments (point → PIP; polygon → bbox-intersect
+`matchPlaces` computes geometric attachments (point → PIP for polygon places, or within a ~1.5 km buffer of a corridor **LineString** via `geojson.PointNearLine`/`PointInOrNearGeometry`; polygon → bbox-intersect
 + permissive containment; over-attach beats missing a perimeter that straddles a
 boundary), then `UpsertEvent` **unions** those with the caller's preset
 `place_ids` (e.g. the NWS zone→area mapping) — preset ids are never dropped.

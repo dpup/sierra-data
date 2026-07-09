@@ -163,16 +163,19 @@ func main() {
 		prefab.WithContext(ctx),
 		prefab.WithGRPCReflection(),
 		// Conditional GET (ETag/If-None-Match -> 304) for RPCs that call
-		// etag.Guard — GetEvent/GetEventHistory today, keyed off the cheap event
-		// revision so a match skips the blob load. The hand-built summary/.geojson
-		// routes bypass the gRPC interceptor and keep their own body-hash ETag.
+		// etag.Guard — event detail (revision), the event/history lists
+		// (DataVersion + filters), and places (per-process nonce) — so a match
+		// skips the expensive load. The hand-built .geojson route bypasses the
+		// gRPC interceptor and keeps its own body-hash ETag. (GetPlaceSummary is
+		// not yet guarded.)
 		prefab.WithPlugin(etag.Plugin()),
 		prefab.WithGRPCService(&gridv1.GridService_ServiceDesc, gridServer),
 		prefab.WithGRPCGateway(func(ctx context.Context, mux *runtime.ServeMux, endpoint string, opts []grpc.DialOption) error {
 			if err := gridv1.RegisterGridServiceHandlerFromEndpoint(ctx, mux, endpoint, opts); err != nil {
 				return err
 			}
-			// Mount the hand-built summary + .geojson endpoints on the same mux.
+			// Mount the hand-built .geojson endpoint on the same mux (summary is
+			// now the GetPlaceSummary RPC).
 			if err := gridServer.RegisterGatewayRoutes(mux); err != nil {
 				return err
 			}
