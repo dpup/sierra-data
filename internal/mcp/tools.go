@@ -78,7 +78,7 @@ func (s *Server) registerTools() []tool {
 			Description: "The headline call: what's happening at a place, address, or lat,lng in the " +
 				"central Sierra (Calaveras/Tuolumne). Returns the area mode (QUIET/WATCH/ACTIVE), " +
 				"per-domain status and counts (fire/evacuation/weather/roads/seismic), top headlines, " +
-				"evacuation status (active_evacuations is an explicit null when the source is UNAVAILABLE " +
+				"evacuation status (activeEvacuations is an explicit null when the source is UNAVAILABLE " +
 				"= unknown, 0 when confirmed none, N when active — never treat null/absence as safe), and " +
 				"per-source freshness. Reference only; verify with official sources.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"location":{"type":"string","description":"a place slug/id (e.g. \"ebbetts-pass\"), a street address, or \"lat,lng\""}},"required":["location"]}`),
@@ -94,8 +94,8 @@ func (s *Server) registerTools() []tool {
 				"a sub-type question (collisions vs. hazards vs. closures), or a count/tally, scope broadly " +
 				"— pass a county/area name or a corridor slug (e.g. location \"Calaveras County\", layer " +
 				"\"road_incident\") — and filter or count the returned rows yourself; each row's headline and " +
-				"area_label carry the road name and incident type. Raise limit (max 200) and follow " +
-				"next_page_token to get the full set. (grid_situation already gives per-domain active counts " +
+				"areaLabel carry the road name and incident type. Raise limit (max 200) and follow " +
+				"nextPageToken to get the full set. (grid_situation already gives per-domain active counts " +
 				"for a single place.)",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"location":{"type":"string","description":"place slug/id, address, or lat,lng to scope to"},"layer":{"type":"string","description":"wildfire|evacuation|weather_alert|earthquake|road_incident"},"severity_min":{"type":"string","description":"INFO|MINOR|MODERATE|SEVERE|EXTREME"},"status":{"type":"string","description":"default ACTIVE,SCHEDULED; pass RESOLVED/EXPIRED to see closed"},"since":{"type":"string","description":"RFC3339; only events observed at/after"},"limit":{"type":"integer"},"page_token":{"type":"string"}}}`),
 			Handler:     s.handleEvents,
@@ -191,7 +191,7 @@ func (s *Server) handleEvents(ctx context.Context, args map[string]interface{}) 
 	events := leanEvents(asArray(body["events"]))
 	out := map[string]interface{}{"events": events, "count": len(events)}
 	if t, ok := body["nextPageToken"]; ok && t != "" {
-		out["next_page_token"] = t
+		out["nextPageToken"] = t
 	}
 	return out, nil
 }
@@ -306,7 +306,7 @@ func (s *Server) handleHistory(ctx context.Context, args map[string]interface{})
 	}
 	out := map[string]interface{}{"revisions": revs, "count": len(revs)}
 	if t, ok := body["nextPageToken"]; ok && t != "" {
-		out["next_page_token"] = t
+		out["nextPageToken"] = t
 	}
 	return out, nil
 }

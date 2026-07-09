@@ -1,14 +1,13 @@
 package gridapi
 
 import (
-	"encoding/json"
-	"errors"
-	"fmt"
-	"net/http"
+	"context"
 	"sort"
 	"strings"
 	"sync"
-	"time"
+
+	"google.golang.org/protobuf/types/known/timestamppb"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
 	"github.com/dpup/sierra-data/internal/config"
@@ -16,14 +15,15 @@ import (
 	"github.com/dpup/sierra-data/internal/store"
 )
 
-// GET /api/v1/places/{place}/summary (plan §2.3/§2.4, task T12b-2): the one-call
-// place rollup — mode (QUIET/WATCH/ACTIVE), a severity summary over the
-// place's live events, per-domain rollups (event layers merged with the live
-// condition layers), the evacuation invariant (int MAY be 0; UNAVAILABLE is an
-// explicit null — an error never becomes a 0), and a source-health sidecar.
+// GetPlaceSummary (GET /api/v1/places/{place}/summary): the one-call place
+// rollup — mode (QUIET/WATCH/ACTIVE), a severity summary over the place's live
+// events, per-domain rollups (event layers merged with the live condition
+// layers), the evacuation invariant (int MAY be 0; UNAVAILABLE is an explicit
+// null — an error never becomes a 0), and a source-health sidecar.
 //
-// The response is a hand-built snake_case JSON document (NOT protojson): the
-// evac null must be an explicit JSON null, exactly like /api/v1/situation.
+// It is a proto RPC (gRPC-Gateway, camelCase) like the rest of the surface;
+// active_evacuations is a google.protobuf.Int32Value so it serializes as an
+// explicit JSON null under the gateway's EmitUnpopulated marshaler.
 
 // Mode values (plan §2.4). Ordered by escalation; the string is the wire value.
 const (
@@ -31,62 +31,6 @@ const (
 	ModeWatch  = "WATCH"
 	ModeActive = "ACTIVE"
 )
-
-// summaryResponse is the exact plan §2.3 JSON shape the site codes against.
-type summaryResponse struct {
-	Place       string         `json:"place"`
-	PlaceID     string         `json:"place_id"`
-	PlaceName   string         `json:"place_name"`
-	GeneratedAt string         `json:"generated_at"`
-	Mode        string         `json:"mode"`
-	Summary     summaryBlock   `json:"summary"`
-	Domains     []domainBlock  `json:"domains"`
-	Sources     []sourceHealth `json:"sources"`
-}
-
-type summaryBlock struct {
-	HighestSeverity     string         `json:"highest_severity"`
-	HighestSeverityRank int            `json:"highest_severity_rank"`
-	SeverityCounts      map[string]int `json:"severity_counts"`
-	TotalActive         int            `json:"total_active"`
-	// ActiveEvacuations is the count of ACTIVE evacuation events in this place
-	// while the Cal OES source is OK/STALE (MAY be 0 — a caveated
-	// confirmed-empty), and an explicit null while UNAVAILABLE: a client MUST
-	// render null as "unknown — check Genasys", never as zero.
-	ActiveEvacuations *int       `json:"active_evacuations"`
-	EvacuationStatus  string     `json:"evacuation_status"`
-	TopEvents         []topEvent `json:"top_events"`
-}
-
-type topEvent struct {
-	ID           string `json:"id"`
-	Layer        string `json:"layer"` // lowercase layer slug ("weather_alert")
-	Severity     string `json:"severity"`
-	SeverityRank int    `json:"severity_rank"`
-	Headline     string `json:"headline"`
-	Source       string `json:"source"` // provenance source id ("usgs")
-}
-
-type domainBlock struct {
-	Domain          string           `json:"domain"`
-	Status          string           `json:"status"` // worst source_status across the domain's layers
-	HighestSeverity string           `json:"highest_severity"`
-	ActiveCount     int              `json:"active_count"`
-	Headlines       []domainHeadline `json:"headlines"` // top 3 by severity
-}
-
-type domainHeadline struct {
-	ID       string `json:"id"`
-	Severity string `json:"severity"`
-	Headline string `json:"headline"`
-}
-
-// sourceHealth is one registry row's health (id, status, last_success_at).
-type sourceHealth struct {
-	ID            string `json:"id"`
-	Status        string `json:"status"`
-	LastSuccessAt string `json:"last_success_at,omitempty"` // omitted when never succeeded
-}
 
 // ModeInputs distills a place's live signals for ComputeMode. Severities are
 // over ACTIVE events only — SCHEDULED watches inform the domains/summary but
@@ -164,28 +108,14 @@ func ComputeMode(in ModeInputs) string {
 	return ModeQuiet
 }
 
-// serveSummary handles GET /api/v1/places/{place}/summary, binding the concrete
-// hazards service; serveSummaryWith carries the fakeable seam (the
-// serveConditionLayer convention).
-func (s *Service) serveSummary(w http.ResponseWriter, r *http.Request, placeKey string) {
-	var hb hazardsBuilder
-	if s.Hazards != nil {
-		// Keep a nil *hazards.Service a nil INTERFACE (see serveMapLayer).
-		hb = s.Hazards
-	}
-	s.serveSummaryWith(w, r, hb, placeKey)
-}
-
-func (s *Service) serveSummaryWith(w http.ResponseWriter, r *http.Request, hb hazardsBuilder, placeKey string) {
-	ctx := r.Context()
+// buildPlaceSummary computes the place rollup as a proto PlaceSummary. It
+// returns store.ErrNotFound for an unknown place (the RPC maps it to NotFound);
+// the caller passes the concrete hazards builder (or a nil interface, which
+// makes the condition layers UNAVAILABLE — fail loud).
+func (s *Service) buildPlaceSummary(ctx context.Context, hb hazardsBuilder, placeKey string) (*gridv1.PlaceSummary, error) {
 	place, err := s.Store.GetPlace(ctx, placeKey)
-	if errors.Is(err, store.ErrNotFound) {
-		notFound(w, fmt.Sprintf("unknown place: %q", placeKey))
-		return
-	}
 	if err != nil {
-		internal(ctx, w, err)
-		return
+		return nil, err
 	}
 
 	// The place's live event set: ACTIVE+SCHEDULED (the "what's happening now"
@@ -200,8 +130,7 @@ func (s *Service) serveSummaryWith(w http.ResponseWriter, r *http.Request, hb ha
 	for {
 		page, next, err := s.Store.QueryEvents(ctx, q)
 		if err != nil {
-			internal(ctx, w, err)
-			return
+			return nil, err
 		}
 		events = append(events, page...)
 		if next == "" {
@@ -212,65 +141,60 @@ func (s *Service) serveSummaryWith(w http.ResponseWriter, r *http.Request, hb ha
 
 	sources, err := s.Store.ListSources(ctx)
 	if err != nil {
-		internal(ctx, w, err)
-		return
+		return nil, err
 	}
 
 	// Condition layers (live projections of the roads/weather services): fetch
 	// once each, feeding the roads/fire domain merges and the fire-weather mode
 	// signal. The three builds do independent upstream I/O, so fan them out
-	// concurrently (mirroring the /situation handler) rather than paying the sum
-	// of their latencies on the request path.
+	// concurrently rather than paying the sum of their latencies.
 	area, covered := s.resolveHazardArea(place)
 	// fire_weather is zone-scoped: an out-of-coverage place inherits no region's
-	// product — a confirmed-empty OK (not "" which worstStatus ranks UNAVAILABLE),
-	// contributing nothing to the fire domain or the mode signal.
+	// product — a confirmed-empty OK (not "" which worstStatus ranks UNAVAILABLE).
 	condChain, condSegment := conditionResult{}, conditionResult{}
 	condFireWx := conditionResult{status: "OK"}
 	var cwg sync.WaitGroup
 	cwg.Add(2)
-	go func() { defer cwg.Done(); condChain = buildCondition(r, hb, area, hazards.LayerChainControl) }()
-	go func() { defer cwg.Done(); condSegment = buildCondition(r, hb, area, hazards.LayerRoadSegment) }()
+	go func() { defer cwg.Done(); condChain = buildCondition(ctx, hb, area, hazards.LayerChainControl) }()
+	go func() { defer cwg.Done(); condSegment = buildCondition(ctx, hb, area, hazards.LayerRoadSegment) }()
 	if covered {
 		cwg.Add(1)
-		go func() { defer cwg.Done(); condFireWx = buildCondition(r, hb, area, hazards.LayerFireWeather) }()
+		go func() { defer cwg.Done(); condFireWx = buildCondition(ctx, hb, area, hazards.LayerFireWeather) }()
 	}
 	cwg.Wait()
 
-	resp := summaryResponse{
+	out := &gridv1.PlaceSummary{
 		Place:       place.GetSlug(),
-		PlaceID:     place.GetId(),
+		PlaceId:     place.GetId(),
 		PlaceName:   place.GetName(),
-		GeneratedAt: s.Now().UTC().Format(time.RFC3339),
+		GeneratedAt: timestamppb.New(s.Now().UTC()),
 	}
 
 	// --- summary block (store events only; conditions live in domains) ---
-	sb := summaryBlock{
+	stats := &gridv1.SummaryStats{
 		HighestSeverity: gridv1.Severity_INFO.String(), // default when no events
-		SeverityCounts:  map[string]int{},
-		TotalActive:     len(events),
-		TopEvents:       []topEvent{},
+		SeverityCounts:  map[string]int32{},
+		TotalActive:     int32(len(events)),
+		TopEvents:       []*gridv1.SummaryTopEvent{},
 	}
 	for _, ev := range events {
 		sev := ev.GetSeverity()
-		sb.SeverityCounts[sev.String()]++
-		if int(sev.Number()) >= sb.HighestSeverityRank {
-			sb.HighestSeverityRank = int(sev.Number())
-			sb.HighestSeverity = sev.String()
+		stats.SeverityCounts[sev.String()]++
+		if int32(sev.Number()) >= stats.HighestSeverityRank {
+			stats.HighestSeverityRank = int32(sev.Number())
+			stats.HighestSeverity = sev.String()
 		}
 	}
-	sb.TopEvents = topEventsFrom(events, 5)
+	stats.TopEvents = topEventsFrom(events, 5)
 
 	byLayer := map[gridv1.Layer][]*gridv1.Event{}
 	for _, ev := range events {
 		byLayer[ev.GetLayer()] = append(byLayer[ev.GetLayer()], ev)
 	}
-	// eventLayerStatus is the SERVED status of an event-backed layer: raw
-	// source health degraded through hazards.DegradeStoreStatus — the exact
-	// mapping the store-backed /api/v1 hazards/situation path applies. The
-	// stored events below ARE served (domains, top_events, map layers), so a
-	// down source with stored data must read STALE, vouching for them as
-	// last-good — never UNAVAILABLE disowning data this same response carries.
+	// eventLayerStatus is the SERVED status of an event-backed layer: raw source
+	// health degraded through hazards.DegradeStoreStatus. Stored events below ARE
+	// served, so a down source with stored data must read STALE, vouching for
+	// them as last-good — never UNAVAILABLE disowning data this response carries.
 	eventLayerStatus := func(layer string) string {
 		st, last := LayerSourceStatus(sources, layer)
 		st, _ = hazards.DegradeStoreStatus(st, len(byLayer[eventLayers[layer]]) > 0, last)
@@ -278,26 +202,24 @@ func (s *Service) serveSummaryWith(w http.ResponseWriter, r *http.Request, hb ha
 	}
 
 	// --- evacuation invariant (an error never becomes a 0) ---
-	// With stored active zones and Cal OES down, the status degrades to STALE
-	// and the stored count is served (the store is the persisted last-good
-	// cache — same answer as /api/v1/situation); null + UNAVAILABLE is
-	// reserved for "down with nothing stored", where unknown really is
-	// unknown.
+	// With stored active zones and Cal OES down, the status degrades to STALE and
+	// the stored count is served; null + UNAVAILABLE is reserved for "down with
+	// nothing stored", where unknown really is unknown.
 	evacStatus := eventLayerStatus(hazards.LayerEvacuation)
-	sb.EvacuationStatus = evacStatus
+	stats.EvacuationStatus = evacStatus
 	if evacStatus == "OK" || evacStatus == "STALE" {
-		n := 0
+		var n int32
 		for _, ev := range events {
 			if ev.GetLayer() == gridv1.Layer_EVACUATION && ev.GetStatus() == gridv1.EventStatus_ACTIVE {
 				n++
 			}
 		}
-		sb.ActiveEvacuations = &n // MAY be 0: a caveated confirmed-empty
+		stats.ActiveEvacuations = wrapperspb.Int32(n) // MAY be 0: a caveated confirmed-empty
 	}
-	resp.Summary = sb
+	out.Summary = stats
 
 	// --- domains (plan §2.4 mapping; fire and roads merge condition layers) ---
-	resp.Domains = []domainBlock{
+	out.Domains = []*gridv1.SummaryDomain{
 		buildDomain("fire",
 			[]string{eventLayerStatus(hazards.LayerWildfire), condFireWx.status},
 			append(eventItems(byLayer[gridv1.Layer_WILDFIRE]), featureItems(condFireWx.features)...)),
@@ -317,8 +239,7 @@ func (s *Service) serveSummaryWith(w http.ResponseWriter, r *http.Request, hb ha
 	}
 
 	// --- mode --- (event layers use the same served/degraded statuses the
-	// domains report: a down source with stored data is STALE, not a dark
-	// layer)
+	// domains report: a down source with stored data is STALE, not a dark layer)
 	anyUnavailable := condChain.status == "UNAVAILABLE" ||
 		condSegment.status == "UNAVAILABLE" || condFireWx.status == "UNAVAILABLE"
 	for layer := range eventLayers {
@@ -345,17 +266,11 @@ func (s *Service) serveSummaryWith(w http.ResponseWriter, r *http.Request, hb ha
 			in.ActiveEvacLevels = append(in.ActiveEvacLevels, ev.GetEvacuation().GetLevel())
 		}
 	}
-	resp.Mode = ComputeMode(in)
+	out.Mode = ComputeMode(in)
 
 	// --- source-health sidecar (the registry rows feeding this place's layers) ---
-	resp.Sources = sourceRows(sources)
-
-	body, err := json.Marshal(resp)
-	if err != nil {
-		internal(ctx, w, err)
-		return
-	}
-	writeJSON(w, r, body, contentTypeJSON, maxAgeEntities)
+	out.Sources = sourceRows(sources)
+	return out, nil
 }
 
 // conditionResult is one condition layer's contribution to the summary.
@@ -367,11 +282,11 @@ type conditionResult struct {
 // buildCondition fetches one condition layer through the hazards delegation
 // seam. An unwired builder (nil interface) or an unknown layer is UNAVAILABLE
 // with no features — fail loud, never a fabricated clear state.
-func buildCondition(r *http.Request, hb hazardsBuilder, area config.HazardArea, layer string) conditionResult {
+func buildCondition(ctx context.Context, hb hazardsBuilder, area config.HazardArea, layer string) conditionResult {
 	if hb == nil {
 		return conditionResult{status: "UNAVAILABLE"}
 	}
-	features, status, _, _, _, ok := hb.BuildLayer(r.Context(), area, layer)
+	features, status, _, _, _, ok := hb.BuildLayer(ctx, area, layer)
 	if !ok {
 		return conditionResult{status: "UNAVAILABLE"}
 	}
@@ -381,7 +296,7 @@ func buildCondition(r *http.Request, hb hazardsBuilder, area config.HazardArea, 
 // topEventsFrom returns the n most urgent events (severity_rank desc, then
 // observed_at desc — the canonical client sort; the store already yields this
 // order, the stable re-sort makes the contract explicit).
-func topEventsFrom(events []*gridv1.Event, n int) []topEvent {
+func topEventsFrom(events []*gridv1.Event, n int) []*gridv1.SummaryTopEvent {
 	sorted := make([]*gridv1.Event, len(events))
 	copy(sorted, events)
 	sort.SliceStable(sorted, func(i, j int) bool {
@@ -394,13 +309,13 @@ func topEventsFrom(events []*gridv1.Event, n int) []topEvent {
 	if len(sorted) > n {
 		sorted = sorted[:n]
 	}
-	out := make([]topEvent, 0, len(sorted))
+	out := make([]*gridv1.SummaryTopEvent, 0, len(sorted))
 	for _, ev := range sorted {
-		out = append(out, topEvent{
-			ID:           ev.GetId(),
+		out = append(out, &gridv1.SummaryTopEvent{
+			Id:           ev.GetId(),
 			Layer:        strings.ToLower(ev.GetLayer().String()),
 			Severity:     ev.GetSeverity().String(),
-			SeverityRank: int(ev.GetSeverity().Number()),
+			SeverityRank: int32(ev.GetSeverity().Number()),
 			Headline:     ev.GetHeadline(),
 			Source:       ev.GetProvenance().GetSourceId(),
 		})
@@ -446,13 +361,13 @@ func featureItems(features []hazards.Feature) []mergedItem {
 // source_status across the domain's layers (partial data must not present as
 // complete), active_count is the merged item count, headlines are the top 3
 // by severity (stable on ties, preserving events-before-conditions order).
-func buildDomain(name string, statuses []string, items []mergedItem) domainBlock {
-	d := domainBlock{
+func buildDomain(name string, statuses []string, items []mergedItem) *gridv1.SummaryDomain {
+	d := &gridv1.SummaryDomain{
 		Domain:          name,
 		Status:          worstStatus(statuses),
 		HighestSeverity: gridv1.Severity_INFO.String(),
-		ActiveCount:     len(items),
-		Headlines:       []domainHeadline{},
+		ActiveCount:     int32(len(items)),
+		Headlines:       []*gridv1.SummaryDomainHeadline{},
 	}
 	topRank := -1
 	for _, it := range items {
@@ -468,7 +383,7 @@ func buildDomain(name string, statuses []string, items []mergedItem) domainBlock
 		sorted = sorted[:3]
 	}
 	for _, it := range sorted {
-		d.Headlines = append(d.Headlines, domainHeadline{ID: it.id, Severity: it.severity, Headline: it.headline})
+		d.Headlines = append(d.Headlines, &gridv1.SummaryDomainHeadline{Id: it.id, Severity: it.severity, Headline: it.headline})
 	}
 	return d
 }
@@ -538,9 +453,9 @@ func summarySourceIDs() map[string]bool {
 // sourceRows projects the registry health rows onto the sidecar shape, in the
 // store's id order. A never-polled row reads UNAVAILABLE — health unknown is
 // not OK (the LayerSourceStatus convention).
-func sourceRows(sources []*gridv1.Source) []sourceHealth {
+func sourceRows(sources []*gridv1.Source) []*gridv1.SummarySourceHealth {
 	allowed := summarySourceIDs()
-	out := []sourceHealth{}
+	out := []*gridv1.SummarySourceHealth{}
 	for _, src := range sources {
 		if !allowed[src.GetId()] {
 			continue
@@ -549,10 +464,10 @@ func sourceRows(sources []*gridv1.Source) []sourceHealth {
 		if status == gridv1.SourceStatus_SOURCE_STATUS_UNSPECIFIED {
 			status = gridv1.SourceStatus_UNAVAILABLE
 		}
-		out = append(out, sourceHealth{
-			ID:            src.GetId(),
+		out = append(out, &gridv1.SummarySourceHealth{
+			Id:            src.GetId(),
 			Status:        status.String(),
-			LastSuccessAt: rfc3339(src.GetLastSuccessAt()),
+			LastSuccessAt: src.GetLastSuccessAt(),
 		})
 	}
 	return out

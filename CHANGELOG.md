@@ -7,9 +7,9 @@ consuming site (e.g. ersn.net, sierragridteam.org).
 There are no formal releases — the service deploys from `main`. Each entry below
 is timestamped; add a new dated section at the top when the API surface changes.
 The API is JSON over HTTP. As of 2026-07-09 there is a single surface,
-`/api/v1/...`, served by gRPC + gRPC-Gateway (field names **camelCase**;
-errors are gRPC-standard `{code, codeName, message, details}`). Two endpoints stay
-hand-built and **snake_case** — the place `summary` and the `.geojson` map layers.
+`/api/v1/...`, served by gRPC + gRPC-Gateway (field names **camelCase**
+throughout; errors are gRPC-standard `{code, codeName, message, details}`). The
+`.geojson` map layers stay hand-built (RFC 7946 geometry) but are also camelCase.
 (History: `/api/v1` originally hosted a different hand-built REST surface, replaced
 by a snake_case `/v1` surface on 2026-07-05, which was in turn folded back onto the
 proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
@@ -34,11 +34,21 @@ consumer from `/v1/*` to `/api/v1/*` and update field casing.
   `poll_interval_seconds`→`pollIntervalSeconds`, `last_success_at`→`lastSuccessAt`, etc.
 - **Errors (proto RPCs):** now gRPC-standard `{code, codeName, message, details}`
   (was `google.rpc.Status`-style `{code, message, details}`) with the mapped HTTP
-  status. The two hand-built endpoints (`summary`, `.geojson`) still emit the
+  status. The one hand-built endpoint (`.geojson`) still emits the
   `google.rpc.Status`-style body (`{code, message, details}`, no `codeName`).
-- **`summary` and `.geojson` are unchanged** — they stay hand-built and
-  **snake_case** (the summary shape; GeoJSON's RFC 7946 contract), just under the
-  new prefix.
+- **camelCase everywhere (incl. `summary` and `.geojson`).** The place `summary`
+  is now the `GetPlaceSummary` proto RPC, so it is camelCase like the rest
+  (`place_id`→`placeId`, `active_evacuations`→`activeEvacuations`,
+  `severity_counts`→`severityCounts`, `top_events`→`topEvents`, …); the
+  `active_evacuations` explicit-null-vs-0-vs-N invariant is preserved (an
+  `Int32Value` renders as JSON `null` when unknown). The `.geojson` map layers
+  stay hand-built but their `properties`/`metadata` are now **camelCase** too
+  (`area_label`→`areaLabel`, `severity_rank`→`severityRank`,
+  `source_status`→`sourceStatus`, `updated_at`→`updatedAt`,
+  `last_source_update`→`lastSourceUpdate`, `source_url`→`sourceUrl`,
+  `generated_at`→`generatedAt`, `has_perimeter`→`hasPerimeter`, `zone_id`→`zoneId`,
+  `depth_km`→`depthKm`, `log_number`→`logNumber`, …). Map clients reading the old
+  snake_case property keys must update.
 - **Also changed by the gateway move:** `HEAD` on `/api/v1/*` now returns `501`
   (the old `/v1` router answered `HEAD`); `page_size` out of range (`0`, `>200`,
   non-numeric) is now silently clamped to `1..200` rather than rejected with
@@ -49,7 +59,8 @@ consumer from `/v1/*` to `/api/v1/*` and update field casing.
   work. Coverage: `events/{id}` + `.../history` (keyed on the event revision);
   `events` + `history` lists (a global data-version that bumps on any event
   change, plus the filter set); `places` + `places/{place}` (the directory is
-  static within a deploy); and the hand-built `summary` + `.geojson` (body-hash).
+  static within a deploy); and the hand-built `.geojson` (body-hash). The
+  `summary` endpoint dropped its body-hash `ETag` when it moved to a proto RPC.
   Not yet instrumented: `conditions`, `sources`, `places:resolve`, `scanners`.
   (Wired via prefab 0.6.0's `etag` plugin.)
 
@@ -68,8 +79,8 @@ consumer from `/v1/*` to `/api/v1/*` and update field casing.
 | `GET /v1/scanners` | `GET /api/v1/scanners` | `ListScanners`. |
 | `GET /v1/roads`, `/v1/roads/{id}` | *(removed)* | Roads are events: `GET /api/v1/events?place={corridor}&layer=road_incident`. |
 | `GET /v1/weather` | `GET /api/v1/conditions` | `GetConditions` — current weather + fire-weather only. **Per-location alerts dropped** (alerts are events: `GET /api/v1/events?layer=weather_alert`). |
-| `GET /v1/places/{place}/summary` | `GET /api/v1/places/{place}/summary` | Unchanged shape, snake_case; evac fail-loud (`active_evacuations` null vs 0 vs N) intact. |
-| `GET /v1/places/{place}/map/{layer}.geojson` | `GET /api/v1/places/{place}/map/{layer}.geojson` | Unchanged envelope, snake_case. |
+| `GET /v1/places/{place}/summary` | `GET /api/v1/places/{place}/summary` | `GetPlaceSummary` RPC, camelCase; evac fail-loud (`activeEvacuations` null vs 0 vs N) intact. |
+| `GET /v1/places/{place}/map/{layer}.geojson` | `GET /api/v1/places/{place}/map/{layer}.geojson` | Same envelope, hand-built, now camelCase `properties`/`metadata`. |
 
 The MCP endpoint (`/mcp`) is unchanged for its clients — it now calls `/api/v1`
 in-process instead of `/v1`. Conditional-GET / ETag support is not yet wired

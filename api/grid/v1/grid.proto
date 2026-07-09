@@ -4,6 +4,7 @@ package grid.v1;
 
 import "google/api/annotations.proto";
 import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
 
 option go_package = "github.com/dpup/sierra-data/api/grid/v1;gridv1";
 
@@ -291,6 +292,12 @@ service GridService {
   rpc GetPlace(GetPlaceRequest) returns (Place) {
     option (google.api.http) = {get: "/api/v1/places/{place}"};
   }
+  // GetPlaceSummary is the one-call place rollup: mode, a cross-layer severity
+  // summary, per-domain status, top events, the evacuation invariant, and a
+  // source-health sidecar. (3-segment path; no collision with GetPlace.)
+  rpc GetPlaceSummary(GetPlaceSummaryRequest) returns (PlaceSummary) {
+    option (google.api.http) = {get: "/api/v1/places/{place}/summary"};
+  }
   // ListScanners returns Broadcastify scanner feeds, optionally scoped to a
   // place (an area serves its feeds; otherwise every area's feeds, deduped).
   rpc ListScanners(ListScannersRequest) returns (ScannerList) {
@@ -308,6 +315,66 @@ service GridService {
   rpc ListSources(ListSourcesRequest) returns (SourceList) {
     option (google.api.http) = {get: "/api/v1/sources"};
   }
+}
+
+message GetPlaceSummaryRequest {
+  string place = 1; // slug or namespaced id
+}
+
+// PlaceSummary is the one-call place rollup (the former hand-built summary,
+// now proto so it is camelCase like the rest of the surface). active_evacuations
+// is a wrapper so it can serialize as an explicit JSON null: null when the
+// evacuation source is UNAVAILABLE (unknown — render "check Genasys"), 0 when
+// confirmed-empty (OK/STALE with no active zones), N when active. An error must
+// never become a 0.
+message PlaceSummary {
+  string place = 1; // slug
+  string place_id = 2;
+  string place_name = 3;
+  google.protobuf.Timestamp generated_at = 4;
+  string mode = 5; // QUIET | WATCH | ACTIVE
+  SummaryStats summary = 6;
+  repeated SummaryDomain domains = 7;
+  repeated SummarySourceHealth sources = 8;
+}
+
+message SummaryStats {
+  string highest_severity = 1;
+  int32 highest_severity_rank = 2;
+  map<string, int32> severity_counts = 3;
+  int32 total_active = 4;
+  google.protobuf.Int32Value active_evacuations = 5; // null = UNAVAILABLE (see PlaceSummary)
+  string evacuation_status = 6; // OK | STALE | UNAVAILABLE
+  repeated SummaryTopEvent top_events = 7;
+}
+
+message SummaryTopEvent {
+  string id = 1;
+  string layer = 2; // lowercase layer slug ("weather_alert")
+  string severity = 3;
+  int32 severity_rank = 4;
+  string headline = 5;
+  string source = 6; // provenance source id ("usgs")
+}
+
+message SummaryDomain {
+  string domain = 1; // fire | evacuation | weather | roads | seismic
+  string status = 2; // worst source_status across the domain's layers
+  string highest_severity = 3;
+  int32 active_count = 4;
+  repeated SummaryDomainHeadline headlines = 5; // top 3 by severity
+}
+
+message SummaryDomainHeadline {
+  string id = 1;
+  string severity = 2;
+  string headline = 3;
+}
+
+message SummarySourceHealth {
+  string id = 1;
+  string status = 2;
+  google.protobuf.Timestamp last_success_at = 3;
 }
 
 // Filter/enum fields are strings (parsed server-side with the shared helpers),

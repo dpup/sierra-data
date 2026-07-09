@@ -37,19 +37,19 @@ type fcBody struct {
 			ID           string `json:"id"`
 			Layer        string `json:"layer"`
 			Severity     string `json:"severity"`
-			SeverityRank int    `json:"severity_rank"`
+			SeverityRank int    `json:"severityRank"`
 			Headline     string `json:"headline"`
 		} `json:"properties"`
 	} `json:"features"`
 	Metadata struct {
 		Layer            string `json:"layer"`
 		Area             string `json:"area"`
-		GeneratedAt      string `json:"generated_at"`
-		SourceStatus     string `json:"source_status"`
-		LastSourceUpdate string `json:"last_source_update"`
+		GeneratedAt      string `json:"generatedAt"`
+		SourceStatus     string `json:"sourceStatus"`
+		LastSourceUpdate string `json:"lastSourceUpdate"`
 		Attribution      string `json:"attribution"`
-		SourceURL        string `json:"source_url"`
-		SchemaVersion    int    `json:"schema_version"`
+		SourceURL        string `json:"sourceUrl"`
+		SchemaVersion    int    `json:"schemaVersion"`
 	} `json:"metadata"`
 }
 

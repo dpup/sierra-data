@@ -124,7 +124,7 @@ S.I.E.R.R.A is an all-volunteer 501(c)(3). This service runs on donated time and
       box.append(nameRow);
 
       const ev = el('p', 'prose'); ev.style.margin = '9px 0 0'; ev.style.fontSize = '13px';
-      const evac = s.active_evacuations;
+      const evac = s.activeEvacuations;
       if (evac === null || evac === undefined) {
         ev.style.color = 'var(--st-UNAVAILABLE)';
         ev.append('Evacuation status unknown — Cal OES did not answer. Check ');
@@ -137,7 +137,7 @@ S.I.E.R.R.A is an all-volunteer 501(c)(3). This service runs on donated time and
       }
       box.append(ev);
 
-      const counts = s.severity_counts || {};
+      const counts = s.severityCounts || {};
       const active = Object.values(counts).reduce((a, b) => a + (Number(b) || 0), 0);
       const tiles = $('rollup').children;
       tiles[0].firstChild.textContent = active || (summary ? '0' : '—');

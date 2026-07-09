@@ -4,8 +4,8 @@ import "encoding/json"
 
 // LLM-shaping: /v1 responses carry base64 GeoJSON geometry that is huge and
 // useless to a model. We drop it and keep a compact `location` centroid + bbox,
-// and trim long fields in list views. The fail-loud fields (source_status,
-// evacuation_status/active_evacuations, provenance/source_url, canonical_url)
+// and trim long fields in list views. The fail-loud fields (sourceStatus,
+// evacuationStatus/activeEvacuations, provenance/sourceUrl, canonicalUrl)
 // are always preserved.
 
 // geometryToLocation replaces an object's base64 `geometry` with a compact

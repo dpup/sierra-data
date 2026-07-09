@@ -3,7 +3,7 @@
 // (docs/mcp-design.md). It is a thin adapter: each tool issues an in-process GET
 // against the /api/v1 gRPC-Gateway mux and reshapes the JSON for LLMs — geometry
 // is stripped (a polygon is a token bomb and useless to a model), and the
-// fail-loud honesty contract (source_status, evacuation null-vs-0, a
+// fail-loud honesty contract (sourceStatus, evacuation null-vs-0, a
 // reference-only disclaimer) is preserved so a model can never render "unknown"
 // as "all-clear".
 //

@@ -37,7 +37,7 @@ Last updated: 2026-07-06
 │   ├── hazards/               # /api/v1 unified GeoJSON hazard layers
 │   ├── store/                 # SQLite grid event store (events, revisions, places, sources)
 │   ├── ingest/                # Poller scheduler + per-source normalizers → the store
-│   ├── gridapi/               # /api/v1 GridService impl (gRPC) + hand-built summary/GeoJSON
+│   ├── gridapi/               # /api/v1 GridService impl (gRPC) + hand-built GeoJSON
 │   ├── places/                # Grid place directory seeder (areas/counties/towns/corridors)
 │   └── lib/                   # Shared libraries (incl. lib/geojson: geometry + PIP)
 ├── data/places/               # Checked-in Census county polygons (counties.geojson)
@@ -271,10 +271,14 @@ is on. Conditional-GET/ETag is not yet wired (deferred behind a future prefab
 hazards|situation|incidents` and the snake_case `/v1`) have all been **removed** —
 they fold into the endpoints below.
 
-**Two endpoints stay hand-built and `snake_case`** (mounted on the same gateway mux
-via `mux.HandlePath`, `gridapi.RegisterGatewayRoutes`): the place `summary` (evac
-`active_evacuations` must serialize as an explicit JSON `null`, which proto3 models
-poorly) and the `.geojson` map layers (RFC 7946 geometry).
+The whole surface is **camelCase**. **One endpoint stays hand-built** (mounted on
+the gateway mux via `mux.HandlePath`, `gridapi.RegisterGatewayRoutes`): the
+`.geojson` map layers (RFC 7946 geometry, which proto3 models poorly) — its
+`properties`/`metadata` are camelCase too (json struct tags in `internal/hazards`).
+The place `summary` is now the `GetPlaceSummary` proto RPC; its
+`activeEvacuations` is a `google.protobuf.Int32Value` so it still serializes as an
+explicit JSON `null` (null=UNAVAILABLE vs 0=confirmed-empty vs N) under the
+gateway's `EmitUnpopulated` marshaler.
 
 **Grid Info Service** (`/api/v1/...`), the `GridService` RPCs:
 - `GET /api/v1/events` - cross-layer event query
@@ -305,17 +309,18 @@ poorly) and the `.geojson` map layers (RFC 7946 geometry).
   health is `status`: `OK|STALE|UNAVAILABLE`, last success/attempt, poll interval,
   last error).
 
-**Map + summary** (hand-built, `snake_case`):
-- `GET /api/v1/places/{place}/summary` - one-fetch place rollup: `mode`
-  (QUIET/WATCH/ACTIVE), a cross-layer `summary`, per-`domains[]` status
-  (`fire`/`evacuation`/`weather`/`roads`/`seismic`), `top_events`, and a
-  `sources[]` health sidecar.
-- `GET /api/v1/places/{place}/map/{layer}.geojson` - one RFC 7946
+**Summary + map:**
+- `GET /api/v1/places/{place}/summary` - `GetPlaceSummary` RPC (camelCase): a
+  one-fetch place rollup — `mode` (QUIET/WATCH/ACTIVE), a cross-layer `summary`,
+  per-`domains[]` status (`fire`/`evacuation`/`weather`/`roads`/`seismic`),
+  `topEvents`, and a `sources[]` health sidecar.
+- `GET /api/v1/places/{place}/map/{layer}.geojson` - hand-built, one RFC 7946
   `FeatureCollection` per layer for a maps client (MapLibre/Leaflet). Layers:
   `road_incident`, `chain_control`, `road_segment`, `weather_alert`,
-  `fire_weather`, `earthquake`, `wildfire`, `evacuation`. Every feature shares a
-  `properties` envelope (`id, layer, kind, severity, severity_rank, headline,
-  source, …`) on the unified severity scale `INFO..EXTREME` (rank 0–4). Coordinates
+  `fire_weather`, `earthquake`, `wildfire`, `evacuation` (these are layer *values*,
+  still snake_case). Every feature shares a camelCase `properties` envelope
+  (`id, layer, kind, severity, severityRank, headline, source, …`) on the unified
+  severity scale `INFO..EXTREME` (rank 0–4). Coordinates
   are `[lng, lat]`. Event layers project from the store
   (`internal/gridapi.ProjectEvents`); the three condition layers (`road_segment`,
   `chain_control`, `fire_weather`) are live projections of the roads/weather
@@ -326,16 +331,16 @@ poorly) and the `.geojson` map layers (RFC 7946 geometry).
 Warning), derived only from authoritative NWS products — never a Red Flag NWS
 hasn't issued.
 
-**`source_status` honesty (geojson `metadata`, summary `domains[]`)** is
+**`sourceStatus` honesty (geojson `metadata`, summary `domains[]`)** is
 `OK | STALE | UNAVAILABLE` — a layer is fail-loud: on source error it returns
-`UNAVAILABLE` with empty features (or `STALE` + `last_source_update` when serving a
+`UNAVAILABLE` with empty features (or `STALE` + `lastSourceUpdate` when serving a
 cached last-good fetch), never a fabricated clear state.
 
 - **Evacuation is life-safety / fail-loud** on `summary`: the invariant is *an error
   never becomes a `0`*. A Cal OES failure is `UNAVAILABLE` →
-  `summary.active_evacuations: null` (with `evacuation_status: UNAVAILABLE`; render
+  `summary.activeEvacuations: null` (with `evacuationStatus: UNAVAILABLE`; render
   "unknown — check Genasys"); a clean fetch with no active zones is `OK` →
-  `active_evacuations: 0` (render "no active evacuations reported", a caveated
+  `activeEvacuations: 0` (render "no active evacuations reported", a caveated
   confirmed-empty, not a guarantee); `N>0` for active zones. `metadata.source_url`
   always links the authoritative Genasys viewer. Areas configured under
   `hazards.areas` in `prefab.yaml`.

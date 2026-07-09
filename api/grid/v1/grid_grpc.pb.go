@@ -26,6 +26,7 @@ const (
 	GridService_ListPlaces_FullMethodName      = "/grid.v1.GridService/ListPlaces"
 	GridService_ResolvePlace_FullMethodName    = "/grid.v1.GridService/ResolvePlace"
 	GridService_GetPlace_FullMethodName        = "/grid.v1.GridService/GetPlace"
+	GridService_GetPlaceSummary_FullMethodName = "/grid.v1.GridService/GetPlaceSummary"
 	GridService_ListScanners_FullMethodName    = "/grid.v1.GridService/ListScanners"
 	GridService_GetConditions_FullMethodName   = "/grid.v1.GridService/GetConditions"
 	GridService_ListSources_FullMethodName     = "/grid.v1.GridService/ListSources"
@@ -55,6 +56,10 @@ type GridServiceClient interface {
 	ResolvePlace(ctx context.Context, in *ResolvePlaceRequest, opts ...grpc.CallOption) (*ResolvePlaceResponse, error)
 	// GetPlace returns one place by slug or namespaced id.
 	GetPlace(ctx context.Context, in *GetPlaceRequest, opts ...grpc.CallOption) (*Place, error)
+	// GetPlaceSummary is the one-call place rollup: mode, a cross-layer severity
+	// summary, per-domain status, top events, the evacuation invariant, and a
+	// source-health sidecar. (3-segment path; no collision with GetPlace.)
+	GetPlaceSummary(ctx context.Context, in *GetPlaceSummaryRequest, opts ...grpc.CallOption) (*PlaceSummary, error)
 	// ListScanners returns Broadcastify scanner feeds, optionally scoped to a
 	// place (an area serves its feeds; otherwise every area's feeds, deduped).
 	ListScanners(ctx context.Context, in *ListScannersRequest, opts ...grpc.CallOption) (*ScannerList, error)
@@ -146,6 +151,16 @@ func (c *gridServiceClient) GetPlace(ctx context.Context, in *GetPlaceRequest, o
 	return out, nil
 }
 
+func (c *gridServiceClient) GetPlaceSummary(ctx context.Context, in *GetPlaceSummaryRequest, opts ...grpc.CallOption) (*PlaceSummary, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PlaceSummary)
+	err := c.cc.Invoke(ctx, GridService_GetPlaceSummary_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *gridServiceClient) ListScanners(ctx context.Context, in *ListScannersRequest, opts ...grpc.CallOption) (*ScannerList, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ScannerList)
@@ -200,6 +215,10 @@ type GridServiceServer interface {
 	ResolvePlace(context.Context, *ResolvePlaceRequest) (*ResolvePlaceResponse, error)
 	// GetPlace returns one place by slug or namespaced id.
 	GetPlace(context.Context, *GetPlaceRequest) (*Place, error)
+	// GetPlaceSummary is the one-call place rollup: mode, a cross-layer severity
+	// summary, per-domain status, top events, the evacuation invariant, and a
+	// source-health sidecar. (3-segment path; no collision with GetPlace.)
+	GetPlaceSummary(context.Context, *GetPlaceSummaryRequest) (*PlaceSummary, error)
 	// ListScanners returns Broadcastify scanner feeds, optionally scoped to a
 	// place (an area serves its feeds; otherwise every area's feeds, deduped).
 	ListScanners(context.Context, *ListScannersRequest) (*ScannerList, error)
@@ -241,6 +260,9 @@ func (UnimplementedGridServiceServer) ResolvePlace(context.Context, *ResolvePlac
 }
 func (UnimplementedGridServiceServer) GetPlace(context.Context, *GetPlaceRequest) (*Place, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetPlace not implemented")
+}
+func (UnimplementedGridServiceServer) GetPlaceSummary(context.Context, *GetPlaceSummaryRequest) (*PlaceSummary, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetPlaceSummary not implemented")
 }
 func (UnimplementedGridServiceServer) ListScanners(context.Context, *ListScannersRequest) (*ScannerList, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListScanners not implemented")
@@ -398,6 +420,24 @@ func _GridService_GetPlace_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _GridService_GetPlaceSummary_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetPlaceSummaryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GridServiceServer).GetPlaceSummary(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GridService_GetPlaceSummary_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GridServiceServer).GetPlaceSummary(ctx, req.(*GetPlaceSummaryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _GridService_ListScanners_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListScannersRequest)
 	if err := dec(in); err != nil {
@@ -486,6 +526,10 @@ var GridService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetPlace",
 			Handler:    _GridService_GetPlace_Handler,
+		},
+		{
+			MethodName: "GetPlaceSummary",
+			Handler:    _GridService_GetPlaceSummary_Handler,
 		},
 		{
 			MethodName: "ListScanners",

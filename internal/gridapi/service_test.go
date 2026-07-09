@@ -253,8 +253,6 @@ func get(t *testing.T, s *Service, path string, hdr ...string) *httptest.Respons
 	rec := httptest.NewRecorder()
 	parts := strings.Split(strings.TrimPrefix(req.URL.Path, "/v1/"), "/")
 	switch {
-	case len(parts) == 3 && parts[0] == "places" && parts[2] == "summary":
-		s.serveSummary(rec, req, parts[1])
 	case len(parts) == 4 && parts[0] == "places" && parts[2] == "map" &&
 		strings.HasSuffix(parts[3], ".geojson"):
 		s.serveMapLayer(rec, req, parts[1], strings.TrimSuffix(parts[3], ".geojson"))

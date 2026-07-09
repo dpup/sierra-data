@@ -16,6 +16,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
@@ -93,31 +96,31 @@ func TestComputeMode(t *testing.T) {
 // summaryOut mirrors the plan §2.3 response shape for decoding.
 type summaryOut struct {
 	Place       string `json:"place"`
-	PlaceID     string `json:"place_id"`
-	PlaceName   string `json:"place_name"`
-	GeneratedAt string `json:"generated_at"`
+	PlaceID     string `json:"placeId"`
+	PlaceName   string `json:"placeName"`
+	GeneratedAt string `json:"generatedAt"`
 	Mode        string `json:"mode"`
 	Summary     struct {
-		HighestSeverity     string         `json:"highest_severity"`
-		HighestSeverityRank int            `json:"highest_severity_rank"`
-		SeverityCounts      map[string]int `json:"severity_counts"`
-		TotalActive         int            `json:"total_active"`
-		ActiveEvacuations   *int           `json:"active_evacuations"`
-		EvacuationStatus    string         `json:"evacuation_status"`
+		HighestSeverity     string         `json:"highestSeverity"`
+		HighestSeverityRank int            `json:"highestSeverityRank"`
+		SeverityCounts      map[string]int `json:"severityCounts"`
+		TotalActive         int            `json:"totalActive"`
+		ActiveEvacuations   *int           `json:"activeEvacuations"`
+		EvacuationStatus    string         `json:"evacuationStatus"`
 		TopEvents           []struct {
 			ID           string `json:"id"`
 			Layer        string `json:"layer"`
 			Severity     string `json:"severity"`
-			SeverityRank int    `json:"severity_rank"`
+			SeverityRank int    `json:"severityRank"`
 			Headline     string `json:"headline"`
 			Source       string `json:"source"`
-		} `json:"top_events"`
+		} `json:"topEvents"`
 	} `json:"summary"`
 	Domains []struct {
 		Domain          string `json:"domain"`
 		Status          string `json:"status"`
-		HighestSeverity string `json:"highest_severity"`
-		ActiveCount     int    `json:"active_count"`
+		HighestSeverity string `json:"highestSeverity"`
+		ActiveCount     int    `json:"activeCount"`
 		Headlines       []struct {
 			ID       string `json:"id"`
 			Severity string `json:"severity"`
@@ -127,7 +130,7 @@ type summaryOut struct {
 	Sources []struct {
 		ID            string `json:"id"`
 		Status        string `json:"status"`
-		LastSuccessAt string `json:"last_success_at"`
+		LastSuccessAt string `json:"lastSuccessAt"`
 	} `json:"sources"`
 }
 
@@ -135,8 +138,8 @@ type summaryOut struct {
 func (o *summaryOut) domain(t *testing.T, name string) (d struct {
 	Domain          string `json:"domain"`
 	Status          string `json:"status"`
-	HighestSeverity string `json:"highest_severity"`
-	ActiveCount     int    `json:"active_count"`
+	HighestSeverity string `json:"highestSeverity"`
+	ActiveCount     int    `json:"activeCount"`
 	Headlines       []struct {
 		ID       string `json:"id"`
 		Severity string `json:"severity"`
@@ -209,13 +212,24 @@ func condFeature(id, layer, severity, headline string, fw *hazards.FireWeatherPr
 	}}
 }
 
-// getSummaryWith drives serveSummaryWith directly with a fake builder (the
-// router path binds the concrete s.Hazards; the interface seam is here).
+// gatewaySummaryJSON mirrors prefab's gRPC-Gateway marshaler (camelCase +
+// EmitUnpopulated) so these tests assert the exact wire bytes — including the
+// active_evacuations explicit null a nil Int32Value produces.
+var gatewaySummaryJSON = protojson.MarshalOptions{UseProtoNames: false, EmitUnpopulated: true}
+
+// getSummaryWith builds the summary proto with a fake condition builder and
+// renders it through the gateway marshaler into a recorder (the interface seam
+// the concrete GridServer binds to s.Hazards).
 func getSummaryWith(t *testing.T, s *Service, hb hazardsBuilder, placeKey string) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodGet, "/v1/places/"+placeKey+"/summary", nil)
+	sum, err := s.buildPlaceSummary(context.Background(), hb, placeKey)
+	require.NoError(t, err)
+	body, err := gatewaySummaryJSON.Marshal(sum)
+	require.NoError(t, err)
 	rec := httptest.NewRecorder()
-	s.serveSummaryWith(rec, req, hb, placeKey)
+	rec.Header().Set("Content-Type", "application/json")
+	rec.Code = http.StatusOK
+	rec.Body.Write(body)
 	return rec
 }
 
@@ -255,21 +269,21 @@ func evacEvent(id, level string, status gridv1.EventStatus) *gridv1.Event {
 // TestSummary_ShapeThroughRouter: full router path (Hazards unwired) — the
 // exact plan §2.3 shape, snake_case spot checks on the raw JSON, the seeded
 // fixture rollup, and the ETag/Cache-Control policy.
-func TestSummary_ShapeThroughRouter(t *testing.T) {
+func TestSummary_Shape(t *testing.T) {
 	s := newTestService(t) // Hazards nil => condition layers UNAVAILABLE
-	rec := get(t, s, "/v1/places/calaveras/summary")
+	rec := getSummaryWith(t, s, nil, "calaveras")
 	out := decodeSummary(t, rec)
 
-	// snake_case spot checks on the raw body (the site codes against these).
+	// camelCase spot checks on the raw body (the wire shape the site codes against).
 	raw := rec.Body.String()
 	for _, key := range []string{
-		`"place_id"`, `"place_name"`, `"generated_at"`, `"highest_severity_rank"`,
-		`"severity_counts"`, `"total_active"`, `"active_evacuations"`,
-		`"evacuation_status"`, `"top_events"`, `"severity_rank"`, `"active_count"`,
+		`"placeId"`, `"placeName"`, `"generatedAt"`, `"highestSeverityRank"`,
+		`"severityCounts"`, `"totalActive"`, `"activeEvacuations"`,
+		`"evacuationStatus"`, `"topEvents"`, `"severityRank"`, `"activeCount"`,
 	} {
 		assert.Contains(t, raw, key)
 	}
-	assert.NotContains(t, raw, `"placeId"`, "no camelCase on the /v1 wire")
+	assert.NotContains(t, raw, `"place_id"`, "the surface is camelCase, no snake_case")
 
 	assert.Equal(t, "calaveras", out.Place)
 	assert.Equal(t, "area:calaveras", out.PlaceID)
@@ -286,7 +300,7 @@ func TestSummary_ShapeThroughRouter(t *testing.T) {
 	// caloes was never seeded: evac is an explicit null + UNAVAILABLE.
 	assert.Nil(t, out.Summary.ActiveEvacuations)
 	assert.Equal(t, "UNAVAILABLE", out.Summary.EvacuationStatus)
-	assert.Contains(t, raw, `"active_evacuations":null`, "null must be explicit, not omitted")
+	assert.Contains(t, raw, `"activeEvacuations":null`, "null must be explicit, not omitted")
 
 	// top_events: severity desc, then observed_at desc; lowercase layer slugs;
 	// provenance source ids.
@@ -329,14 +343,6 @@ func TestSummary_ShapeThroughRouter(t *testing.T) {
 		assert.Empty(t, src.LastSuccessAt, src.ID)
 	}
 	assert.Equal(t, []string{"calfire", "chp", "nws", "usgs"}, ids)
-
-	// Cache policy: 30s + strong ETag revalidation.
-	assert.Equal(t, "public, max-age=30", rec.Header().Get("Cache-Control"))
-	etag := rec.Header().Get("ETag")
-	require.NotEmpty(t, etag)
-	rec = get(t, s, "/v1/places/calaveras/summary", "If-None-Match", etag)
-	assert.Equal(t, http.StatusNotModified, rec.Code)
-	assert.Empty(t, rec.Body.String())
 }
 
 // TestSummary_EvacInvariant: null vs 0 vs count, flipped via RecordAttempt —
@@ -567,10 +573,14 @@ func TestSummary_ModeTransitions(t *testing.T) {
 	assert.Equal(t, ModeQuiet, out.Mode)
 }
 
-// TestSummary_UnknownPlace: 404 google.rpc.Status through the router.
+// TestSummary_UnknownPlace: the RPC maps an unknown place to gRPC NotFound.
 func TestSummary_UnknownPlace(t *testing.T) {
 	s := newTestService(t)
-	rec := get(t, s, "/v1/places/atlantis/summary")
-	sb := requireStatus(t, rec, http.StatusNotFound, 5)
-	assert.Contains(t, sb.Message, "atlantis")
+	_, err := NewGridServer(s).GetPlaceSummary(context.Background(),
+		&gridv1.GetPlaceSummaryRequest{Place: "atlantis"})
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.NotFound, st.Code())
+	assert.Contains(t, st.Message(), "atlantis")
 }

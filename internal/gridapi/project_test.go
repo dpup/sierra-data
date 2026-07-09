@@ -71,19 +71,19 @@ func TestProjectEvents_Wildfire_CalfireAdoptedPerimeter(t *testing.T) {
 	    "kind": "Wildfire",
 	    "category": "wildfire",
 	    "severity": "SEVERE",
-	    "severity_rank": 3,
+	    "severityRank": 3,
 	    "headline": "Salt Springs Fire — 1200 ac, 35% contained",
 	    "status": "active",
 	    "effective": "2026-07-01T10:00:00Z",
-	    "updated_at": "2026-07-04T08:00:00Z",
-	    "area_label": "near Hwy 4",
+	    "updatedAt": "2026-07-04T08:00:00Z",
+	    "areaLabel": "near Hwy 4",
 	    "source": {
 	      "id": "calfire",
 	      "name": "CAL FIRE",
 	      "url": "https://www.fire.ca.gov/incidents/salt-springs",
 	      "attribution": "CAL FIRE / WFIGS"
 	    },
-	    "wildfire": {"acres": 1200, "containment": 35, "county": "Calaveras", "has_perimeter": true}
+	    "wildfire": {"acres": 1200, "containment": 35, "county": "Calaveras", "hasPerimeter": true}
 	  }
 	}`, featJSON(t, feats[0]))
 }
@@ -117,11 +117,11 @@ func TestProjectEvents_Wildfire_StandaloneWfigsPerimeter(t *testing.T) {
 	    "kind": "Wildfire",
 	    "category": "wildfire",
 	    "severity": "SEVERE",
-	    "severity_rank": 3,
+	    "severityRank": 3,
 	    "headline": "Lonely — 250 ac, 10% contained",
 	    "status": "active",
 	    "source": {"id": "wfigs", "name": "NIFC WFIGS", "attribution": "NIFC / WFIGS"},
-	    "wildfire": {"acres": 250.4, "containment": 10, "cause": "Human", "has_perimeter": true}
+	    "wildfire": {"acres": 250.4, "containment": 10, "cause": "Human", "hasPerimeter": true}
 	  }
 	}`, featJSON(t, feats[0]))
 }
@@ -169,19 +169,19 @@ func TestProjectEvents_Evacuation_LevelBecomesStatus(t *testing.T) {
 	    "kind": "Evacuation",
 	    "category": "order",
 	    "severity": "EXTREME",
-	    "severity_rank": 4,
+	    "severityRank": 4,
 	    "headline": "Evacuation Order — Zone A",
 	    "description": "Leave now via Hwy 4. Do not delay.",
 	    "status": "ORDER",
-	    "updated_at": "2026-06-25T15:06:40Z",
-	    "area_label": "Zone A",
+	    "updatedAt": "2026-06-25T15:06:40Z",
+	    "areaLabel": "Zone A",
 	    "source": {
 	      "id": "caloes",
 	      "name": "Cal OES",
 	      "url": "https://protect.genasys.com/",
 	      "attribution": "Cal OES — reference only"
 	    },
-	    "evacuation": {"zone_id": "CAL-E-046", "level": "ORDER", "event_type": "Fire", "county": "Calaveras"}
+	    "evacuation": {"zoneId": "CAL-E-046", "level": "ORDER", "eventType": "Fire", "county": "Calaveras"}
 	  }
 	}`, featJSON(t, feats[0]))
 
@@ -223,7 +223,7 @@ func TestProjectEvents_WeatherAlert_ZonelessNullGeometry(t *testing.T) {
 	    "kind": "Weather alert",
 	    "category": "Red Flag Warning",
 	    "severity": "SEVERE",
-	    "severity_rank": 3,
+	    "severityRank": 3,
 	    "headline": "Red Flag Warning until 8 PM PDT",
 	    "description": "* WHAT...Gusty winds and low humidity.",
 	    "effective": "2026-07-04T10:00:00Z",
@@ -282,18 +282,18 @@ func TestProjectEvents_Earthquake_UpdatedAtRule(t *testing.T) {
 	    "kind": "Earthquake",
 	    "category": "earthquake",
 	    "severity": "MODERATE",
-	    "severity_rank": 2,
+	    "severityRank": 2,
 	    "headline": "M4.2 — 10km NE of Murphys, CA",
 	    "effective": "2026-06-25T15:06:40Z",
-	    "updated_at": "2026-06-25T15:15:00Z",
-	    "area_label": "10km NE of Murphys, CA",
+	    "updatedAt": "2026-06-25T15:15:00Z",
+	    "areaLabel": "10km NE of Murphys, CA",
 	    "source": {
 	      "id": "usgs",
 	      "name": "USGS",
 	      "url": "https://earthquake.usgs.gov/earthquakes/eventpage/nc75095123",
 	      "attribution": "U.S. Geological Survey"
 	    },
-	    "earthquake": {"magnitude": 4.2, "depth_km": 7.6, "felt": 37}
+	    "earthquake": {"magnitude": 4.2, "depthKm": 7.6, "felt": 37}
 	  }
 	}`, featJSON(t, feats[0]))
 
@@ -351,15 +351,15 @@ func TestProjectEvents_RoadIncident_ConstantSourceBlock(t *testing.T) {
 	    "kind": "Road incident",
 	    "category": "incident",
 	    "severity": "SEVERE",
-	    "severity_rank": 3,
+	    "severityRank": 3,
 	    "headline": "Vehicle fire on Hwy 4",
 	    "description": "Vehicle fire blocking the right lane",
 	    "status": "active",
 	    "effective": "2026-07-04T06:24:00Z",
-	    "updated_at": "2026-07-04T07:00:00Z",
-	    "area_label": "Hwy 4 at Avery",
+	    "updatedAt": "2026-07-04T07:00:00Z",
+	    "areaLabel": "Hwy 4 at Avery",
 	    "source": {"id": "chp", "name": "CHP / Caltrans", "attribution": "quickmap.dot.ca.gov"},
-	    "incident": {"log_number": "250916ST0066"}
+	    "incident": {"logNumber": "250916ST0066"}
 	  }
 	}`, featJSON(t, feats[0]))
 

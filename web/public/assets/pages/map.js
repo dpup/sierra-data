@@ -2,7 +2,7 @@
 //
 // Renders per-layer GeoJSON from GET /api/v1/places/{place}/map/{layer}.geojson on
 // a MapLibre map, with the honesty panel — each layer's `metadata` member
-// (source_status / generated_at / attribution) displayed prominently, plus the
+// (sourceStatus / generatedAt / attribution) displayed prominently, plus the
 // exact .geojson URL a third-party map client would use.
 //
 // All view state (place, layers, map view) lives in the query string:
@@ -433,7 +433,7 @@ function init() {
   }
 
   /** Popup: headline, severity chip (canonical ramp + label), source
-   * attribution, updated_at. All upstream text via textContent. */
+   * attribution, updatedAt. All upstream text via textContent. */
   function onFeatureClick(e) {
     const f = e.features && e.features[0];
     if (!f) return;
@@ -473,8 +473,8 @@ function init() {
 
     const updated = document.createElement('div');
     updated.className = 'popup-updated muted small';
-    updated.textContent = props.updated_at
-      ? `updated ${timeAgo(props.updated_at)} · ${timeAbs(props.updated_at)}`
+    updated.textContent = props.updatedAt
+      ? `updated ${timeAgo(props.updatedAt)} · ${timeAbs(props.updatedAt)}`
       : 'updated —';
 
     box.append(headline, chips, srcLine, updated);
@@ -601,7 +601,7 @@ function init() {
       r.fc && r.fc.metadata && typeof r.fc.metadata === 'object'
         ? r.fc.metadata
         : null;
-    const status = md ? String(md.source_status || '').toUpperCase() : '';
+    const status = md ? String(md.sourceStatus || '').toUpperCase() : '';
     head.appendChild(sourceDot(status || 'UNKNOWN'));
 
     if (!md) {
@@ -616,7 +616,7 @@ function init() {
       note.textContent =
         'UNAVAILABLE — the upstream feed errored. Showing nothing ≠ all clear.';
       entry.appendChild(note);
-      const src = safeHttpUrl(md.source_url);
+      const src = safeHttpUrl(md.sourceUrl);
       if (src) {
         const p = document.createElement('div');
         p.className = 'meta-note';
@@ -631,19 +631,19 @@ function init() {
     } else if (status === 'STALE') {
       const note = document.createElement('div');
       note.className = 'meta-note meta-stale';
-      note.textContent = md.last_source_update
+      note.textContent = md.lastSourceUpdate
         ? `STALE — serving last-good data; last source update ${timeAgo(
-            md.last_source_update
-          )} (${timeAbs(md.last_source_update)}).`
+            md.lastSourceUpdate
+          )} (${timeAbs(md.lastSourceUpdate)}).`
         : 'STALE — serving last-good data; last source update unknown.';
       entry.appendChild(note);
     }
 
     if (md) {
-      entry.appendChild(metaRow('generated_at', timeCell(md.generated_at)));
-      if (status === 'STALE' && md.last_source_update) {
+      entry.appendChild(metaRow('generatedAt', timeCell(md.generatedAt)));
+      if (status === 'STALE' && md.lastSourceUpdate) {
         entry.appendChild(
-          metaRow('last_source_update', timeCell(md.last_source_update))
+          metaRow('lastSourceUpdate', timeCell(md.lastSourceUpdate))
         );
       }
       entry.appendChild(
@@ -711,7 +711,7 @@ function init() {
       tdSrc.textContent = (source && (source.name || source.id)) || '—';
 
       const tdUpd = document.createElement('td');
-      tdUpd.appendChild(timeCell(props.updated_at));
+      tdUpd.appendChild(timeCell(props.updatedAt));
 
       tr.append(tdSev, tdHeadline, tdLayer, tdSrc, tdUpd);
       tbody.appendChild(tr);

@@ -23,23 +23,14 @@ import (
 	"github.com/dpup/sierra-data/internal/store"
 )
 
-// RegisterGatewayRoutes mounts the two endpoints that stay hand-built (not proto)
-// directly on the gateway mux, so they live under /api/v1 beside the proto RPCs
-// with no routing collision:
-//   - the place summary rollup — hand-built because active_evacuations must
-//     serialize as an explicit JSON null (the life-safety invariant);
-//   - the .geojson map layers — RFC 7946 geometry, which proto3 models poorly.
-//
-// Both keep their snake_case bodies (the plan summary shape; GeoJSON's RFC
-// contract). Call from a prefab.WithGRPCGateway callback after registering the
-// GridService handler.
+// RegisterGatewayRoutes mounts the .geojson map layers — the one endpoint that
+// stays hand-built (RFC 7946 geometry, which proto3 models poorly) — directly on
+// the gateway mux, so it lives under /api/v1 beside the proto RPCs with no
+// routing collision. Its property/metadata keys are camelCase (json struct tags)
+// to match the rest of the surface. Call from a prefab.WithGRPCGateway callback
+// after registering the GridService handler. (The place summary is now the
+// GetPlaceSummary RPC.)
 func (g *GridServer) RegisterGatewayRoutes(mux *runtime.ServeMux) error {
-	if err := mux.HandlePath("GET", "/api/v1/places/{place}/summary",
-		func(w http.ResponseWriter, r *http.Request, pp map[string]string) {
-			g.svc.serveSummary(w, r, pp["place"])
-		}); err != nil {
-		return err
-	}
 	return mux.HandlePath("GET", "/api/v1/places/{place}/map/{layer}",
 		func(w http.ResponseWriter, r *http.Request, pp map[string]string) {
 			g.svc.serveMapLayer(w, r, pp["place"], strings.TrimSuffix(pp["layer"], ".geojson"))
@@ -307,6 +298,23 @@ func (g *GridServer) GetPlace(ctx context.Context, req *gridv1.GetPlaceRequest) 
 		return nil, err
 	}
 	return place, nil
+}
+
+// GetPlaceSummary returns the one-call place rollup (mode, severity summary,
+// per-domain status, top events, the evacuation invariant, source health).
+func (g *GridServer) GetPlaceSummary(ctx context.Context, req *gridv1.GetPlaceSummaryRequest) (*gridv1.PlaceSummary, error) {
+	var hb hazardsBuilder
+	if g.svc.Hazards != nil {
+		hb = g.svc.Hazards // keep a nil *hazards.Service a nil interface
+	}
+	sum, err := g.svc.buildPlaceSummary(ctx, hb, req.GetPlace())
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, notFoundErr("unknown place: %q", req.GetPlace())
+	}
+	if err != nil {
+		return nil, internalErr(ctx, err)
+	}
+	return sum, nil
 }
 
 // ResolvePlace maps a lat/lng or address to the containing places (most-specific

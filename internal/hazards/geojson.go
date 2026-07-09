@@ -38,12 +38,12 @@ type Geometry struct {
 type Metadata struct {
 	Layer            string `json:"layer"`
 	Area             string `json:"area"`
-	GeneratedAt      string `json:"generated_at"`
-	SourceStatus     string `json:"source_status"` // OK | STALE | UNAVAILABLE
-	LastSourceUpdate string `json:"last_source_update,omitempty"`
+	GeneratedAt      string `json:"generatedAt"`
+	SourceStatus     string `json:"sourceStatus"` // OK | STALE | UNAVAILABLE
+	LastSourceUpdate string `json:"lastSourceUpdate,omitempty"`
 	Attribution      string `json:"attribution,omitempty"`
-	SourceURL        string `json:"source_url,omitempty"`
-	SchemaVersion    int    `json:"schema_version"`
+	SourceURL        string `json:"sourceUrl,omitempty"`
+	SchemaVersion    int    `json:"schemaVersion"`
 }
 
 // --- Geometry constructors (handle the lat/lng -> lon,lat swap + precision) ---

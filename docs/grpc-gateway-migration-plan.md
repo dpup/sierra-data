@@ -115,9 +115,16 @@ revision); `ListEvents`/`ListHistory` (a cheap monotonic `store.DataVersion()` �
 never yields a stale `304` — plus the filter set); and `ListPlaces`/`GetPlace` (a
 per-process nonce, since the directory is seeded at boot and static thereafter).
 The nonce is also folded into the event-list validators so a redeploy that
-changes place polygons invalidates them too. The hand-built `summary`/`.geojson`
-keep their body-hash `ETag`. Still un-instrumented: `GetConditions`,
-`ListSources`, `ResolvePlace`, `ListScanners`.
+changes place polygons invalidates them too. The hand-built `.geojson` keeps its
+body-hash `ETag`; `summary` is now the `GetPlaceSummary` RPC with no ETag. Still
+un-instrumented: `GetConditions`, `ListSources`, `ResolvePlace`, `ListScanners`.
+
+(As built, 2026-07-09: `summary` moved from a hand-built snake_case handler to the
+`GetPlaceSummary` proto RPC — camelCase like the rest, `active_evacuations` an
+`Int32Value` so the null-vs-0 invariant survives. The `.geojson` layers stay
+hand-built but are camelCase too. So `.geojson` is the only hand-built endpoint,
+and the whole surface is camelCase — the "summary stays hand-built snake_case"
+phrasing below is the original plan, not the final shape.)
 
 ## 5. Target architecture (as built)
 
@@ -132,7 +139,7 @@ prefab.New(
   prefab.WithGRPCService(&gridv1.GridService_ServiceDesc, gridServer),
   prefab.WithGRPCGateway(func(ctx, mux, endpoint, opts) error {
     gridv1.RegisterGridServiceHandlerFromEndpoint(ctx, mux, endpoint, opts) // the proto RPCs
-    return gridServer.RegisterGatewayRoutes(mux)                            // summary + .geojson, hand-built on the same mux
+    return gridServer.RegisterGatewayRoutes(mux)                            // .geojson, hand-built on the same mux
   }),
   prefab.WithHTTPHandlerFunc("/mcp", mcpHandler.ServeHTTP),  // MCP calls the gateway mux in-process
   prefab.WithHTTPHandlerFunc("/", siteHandler),
@@ -181,8 +188,8 @@ geometry) — are mounted on the **same gateway mux** via `mux.HandlePath`
 | `GET /v1/scanners` | `ListScanners` | `GET /api/v1/scanners` |
 | `GET /v1/roads`, `/v1/roads/{id}` | *(none — roads are events)* | `GET /api/v1/events?place={corridor}&layer=road_incident` |
 | `GET /v1/weather` | `GetConditions` (weather + fire-weather, no alerts) | `GET /api/v1/conditions` |
-| `GET /v1/places/{place}/summary` | *(hand-built on the gateway mux)* | `GET /api/v1/places/{place}/summary` (snake_case) |
-| `GET /v1/places/{place}/map/{layer}.geojson` | *(hand-built on the gateway mux)* | `GET /api/v1/places/{place}/map/{layer}.geojson` (snake_case) |
+| `GET /v1/places/{place}/summary` | `GetPlaceSummary` | `GET /api/v1/places/{place}/summary` (camelCase) |
+| `GET /v1/places/{place}/map/{layer}.geojson` | *(hand-built on the gateway mux)* | `GET /api/v1/places/{place}/map/{layer}.geojson` (camelCase) |
 
 Shape changes for the proto RPC rows: field names camelCase; error bodies become
 `CustomErrorResponse` (`{code, codeName, message, details}`);
@@ -214,9 +221,9 @@ Port the logic out of the hand-built handlers into RPC methods:
   is **handler-managed**, not server-wide (see §4 "Resolved"): each opted-in RPC
   calls `etag.Guard(ctx, etag.Weak(version))` with a cheap domain version. Wired
   on event detail (`EventVersion`), the event/history lists (`DataVersion` +
-  filters), and places (per-process nonce); the hand-built `summary`/`.geojson`
-  keep their own body-hash `ETag`. `conditions`/`sources`/`resolve`/`scanners`
-  are un-instrumented for now.
+  filters), and places (per-process nonce); the hand-built `.geojson` keeps its
+  own body-hash `ETag` (`summary` is now the `GetPlaceSummary` RPC, no ETag).
+  `conditions`/`sources`/`resolve`/`scanners` are un-instrumented for now.
 - **GeoJSON routing:** the gateway and the GeoJSON handler both live under
   `/api/v1/` — mount the GeoJSON handler at the more specific `/api/v1/places/`
   (or a `.geojson`-suffix check) so the two don't fight in `http.ServeMux`;

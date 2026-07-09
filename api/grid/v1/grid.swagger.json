@@ -359,6 +359,38 @@
         ]
       }
     },
+    "/api/v1/places/{place}/summary": {
+      "get": {
+        "summary": "GetPlaceSummary is the one-call place rollup: mode, a cross-layer severity\nsummary, per-domain status, top events, the evacuation invariant, and a\nsource-health sidecar. (3-segment path; no collision with GetPlace.)",
+        "operationId": "GridService_GetPlaceSummary",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1PlaceSummary"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "place",
+            "description": "slug or namespaced id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "GridService"
+        ]
+      }
+    },
     "/api/v1/places:resolve": {
       "get": {
         "summary": "ResolvePlace maps a lat/lng or address to the containing places,\nmost-specific first (SITE, EVAC_ZONE, TOWN, CORRIDOR, COUNTY, AREA).",
@@ -891,6 +923,47 @@
         }
       }
     },
+    "v1PlaceSummary": {
+      "type": "object",
+      "properties": {
+        "place": {
+          "type": "string",
+          "title": "slug"
+        },
+        "placeId": {
+          "type": "string"
+        },
+        "placeName": {
+          "type": "string"
+        },
+        "generatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "mode": {
+          "type": "string",
+          "title": "QUIET | WATCH | ACTIVE"
+        },
+        "summary": {
+          "$ref": "#/definitions/v1SummaryStats"
+        },
+        "domains": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1SummaryDomain"
+          }
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1SummarySourceHealth"
+          }
+        }
+      },
+      "description": "PlaceSummary is the one-call place rollup (the former hand-built summary,\nnow proto so it is camelCase like the rest of the surface). active_evacuations\nis a wrapper so it can serialize as an explicit JSON null: null when the\nevacuation source is UNAVAILABLE (unknown — render \"check Genasys\"), 0 when\nconfirmed-empty (OK/STALE with no active zones), N when active. An error must\nnever become a 0."
+    },
     "v1Provenance": {
       "type": "object",
       "properties": {
@@ -1077,6 +1150,128 @@
         "UNAVAILABLE"
       ],
       "default": "SOURCE_STATUS_UNSPECIFIED"
+    },
+    "v1SummaryDomain": {
+      "type": "object",
+      "properties": {
+        "domain": {
+          "type": "string",
+          "title": "fire | evacuation | weather | roads | seismic"
+        },
+        "status": {
+          "type": "string",
+          "title": "worst source_status across the domain's layers"
+        },
+        "highestSeverity": {
+          "type": "string"
+        },
+        "activeCount": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "headlines": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1SummaryDomainHeadline"
+          },
+          "title": "top 3 by severity"
+        }
+      }
+    },
+    "v1SummaryDomainHeadline": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "severity": {
+          "type": "string"
+        },
+        "headline": {
+          "type": "string"
+        }
+      }
+    },
+    "v1SummarySourceHealth": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "lastSuccessAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "v1SummaryStats": {
+      "type": "object",
+      "properties": {
+        "highestSeverity": {
+          "type": "string"
+        },
+        "highestSeverityRank": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "severityCounts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        "totalActive": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "activeEvacuations": {
+          "type": "integer",
+          "format": "int32",
+          "title": "null = UNAVAILABLE (see PlaceSummary)"
+        },
+        "evacuationStatus": {
+          "type": "string",
+          "title": "OK | STALE | UNAVAILABLE"
+        },
+        "topEvents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1SummaryTopEvent"
+          }
+        }
+      }
+    },
+    "v1SummaryTopEvent": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "layer": {
+          "type": "string",
+          "title": "lowercase layer slug (\"weather_alert\")"
+        },
+        "severity": {
+          "type": "string"
+        },
+        "severityRank": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "headline": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string",
+          "title": "provenance source id (\"usgs\")"
+        }
+      }
     },
     "v1WeatherAlertDetail": {
       "type": "object",

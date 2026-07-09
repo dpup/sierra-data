@@ -46,7 +46,7 @@ Rules:
 - This is reference-only, life-safety data. Never present absence of data as an all-clear.
 - If any source is UNAVAILABLE (see grid_sources), say that status is UNKNOWN, not clear.
 - For evacuations: null = unknown (tell the user to check Genasys), 0 = no active zones reported (caveated, not a guarantee), N = active. Do not collapse null and 0.
-- Cite the canonical_url / source links; render evacuation orders verbatim.`, loc, loc, loc, loc)
+- Cite the canonicalUrl / source links; render evacuation orders verbatim.`, loc, loc, loc, loc)
 
 	return rpcResponse{Result: map[string]interface{}{
 		"description": "Hazard briefing for " + loc,
