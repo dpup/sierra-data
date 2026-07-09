@@ -24,7 +24,9 @@ const (
 	GridService_GetEventHistory_FullMethodName = "/grid.v1.GridService/GetEventHistory"
 	GridService_ListHistory_FullMethodName     = "/grid.v1.GridService/ListHistory"
 	GridService_ListPlaces_FullMethodName      = "/grid.v1.GridService/ListPlaces"
+	GridService_ResolvePlace_FullMethodName    = "/grid.v1.GridService/ResolvePlace"
 	GridService_GetPlace_FullMethodName        = "/grid.v1.GridService/GetPlace"
+	GridService_ListScanners_FullMethodName    = "/grid.v1.GridService/ListScanners"
 	GridService_ListSources_FullMethodName     = "/grid.v1.GridService/ListSources"
 )
 
@@ -47,8 +49,14 @@ type GridServiceClient interface {
 	ListHistory(ctx context.Context, in *ListHistoryRequest, opts ...grpc.CallOption) (*EventRevisionList, error)
 	// ListPlaces returns the place directory filtered by kind and a name query.
 	ListPlaces(ctx context.Context, in *ListPlacesRequest, opts ...grpc.CallOption) (*PlaceList, error)
+	// ResolvePlace maps a lat/lng or address to the containing places,
+	// most-specific first (SITE, EVAC_ZONE, TOWN, CORRIDOR, COUNTY, AREA).
+	ResolvePlace(ctx context.Context, in *ResolvePlaceRequest, opts ...grpc.CallOption) (*ResolvePlaceResponse, error)
 	// GetPlace returns one place by slug or namespaced id.
 	GetPlace(ctx context.Context, in *GetPlaceRequest, opts ...grpc.CallOption) (*Place, error)
+	// ListScanners returns Broadcastify scanner feeds, optionally scoped to a
+	// place (an area serves its feeds; otherwise every area's feeds, deduped).
+	ListScanners(ctx context.Context, in *ListScannersRequest, opts ...grpc.CallOption) (*ScannerList, error)
 	// ListSources returns the source registry with per-source health — the
 	// honesty mechanism clients key layer trust off.
 	ListSources(ctx context.Context, in *ListSourcesRequest, opts ...grpc.CallOption) (*SourceList, error)
@@ -112,10 +120,30 @@ func (c *gridServiceClient) ListPlaces(ctx context.Context, in *ListPlacesReques
 	return out, nil
 }
 
+func (c *gridServiceClient) ResolvePlace(ctx context.Context, in *ResolvePlaceRequest, opts ...grpc.CallOption) (*ResolvePlaceResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResolvePlaceResponse)
+	err := c.cc.Invoke(ctx, GridService_ResolvePlace_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *gridServiceClient) GetPlace(ctx context.Context, in *GetPlaceRequest, opts ...grpc.CallOption) (*Place, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(Place)
 	err := c.cc.Invoke(ctx, GridService_GetPlace_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gridServiceClient) ListScanners(ctx context.Context, in *ListScannersRequest, opts ...grpc.CallOption) (*ScannerList, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ScannerList)
+	err := c.cc.Invoke(ctx, GridService_ListScanners_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -151,8 +179,14 @@ type GridServiceServer interface {
 	ListHistory(context.Context, *ListHistoryRequest) (*EventRevisionList, error)
 	// ListPlaces returns the place directory filtered by kind and a name query.
 	ListPlaces(context.Context, *ListPlacesRequest) (*PlaceList, error)
+	// ResolvePlace maps a lat/lng or address to the containing places,
+	// most-specific first (SITE, EVAC_ZONE, TOWN, CORRIDOR, COUNTY, AREA).
+	ResolvePlace(context.Context, *ResolvePlaceRequest) (*ResolvePlaceResponse, error)
 	// GetPlace returns one place by slug or namespaced id.
 	GetPlace(context.Context, *GetPlaceRequest) (*Place, error)
+	// ListScanners returns Broadcastify scanner feeds, optionally scoped to a
+	// place (an area serves its feeds; otherwise every area's feeds, deduped).
+	ListScanners(context.Context, *ListScannersRequest) (*ScannerList, error)
 	// ListSources returns the source registry with per-source health — the
 	// honesty mechanism clients key layer trust off.
 	ListSources(context.Context, *ListSourcesRequest) (*SourceList, error)
@@ -181,8 +215,14 @@ func (UnimplementedGridServiceServer) ListHistory(context.Context, *ListHistoryR
 func (UnimplementedGridServiceServer) ListPlaces(context.Context, *ListPlacesRequest) (*PlaceList, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListPlaces not implemented")
 }
+func (UnimplementedGridServiceServer) ResolvePlace(context.Context, *ResolvePlaceRequest) (*ResolvePlaceResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ResolvePlace not implemented")
+}
 func (UnimplementedGridServiceServer) GetPlace(context.Context, *GetPlaceRequest) (*Place, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetPlace not implemented")
+}
+func (UnimplementedGridServiceServer) ListScanners(context.Context, *ListScannersRequest) (*ScannerList, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListScanners not implemented")
 }
 func (UnimplementedGridServiceServer) ListSources(context.Context, *ListSourcesRequest) (*SourceList, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListSources not implemented")
@@ -298,6 +338,24 @@ func _GridService_ListPlaces_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _GridService_ResolvePlace_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResolvePlaceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GridServiceServer).ResolvePlace(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GridService_ResolvePlace_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GridServiceServer).ResolvePlace(ctx, req.(*ResolvePlaceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _GridService_GetPlace_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetPlaceRequest)
 	if err := dec(in); err != nil {
@@ -312,6 +370,24 @@ func _GridService_GetPlace_Handler(srv interface{}, ctx context.Context, dec fun
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(GridServiceServer).GetPlace(ctx, req.(*GetPlaceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _GridService_ListScanners_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListScannersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GridServiceServer).ListScanners(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GridService_ListScanners_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GridServiceServer).ListScanners(ctx, req.(*ListScannersRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -362,8 +438,16 @@ var GridService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _GridService_ListPlaces_Handler,
 		},
 		{
+			MethodName: "ResolvePlace",
+			Handler:    _GridService_ResolvePlace_Handler,
+		},
+		{
 			MethodName: "GetPlace",
 			Handler:    _GridService_GetPlace_Handler,
+		},
+		{
+			MethodName: "ListScanners",
+			Handler:    _GridService_ListScanners_Handler,
 		},
 		{
 			MethodName: "ListSources",

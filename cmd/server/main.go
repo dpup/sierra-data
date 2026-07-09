@@ -149,7 +149,7 @@ func main() {
 	// gRPC-Gateway (docs/grpc-gateway-migration-plan.md). Being ported endpoint
 	// by endpoint; the hand-built /v1 handlers remain until each RPC reaches
 	// parity. Gateway annotations mount under /api/, which Prefab already serves.
-	gridServer := gridapi.NewGridServer(gridStore)
+	gridServer := gridapi.NewGridServer(gridapiService)
 
 	// Prefab server. gRPC + gateway serve the /api/v1 GridService; the hand-built
 	// /v1 grid API, MCP, and the static site are plain HTTP handlers.

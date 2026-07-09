@@ -328,6 +328,80 @@
         ]
       }
     },
+    "/api/v1/places:resolve": {
+      "get": {
+        "summary": "ResolvePlace maps a lat/lng or address to the containing places,\nmost-specific first (SITE, EVAC_ZONE, TOWN, CORRIDOR, COUNTY, AREA).",
+        "operationId": "GridService_ResolvePlace",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ResolvePlaceResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "lat",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "lng",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "address",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "GridService"
+        ]
+      }
+    },
+    "/api/v1/scanners": {
+      "get": {
+        "summary": "ListScanners returns Broadcastify scanner feeds, optionally scoped to a\nplace (an area serves its feeds; otherwise every area's feeds, deduped).",
+        "operationId": "GridService_ListScanners",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ScannerList"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "place",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "GridService"
+        ]
+      }
+    },
     "/api/v1/sources": {
       "get": {
         "summary": "ListSources returns the source registry with per-source health — the\nhonesty mechanism clients key layer trust off.",
@@ -772,6 +846,37 @@
         }
       }
     },
+    "v1ResolvePlaceResponse": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "$ref": "#/definitions/v1ResolveQuery"
+        },
+        "places": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1Place"
+          }
+        }
+      }
+    },
+    "v1ResolveQuery": {
+      "type": "object",
+      "properties": {
+        "lat": {
+          "type": "number",
+          "format": "double"
+        },
+        "lng": {
+          "type": "number",
+          "format": "double"
+        },
+        "matchedAddress": {
+          "type": "string"
+        }
+      }
+    },
     "v1RoadIncidentDetail": {
       "type": "object",
       "properties": {
@@ -795,6 +900,35 @@
         }
       },
       "description": "Kind-specific only. The incident type is the envelope `category`, the human\nlocation is `area_label`, and the short line is the `headline` — none are\nrepeated here."
+    },
+    "v1Scanner": {
+      "type": "object",
+      "properties": {
+        "feedId": {
+          "type": "string"
+        },
+        "channelLabel": {
+          "type": "string"
+        },
+        "agency": {
+          "type": "string"
+        },
+        "broadcastifyUrl": {
+          "type": "string"
+        }
+      }
+    },
+    "v1ScannerList": {
+      "type": "object",
+      "properties": {
+        "scanners": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1Scanner"
+          }
+        }
+      }
     },
     "v1Severity": {
       "type": "string",

@@ -280,9 +280,21 @@ service GridService {
   rpc ListPlaces(ListPlacesRequest) returns (PlaceList) {
     option (google.api.http) = {get: "/api/v1/places"};
   }
+  // ResolvePlace maps a lat/lng or address to the containing places,
+  // most-specific first (SITE, EVAC_ZONE, TOWN, CORRIDOR, COUNTY, AREA).
+  rpc ResolvePlace(ResolvePlaceRequest) returns (ResolvePlaceResponse) {
+    // AIP custom-method form (colon verb) so it can't be shadowed by the
+    // GetPlace {place} wildcard.
+    option (google.api.http) = {get: "/api/v1/places:resolve"};
+  }
   // GetPlace returns one place by slug or namespaced id.
   rpc GetPlace(GetPlaceRequest) returns (Place) {
     option (google.api.http) = {get: "/api/v1/places/{place}"};
+  }
+  // ListScanners returns Broadcastify scanner feeds, optionally scoped to a
+  // place (an area serves its feeds; otherwise every area's feeds, deduped).
+  rpc ListScanners(ListScannersRequest) returns (ScannerList) {
+    option (google.api.http) = {get: "/api/v1/scanners"};
   }
   // ListSources returns the source registry with per-source health — the
   // honesty mechanism clients key layer trust off.
@@ -329,5 +341,33 @@ message ListPlacesRequest {
 }
 message GetPlaceRequest {
   string place = 1;
+}
+// lat/lng are strings so presence + range/NaN validation matches the /v1
+// handler; provide lat+lng OR address, not both.
+message ResolvePlaceRequest {
+  string lat = 1;
+  string lng = 2;
+  string address = 3;
+}
+message ResolveQuery {
+  double lat = 1;
+  double lng = 2;
+  string matched_address = 3;
+}
+message ResolvePlaceResponse {
+  ResolveQuery query = 1;
+  repeated Place places = 2;
+}
+message ListScannersRequest {
+  string place = 1;
+}
+message Scanner {
+  string feed_id = 1;
+  string channel_label = 2;
+  string agency = 3;
+  string broadcastify_url = 4;
+}
+message ScannerList {
+  repeated Scanner scanners = 1;
 }
 message ListSourcesRequest {}
