@@ -51,7 +51,7 @@
     <dt>Base URL</dt>
     <dd>https://data.sierragridteam.org — all endpoints under <code class="inline">/api/v1/</code></dd>
     <dt>Default format</dt>
-    <dd>protojson. The gRPC RPC endpoints emit <strong>camelCase</strong> field names (<code class="inline">observedAt</code>, <code class="inline">areaLabel</code>, <code class="inline">nextPageToken</code>); the hand-built <code class="inline">/api/v1/places/{place}/summary</code> and <code class="inline">.geojson</code> responses keep <strong>snake_case</strong> (<code class="inline">source_status</code>, <code class="inline">severity_rank</code>)</dd>
+    <dd>protojson, <strong>camelCase</strong> throughout (<code class="inline">observedAt</code>, <code class="inline">areaLabel</code>, <code class="inline">nextPageToken</code>) — the gRPC RPCs via the gateway marshaler and the hand-built <code class="inline">.geojson</code> layers via matching camelCase keys (<code class="inline">sourceStatus</code>, <code class="inline">severityRank</code>)</dd>
     <dt>Binary protobuf</dt>
     <dd><code class="inline">Accept: application/proto</code> on entity endpoints returns the <code class="inline">grid.v1</code> messages as binary protobuf</dd>
     <dt>GeoJSON</dt>
@@ -110,7 +110,7 @@ Content-Type: application/json
     (not a proto message) with the area
     <code class="inline">mode</code>, a cross-layer summary, per-domain
     statuses, top events, and a source-health sidecar. Carries the evacuation
-    fail-loud invariant — <code class="inline">active_evacuations</code> is
+    fail-loud invariant — <code class="inline">activeEvacuations</code> is
     <code class="inline">int | null</code>, and <code class="inline">null</code>
     means <em>unknown</em>, never zero (<a href="#evac">§6</a>).
     <code class="inline">Cache-Control: max-age=30</code>. Full response shape
@@ -120,7 +120,7 @@ Content-Type: application/json
     <thead><tr><th>Field</th><th>Values</th><th>Semantics</th></tr></thead>
     <tbody>
       <tr><td class="mono">mode</td><td class="mono">QUIET | WATCH | ACTIVE</td><td class="wrap">ACTIVE: any active evacuation (ORDER / WARNING / SHELTER_IN_PLACE), any active EXTREME event, or a SEVERE wildfire. WATCH: any active SEVERE, an evacuation ADVISORY, fire weather elevated/red-flag, or any layer UNAVAILABLE while another signal is ≥ MODERATE. QUIET: otherwise. An UNAVAILABLE evacuation source forces mode ≥ WATCH — unknown is not quiet.</td></tr>
-      <tr><td class="mono">domains[]</td><td class="mono">fire, evacuation, weather, roads, seismic</td><td class="wrap">fire = wildfire + fire_weather; weather = weather_alert; roads = road_incident + chain_control + road_segment; seismic = earthquake. Each domain carries <code>status</code> (worst source_status), <code>highest_severity</code>, <code>active_count</code>, and up to 3 <code>headlines</code>.</td></tr>
+      <tr><td class="mono">domains[]</td><td class="mono">fire, evacuation, weather, roads, seismic</td><td class="wrap">fire = wildfire + fire_weather; weather = weather_alert; roads = road_incident + chain_control + road_segment; seismic = earthquake. Each domain carries <code>status</code> (worst sourceStatus), <code>highestSeverity</code>, <code>activeCount</code>, and up to 3 <code>headlines</code>.</td></tr>
     </tbody>
   </table></div>
   <div class="live-examples">
@@ -309,7 +309,7 @@ Content-Type: application/json
   <h3 class="endpoint-head" id="ep-sources"><span class="chip-get"><b>GET</b> /api/v1/sources</span></h3>
   <p>
     The provenance and health registry behind every
-    <code class="inline">source_status</code> in the system
+    <code class="inline">sourceStatus</code> in the system
     (<code class="inline">SourceList</code>): per source, its poll interval,
     last successful fetch, last attempt, last error text, and derived status
     <code class="inline">OK | STALE | UNAVAILABLE</code>. Registry contents in
@@ -524,27 +524,27 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
   "metadata": {
     "layer": "evacuation",
     "area": "ebbetts-pass",
-    "generated_at": "2026-07-05T15:42:11Z",
-    "source_status": "OK",            // OK | STALE | UNAVAILABLE
-    "last_source_update": "2026-07-05T15:38:00Z",
+    "generatedAt": "2026-07-05T15:42:11Z",
+    "sourceStatus": "OK",             // OK | STALE | UNAVAILABLE
+    "lastSourceUpdate": "2026-07-05T15:38:00Z",
     "attribution": "Cal OES / California County Governments — reference only",
-    "source_url": "https://protect.genasys.com/…",
-    "schema_version": 1
+    "sourceUrl": "https://protect.genasys.com/…",
+    "schemaVersion": 1
   }
 }</pre>
 
-  <h3><code class="inline">metadata.source_status</code></h3>
+  <h3><code class="inline">metadata.sourceStatus</code></h3>
   <p>
     Layers are fail-loud: a source error never becomes a fabricated clear
     state. The three states render differently and <strong>must not be
     collapsed</strong>:
   </p>
   <div class="table-wrap"><table class="data-table">
-    <thead><tr><th>source_status</th><th>Features</th><th>Required client rendering</th></tr></thead>
+    <thead><tr><th>sourceStatus</th><th>Features</th><th>Required client rendering</th></tr></thead>
     <tbody>
       <tr><td><span class="dot-status st-OK"><span class="dot"></span>OK</span></td><td>current</td><td class="wrap">Normal.</td></tr>
-      <tr><td><span class="dot-status st-STALE"><span class="dot"></span>STALE</span></td><td>last-good served</td><td class="wrap">Render with a "data ~N min old" indicator (N from <code>generated_at − last_source_update</code>).</td></tr>
-      <tr><td><span class="dot-status st-UNAVAILABLE"><span class="dot"></span>UNAVAILABLE</span></td><td>empty</td><td class="wrap">Suppress the map layer; show an empty-state banner linking <code>metadata.source_url</code>. Never render as "all clear".</td></tr>
+      <tr><td><span class="dot-status st-STALE"><span class="dot"></span>STALE</span></td><td>last-good served</td><td class="wrap">Render with a "data ~N min old" indicator (N from <code>generatedAt − lastSourceUpdate</code>).</td></tr>
+      <tr><td><span class="dot-status st-UNAVAILABLE"><span class="dot"></span>UNAVAILABLE</span></td><td>empty</td><td class="wrap">Suppress the map layer; show an empty-state banner linking <code>metadata.sourceUrl</code>. Never render as "all clear".</td></tr>
     </tbody>
   </table></div>
 
@@ -552,7 +552,7 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
   <p>
     Every feature, in every layer, shares one common envelope — that is the
     unification. A client renders any feature's card from
-    <code class="inline">headline / severity / source / updated_at</code>
+    <code class="inline">headline / severity / source / updatedAt</code>
     without knowing its kind:
   </p>
   <pre class="code">{
@@ -565,19 +565,19 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
     "kind": "Wildfire",                  // human label
     "category": "active",                // source sub-type / status slug
     "severity": "SEVERE",                // unified scale, §3
-    "severity_rank": 3,                  // 0..4, for sort/color
+    "severityRank": 3,                   // 0..4, for sort/color
     "headline": "Salt Springs Fire — 1,377 ac, 20% contained",
     "description": "…",                  // optional, long
     "status": "active",
     "effective": "2026-07-05T14:02:00Z", // RFC 3339, nullable
     "expires": null,
-    "updated_at": "2026-07-05T15:40:00Z",
-    "area_label": "Hathaway Pines &amp; Avery",  // optional
+    "updatedAt": "2026-07-05T15:40:00Z",
+    "areaLabel": "Hathaway Pines &amp; Avery",   // optional
     "source": {
       "id": "calfire", "name": "CAL FIRE",
       "url": "https://www.fire.ca.gov/incidents/…",
       "attribution": "CAL FIRE / WFIGS",
-      "fetched_at": "2026-07-05T15:42:10Z"
+      "fetchedAt": "2026-07-05T15:42:10Z"
     },
     // ---- per-kind typed block (only the relevant one) ----
     "wildfire": { "acres": 1377, "containment": 20, … }
@@ -586,9 +586,9 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
   <ul>
     <li><strong>Per-kind data</strong> lives under a single namespaced key (<code class="inline">wildfire</code>, <code class="inline">earthquake</code>, <code class="inline">evacuation</code>, <code class="inline">weather</code>, <code class="inline">incident</code>) — consumers ignore kinds they don't handle; no field collisions.</li>
     <li><strong>Coordinate order is <code class="inline">[longitude, latitude]</code></strong> (GeoJSON axis order), WGS84, trimmed to 5 decimals (~1.1 m). Polygons are simplified to keep features small.</li>
-    <li><strong>Null geometry is valid</strong> (e.g. a county-wide advisory): the feature has <code class="inline">"geometry": null</code> with the same properties envelope. Exclude it from the map layer and render it as a full-width banner/list card sorted by <code class="inline">severity_rank</code> alongside located features, showing <code class="inline">headline</code>, <code class="inline">source.name</code>, <code class="inline">updated_at</code>, and <code class="inline">source.url</code>.</li>
+    <li><strong>Null geometry is valid</strong> (e.g. a county-wide advisory): the feature has <code class="inline">"geometry": null</code> with the same properties envelope. Exclude it from the map layer and render it as a full-width banner/list card sorted by <code class="inline">severityRank</code> alongside located features, showing <code class="inline">headline</code>, <code class="inline">source.name</code>, <code class="inline">updatedAt</code>, and <code class="inline">source.url</code>.</li>
     <li><strong>URL fields are scheme-validated upstream</strong>: any upstream-sourced URL that is not <code class="inline">https://</code>/<code class="inline">http://</code> is dropped before it reaches the response. Treat all upstream text (headlines, descriptions) as untrusted anyway.</li>
-    <li>Unit-bearing fields name their unit (<code class="inline">wind_gust_mph</code>, <code class="inline">depth_km</code>).</li>
+    <li>Unit-bearing fields name their unit (<code class="inline">windGustMph</code>, <code class="inline">depthKm</code>).</li>
   </ul>
   <div class="live-examples">
     <a href="/api/v1/places/ebbetts-pass/map/wildfire.geojson">/api/v1/places/ebbetts-pass/map/wildfire.geojson</a>
@@ -621,15 +621,15 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
     <h3>The invariant, mechanically</h3>
     <p>
       In <code class="inline">/api/v1/places/{place}/summary</code>,
-      <code class="inline">summary.active_evacuations</code> is
+      <code class="inline">summary.activeEvacuations</code> is
       <code class="inline">int | null</code> and
-      <code class="inline">summary.evacuation_status</code> is
+      <code class="inline">summary.evacuationStatus</code> is
       <code class="inline">OK | STALE | UNAVAILABLE</code>:
     </p>
     <div class="table-wrap"><table class="data-table">
-      <thead><tr><th>active_evacuations</th><th>evacuation_status</th><th>Meaning</th><th>Required client rendering</th></tr></thead>
+      <thead><tr><th>activeEvacuations</th><th>evacuationStatus</th><th>Meaning</th><th>Required client rendering</th></tr></thead>
       <tbody>
-        <tr><td class="mono">null</td><td><span class="dot-status st-UNAVAILABLE"><span class="dot"></span>UNAVAILABLE</span></td><td class="wrap">The Cal OES feed errored. <strong>Unknown — not zero.</strong></td><td class="wrap">"Evacuation status unknown — check <a href="https://protect.genasys.com/">Genasys Protect</a>" (or the <code>source_url</code> provided). Never an all-clear, never a blank.</td></tr>
+        <tr><td class="mono">null</td><td><span class="dot-status st-UNAVAILABLE"><span class="dot"></span>UNAVAILABLE</span></td><td class="wrap">The Cal OES feed errored. <strong>Unknown — not zero.</strong></td><td class="wrap">"Evacuation status unknown — check <a href="https://protect.genasys.com/">Genasys Protect</a>" (or the <code>sourceUrl</code> provided). Never an all-clear, never a blank.</td></tr>
         <tr><td class="mono">0</td><td><span class="dot-status st-OK"><span class="dot"></span>OK</span></td><td class="wrap">Cal OES fetched cleanly and reports no active zones — a <em>caveated confirmed-empty</em>.</td><td class="wrap">"No active evacuations reported (per Cal OES)" — still linked to the source, never phrased as a guarantee.</td></tr>
         <tr><td class="mono">n &gt; 0</td><td><span class="dot-status st-OK"><span class="dot"></span>OK</span> / <span class="dot-status st-STALE"><span class="dot"></span>STALE</span></td><td class="wrap">Active zones exist (STALE = counted from the last good fetch).</td><td class="wrap">Show the count and the zones; if STALE, show data age.</td></tr>
       </tbody>
@@ -646,9 +646,9 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
     <p>
       The same rule applies to the evacuation map layer
       (<a href="/api/v1/places/ebbetts-pass/map/evacuation.geojson" class="mono">/api/v1/places/ebbetts-pass/map/evacuation.geojson</a>):
-      <code class="inline">source_status: UNAVAILABLE</code> comes with empty
+      <code class="inline">sourceStatus: UNAVAILABLE</code> comes with empty
       features and must render as an unknown-state banner, never an empty
-      (implicitly safe) map. <code class="inline">metadata.source_url</code>
+      (implicitly safe) map. <code class="inline">metadata.sourceUrl</code>
       links the authoritative Genasys viewer in <em>every</em> state.
     </p>
     <p>
@@ -660,18 +660,18 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
 
     <h3>The summary shape (quoted from the contract)</h3>
     <pre class="code">{
-  "place": "ebbetts-pass", "place_id": "area:ebbetts-pass",
-  "place_name": "Calaveras County", "generated_at": "RFC3339",
+  "place": "ebbetts-pass", "placeId": "area:ebbetts-pass",
+  "placeName": "Calaveras County", "generatedAt": "RFC3339",
   "mode": "QUIET|WATCH|ACTIVE",
   "summary": {
-    "highest_severity": "SEVERE", "highest_severity_rank": 3,
-    "severity_counts": {"SEVERE": 1}, "total_active": 4,
-    "active_evacuations": null, "evacuation_status": "UNAVAILABLE",
-    "top_events": [{"id","layer","severity","severity_rank","headline","source"}]
+    "highestSeverity": "SEVERE", "highestSeverityRank": 3,
+    "severityCounts": {"SEVERE": 1}, "totalActive": 4,
+    "activeEvacuations": null, "evacuationStatus": "UNAVAILABLE",
+    "topEvents": [{"id","layer","severity","severityRank","headline","source"}]
   },
-  "domains": [{"domain","status","highest_severity","active_count",
+  "domains": [{"domain","status","highestSeverity","activeCount",
                "headlines":[{"id","severity","headline"}]}],
-  "sources": [{"id","status","last_success_at"}]
+  "sources": [{"id","status","lastSuccessAt"}]
 }</pre>
     <div class="live-examples">
       <a href="/api/v1/places/ebbetts-pass/summary">/api/v1/places/ebbetts-pass/summary</a>
@@ -719,7 +719,7 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
   <h3>Attribution requirements</h3>
   <ul>
     <li>Display the <code class="inline">attribution</code> string (from <code class="inline">Source.attribution</code>, <code class="inline">Event.provenance.attribution</code>, or <code class="inline">metadata.attribution</code> on GeoJSON layers) wherever you render the data.</li>
-    <li>Link the upstream: <code class="inline">provenance.sourceUrl</code> (events) / <code class="inline">metadata.source_url</code> (GeoJSON) on records, <code class="inline">homepageUrl</code> on the source.</li>
+    <li>Link the upstream: <code class="inline">provenance.sourceUrl</code> (events) / <code class="inline">metadata.sourceUrl</code> (GeoJSON) on records, <code class="inline">homepageUrl</code> on the source.</li>
     <li>Evacuation data must carry its reference-only framing and the Genasys link in every state (§6).</li>
   </ul>
   <div class="live-examples">
