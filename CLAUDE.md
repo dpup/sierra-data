@@ -283,8 +283,14 @@ gateway's `EmitUnpopulated` marshaler.
 **Grid Info Service** (`/api/v1/...`), the `GridService` RPCs:
 - `GET /api/v1/events` - cross-layer event query
   (`place,layer,status,severity_min,since,page_token,page_size`; default status
-  `ACTIVE,SCHEDULED`; keyset pagination → `{events, nextPageToken}`). This is the
-  road-incident feed (`layer=road_incident`, scope by corridor `place`) and the
+  `ACTIVE,SCHEDULED`; keyset pagination → `{events, nextPageToken}`). **`place`
+  accepts the slug (`hwy4-murphys-arnold`) or the namespaced id
+  (`corridor:hwy4-murphys-arnold`)** — both resolve (`Store.GetPlace` keys on `id`
+  when the value contains `:`, else `slug`); the bare slug is the intended form.
+  Events attach to a place geometrically: point events fall inside a polygon place
+  (county/area) or within `corridorBufferMeters` (~1.5 km) of a corridor
+  LineString. This is the road-incident feed (`layer=road_incident`, scope by
+  corridor `place`) and the
   weather-alert listing (`layer=weather_alert`) — there is no separate roads or
   incidents endpoint. All road incidents are AI-enhanced (`enhancement`:
   description/summary/impact/metadata), with `severity` driven by the model's

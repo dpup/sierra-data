@@ -132,10 +132,15 @@ func (s *Store) PlacesContaining(ctx context.Context, lat, lng float64) ([]*grid
 			continue
 		}
 		minLat, minLng, maxLat, maxLng := g.Bbox()
-		if lat < minLat || lat > maxLat || lng < minLng || lng > maxLng {
+		// Widen the prefilter by the corridor buffer so a point near (but outside)
+		// a zero-width corridor line still reaches the exact test below. Harmless
+		// for polygons — the exact PointInGeometry test is authoritative.
+		if lat < minLat-corridorBufferDeg || lat > maxLat+corridorBufferDeg ||
+			lng < minLng-corridorBufferDeg || lng > maxLng+corridorBufferDeg {
 			continue
 		}
-		if geojson.PointInGeometry(lat, lng, g) {
+		if geojson.PointInGeometry(lat, lng, g) ||
+			geojson.PointNearLine(lat, lng, g, corridorBufferMeters) {
 			matched = append(matched, p)
 		}
 	}

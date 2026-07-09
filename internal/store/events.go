@@ -502,6 +502,19 @@ func upsertGeo(tx *sql.Tx, ev *gridv1.Event) error {
 	return nil
 }
 
+// corridorBufferMeters is how close a point event must be to a corridor
+// LineString to attach to it. Corridors are seeded as the straight
+// origin->destination chord (not the road's true path), so the buffer has to
+// absorb both the chord-vs-road deviation on these short mountain sections and
+// the few-hundred-metre slop in CHP/Caltrans incident coordinates. Tune here.
+// corridorBufferDeg is a loose degree-margin (>= the buffer, ~1° ≈ 111 km) used
+// only to widen the cheap bbox prefilter so a point near a zero-width line still
+// reaches the exact PointNearLine test.
+const (
+	corridorBufferMeters = 1500
+	corridorBufferDeg    = corridorBufferMeters/111000.0*1.3 + 0.0
+)
+
 // matchPlaces computes the geometric event->place attachments.
 //
 // Rule (over-attach beats missing a perimeter that crosses a boundary):
@@ -552,7 +565,11 @@ func (s *Store) matchPlaces(tx *sql.Tx, ev *gridv1.Event) ([]string, error) {
 	var matched []string
 	for _, pl := range places {
 		if pointLike {
-			if geojson.PointInGeometry(centroid.GetLat(), centroid.GetLng(), pl.geom) {
+			// Polygon places: exact point-in-polygon. Corridor (LineString) places:
+			// attach when the point is within corridorBufferMeters of the road line
+			// (PointNearLine is a no-op for non-line geoms, so this is safe for all).
+			if geojson.PointInGeometry(centroid.GetLat(), centroid.GetLng(), pl.geom) ||
+				geojson.PointNearLine(centroid.GetLat(), centroid.GetLng(), pl.geom, corridorBufferMeters) {
 				matched = append(matched, pl.id)
 			}
 			continue

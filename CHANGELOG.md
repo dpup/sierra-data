@@ -16,6 +16,23 @@ proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 
 ## 2026-07-09
 
+### Fixed — road incidents now attach to road corridors
+
+`GET /api/v1/events?place={corridor}&layer=road_incident` (the "road alerts on a
+corridor" query) returned **nothing**: corridors are `LineString` places (the
+straight origin→destination chord), and event→place attachment used a
+point-in-*polygon* test, which never matches a zero-width line — so no incident
+ever attached to a corridor. Now a point event attaches to a corridor when it is
+within ~1.5 km of the corridor line (`corridorBufferMeters`). `GET
+/api/v1/places:resolve?lat=&lng=` gains the same behavior: a point on a monitored
+road now resolves to its `corridor:*` place. (The chord is a straight
+approximation of the real road, so the buffer is deliberately generous; incident
+coordinates are approximate too.)
+
+Also clarified: the `?place=` filter (and `/api/v1/places/{place}`) accept **either
+the slug** (`hwy4-murphys-arnold`) **or the namespaced id**
+(`corridor:hwy4-murphys-arnold`) — the bare slug is the intended form.
+
 ### Changed — the data API is now proto-defined gRPC + gRPC-Gateway at `/api/v1` (BREAKING)
 
 The hand-built snake_case `/v1` surface (added 2026-07-05) has been **removed** and

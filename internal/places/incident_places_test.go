@@ -68,6 +68,15 @@ func TestRoadIncidentPointsRespectCorridorPolygon(t *testing.T) {
 			"%s (%.3f,%.3f) is west of the corridor — must not tag ebbetts-pass", c.id, c.lat, c.lng)
 	}
 
+	// A road incident on a corridor LineString attaches by proximity (corridors
+	// are lines, so a point-in-polygon test never matches them). testConfig seeds
+	// corridor:hwy4-angels-murphys from (38.0678,-120.5402) to (38.1377,-120.4561).
+	assert.Containsf(t, attachedPlaces("chp:on-hwy4", gridv1.Layer_ROAD_INCIDENT, 38.10275, -120.49815),
+		"corridor:hwy4-angels-murphys", "an incident on the road line must attach to the corridor")
+	// ~35 km west of the line: must not attach to the corridor.
+	assert.NotContainsf(t, attachedPlaces("chp:far-off", gridv1.Layer_ROAD_INCIDENT, 38.10275, -120.90),
+		"corridor:hwy4-angels-murphys", "an incident far from the line must not attach")
+
 	// Genuinely in-corridor incidents (lng >= -120.6) must still attach.
 	for _, c := range []struct {
 		id       string
