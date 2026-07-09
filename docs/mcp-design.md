@@ -5,7 +5,7 @@ design of record; the notes below describe what shipped.
 
 How The Grid would expose its hazard/roads/weather data to LLM agents via the
 Model Context Protocol (MCP). The service is read-only and unauthenticated, so
-the protocol maps almost 1:1 onto the existing `/v1` surface
+the protocol maps almost 1:1 onto the existing `/api/v1` surface
 (`docs/v2-api-spec.md`). The design work is **not** the plumbing — it's shaping
 responses for LLMs (compact, geometry-free) and baking the fail-loud honesty
 contract into every tool result so a model cannot turn "unknown" into
@@ -16,14 +16,14 @@ contract into every tool result so a model cannot turn "unknown" into
 - **Read-only, no auth** → no OAuth, no write tools ever. Add basic per-IP rate
   limiting since it's public.
 - **One store, one query layer** → MCP tools reuse the same store reads as the
-  `internal/gridapi` `/v1` handlers; the only new code is an LLM-shaped
+  `internal/gridapi` `/api/v1` surface; the only new code is an LLM-shaped
   projection + tool schemas.
 - **Pure-Go** → a pure-Go MCP SDK (`modelcontextprotocol/go-sdk` or
   `mark3labs/mcp-go`) keeps `CGO_ENABLED=0`.
 
 ## Transport & mounting
 
-- **Remote MCP over Streamable HTTP**, mounted at `/mcp` exactly like `/v1`:
+- **Remote MCP over Streamable HTTP**, mounted at `/mcp` exactly like `/api/v1`:
   `prefab.WithHTTPHandler("/mcp", mcpHandler)`. One URL —
   `https://data.sierragridteam.org/mcp` — no install for the agent.
 - Use the current **Streamable HTTP** transport, not the deprecated SSE
@@ -49,12 +49,12 @@ Each tool accepts a flexible `location` — a place slug/id **or** an address
 | `grid_situation` | `location` | `mode` (QUIET/WATCH/ACTIVE), per-domain status + counts, top headlines, **evacuation: `null`=unknown / `0` / `N`** with framing + Genasys link, source freshness. The flagship call. |
 | `grid_events` | `location?`, `layer?`, `severity_min?`, `status?`, `since?`, `limit?`, `page_token?` | rows `{id, layer, kind, severity, headline, area_label, observed_at, source, canonical_url}`; geometry → centroid + `map_url`. |
 | `grid_event` | `id` | full event: AI `summary`, verbatim `description`, severity/status, effective/expires, typed detail (acres/containment, evac level, magnitude…), provenance + `canonical_url`. |
-| `grid_conditions` | `location?` / `corridor?` | roads (status, travel time, chain control) + weather (temp/wind/visibility, `fire_weather` state). |
+| `grid_conditions` | `location?` | weather per location (temp/wind/visibility) + `fire_weather` state. (Road status/incidents are events: `grid_events` `layer=road_incident`.) |
 | `grid_resolve` | `address` or `lat,lng` | containing places, most-specific-first `{slug, id, kind, name}`. |
 | `grid_places` | `kind?`, `q?` | directory for discovery `{slug, id, kind, name, parent}`. |
 
 **Optional / later:** `grid_sources` (feed health), `grid_history`
-(after-action), MCP **resources** (the `/v1` reference as a readable resource),
+(after-action), MCP **resources** (the `/api/v1` reference as a readable resource),
 and a "hazard briefing for {place}" **prompt** template.
 
 ## Response-shaping rules (the real work)

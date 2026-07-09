@@ -142,7 +142,7 @@ func main() {
 	// summary + .geojson gateway routes (the census geocoder powers
 	// /api/v1/places:resolve?address=).
 	censusClient := census.NewClient()
-	gridapiService := gridapi.NewService(gridStore, roadsService, weatherService, censusClient, appConfig, hazardsService)
+	gridapiService := gridapi.NewService(gridStore, weatherService, censusClient, appConfig, hazardsService)
 
 	// MCP endpoint (docs/mcp-design.md): read-only tools for LLM agents over
 	// Streamable HTTP. The tools call the /api/v1 surface in-process against the

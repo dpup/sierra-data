@@ -1,8 +1,8 @@
 # Grid event store (SQLite persistence)
 
 The system of record for the grid service: hazard **events** with full revision
-history, the **place** directory, and the **source** registry. Backs both `/v1`
-(`internal/gridapi`) and the re-backed `/api/v1` hazard event layers
+history, the **place** directory, and the **source** registry. Backs the
+`/api/v1` API (`internal/gridapi`, gRPC-Gateway) and the hazard event layers
 (`internal/hazards`). Design: `docs/v2-api-spec.md` §4 +
 `docs/v2-implementation-plan.md` §2.2. Pure-Go driver (`modernc.org/sqlite`) so
 the `CGO_ENABLED=0` cross-compile keeps working — do **not** swap in a cgo driver.

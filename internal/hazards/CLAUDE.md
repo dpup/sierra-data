@@ -61,10 +61,10 @@ underlying service (no double-caching).
 
 ## Served through prefab's HTTP security wrapper
 
-The package no longer registers any handler itself; `gridapi` mounts `/v1` and
-calls `BuildLayer` in-process. CORS / the `*.ersn.net` allowlist are applied by
-prefab's `securityMiddleware` on the `/v1` handler — do not add manual
-`SecurityHeaders` calls.
+The package no longer registers any handler itself; `gridapi` serves `/api/v1`
+(via prefab's gRPC-Gateway) and calls `BuildLayer` in-process. CORS / the
+`*.ersn.net` allowlist are applied by prefab's `securityMiddleware` on the
+mounted handlers — do not add manual `SecurityHeaders` calls.
 
 ## Changing a condition layer
 

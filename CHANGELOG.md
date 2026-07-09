@@ -32,11 +32,19 @@ consumer from `/v1/*` to `/api/v1/*` and update field casing.
   `next_page_token`→`nextPageToken`, `parent_id`→`parentId`, `observed_at`→`observedAt`,
   `area_label`→`areaLabel`, `matched_address`→`matchedAddress`, `homepage_url`→`homepageUrl`,
   `poll_interval_seconds`→`pollIntervalSeconds`, `last_success_at`→`lastSuccessAt`, etc.
-- **Errors:** now gRPC-standard `{code, codeName, message, details}` (was
-  `google.rpc.Status`-style `{code, message, details}`) with the mapped HTTP status.
+- **Errors (proto RPCs):** now gRPC-standard `{code, codeName, message, details}`
+  (was `google.rpc.Status`-style `{code, message, details}`) with the mapped HTTP
+  status. The two hand-built endpoints (`summary`, `.geojson`) still emit the
+  `google.rpc.Status`-style body (`{code, message, details}`, no `codeName`).
 - **`summary` and `.geojson` are unchanged** — they stay hand-built and
   **snake_case** (the summary shape; GeoJSON's RFC 7946 contract), just under the
   new prefix.
+- **Also changed by the gateway move:** `HEAD` on `/api/v1/*` now returns `501`
+  (the old `/v1` router answered `HEAD`); `page_size` out of range (`0`, `>200`,
+  non-numeric) is now silently clamped to `1..200` rather than rejected with
+  `400`; the `Accept: application/proto` binary rendering (never widely used) is
+  gone — responses are JSON only; and conditional GET (`ETag`/`If-None-Match`) is
+  not yet re-wired (deferred behind a future prefab `WithETag`).
 
 **Endpoint map (`/v1` → `/api/v1`):**
 

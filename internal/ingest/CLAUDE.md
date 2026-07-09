@@ -105,11 +105,11 @@ AI-enhanced from the `RoadsService` pipeline — do not re-enhance them).
 4. **Seed registry + wiring** (`cmd/server/main.go`): add the source id to
    `gridSourceInfo` (display name + attribution) and add a `PollerSpec` to the
    scheduler's `Pollers` list. The registry constants must match the normalizer's
-   provenance so `/v1/sources` and event provenance agree.
+   provenance so `/api/v1/sources` and event provenance agree.
 5. **Projection** (`internal/gridapi/project.go`): add a `case` to `ProjectEvents`
    producing the exact shipped envelope; if it's a map layer, add it to
    `eventLayers` and `layerSourceIDs` in `internal/gridapi/maplayers.go`.
-6. **Docs**: `site/docs.html` (public `/v1` reference) and a `CHANGELOG.md` entry.
+6. **Docs**: `site/docs.html` (public `/api/v1` reference) and a `CHANGELOG.md` entry.
 
 Per the spec, that's the whole surface — a new poller shows up in summary domains,
-`/v1/events`, and the map namespace automatically; no new endpoints.
+`/api/v1/events`, and the map namespace automatically; no new endpoints.

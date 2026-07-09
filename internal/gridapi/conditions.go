@@ -8,8 +8,9 @@ import (
 	"github.com/dpup/sierra-data/internal/lib/geojson"
 )
 
-// Shared conditions helpers for the ?place= bbox filter. The /v1 roads and
-// weather conditions passthroughs live on the gRPC GridServer (grpc.go); the
+// Shared conditions helpers for the ?place= bbox filter. GridServer.GetConditions
+// (grpc.go) serves current weather + fire-weather (there is no roads passthrough
+// — road conditions are the road_segment/chain_control map layers); the
 // place-bbox resolution and the weather filter below back that path.
 
 // bbox is an axis-aligned lat/lng box (internal lat/lng order, unlike

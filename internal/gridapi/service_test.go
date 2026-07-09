@@ -76,16 +76,8 @@ func testConfig() *config.Config {
 	}
 }
 
-// fakeRoads / fakeWeather / fakeCensus are the narrow-interface stubs.
-type fakeRoads struct {
-	resp *api.ListRoadsResponse
-	err  error
-}
-
-func (f *fakeRoads) ListRoads(context.Context, *api.ListRoadsRequest) (*api.ListRoadsResponse, error) {
-	return f.resp, f.err
-}
-
+// fakeWeather / fakeCensus are the narrow-interface stubs. (roadsResp lives
+// here too — the hazards fake in maplayers_test.go reuses it.)
 type fakeWeather struct {
 	resp *api.ListWeatherResponse
 	err  error
@@ -241,7 +233,7 @@ func newTestService(t *testing.T) *Service {
 	require.NoError(t, places.Seed(context.Background(), st, cfg))
 	seedEvents(t, st)
 
-	svc := NewService(st, &fakeRoads{resp: roadsResp()}, &fakeWeather{resp: weatherResp()}, &fakeCensus{}, cfg, nil)
+	svc := NewService(st, &fakeWeather{resp: weatherResp()}, &fakeCensus{}, cfg, nil)
 	svc.Now = func() time.Time { return base }
 	return svc
 }

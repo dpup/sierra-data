@@ -6,59 +6,15 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-
-	"google.golang.org/protobuf/encoding/protojson"
-	"google.golang.org/protobuf/proto"
 )
 
-// jsonOpts is the one protojson configuration for the /v1 surface: proto
-// field names verbatim, so the wire is snake_case end to end (plan §2.4).
-//
-// Determinism note: protojson output is deliberately unstable ACROSS binaries
-// (protobuf's detrand varies whitespace per process), but within one running
-// process the bytes for equal messages are stable. That is exactly the
-// lifetime a strong body-hash ETag needs for If-None-Match revalidation: a
-// restart/deploy changes the ETag once and clients simply refetch.
-var jsonOpts = protojson.MarshalOptions{UseProtoNames: true}
-
-const (
-	contentTypeJSON  = "application/json"
-	contentTypeProto = "application/proto"
-)
-
-// wantsProto reports whether the client asked for binary proto. Simple
-// substring membership over the Accept list — no q-value ranking; JSON is the
-// default for absent/other/*/* accepts.
-func wantsProto(r *http.Request) bool {
-	return strings.Contains(r.Header.Get("Accept"), contentTypeProto)
-}
-
-// marshalMessage renders m per the request's Accept header:
-// application/proto -> proto.Marshal binary, anything else -> protojson.
-func marshalMessage(r *http.Request, m proto.Message) (body []byte, contentType string, err error) {
-	if wantsProto(r) {
-		body, err = proto.Marshal(m)
-		return body, contentTypeProto, err
-	}
-	body, err = jsonOpts.Marshal(m)
-	return body, contentTypeJSON, err
-}
-
-// writeMessage is the proto-message write path every entity endpoint uses:
-// content negotiation, then ETag/304 handling via writeJSON.
-func writeMessage(w http.ResponseWriter, r *http.Request, m proto.Message, maxAge int) {
-	body, ct, err := marshalMessage(r, m)
-	if err != nil {
-		internal(r.Context(), w, err)
-		return
-	}
-	writeJSON(w, r, body, ct, maxAge)
-}
+// contentTypeJSON is the content type the hand-built summary endpoint writes
+// through writeJSON (the .geojson map layers pass "application/geo+json").
+const contentTypeJSON = "application/json"
 
 // writeJSON writes body with Cache-Control public,max-age and a strong ETag,
-// answering If-None-Match with 304. Despite the name (the task contract's) it
-// writes any content type — the ETag input includes the content type so the
-// JSON and proto renderings of one resource never share a validator.
+// answering If-None-Match with 304. It writes any content type — the ETag input
+// includes the content type so two renderings never share a validator.
 //
 // The ETag is the first 16 bytes of sha256(contentType + NUL + body), hex,
 // quoted. 304 responses keep the ETag and Cache-Control headers (RFC 9110
@@ -71,13 +27,6 @@ func writeJSON(w http.ResponseWriter, r *http.Request, body []byte, contentType 
 	etag := `"` + hex.EncodeToString(h.Sum(nil)[:16]) + `"`
 
 	w.Header().Set("ETag", etag)
-	// The body is content-negotiated on Accept (protojson vs binary proto),
-	// and Cache-Control is public: without Vary a shared cache would serve
-	// one rendering to a client that asked for the other within max-age (the
-	// content-type-salted ETag can't help — caches don't revalidate while
-	// fresh). Add, not Set: prefab's middleware sets a static Vary: Origin
-	// that must be merged, never clobbered.
-	w.Header().Add("Vary", "Accept")
 	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", maxAge))
 	if inmMatches(r.Header.Get("If-None-Match"), etag) {
 		w.WriteHeader(http.StatusNotModified)

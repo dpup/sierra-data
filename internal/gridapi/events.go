@@ -2,26 +2,11 @@ package gridapi
 
 import (
 	"fmt"
-	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
 	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
 )
-
-// wantEnhancementIO reports whether the request opted into the large model I/O
-// fields (enhancement.request/response). Default false — they are omitted so
-// list responses stay lean; opt in with ?enhancement_io=true (or 1). The
-// lightweight provenance (model, enhanced_at, fields) is always kept.
-func wantEnhancementIO(r *http.Request) bool {
-	switch strings.ToLower(r.URL.Query().Get("enhancement_io")) {
-	case "true", "1", "yes":
-		return true
-	default:
-		return false
-	}
-}
 
 // stripEventsIO clears enhancement.request/response on each event unless kept.
 // Mutates in place — safe because the store returns freshly unmarshaled events
@@ -114,19 +99,6 @@ func parseRFC3339(name, v string) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("invalid %s: %q is not RFC 3339", name, v)
 	}
 	return t, nil
-}
-
-// parsePageSize enforces the documented 1..200 window; "" means the store
-// default (50).
-func parsePageSize(v string) (int, error) {
-	if v == "" {
-		return 0, nil
-	}
-	n, err := strconv.Atoi(v)
-	if err != nil || n < 1 || n > 200 {
-		return 0, fmt.Errorf("page_size must be an integer in 1..200, got %q", v)
-	}
-	return n, nil
 }
 
 // isBadToken distinguishes a client-supplied garbage page_token (400) from a

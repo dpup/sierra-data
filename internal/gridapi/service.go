@@ -20,22 +20,14 @@ import (
 	"github.com/dpup/sierra-data/internal/store"
 )
 
-// Cache-Control max-age per endpoint family. Store-backed reads revalidate
-// fast (ingest ticks are 2–5 min); conditions passthroughs match the shipped
-// hazards GeoJSON cadence; scanner config is operator-authored and near-static
-// (matches the shipped /api/v1/scanners max-age).
+// Cache-Control max-age for the two hand-built endpoints that write through
+// writeJSON: the place summary (entities) and the .geojson map layers
+// (conditions cadence). Store-backed reads revalidate fast (ingest ticks are
+// 2–5 min).
 const (
 	maxAgeEntities   = 30
 	maxAgeConditions = 60
-	maxAgeScanners   = 3600
 )
-
-// RoadsAPI is the slice of RoadsService the map layers / conditions consume. A
-// narrow local interface keeps the package testable with fakes (the
-// internal/hazards convention).
-type RoadsAPI interface {
-	ListRoads(context.Context, *api.ListRoadsRequest) (*api.ListRoadsResponse, error)
-}
 
 // WeatherAPI is the slice of WeatherService the GetConditions RPC and the
 // fire_weather map layer consume.
@@ -53,7 +45,6 @@ type CensusAPI interface {
 // summary/maplayers/project handlers plug in as methods on the same receiver.
 type Service struct {
 	Store   *store.Store
-	Roads   RoadsAPI
 	Weather WeatherAPI
 	Census  CensusAPI
 	Cfg     *config.Config
@@ -66,10 +57,9 @@ type Service struct {
 
 // NewService wires the /api/v1 API. hz may be nil until the map-layer endpoints
 // need it — the entity endpoints never touch it.
-func NewService(st *store.Store, roads RoadsAPI, weather WeatherAPI, census CensusAPI, cfg *config.Config, hz *hazards.Service) *Service {
+func NewService(st *store.Store, weather WeatherAPI, census CensusAPI, cfg *config.Config, hz *hazards.Service) *Service {
 	return &Service{
 		Store:   st,
-		Roads:   roads,
 		Weather: weather,
 		Census:  census,
 		Cfg:     cfg,

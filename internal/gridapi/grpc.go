@@ -47,13 +47,20 @@ func (g *GridServer) RegisterGatewayRoutes(mux *runtime.ServeMux) error {
 func notFoundErr(format string, args ...any) error {
 	return status.Errorf(codes.NotFound, format, args...)
 }
-func invalidErr(err error) error  { return status.Error(codes.InvalidArgument, err.Error()) }
-func internalErr(err error) error { return status.Error(codes.Internal, err.Error()) }
-func tokenOrInternal(err error) error {
+func invalidErr(err error) error { return status.Error(codes.InvalidArgument, err.Error()) }
+
+// internalErr logs the real error server-side and returns a generic
+// codes.Internal status — the raw error never reaches the (public, unauthed)
+// wire. Mirrors errors.go's internal() convention for the hand-built handlers.
+func internalErr(ctx context.Context, err error) error {
+	logError(ctx, "gridapi: internal error", err)
+	return status.Error(codes.Internal, "internal error")
+}
+func tokenOrInternal(ctx context.Context, err error) error {
 	if isBadToken(err) {
 		return status.Error(codes.InvalidArgument, "invalid page_token")
 	}
-	return internalErr(err)
+	return internalErr(ctx, err)
 }
 
 // resolvePlaceID resolves an optional place filter to its id ("" stays "").
@@ -66,7 +73,7 @@ func (g *GridServer) resolvePlaceID(ctx context.Context, key string) (string, er
 		return "", notFoundErr("unknown place: %q", key)
 	}
 	if err != nil {
-		return "", internalErr(err)
+		return "", internalErr(ctx, err)
 	}
 	return place.GetId(), nil
 }
@@ -116,7 +123,7 @@ func (g *GridServer) ListEvents(ctx context.Context, req *gridv1.ListEventsReque
 
 	events, next, err := g.svc.Store.QueryEvents(ctx, eq)
 	if err != nil {
-		return nil, tokenOrInternal(err)
+		return nil, tokenOrInternal(ctx, err)
 	}
 	stripEventsIO(events, req.GetEnhancementIo())
 	return &gridv1.EventList{Events: events, NextPageToken: next}, nil
@@ -129,7 +136,7 @@ func (g *GridServer) GetEvent(ctx context.Context, req *gridv1.GetEventRequest) 
 		return nil, notFoundErr("unknown event: %q", req.GetId())
 	}
 	if err != nil {
-		return nil, internalErr(err)
+		return nil, internalErr(ctx, err)
 	}
 	stripEventsIO([]*gridv1.Event{ev}, req.GetEnhancementIo())
 	return ev, nil
@@ -143,11 +150,11 @@ func (g *GridServer) GetEventHistory(ctx context.Context, req *gridv1.GetEventHi
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, notFoundErr("unknown event: %q", req.GetId())
 		}
-		return nil, internalErr(err)
+		return nil, internalErr(ctx, err)
 	}
 	revs, next, err := g.svc.Store.EventHistory(ctx, req.GetId(), int(req.GetPageSize()), req.GetPageToken())
 	if err != nil {
-		return nil, tokenOrInternal(err)
+		return nil, tokenOrInternal(ctx, err)
 	}
 	stripRevisionsIO(revs, req.GetEnhancementIo())
 	return &gridv1.EventRevisionList{Revisions: revs, NextPageToken: next}, nil
@@ -179,7 +186,7 @@ func (g *GridServer) ListHistory(ctx context.Context, req *gridv1.ListHistoryReq
 
 	revs, next, err := g.svc.Store.QueryHistory(ctx, hq)
 	if err != nil {
-		return nil, tokenOrInternal(err)
+		return nil, tokenOrInternal(ctx, err)
 	}
 	stripRevisionsIO(revs, req.GetEnhancementIo())
 	return &gridv1.EventRevisionList{Revisions: revs, NextPageToken: next}, nil
@@ -198,7 +205,7 @@ func (g *GridServer) ListPlaces(ctx context.Context, req *gridv1.ListPlacesReque
 	}
 	places, err := g.svc.Store.ListPlaces(ctx, kind, req.GetQ())
 	if err != nil {
-		return nil, internalErr(err)
+		return nil, internalErr(ctx, err)
 	}
 	return &gridv1.PlaceList{Places: places}, nil
 }
@@ -210,7 +217,7 @@ func (g *GridServer) GetPlace(ctx context.Context, req *gridv1.GetPlaceRequest) 
 		return nil, notFoundErr("unknown place: %q", req.GetPlace())
 	}
 	if err != nil {
-		return nil, internalErr(err)
+		return nil, internalErr(ctx, err)
 	}
 	return place, nil
 }
@@ -258,7 +265,7 @@ func (g *GridServer) ResolvePlace(ctx context.Context, req *gridv1.ResolvePlaceR
 
 	places, err := g.svc.Store.PlacesContaining(ctx, lat, lng)
 	if err != nil {
-		return nil, internalErr(err)
+		return nil, internalErr(ctx, err)
 	}
 	return &gridv1.ResolvePlaceResponse{
 		Query:  &gridv1.ResolveQuery{Lat: lat, Lng: lng, MatchedAddress: matched},
@@ -276,7 +283,7 @@ func (g *GridServer) ListScanners(ctx context.Context, req *gridv1.ListScannersR
 			return nil, notFoundErr("unknown place: %q", p)
 		}
 		if err != nil {
-			return nil, internalErr(err)
+			return nil, internalErr(ctx, err)
 		}
 		if place.GetKind() == gridv1.PlaceKind_AREA {
 			if area, ok := g.svc.areaByID(place.GetSlug()); ok {
@@ -316,7 +323,7 @@ func fireWeatherSlug(s api.FireWeatherState) string {
 func (g *GridServer) GetConditions(ctx context.Context, req *gridv1.GetConditionsRequest) (*gridv1.Conditions, error) {
 	resp, err := g.svc.Weather.ListWeather(ctx, &api.ListWeatherRequest{})
 	if err != nil {
-		return nil, internalErr(err)
+		return nil, internalErr(ctx, err)
 	}
 	data := resp.GetWeatherData()
 	if p := req.GetPlace(); p != "" {
@@ -325,7 +332,7 @@ func (g *GridServer) GetConditions(ctx context.Context, req *gridv1.GetCondition
 			return nil, notFoundErr("unknown place: %q", p)
 		}
 		if err != nil {
-			return nil, internalErr(err)
+			return nil, internalErr(ctx, err)
 		}
 		data = filterWeather(data, g.svc.Cfg.Weather.Locations, box, ok)
 	}
@@ -361,7 +368,7 @@ func (g *GridServer) GetConditions(ctx context.Context, req *gridv1.GetCondition
 func (g *GridServer) ListSources(ctx context.Context, _ *gridv1.ListSourcesRequest) (*gridv1.SourceList, error) {
 	sources, err := g.svc.Store.ListSources(ctx)
 	if err != nil {
-		return nil, internalErr(err)
+		return nil, internalErr(ctx, err)
 	}
 	return &gridv1.SourceList{Sources: sources}, nil
 }

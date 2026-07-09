@@ -29,11 +29,6 @@ func writeStatus(w http.ResponseWriter, httpCode int, grpcCode int, msg string) 
 	_, _ = w.Write(body)
 }
 
-// badRequest is 400 / INVALID_ARGUMENT: the client sent an unusable parameter.
-func badRequest(w http.ResponseWriter, msg string) {
-	writeStatus(w, http.StatusBadRequest, int(codes.InvalidArgument), msg)
-}
-
 // notFound is 404 / NOT_FOUND.
 func notFound(w http.ResponseWriter, msg string) {
 	writeStatus(w, http.StatusNotFound, int(codes.NotFound), msg)
@@ -42,19 +37,6 @@ func notFound(w http.ResponseWriter, msg string) {
 // notImplemented is 501 / UNIMPLEMENTED (the T12b endpoint stubs).
 func notImplemented(w http.ResponseWriter, msg string) {
 	writeStatus(w, http.StatusNotImplemented, int(codes.Unimplemented), msg)
-}
-
-// methodNotAllowed is 405; UNIMPLEMENTED is the closest gRPC code (there is
-// no 405 entry in the canonical mapping — the HTTP status is authoritative).
-// Callers set the Allow header first.
-func methodNotAllowed(w http.ResponseWriter, method string) {
-	writeStatus(w, http.StatusMethodNotAllowed, int(codes.Unimplemented), "method not allowed: "+method)
-}
-
-// unavailable is 503 / UNAVAILABLE: a dependency (e.g. the Census geocoder)
-// failed transiently; the client may retry.
-func unavailable(w http.ResponseWriter, msg string) {
-	writeStatus(w, http.StatusServiceUnavailable, int(codes.Unavailable), msg)
 }
 
 // internal is 500 / INTERNAL. The real error is logged server-side only — a
