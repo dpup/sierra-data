@@ -19,7 +19,13 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	GridService_ListSources_FullMethodName = "/grid.v1.GridService/ListSources"
+	GridService_ListEvents_FullMethodName      = "/grid.v1.GridService/ListEvents"
+	GridService_GetEvent_FullMethodName        = "/grid.v1.GridService/GetEvent"
+	GridService_GetEventHistory_FullMethodName = "/grid.v1.GridService/GetEventHistory"
+	GridService_ListHistory_FullMethodName     = "/grid.v1.GridService/ListHistory"
+	GridService_ListPlaces_FullMethodName      = "/grid.v1.GridService/ListPlaces"
+	GridService_GetPlace_FullMethodName        = "/grid.v1.GridService/GetPlace"
+	GridService_ListSources_FullMethodName     = "/grid.v1.GridService/ListSources"
 )
 
 // GridServiceClient is the client API for GridService service.
@@ -30,6 +36,19 @@ const (
 // Ported endpoint-by-endpoint from the hand-built /v1 handlers; see
 // docs/grpc-gateway-migration-plan.md §7 for the full endpoint map.
 type GridServiceClient interface {
+	// ListEvents returns store-backed events filtered by place, layer, status,
+	// severity_min, and since, with keyset pagination.
+	ListEvents(ctx context.Context, in *ListEventsRequest, opts ...grpc.CallOption) (*EventList, error)
+	// GetEvent returns the current revision of one event by id.
+	GetEvent(ctx context.Context, in *GetEventRequest, opts ...grpc.CallOption) (*Event, error)
+	// GetEventHistory returns one event's revisions, newest first, paginated.
+	GetEventHistory(ctx context.Context, in *GetEventHistoryRequest, opts ...grpc.CallOption) (*EventRevisionList, error)
+	// ListHistory returns revisions across events over a [from, to) window.
+	ListHistory(ctx context.Context, in *ListHistoryRequest, opts ...grpc.CallOption) (*EventRevisionList, error)
+	// ListPlaces returns the place directory filtered by kind and a name query.
+	ListPlaces(ctx context.Context, in *ListPlacesRequest, opts ...grpc.CallOption) (*PlaceList, error)
+	// GetPlace returns one place by slug or namespaced id.
+	GetPlace(ctx context.Context, in *GetPlaceRequest, opts ...grpc.CallOption) (*Place, error)
 	// ListSources returns the source registry with per-source health — the
 	// honesty mechanism clients key layer trust off.
 	ListSources(ctx context.Context, in *ListSourcesRequest, opts ...grpc.CallOption) (*SourceList, error)
@@ -41,6 +60,66 @@ type gridServiceClient struct {
 
 func NewGridServiceClient(cc grpc.ClientConnInterface) GridServiceClient {
 	return &gridServiceClient{cc}
+}
+
+func (c *gridServiceClient) ListEvents(ctx context.Context, in *ListEventsRequest, opts ...grpc.CallOption) (*EventList, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EventList)
+	err := c.cc.Invoke(ctx, GridService_ListEvents_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gridServiceClient) GetEvent(ctx context.Context, in *GetEventRequest, opts ...grpc.CallOption) (*Event, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Event)
+	err := c.cc.Invoke(ctx, GridService_GetEvent_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gridServiceClient) GetEventHistory(ctx context.Context, in *GetEventHistoryRequest, opts ...grpc.CallOption) (*EventRevisionList, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EventRevisionList)
+	err := c.cc.Invoke(ctx, GridService_GetEventHistory_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gridServiceClient) ListHistory(ctx context.Context, in *ListHistoryRequest, opts ...grpc.CallOption) (*EventRevisionList, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EventRevisionList)
+	err := c.cc.Invoke(ctx, GridService_ListHistory_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gridServiceClient) ListPlaces(ctx context.Context, in *ListPlacesRequest, opts ...grpc.CallOption) (*PlaceList, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PlaceList)
+	err := c.cc.Invoke(ctx, GridService_ListPlaces_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gridServiceClient) GetPlace(ctx context.Context, in *GetPlaceRequest, opts ...grpc.CallOption) (*Place, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Place)
+	err := c.cc.Invoke(ctx, GridService_GetPlace_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *gridServiceClient) ListSources(ctx context.Context, in *ListSourcesRequest, opts ...grpc.CallOption) (*SourceList, error) {
@@ -61,6 +140,19 @@ func (c *gridServiceClient) ListSources(ctx context.Context, in *ListSourcesRequ
 // Ported endpoint-by-endpoint from the hand-built /v1 handlers; see
 // docs/grpc-gateway-migration-plan.md §7 for the full endpoint map.
 type GridServiceServer interface {
+	// ListEvents returns store-backed events filtered by place, layer, status,
+	// severity_min, and since, with keyset pagination.
+	ListEvents(context.Context, *ListEventsRequest) (*EventList, error)
+	// GetEvent returns the current revision of one event by id.
+	GetEvent(context.Context, *GetEventRequest) (*Event, error)
+	// GetEventHistory returns one event's revisions, newest first, paginated.
+	GetEventHistory(context.Context, *GetEventHistoryRequest) (*EventRevisionList, error)
+	// ListHistory returns revisions across events over a [from, to) window.
+	ListHistory(context.Context, *ListHistoryRequest) (*EventRevisionList, error)
+	// ListPlaces returns the place directory filtered by kind and a name query.
+	ListPlaces(context.Context, *ListPlacesRequest) (*PlaceList, error)
+	// GetPlace returns one place by slug or namespaced id.
+	GetPlace(context.Context, *GetPlaceRequest) (*Place, error)
 	// ListSources returns the source registry with per-source health — the
 	// honesty mechanism clients key layer trust off.
 	ListSources(context.Context, *ListSourcesRequest) (*SourceList, error)
@@ -74,6 +166,24 @@ type GridServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedGridServiceServer struct{}
 
+func (UnimplementedGridServiceServer) ListEvents(context.Context, *ListEventsRequest) (*EventList, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListEvents not implemented")
+}
+func (UnimplementedGridServiceServer) GetEvent(context.Context, *GetEventRequest) (*Event, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetEvent not implemented")
+}
+func (UnimplementedGridServiceServer) GetEventHistory(context.Context, *GetEventHistoryRequest) (*EventRevisionList, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetEventHistory not implemented")
+}
+func (UnimplementedGridServiceServer) ListHistory(context.Context, *ListHistoryRequest) (*EventRevisionList, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListHistory not implemented")
+}
+func (UnimplementedGridServiceServer) ListPlaces(context.Context, *ListPlacesRequest) (*PlaceList, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListPlaces not implemented")
+}
+func (UnimplementedGridServiceServer) GetPlace(context.Context, *GetPlaceRequest) (*Place, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetPlace not implemented")
+}
 func (UnimplementedGridServiceServer) ListSources(context.Context, *ListSourcesRequest) (*SourceList, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListSources not implemented")
 }
@@ -96,6 +206,114 @@ func RegisterGridServiceServer(s grpc.ServiceRegistrar, srv GridServiceServer) {
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&GridService_ServiceDesc, srv)
+}
+
+func _GridService_ListEvents_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListEventsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GridServiceServer).ListEvents(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GridService_ListEvents_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GridServiceServer).ListEvents(ctx, req.(*ListEventsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _GridService_GetEvent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetEventRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GridServiceServer).GetEvent(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GridService_GetEvent_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GridServiceServer).GetEvent(ctx, req.(*GetEventRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _GridService_GetEventHistory_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetEventHistoryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GridServiceServer).GetEventHistory(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GridService_GetEventHistory_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GridServiceServer).GetEventHistory(ctx, req.(*GetEventHistoryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _GridService_ListHistory_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListHistoryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GridServiceServer).ListHistory(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GridService_ListHistory_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GridServiceServer).ListHistory(ctx, req.(*ListHistoryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _GridService_ListPlaces_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListPlacesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GridServiceServer).ListPlaces(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GridService_ListPlaces_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GridServiceServer).ListPlaces(ctx, req.(*ListPlacesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _GridService_GetPlace_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetPlaceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GridServiceServer).GetPlace(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GridService_GetPlace_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GridServiceServer).GetPlace(ctx, req.(*GetPlaceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _GridService_ListSources_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -123,6 +341,30 @@ var GridService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "grid.v1.GridService",
 	HandlerType: (*GridServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "ListEvents",
+			Handler:    _GridService_ListEvents_Handler,
+		},
+		{
+			MethodName: "GetEvent",
+			Handler:    _GridService_GetEvent_Handler,
+		},
+		{
+			MethodName: "GetEventHistory",
+			Handler:    _GridService_GetEventHistory_Handler,
+		},
+		{
+			MethodName: "ListHistory",
+			Handler:    _GridService_ListHistory_Handler,
+		},
+		{
+			MethodName: "ListPlaces",
+			Handler:    _GridService_ListPlaces_Handler,
+		},
+		{
+			MethodName: "GetPlace",
+			Handler:    _GridService_GetPlace_Handler,
+		},
 		{
 			MethodName: "ListSources",
 			Handler:    _GridService_ListSources_Handler,

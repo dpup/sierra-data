@@ -259,6 +259,31 @@ message SourceList {
 // Ported endpoint-by-endpoint from the hand-built /v1 handlers; see
 // docs/grpc-gateway-migration-plan.md §7 for the full endpoint map.
 service GridService {
+  // ListEvents returns store-backed events filtered by place, layer, status,
+  // severity_min, and since, with keyset pagination.
+  rpc ListEvents(ListEventsRequest) returns (EventList) {
+    option (google.api.http) = {get: "/api/v1/events"};
+  }
+  // GetEvent returns the current revision of one event by id.
+  rpc GetEvent(GetEventRequest) returns (Event) {
+    option (google.api.http) = {get: "/api/v1/events/{id}"};
+  }
+  // GetEventHistory returns one event's revisions, newest first, paginated.
+  rpc GetEventHistory(GetEventHistoryRequest) returns (EventRevisionList) {
+    option (google.api.http) = {get: "/api/v1/events/{id}/history"};
+  }
+  // ListHistory returns revisions across events over a [from, to) window.
+  rpc ListHistory(ListHistoryRequest) returns (EventRevisionList) {
+    option (google.api.http) = {get: "/api/v1/history"};
+  }
+  // ListPlaces returns the place directory filtered by kind and a name query.
+  rpc ListPlaces(ListPlacesRequest) returns (PlaceList) {
+    option (google.api.http) = {get: "/api/v1/places"};
+  }
+  // GetPlace returns one place by slug or namespaced id.
+  rpc GetPlace(GetPlaceRequest) returns (Place) {
+    option (google.api.http) = {get: "/api/v1/places/{place}"};
+  }
   // ListSources returns the source registry with per-source health — the
   // honesty mechanism clients key layer trust off.
   rpc ListSources(ListSourcesRequest) returns (SourceList) {
@@ -266,4 +291,43 @@ service GridService {
   }
 }
 
+// Filter/enum fields are strings (parsed server-side with the shared helpers),
+// matching the query params of the surface being replaced. page_size 0 = default
+// (store clamps to 1..200). enhancement_io opts into the large model I/O fields.
+message ListEventsRequest {
+  string place = 1;
+  repeated string layer = 2;
+  repeated string status = 3;
+  string severity_min = 4;
+  string since = 5; // RFC 3339
+  int32 page_size = 6;
+  string page_token = 7;
+  bool enhancement_io = 8;
+}
+message GetEventRequest {
+  string id = 1;
+  bool enhancement_io = 2;
+}
+message GetEventHistoryRequest {
+  string id = 1;
+  int32 page_size = 2;
+  string page_token = 3;
+  bool enhancement_io = 4;
+}
+message ListHistoryRequest {
+  string place = 1;
+  repeated string layer = 2;
+  string from = 3; // RFC 3339
+  string to = 4; // RFC 3339
+  int32 page_size = 5;
+  string page_token = 6;
+  bool enhancement_io = 7;
+}
+message ListPlacesRequest {
+  string kind = 1;
+  string q = 2;
+}
+message GetPlaceRequest {
+  string place = 1;
+}
 message ListSourcesRequest {}

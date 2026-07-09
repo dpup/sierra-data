@@ -16,6 +16,318 @@
     "application/json"
   ],
   "paths": {
+    "/api/v1/events": {
+      "get": {
+        "summary": "ListEvents returns store-backed events filtered by place, layer, status,\nseverity_min, and since, with keyset pagination.",
+        "operationId": "GridService_ListEvents",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1EventList"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "place",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "layer",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "collectionFormat": "multi"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "collectionFormat": "multi"
+          },
+          {
+            "name": "severityMin",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "since",
+            "description": "RFC 3339",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "type": "integer",
+            "format": "int32"
+          },
+          {
+            "name": "pageToken",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "enhancementIo",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "tags": [
+          "GridService"
+        ]
+      }
+    },
+    "/api/v1/events/{id}": {
+      "get": {
+        "summary": "GetEvent returns the current revision of one event by id.",
+        "operationId": "GridService_GetEvent",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1Event"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "enhancementIo",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "tags": [
+          "GridService"
+        ]
+      }
+    },
+    "/api/v1/events/{id}/history": {
+      "get": {
+        "summary": "GetEventHistory returns one event's revisions, newest first, paginated.",
+        "operationId": "GridService_GetEventHistory",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1EventRevisionList"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "type": "integer",
+            "format": "int32"
+          },
+          {
+            "name": "pageToken",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "enhancementIo",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "tags": [
+          "GridService"
+        ]
+      }
+    },
+    "/api/v1/history": {
+      "get": {
+        "summary": "ListHistory returns revisions across events over a [from, to) window.",
+        "operationId": "GridService_ListHistory",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1EventRevisionList"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "place",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "layer",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "collectionFormat": "multi"
+          },
+          {
+            "name": "from",
+            "description": "RFC 3339",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "to",
+            "description": "RFC 3339",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "type": "integer",
+            "format": "int32"
+          },
+          {
+            "name": "pageToken",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "enhancementIo",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "tags": [
+          "GridService"
+        ]
+      }
+    },
+    "/api/v1/places": {
+      "get": {
+        "summary": "ListPlaces returns the place directory filtered by kind and a name query.",
+        "operationId": "GridService_ListPlaces",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1PlaceList"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "GridService"
+        ]
+      }
+    },
+    "/api/v1/places/{place}": {
+      "get": {
+        "summary": "GetPlace returns one place by slug or namespaced id.",
+        "operationId": "GridService_GetPlace",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1Place"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "place",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "GridService"
+        ]
+      }
+    },
     "/api/v1/sources": {
       "get": {
         "summary": "ListSources returns the source registry with per-source health — the\nhonesty mechanism clients key layer trust off.",
@@ -68,6 +380,433 @@
           }
         }
       }
+    },
+    "v1BoundingBox": {
+      "type": "object",
+      "properties": {
+        "minLat": {
+          "type": "number",
+          "format": "double"
+        },
+        "minLng": {
+          "type": "number",
+          "format": "double"
+        },
+        "maxLat": {
+          "type": "number",
+          "format": "double"
+        },
+        "maxLng": {
+          "type": "number",
+          "format": "double"
+        }
+      }
+    },
+    "v1EarthquakeDetail": {
+      "type": "object",
+      "properties": {
+        "magnitude": {
+          "type": "number",
+          "format": "double"
+        },
+        "depthKm": {
+          "type": "number",
+          "format": "double"
+        },
+        "felt": {
+          "type": "integer",
+          "format": "int32",
+          "title": "USGS DYFI felt-report count"
+        }
+      }
+    },
+    "v1Enhancement": {
+      "type": "object",
+      "properties": {
+        "model": {
+          "type": "string",
+          "description": "\"gpt-4o-mini\", \"claude-haiku-4-5\", ..."
+        },
+        "enhancedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "which Event fields were generated"
+        },
+        "request": {
+          "type": "string",
+          "description": "Transparency: the exact model input and output, so a client can show what\nwas sent and what came back. `request` is the incident-specific user prompt\n(the static system prompt is not included); `response` is the raw structured\nJSON the model returned. Excluded from the event content hash."
+        },
+        "response": {
+          "type": "string"
+        }
+      },
+      "description": "AI-enhancement provenance so clients can badge AI-summarized text\n(spec §3.1: translate, never assert; originals preserved in description)."
+    },
+    "v1EvacuationDetail": {
+      "type": "object",
+      "properties": {
+        "zoneId": {
+          "type": "string"
+        },
+        "level": {
+          "type": "string",
+          "title": "ORDER | WARNING | ADVISORY | SHELTER_IN_PLACE"
+        },
+        "eventType": {
+          "type": "string"
+        },
+        "county": {
+          "type": "string"
+        }
+      }
+    },
+    "v1Event": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "title": "\"{source_id}:{native_id}\" — matches shipped ids"
+        },
+        "layer": {
+          "$ref": "#/definitions/v1Layer",
+          "description": "shipped taxonomy + additions",
+          "title": "e.g. \"calfire:2026-salt-springs\""
+        },
+        "category": {
+          "type": "string",
+          "title": "source sub-type slug (\"active\", \"order\", ...)"
+        },
+        "severity": {
+          "$ref": "#/definitions/v1Severity",
+          "title": "shipped 5-level scale"
+        },
+        "status": {
+          "$ref": "#/definitions/v1EventStatus"
+        },
+        "headline": {
+          "type": "string",
+          "title": "card-renderable without knowing the kind"
+        },
+        "summary": {
+          "type": "string",
+          "title": "AI-enhanced 2–3 sentences where applicable"
+        },
+        "description": {
+          "type": "string",
+          "title": "long form / original text"
+        },
+        "areaLabel": {
+          "type": "string",
+          "title": "\"Hathaway Pines \u0026 Avery\""
+        },
+        "canonicalUrl": {
+          "type": "string",
+          "title": "scheme-validated (https/http only, per shipped rule)"
+        },
+        "geometry": {
+          "$ref": "#/definitions/v1Geometry",
+          "title": "may be absent: county-wide advisories"
+        },
+        "placeIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "precomputed intersections (spec §4)"
+        },
+        "provenance": {
+          "$ref": "#/definitions/v1Provenance"
+        },
+        "effective": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "expires": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "observedAt": {
+          "type": "string",
+          "format": "date-time",
+          "title": "upstream last-update"
+        },
+        "ingestedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "revision": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "enhancement": {
+          "$ref": "#/definitions/v1Enhancement",
+          "title": "AI-enhancement provenance (spec §3.1)"
+        },
+        "wildfire": {
+          "$ref": "#/definitions/v1WildfireDetail"
+        },
+        "evacuation": {
+          "$ref": "#/definitions/v1EvacuationDetail"
+        },
+        "weatherAlert": {
+          "$ref": "#/definitions/v1WeatherAlertDetail"
+        },
+        "fireWeather": {
+          "$ref": "#/definitions/v1FireWeatherDetail"
+        },
+        "earthquake": {
+          "$ref": "#/definitions/v1EarthquakeDetail"
+        },
+        "roadIncident": {
+          "$ref": "#/definitions/v1RoadIncidentDetail"
+        }
+      }
+    },
+    "v1EventList": {
+      "type": "object",
+      "properties": {
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1Event"
+          }
+        },
+        "nextPageToken": {
+          "type": "string"
+        }
+      }
+    },
+    "v1EventRevision": {
+      "type": "object",
+      "properties": {
+        "revision": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "observedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "ingestedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "event": {
+          "$ref": "#/definitions/v1Event"
+        }
+      }
+    },
+    "v1EventRevisionList": {
+      "type": "object",
+      "properties": {
+        "revisions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1EventRevision"
+          }
+        },
+        "nextPageToken": {
+          "type": "string"
+        }
+      }
+    },
+    "v1EventStatus": {
+      "type": "string",
+      "enum": [
+        "EVENT_STATUS_UNSPECIFIED",
+        "SCHEDULED",
+        "ACTIVE",
+        "RESOLVED",
+        "EXPIRED"
+      ],
+      "default": "EVENT_STATUS_UNSPECIFIED",
+      "title": "- SCHEDULED: planned PSPS, forecast closures\n - RESOLVED: upstream confirmed over\n - EXPIRED: aged out per-source policy; upstream went quiet"
+    },
+    "v1FireWeatherDetail": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "type": "string",
+          "title": "normal | elevated | red-flag"
+        },
+        "sourceEvent": {
+          "type": "string",
+          "title": "NWS product driving the state"
+        },
+        "zones": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "description": "fire_weather is condition-backed (a live projection, not an event); this\nmessage exists for the spec §3 oneof shape."
+    },
+    "v1Geometry": {
+      "type": "object",
+      "properties": {
+        "geojson": {
+          "type": "string",
+          "format": "byte",
+          "title": "RFC 7946 geometry object, UTF-8"
+        },
+        "bbox": {
+          "$ref": "#/definitions/v1BoundingBox",
+          "title": "always populated at ingest"
+        },
+        "centroid": {
+          "$ref": "#/definitions/v1LatLng"
+        }
+      }
+    },
+    "v1LatLng": {
+      "type": "object",
+      "properties": {
+        "lat": {
+          "type": "number",
+          "format": "double"
+        },
+        "lng": {
+          "type": "number",
+          "format": "double"
+        }
+      }
+    },
+    "v1Layer": {
+      "type": "string",
+      "enum": [
+        "LAYER_UNSPECIFIED",
+        "WILDFIRE",
+        "EVACUATION",
+        "WEATHER_ALERT",
+        "FIRE_WEATHER",
+        "EARTHQUAKE",
+        "ROAD_INCIDENT",
+        "POWER",
+        "GAUGE",
+        "AIR_QUALITY",
+        "NETWORK",
+        "ANNOUNCEMENT"
+      ],
+      "default": "LAYER_UNSPECIFIED",
+      "title": "- POWER: condition-backed layers (ROAD_SEGMENT, CHAIN_CONTROL) are projections, not events"
+    },
+    "v1Place": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "title": "\"area:ebbetts-pass\" — existing area ids preserved under a kind"
+        },
+        "kind": {
+          "$ref": "#/definitions/v1PlaceKind"
+        },
+        "name": {
+          "type": "string"
+        },
+        "slug": {
+          "type": "string"
+        },
+        "geometry": {
+          "$ref": "#/definitions/v1Geometry"
+        },
+        "parentId": {
+          "type": "string"
+        }
+      }
+    },
+    "v1PlaceKind": {
+      "type": "string",
+      "enum": [
+        "PLACE_KIND_UNSPECIFIED",
+        "AREA",
+        "COUNTY",
+        "TOWN",
+        "EVAC_ZONE",
+        "CORRIDOR",
+        "SITE"
+      ],
+      "default": "PLACE_KIND_UNSPECIFIED",
+      "title": "- AREA: existing configured areas; org footprints live here too"
+    },
+    "v1PlaceList": {
+      "type": "object",
+      "properties": {
+        "places": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1Place"
+          }
+        }
+      }
+    },
+    "v1Provenance": {
+      "type": "object",
+      "properties": {
+        "sourceId": {
+          "type": "string"
+        },
+        "sourceName": {
+          "type": "string",
+          "title": "denormalized: \"CAL FIRE\""
+        },
+        "attribution": {
+          "type": "string",
+          "title": "\"CAL FIRE / WFIGS\""
+        },
+        "sourceUrl": {
+          "type": "string"
+        },
+        "fetchedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "v1RoadIncidentDetail": {
+      "type": "object",
+      "properties": {
+        "logNumber": {
+          "type": "string"
+        },
+        "impact": {
+          "type": "string",
+          "title": "AI-assessed: none | light | moderate | severe"
+        },
+        "duration": {
+          "type": "string",
+          "title": "AI-assessed: unknown | \u003c 1 hour | several hours | ongoing"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "structured extras from AI analysis (internal keys stripped)"
+        }
+      },
+      "description": "Kind-specific only. The incident type is the envelope `category`, the human\nlocation is `area_label`, and the short line is the `headline` — none are\nrepeated here."
+    },
+    "v1Severity": {
+      "type": "string",
+      "enum": [
+        "INFO",
+        "MINOR",
+        "MODERATE",
+        "SEVERE",
+        "EXTREME"
+      ],
+      "default": "INFO",
+      "description": "The shipped scale, unchanged. rank = enum value; INFO=0 ... EXTREME=4."
     },
     "v1Source": {
       "type": "object",
@@ -136,6 +875,60 @@
         "UNAVAILABLE"
       ],
       "default": "SOURCE_STATUS_UNSPECIFIED"
+    },
+    "v1WeatherAlertDetail": {
+      "type": "object",
+      "properties": {
+        "nwsSeverity": {
+          "type": "string",
+          "title": "raw NWS vocabulary (Extreme..Minor), distinct from unified severity"
+        },
+        "certainty": {
+          "type": "string"
+        },
+        "urgency": {
+          "type": "string"
+        },
+        "instruction": {
+          "type": "string"
+        },
+        "areaDesc": {
+          "type": "string",
+          "title": "NWS free-text area (no envelope equivalent for zone alerts)"
+        },
+        "zones": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "NWS forecast zones, e.g. \"CAZ064\""
+        }
+      },
+      "title": "Detail messages carry only KIND-SPECIFIC fields not already in the Event\nenvelope. Fields that duplicate an envelope field are NOT repeated here:\n  - the NWS event name is the envelope `category`\n  - the sending office is `provenance.source_name`"
+    },
+    "v1WildfireDetail": {
+      "type": "object",
+      "properties": {
+        "acres": {
+          "type": "number",
+          "format": "double"
+        },
+        "containment": {
+          "type": "integer",
+          "format": "int32",
+          "title": "percent contained, 0-100"
+        },
+        "county": {
+          "type": "string"
+        },
+        "cause": {
+          "type": "string"
+        },
+        "hasPerimeter": {
+          "type": "boolean",
+          "title": "true when geometry is a WFIGS perimeter polygon"
+        }
+      }
     }
   }
 }
