@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/dpup/sierra-data/internal/lib/geojson"
@@ -51,8 +52,9 @@ var ErrNotFound = errors.New("store: not found")
 // run one at a time; reads go straight to the pool and serialize against the
 // writer's short commit via busy_timeout.
 type Store struct {
-	db *sql.DB
-	mu sync.Mutex // single-writer discipline
+	db       *sql.DB
+	lockFile *os.File   // exclusive flock guard; released on Close/process exit
+	mu       sync.Mutex // single-writer discipline
 
 	// placesGeo caches parsed place geometries so matchPlaces (called per event
 	// on every ingest tick, including hash-equal no-ops) does not re-SELECT and
@@ -124,6 +126,18 @@ func Open(path string, opts ...Option) (*Store, error) {
 			return nil, fmt.Errorf("store: creating db dir: %w", err)
 		}
 	}
+
+	// Single-writer guard: two processes writing the same SQLite file corrupt it
+	// on filesystems where SQLite's own locking isn't honored (bind mounts /
+	// network FS). Take an exclusive advisory lock so a second opener fails loudly
+	// instead. The flock is tied to the fd, so the kernel releases it on Close or
+	// process death — no stale lock. (This coordinates within one kernel; a writer
+	// on a separate host reaching the file via the mount can still slip past — for
+	// that, don't share the db path.)
+	lockFile, err := acquireDBLock(path)
+	if err != nil {
+		return nil, err
+	}
 	// _pragma entries apply to every pooled connection. busy_timeout absorbs the
 	// reader/writer serialization of a rollback journal (no WAL MVCC): a reader
 	// waits up to this long for the single writer's brief commit rather than
@@ -133,19 +147,48 @@ func Open(path string, opts ...Option) (*Store, error) {
 		path, cfg.journalMode, sync)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
+		lockFile.Close()
 		return nil, fmt.Errorf("store: open %s: %w", path, err)
 	}
-	s := &Store{db: db}
+	s := &Store{db: db, lockFile: lockFile}
 	if err := s.migrate(); err != nil {
 		db.Close()
+		lockFile.Close()
 		return nil, err
 	}
 	return s, nil
 }
 
+// acquireDBLock takes an exclusive advisory lock on <path>.lock so a second
+// process opening the same database fails loudly instead of silently corrupting
+// it. The lock is an flock bound to the open fd — released automatically by the
+// kernel on Close or if the process dies, so there is no stale lock to clean up.
+func acquireDBLock(dbPath string) (*os.File, error) {
+	lockPath := dbPath + ".lock"
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, fmt.Errorf("store: opening lock file %s: %w", lockPath, err)
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		f.Close()
+		return nil, fmt.Errorf("store: database %q is already open by another process "+
+			"(concurrent writers corrupt SQLite); stop the other server or point "+
+			"PF__GRID__DBPATH at a different file: %w", dbPath, err)
+	}
+	// Record our pid for humans inspecting the lock file (best-effort).
+	if err := f.Truncate(0); err == nil {
+		f.WriteAt([]byte(fmt.Sprintf("%d\n", os.Getpid())), 0)
+	}
+	return f, nil
+}
+
 // Close closes the underlying database.
 func (s *Store) Close() error {
-	return s.db.Close()
+	err := s.db.Close()
+	if s.lockFile != nil {
+		s.lockFile.Close() // releases the flock
+	}
+	return err
 }
 
 func (s *Store) migrate() error {

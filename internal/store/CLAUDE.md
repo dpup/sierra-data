@@ -130,6 +130,22 @@ level in `journalModeSynchronous`:
 - **WAL** → `synchronous=NORMAL`. Faster concurrent reads, but the `-shm` is
   memory-mapped and **breaks over NFS/EFS** — use it only on a real local disk.
 
+**Cross-process guard — `Open` takes an exclusive `flock`.** SQLite's own
+per-file locking is not honored on some shared filesystems — notably the
+**virtiofs bind mount** Docker Desktop uses for `/workspace` — so two processes
+writing the same DB there silently corrupt it (`database disk image is
+malformed`). The classic footgun: the container's dev server *and* a host process
+that mounts the workspace both open `./data/grid.db`. `Open` takes an exclusive
+advisory `flock` on `<path>.lock` and returns a clear "already open by another
+process" error instead of racing; the flock is bound to the fd, so the kernel
+releases it on `Close` or process death (no stale lock). It coordinates within
+one kernel only — a writer reaching the file from a separate host via the mount
+can still slip past — so **for dev, keep the DB off the bind mount**: point
+`PF__GRID__DBPATH` at a container-local path outside `/workspace` (e.g.
+`$HOME/.local/state/grid/grid.db`, set in `.envrc`) rather than relying on the
+lock alone. A single writer is corruption-free on every filesystem; only
+concurrent writers are the hazard.
+
 **The store is a system of record, not a rehydrate-able cache.** A clean restart
 with the DB intact rehydrates everything (that is the point of persistence). But
 if the DB is *lost*, only the **current active snapshot** rebuilds — the pollers

@@ -70,6 +70,25 @@ func revisionCount(t *testing.T, s *Store, eventID string) int {
 	return n
 }
 
+func TestOpenRejectsConcurrentOpener(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "grid.db")
+
+	s1, err := Open(path)
+	require.NoError(t, err)
+
+	// A second opener while the first holds the lock must fail loudly (two
+	// writers corrupt SQLite on shared filesystems), not open and race.
+	_, err = Open(path)
+	require.Error(t, err, "second concurrent open must be rejected")
+	assert.Contains(t, err.Error(), "already open")
+
+	// Closing the first releases the flock, so a fresh open then succeeds.
+	require.NoError(t, s1.Close())
+	s2, err := Open(path)
+	require.NoError(t, err, "reopen after close must succeed (lock released)")
+	require.NoError(t, s2.Close())
+}
+
 func TestOpenMigrateIdempotent(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "grid.db")
