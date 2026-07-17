@@ -205,9 +205,13 @@ func TestSeed_AreaPrefersPolygon(t *testing.T) {
 	g, err := geojson.Parse(p.GetGeometry().GetGeojson())
 	require.NoError(t, err)
 	require.Equal(t, "Polygon", g.Type)
+	// The hand-drawn polygon (a small Calaveras/Tuolumne extent) must win over the
+	// deliberately huge config bbox above — assert we got the polygon's extent, not
+	// the 30..45 / -125..-115 rectangle. Exact vertices live in areas.geojson and
+	// are operator-editable, so don't pin them here.
 	bb := p.GetGeometry().GetBbox()
-	assert.InDelta(t, 37.90, bb.GetMinLat(), 0.001)
-	assert.InDelta(t, 38.53, bb.GetMaxLat(), 0.001)
-	assert.InDelta(t, -120.60, bb.GetMinLng(), 0.001)
-	assert.InDelta(t, -119.90, bb.GetMaxLng(), 0.001)
+	assert.Greater(t, bb.GetMinLat(), 37.5)
+	assert.Less(t, bb.GetMaxLat(), 38.8)
+	assert.Greater(t, bb.GetMinLng(), -121.0)
+	assert.Less(t, bb.GetMaxLng(), -119.5)
 }

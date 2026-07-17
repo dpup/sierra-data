@@ -6,22 +6,52 @@
       "properties": {
         "id": "ebbetts-pass",
         "name": "Ebbetts Pass Corridor",
-        "note": "Hand-drawn coverage wedge (replaces the coarse square bbox). Follows the Hwy 4 corridor Angels Camp -> Bear Valley, bulges NW to the Tiger Creek forest above Arnold, and extends SE up Hwy 108 into the Stanislaus NF (Pinecrest/Dodge Ridge). Excludes San Andreas & Jackson (NW) and Farmington (SW). Exterior ring is CCW per RFC 7946. Coordinates are [lng, lat]."
+        "note": "Hand-drawn coverage polygon (replaces the coarse square bbox). West edge reaches San Andreas; south holds at Angels Camp / New Melones; east meets Hwy 108 SE of Bear Valley (Pinecrest/Dardanelle area); north caps just above Bear Valley up the Hwy 4 corridor, the NE edge cutting SE to the 108. Exterior ring is CCW per RFC 7946. Coordinates are [lng, lat]."
       },
       "geometry": {
         "type": "Polygon",
         "coordinates": [
           [
-            [-120.600, 38.130],
-            [-120.560, 37.980],
-            [-120.440, 37.900],
-            [-120.280, 37.900],
-            [-120.030, 37.980],
-            [-119.900, 38.220],
-            [-119.980, 38.500],
-            [-120.140, 38.530],
-            [-120.470, 38.450],
-            [-120.600, 38.130]
+            [
+              -120.6137,
+              38.024
+            ],
+            [
+              -120.4644,
+              37.9139
+            ],
+            [
+              -120.3278,
+              37.936
+            ],
+            [
+              -120.141,
+              38.0306
+            ],
+            [
+              -119.9349,
+              38.2406
+            ],
+            [
+              -119.9565,
+              38.4306
+            ],
+            [
+              -120.0406,
+              38.5294
+            ],
+            [
+              -120.2874,
+              38.5535
+            ],
+            [
+              -120.68,
+              38.2
+            ],
+            [
+              -120.6137,
+              38.024
+            ]
           ]
         ]
       }

@@ -226,20 +226,20 @@ hazards:
       # COUNTIES — that's why an AREA is its own place kind, not a county.
       #
       # The precise coverage boundary is a hand-drawn polygon in
-      # data/places/areas.geojson (keyed by this id) — a wedge along the Hwy 4
-      # corridor Angels Camp -> Bear Valley, bulging NW to the Tiger Creek
-      # forest and SE up Hwy 108 into the Stanislaus NF, excluding the corners
-      # the old square over-reached (San Andreas/Jackson NW, Farmington SW).
+      # data/places/areas.geojson (keyed by this id) — west out to San Andreas,
+      # south at Angels Camp / New Melones, east meeting Hwy 108 SE of Bear
+      # Valley (Pinecrest/Dardanelle), and north capping just above Bear Valley
+      # up the Hwy 4 corridor (the NE edge cuts SE to the 108).
       # THAT polygon does the event->area attribution (point-in-polygon) and the
       # map footprint. These `bounds` are now just the coarse FETCH rectangle:
       # they must cover the polygon (the upstream USGS/Cal OES queries and the
       # wildfire/earthquake in-scope filter take a rectangle), so they're set to
       # the polygon's bounding box plus a small margin.
       bounds:
-        minLatitude: 37.88
-        maxLatitude: 38.55
-        minLongitude: -120.62
-        maxLongitude: -119.88
+        minLatitude: 37.87
+        maxLatitude: 38.59
+        minLongitude: -120.72
+        maxLongitude: -119.89
       incidentArea: "mother-lode"   # reuse the roads incidents region filter
       # NWS forecast zones this area covers — scopes the weather_alert and
       # fire_weather layers (which carry zones, not coordinates). The Hwy 4 + Hwy
