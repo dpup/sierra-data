@@ -47,6 +47,12 @@ func main() {
 	// Load configuration using Prefab's config system
 	appConfig := config.LoadConfig()
 
+	// Tell prefab's config validator that the app's own config namespaces are
+	// known, so it doesn't warn about every roads/weather/grid/... key as a
+	// "potential typo". Prefab's own server.* keys stay validated, so real typos
+	// there still surface. Must run before prefab.New (which validates on build).
+	registerAppConfigKeys()
+
 	// Initialize cache. Periodic cleanup evicts very-stale entries so keys that
 	// are never overwritten (content-hash AI-enhancement entries) don't
 	// accumulate forever.
@@ -255,6 +261,24 @@ var gridSourceInfo = map[string]struct{ name, attribution string }{
 	"chp":      {"CHP / Caltrans", "quickmap.dot.ca.gov"},
 	"caltrans": {"Caltrans", "quickmap.dot.ca.gov"},
 	"meshcore": {"MeshCore Mesh", "MeshCore community mesh"},
+}
+
+// registerAppConfigKeys registers the app's top-level config namespaces with
+// prefab's key validator. They live in prefab.yaml but aren't prefab's own keys,
+// so without this prefab logs every one as an unknown key on startup. Registered
+// as namespace prefixes — prefab's HasRegisteredPrefix allows any key beneath a
+// registered namespace, so one entry per namespace covers all nested keys.
+func registerAppConfigKeys() {
+	for _, ns := range []string{
+		"grid", "roads", "weather", "hazards",
+		"openai", "openweather", "googleRoutes", "google_routes",
+	} {
+		prefab.RegisterConfigKey(prefab.ConfigKeyInfo{
+			Key:         ns,
+			Description: "The Grid application config namespace (see internal/config)",
+			Type:        "object",
+		})
+	}
 }
 
 // meshcoreClientConfig maps the grid.meshcore config onto the meshcore client
