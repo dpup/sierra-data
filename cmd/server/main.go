@@ -264,11 +264,20 @@ func meshcoreClientConfig(cfg *config.Config) meshcore.Config {
 	mc := cfg.Grid.Meshcore
 	brokers := make([]meshcore.Broker, 0, len(mc.Brokers))
 	for _, b := range mc.Brokers {
+		// Per-broker creds win; otherwise fall back to the shared subscriber
+		// credentials (env-injected via PF__GRID__MESHCORE__USERNAME/PASSWORD).
+		user, pass := b.Username, b.Password
+		if user == "" {
+			user = mc.Username
+		}
+		if pass == "" {
+			pass = mc.Password
+		}
 		brokers = append(brokers, meshcore.Broker{
 			URL:      b.URL,
 			ClientID: b.ClientID,
-			Username: b.Username,
-			Password: b.Password,
+			Username: user,
+			Password: pass,
 			Topics:   b.Topics,
 			QoS:      b.QoS,
 		})

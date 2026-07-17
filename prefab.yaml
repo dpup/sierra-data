@@ -355,7 +355,7 @@ grid:
   # (all WSS+TLS :443). meshmapper access: a Region Onboarding form → creds via
   # Discord. For local testing, self-host a broker + a publishing observer.
   meshcore:
-    enabled: false
+    enabled: true
     # Keeps a recently-heard node in each poll snapshot; expireAfter (above), not
     # this, governs real liveness.
     activeWindow: "30m"
@@ -375,8 +375,14 @@ grid:
         maxLatitude: 39.0    # north of the Calaveras/Tuolumne Sierra
         minLongitude: -123.0 # Pacific coast / SF
         maxLongitude: -119.5 # east of Ebbetts/Sonora passes
-    brokers: []
-      # - url: "wss://mqtt.meshmapper.net:443"
-      #   topics: ["meshcore/+/+/packets"]
-      #   username: "<operator-issued subscriber user>"
-      #   password: "<operator-issued subscriber pass>"  # prefer PF__ env, don't commit
+    # Subscriber credentials are SECRETS — injected per-environment, NEVER
+    # committed (dev → .env, prod → terraform). Set them as scalar env keys:
+    #   PF__GRID__MESHCORE__USERNAME
+    #   PF__GRID__MESHCORE__PASSWORD
+    # These apply to every broker below that omits its own username/password.
+    # (A per-broker cred *inside* the brokers array can't be set via env — koanf
+    # can't merge an env key onto a YAML array element — so use the scalars above.)
+    brokers:
+      - url: "wss://mqtt.gomesh.dev:443/mqtt"
+        clientId: "data.sierragridteam.org"
+        topics: ["meshcore/+/+/packets"]

@@ -53,8 +53,15 @@ type MeshcoreConfig struct {
 	// the union of hazards.areas. Mesh presence is deliberately monitored over a
 	// WIDER area than the hazard region (e.g. the Bay Area too) so there is enough
 	// traffic to confirm the source is live; tighten once it's noisy.
-	Bounds  []GeoBounds      `koanf:"bounds"`
-	Brokers []MeshcoreBroker `koanf:"brokers"`
+	Bounds []GeoBounds `koanf:"bounds"`
+	// Username/Password are the subscriber credentials applied to every broker
+	// that doesn't set its own. These are SECRETS: inject them per-environment
+	// (dev .env, prod terraform) via PF__GRID__MESHCORE__USERNAME /
+	// PF__GRID__MESHCORE__PASSWORD — a scalar env key merges reliably, unlike a
+	// per-broker key inside the brokers array. Never commit real credentials.
+	Username string           `koanf:"username"`
+	Password string           `koanf:"password"`
+	Brokers  []MeshcoreBroker `koanf:"brokers"`
 }
 
 // MeshcoreBroker is one MQTT endpoint. URL scheme selects transport
