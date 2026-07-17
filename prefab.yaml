@@ -1,7 +1,7 @@
 server:
   port: 8181  # Local dev port. Production (Docker/ECS) overrides via PF__SERVER__PORT=8080.
   security:
-    xFrameOptions: DENY  # X-Frame-Options header
+    xFramesOptions: DENY  # X-Frame-Options header (prefab reads xFramesOptions, plural)
 
     # CORS settings
     # NOTE: Prefab only emits Access-Control-Allow-Origin when the request's
