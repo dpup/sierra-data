@@ -138,7 +138,10 @@ malformed`). The classic footgun: the container's dev server *and* a host proces
 that mounts the workspace both open `./data/grid.db`. `Open` takes an exclusive
 advisory `flock` on `<path>.lock` and returns a clear "already open by another
 process" error instead of racing; the flock is bound to the fd, so the kernel
-releases it on `Close` or process death (no stale lock). It coordinates within
+releases it on `Close` or process death (no stale lock). It waits up to
+`lockAcquireTimeout` (~15s) for a contended lock first, so a rolling deploy's new
+task acquires once the old one drains and exits (releasing its flock on the
+shared EFS volume) rather than failing on the brief overlap. It coordinates within
 one kernel only — a writer reaching the file from a separate host via the mount
 can still slip past — so **for dev, keep the DB off the bind mount**: point
 `PF__GRID__DBPATH` at a container-local path outside `/workspace` (e.g.

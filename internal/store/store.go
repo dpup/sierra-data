@@ -159,21 +159,38 @@ func Open(path string, opts ...Option) (*Store, error) {
 	return s, nil
 }
 
+// lockAcquireTimeout bounds how long Open waits for the db lock. A brief wait
+// lets a rolling deploy's new task acquire once the previous writer drains and
+// exits (releasing its flock), instead of failing on a few-second overlap on the
+// shared volume. A genuinely stuck second writer still fails loud after this.
+// Overridable in tests.
+var lockAcquireTimeout = 15 * time.Second
+
 // acquireDBLock takes an exclusive advisory lock on <path>.lock so a second
 // process opening the same database fails loudly instead of silently corrupting
 // it. The lock is an flock bound to the open fd — released automatically by the
 // kernel on Close or if the process dies, so there is no stale lock to clean up.
+// It waits up to lockAcquireTimeout for a contended lock (deploy drain window)
+// before giving up.
 func acquireDBLock(dbPath string) (*os.File, error) {
 	lockPath := dbPath + ".lock"
 	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return nil, fmt.Errorf("store: opening lock file %s: %w", lockPath, err)
 	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		f.Close()
-		return nil, fmt.Errorf("store: database %q is already open by another process "+
-			"(concurrent writers corrupt SQLite); stop the other server or point "+
-			"PF__GRID__DBPATH at a different file: %w", dbPath, err)
+	deadline := time.Now().Add(lockAcquireTimeout)
+	for {
+		lockErr := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if lockErr == nil {
+			break
+		}
+		if !errors.Is(lockErr, syscall.EWOULDBLOCK) || !time.Now().Before(deadline) {
+			f.Close()
+			return nil, fmt.Errorf("store: database %q is already open by another process "+
+				"(concurrent writers corrupt SQLite); stop the other server or point "+
+				"PF__GRID__DBPATH at a different file: %w", dbPath, lockErr)
+		}
+		time.Sleep(250 * time.Millisecond)
 	}
 	// Record our pid for humans inspecting the lock file (best-effort).
 	if err := f.Truncate(0); err == nil {

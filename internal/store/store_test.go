@@ -71,6 +71,10 @@ func revisionCount(t *testing.T, s *Store, eventID string) int {
 }
 
 func TestOpenRejectsConcurrentOpener(t *testing.T) {
+	// Keep the contention wait short so the test doesn't sit for the deploy window.
+	defer func(old time.Duration) { lockAcquireTimeout = old }(lockAcquireTimeout)
+	lockAcquireTimeout = 300 * time.Millisecond
+
 	path := filepath.Join(t.TempDir(), "grid.db")
 
 	s1, err := Open(path)
