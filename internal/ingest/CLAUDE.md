@@ -72,6 +72,24 @@ Either way a **failed** poll transitions nothing (mechanisms above). Every
 transition is a recorded revision. Grace is anchored to `last_seen_at`
 (`shouldExpire`), not `observed_at`.
 
+## Push sources wrapped as pollers (MeshCore)
+
+`network.go` (the `meshcore` source) is a **push** source fitted to this pull
+model: a long-lived MQTT subscriber (`internal/clients/meshcore.Registry`)
+accumulates node state in memory, and `NetworkNormalizer.Poll` returns a snapshot
+of recently-heard, in-region nodes on each tick. This keeps single-writer
+discipline, tick-based health, and the disappearance sweep unchanged. Two
+mesh-specific rules:
+
+- **All brokers down ⇒ hard `Poll` error.** An empty snapshot from *our* outage
+  must never read as "every node left the mesh" (fail-loud invariant). A mesh has
+  no goodbye packet, so the source uses `disappearance: expire` with a multi-day
+  `expireAfter`; genuine silence expires a node, our downtime does not.
+- **Volatile telemetry stays out of the content hash.** SNR/RSSI/hops/gateways
+  ride in `NetworkDetail.telemetry`, which `store.ContentHash` zeroes — so the
+  advert firehose refreshes `last_seen_at` without minting a revision. Only a
+  node's identity, role, name, location, or status change writes history.
+
 ## Enhancement budget + carry-forward
 
 Only the `WEATHER_ALERT` layer is enhanced here (road incidents arrive already

@@ -43,6 +43,14 @@ hash differs from the stored one. Zeroed fields and the reason each is excluded:
   to spend AI-enhancement budget **before** enhancing. If enhancement were hashed,
   an enhanced event would differ from the next raw poll and loop forever, and the
   spec §6 "enhancement regenerated per poll" bug would come back.
+- `network.telemetry` (NETWORK events only) — the MeshCore per-advert signal state
+  (SNR/RSSI/hop count/path/gateways/last-advert time). A mesh node re-adverts
+  constantly and every packet carries fresh signal metrics; hashing them would mint
+  a revision per packet and blow up `event_revisions`. Grouping them into one
+  telemetry sub-message means one field to zero. What still mints a revision is a
+  node's **stable identity** (pubkey, role, name), its **location** (geometry is
+  hashed — movement is meaningful), or a **status** flip. The volatile metrics ride
+  forward untouched across polls, exactly like `summary`/`enhancement`.
 
 `NeedsUpdate` is the read-only pre-check the scheduler uses for the budget
 decision; `UpsertEvent` re-computes the hash itself from the event **as passed**

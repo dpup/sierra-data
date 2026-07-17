@@ -21,6 +21,7 @@ import (
 	"github.com/dpup/sierra-data/internal/clients/caltrans"
 	"github.com/dpup/sierra-data/internal/clients/census"
 	"github.com/dpup/sierra-data/internal/clients/google"
+	"github.com/dpup/sierra-data/internal/clients/meshcore"
 	"github.com/dpup/sierra-data/internal/clients/nws"
 	"github.com/dpup/sierra-data/internal/clients/usgs"
 	"github.com/dpup/sierra-data/internal/clients/weather"
@@ -124,14 +125,33 @@ func main() {
 
 	// One poller per upstream scope; weather_alert and road_incident reuse the
 	// services' cached, budgeted pipelines (plan decision 6).
+	pollers := []ingest.PollerSpec{
+		{Normalizer: ingest.NewEarthquakeNormalizer(appConfig, usgs.NewClient()), Interval: gridPollInterval(appConfig, "usgs")},
+		{Normalizer: ingest.NewWildfireNormalizer(appConfig, calfire.NewClient(), wfigs.NewClient()), Interval: gridPollInterval(appConfig, "calfire", "wfigs")},
+		{Normalizer: ingest.NewEvacuationNormalizer(appConfig, caloes.NewClient()), Interval: gridPollInterval(appConfig, "caloes")},
+		{Normalizer: ingest.NewWeatherAlertNormalizer(appConfig, weatherService), Interval: gridPollInterval(appConfig, "nws")},
+		{Normalizer: ingest.NewRoadIncidentNormalizer(appConfig, roadsService), Interval: gridPollInterval(appConfig, "chp", "caltrans")},
+	}
+
+	// MeshCore mesh-node presence (optional): a long-lived MQTT subscriber to
+	// community bridges accumulates node state; the NetworkNormalizer serves a
+	// snapshot on the scheduler's tick. Enabled only when configured with brokers.
+	if appConfig.Grid.Meshcore.Enabled && len(appConfig.Grid.Meshcore.Brokers) > 0 {
+		meshcoreReg := meshcore.NewRegistry(meshcoreClientConfig(appConfig))
+		if err := meshcoreReg.Connect(ctx); err != nil {
+			logging.Errorw(ctx, "Failed to start MeshCore subscriber", "error", err)
+		} else {
+			defer meshcoreReg.Close()
+			logging.Infow(ctx, "MeshCore subscriber started", "brokers", len(appConfig.Grid.Meshcore.Brokers))
+			pollers = append(pollers, ingest.PollerSpec{
+				Normalizer: ingest.NewNetworkNormalizer(appConfig, meshcoreReg),
+				Interval:   gridPollInterval(appConfig, "meshcore"),
+			})
+		}
+	}
+
 	scheduler := ingest.NewScheduler(gridStore, ingest.SchedulerConfig{
-		Pollers: []ingest.PollerSpec{
-			{Normalizer: ingest.NewEarthquakeNormalizer(appConfig, usgs.NewClient()), Interval: gridPollInterval(appConfig, "usgs")},
-			{Normalizer: ingest.NewWildfireNormalizer(appConfig, calfire.NewClient(), wfigs.NewClient()), Interval: gridPollInterval(appConfig, "calfire", "wfigs")},
-			{Normalizer: ingest.NewEvacuationNormalizer(appConfig, caloes.NewClient()), Interval: gridPollInterval(appConfig, "caloes")},
-			{Normalizer: ingest.NewWeatherAlertNormalizer(appConfig, weatherService), Interval: gridPollInterval(appConfig, "nws")},
-			{Normalizer: ingest.NewRoadIncidentNormalizer(appConfig, roadsService), Interval: gridPollInterval(appConfig, "chp", "caltrans")},
-		},
+		Pollers:       pollers,
 		Tuning:        appConfig.Grid.Sources,
 		Enhancer:      nwsEnhancer,
 		EnhancerModel: model,
@@ -234,6 +254,30 @@ var gridSourceInfo = map[string]struct{ name, attribution string }{
 	"nws":      {"National Weather Service", "NOAA / National Weather Service"},
 	"chp":      {"CHP / Caltrans", "quickmap.dot.ca.gov"},
 	"caltrans": {"Caltrans", "quickmap.dot.ca.gov"},
+	"meshcore": {"MeshCore Mesh", "MeshCore community mesh"},
+}
+
+// meshcoreClientConfig maps the grid.meshcore config onto the meshcore client
+// Config. RetainFor is anchored to the source's expireAfter so the store's
+// lifecycle — not the in-memory buffer — decides when a silent node is gone.
+func meshcoreClientConfig(cfg *config.Config) meshcore.Config {
+	mc := cfg.Grid.Meshcore
+	brokers := make([]meshcore.Broker, 0, len(mc.Brokers))
+	for _, b := range mc.Brokers {
+		brokers = append(brokers, meshcore.Broker{
+			URL:      b.URL,
+			ClientID: b.ClientID,
+			Username: b.Username,
+			Password: b.Password,
+			Topics:   b.Topics,
+			QoS:      b.QoS,
+		})
+	}
+	return meshcore.Config{
+		Brokers:               brokers,
+		RequireValidSignature: mc.RequireValidSignature,
+		RetainFor:             cfg.Grid.Sources["meshcore"].ExpireAfter,
+	}
 }
 
 // gridSourceSeeds builds the source registry rows: ids + tuning from

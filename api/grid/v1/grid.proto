@@ -46,11 +46,11 @@ message Event {
     FireWeatherDetail fire_weather = 23;
     EarthquakeDetail earthquake = 24;
     RoadIncidentDetail road_incident = 25;
+    NetworkDetail network = 26;
   }
 
-  // Power/Gauge/AirQuality/Network/Announcement details — defined with their
-  // pollers.
-  reserved 26 to 30;
+  // Power/Gauge/AirQuality/Announcement details — defined with their pollers.
+  reserved 27 to 30;
 }
 
 enum Layer {
@@ -227,6 +227,31 @@ message RoadIncidentDetail {
   string impact = 4;                // AI-assessed: none | light | moderate | severe
   string duration = 5;              // AI-assessed: unknown | < 1 hour | several hours | ongoing
   map<string, string> metadata = 7; // structured extras from AI analysis (internal keys stripped)
+}
+
+// MeshCore mesh-node presence (Layer_NETWORK). One event per node, keyed by
+// its Ed25519 public key. Stable identity + advertised location live here (and
+// mint a revision on change); the per-packet signal metrics live in the nested
+// NetworkTelemetry, which the store's ContentHash zeroes — so the firehose of
+// adverts refreshes liveness (last_seen_at) without ever writing a revision.
+message NetworkDetail {
+  string public_key = 1;   // full Ed25519 public key, hex (also the Event.id native part)
+  string node_type = 2;    // companion | repeater | room_server | sensor
+  string name = 3;         // advertised node name
+
+  NetworkTelemetry telemetry = 4;   // VOLATILE — excluded from the content hash
+}
+
+// NetworkTelemetry is the volatile, per-advert signal state. It is deliberately
+// grouped into one sub-message so store.ContentHash can zero the whole field:
+// none of it mints a revision.
+message NetworkTelemetry {
+  double snr = 1;                              // last SNR (dB), gateway-reported
+  int32 rssi = 2;                              // last RSSI (dBm), gateway-reported
+  uint32 hop_count = 3;                        // path length of the last-heard advert
+  repeated string path = 4;                    // repeater public-key prefixes it traversed
+  repeated string gateways = 5;                // origin ids of the gateways/brokers that heard it
+  google.protobuf.Timestamp last_advert_at = 6; // sender-stamped time of the last advert
 }
 
 // List / response wrappers for the hand-built /v1 handlers.

@@ -721,6 +721,9 @@
         },
         "roadIncident": {
           "$ref": "#/definitions/v1RoadIncidentDetail"
+        },
+        "network": {
+          "$ref": "#/definitions/v1NetworkDetail"
         }
       }
     },
@@ -872,6 +875,68 @@
       ],
       "default": "LAYER_UNSPECIFIED",
       "title": "- POWER: condition-backed layers (ROAD_SEGMENT, CHAIN_CONTROL) are projections, not events"
+    },
+    "v1NetworkDetail": {
+      "type": "object",
+      "properties": {
+        "publicKey": {
+          "type": "string",
+          "title": "full Ed25519 public key, hex (also the Event.id native part)"
+        },
+        "nodeType": {
+          "type": "string",
+          "title": "companion | repeater | room_server | sensor"
+        },
+        "name": {
+          "type": "string",
+          "title": "advertised node name"
+        },
+        "telemetry": {
+          "$ref": "#/definitions/v1NetworkTelemetry",
+          "title": "VOLATILE — excluded from the content hash"
+        }
+      },
+      "description": "MeshCore mesh-node presence (Layer_NETWORK). One event per node, keyed by\nits Ed25519 public key. Stable identity + advertised location live here (and\nmint a revision on change); the per-packet signal metrics live in the nested\nNetworkTelemetry, which the store's ContentHash zeroes — so the firehose of\nadverts refreshes liveness (last_seen_at) without ever writing a revision."
+    },
+    "v1NetworkTelemetry": {
+      "type": "object",
+      "properties": {
+        "snr": {
+          "type": "number",
+          "format": "double",
+          "title": "last SNR (dB), gateway-reported"
+        },
+        "rssi": {
+          "type": "integer",
+          "format": "int32",
+          "title": "last RSSI (dBm), gateway-reported"
+        },
+        "hopCount": {
+          "type": "integer",
+          "format": "int64",
+          "title": "path length of the last-heard advert"
+        },
+        "path": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "repeater public-key prefixes it traversed"
+        },
+        "gateways": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "origin ids of the gateways/brokers that heard it"
+        },
+        "lastAdvertAt": {
+          "type": "string",
+          "format": "date-time",
+          "title": "sender-stamped time of the last advert"
+        }
+      },
+      "description": "NetworkTelemetry is the volatile, per-advert signal state. It is deliberately\ngrouped into one sub-message so store.ContentHash can zero the whole field:\nnone of it mints a revision."
     },
     "v1Place": {
       "type": "object",

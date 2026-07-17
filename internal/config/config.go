@@ -32,6 +32,35 @@ type GridConfig struct {
 	JournalMode string                  `koanf:"journalMode"`
 	Enhancement GridEnhancement         `koanf:"enhancement"`
 	Sources     map[string]SourceTuning `koanf:"sources"`
+	Meshcore    MeshcoreConfig          `koanf:"meshcore"`
+}
+
+// MeshcoreConfig configures the MeshCore mesh-node presence source: a set of
+// community MQTT bridges we subscribe to (several for resilience). It maps to
+// the meshcore.Config client struct in cmd/server. Poll cadence and lifecycle
+// (disappearance: expire, expireAfter) live in the grid.sources.meshcore
+// SourceTuning entry, not here.
+type MeshcoreConfig struct {
+	Enabled bool `koanf:"enabled"`
+	// ActiveWindow keeps a recently-heard node in each poll snapshot. Default
+	// 30m. The store's expireAfter, not this, decides when a silent node is gone.
+	ActiveWindow time.Duration `koanf:"activeWindow"`
+	// RequireValidSignature drops adverts whose Ed25519 signature fails to verify
+	// (off by default until framing is confirmed against a live capture).
+	RequireValidSignature bool             `koanf:"requireValidSignature"`
+	Brokers               []MeshcoreBroker `koanf:"brokers"`
+}
+
+// MeshcoreBroker is one MQTT endpoint. URL scheme selects transport
+// (tcp:// | ssl:// | ws:// | wss://). Secrets should come from PF__ env, not
+// the committed prefab.yaml.
+type MeshcoreBroker struct {
+	URL      string   `koanf:"url"`
+	ClientID string   `koanf:"clientId"`
+	Username string   `koanf:"username"`
+	Password string   `koanf:"password"`
+	Topics   []string `koanf:"topics"`
+	QoS      uint8    `koanf:"qos"`
 }
 
 // GridEnhancement gates the NWS weather-alert AI enhancer. BudgetPerTick caps

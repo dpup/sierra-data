@@ -37,6 +37,8 @@ func ProjectEvents(layer string, events []*gridv1.Event) []hazards.Feature {
 			f = projectEarthquake(ev)
 		case hazards.LayerRoadIncident:
 			f = projectRoadIncident(ev)
+		case hazards.LayerNetwork:
+			f = projectNetwork(ev)
 		default:
 			continue // not an event-backed layer
 		}
@@ -154,6 +156,29 @@ func projectRoadIncident(ev *gridv1.Event) hazards.Feature {
 	p.UpdatedAt = rfc3339(ev.GetObservedAt())
 	p.Source = hazards.Source{ID: "chp", Name: "CHP / Caltrans", Attribution: "quickmap.dot.ca.gov"}
 	p.Incident = &hazards.IncidentProps{LogNumber: d.GetLogNumber()}
+	return feature(ev, p)
+}
+
+// projectNetwork projects a MeshCore mesh-node presence event. This is a new
+// layer (no legacy live builder to stay byte-compatible with). The source block
+// is the per-layer constant; per-feature signal metrics come from the volatile
+// telemetry block. properties.status is the UPPERCASE lifecycle enum.
+func projectNetwork(ev *gridv1.Event) hazards.Feature {
+	d := ev.GetNetwork()
+	t := d.GetTelemetry()
+	p := baseProps(ev, hazards.LayerNetwork, "Mesh node")
+	p.Status = lifecycleStatus(ev)
+	p.UpdatedAt = rfc3339(ev.GetObservedAt())
+	p.Source = hazards.Source{ID: "meshcore", Name: "MeshCore Mesh", URL: safeURL(ev.GetCanonicalUrl()), Attribution: "MeshCore community mesh"}
+	p.Network = &hazards.NetworkProps{
+		PublicKey: d.GetPublicKey(),
+		NodeType:  d.GetNodeType(),
+		Name:      d.GetName(),
+		SNR:       t.GetSnr(),
+		RSSI:      t.GetRssi(),
+		HopCount:  t.GetHopCount(),
+		Gateways:  t.GetGateways(),
+	}
 	return feature(ev, p)
 }
 

@@ -163,14 +163,27 @@ func (s *Service) buildPlaceSummary(ctx context.Context, hb hazardsBuilder, plac
 		GeneratedAt: timestamppb.New(s.Now().UTC()),
 	}
 
+	// Mesh-node presence (NETWORK) is ambient INFO infrastructure state, surfaced
+	// in its own `comms` domain below. It must NOT inflate the top-level hazard
+	// rollup (total_active, severity counts, top events, mode) — the same
+	// "ambient state is monitoring, not an active hazard" rule that excludes
+	// baseline conditions (commit d278e43). hazardEvents is the set that drives
+	// those; byLayer (built from the full set) still feeds the comms domain.
+	hazardEvents := make([]*gridv1.Event, 0, len(events))
+	for _, ev := range events {
+		if ev.GetLayer() != gridv1.Layer_NETWORK {
+			hazardEvents = append(hazardEvents, ev)
+		}
+	}
+
 	// --- summary block (store events only; conditions live in domains) ---
 	stats := &gridv1.SummaryStats{
 		HighestSeverity: gridv1.Severity_INFO.String(), // default when no events
 		SeverityCounts:  map[string]int32{},
-		TotalActive:     int32(len(events)),
+		TotalActive:     int32(len(hazardEvents)),
 		TopEvents:       []*gridv1.SummaryTopEvent{},
 	}
-	for _, ev := range events {
+	for _, ev := range hazardEvents {
 		sev := ev.GetSeverity()
 		stats.SeverityCounts[sev.String()]++
 		if int32(sev.Number()) >= stats.HighestSeverityRank {
@@ -178,7 +191,7 @@ func (s *Service) buildPlaceSummary(ctx context.Context, hb hazardsBuilder, plac
 			stats.HighestSeverity = sev.String()
 		}
 	}
-	stats.TopEvents = topEventsFrom(events, 5)
+	stats.TopEvents = topEventsFrom(hazardEvents, 5)
 
 	byLayer := map[gridv1.Layer][]*gridv1.Event{}
 	for _, ev := range events {
@@ -230,12 +243,23 @@ func (s *Service) buildPlaceSummary(ctx context.Context, hb hazardsBuilder, plac
 			[]string{eventLayerStatus(hazards.LayerEarthquake)},
 			eventItems(byLayer[gridv1.Layer_EARTHQUAKE])),
 	}
+	// comms (MeshCore mesh presence) is only reported when the source is enabled:
+	// a deliberately-off source must not surface as a dark/UNAVAILABLE domain.
+	if s.Cfg.Grid.Meshcore.Enabled {
+		out.Domains = append(out.Domains, buildDomain("comms",
+			[]string{eventLayerStatus(hazards.LayerNetwork)},
+			eventItems(byLayer[gridv1.Layer_NETWORK])))
+	}
 
 	// --- mode --- (event layers use the same served/degraded statuses the
 	// domains report: a down source with stored data is STALE, not a dark layer)
 	anyUnavailable := condChain.status == "UNAVAILABLE" ||
 		condSegment.status == "UNAVAILABLE" || condFireWx.status == "UNAVAILABLE"
 	for layer := range eventLayers {
+		// A deliberately-off comms source is not a data gap in the hazard picture.
+		if layer == hazards.LayerNetwork && !s.Cfg.Grid.Meshcore.Enabled {
+			continue
+		}
 		if eventLayerStatus(layer) == "UNAVAILABLE" {
 			anyUnavailable = true
 		}
@@ -245,7 +269,7 @@ func (s *Service) buildPlaceSummary(ctx context.Context, hb hazardsBuilder, plac
 		FireWeatherState:    fireWeatherState(condFireWx.features),
 		AnyLayerUnavailable: anyUnavailable,
 	}
-	for _, ev := range events {
+	for _, ev := range hazardEvents {
 		if ev.GetStatus() != gridv1.EventStatus_ACTIVE {
 			continue // SCHEDULED never escalates the mode
 		}

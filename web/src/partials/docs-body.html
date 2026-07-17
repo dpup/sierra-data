@@ -120,7 +120,7 @@ Content-Type: application/json
     <thead><tr><th>Field</th><th>Values</th><th>Semantics</th></tr></thead>
     <tbody>
       <tr><td class="mono">mode</td><td class="mono">QUIET | WATCH | ACTIVE</td><td class="wrap">ACTIVE: any active evacuation (ORDER / WARNING / SHELTER_IN_PLACE), any active EXTREME event, or a SEVERE wildfire. WATCH: any active SEVERE, an evacuation ADVISORY, fire weather elevated/red-flag, or any layer UNAVAILABLE while another signal is ≥ MODERATE. QUIET: otherwise. An UNAVAILABLE evacuation source forces mode ≥ WATCH — unknown is not quiet.</td></tr>
-      <tr><td class="mono">domains[]</td><td class="mono">fire, evacuation, weather, roads, seismic</td><td class="wrap">fire = wildfire + fire_weather; weather = weather_alert; roads = road_incident + chain_control + road_segment; seismic = earthquake. Each domain carries <code>status</code> (worst sourceStatus), <code>highestSeverity</code>, <code>activeCount</code>, and up to 3 <code>headlines</code>. <code>activeCount</code> and <code>headlines</code> count <em>active</em> items only: every event, but a condition feature (road segment, chain control, fire-weather banner) only when it is above <code>INFO</code>. Baseline monitoring — an open road, "normal" fire weather — is excluded, so a QUIET domain reads <code>activeCount: 0</code> even while the map layer still draws those features.</td></tr>
+      <tr><td class="mono">domains[]</td><td class="mono">fire, evacuation, weather, roads, seismic, comms</td><td class="wrap">fire = wildfire + fire_weather; weather = weather_alert; roads = road_incident + chain_control + road_segment; seismic = earthquake; comms = mesh_node (present only when the MeshCore source is enabled). Each domain carries <code>status</code> (worst sourceStatus), <code>highestSeverity</code>, <code>activeCount</code>, and up to 3 <code>headlines</code>. <code>activeCount</code> and <code>headlines</code> count <em>active</em> items only: every event, but a condition feature (road segment, chain control, fire-weather banner) only when it is above <code>INFO</code>. Baseline monitoring — an open road, "normal" fire weather — is excluded, so a QUIET domain reads <code>activeCount: 0</code> even while the map layer still draws those features. Mesh-node presence is ambient <code>INFO</code> state: it feeds the <code>comms</code> domain but is excluded from <code>totalActive</code>, <code>severityCounts</code>, <code>topEvents</code>, and <code>mode</code>.</td></tr>
     </tbody>
   </table></div>
   <div class="live-examples">
@@ -145,6 +145,7 @@ Content-Type: application/json
       <tr><td class="mono">road_segment</td><td>live conditions</td><td class="wrap">Monitored road corridors with congestion state (LineString)</td></tr>
       <tr><td class="mono">chain_control</td><td>live conditions</td><td class="wrap">Chain-control status per corridor (R1/R2/R3)</td></tr>
       <tr><td class="mono">fire_weather</td><td>live conditions</td><td class="wrap">Fire-weather state per NWS zone (normal / elevated / red-flag)</td></tr>
+      <tr><td class="mono">mesh_node</td><td>event store</td><td class="wrap">MeshCore mesh-node presence (points) — repeaters, room servers, and located companion nodes heard in the region</td></tr>
     </tbody>
   </table></div>
   <div class="live-examples">
@@ -332,7 +333,7 @@ Content-Type: application/json
   <div class="table-wrap"><table class="data-table">
     <thead><tr><th>Field</th><th>Type</th><th>Semantics</th></tr></thead>
     <tbody>
-      <tr><td class="mono">id</td><td class="mono">string</td><td class="wrap">Globally unique, source-namespaced: <code>{namespace}:{native_id}</code>. Namespaces: <code>chp:</code> (road incidents), <code>wx:</code> (weather alerts), <code>usgs:</code> (earthquakes), <code>calfire:</code> (CAL FIRE incidents), <code>wfigs:</code> (fire perimeters), <code>evac:</code> (evacuation zones). WFIGS ids are <code>wfigs:{normalized-name}</code> with <code>-2</code>, <code>-3</code> disambiguators.</td></tr>
+      <tr><td class="mono">id</td><td class="mono">string</td><td class="wrap">Globally unique, source-namespaced: <code>{namespace}:{native_id}</code>. Namespaces: <code>chp:</code> (road incidents), <code>wx:</code> (weather alerts), <code>usgs:</code> (earthquakes), <code>calfire:</code> (CAL FIRE incidents), <code>wfigs:</code> (fire perimeters), <code>evac:</code> (evacuation zones), <code>meshcore:</code> (mesh nodes, keyed by Ed25519 public key). WFIGS ids are <code>wfigs:{normalized-name}</code> with <code>-2</code>, <code>-3</code> disambiguators.</td></tr>
       <tr><td class="mono">layer</td><td class="mono">Layer</td><td class="wrap">Layer taxonomy (table below)</td></tr>
       <tr><td class="mono">category</td><td class="mono">string</td><td class="wrap">Source sub-type slug (<code>"active"</code>, <code>"order"</code>, …)</td></tr>
       <tr><td class="mono">severity</td><td class="mono">Severity</td><td class="wrap">Unified 5-level scale (table below)</td></tr>
@@ -371,14 +372,18 @@ Content-Type: application/json
       <tr><td class="mono">weatherAlert</td><td class="wrap mono">nwsSeverity, certainty, urgency, instruction, areaDesc (string), zones (repeated string)</td></tr>
       <tr><td class="mono">earthquake</td><td class="wrap mono">magnitude (double), depthKm (double), felt (int32)</td></tr>
       <tr><td class="mono">roadIncident</td><td class="wrap mono">logNumber (string), impact, duration (string), metadata (map&lt;string,string&gt;)</td></tr>
+      <tr><td class="mono">network</td><td class="wrap mono">publicKey (hex string), nodeType (companion | repeater | room_server | sensor), name (string), telemetry { snr (double), rssi (int32), hopCount (uint32), path (repeated string), gateways (repeated string), lastAdvertAt (timestamp) }</td></tr>
     </tbody>
   </table></div>
   <p class="small muted">
     Unit-bearing fields name their unit (<code class="inline">depthKm</code>).
     A <code class="inline">fire_weather</code> detail slot is reserved in the
     schema but fire weather is condition-backed (a map layer, not an event
-    stream). Slots are also reserved for future layers: power, gauge,
-    air_quality, network, announcement.
+    stream). The <code class="inline">network</code> block's
+    <code class="inline">telemetry</code> is the last-heard signal state and is
+    volatile — it never mints a new event revision (only a node's identity,
+    role, name, location, or status does). Slots are also reserved for future
+    layers: power, gauge, air_quality, announcement.
   </p>
 
   <h3>Enum: Layer</h3>
@@ -391,7 +396,8 @@ Content-Type: application/json
       <tr><td class="mono">FIRE_WEATHER</td><td class="num">4</td><td class="mono">fire_weather</td><td>conditions (map layer only)</td></tr>
       <tr><td class="mono">EARTHQUAKE</td><td class="num">5</td><td class="mono">earthquake</td><td>events</td></tr>
       <tr><td class="mono">ROAD_INCIDENT</td><td class="num">6</td><td class="mono">road_incident</td><td>events</td></tr>
-      <tr><td class="mono">POWER … ANNOUNCEMENT</td><td class="num">10–14</td><td class="mono">—</td><td>reserved for future pollers</td></tr>
+      <tr><td class="mono">NETWORK</td><td class="num">13</td><td class="mono">mesh_node</td><td>events (MeshCore presence)</td></tr>
+      <tr><td class="mono">POWER, GAUGE, AIR_QUALITY, ANNOUNCEMENT</td><td class="num">10–14</td><td class="mono">—</td><td>reserved for future pollers</td></tr>
     </tbody>
   </table></div>
   <p class="small muted">
@@ -579,7 +585,7 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
   }
 }</pre>
   <ul>
-    <li><strong>Per-kind data</strong> lives under a single namespaced key (<code class="inline">wildfire</code>, <code class="inline">earthquake</code>, <code class="inline">evacuation</code>, <code class="inline">weather</code>, <code class="inline">incident</code>) — consumers ignore kinds they don't handle; no field collisions.</li>
+    <li><strong>Per-kind data</strong> lives under a single namespaced key (<code class="inline">wildfire</code>, <code class="inline">earthquake</code>, <code class="inline">evacuation</code>, <code class="inline">weather</code>, <code class="inline">incident</code>, <code class="inline">network</code>) — consumers ignore kinds they don't handle; no field collisions.</li>
     <li><strong>Coordinate order is <code class="inline">[longitude, latitude]</code></strong> (GeoJSON axis order), WGS84, trimmed to 5 decimals (~1.1 m). Polygons are simplified to keep features small.</li>
     <li><strong>Null geometry is valid</strong> (e.g. a county-wide advisory): the feature has <code class="inline">"geometry": null</code> with the same properties envelope. Exclude it from the map layer and render it as a full-width banner/list card sorted by <code class="inline">severityRank</code> alongside located features, showing <code class="inline">headline</code>, <code class="inline">source.name</code>, <code class="inline">updatedAt</code>, and <code class="inline">source.url</code>.</li>
     <li><strong>URL fields are scheme-validated upstream</strong>: any upstream-sourced URL that is not <code class="inline">https://</code>/<code class="inline">http://</code> is dropped before it reaches the response. Treat all upstream text (headlines, descriptions) as untrusted anyway.</li>

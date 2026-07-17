@@ -14,6 +14,39 @@ throughout; errors are gRPC-standard `{code, codeName, message, details}`). The
 by a snake_case `/v1` surface on 2026-07-05, which was in turn folded back onto the
 proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 
+## 2026-07-16
+
+### Added — MeshCore mesh-node presence (`NETWORK` layer, `meshcore` source)
+
+New data source: MeshCore LoRa mesh-node presence, ingested from community MQTT
+bridges. One event per node (keyed by its Ed25519 public key). All additive —
+no existing response shape changes.
+
+- **`GET /api/v1/events?layer=network`** — mesh nodes as events. Each carries a
+  `network` detail block: `publicKey`, `nodeType`
+  (`companion|repeater|room_server|sensor`), `name`, and a nested `telemetry`
+  (`snr`, `rssi`, `hopCount`, `path`, `gateways`, `lastAdvertAt`). `severity` is
+  always `INFO`; `status` is `ACTIVE` while heard, `EXPIRED` after ~5 days of
+  silence (a mesh has no departure signal). Scope: any node advertising a
+  location inside a configured area; locationless nodes are dropped.
+- **`GET /api/v1/places/{place}/map/mesh_node.geojson`** — a new map layer.
+  Point features `[lng, lat]`, the shared camelCase `properties` envelope plus a
+  `network` block. Node locations are quantized to ~4 decimals (~11 m).
+- **`GET /api/v1/sources`** — a new `meshcore` source row (health = broker
+  connectivity: `OK` while ≥1 broker connected).
+- **`GET /api/v1/places/{place}/summary`** — a new `comms` domain, present
+  **only when the source is enabled**. Mesh presence is ambient `INFO` state, so
+  it does **not** count toward top-level `summary.totalActive`, `severityCounts`,
+  `topEvents`, or `mode` (same exclusion as baseline conditions, 2026-07-09).
+
+The `telemetry` sub-block is deliberately excluded from the event content hash,
+so the advert firehose refreshes liveness without minting revisions — only a
+node's identity, role, name, location, or status change writes history.
+
+Disabled by default (no brokers configured). NOTE for the public docs site
+(`../web`): add the `network`/`mesh_node` layer + `network` detail block to the
+`/api/v1` reference — that source lives outside this repo.
+
 ## 2026-07-09
 
 ### Fixed — `summary` domains no longer count baseline conditions as active

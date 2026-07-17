@@ -10,6 +10,7 @@ const (
 	LayerEarthquake   = "earthquake"
 	LayerWildfire     = "wildfire"
 	LayerEvacuation   = "evacuation"
+	LayerNetwork      = "mesh_node"
 )
 
 // Properties is the common envelope shared by every hazard feature, plus a
@@ -39,6 +40,7 @@ type Properties struct {
 	Earthquake   *EarthquakeProps   `json:"earthquake,omitempty"`
 	Wildfire     *WildfireProps     `json:"wildfire,omitempty"`
 	Evacuation   *EvacuationProps   `json:"evacuation,omitempty"`
+	Network      *NetworkProps      `json:"network,omitempty"`
 }
 
 // Source identifies the upstream feed a feature came from.
@@ -109,6 +111,18 @@ type EvacuationProps struct {
 	Level     string `json:"level"` // ORDER | WARNING | ADVISORY | SHELTER_IN_PLACE
 	EventType string `json:"eventType,omitempty"`
 	County    string `json:"county,omitempty"`
+}
+
+// NetworkProps is the mesh_node (MeshCore) kind block. The signal metrics are
+// the last-heard values (volatile; not part of the event's content hash).
+type NetworkProps struct {
+	PublicKey string   `json:"publicKey"`
+	NodeType  string   `json:"nodeType,omitempty"` // companion | repeater | room_server | sensor
+	Name      string   `json:"name,omitempty"`
+	SNR       float64  `json:"snr,omitempty"`
+	RSSI      int32    `json:"rssi,omitempty"`
+	HopCount  uint32   `json:"hopCount,omitempty"`
+	Gateways  []string `json:"gateways,omitempty"`
 }
 
 // setSeverity sets both Severity and the derived SeverityRank.

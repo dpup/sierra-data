@@ -39,6 +39,7 @@ var eventLayers = map[string]gridv1.Layer{
 	hazards.LayerWeatherAlert: gridv1.Layer_WEATHER_ALERT,
 	hazards.LayerEarthquake:   gridv1.Layer_EARTHQUAKE,
 	hazards.LayerRoadIncident: gridv1.Layer_ROAD_INCIDENT,
+	hazards.LayerNetwork:      gridv1.Layer_NETWORK,
 }
 
 // conditionLayers is the set of layers that remain live projections of the
@@ -59,6 +60,7 @@ var layerSourceIDs = map[string][]string{
 	hazards.LayerWeatherAlert: {"nws"},
 	hazards.LayerEarthquake:   {"usgs"},
 	hazards.LayerRoadIncident: {"chp", "caltrans"},
+	hazards.LayerNetwork:      {"meshcore"},
 }
 
 // hazardsBuilder is the slice of *hazards.Service the condition-backed layers

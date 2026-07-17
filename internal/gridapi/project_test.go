@@ -373,6 +373,50 @@ func TestProjectEvents_RoadIncident_ConstantSourceBlock(t *testing.T) {
 	assert.Equal(t, "ACTIVE", cl.Properties.Status)
 }
 
+func TestProjectEvents_Network_MeshNode(t *testing.T) {
+	const point = `{"type":"Point","coordinates":[-120.4579,38.1374]}`
+	node := &gridv1.Event{
+		Id:           "meshcore:aa11bb22",
+		Layer:        gridv1.Layer_NETWORK,
+		Category:     "repeater",
+		Severity:     gridv1.Severity_INFO,
+		Status:       gridv1.EventStatus_ACTIVE,
+		Headline:     "Murphys Ridge (repeater)",
+		AreaLabel:    "Murphys Ridge",
+		CanonicalUrl: "https://map.meshcore.io",
+		Geometry:     geom(point),
+		ObservedAt:   ts("2026-07-15T10:00:00Z"),
+		Provenance:   &gridv1.Provenance{SourceId: "meshcore", SourceName: "MeshCore Mesh"},
+		Detail: &gridv1.Event_Network{Network: &gridv1.NetworkDetail{
+			PublicKey: "aa11bb22", NodeType: "repeater", Name: "Murphys Ridge",
+			Telemetry: &gridv1.NetworkTelemetry{
+				Snr: 4.5, Rssi: -93, HopCount: 2, Gateways: []string{"ag loft rpt"},
+			},
+		}},
+	}
+
+	feats := ProjectEvents(hazards.LayerNetwork, []*gridv1.Event{node})
+	require.Len(t, feats, 1)
+	assert.JSONEq(t, `{
+	  "type": "Feature",
+	  "geometry": `+point+`,
+	  "properties": {
+	    "id": "meshcore:aa11bb22",
+	    "layer": "MESH_NODE",
+	    "kind": "Mesh node",
+	    "category": "repeater",
+	    "severity": "INFO",
+	    "severityRank": 0,
+	    "headline": "Murphys Ridge (repeater)",
+	    "status": "ACTIVE",
+	    "updatedAt": "2026-07-15T10:00:00Z",
+	    "areaLabel": "Murphys Ridge",
+	    "source": {"id": "meshcore", "name": "MeshCore Mesh", "url": "https://map.meshcore.io", "attribution": "MeshCore community mesh"},
+	    "network": {"publicKey": "aa11bb22", "nodeType": "repeater", "name": "Murphys Ridge", "snr": 4.5, "rssi": -93, "hopCount": 2, "gateways": ["ag loft rpt"]}
+	  }
+	}`, featJSON(t, feats[0]))
+}
+
 func TestProjectEvents_SkipsUnknownLayer(t *testing.T) {
 	ev := &gridv1.Event{Id: "x", Layer: gridv1.Layer_WILDFIRE}
 	assert.Empty(t, ProjectEvents("chain_control", []*gridv1.Event{ev}),

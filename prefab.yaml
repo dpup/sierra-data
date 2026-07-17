@@ -331,3 +331,40 @@ grid:
       # on a 10m cadence, so polling faster just re-reads the same data.
       pollInterval: "10m"
       disappearance: "resolve"
+    meshcore:
+      # Cadence for reconciling the in-memory MeshCore node buffer to the store
+      # (presence is push-fed over MQTT; this is not an upstream fetch interval).
+      pollInterval: "60s"
+      # No goodbye packet in a mesh — silence is not proof of absence. A node is
+      # EXPIRED only after ~5 days unheard (map.meshcore.io's green window). This
+      # also bounds the client's in-memory retention.
+      disappearance: "expire"
+      expireAfter: "120h"
+
+  # MeshCore mesh-node presence source. Subscribes to community MQTT bridges,
+  # several for resilience; a node heard on more than one collapses to a single
+  # event. Disabled by default: MeshCore has no official broker, and read/
+  # subscribe access to the community brokers is operator-gated (a device key
+  # grants publish-only; subscribing needs an operator-issued username/password).
+  # To enable, request a subscriber credential, add brokers (secrets via PF__
+  # env), and set enabled: true.
+  #
+  # NOTE: bayme.sh's public broker (mqtt.bayme.sh, topic msh/US/bayarea) is
+  # MESHTASTIC — a different protocol, NOT usable here. MeshCore brokers include
+  # mqtt.meshmapper.net, the LetsMesh US/EU servers, and mqttmc01.bostonme.sh
+  # (all WSS+TLS :443). meshmapper access: a Region Onboarding form → creds via
+  # Discord. For local testing, self-host a broker + a publishing observer.
+  meshcore:
+    enabled: false
+    # Keeps a recently-heard node in each poll snapshot; expireAfter (above), not
+    # this, governs real liveness.
+    activeWindow: "30m"
+    # Drop adverts whose Ed25519 signature fails to verify. Off until the raw
+    # payload framing is confirmed against a live capture (see
+    # internal/clients/meshcore/advert.go); flip on once verified.
+    requireValidSignature: false
+    brokers: []
+      # - url: "wss://mqtt.meshmapper.net:443"
+      #   topics: ["meshcore/+/+/packets"]
+      #   username: "<operator-issued subscriber user>"
+      #   password: "<operator-issued subscriber pass>"  # prefer PF__ env, don't commit

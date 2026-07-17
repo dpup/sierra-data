@@ -242,6 +242,36 @@ export PF__GRID__DBPATH=/data/grid.db
   zone that leaked out-of-area alerts).
 - Powers `/weather/alerts` zone alerts and the `fire_weather` classification
 
+**MeshCore MQTT bridges** (mesh-node presence, `NETWORK` layer):
+- MeshCore has **no native MQTT and no official broker/topic spec** — we
+  subscribe to community bridges (`grid.meshcore.brokers`, several for
+  resilience). Disabled by default (`grid.meshcore.enabled: false`).
+- The map-ecosystem bridges publish a JSON envelope per packet to
+  `meshcore/{IATA}/{PUBLIC_KEY}/packets` with `packet_type`, `SNR`, `RSSI`,
+  `path`, and a hex `raw` payload. We ingest **only ADVERT packets
+  (`packet_type` 4)** — unencrypted, carrying pubkey/role/location/name — and
+  decode `raw` in `internal/clients/meshcore` (std-lib crypto; no heavy dep).
+- **`mqtt.bayme.sh` is Bay Area Mesh's Meshtastic broker — a different protocol,
+  not usable here.** MeshCore brokers: `mqtt.meshmapper.net`, LetsMesh US/EU,
+  `mqttmc01.bostonme.sh` (all WSS+TLS on :443).
+- **Auth: subscribing is operator-gated, not self-serve.** These brokers split
+  auth (michaelhart/meshcore-mqtt-broker model): *publishing* is self-sovereign
+  (username `v1_{PUBKEY}` + a self-signed Ed25519 JWT password, no allowlist),
+  but *subscribing* — what we do — needs a **separate operator-issued
+  `username:password`** account (`SUBSCRIBER_N=user:pass:role`). So a device key
+  alone can't read the feed; request a subscriber credential (meshmapper: a
+  Region Onboarding form → creds via Discord). Our client already supports this —
+  the operator drops the issued user/pass into `grid.meshcore.brokers[]`; the
+  device-key JWT path is not needed for a read-only subscriber. Before trusting a
+  bridge, confirm the `raw` framing against a live capture, then flip
+  `requireValidSignature` on. For local testing, self-host a broker + a publishing
+  observer (Cisien/meshcoretomqtt) rather than waiting on access.
+- Architecture: a long-lived subscriber (`meshcore.Registry`) buffers node state;
+  `ingest.NetworkNormalizer` serves a snapshot on each scheduler tick (a push
+  source wrapped as a poller). Lifecycle is `disappearance: expire` with a
+  multi-day `expireAfter` (no goodbye packet); when all brokers are down `Poll`
+  hard-errors so the sweep never falsely expires live nodes.
+
 **OpenAI API** (Optional):
 - **AI-Enhanced Road Status Determination**: Intelligently analyzes traffic incidents to determine accurate road status (open/restricted/closed)
 - **Status Explanations**: Provides clear explanations when roads are restricted or closed (populates `status_explanation` field)
@@ -321,13 +351,16 @@ gateway's `EmitUnpopulated` marshaler.
 **Summary + map:**
 - `GET /api/v1/places/{place}/summary` - `GetPlaceSummary` RPC (camelCase): a
   one-fetch place rollup — `mode` (QUIET/WATCH/ACTIVE), a cross-layer `summary`,
-  per-`domains[]` status (`fire`/`evacuation`/`weather`/`roads`/`seismic`),
-  `topEvents`, and a `sources[]` health sidecar.
+  per-`domains[]` status (`fire`/`evacuation`/`weather`/`roads`/`seismic`, plus
+  `comms` when the MeshCore source is enabled), `topEvents`, and a `sources[]`
+  health sidecar. Mesh-node presence (`NETWORK`) is ambient `INFO` state: it is
+  excluded from `totalActive`/`severityCounts`/`topEvents`/`mode` (like baseline
+  conditions) and appears only in the `comms` domain.
 - `GET /api/v1/places/{place}/map/{layer}.geojson` - hand-built, one RFC 7946
   `FeatureCollection` per layer for a maps client (MapLibre/Leaflet). Layers:
   `road_incident`, `chain_control`, `road_segment`, `weather_alert`,
-  `fire_weather`, `earthquake`, `wildfire`, `evacuation` (these are layer *values*,
-  still snake_case). Every feature shares a camelCase `properties` envelope
+  `fire_weather`, `earthquake`, `wildfire`, `evacuation`, `mesh_node` (these are
+  layer *values*, still snake_case). Every feature shares a camelCase `properties` envelope
   (`id, layer, kind, severity, severityRank, headline, source, …`) on the unified
   severity scale `INFO..EXTREME` (rank 0–4). Coordinates
   are `[lng, lat]`. Event layers project from the store

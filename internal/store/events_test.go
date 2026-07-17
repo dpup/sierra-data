@@ -460,6 +460,99 @@ func TestContentHashIgnoresVolatileFields(t *testing.T) {
 	assert.NotEqual(t, base, ContentHash(statusChanged), "status is hashed content")
 }
 
+// A NETWORK event's telemetry (SNR/RSSI/hops/gateways) is excluded from the
+// content hash: a mesh node re-adverting with fresh signal metrics must not
+// mint a revision, or the MeshCore advert firehose blows up event_revisions.
+// Identity/name/status changes still do.
+func TestContentHashIgnoresNetworkTelemetry(t *testing.T) {
+	node := func() *gridv1.Event {
+		return &gridv1.Event{
+			Id:         "meshcore:abc123",
+			Layer:      gridv1.Layer_NETWORK,
+			Severity:   gridv1.Severity_INFO,
+			Status:     gridv1.EventStatus_ACTIVE,
+			Headline:   "Murphys Ridge (repeater)",
+			Provenance: &gridv1.Provenance{SourceId: "meshcore", SourceName: "MeshCore Mesh"},
+			ObservedAt: timestamppb.New(baseTime),
+			Detail: &gridv1.Event_Network{Network: &gridv1.NetworkDetail{
+				PublicKey: "abc123",
+				NodeType:  "repeater",
+				Name:      "Murphys Ridge",
+				Telemetry: &gridv1.NetworkTelemetry{Snr: 4.5, Rssi: -93, HopCount: 1},
+			}},
+		}
+	}
+	base := ContentHash(node())
+
+	// Fresh telemetry only: same hash.
+	telem := node()
+	telem.GetNetwork().Telemetry = &gridv1.NetworkTelemetry{
+		Snr: -7.25, Rssi: -119, HopCount: 3,
+		Path:     []string{"C2", "E2"},
+		Gateways: []string{"ag loft rpt"},
+	}
+	assert.Equal(t, base, ContentHash(telem), "telemetry is excluded from the hash")
+
+	// Nil telemetry vs populated telemetry: still the same hash.
+	nilTelem := node()
+	nilTelem.GetNetwork().Telemetry = nil
+	assert.Equal(t, base, ContentHash(nilTelem))
+
+	// Stable-identity changes still flip the hash.
+	renamed := node()
+	renamed.GetNetwork().Name = "Murphys Ridge East"
+	renamed.Headline = "Murphys Ridge East (repeater)"
+	assert.NotEqual(t, base, ContentHash(renamed), "name is hashed content")
+
+	roled := node()
+	roled.GetNetwork().NodeType = "room_server"
+	assert.NotEqual(t, base, ContentHash(roled), "role is hashed content")
+}
+
+// End-to-end store check: re-upserting a NETWORK node with only new telemetry
+// is a hash-equal no-op (no new revision), matching the enhancement pattern.
+func TestUpsertNetworkTelemetryIsNoOp(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	seedSource(t, s, "meshcore")
+
+	node := &gridv1.Event{
+		Id:         "meshcore:abc123",
+		Layer:      gridv1.Layer_NETWORK,
+		Severity:   gridv1.Severity_INFO,
+		Status:     gridv1.EventStatus_ACTIVE,
+		Headline:   "Murphys Ridge (repeater)",
+		Provenance: &gridv1.Provenance{SourceId: "meshcore", SourceName: "MeshCore Mesh"},
+		ObservedAt: timestamppb.New(baseTime),
+		Detail: &gridv1.Event_Network{Network: &gridv1.NetworkDetail{
+			PublicKey: "abc123", NodeType: "repeater", Name: "Murphys Ridge",
+			Telemetry: &gridv1.NetworkTelemetry{Snr: 4.5, Rssi: -93},
+		}},
+	}
+	res, err := s.UpsertEvent(ctx, node)
+	require.NoError(t, err)
+	assert.Equal(t, UpsertResult{Changed: true, Revision: 1}, res)
+	assert.Equal(t, 1, revisionCount(t, s, "meshcore:abc123"))
+
+	// A later advert, new signal metrics only: no revision.
+	reheard := proto.Clone(node).(*gridv1.Event)
+	reheard.ObservedAt = timestamppb.New(baseTime.Add(time.Hour))
+	reheard.GetNetwork().Telemetry = &gridv1.NetworkTelemetry{Snr: -8, Rssi: -120, HopCount: 2}
+	res, err = s.UpsertEvent(ctx, reheard)
+	require.NoError(t, err)
+	assert.Equal(t, UpsertResult{Changed: false, Revision: 1}, res)
+	assert.Equal(t, 1, revisionCount(t, s, "meshcore:abc123"))
+
+	// A name change does write a revision.
+	renamed := proto.Clone(reheard).(*gridv1.Event)
+	renamed.GetNetwork().Name = "Murphys Ridge East"
+	renamed.Headline = "Murphys Ridge East (repeater)"
+	res, err = s.UpsertEvent(ctx, renamed)
+	require.NoError(t, err)
+	assert.Equal(t, UpsertResult{Changed: true, Revision: 2}, res)
+	assert.Equal(t, 2, revisionCount(t, s, "meshcore:abc123"))
+}
+
 // An enhancement-only change (excluded from the content hash, so no new
 // revision) must still PERSIST to the stored blob — a re-run enhancement with
 // fresh enhanced_at/request/response is otherwise silently dropped on the
