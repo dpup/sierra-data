@@ -359,10 +359,11 @@ grid:
     # Keeps a recently-heard node in each poll snapshot; expireAfter (above), not
     # this, governs real liveness.
     activeWindow: "30m"
-    # Drop adverts whose Ed25519 signature fails to verify. Off until the raw
-    # payload framing is confirmed against a live capture (see
-    # internal/clients/meshcore/advert.go); flip on once verified.
-    requireValidSignature: false
+    # Drop adverts whose Ed25519 signature fails to verify. Framing confirmed
+    # against a live capture (2026-07-17, mqtt.gomesh.dev): the bridge `raw` is
+    # the full over-the-air frame, stripped by meshcore.DecodeFrame, after which
+    # real adverts verify. On by default so spoofed/corrupt adverts are dropped.
+    requireValidSignature: true
     brokers: []
       # - url: "wss://mqtt.meshmapper.net:443"
       #   topics: ["meshcore/+/+/packets"]

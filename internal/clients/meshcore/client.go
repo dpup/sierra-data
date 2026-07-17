@@ -40,8 +40,9 @@ type Broker struct {
 type Config struct {
 	Brokers []Broker
 	// RequireValidSignature drops adverts whose Ed25519 signature doesn't verify.
-	// Off by default until the exact signature framing is confirmed against a
-	// live capture (see package doc / plan); flip on once verified.
+	// Framing was confirmed against a live capture (2026-07-17): the bridge `raw`
+	// is the full frame, stripped by DecodeFrame, after which real adverts verify.
+	// Safe (and recommended) to enable to reject spoofed/corrupt adverts.
 	RequireValidSignature bool
 	// RetainFor bounds registry memory: nodes not heard within this window are
 	// pruned. Set to the source's expireAfter so the store's lifecycle, not the
@@ -190,7 +191,9 @@ func (r *Registry) ingestPacket(env *packetEnvelope, brokerID string) {
 		logging.Debugw(r.baseCtx, "MeshCore: undecodable raw hex", "error", err)
 		return
 	}
-	adv, err := DecodeAdvert(raw)
+	// The bridge `raw` is the full over-the-air frame (header + path + payload),
+	// so strip the transport framing before decoding the advert payload.
+	adv, err := DecodeFrame(raw)
 	if err != nil {
 		logging.Debugw(r.baseCtx, "MeshCore: advert decode failed", "error", err)
 		return

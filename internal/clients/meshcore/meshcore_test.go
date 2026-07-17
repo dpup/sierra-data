@@ -111,6 +111,14 @@ func TestDecodeAdvertTooShort(t *testing.T) {
 	require.Error(t, err)
 }
 
+// advertFrame wraps a bare advert payload in the minimal MeshCore transport
+// frame the bridges actually publish in `raw`: header (advert+flood) + a
+// zero-hop path_len. DecodeFrame strips this back off.
+func advertFrame(payload []byte) []byte {
+	frame := []byte{0x11, 0x00} // payload_type=ADVERT, route=FLOOD; path_len=0 (no hops)
+	return append(frame, payload...)
+}
+
 // envelopeJSON wraps a payload the way the map-ecosystem bridges do.
 func envelopeJSON(t *testing.T, packetType int, payload []byte, snr float64, rssi int, origin, path string) []byte {
 	t.Helper()
@@ -120,7 +128,7 @@ func envelopeJSON(t *testing.T, packetType int, payload []byte, snr float64, rss
 		"timestamp":   "2026-07-15T10:00:00.000000",
 		"packet_type": fmt.Sprintf("%d", packetType), // bridges send numbers as strings
 		"route":       "F",
-		"raw":         hex.EncodeToString(payload),
+		"raw":         hex.EncodeToString(advertFrame(payload)),
 		"SNR":         fmt.Sprintf("%g", snr),
 		"RSSI":        fmt.Sprintf("%d", rssi),
 		"hash":        "AC9D2DDDD8395712",

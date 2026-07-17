@@ -1,5 +1,5 @@
 # Live Data API Server - Build, Test, and Deployment Tasks
-.PHONY: build test proto proto-tools clean server tools site site-install site-dev site-shots check-site run dev lint fmt docker docker-build docker-run docker-run-dev docker-push docker-clean deploy install help
+.PHONY: build test proto proto-tools clean server tools site site-install site-dev site-shots check-site run dev lint fmt docker docker-build docker-run docker-run-dev docker-push docker-clean deploy install help test-meshcore
 
 # Go parameters
 GOCMD=go
@@ -30,6 +30,7 @@ SERVER_BINARY=$(BUILD_DIR)/server
 TEST_GOOGLE_BINARY=$(BUILD_DIR)/test-google
 TEST_CALTRANS_BINARY=$(BUILD_DIR)/test-caltrans
 TEST_WEATHER_BINARY=$(BUILD_DIR)/test-weather
+TEST_MESHCORE_BINARY=$(BUILD_DIR)/test-meshcore
 TEST_GEO_UTILS_BINARY=$(BUILD_DIR)/test-geo-utils
 TEST_ALERT_ENHANCER_BINARY=$(BUILD_DIR)/test-alert-enhancer
 TEST_ROUTE_MATCHER_BINARY=$(BUILD_DIR)/test-route-matcher
@@ -54,7 +55,7 @@ $(SERVER_BINARY): proto
 	$(GOBUILD) -o $(SERVER_BINARY) ./$(CMD_DIR)/server
 
 # Build CLI testing tools only
-tools: $(TEST_GOOGLE_BINARY) $(TEST_CALTRANS_BINARY) $(TEST_WEATHER_BINARY)
+tools: $(TEST_GOOGLE_BINARY) $(TEST_CALTRANS_BINARY) $(TEST_WEATHER_BINARY) $(TEST_MESHCORE_BINARY)
 
 $(TEST_GOOGLE_BINARY): proto
 	$(GOBUILD) -o $(TEST_GOOGLE_BINARY) ./$(CMD_DIR)/test-google
@@ -64,6 +65,9 @@ $(TEST_CALTRANS_BINARY): proto
 
 $(TEST_WEATHER_BINARY): proto
 	$(GOBUILD) -o $(TEST_WEATHER_BINARY) ./$(CMD_DIR)/test-weather
+
+$(TEST_MESHCORE_BINARY): proto
+	$(GOBUILD) -o $(TEST_MESHCORE_BINARY) ./$(CMD_DIR)/test-meshcore
 
 # Build the static site with Astro (source in web/) into site/dist. The output
 # is a COMMITTED artifact (like the generated *.pb.go) so the Docker `go build`
@@ -177,6 +181,11 @@ test-caltrans: $(TEST_CALTRANS_BINARY)
 
 test-weather: $(TEST_WEATHER_BINARY)
 	./$(TEST_WEATHER_BINARY) --config=prefab.yaml $(if $(LOCATION_ID),--location-id=$(LOCATION_ID)) $(if $(VERBOSE),--verbose)
+
+# MeshCore bridge subscribe probe. Broker/creds via env (MC_HOST/MC_USER/MC_PASS,
+# etc. — see cmd/test-meshcore); nothing sensitive is passed on the command line.
+test-meshcore: $(TEST_MESHCORE_BINARY)
+	./$(TEST_MESHCORE_BINARY)
 
 # Validate configuration without API calls
 test-config:
