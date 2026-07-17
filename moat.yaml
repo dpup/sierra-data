@@ -1,6 +1,13 @@
 name: motherlode
 agent: claude
 runtime: docker
+env:
+  # Keep the grid dev DB on the container-local overlay FS, NOT the virtiofs
+  # bind-mounted /workspace/data (which is shared with the host that mounts the
+  # workspace). Two servers writing the same SQLite file on virtiofs corrupt it
+  # (virtiofs doesn't honor cross-process locking); a container-local path can't
+  # collide with the host process. Absolute (moat.yaml env doesn't expand $HOME).
+  PF__GRID__DBPATH: /home/moatuser/.local/state/grid/grid.db
 grants:
   - github
   - ssh:github
