@@ -364,6 +364,17 @@ grid:
     # the full over-the-air frame, stripped by meshcore.DecodeFrame, after which
     # real adverts verify. On by default so spoofed/corrupt adverts are dropped.
     requireValidSignature: true
+    # Geofence for node inclusion (a node's advertised location must fall inside a
+    # box). Deliberately WIDER than the Ebbetts Pass hazard area: our Sierra
+    # repeaters run in power-saver mode and are quiet, so we also track the busier
+    # Bay Area / Monterey mesh to confirm the source is live end-to-end. Tighten
+    # to the service area once traffic is proven. Omit `bounds` to fall back to
+    # the hazards.areas union.
+    bounds:
+      - minLatitude: 36.0    # Monterey / south Bay
+        maxLatitude: 39.0    # north of the Calaveras/Tuolumne Sierra
+        minLongitude: -123.0 # Pacific coast / SF
+        maxLongitude: -119.5 # east of Ebbetts/Sonora passes
     brokers: []
       # - url: "wss://mqtt.meshmapper.net:443"
       #   topics: ["meshcore/+/+/packets"]

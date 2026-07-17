@@ -81,7 +81,11 @@ Live-captured against `wss://mqtt.gomesh.dev:443/mqtt` (subscriber
    onboarding (or a LetsMesh/bostonme.sh equivalent) for a region-relevant feed.
 2. **Configure `prefab.yaml`**: set `grid.meshcore.enabled: true`, add the
    broker(s) with a region topic filter (e.g. `meshcore/{IATA}/+/packets` scoped
-   to the service-area IATA codes), secrets via `PF__` env.
+   to the service-area IATA codes), secrets via `PF__` env. The node geofence is
+   `grid.meshcore.bounds` — deliberately **wider than the hazard area** (Bay Area
+   + Monterey + Sierra) because our Sierra repeaters run power-saver and are quiet;
+   the wider net proves the source is live. Tighten once traffic is confirmed;
+   omit `bounds` to fall back to the `hazards.areas` union.
 3. **End-to-end verify** with real traffic: nodes appear in
    `/api/v1/events?layer=network`, `/sources` shows `meshcore` OK, the
    `mesh_node.geojson` layer draws points, the `comms` summary domain appears, and

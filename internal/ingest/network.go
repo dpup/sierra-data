@@ -64,8 +64,9 @@ func (n *NetworkNormalizer) SourceIDs() []string { return []string{meshSourceID}
 // (scheduler invariant), so nodes stay ACTIVE until genuinely silent past the
 // source's expireAfter.
 func (n *NetworkNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult, error) {
-	if len(n.cfg.Hazards.Areas) == 0 {
-		return nil, errEmptyScope("hazard areas")
+	boxes := n.geofence()
+	if len(boxes) == 0 {
+		return nil, errEmptyScope("meshcore geofence")
 	}
 	connected, _ := n.registry.Health()
 	if connected == 0 {
@@ -75,9 +76,9 @@ func (n *NetworkNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult,
 	nodes := n.registry.Snapshot(n.activeWindow)
 	events := make([]*gridv1.Event, 0, len(nodes))
 	for _, nd := range nodes {
-		// Scope: any node with a location inside a configured area. Locationless
-		// nodes can't be geofenced and are dropped.
-		if !nd.HasLocation || !n.inRegion(nd.Lat, nd.Lng) {
+		// Scope: any node with a location inside the geofence. Locationless nodes
+		// can't be geofenced and are dropped.
+		if !nd.HasLocation || !inAnyBounds(nd.Lat, nd.Lng, boxes) {
 			continue
 		}
 		lat := quantizeCoord(nd.Lat)
@@ -116,12 +117,26 @@ func (n *NetworkNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult,
 	return &PollResult{Events: events}, nil
 }
 
-// inRegion reports whether a coordinate falls within any configured hazard area
-// bbox. Precise polygon attachment happens later in the store's matchPlaces;
-// this is the coarse ingest gate.
-func (n *NetworkNormalizer) inRegion(lat, lng float64) bool {
+// geofence returns the bboxes a node's location must fall within to be ingested.
+// MeshCore presence is monitored over a deliberately WIDER area than the hazard
+// region (config meshcore.bounds — e.g. to include the Bay Area for liveness
+// confidence); when unset it falls back to the union of hazard-area bounds.
+func (n *NetworkNormalizer) geofence() []config.GeoBounds {
+	if len(n.cfg.Grid.Meshcore.Bounds) > 0 {
+		return n.cfg.Grid.Meshcore.Bounds
+	}
+	boxes := make([]config.GeoBounds, 0, len(n.cfg.Hazards.Areas))
 	for _, a := range n.cfg.Hazards.Areas {
-		if a.Bounds.Contains(lat, lng) {
+		boxes = append(boxes, a.Bounds)
+	}
+	return boxes
+}
+
+// inAnyBounds reports whether a coordinate falls within any bbox. Precise polygon
+// attachment happens later in the store's matchPlaces; this is the coarse gate.
+func inAnyBounds(lat, lng float64, boxes []config.GeoBounds) bool {
+	for _, b := range boxes {
+		if b.Contains(lat, lng) {
 			return true
 		}
 	}

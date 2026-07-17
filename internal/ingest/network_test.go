@@ -9,6 +9,7 @@ import (
 
 	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
 	"github.com/dpup/sierra-data/internal/clients/meshcore"
+	"github.com/dpup/sierra-data/internal/config"
 )
 
 // fakeMeshRegistry is a canned MeshRegistry for the normalizer tests.
@@ -70,6 +71,27 @@ func TestNetworkPollBuildsEvents(t *testing.T) {
 	assert.EqualValues(t, 2, det.Telemetry.HopCount)
 	assert.Equal(t, []string{"C2", "E2"}, det.Telemetry.Path)
 	assert.Equal(t, []string{"ag loft rpt"}, det.Telemetry.Gateways)
+}
+
+func TestNetworkPollWiderBoundsOverrideHazardAreas(t *testing.T) {
+	cfg := testConfig()
+	// Explicit meshcore geofence covering the Bay Area → Sierra, wider than the
+	// hazard region. A San Francisco node is outside hazards.areas but inside this.
+	cfg.Grid.Meshcore.Bounds = []config.GeoBounds{
+		{MinLatitude: 36.0, MaxLatitude: 39.0, MinLongitude: -123.0, MaxLongitude: -119.5},
+	}
+	reg := &fakeMeshRegistry{connected: 1, nodes: []meshcore.NodeState{
+		{PubKey: "bay01", Role: meshcore.RoleRepeater, Name: "SF Node",
+			HasLocation: true, Lat: 37.7888, Lng: -122.4188}, // Bay Area: in wider box, out of hazard area
+		{PubKey: "far01", Role: meshcore.RoleRepeater, Name: "Reno",
+			HasLocation: true, Lat: 39.5, Lng: -119.0}, // outside even the wider box
+	}}
+	n := NewNetworkNormalizer(cfg, reg)
+
+	res, err := n.Poll(testCtx(), nil)
+	require.NoError(t, err)
+	require.Len(t, res.Events, 1, "the SF node is included by the wider meshcore bounds; Reno stays out")
+	assert.Equal(t, "meshcore:bay01", res.Events[0].Id)
 }
 
 func TestNetworkPollHardErrorsWhenNoBrokers(t *testing.T) {

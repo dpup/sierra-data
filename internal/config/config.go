@@ -46,9 +46,15 @@ type MeshcoreConfig struct {
 	// 30m. The store's expireAfter, not this, decides when a silent node is gone.
 	ActiveWindow time.Duration `koanf:"activeWindow"`
 	// RequireValidSignature drops adverts whose Ed25519 signature fails to verify
-	// (off by default until framing is confirmed against a live capture).
-	RequireValidSignature bool             `koanf:"requireValidSignature"`
-	Brokers               []MeshcoreBroker `koanf:"brokers"`
+	// (on by default; framing confirmed against a live capture, 2026-07-17).
+	RequireValidSignature bool `koanf:"requireValidSignature"`
+	// Bounds is the geofence for node inclusion — nodes whose advertised location
+	// falls inside any box are ingested. When empty, the normalizer falls back to
+	// the union of hazards.areas. Mesh presence is deliberately monitored over a
+	// WIDER area than the hazard region (e.g. the Bay Area too) so there is enough
+	// traffic to confirm the source is live; tighten once it's noisy.
+	Bounds  []GeoBounds      `koanf:"bounds"`
+	Brokers []MeshcoreBroker `koanf:"brokers"`
 }
 
 // MeshcoreBroker is one MQTT endpoint. URL scheme selects transport
