@@ -58,6 +58,11 @@ type NodeState struct {
 	HasLocation bool
 	Lat, Lng    float64
 
+	// Brokers are the MQTT server URL(s) this node was heard on — recorded in
+	// event provenance (which server delivered the advert). Sorted; unioned
+	// across brokers when a node is heard on more than one.
+	Brokers []string
+
 	// Volatile telemetry (never mints a store revision).
 	SNR          float64
 	RSSI         int32
@@ -71,6 +76,7 @@ type NodeState struct {
 type nodeEntry struct {
 	NodeState
 	gateways map[string]struct{}
+	brokers  map[string]struct{}
 }
 
 // Registry subscribes to MeshCore MQTT bridges and accumulates node presence in
@@ -213,7 +219,7 @@ func (r *Registry) ingestPacket(env *packetEnvelope, brokerID string) {
 
 	e := r.nodes[adv.PubKey]
 	if e == nil {
-		e = &nodeEntry{gateways: make(map[string]struct{})}
+		e = &nodeEntry{gateways: make(map[string]struct{}), brokers: make(map[string]struct{})}
 		r.nodes[adv.PubKey] = e
 	}
 	e.PubKey = adv.PubKey
@@ -234,6 +240,10 @@ func (r *Registry) ingestPacket(env *packetEnvelope, brokerID string) {
 	if gw != "" {
 		e.gateways[gw] = struct{}{}
 	}
+	// brokerID is the MQTT server URL this advert arrived on (→ provenance).
+	if brokerID != "" {
+		e.brokers[brokerID] = struct{}{}
+	}
 
 	r.pruneLocked(now)
 }
@@ -253,6 +263,7 @@ func (r *Registry) Snapshot(activeWindow time.Duration) []NodeState {
 		}
 		ns := e.NodeState
 		ns.Gateways = sortedKeys(e.gateways)
+		ns.Brokers = sortedKeys(e.brokers)
 		out = append(out, ns)
 	}
 	return out

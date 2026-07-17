@@ -94,6 +94,46 @@ func TestNetworkPollWiderBoundsOverrideHazardAreas(t *testing.T) {
 	assert.Equal(t, "meshcore:bay01", res.Events[0].Id)
 }
 
+func TestNetworkProvenanceAttributesBrokerOperator(t *testing.T) {
+	cfg := testConfig()
+	cfg.Grid.Meshcore.Brokers = []config.MeshcoreBroker{{
+		URL: "wss://mqtt.gomesh.dev:443/mqtt", Operator: "LetsMesh",
+		OperatorURL: "https://analyzer.letsmesh.net/about",
+	}}
+	reg := &fakeMeshRegistry{connected: 1, nodes: []meshcore.NodeState{{
+		PubKey: "aa11bb22", Role: meshcore.RoleRepeater, Name: "Ridge",
+		HasLocation: true, Lat: 38.14, Lng: -120.45,
+		Brokers: []string{"wss://mqtt.gomesh.dev:443/mqtt"},
+	}}}
+	n := NewNetworkNormalizer(cfg, reg)
+
+	res, err := n.Poll(testCtx(), nil)
+	require.NoError(t, err)
+	require.Len(t, res.Events, 1)
+	ev := res.Events[0]
+
+	prov := ev.GetProvenance()
+	// provenance points at the operator's https page (not the wss:// broker URL)…
+	assert.Equal(t, "https://analyzer.letsmesh.net/about", prov.GetSourceUrl())
+	assert.Equal(t, "MeshCore community mesh via LetsMesh", prov.GetAttribution())
+	// …while the node's map deep-link stays on canonical_url.
+	assert.Equal(t, meshMapURL, ev.GetCanonicalUrl())
+}
+
+func TestNetworkProvenanceFallsBackWithoutOperator(t *testing.T) {
+	// A node heard on a broker with no configured operator falls back to the map.
+	reg := &fakeMeshRegistry{connected: 1, nodes: []meshcore.NodeState{{
+		PubKey: "cc33", Role: meshcore.RoleRepeater, HasLocation: true, Lat: 38.14, Lng: -120.45,
+		Brokers: []string{"wss://unknown-broker"},
+	}}}
+	n := NewNetworkNormalizer(testConfig(), reg)
+	res, err := n.Poll(testCtx(), nil)
+	require.NoError(t, err)
+	require.Len(t, res.Events, 1)
+	assert.Equal(t, meshMapURL, res.Events[0].GetProvenance().GetSourceUrl())
+	assert.Equal(t, "MeshCore community mesh", res.Events[0].GetProvenance().GetAttribution())
+}
+
 func TestNetworkPollHardErrorsWhenNoBrokers(t *testing.T) {
 	reg := &fakeMeshRegistry{connected: 0, nodes: []meshcore.NodeState{
 		{PubKey: "aa", Role: meshcore.RoleRepeater, HasLocation: true, Lat: 38.1, Lng: -120.4},

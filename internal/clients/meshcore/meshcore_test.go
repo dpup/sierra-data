@@ -159,6 +159,7 @@ func TestRegistryIngestsAdvert(t *testing.T) {
 	assert.EqualValues(t, 2, n.HopCount)
 	assert.Equal(t, []string{"C2", "E2"}, n.Path)
 	assert.Equal(t, []string{"ag loft rpt"}, n.Gateways)
+	assert.Equal(t, []string{"broker-a"}, n.Brokers)
 }
 
 func TestRegistryIgnoresNonAdvert(t *testing.T) {
@@ -184,6 +185,7 @@ func TestRegistryMergesAcrossBrokers(t *testing.T) {
 	nodes := r.Snapshot(0)
 	require.Len(t, nodes, 1, "same pubkey collapses to one node")
 	assert.Equal(t, []string{"gw-east", "gw-west"}, nodes[0].Gateways)
+	assert.Equal(t, []string{"broker-a", "broker-b"}, nodes[0].Brokers, "brokers union, sorted")
 }
 
 func TestRegistrySnapshotActiveWindow(t *testing.T) {

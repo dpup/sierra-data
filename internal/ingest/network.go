@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
@@ -44,6 +45,9 @@ type NetworkNormalizer struct {
 	cfg          *config.Config
 	registry     MeshRegistry
 	activeWindow time.Duration
+	// brokerOps maps a broker URL to its config (operator name + https page),
+	// used to attribute a node's provenance to the MQTT server's operator.
+	brokerOps map[string]config.MeshcoreBroker
 }
 
 // NewNetworkNormalizer wires the normalizer to a MeshCore registry.
@@ -52,7 +56,11 @@ func NewNetworkNormalizer(cfg *config.Config, registry MeshRegistry) *NetworkNor
 	if aw <= 0 {
 		aw = defaultMeshActiveWindow
 	}
-	return &NetworkNormalizer{cfg: cfg, registry: registry, activeWindow: aw}
+	ops := make(map[string]config.MeshcoreBroker, len(cfg.Grid.Meshcore.Brokers))
+	for _, b := range cfg.Grid.Meshcore.Brokers {
+		ops[b.URL] = b
+	}
+	return &NetworkNormalizer{cfg: cfg, registry: registry, activeWindow: aw, brokerOps: ops}
 }
 
 // SourceIDs implements Normalizer.
@@ -98,7 +106,7 @@ func (n *NetworkNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult,
 		// observed_at is when this node's content was observed; it's zeroed in the
 		// content hash, so it only persists on an actual identity/location change.
 		ev.ObservedAt = tsProto(nd.LastAdvertAt)
-		ev.Provenance = NewProvenance(meshSourceID, meshSourceName, meshAttribution, meshMapURL)
+		ev.Provenance = n.meshProvenance(nd.Brokers)
 		ev.Detail = &gridv1.Event_Network{Network: &gridv1.NetworkDetail{
 			PublicKey: nd.PubKey,
 			NodeType:  nd.Role,
@@ -115,6 +123,39 @@ func (n *NetworkNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult,
 		events = append(events, ev)
 	}
 	return &PollResult{Events: events}, nil
+}
+
+// meshProvenance attributes a node to the operator(s) of the MQTT broker(s) it
+// was heard on: provenance source_url is the primary operator's https page (not
+// the wss:// broker URL), and attribution names the operator(s). Falls back to
+// the community map when a broker has no configured operator. The node's map
+// deep-link stays on Event.canonical_url. Brokers are sorted, so a stable
+// broker set yields a stable provenance (no per-poll revision churn).
+func (n *NetworkNormalizer) meshProvenance(brokers []string) *gridv1.Provenance {
+	sourceURL := ""
+	var names []string
+	seen := map[string]bool{}
+	for _, b := range brokers {
+		mb, ok := n.brokerOps[b]
+		if !ok {
+			continue
+		}
+		if sourceURL == "" && mb.OperatorURL != "" {
+			sourceURL = mb.OperatorURL
+		}
+		if mb.Operator != "" && !seen[mb.Operator] {
+			seen[mb.Operator] = true
+			names = append(names, mb.Operator)
+		}
+	}
+	attribution := meshAttribution
+	if len(names) > 0 {
+		attribution = meshAttribution + " via " + strings.Join(names, ", ")
+	}
+	if sourceURL == "" {
+		sourceURL = meshMapURL
+	}
+	return NewProvenance(meshSourceID, meshSourceName, attribution, sourceURL)
 }
 
 // geofence returns the bboxes a node's location must fall within to be ingested.

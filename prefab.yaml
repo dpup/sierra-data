@@ -386,3 +386,8 @@ grid:
       - url: "wss://mqtt.gomesh.dev:443/mqtt"
         clientId: "data.sierragridteam.org"
         topics: ["meshcore/+/+/packets"]
+        # Who runs this MQTT server — used for event provenance (an https page,
+        # not the wss:// URL). A node's events attribute to the operator(s) of
+        # the broker(s) that heard it.
+        operator: "LetsMesh"
+        operatorUrl: "https://analyzer.letsmesh.net/about"

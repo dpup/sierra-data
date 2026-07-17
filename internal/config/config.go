@@ -74,6 +74,11 @@ type MeshcoreBroker struct {
 	Password string   `koanf:"password"`
 	Topics   []string `koanf:"topics"`
 	QoS      uint8    `koanf:"qos"`
+	// Operator identifies who runs this MQTT server, for event provenance —
+	// a human-readable name and an https page (not the wss:// broker URL). A
+	// node's events attribute to the operator(s) of the broker(s) that heard it.
+	Operator    string `koanf:"operator"`
+	OperatorURL string `koanf:"operatorUrl"`
 }
 
 // GridEnhancement gates the NWS weather-alert AI enhancer. BudgetPerTick caps
