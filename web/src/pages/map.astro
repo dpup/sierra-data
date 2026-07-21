@@ -61,6 +61,11 @@ import SectionHead from '../components/SectionHead.astro';
       .maplibregl-popup-anchor-right .maplibregl-popup-tip { border-left-color: var(--bg-card); }
       .map-popup .popup-headline { font-weight: 600; color: var(--text-hi); margin-bottom: 5px; }
       .map-popup .popup-chips { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+      .map-popup .popup-details { margin: 6px 0; padding: 6px 0; border-top: 1px solid var(--border-row); border-bottom: 1px solid var(--border-row); }
+      .map-popup .popup-details dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 0; }
+      .map-popup .popup-details dt { color: var(--text-fainter); font-size: 11px; }
+      .map-popup .popup-details dd { margin: 0; color: var(--text); font-size: 12px; overflow-wrap: anywhere; }
+      .map-popup .popup-desc { margin-top: 5px; }
 
       @media (max-width: 900px) {
         .map-layout { grid-template-columns: 1fr; }

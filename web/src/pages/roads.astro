@@ -1,0 +1,118 @@
+---
+import Shell from '../layouts/Shell.astro';
+import PageHead from '../components/PageHead.astro';
+import SectionHead from '../components/SectionHead.astro';
+---
+<Shell
+  current="roads"
+  title="Road conditions · The Grid"
+  description="Road conditions across three live GeoJSON layers — road_segment (travel time, delay, congestion, status), chain_control (R1/R2/R3), and road_incident (AI-enhanced CHP/Caltrans incidents) — each with honest source-status. An UNAVAILABLE layer is shown loud; an empty layer is a clean report, not an all-clear."
+>
+  <Fragment slot="head">
+    <style is:global>
+      /* --- roads page, on the locked tokens --- */
+      .rd-status-line { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:0 0 12px; }
+      .rd-curl { display:flex; align-items:center; gap:7px; margin-left:auto; }
+      .rd-curl code {
+        font-family: var(--font-mono); font-size: 11px; background: var(--bg-code);
+        border: 1px solid var(--border-soft); border-radius: 2px; padding: 2px 6px;
+        overflow-wrap: anywhere; user-select: all; color: #9db8cf;
+      }
+      .rd-copy {
+        font: inherit; font-size: 11px; color: var(--text-2); background: var(--bg-card);
+        border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 2px 8px; cursor: pointer;
+      }
+      .rd-copy:hover { color: var(--text); }
+
+      .rd-scroll { overflow-x: auto; }
+      table.rd { width: 100%; border-collapse: collapse; font-size: 13px; }
+      table.rd th {
+        text-align: left; font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase;
+        color: var(--text-fainter); font-weight: 600; padding: 4px 12px 8px 0; white-space: nowrap;
+        border-bottom: 1px solid var(--border-row);
+      }
+      table.rd td { padding: 9px 12px 9px 0; border-bottom: 1px solid var(--border-row); vertical-align: top; }
+      table.rd tr:last-child td { border-bottom: none; }
+      table.rd td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+      .rd-wrap { max-width: 34ch; }
+      .rd-road { font-weight: 600; color: var(--text-hi); }
+      .rd-explain { margin-top: 3px; }
+      .rd-delay { color: var(--st-STALE); }
+
+      /* status / level badges */
+      .rd-badge {
+        display: inline-block; font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+        padding: 1px 8px; border-radius: 999px; white-space: nowrap; border: 1px solid transparent;
+      }
+      .rd-ok      { color: var(--st-OK);          background: color-mix(in srgb, var(--st-OK) 14%, transparent);          border-color: color-mix(in srgb, var(--st-OK) 40%, transparent); }
+      .rd-warn    { color: #d9a441;               background: color-mix(in srgb, #d9a441 14%, transparent);              border-color: color-mix(in srgb, #d9a441 40%, transparent); }
+      .rd-warn2   { color: #e08a3c;               background: color-mix(in srgb, #e08a3c 15%, transparent);              border-color: color-mix(in srgb, #e08a3c 45%, transparent); }
+      .rd-bad     { color: var(--st-UNAVAILABLE); background: color-mix(in srgb, var(--st-UNAVAILABLE) 15%, transparent); border-color: color-mix(in srgb, var(--st-UNAVAILABLE) 45%, transparent); }
+      .rd-unknown { color: var(--text-2);         background: var(--bg-hover-2); border-color: var(--border); }
+
+      /* incidents list */
+      .rd-incidents { display: flex; flex-direction: column; gap: 12px; }
+      .rd-incident { border-bottom: 1px solid var(--border-row); padding-bottom: 12px; }
+      .rd-incident:last-child { border-bottom: none; padding-bottom: 0; }
+      .rd-inc-head { display: flex; align-items: center; gap: 9px; margin-bottom: 4px; }
+      .rd-inc-headline { font-weight: 600; color: var(--text-hi); }
+      .rd-inc-body { margin: 2px 0 5px; max-width: 78ch; }
+      .rd-inc-meta { font-family: var(--font-mono); }
+
+      .notice-bad { border-left: 2px solid var(--st-UNAVAILABLE); }
+    </style>
+  </Fragment>
+
+  <PageHead kicker="Road conditions" title="Roads">
+    <p class="lead">
+      Road conditions come from three live layers the Grid projects for a place —
+      each one RFC&nbsp;7946 GeoJSON from
+      <code class="inline">GET /api/v1/places/&#123;place&#125;/map/&#123;layer&#125;.geojson</code>.
+      <strong>road_segment</strong> carries travel time, delay, congestion and open/restricted/closed
+      status (Google Routes + Caltrans); <strong>chain_control</strong> the active R1/R2/R3 controls;
+      <strong>road_incident</strong> the AI-enhanced CHP/Caltrans incidents. Each layer's
+      <code class="inline">metadata.source_status</code> is rendered honestly:
+      <strong class="accent-orange">an UNAVAILABLE layer is shown loud — and an empty layer is a clean report, not an all-clear.</strong>
+    </p>
+  </PageHead>
+
+  <section class="card" style="margin-top:20px;">
+    <div class="field" style="margin:0;">
+      <label for="rd-place">Place — GET /api/v1/places?kind=AREA</label>
+      <select id="rd-place"><option value="">loading places…</option></select>
+    </div>
+  </section>
+
+  <SectionHead class="section-gap" heading="Road segments" get="…/map/road_segment.geojson" cap="status · congestion · travel time · delay" />
+  <p class="prose" style="font-size:13px;margin:0 0 12px;">
+    One row per monitored road, drawn live from Google Routes travel times and Caltrans
+    status. Delay is against the road's free-flow duration; status is AI-determined
+    (open / restricted / closed) with the explanation shown when a road isn't fully open.
+  </p>
+  <div id="rd-seg-status" class="rd-status-line"></div>
+  <div class="card"><div id="rd-seg"></div></div>
+
+  <SectionHead class="section-gap" heading="Chain control" get="…/map/chain_control.geojson" cap="level · highway · direction" />
+  <p class="prose" style="font-size:13px;margin:0 0 12px;">
+    Active chain requirements from Caltrans (R1 chains or 4WD · R2 chains except 4WD · R3 chains
+    required, all vehicles). Empty here means the source reported no controls — not a failed feed.
+  </p>
+  <div id="rd-chain-status" class="rd-status-line"></div>
+  <div class="card"><div id="rd-chain"></div></div>
+
+  <SectionHead class="section-gap" heading="Road incidents" get="…/map/road_incident.geojson" cap="severity · headline · log #" />
+  <p class="prose" style="font-size:13px;margin:0 0 12px;">
+    CHP and Caltrans incidents on these corridors, each AI-enhanced into a readable summary
+    with an impact-driven severity. These are stored events — the same records
+    <code class="inline">GET /api/v1/events?layer=road_incident</code> returns.
+  </p>
+  <div id="rd-inc-status" class="rd-status-line"></div>
+  <div class="card"><div id="rd-inc"></div></div>
+
+  <div id="rd-errors" class="section-gap"></div>
+
+  <script is:inline type="module">
+    import { initRoadsPage } from '/assets/pages/roads.js';
+    initRoadsPage();
+  </script>
+</Shell>

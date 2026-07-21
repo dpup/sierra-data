@@ -223,6 +223,98 @@ export function featureSource(props) {
 }
 
 /**
+ * Parse a possibly-stringified nested property. MapLibre stringifies nested
+ * GeoJSON property objects/arrays, so a per-kind block may arrive as JSON text.
+ * @param {*} v
+ * @returns {Object|null}
+ */
+function asObj(v) {
+  if (v && typeof v === 'object') return v;
+  if (typeof v === 'string') {
+    try { const o = JSON.parse(v); return o && typeof o === 'object' ? o : null; } catch { return null; }
+  }
+  return null;
+}
+
+/**
+ * Per-kind detail rows for the popup — the typed block for props.layer plus the
+ * envelope status/description, so each layer shows its distinctive data (road
+ * congestion/delay/status, chain level, quake magnitude, mesh telemetry, …) and
+ * not just the shared envelope. Returns a <div class="popup-details"> or null.
+ * Values via textContent (upstream text is untrusted).
+ * @param {Object} props feature properties
+ * @returns {HTMLElement|null}
+ */
+export function kindDetails(props) {
+  const rows = [];
+  const add = (k, v) => { if (v !== undefined && v !== null && v !== '') rows.push([k, String(v)]); };
+  add('status', props.status);
+  const layer = String(props.layer || '').toUpperCase();
+
+  if (layer === 'ROAD_SEGMENT') {
+    const r = asObj(props.road) || {};
+    add('congestion', r.congestion);
+    if (r.durationMinutes != null) add('travel', r.durationMinutes + ' min');
+    if (r.delayMinutes != null) add('delay', (r.delayMinutes > 0 ? '+' : '') + r.delayMinutes + ' min');
+    if (r.distanceKm != null) add('distance', r.distanceKm + ' km');
+  } else if (layer === 'CHAIN_CONTROL') {
+    const c = asObj(props.chainControl) || {};
+    add('level', c.level); add('highway', c.highway); add('direction', c.direction);
+  } else if (layer === 'ROAD_INCIDENT') {
+    add('log #', (asObj(props.incident) || {}).logNumber);
+  } else if (layer === 'WILDFIRE') {
+    const w = asObj(props.wildfire) || {};
+    if (w.acres) add('acres', w.acres);
+    if (w.containment != null) add('containment', w.containment + '%');
+    add('county', w.county); add('cause', w.cause);
+  } else if (layer === 'EVACUATION') {
+    const e = asObj(props.evacuation) || {};
+    add('level', e.level); add('zone', e.zoneId); add('county', e.county); add('type', e.eventType);
+  } else if (layer === 'EARTHQUAKE') {
+    const q = asObj(props.earthquake) || {};
+    if (q.magnitude != null) add('magnitude', 'M' + q.magnitude);
+    if (q.depthKm != null) add('depth', q.depthKm + ' km');
+    if (q.felt) add('felt reports', q.felt);
+  } else if (layer === 'WEATHER_ALERT') {
+    const w = asObj(props.weather) || {};
+    add('event', w.event);
+    if (Array.isArray(w.zones) && w.zones.length) add('zones', w.zones.join(', '));
+  } else if (layer === 'FIRE_WEATHER') {
+    const w = asObj(props.fireWeather) || {};
+    add('state', w.state);
+    if (Array.isArray(w.zones) && w.zones.length) add('zones', w.zones.join(', '));
+  } else if (layer === 'MESH_NODE') {
+    const n = asObj(props.network) || {};
+    add('type', n.nodeType); add('node', n.name);
+    if (n.publicKey) add('pubkey', String(n.publicKey).slice(0, 12) + '…');
+    if (n.snr != null) add('SNR', n.snr + ' dB');
+    if (n.rssi != null) add('RSSI', n.rssi + ' dBm');
+    if (n.hopCount != null) add('hops', n.hopCount);
+    if (Array.isArray(n.gateways) && n.gateways.length) add('gateways', n.gateways.join(', '));
+  }
+
+  if (!rows.length && !props.description) return null;
+  const box = document.createElement('div');
+  box.className = 'popup-details';
+  if (rows.length) {
+    const dl = document.createElement('dl');
+    for (const [k, v] of rows) {
+      const dt = document.createElement('dt'); dt.textContent = k;
+      const dd = document.createElement('dd'); dd.textContent = v;
+      dl.append(dt, dd);
+    }
+    box.append(dl);
+  }
+  if (props.description) {
+    const d = document.createElement('div');
+    d.className = 'popup-desc muted small';
+    d.textContent = props.description;
+    box.append(d);
+  }
+  return box;
+}
+
+/**
  * Upstream URLs are untrusted; only http(s) may become a link
  * (hazard-aggregation-design §4.1 rule).
  * @param {*} u
@@ -477,7 +569,10 @@ function init() {
       ? `updated ${timeAgo(props.updatedAt)} · ${timeAbs(props.updatedAt)}`
       : 'updated —';
 
-    box.append(headline, chips, srcLine, updated);
+    const details = kindDetails(props);
+    box.append(headline, chips);
+    if (details) box.append(details);
+    box.append(srcLine, updated);
 
     new maplibregl.Popup({ maxWidth: '320px' })
       .setLngLat(e.lngLat)
