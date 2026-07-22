@@ -303,11 +303,17 @@ grid:
       # A quake aging out of the 7-day M2.5+ query window is its natural end
       # of life; the window is authoritative for "current", so resolve.
       disappearance: "resolve"
+    # CAL FIRE + WFIGS share ONE poller (the wildfire normalizer joins incidents
+    # with perimeters), which ticks at the FASTER of the two intervals and fetches
+    # both each tick — so these must move together to actually slow WFIGS. Raised
+    # 5m -> 10m to ease WFIGS' ArcGIS rate limit (occasional 429s, worst right
+    # after a deploy when a fresh instance re-fetches). Fire freshness at 10m is
+    # ample; the life-safety urgency lives in the 2m evacuation poll.
     calfire:
-      pollInterval: "5m"
+      pollInterval: "10m"
       disappearance: "resolve"
     wfigs:
-      pollInterval: "5m"
+      pollInterval: "10m"
       # Perimeter uploads lag the fire; a perimeter missing from one poll is
       # not containment. Expire only after a day without reappearing.
       disappearance: "expire"

@@ -15,9 +15,13 @@ import (
 	"github.com/dpup/sierra-data/internal/store"
 )
 
-// maxStartJitter spreads poller start times so a restart doesn't hit every
-// upstream at once.
-const maxStartJitter = 15 * time.Second
+// maxStartJitter spreads each poller's first tick over this window so a restart
+// (or a rolling deploy's overlapping old+new tasks) doesn't hit every upstream
+// at once — notably WFIGS, whose ArcGIS endpoint 429s under a post-deploy burst.
+// Wider than the old 15s so a fresh instance's first fetch is less likely to
+// coincide with the draining instance's poll; still well under the poll
+// intervals, so first data lands within ~90s of boot.
+const maxStartJitter = 90 * time.Second
 
 // PollerSpec pairs a normalizer with its poll interval. A normalizer spanning
 // several sources (wildfire, road incidents) runs at one interval: the
