@@ -150,7 +150,7 @@ func TestRegistryIngestsAdvert(t *testing.T) {
 	r := NewRegistry(Config{})
 	r.ingestRaw(envelopeJSON(t, 4, payload, 4.5, -93, "ag loft rpt", 0xc2, 0xe2), "broker-a")
 
-	nodes := r.Snapshot(0)
+	nodes := r.Snapshot()
 	require.Len(t, nodes, 1)
 	n := nodes[0]
 	assert.Equal(t, RoleRepeater, n.Role)
@@ -241,7 +241,7 @@ func TestRegistryIgnoresNonAdvert(t *testing.T) {
 
 	r := NewRegistry(Config{})
 	r.ingestRaw(envelopeJSON(t, 2, payload, 5, -90, "gw"), "broker-a") // TXT_MSG
-	assert.Empty(t, r.Snapshot(0))
+	assert.Empty(t, r.Snapshot())
 }
 
 func TestRegistryMergesAcrossBrokers(t *testing.T) {
@@ -254,29 +254,45 @@ func TestRegistryMergesAcrossBrokers(t *testing.T) {
 	r.ingestRaw(envelopeJSON(t, 4, payload, 4, -93, "gw-east"), "broker-a")
 	r.ingestRaw(envelopeJSON(t, 4, payload, 6, -80, "gw-west"), "broker-b")
 
-	nodes := r.Snapshot(0)
+	nodes := r.Snapshot()
 	require.Len(t, nodes, 1, "same pubkey collapses to one node")
 	assert.Equal(t, []string{"gw-east", "gw-west"}, nodes[0].Gateways)
 	assert.Equal(t, []string{"broker-a", "broker-b"}, nodes[0].Brokers, "brokers union, sorted")
 }
 
-func TestRegistrySnapshotActiveWindow(t *testing.T) {
+func TestRegistryCadencePresence(t *testing.T) {
 	_, priv, err := ed25519.GenerateKey(nil)
 	require.NoError(t, err)
 	payload := buildAdvert(t, priv, 2, &[2]float64{38, -120}, "Ridge", 1_700_000_000)
 
 	base := time.Date(2026, 7, 15, 10, 0, 0, 0, time.UTC)
-	r := NewRegistry(Config{})
+	// Big RetainFor so memory pruning never interferes; the per-node window is
+	// what filters. k=3, floor 1h, ceil 100h.
+	r := NewRegistry(Config{CadenceK: 3, GraceFloor: time.Hour, GraceCeil: 100 * time.Hour, RetainFor: 1000 * time.Hour})
+
+	// First advert: no cadence yet → GraceFloor (1h) window.
 	r.now = func() time.Time { return base }
 	r.ingestRaw(envelopeJSON(t, 4, payload, 4, -93, "gw"), "broker-a")
 
-	// 20m later, within a 30m window.
-	r.now = func() time.Time { return base.Add(20 * time.Minute) }
-	assert.Len(t, r.Snapshot(30*time.Minute), 1)
+	// A multi-gateway echo 10s later must NOT be counted as a new advert for
+	// cadence (it would otherwise poison the interval toward seconds).
+	r.now = func() time.Time { return base.Add(10 * time.Second) }
+	r.ingestRaw(envelopeJSON(t, 4, payload, 4, -93, "gw2"), "broker-a")
 
-	// 40m later, outside it.
-	r.now = func() time.Time { return base.Add(40 * time.Minute) }
-	assert.Empty(t, r.Snapshot(30*time.Minute))
+	r.now = func() time.Time { return base.Add(30 * time.Minute) }
+	assert.Len(t, r.Snapshot(), 1, "within GraceFloor for an unknown-cadence node")
+	r.now = func() time.Time { return base.Add(90 * time.Minute) }
+	assert.Empty(t, r.Snapshot(), "past GraceFloor, still no measured cadence")
+
+	// A genuine second advert 10h after the first establishes a ~10h cadence →
+	// window = 3 × 10h = 30h (echo above was correctly ignored, else it'd be far
+	// shorter).
+	r.now = func() time.Time { return base.Add(10 * time.Hour) }
+	r.ingestRaw(envelopeJSON(t, 4, payload, 4, -93, "gw"), "broker-a")
+	r.now = func() time.Time { return base.Add(10*time.Hour + 25*time.Hour) }
+	assert.Len(t, r.Snapshot(), 1, "within 3× the measured cadence")
+	r.now = func() time.Time { return base.Add(10*time.Hour + 35*time.Hour) }
+	assert.Empty(t, r.Snapshot(), "past 3× the measured cadence")
 }
 
 func TestRegistryPrunesStaleNodes(t *testing.T) {
@@ -288,8 +304,8 @@ func TestRegistryPrunesStaleNodes(t *testing.T) {
 	r := NewRegistry(Config{RetainFor: time.Hour})
 	r.now = func() time.Time { return base }
 	r.ingestRaw(envelopeJSON(t, 4, payload, 4, -93, "gw"), "broker-a")
-	assert.Len(t, r.Snapshot(0), 1)
+	assert.Len(t, r.Snapshot(), 1)
 
 	r.now = func() time.Time { return base.Add(2 * time.Hour) }
-	assert.Empty(t, r.Snapshot(0), "node pruned past RetainFor")
+	assert.Empty(t, r.Snapshot(), "node pruned past RetainFor")
 }

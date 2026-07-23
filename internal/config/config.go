@@ -42,9 +42,20 @@ type GridConfig struct {
 // SourceTuning entry, not here.
 type MeshcoreConfig struct {
 	Enabled bool `koanf:"enabled"`
-	// ActiveWindow keeps a recently-heard node in each poll snapshot. Default
-	// 30m. The store's expireAfter, not this, decides when a silent node is gone.
+	// ActiveWindow is DEPRECATED and ignored: presence is now cadence-aware (each
+	// node stays in the snapshot for CadenceK × its own advert interval, clamped
+	// to [GraceFloor, GraceCeil]), so a single global window no longer applies.
+	// See docs/mesh-topology-design.md §9.
 	ActiveWindow time.Duration `koanf:"activeWindow"`
+	// CadenceK / GraceFloor / GraceCeil tune cadence-aware presence. A node stays
+	// present for CadenceK × its measured inter-advert interval, clamped to
+	// [GraceFloor, GraceCeil]; a node with no cadence yet (one-shot / brand-new)
+	// gets GraceFloor, so drive-through transients evaporate while a slow backbone
+	// repeater is protected in proportion to its rhythm. Defaults (cmd/server):
+	// k=3, floor=3h, ceil=72h. The registry's memory retention is GraceCeil.
+	CadenceK   float64       `koanf:"cadenceK"`
+	GraceFloor time.Duration `koanf:"graceFloor"`
+	GraceCeil  time.Duration `koanf:"graceCeil"`
 	// RequireValidSignature drops adverts whose Ed25519 signature fails to verify
 	// (on by default; framing confirmed against a live capture, 2026-07-17).
 	RequireValidSignature bool `koanf:"requireValidSignature"`

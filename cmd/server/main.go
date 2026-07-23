@@ -314,11 +314,22 @@ func meshcoreClientConfig(cfg *config.Config) meshcore.Config {
 	if spamFloor <= 0 {
 		spamFloor = 30 * time.Second
 	}
+	graceCeil := mc.GraceCeil
+	if graceCeil <= 0 {
+		graceCeil = 72 * time.Hour
+	}
+	// RetainFor (in-memory node retention) is anchored to the presence ceiling, NOT
+	// the source's expireAfter: expireAfter is now the short disappearance-sweep
+	// safety net, while a node must live in memory for its whole cadence-derived
+	// presence window (up to GraceCeil). NewRegistry defaults the remaining knobs.
 	return meshcore.Config{
 		Brokers:               brokers,
 		RequireValidSignature: mc.RequireValidSignature,
-		RetainFor:             cfg.Grid.Sources["meshcore"].ExpireAfter,
+		RetainFor:             graceCeil,
 		SpamFloor:             spamFloor,
+		CadenceK:              mc.CadenceK,
+		GraceFloor:            mc.GraceFloor,
+		GraceCeil:             graceCeil,
 	}
 }
 

@@ -19,9 +19,9 @@ type fakeMeshRegistry struct {
 	obs       []meshcore.Observation
 }
 
-func (f *fakeMeshRegistry) Snapshot(time.Duration) []meshcore.NodeState { return f.nodes }
-func (f *fakeMeshRegistry) Health() (int, time.Time)                    { return f.connected, time.Time{} }
-func (f *fakeMeshRegistry) DrainObservations() []meshcore.Observation   { return f.obs }
+func (f *fakeMeshRegistry) Snapshot() []meshcore.NodeState            { return f.nodes }
+func (f *fakeMeshRegistry) Health() (int, time.Time)                  { return f.connected, time.Time{} }
+func (f *fakeMeshRegistry) DrainObservations() []meshcore.Observation { return f.obs }
 
 func TestNetworkPollBuildsEvents(t *testing.T) {
 	reg := &fakeMeshRegistry{

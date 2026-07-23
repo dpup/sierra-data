@@ -21,7 +21,6 @@ const (
 	meshAttribution = "MeshCore community mesh"
 	meshMapURL      = "https://map.meshcore.io"
 
-	defaultMeshActiveWindow = 30 * time.Minute
 	// meshLocationDecimals damps GPS jitter: ~4 dp ≈ 11 m. Location is hashed
 	// content, so un-quantized jitter would mint spurious revisions.
 	meshLocationDecimals = 1e4
@@ -30,8 +29,9 @@ const (
 // MeshRegistry is the read side of the MeshCore MQTT subscriber the normalizer
 // depends on (satisfied by *meshcore.Registry; a fake is used in tests).
 type MeshRegistry interface {
-	// Snapshot returns nodes heard within activeWindow.
-	Snapshot(activeWindow time.Duration) []meshcore.NodeState
+	// Snapshot returns the nodes currently present (each within its own
+	// cadence-derived window; see meshcore.Registry.Snapshot).
+	Snapshot() []meshcore.NodeState
 	// Health reports connected broker count and last-message time.
 	Health() (connected int, lastMsg time.Time)
 	// DrainObservations returns the receptions buffered since the last drain
@@ -46,9 +46,8 @@ type MeshRegistry interface {
 // store excludes from the content hash — so the advert firehose refreshes
 // liveness without minting a revision.
 type NetworkNormalizer struct {
-	cfg          *config.Config
-	registry     MeshRegistry
-	activeWindow time.Duration
+	cfg      *config.Config
+	registry MeshRegistry
 	// brokerOps maps a broker URL to its config (operator name + https page),
 	// used to attribute a node's provenance to the MQTT server's operator.
 	brokerOps map[string]config.MeshcoreBroker
@@ -56,15 +55,11 @@ type NetworkNormalizer struct {
 
 // NewNetworkNormalizer wires the normalizer to a MeshCore registry.
 func NewNetworkNormalizer(cfg *config.Config, registry MeshRegistry) *NetworkNormalizer {
-	aw := cfg.Grid.Meshcore.ActiveWindow
-	if aw <= 0 {
-		aw = defaultMeshActiveWindow
-	}
 	ops := make(map[string]config.MeshcoreBroker, len(cfg.Grid.Meshcore.Brokers))
 	for _, b := range cfg.Grid.Meshcore.Brokers {
 		ops[b.URL] = b
 	}
-	return &NetworkNormalizer{cfg: cfg, registry: registry, activeWindow: aw, brokerOps: ops}
+	return &NetworkNormalizer{cfg: cfg, registry: registry, brokerOps: ops}
 }
 
 // SourceIDs implements Normalizer.
@@ -85,7 +80,7 @@ func (n *NetworkNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult,
 		return nil, fmt.Errorf("meshcore: no brokers connected; not asserting node disappearance")
 	}
 
-	nodes := n.registry.Snapshot(n.activeWindow)
+	nodes := n.registry.Snapshot()
 	events := make([]*gridv1.Event, 0, len(nodes))
 	for _, nd := range nodes {
 		// Scope: any node with a location inside the geofence. Locationless nodes

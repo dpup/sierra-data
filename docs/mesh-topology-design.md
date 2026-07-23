@@ -1,6 +1,6 @@
 # Mesh Topology & Relay History — Technical Design
 
-Status: **Proposed** · Owner: The Grid (S.I.E.R.R.A) · Last updated: 2026-07-23
+Status: **Implemented (steps 1–5)** · Owner: The Grid (S.I.E.R.R.A) · Last updated: 2026-07-23
 
 ## 1. Summary
 
@@ -294,23 +294,36 @@ The fail-loud invariant is preserved: all-brokers-down still hard-errors `Poll`
 window only narrows *which recently-heard nodes* count as present; it never runs
 when the feed is down.
 
-## 10. Config (`prefab.yaml` → `grid.meshcore`)
+## 10. Config (as shipped)
 
 ```yaml
 grid:
+  sources:
+    meshcore:
+      disappearance: expire
+      expireAfter: 2h            # the SHORT disappearance-sweep safety net (was 120h)
   meshcore:
-    observationRetention: 48h    # Tier 0 raw
-    rollupBucket: 24h            # Tier 1 grain
-    rollupRetention: 17520h      # 2 years
-    compactionInterval: 1h
-    liveWindow: 72h             # default mesh_link recency window
+    # relay-observation store (Tier 0 → Tier 1)
     spamFloor: 30s              # min gap between persisted raw rows per (node, gateway)
-    presence:
-      cadenceK: 3               # keep a node present within k × its measured interval
-      graceFloor: 3h            # min presence window (one-shot / unknown cadence)
-      graceCeil: 72h            # max presence window (slowest backbone)
-    sweepGrace: 1h              # short uniform safety net on the disappearance sweep
+    compactionInterval: 1h
+    observationRetention: 48h   # Tier 0 raw
+    rollupRetention: 17520h     # Tier 1, 2 years
+    # cadence-aware presence
+    cadenceK: 3                 # keep a node present within k × its measured interval
+    graceFloor: 3h              # min window (one-shot / unknown cadence)
+    graceCeil: 72h              # max window; also the registry's in-memory retention
 ```
+
+Notes on what moved where:
+- `rollupBucket` is fixed at one UTC day (not a knob).
+- The `mesh_link` live-recency window is a **request** parameter
+  (`?window=`, default 72h), not config.
+- The sweep grace is the existing `grid.sources.meshcore.expireAfter`, dropped
+  from 120h to **2h**: cadence-aware presence in the registry now does the
+  per-node reasoning, so the sweep only needs a short uniform backstop once a node
+  has already left the snapshot. In-memory node retention is `graceCeil` (a node
+  must live long enough for its whole presence window), decoupled from
+  `expireAfter`.
 
 ## 11. Integration seams
 

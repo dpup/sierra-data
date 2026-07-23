@@ -54,6 +54,16 @@ type Config struct {
 	// gateway) are each kept: hearing a link on N gateways is real resilience
 	// signal. 0 disables the floor (keep every reception).
 	SpamFloor time.Duration
+	// Cadence-aware presence (docs/mesh-topology-design.md §9): a node stays in
+	// Snapshot for CadenceK × its own measured inter-advert interval, clamped to
+	// [GraceFloor, GraceCeil]. A node with no cadence yet (one-shot / brand-new)
+	// gets GraceFloor, so drive-through transients evaporate while a slow backbone
+	// repeater is protected in proportion to its rhythm. Zero values default
+	// (k=3, floor=3h, ceil=72h). RetainFor should be ≥ GraceCeil so a node lives
+	// in memory for its whole presence window; it defaults to GraceCeil if unset.
+	CadenceK   float64
+	GraceFloor time.Duration
+	GraceCeil  time.Duration
 }
 
 // Observation is one received advert, captured for the relay-topology store
@@ -106,7 +116,27 @@ type nodeEntry struct {
 	NodeState
 	gateways map[string]struct{}
 	brokers  map[string]struct{}
+
+	// Cadence estimate for presence: lastAdvertAt is the heard time of the last
+	// DISTINCT advert (multi-gateway echoes of one advert are collapsed), and
+	// ewmaInterval is the smoothed inter-advert interval. advertCount < 2 means
+	// no interval measured yet (treated as unknown cadence).
+	lastAdvertAt time.Time
+	ewmaInterval time.Duration
+	advertCount  int
 }
+
+// Cadence-aware presence tuning defaults + smoothing.
+const (
+	defaultCadenceK   = 3
+	defaultGraceFloor = 3 * time.Hour
+	defaultGraceCeil  = 72 * time.Hour
+	// minCadenceSample ignores same-advert echoes (one advert arrives off several
+	// gateways within seconds) when measuring the inter-advert interval.
+	minCadenceSample = 30 * time.Second
+	// cadenceAlpha weights the newest interval in the EWMA (responsive but stable).
+	cadenceAlpha = 0.3
+)
 
 // Registry subscribes to MeshCore MQTT bridges and accumulates node presence in
 // memory. It is safe for concurrent use: MQTT callbacks write, the ingest
@@ -129,7 +159,21 @@ type Registry struct {
 }
 
 // NewRegistry builds a Registry. Call Connect to start the MQTT subscriptions.
+// Zero cadence-presence knobs default; RetainFor defaults to GraceCeil so a node
+// lives in memory for its whole presence window.
 func NewRegistry(cfg Config) *Registry {
+	if cfg.CadenceK <= 0 {
+		cfg.CadenceK = defaultCadenceK
+	}
+	if cfg.GraceFloor <= 0 {
+		cfg.GraceFloor = defaultGraceFloor
+	}
+	if cfg.GraceCeil <= 0 {
+		cfg.GraceCeil = defaultGraceCeil
+	}
+	if cfg.RetainFor <= 0 {
+		cfg.RetainFor = cfg.GraceCeil
+	}
 	return &Registry{
 		cfg:     cfg,
 		baseCtx: context.Background(),
@@ -273,6 +317,22 @@ func (r *Registry) ingestPacket(env *packetEnvelope, brokerID string) {
 	e.HopCount = uint32(adv.HopCount)
 	e.LastAdvertAt = adv.Timestamp // node-reported; unreliable clock, diagnostic only
 	e.LastHeardAt = now            // our receive time — the trustworthy clock
+
+	// Update the cadence estimate from the interval between DISTINCT adverts (one
+	// advert echoes off several gateways within seconds — collapse those). Drives
+	// the per-node presence window in Snapshot.
+	if e.lastAdvertAt.IsZero() {
+		e.lastAdvertAt = now
+		e.advertCount = 1
+	} else if gap := now.Sub(e.lastAdvertAt); gap >= minCadenceSample {
+		if e.ewmaInterval <= 0 {
+			e.ewmaInterval = gap
+		} else {
+			e.ewmaInterval = time.Duration(cadenceAlpha*float64(gap) + (1-cadenceAlpha)*float64(e.ewmaInterval))
+		}
+		e.lastAdvertAt = now
+		e.advertCount++
+	}
 	if gw != "" {
 		e.gateways[gw] = struct{}{}
 	}
@@ -340,9 +400,14 @@ func (r *Registry) DrainObservations() []Observation {
 	return out
 }
 
-// Snapshot returns nodes heard within activeWindow (0 = no window). Gateways are
-// materialized as a sorted slice. This is what the normalizer's Poll returns.
-func (r *Registry) Snapshot(activeWindow time.Duration) []NodeState {
+// Snapshot returns the nodes currently PRESENT — each one heard within its own
+// cadence-derived window (CadenceK × measured inter-advert interval, clamped to
+// [GraceFloor, GraceCeil]; GraceFloor for a node with no cadence yet). A slow
+// backbone repeater is protected in proportion to its rhythm while a dead chatty
+// node or a one-shot transient drops out quickly. This is the "current set" the
+// normalizer hands the disappearance sweep, so the sweep's own grace can stay a
+// short uniform safety net. Gateways are materialized as a sorted slice.
+func (r *Registry) Snapshot() []NodeState {
 	now := r.now()
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -350,7 +415,7 @@ func (r *Registry) Snapshot(activeWindow time.Duration) []NodeState {
 
 	out := make([]NodeState, 0, len(r.nodes))
 	for _, e := range r.nodes {
-		if activeWindow > 0 && now.Sub(e.LastHeardAt) > activeWindow {
+		if now.Sub(e.LastHeardAt) > r.presenceWindow(e) {
 			continue
 		}
 		ns := e.NodeState
@@ -359,6 +424,24 @@ func (r *Registry) Snapshot(activeWindow time.Duration) []NodeState {
 		out = append(out, ns)
 	}
 	return out
+}
+
+// presenceWindow is how long a node stays present after its last advert:
+// CadenceK × its measured cadence, clamped to [GraceFloor, GraceCeil]. A node
+// with no interval measured yet (one advert, or echoes only) gets GraceFloor, so
+// drive-through transients evaporate. Caller holds r.mu.
+func (r *Registry) presenceWindow(e *nodeEntry) time.Duration {
+	if e.advertCount < 2 || e.ewmaInterval <= 0 {
+		return r.cfg.GraceFloor
+	}
+	w := time.Duration(r.cfg.CadenceK * float64(e.ewmaInterval))
+	if w < r.cfg.GraceFloor {
+		return r.cfg.GraceFloor
+	}
+	if w > r.cfg.GraceCeil {
+		return r.cfg.GraceCeil
+	}
+	return w
 }
 
 // prefixLens are the hex lengths of the 1-, 2-, and 3-byte path-hash modes.
