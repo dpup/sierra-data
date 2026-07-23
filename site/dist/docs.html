@@ -373,7 +373,7 @@ Content-Type: application/json
       <tr><td class="mono">weatherAlert</td><td class="wrap mono">nwsSeverity, certainty, urgency, instruction, areaDesc (string), zones (repeated string)</td></tr>
       <tr><td class="mono">earthquake</td><td class="wrap mono">magnitude (double), depthKm (double), felt (int32)</td></tr>
       <tr><td class="mono">roadIncident</td><td class="wrap mono">logNumber (string), impact, duration (string), metadata (map&lt;string,string&gt;)</td></tr>
-      <tr><td class="mono">network</td><td class="wrap mono">publicKey (hex string), nodeType (companion | repeater | room_server | sensor), name (string), telemetry { snr (double), rssi (int32), hopCount (uint32), path (repeated string), gateways (repeated string), lastAdvertAt (timestamp) }</td></tr>
+      <tr><td class="mono">network</td><td class="wrap mono">publicKey (hex string), nodeType (companion | repeater | room_server | sensor), name (string), telemetry { snr (double), rssi (int32), hopCount (uint32), path (repeated string — relay hops as repeater pubkey-prefix hashes), pathNodes (repeated string — path resolved to full node public keys, parallel to path), gateways (repeated string), lastAdvertAt (timestamp) }</td></tr>
     </tbody>
   </table></div>
   <p class="small muted">

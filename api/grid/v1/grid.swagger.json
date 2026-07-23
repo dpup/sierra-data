@@ -921,7 +921,7 @@
           "items": {
             "type": "string"
           },
-          "title": "repeater public-key prefixes it traversed"
+          "title": "repeater public-key prefixes it traversed (hex)"
         },
         "gateways": {
           "type": "array",
@@ -934,6 +934,13 @@
           "type": "string",
           "format": "date-time",
           "title": "sender-stamped time of the last advert"
+        },
+        "pathNodes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "path resolved to full node public keys — parallel to `path`, one entry per\nhop, empty when a prefix matched no known node or was ambiguous. The relay\ntopology for a mesh map."
         }
       },
       "description": "NetworkTelemetry is the volatile, per-advert signal state. It is deliberately\ngrouped into one sub-message so store.ContentHash can zero the whole field:\nnone of it mints a revision."

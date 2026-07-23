@@ -122,10 +122,12 @@ type NetworkProps struct {
 	SNR       float64 `json:"snr,omitempty"`
 	RSSI      int32   `json:"rssi,omitempty"`
 	HopCount  uint32  `json:"hopCount,omitempty"`
-	// Path is the relay chain (per-hop repeater hashes, hex) the last-heard
-	// advert traversed — the mesh topology; Gateways are the observers that heard it.
-	Path     []string `json:"path,omitempty"`
-	Gateways []string `json:"gateways,omitempty"`
+	// Path is the relay chain (per-hop repeater hashes, hex) the last-heard advert
+	// traversed; PathNodes is Path resolved to full node public keys (parallel,
+	// "" where unresolved) — the drawable topology. Gateways are the observers.
+	Path      []string `json:"path,omitempty"`
+	PathNodes []string `json:"pathNodes,omitempty"`
+	Gateways  []string `json:"gateways,omitempty"`
 }
 
 // setSeverity sets both Severity and the derived SeverityRank.

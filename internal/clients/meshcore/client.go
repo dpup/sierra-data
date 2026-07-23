@@ -64,10 +64,14 @@ type NodeState struct {
 	Brokers []string
 
 	// Volatile telemetry (never mints a store revision).
-	SNR          float64
-	RSSI         int32
-	HopCount     uint32
-	Path         []string
+	SNR      float64
+	RSSI     int32
+	HopCount uint32
+	Path     []string // per-hop repeater pubkey-prefix hashes (hex), from the frame
+	// PathNodes is Path resolved to full node public keys (parallel to Path; ""
+	// where a prefix matched no known node or was ambiguous). Filled by Snapshot,
+	// which has the whole node catalog. The relay topology for a mesh map.
+	PathNodes    []string
 	Gateways     []string
 	LastAdvertAt time.Time // sender-stamped
 	LastHeardAt  time.Time // our receive time
@@ -268,7 +272,42 @@ func (r *Registry) Snapshot(activeWindow time.Duration) []NodeState {
 		ns.Brokers = sortedKeys(e.brokers)
 		out = append(out, ns)
 	}
+
+	// Resolve each node's relay path (repeater pubkey-prefix hashes) to full node
+	// public keys for topology. Index every known node's pubkey prefixes; a hop
+	// resolves only on a UNIQUE prefix match (ambiguous or unknown → left empty).
+	idx := make(map[string][]string, len(r.nodes)*len(prefixLens))
+	for pk := range r.nodes {
+		for _, n := range prefixLens {
+			if len(pk) >= n {
+				idx[pk[:n]] = append(idx[pk[:n]], pk)
+			}
+		}
+	}
+	for i := range out {
+		out[i].PathNodes = resolvePath(out[i].Path, idx)
+	}
 	return out
+}
+
+// prefixLens are the hex lengths of the 1-, 2-, and 3-byte path-hash modes.
+var prefixLens = []int{2, 4, 6}
+
+// resolvePath maps each relay-path hop (a pubkey-prefix hash, hex) to the full
+// public key of the node it identifies, using a prefix→pubkeys index. A hop
+// resolves only when EXACTLY ONE known node carries that prefix; ambiguous
+// (collision) or unknown hops stay empty. Result is parallel to hops.
+func resolvePath(hops []string, idx map[string][]string) []string {
+	if len(hops) == 0 {
+		return nil
+	}
+	res := make([]string, len(hops))
+	for i, h := range hops {
+		if cands := idx[h]; len(cands) == 1 {
+			res[i] = cands[0]
+		}
+	}
+	return res
 }
 
 // Health reports how many brokers are currently connected and when the last

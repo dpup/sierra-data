@@ -160,8 +160,30 @@ func TestRegistryIngestsAdvert(t *testing.T) {
 	assert.EqualValues(t, -93, n.RSSI)
 	assert.EqualValues(t, 2, n.HopCount)
 	assert.Equal(t, []string{"c2", "e2"}, n.Path) // from the frame relay path, hex per hop
+	assert.Len(t, n.PathNodes, 2)                 // resolved parallel to Path (no catalog match here)
 	assert.Equal(t, []string{"ag loft rpt"}, n.Gateways)
 	assert.Equal(t, []string{"broker-a"}, n.Brokers)
+}
+
+func TestResolvePath(t *testing.T) {
+	// abcdef00 and ab998877 share the 1-byte prefix "ab"; cd123456 is alone.
+	pubkeys := []string{"abcdef00", "ab998877", "cd123456"}
+	idx := map[string][]string{}
+	for _, pk := range pubkeys {
+		for _, n := range prefixLens {
+			if len(pk) >= n {
+				idx[pk[:n]] = append(idx[pk[:n]], pk)
+			}
+		}
+	}
+	got := resolvePath([]string{"ab", "abcd", "cd12", "9999"}, idx)
+	assert.Equal(t, []string{
+		"",         // "ab" (1-byte) matches two nodes → ambiguous, unresolved
+		"abcdef00", // "abcd" (2-byte) is unique
+		"cd123456", // "cd12" (2-byte) is unique
+		"",         // "9999" matches nothing
+	}, got)
+	assert.Nil(t, resolvePath(nil, idx))
 }
 
 func TestRegistryIgnoresNonAdvert(t *testing.T) {

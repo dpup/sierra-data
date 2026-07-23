@@ -21,15 +21,18 @@ proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 Enriches the MeshCore layer toward a real mesh-topology map. Additive on the
 events RPC; the geojson layer gains one field.
 
-- **Relay path now populated.** `telemetry.path` and `telemetry.hopCount` (on
-  `GET /api/v1/events?layer=network`) were always empty/0 — they were read from a
-  bridge field most bridges don't send. They now come from the over-the-air
-  frame's transport path: `path` is the relay chain as per-hop repeater hashes
-  (lowercase hex, sender→observer order), `hopCount` the number of hops. The
-  `gateways` (observers that heard the node) are unchanged.
-- **`mesh_node.geojson` gains `path`.** The map layer's `network` block now
-  carries `path` (same hex-hash relay chain) alongside the existing `hopCount`
-  (which now shows a real value instead of being omitted at 0).
+- **Relay path now populated + resolved.** `telemetry.path` and
+  `telemetry.hopCount` (on `GET /api/v1/events?layer=network`) were always
+  empty/0 — read from a bridge field most bridges don't send. They now come from
+  the over-the-air frame's transport path: `path` is the relay chain as per-hop
+  repeater pubkey-prefix hashes (lowercase hex, sender→observer order), `hopCount`
+  the hop count. New **`telemetry.pathNodes`** resolves each hop to the full node
+  public key it identifies (parallel to `path`, empty where a prefix matched no
+  known node or was ambiguous) — the drawable relay topology. `gateways`
+  (observers that heard the node) are unchanged.
+- **`mesh_node.geojson` gains `path` + `pathNodes`.** The map layer's `network`
+  block now carries both (same values) alongside the existing `hopCount` (now a
+  real value instead of omitted at 0).
 - **Observed time is our receive time, not the node's.** Mesh node clocks are
   frequently badly skewed (we saw adverts stamped months in the future). A
   network event's `observedAt` — which `/events` orders and `since`-filters on —
