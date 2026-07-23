@@ -158,9 +158,7 @@ func TestRegistryIngestsAdvert(t *testing.T) {
 	assert.True(t, n.HasLocation)
 	assert.InDelta(t, 4.5, n.SNR, 1e-9)
 	assert.EqualValues(t, -93, n.RSSI)
-	assert.EqualValues(t, 2, n.HopCount)
-	assert.Equal(t, []string{"c2", "e2"}, n.Path) // from the frame relay path, hex per hop
-	assert.Len(t, n.PathNodes, 2)                 // resolved parallel to Path (no catalog match here)
+	assert.EqualValues(t, 2, n.HopCount) // last-heard advert's path length
 	assert.Equal(t, []string{"ag loft rpt"}, n.Gateways)
 	assert.Equal(t, []string{"broker-a"}, n.Brokers)
 }

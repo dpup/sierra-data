@@ -177,8 +177,6 @@ func projectNetwork(ev *gridv1.Event) hazards.Feature {
 		SNR:       t.GetSnr(),
 		RSSI:      t.GetRssi(),
 		HopCount:  t.GetHopCount(),
-		Path:      t.GetPath(),
-		PathNodes: t.GetPathNodes(),
 		Gateways:  t.GetGateways(),
 	}
 	return feature(ev, p)

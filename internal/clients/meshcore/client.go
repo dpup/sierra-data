@@ -91,15 +91,12 @@ type NodeState struct {
 	// across brokers when a node is heard on more than one.
 	Brokers []string
 
-	// Volatile telemetry (never mints a store revision).
-	SNR      float64
-	RSSI     int32
-	HopCount uint32
-	Path     []string // per-hop repeater pubkey-prefix hashes (hex), from the frame
-	// PathNodes is Path resolved to full node public keys (parallel to Path; ""
-	// where a prefix matched no known node or was ambiguous). Filled by Snapshot,
-	// which has the whole node catalog. The relay topology for a mesh map.
-	PathNodes    []string
+	// Volatile last-heard telemetry (never mints a store revision). The relay path
+	// is NOT here — it is per-reception, captured in the observation firehose
+	// (see Observation) and served as derived topology, not per-node presence.
+	SNR          float64
+	RSSI         int32
+	HopCount     uint32
 	Gateways     []string
 	LastAdvertAt time.Time // sender-stamped
 	LastHeardAt  time.Time // our receive time
@@ -270,10 +267,9 @@ func (r *Registry) ingestPacket(env *packetEnvelope, brokerID string) {
 	}
 	e.SNR = env.SNR.float()
 	e.RSSI = int32(env.RSSI.int())
-	// Relay path + hop count come from the over-the-air frame (adv), not the
-	// bridge's optional `path` envelope field — the frame is authoritative and
-	// present on every relayed advert.
-	e.Path = adv.Path
+	// Hop count is the last-heard advert's path length (from the authoritative
+	// over-the-air frame). The path itself is per-reception — captured in the
+	// observation below, not on node presence.
 	e.HopCount = uint32(adv.HopCount)
 	e.LastAdvertAt = adv.Timestamp // node-reported; unreliable clock, diagnostic only
 	e.LastHeardAt = now            // our receive time — the trustworthy clock
@@ -361,13 +357,6 @@ func (r *Registry) Snapshot(activeWindow time.Duration) []NodeState {
 		ns.Gateways = sortedKeys(e.gateways)
 		ns.Brokers = sortedKeys(e.brokers)
 		out = append(out, ns)
-	}
-
-	// Resolve each node's relay path (repeater pubkey-prefix hashes) to full node
-	// public keys for topology, against the whole known catalog.
-	idx := r.prefixIndexLocked()
-	for i := range out {
-		out[i].PathNodes = resolvePath(out[i].Path, idx)
 	}
 	return out
 }

@@ -30,7 +30,7 @@ func TestNetworkPollBuildsEvents(t *testing.T) {
 			{ // in-region repeater with location
 				PubKey: "aa11bb22cc33", Role: meshcore.RoleRepeater, Name: "Murphys Ridge",
 				HasLocation: true, Lat: 38.137412, Lng: -120.457934,
-				SNR: 4.5, RSSI: -93, HopCount: 2, Path: []string{"c2", "e2"},
+				SNR: 4.5, RSSI: -93, HopCount: 2,
 				Gateways:     []string{"ag loft rpt"},
 				LastAdvertAt: time.Unix(1_782_400_000, 0).UTC(),            // node clock (skewed/untrusted)
 				LastHeardAt:  time.Date(2026, 7, 20, 9, 0, 0, 0, time.UTC), // our receive time
@@ -73,7 +73,6 @@ func TestNetworkPollBuildsEvents(t *testing.T) {
 	assert.InDelta(t, 4.5, det.Telemetry.Snr, 1e-9)
 	assert.EqualValues(t, -93, det.Telemetry.Rssi)
 	assert.EqualValues(t, 2, det.Telemetry.HopCount)
-	assert.Equal(t, []string{"c2", "e2"}, det.Telemetry.Path)
 
 	// Event's observed time is OUR receive time (LastHeardAt), never the node's
 	// skewed clock — the feed orders/`since`-filters on this.

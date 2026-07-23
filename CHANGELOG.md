@@ -16,23 +16,33 @@ proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 
 ## 2026-07-23
 
-### Changed — mesh-node relay path + trustworthy observed time (`NETWORK` layer)
+### Added — mesh relay topology endpoint `GET /api/v1/mesh/links`
 
-Enriches the MeshCore layer toward a real mesh-topology map. Additive on the
-events RPC; the geojson layer gains one field.
+The MeshCore relay topology is now served as a **derived, durable** graph instead
+of one frozen path sample per node. A path is a property of a *reception*, not of
+a node, so per-advert relay paths are rolled up over time and served as a weighted
+edge list.
 
-- **Relay path now populated + resolved.** `telemetry.path` and
-  `telemetry.hopCount` (on `GET /api/v1/events?layer=network`) were always
-  empty/0 — read from a bridge field most bridges don't send. They now come from
-  the over-the-air frame's transport path: `path` is the relay chain as per-hop
-  repeater pubkey-prefix hashes (lowercase hex, sender→observer order), `hopCount`
-  the hop count. New **`telemetry.pathNodes`** resolves each hop to the full node
-  public key it identifies (parallel to `path`, empty where a prefix matched no
-  known node or was ambiguous) — the drawable relay topology. `gateways`
-  (observers that heard the node) are unchanged.
-- **`mesh_node.geojson` gains `path` + `pathNodes`.** The map layer's `network`
-  block now carries both (same values) alongside the existing `hopCount` (now a
-  real value instead of omitted at 0).
+- **New `GET /api/v1/mesh/links?window=<Go duration>`** — the whole mesh's relay
+  links (global, not place-scoped). Response `{window, generatedAt, links[]}`;
+  each link is `{a, b, observations, daysActive, firstSeen, lastSeen, bestSnr}`
+  (`a`/`b` are node public keys, canonical `a < b`). `daysActive` (distinct days
+  the link was observed) and `lastSeen` let a client weight and recency-fade an
+  intermittent mesh honestly. `window` defaults to `72h`, clamps to ~400d. Join
+  `a`/`b` to node coordinates from `GET /api/v1/events?layer=network` (or the
+  `mesh_node.geojson` layer) to draw the links.
+
+### Removed — `telemetry.path` / `telemetry.pathNodes` (`NETWORK` layer) — **breaking**
+
+- **`telemetry.path` and `telemetry.pathNodes` are gone** from network events
+  (`GET /api/v1/events?layer=network`) and from the `mesh_node.geojson` `network`
+  block. They were briefly shipped earlier on 2026-07-23; a single frozen path
+  per node was the wrong model. **Migration:** use `GET /api/v1/mesh/links` for
+  relay topology. `telemetry.snr`/`rssi`/`hopCount`/`gateways`/`lastAdvertAt`
+  remain as last-heard values.
+
+### Changed — trustworthy observed time (`NETWORK` layer)
+
 - **Observed time is our receive time, not the node's.** Mesh node clocks are
   frequently badly skewed (we saw adverts stamped months in the future). A
   network event's `observedAt` — which `/events` orders and `since`-filters on —

@@ -114,20 +114,17 @@ type EvacuationProps struct {
 }
 
 // NetworkProps is the mesh_node (MeshCore) kind block. The signal metrics are
-// the last-heard values (volatile; not part of the event's content hash).
+// the last-heard values (volatile; not part of the event's content hash). The
+// relay path is NOT here — a path is per-reception, not per-node; the drawable
+// topology is served derived at GET /api/v1/mesh/links.
 type NetworkProps struct {
-	PublicKey string  `json:"publicKey"`
-	NodeType  string  `json:"nodeType,omitempty"` // companion | repeater | room_server | sensor
-	Name      string  `json:"name,omitempty"`
-	SNR       float64 `json:"snr,omitempty"`
-	RSSI      int32   `json:"rssi,omitempty"`
-	HopCount  uint32  `json:"hopCount,omitempty"`
-	// Path is the relay chain (per-hop repeater hashes, hex) the last-heard advert
-	// traversed; PathNodes is Path resolved to full node public keys (parallel,
-	// "" where unresolved) — the drawable topology. Gateways are the observers.
-	Path      []string `json:"path,omitempty"`
-	PathNodes []string `json:"pathNodes,omitempty"`
-	Gateways  []string `json:"gateways,omitempty"`
+	PublicKey string   `json:"publicKey"`
+	NodeType  string   `json:"nodeType,omitempty"` // companion | repeater | room_server | sensor
+	Name      string   `json:"name,omitempty"`
+	SNR       float64  `json:"snr,omitempty"`
+	RSSI      int32    `json:"rssi,omitempty"`
+	HopCount  uint32   `json:"hopCount,omitempty"`
+	Gateways  []string `json:"gateways,omitempty"` // observers that heard the node
 }
 
 // setSeverity sets both Severity and the derived SeverityRank.

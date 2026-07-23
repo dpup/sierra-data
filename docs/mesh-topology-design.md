@@ -238,16 +238,22 @@ two layers (`mesh_node` + `mesh_link`), with a window control that re-queries.
 
 ## 8. Presence event — slimmed to identity
 
-`NetworkTelemetry` sheds `path` and `path_nodes` (reserve the field numbers;
-deprecate rather than renumber). The event keeps **identity only** — pubkey, role,
-name, location. `snr`/`rssi`/`gateways` also drop from the event so there is
-exactly one home for signal and **zero frozen fields**; a node popup that wants
-"last heard at SNR X" reads the latest observation. `mesh_node.geojson` keeps
-projecting nodes from events (unchanged).
+`NetworkTelemetry` sheds `path` and `path_nodes` (field numbers 4 and 7
+**reserved**, not renumbered) — the fields that were per-reception, not per-node,
+and that froze at the last revision. Topology is now the derived `mesh_link`
+read.
 
-This means what mints a presence revision is exactly a node's stable identity,
-role, name, location, or status — never signal. Same rule as today, minus the two
-path fields that never belonged.
+**Shipped decision:** the event *keeps* `snr`/`rssi`/`hopCount`/`gateways` as a
+"last-heard" convenience for the node card. They're still frozen-at-revision, but
+for a presence card (an INFO node dot) that mild staleness is acceptable, and
+keeping them avoids a new per-node latest-observation read just to fill a popup.
+Fully draining signal to observations (with a per-node latest read) stays a clean
+later option; it isn't worth it now. `mesh_node.geojson` keeps projecting nodes
+from events (unchanged, minus the two path fields).
+
+What mints a presence revision is still exactly a node's stable identity, role,
+name, location, or status — never signal. Same rule as today, minus the two path
+fields that never belonged.
 
 ## 9. Cadence-aware presence (the "chatty vs fixed expiration" fix)
 

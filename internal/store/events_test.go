@@ -488,7 +488,6 @@ func TestContentHashIgnoresNetworkTelemetry(t *testing.T) {
 	telem := node()
 	telem.GetNetwork().Telemetry = &gridv1.NetworkTelemetry{
 		Snr: -7.25, Rssi: -119, HopCount: 3,
-		Path:     []string{"C2", "E2"},
 		Gateways: []string{"ag loft rpt"},
 	}
 	assert.Equal(t, base, ContentHash(telem), "telemetry is excluded from the hash")
