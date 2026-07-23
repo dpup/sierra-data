@@ -59,13 +59,20 @@ const (
 
 // Advert is a decoded MeshCore ADVERT packet.
 type Advert struct {
-	PubKey         string    // full public key, lowercase hex — the node identity
-	Role           string    // companion | repeater | room_server | sensor | unknown(n)
-	Name           string    // advertised name, empty if the name flag was unset
-	HasLocation    bool      // the location flag was set
-	Lat, Lng       float64   // valid only when HasLocation
-	Timestamp      time.Time // sender-stamped advert time (UTC)
-	SignatureValid bool      // Ed25519 signature verified against pubkey ‖ ts ‖ appdata
+	PubKey      string    // full public key, lowercase hex — the node identity
+	Role        string    // companion | repeater | room_server | sensor | unknown(n)
+	Name        string    // advertised name, empty if the name flag was unset
+	HasLocation bool      // the location flag was set
+	Lat, Lng    float64   // valid only when HasLocation
+	Timestamp   time.Time // sender-stamped advert time (UTC) — node clocks are
+	// unreliable (frequently skewed), so this is diagnostic only; never use it for
+	// ordering or freshness (use our receive time).
+	// Path/HopCount are the transport relay path — the repeater-hash chain the
+	// advert traversed to reach the observing bridge. Set by DecodeFrame (frame
+	// level); DecodeAdvert alone leaves them empty (the payload carries no path).
+	Path           []string // per-hop repeater hashes, lowercase hex, sender→observer order
+	HopCount       int      // relay hop count (frame hash_count)
+	SignatureValid bool     // Ed25519 signature verified against pubkey ‖ ts ‖ appdata
 }
 
 // roleName maps the role nibble to a stable slug.

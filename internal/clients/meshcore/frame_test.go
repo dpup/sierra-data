@@ -71,6 +71,32 @@ func TestDecodeFrame_HopInvariant(t *testing.T) {
 	assert.Equal(t, names[0], names[2])
 }
 
+func TestDecodeFrame_RelayPath(t *testing.T) {
+	// 0 hops (heard directly): empty path. (frameJanet0 path_len 0x40)
+	adv, err := DecodeFrame(mustHex(t, frameJanet0))
+	require.NoError(t, err)
+	assert.Equal(t, 0, adv.HopCount)
+	assert.Empty(t, adv.Path)
+
+	// 1 hop, hash_size 2 (path_len 0x41): one 2-byte hash.
+	adv, err = DecodeFrame(mustHex(t, frameJanet1))
+	require.NoError(t, err)
+	assert.Equal(t, 1, adv.HopCount)
+	assert.Equal(t, []string{"abab"}, adv.Path)
+
+	// 2 hops (path_len 0x42): two 2-byte hashes.
+	adv, err = DecodeFrame(mustHex(t, frameJanet2))
+	require.NoError(t, err)
+	assert.Equal(t, 2, adv.HopCount)
+	assert.Equal(t, []string{"dc50", "6095"}, adv.Path)
+
+	// 3 hops (Gilroy, path_len 0x43): three 2-byte hashes — the relay chain.
+	adv, err = DecodeFrame(mustHex(t, frameGilroy))
+	require.NoError(t, err)
+	assert.Equal(t, 3, adv.HopCount)
+	assert.Equal(t, []string{"cd32", "ad77", "fa57"}, adv.Path)
+}
+
 func TestDecodeFrame_RejectsNonAdvert(t *testing.T) {
 	// header 0x08 → payload_type 2 (TXT_MSG), route 0. Not an advert.
 	_, err := DecodeFrame([]byte{0x08, 0x00, 0x01, 0x02})

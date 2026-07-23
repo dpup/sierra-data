@@ -1,6 +1,9 @@
 package meshcore
 
-import "fmt"
+import (
+	"encoding/hex"
+	"fmt"
+)
 
 // MeshCore over-the-air packet framing. The map-ecosystem bridges publish the
 // full received frame (not just the advert payload) in the envelope's `raw`
@@ -66,7 +69,20 @@ func DecodeFrame(raw []byte) (*Advert, error) {
 	if off+pathBytes > len(raw) {
 		return nil, fmt.Errorf("meshcore: frame path exceeds length (hashSize=%d hashCount=%d, have %d)", hashSize, hashCount, len(raw)-off)
 	}
+	path := raw[off : off+pathBytes]
 	off += pathBytes
 
-	return DecodeAdvert(raw[off:])
+	adv, err := DecodeAdvert(raw[off:])
+	if err != nil {
+		return nil, err
+	}
+	// Carry the relay path: hash_count hops of hash_size-byte repeater hashes,
+	// one hop hash per hex string, sender→observer order. This is the mesh
+	// topology the payload alone doesn't carry.
+	adv.HopCount = hashCount
+	adv.Path = make([]string, hashCount)
+	for i := 0; i < hashCount; i++ {
+		adv.Path[i] = hex.EncodeToString(path[i*hashSize : (i+1)*hashSize])
+	}
+	return adv, nil
 }

@@ -14,6 +14,29 @@ throughout; errors are gRPC-standard `{code, codeName, message, details}`). The
 by a snake_case `/v1` surface on 2026-07-05, which was in turn folded back onto the
 proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 
+## 2026-07-23
+
+### Changed — mesh-node relay path + trustworthy observed time (`NETWORK` layer)
+
+Enriches the MeshCore layer toward a real mesh-topology map. Additive on the
+events RPC; the geojson layer gains one field.
+
+- **Relay path now populated.** `telemetry.path` and `telemetry.hopCount` (on
+  `GET /api/v1/events?layer=network`) were always empty/0 — they were read from a
+  bridge field most bridges don't send. They now come from the over-the-air
+  frame's transport path: `path` is the relay chain as per-hop repeater hashes
+  (lowercase hex, sender→observer order), `hopCount` the number of hops. The
+  `gateways` (observers that heard the node) are unchanged.
+- **`mesh_node.geojson` gains `path`.** The map layer's `network` block now
+  carries `path` (same hex-hash relay chain) alongside the existing `hopCount`
+  (which now shows a real value instead of being omitted at 0).
+- **Observed time is our receive time, not the node's.** Mesh node clocks are
+  frequently badly skewed (we saw adverts stamped months in the future). A
+  network event's `observedAt` — which `/events` orders and `since`-filters on —
+  is now **when we received the advert**, never the node-reported timestamp. The
+  node's own stamp survives only as `telemetry.lastAdvertAt` (diagnostic). If you
+  sorted or filtered network events by `observedAt`, results are now correct.
+
 ## 2026-07-16
 
 ### Added — MeshCore mesh-node presence (`NETWORK` layer, `meshcore` source)

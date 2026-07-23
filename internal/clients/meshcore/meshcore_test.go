@@ -111,16 +111,19 @@ func TestDecodeAdvertTooShort(t *testing.T) {
 	require.Error(t, err)
 }
 
-// advertFrame wraps a bare advert payload in the minimal MeshCore transport
-// frame the bridges actually publish in `raw`: header (advert+flood) + a
-// zero-hop path_len. DecodeFrame strips this back off.
-func advertFrame(payload []byte) []byte {
-	frame := []byte{0x11, 0x00} // payload_type=ADVERT, route=FLOOD; path_len=0 (no hops)
+// advertFrame wraps a bare advert payload in the MeshCore transport frame the
+// bridges publish in `raw`: header (advert+flood) + path_len + path + payload.
+// Each hop is a 1-byte repeater hash (hash_size 1); no hops → a zero-hop frame.
+// DecodeFrame strips this back off (and recovers the path).
+func advertFrame(payload []byte, hops ...byte) []byte {
+	pathLen := byte(len(hops)) // hash_size 1 (top bits 0), hash_count = len(hops)
+	frame := append([]byte{0x11, pathLen}, hops...)
 	return append(frame, payload...)
 }
 
-// envelopeJSON wraps a payload the way the map-ecosystem bridges do.
-func envelopeJSON(t *testing.T, packetType int, payload []byte, snr float64, rssi int, origin, path string) []byte {
+// envelopeJSON wraps a payload the way the map-ecosystem bridges do; `hops` are
+// the frame's relay-path hash bytes (the authoritative path source now).
+func envelopeJSON(t *testing.T, packetType int, payload []byte, snr float64, rssi int, origin string, hops ...byte) []byte {
 	t.Helper()
 	m := map[string]any{
 		"origin":      origin,
@@ -128,11 +131,10 @@ func envelopeJSON(t *testing.T, packetType int, payload []byte, snr float64, rss
 		"timestamp":   "2026-07-15T10:00:00.000000",
 		"packet_type": fmt.Sprintf("%d", packetType), // bridges send numbers as strings
 		"route":       "F",
-		"raw":         hex.EncodeToString(advertFrame(payload)),
+		"raw":         hex.EncodeToString(advertFrame(payload, hops...)),
 		"SNR":         fmt.Sprintf("%g", snr),
 		"RSSI":        fmt.Sprintf("%d", rssi),
 		"hash":        "AC9D2DDDD8395712",
-		"path":        path,
 	}
 	b, err := json.Marshal(m)
 	require.NoError(t, err)
@@ -146,7 +148,7 @@ func TestRegistryIngestsAdvert(t *testing.T) {
 	payload := buildAdvert(t, priv, 2, &loc, "Murphys Ridge", 1_700_000_000)
 
 	r := NewRegistry(Config{})
-	r.ingestRaw(envelopeJSON(t, 4, payload, 4.5, -93, "ag loft rpt", "C2 -> E2"), "broker-a")
+	r.ingestRaw(envelopeJSON(t, 4, payload, 4.5, -93, "ag loft rpt", 0xc2, 0xe2), "broker-a")
 
 	nodes := r.Snapshot(0)
 	require.Len(t, nodes, 1)
@@ -157,7 +159,7 @@ func TestRegistryIngestsAdvert(t *testing.T) {
 	assert.InDelta(t, 4.5, n.SNR, 1e-9)
 	assert.EqualValues(t, -93, n.RSSI)
 	assert.EqualValues(t, 2, n.HopCount)
-	assert.Equal(t, []string{"C2", "E2"}, n.Path)
+	assert.Equal(t, []string{"c2", "e2"}, n.Path) // from the frame relay path, hex per hop
 	assert.Equal(t, []string{"ag loft rpt"}, n.Gateways)
 	assert.Equal(t, []string{"broker-a"}, n.Brokers)
 }
@@ -168,7 +170,7 @@ func TestRegistryIgnoresNonAdvert(t *testing.T) {
 	payload := buildAdvert(t, priv, 2, nil, "n", 1_700_000_000)
 
 	r := NewRegistry(Config{})
-	r.ingestRaw(envelopeJSON(t, 2, payload, 5, -90, "gw", ""), "broker-a") // TXT_MSG
+	r.ingestRaw(envelopeJSON(t, 2, payload, 5, -90, "gw"), "broker-a") // TXT_MSG
 	assert.Empty(t, r.Snapshot(0))
 }
 
@@ -179,8 +181,8 @@ func TestRegistryMergesAcrossBrokers(t *testing.T) {
 	payload := buildAdvert(t, priv, 2, &loc, "Ridge", 1_700_000_000)
 
 	r := NewRegistry(Config{})
-	r.ingestRaw(envelopeJSON(t, 4, payload, 4, -93, "gw-east", ""), "broker-a")
-	r.ingestRaw(envelopeJSON(t, 4, payload, 6, -80, "gw-west", ""), "broker-b")
+	r.ingestRaw(envelopeJSON(t, 4, payload, 4, -93, "gw-east"), "broker-a")
+	r.ingestRaw(envelopeJSON(t, 4, payload, 6, -80, "gw-west"), "broker-b")
 
 	nodes := r.Snapshot(0)
 	require.Len(t, nodes, 1, "same pubkey collapses to one node")
@@ -196,7 +198,7 @@ func TestRegistrySnapshotActiveWindow(t *testing.T) {
 	base := time.Date(2026, 7, 15, 10, 0, 0, 0, time.UTC)
 	r := NewRegistry(Config{})
 	r.now = func() time.Time { return base }
-	r.ingestRaw(envelopeJSON(t, 4, payload, 4, -93, "gw", ""), "broker-a")
+	r.ingestRaw(envelopeJSON(t, 4, payload, 4, -93, "gw"), "broker-a")
 
 	// 20m later, within a 30m window.
 	r.now = func() time.Time { return base.Add(20 * time.Minute) }
@@ -215,7 +217,7 @@ func TestRegistryPrunesStaleNodes(t *testing.T) {
 	base := time.Date(2026, 7, 15, 10, 0, 0, 0, time.UTC)
 	r := NewRegistry(Config{RetainFor: time.Hour})
 	r.now = func() time.Time { return base }
-	r.ingestRaw(envelopeJSON(t, 4, payload, 4, -93, "gw", ""), "broker-a")
+	r.ingestRaw(envelopeJSON(t, 4, payload, 4, -93, "gw"), "broker-a")
 	assert.Len(t, r.Snapshot(0), 1)
 
 	r.now = func() time.Time { return base.Add(2 * time.Hour) }

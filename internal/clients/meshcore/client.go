@@ -211,7 +211,6 @@ func (r *Registry) ingestPacket(env *packetEnvelope, brokerID string) {
 
 	now := r.now()
 	gw := firstNonEmpty(env.OriginID, env.Origin, brokerID)
-	path := parsePath(env.Path)
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -233,10 +232,13 @@ func (r *Registry) ingestPacket(env *packetEnvelope, brokerID string) {
 	}
 	e.SNR = env.SNR.float()
 	e.RSSI = int32(env.RSSI.int())
-	e.Path = path
-	e.HopCount = uint32(len(path))
-	e.LastAdvertAt = adv.Timestamp
-	e.LastHeardAt = now
+	// Relay path + hop count come from the over-the-air frame (adv), not the
+	// bridge's optional `path` envelope field — the frame is authoritative and
+	// present on every relayed advert.
+	e.Path = adv.Path
+	e.HopCount = uint32(adv.HopCount)
+	e.LastAdvertAt = adv.Timestamp // node-reported; unreliable clock, diagnostic only
+	e.LastHeardAt = now            // our receive time — the trustworthy clock
 	if gw != "" {
 		e.gateways[gw] = struct{}{}
 	}
@@ -365,22 +367,6 @@ func (f *flexFloat) UnmarshalJSON(b []byte) error {
 }
 
 // --- small helpers ---------------------------------------------------------
-
-// parsePath splits a bridge path like "C2 -> E2" into ["C2","E2"].
-func parsePath(s string) []string {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return nil
-	}
-	parts := strings.Split(s, "->")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		if p = strings.TrimSpace(p); p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
-}
 
 func sortedKeys(m map[string]struct{}) []string {
 	out := make([]string, 0, len(m))

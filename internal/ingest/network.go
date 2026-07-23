@@ -105,7 +105,12 @@ func (n *NetworkNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult,
 		ev.Geometry = GeometryFromPoint(lat, lng)
 		// observed_at is when this node's content was observed; it's zeroed in the
 		// content hash, so it only persists on an actual identity/location change.
-		ev.ObservedAt = tsProto(nd.LastAdvertAt)
+		// Mesh node clocks are frequently skewed (we've seen adverts stamped
+		// months in the future), so the event's observed time — which the feed
+		// orders and `since`-filters on — is OUR receive time, never the
+		// node-reported advert timestamp. The node's stamp is kept only in
+		// telemetry.lastAdvertAt (diagnostic; reveals the skew).
+		ev.ObservedAt = tsProto(nd.LastHeardAt)
 		ev.Provenance = n.meshProvenance(nd.Brokers)
 		ev.Detail = &gridv1.Event_Network{Network: &gridv1.NetworkDetail{
 			PublicKey: nd.PubKey,

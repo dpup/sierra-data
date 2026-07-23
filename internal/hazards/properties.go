@@ -116,13 +116,16 @@ type EvacuationProps struct {
 // NetworkProps is the mesh_node (MeshCore) kind block. The signal metrics are
 // the last-heard values (volatile; not part of the event's content hash).
 type NetworkProps struct {
-	PublicKey string   `json:"publicKey"`
-	NodeType  string   `json:"nodeType,omitempty"` // companion | repeater | room_server | sensor
-	Name      string   `json:"name,omitempty"`
-	SNR       float64  `json:"snr,omitempty"`
-	RSSI      int32    `json:"rssi,omitempty"`
-	HopCount  uint32   `json:"hopCount,omitempty"`
-	Gateways  []string `json:"gateways,omitempty"`
+	PublicKey string  `json:"publicKey"`
+	NodeType  string  `json:"nodeType,omitempty"` // companion | repeater | room_server | sensor
+	Name      string  `json:"name,omitempty"`
+	SNR       float64 `json:"snr,omitempty"`
+	RSSI      int32   `json:"rssi,omitempty"`
+	HopCount  uint32  `json:"hopCount,omitempty"`
+	// Path is the relay chain (per-hop repeater hashes, hex) the last-heard
+	// advert traversed — the mesh topology; Gateways are the observers that heard it.
+	Path     []string `json:"path,omitempty"`
+	Gateways []string `json:"gateways,omitempty"`
 }
 
 // setSeverity sets both Severity and the derived SeverityRank.
