@@ -1,0 +1,65 @@
+---
+import Shell from '../layouts/Shell.astro';
+import PageHead from '../components/PageHead.astro';
+---
+<Shell
+  current="mesh"
+  title="Mesh — relay topology · The Grid"
+  description="The MeshCore mesh as a topology map: every located node (colored by role) with the relay links reconstructed from each advert's path — the repeater chain it traversed, resolved to mapped nodes. Built from GET /api/v1/events?layer=network."
+>
+  <Fragment slot="head">
+    <link rel="stylesheet" href="/lib/maplibre-gl.css" />
+    <style is:global>
+      .mesh-topbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; margin: 20px 0 12px; }
+      #mesh-stats { font-size: 13.5px; }
+      #mesh-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-left: auto; font-size: 12.5px; color: var(--text-2); }
+      .mesh-leg { display: inline-flex; align-items: center; gap: 6px; }
+      .mesh-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; border: 1px solid #0b0f12; }
+      #mesh-canvas {
+        width: 100%; height: 620px; border: 1px solid var(--border); border-radius: var(--radius);
+        background: #0f1417; overflow: hidden;
+      }
+      /* popup, dev-console themed (mirrors the map page) */
+      .maplibregl-popup-content {
+        background: var(--bg-card); color: var(--text); border: 1px solid var(--border);
+        border-radius: var(--radius); font-family: var(--font-mono); font-size: 12.5px;
+        padding: 10px 12px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+      }
+      .maplibregl-popup-close-button { color: var(--text-faint); font-size: 17px; }
+      .map-popup .popup-headline { font-weight: 600; color: var(--text-hi); margin-bottom: 5px; }
+      .map-popup .popup-chips { margin-bottom: 6px; }
+      .mesh-roletag { font-weight: 600; }
+      .popup-details-dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 0; }
+      .popup-details-dl dt { color: var(--text-fainter); font-size: 11px; }
+      .popup-details-dl dd { margin: 0; color: var(--text); font-size: 12px; overflow-wrap: anywhere; }
+      @media (max-width: 720px) { #mesh-canvas { height: 66vh; } #mesh-legend { margin-left: 0; } }
+    </style>
+  </Fragment>
+
+  <PageHead kicker="Relay topology" title="Mesh">
+    <p class="lead">
+      The whole MeshCore mesh as a topology map — every located node from
+      <code class="inline">GET /api/v1/events?layer=network</code>, colored by role, with the
+      <strong>relay links</strong> reconstructed from each advert's path. A node's
+      <code class="inline">telemetry.path</code> is the repeater chain its advert traversed (public-key
+      prefix hashes); <code class="inline">pathNodes</code> resolves those to mapped nodes, and each
+      resolved hop becomes an edge. Coverage is deliberately wide (Bay Area → Sierra) so the
+      topology is legible. <strong class="accent-orange">A sparse map is not an all-clear — a node
+      is only drawn once we've heard it advertise a location.</strong>
+    </p>
+  </PageHead>
+
+  <div class="mesh-topbar">
+    <div id="mesh-stats" class="muted">Loading the mesh…</div>
+    <div id="mesh-legend"></div>
+  </div>
+
+  <div id="mesh-canvas"></div>
+  <div id="mesh-errors" class="section-gap"></div>
+
+  <script is:inline src="/lib/maplibre-gl.js"></script>
+  <script is:inline type="module">
+    import { initMeshPage } from '/assets/pages/mesh.js';
+    initMeshPage();
+  </script>
+</Shell>
