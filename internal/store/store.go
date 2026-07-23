@@ -38,11 +38,49 @@ var schemaV1 string
 // rows with a zero LastSeenAt so callers can fall back to observed/ingested.
 const migrationV2 = `ALTER TABLE events ADD COLUMN last_seen_at INTEGER NOT NULL DEFAULT 0`
 
+// migrationV3 adds the MeshCore relay-topology tables (docs/mesh-topology-design.md):
+//   - mesh_observations: the append-only reception firehose (Tier 0, short-lived) —
+//     one row per advert we heard, our-clock timestamp, signal + relay path.
+//   - mesh_link_rollup: the derived per-link-per-day topology history (Tier 1).
+//   - mesh_meta: KV for the compaction watermark.
+// These are pure DERIVED telemetry, NOT proto-blob-canonical system-of-record
+// data — plain columns are correct, and they re-accumulate from the live feed if
+// lost (unlike event history). Compaction rolls Tier 0 into Tier 1 and prunes.
+const migrationV3 = `
+CREATE TABLE mesh_observations (
+  id         INTEGER PRIMARY KEY,       -- rowid, monotonic
+  pubkey     TEXT NOT NULL,             -- advertising node
+  heard_at   INTEGER NOT NULL,          -- OUR receive time (unix sec) — the trustworthy clock
+  broker     TEXT NOT NULL DEFAULT '',  -- MQTT server heard on
+  gateway    TEXT NOT NULL DEFAULT '',  -- origin_id / gateway that reported it
+  snr        REAL,
+  rssi       INTEGER,
+  hop_count  INTEGER NOT NULL DEFAULT 0,
+  path       TEXT NOT NULL DEFAULT '',  -- comma-joined hop prefix-hashes (hex), as received
+  path_nodes TEXT NOT NULL DEFAULT ''   -- resolved pubkeys ('' where a hop was unresolved)
+);
+CREATE INDEX idx_mesh_obs_heard  ON mesh_observations(heard_at);
+CREATE INDEX idx_mesh_obs_pubkey ON mesh_observations(pubkey, heard_at);
+
+CREATE TABLE mesh_link_rollup (
+  a_pubkey     TEXT NOT NULL,           -- canonical a < b
+  b_pubkey     TEXT NOT NULL,
+  bucket       INTEGER NOT NULL,        -- heard_at truncated to UTC day
+  observations INTEGER NOT NULL DEFAULT 0,
+  best_snr     REAL,
+  first_seen   INTEGER NOT NULL,
+  last_seen    INTEGER NOT NULL,
+  PRIMARY KEY (a_pubkey, b_pubkey, bucket)
+);
+CREATE INDEX idx_mesh_link_bucket ON mesh_link_rollup(bucket);
+
+CREATE TABLE mesh_meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL);`
+
 // migrations[i] is the DDL for schema version i+1. Applied versions are
 // recorded in schema_migrations; already-applied versions are skipped, so
 // Open is idempotent across restarts and an existing dev DB at an older
 // version picks up only the missing migrations.
-var migrations = []string{schemaV1, migrationV2}
+var migrations = []string{schemaV1, migrationV2, migrationV3}
 
 // ErrNotFound is returned by point lookups (GetEvent, GetPlace) when no row
 // matches. Callers map it to a 404.

@@ -20,6 +20,7 @@ import (
 	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
 	"github.com/dpup/sierra-data/internal/config"
 	"github.com/dpup/sierra-data/internal/lib/geojson"
+	"github.com/dpup/sierra-data/internal/store"
 )
 
 // Normalizer is one poller's contract: fetch its upstream(s) and return the
@@ -60,6 +61,13 @@ type PollResult struct {
 	// an event missing from Events proves nothing. RecordAttempt still
 	// records the success — health and lifecycle are deliberately separate.
 	SweepSuppress []string
+	// MeshObservations is the mesh-node reception firehose drained from the push
+	// source's buffer this tick (nil for every other poller). Receptions are
+	// measurements, not events — the scheduler batch-inserts them into the
+	// append-only observation store (Tier 0) in the same writer context as the
+	// presence upserts, never touching the revisioned event path. See
+	// docs/mesh-topology-design.md.
+	MeshObservations []store.MeshObservation
 }
 
 // NewEvent builds an event with the envelope fields every normalizer sets.

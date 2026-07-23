@@ -306,10 +306,18 @@ func meshcoreClientConfig(cfg *config.Config) meshcore.Config {
 			QoS:      b.QoS,
 		})
 	}
+	// SpamFloor guards the relay-observation store from a fast-adverting node;
+	// default 30s when unset (0 in yaml is treated as the default, not "disable" —
+	// direct Config construction in tests can still disable it with a negative).
+	spamFloor := mc.SpamFloor
+	if spamFloor <= 0 {
+		spamFloor = 30 * time.Second
+	}
 	return meshcore.Config{
 		Brokers:               brokers,
 		RequireValidSignature: mc.RequireValidSignature,
 		RetainFor:             cfg.Grid.Sources["meshcore"].ExpireAfter,
+		SpamFloor:             spamFloor,
 	}
 }
 

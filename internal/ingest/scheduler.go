@@ -175,6 +175,18 @@ func (s *Scheduler) tick(ctx context.Context, spec PollerSpec) {
 		logging.Errorw(ctx, "Ingest tick: touch seen failed", "sources", sourceIDs, "error", err)
 	}
 
+	// Flush the mesh reception firehose (nil for every non-mesh poller). These are
+	// measurements written to the append-only observation store, outside the
+	// revisioned event path; a failure logs and continues — losing a tick of raw
+	// telemetry never blocks presence ingest. Reached only on a successful poll
+	// (a hard Poll error returned above), so our outage never writes stale rows.
+	if len(result.MeshObservations) > 0 {
+		if err := s.store.InsertMeshObservations(ctx, result.MeshObservations); err != nil {
+			logging.Errorw(ctx, "Ingest tick: mesh observation insert failed",
+				"count", len(result.MeshObservations), "error", err)
+		}
+	}
+
 	// (c) Disappearance sweep — ONLY for sources whose fetch succeeded this
 	// tick (PerSource errors mean that source's absence proves nothing) AND
 	// that the poller did not suppress. Suppression is life-safety honesty:

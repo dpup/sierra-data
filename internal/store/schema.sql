@@ -73,3 +73,9 @@ CREATE TABLE subscriptions (         -- phase 2, anticipated
   created_at   INTEGER NOT NULL,
   confirmed_at INTEGER
 );
+
+-- v3 (store.go migrationV3) adds the MeshCore relay-topology tables (derived
+-- telemetry, NOT proto-canonical — see docs/mesh-topology-design.md):
+--   mesh_observations  Tier 0 append-only reception firehose (short-lived)
+--   mesh_link_rollup   Tier 1 per-link-per-day topology history
+--   mesh_meta          KV for the compaction watermark

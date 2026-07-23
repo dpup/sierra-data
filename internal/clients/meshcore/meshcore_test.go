@@ -165,6 +165,56 @@ func TestRegistryIngestsAdvert(t *testing.T) {
 	assert.Equal(t, []string{"broker-a"}, n.Brokers)
 }
 
+func TestRegistryDrainObservations(t *testing.T) {
+	_, priv, err := ed25519.GenerateKey(nil)
+	require.NoError(t, err)
+	loc := [2]float64{38.1, -120.4}
+	payload := buildAdvert(t, priv, 2, &loc, "Ridge", 1_700_000_000)
+
+	r := NewRegistry(Config{})
+	// Same node heard on two gateways: presence collapses to one, but EVERY
+	// reception is captured for the topology firehose.
+	r.ingestRaw(envelopeJSON(t, 4, payload, 4.5, -93, "gw-east", 0xc2, 0xe2), "broker-a")
+	r.ingestRaw(envelopeJSON(t, 4, payload, 6, -80, "gw-west", 0xc2, 0xe2), "broker-b")
+
+	obs := r.DrainObservations()
+	require.Len(t, obs, 2, "every reception captured, not collapsed like presence")
+	assert.Equal(t, "broker-a", obs[0].Broker)
+	assert.Equal(t, "gw-east", obs[0].Gateway)
+	assert.InDelta(t, 4.5, obs[0].SNR, 1e-9)
+	assert.EqualValues(t, -93, obs[0].RSSI)
+	assert.EqualValues(t, 2, obs[0].HopCount)
+	assert.Equal(t, []string{"c2", "e2"}, obs[0].Path)
+	assert.Len(t, obs[0].PathNodes, 2) // resolved parallel to Path (no catalog match here)
+
+	assert.Empty(t, r.DrainObservations(), "drain clears the buffer")
+}
+
+func TestRegistrySpamFloor(t *testing.T) {
+	_, priv, err := ed25519.GenerateKey(nil)
+	require.NoError(t, err)
+	payload := buildAdvert(t, priv, 2, &[2]float64{38, -120}, "Ridge", 1_700_000_000)
+
+	base := time.Date(2026, 7, 15, 10, 0, 0, 0, time.UTC)
+	r := NewRegistry(Config{SpamFloor: time.Minute})
+	r.now = func() time.Time { return base }
+	r.ingestRaw(envelopeJSON(t, 4, payload, 4, -93, "gw"), "broker-a")
+
+	// 10s later, SAME node+gateway → dropped by the floor.
+	r.now = func() time.Time { return base.Add(10 * time.Second) }
+	r.ingestRaw(envelopeJSON(t, 4, payload, 4, -93, "gw"), "broker-a")
+
+	// Same instant, DIFFERENT gateway → kept (multi-gateway is resilience signal).
+	r.ingestRaw(envelopeJSON(t, 4, payload, 5, -80, "gw2"), "broker-a")
+
+	// 90s from the first advert → past the floor on the original gateway → kept.
+	r.now = func() time.Time { return base.Add(90 * time.Second) }
+	r.ingestRaw(envelopeJSON(t, 4, payload, 4, -93, "gw"), "broker-a")
+
+	obs := r.DrainObservations()
+	assert.Len(t, obs, 3, "floor drops only the same node+gateway within the window")
+}
+
 func TestResolvePath(t *testing.T) {
 	// abcdef00 and ab998877 share the 1-byte prefix "ab"; cd123456 is alone.
 	pubkeys := []string{"abcdef00", "ab998877", "cd123456"}

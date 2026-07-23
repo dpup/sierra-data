@@ -10,6 +10,7 @@ import (
 	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
 	"github.com/dpup/sierra-data/internal/clients/meshcore"
 	"github.com/dpup/sierra-data/internal/config"
+	"github.com/dpup/sierra-data/internal/store"
 )
 
 // MeshCore presence source constants. Nodes deep-link to the community map
@@ -33,6 +34,9 @@ type MeshRegistry interface {
 	Snapshot(activeWindow time.Duration) []meshcore.NodeState
 	// Health reports connected broker count and last-message time.
 	Health() (connected int, lastMsg time.Time)
+	// DrainObservations returns the receptions buffered since the last drain
+	// (cleared), for the append-only relay-observation store (Tier 0).
+	DrainObservations() []meshcore.Observation
 }
 
 // NetworkNormalizer projects MeshCore node presence into NETWORK events. It
@@ -128,7 +132,29 @@ func (n *NetworkNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult,
 		}}
 		events = append(events, ev)
 	}
-	return &PollResult{Events: events}, nil
+
+	// Drain the reception firehose accumulated since the last tick into the
+	// append-only observation store (Tier 0). Unlike the presence events above,
+	// observations are NOT geofenced here — a relay hop just outside the fence can
+	// still connect two in-region nodes, and the raw path is retained for
+	// re-resolution; the edge-build/projection step applies the located +
+	// in-region filter. These are measurements, not events.
+	obs := n.registry.DrainObservations()
+	storeObs := make([]store.MeshObservation, 0, len(obs))
+	for _, o := range obs {
+		storeObs = append(storeObs, store.MeshObservation{
+			PubKey:    o.PubKey,
+			HeardAt:   o.HeardAt,
+			Broker:    o.Broker,
+			Gateway:   o.Gateway,
+			SNR:       o.SNR,
+			RSSI:      o.RSSI,
+			HopCount:  o.HopCount,
+			Path:      o.Path,
+			PathNodes: o.PathNodes,
+		})
+	}
+	return &PollResult{Events: events, MeshObservations: storeObs}, nil
 }
 
 // meshProvenance attributes a node to the operator(s) of the MQTT broker(s) it

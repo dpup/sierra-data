@@ -48,7 +48,35 @@ type Config struct {
 	// pruned. Set to the source's expireAfter so the store's lifecycle, not the
 	// buffer, decides when a silent node is gone.
 	RetainFor time.Duration
+	// SpamFloor is the minimum gap between BUFFERED receptions from the same node
+	// on the same gateway — a guard so a pathological fast-adverting node can't
+	// flood the observation store. Multi-gateway copies of one advert (different
+	// gateway) are each kept: hearing a link on N gateways is real resilience
+	// signal. 0 disables the floor (keep every reception).
+	SpamFloor time.Duration
 }
+
+// Observation is one received advert, captured for the relay-topology store
+// (Tier 0). Unlike NodeState (the latest-per-node presence), every reception is
+// kept — the raw firehose the topology rollup is derived from. HeardAt is our
+// receive time. PathNodes is resolved at DrainObservations time against the
+// current node catalog (empty until then), parallel to Path.
+type Observation struct {
+	PubKey    string
+	HeardAt   time.Time
+	Broker    string
+	Gateway   string
+	SNR       float64
+	RSSI      int32
+	HopCount  uint32
+	Path      []string
+	PathNodes []string
+}
+
+// maxObsBuffer caps the reception buffer between drains. The scheduler drains
+// every tick (minutes), so this only trips on a pathological burst; past it the
+// oldest receptions are dropped to bound memory.
+const maxObsBuffer = 100000
 
 // NodeState is a snapshot of one mesh node's presence.
 type NodeState struct {
@@ -95,6 +123,11 @@ type Registry struct {
 	clients   []mqtt.Client
 	lastMsgAt time.Time
 
+	// obsBuf accumulates receptions between scheduler drains; obsGate tracks the
+	// last buffered time per (pubkey,gateway) for the SpamFloor. Both guarded by mu.
+	obsBuf  []Observation
+	obsGate map[string]time.Time
+
 	now func() time.Time // injectable clock for tests
 }
 
@@ -104,6 +137,7 @@ func NewRegistry(cfg Config) *Registry {
 		cfg:     cfg,
 		baseCtx: context.Background(),
 		nodes:   make(map[string]*nodeEntry),
+		obsGate: make(map[string]time.Time),
 		now:     time.Now,
 	}
 }
@@ -251,7 +285,63 @@ func (r *Registry) ingestPacket(env *packetEnvelope, brokerID string) {
 		e.brokers[brokerID] = struct{}{}
 	}
 
+	// Buffer this reception for the topology store (Tier 0) unless it trips the
+	// per-(node,gateway) spam floor. The rollup weight derives from these rows, so
+	// a capped spammer is correctly down-weighted too; PathNodes is left empty here
+	// and resolved at drain time against the full catalog.
+	if r.allowObservationLocked(adv.PubKey, gw, now) {
+		r.obsBuf = append(r.obsBuf, Observation{
+			PubKey:   adv.PubKey,
+			HeardAt:  now,
+			Broker:   brokerID,
+			Gateway:  gw,
+			SNR:      env.SNR.float(),
+			RSSI:     int32(env.RSSI.int()),
+			HopCount: uint32(adv.HopCount),
+			Path:     adv.Path,
+		})
+		if over := len(r.obsBuf) - maxObsBuffer; over > 0 {
+			// Drop oldest — the drain interval is short, so this only trips on a
+			// pathological burst; keep the most recent receptions.
+			r.obsBuf = append(r.obsBuf[:0], r.obsBuf[over:]...)
+		}
+	}
+
 	r.pruneLocked(now)
+}
+
+// allowObservationLocked reports whether a reception should be buffered, applying
+// the per-(pubkey,gateway) SpamFloor. Caller holds r.mu.
+func (r *Registry) allowObservationLocked(pubkey, gateway string, now time.Time) bool {
+	if r.cfg.SpamFloor <= 0 {
+		return true
+	}
+	key := pubkey + "\x00" + gateway
+	if last, ok := r.obsGate[key]; ok && now.Sub(last) < r.cfg.SpamFloor {
+		return false
+	}
+	r.obsGate[key] = now
+	return true
+}
+
+// DrainObservations returns the receptions buffered since the last drain and
+// clears the buffer. Called once per scheduler tick (single reader) alongside
+// Snapshot; the scheduler flushes the result to the append-only observation
+// store. Each observation's relay path is resolved to node pubkeys against the
+// CURRENT catalog — same unique-prefix-match rule as Snapshot.
+func (r *Registry) DrainObservations() []Observation {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.obsBuf) == 0 {
+		return nil
+	}
+	idx := r.prefixIndexLocked()
+	out := r.obsBuf
+	r.obsBuf = nil
+	for i := range out {
+		out[i].PathNodes = resolvePath(out[i].Path, idx)
+	}
+	return out
 }
 
 // Snapshot returns nodes heard within activeWindow (0 = no window). Gateways are
@@ -274,16 +364,8 @@ func (r *Registry) Snapshot(activeWindow time.Duration) []NodeState {
 	}
 
 	// Resolve each node's relay path (repeater pubkey-prefix hashes) to full node
-	// public keys for topology. Index every known node's pubkey prefixes; a hop
-	// resolves only on a UNIQUE prefix match (ambiguous or unknown → left empty).
-	idx := make(map[string][]string, len(r.nodes)*len(prefixLens))
-	for pk := range r.nodes {
-		for _, n := range prefixLens {
-			if len(pk) >= n {
-				idx[pk[:n]] = append(idx[pk[:n]], pk)
-			}
-		}
-	}
+	// public keys for topology, against the whole known catalog.
+	idx := r.prefixIndexLocked()
 	for i := range out {
 		out[i].PathNodes = resolvePath(out[i].Path, idx)
 	}
@@ -292,6 +374,21 @@ func (r *Registry) Snapshot(activeWindow time.Duration) []NodeState {
 
 // prefixLens are the hex lengths of the 1-, 2-, and 3-byte path-hash modes.
 var prefixLens = []int{2, 4, 6}
+
+// prefixIndexLocked maps every known node's pubkey prefixes (the 1/2/3-byte hex
+// lengths) to the pubkeys carrying them, for relay-hop resolution. A hop resolves
+// only on a UNIQUE match (see resolvePath). Caller holds r.mu.
+func (r *Registry) prefixIndexLocked() map[string][]string {
+	idx := make(map[string][]string, len(r.nodes)*len(prefixLens))
+	for pk := range r.nodes {
+		for _, n := range prefixLens {
+			if len(pk) >= n {
+				idx[pk[:n]] = append(idx[pk[:n]], pk)
+			}
+		}
+	}
+	return idx
+}
 
 // resolvePath maps each relay-path hop (a pubkey-prefix hash, hex) to the full
 // public key of the node it identifies, using a prefix→pubkeys index. A hop
@@ -344,6 +441,12 @@ func (r *Registry) pruneLocked(now time.Time) {
 	for k, e := range r.nodes {
 		if now.Sub(e.LastHeardAt) > r.cfg.RetainFor {
 			delete(r.nodes, k)
+		}
+	}
+	// Keep the spam-floor map from growing without bound as gateways come and go.
+	for k, t := range r.obsGate {
+		if now.Sub(t) > r.cfg.RetainFor {
+			delete(r.obsGate, k)
 		}
 	}
 }

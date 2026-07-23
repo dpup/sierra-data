@@ -62,6 +62,12 @@ type MeshcoreConfig struct {
 	Username string           `koanf:"username"`
 	Password string           `koanf:"password"`
 	Brokers  []MeshcoreBroker `koanf:"brokers"`
+	// SpamFloor is the minimum gap between persisted raw receptions from the SAME
+	// node on the SAME gateway — a guard so a pathological fast-adverting node
+	// can't flood the relay-observation store (Tier 0). Multi-gateway copies of
+	// one advert are unaffected (different gateways are kept — resilience signal).
+	// Defaults to 30s in cmd/server when unset. See docs/mesh-topology-design.md.
+	SpamFloor time.Duration `koanf:"spamFloor"`
 }
 
 // MeshcoreBroker is one MQTT endpoint. URL scheme selects transport
