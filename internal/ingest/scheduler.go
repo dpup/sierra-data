@@ -31,15 +31,26 @@ type PollerSpec struct {
 	Interval   time.Duration
 }
 
+// MeshMaintenance configures the periodic compaction + prune of the MeshCore
+// relay-observation store (docs/mesh-topology-design.md): Tier 0 receptions are
+// rolled into the Tier 1 per-link-per-day history, then aged rows are pruned. A
+// zero Interval disables the whole tick (meshcore off / no topology store).
+type MeshMaintenance struct {
+	Interval             time.Duration // compaction + prune cadence (0 disables)
+	ObservationRetention time.Duration // Tier 0 raw age cap
+	RollupRetention      time.Duration // Tier 1 rollup age cap
+}
+
 // SchedulerConfig wires a Scheduler. Tuning keys are source ids; missing
 // entries default to the resolve policy with no expire grace. A nil Enhancer
 // (or a zero BudgetPerTick) disables weather-alert enhancement.
 type SchedulerConfig struct {
-	Pollers       []PollerSpec
-	Tuning        map[string]config.SourceTuning
-	Enhancer      NWSEnhancer
-	EnhancerModel string // stamped into Enhancement.model on enhanced events
-	BudgetPerTick int    // max Enhance calls (attempts, not successes) per tick
+	Pollers         []PollerSpec
+	Tuning          map[string]config.SourceTuning
+	Enhancer        NWSEnhancer
+	EnhancerModel   string          // stamped into Enhancement.model on enhanced events
+	BudgetPerTick   int             // max Enhance calls (attempts, not successes) per tick
+	MeshMaintenance MeshMaintenance // relay-observation compaction + prune (Interval 0 = off)
 }
 
 // Scheduler drives the ingest pollers: one goroutine per PollerSpec, each
@@ -52,6 +63,7 @@ type Scheduler struct {
 	enhancer      NWSEnhancer
 	enhancerModel string
 	budgetPerTick int
+	meshMaint     MeshMaintenance
 	now           func() time.Time // injectable for lifecycle tests
 }
 
@@ -64,6 +76,7 @@ func NewScheduler(st *store.Store, cfg SchedulerConfig) *Scheduler {
 		enhancer:      cfg.Enhancer,
 		enhancerModel: cfg.EnhancerModel,
 		budgetPerTick: cfg.BudgetPerTick,
+		meshMaint:     cfg.MeshMaintenance,
 		now:           time.Now,
 	}
 }
@@ -75,7 +88,54 @@ func (s *Scheduler) Start(ctx context.Context) {
 	for _, spec := range s.pollers {
 		go s.run(ctx, spec)
 	}
-	logging.Infow(ctx, "Ingest scheduler started", "pollers", len(s.pollers))
+	if s.meshMaint.Interval > 0 {
+		go s.runMeshMaintenance(ctx)
+	}
+	logging.Infow(ctx, "Ingest scheduler started", "pollers", len(s.pollers),
+		"meshMaintenance", s.meshMaint.Interval > 0)
+}
+
+// runMeshMaintenance ticks the relay-observation compaction + prune on its own
+// interval. It shares the store's single writer (inTx takes the mutex), so it
+// serializes with the pollers rather than being a second writer. First run is
+// after one interval, keeping it off the boot burst.
+func (s *Scheduler) runMeshMaintenance(ctx context.Context) {
+	ticker := time.NewTicker(s.meshMaint.Interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.safeMeshMaintenance(ctx)
+		}
+	}
+}
+
+// safeMeshMaintenance runs one compaction + prune cycle, panic-isolated (a bad
+// cycle must not kill the goroutine) and fully log-and-continue: topology
+// maintenance is best-effort and never blocks presence ingest.
+func (s *Scheduler) safeMeshMaintenance(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			logging.Errorw(ctx, "Mesh maintenance: recovered from panic", "error", r)
+		}
+	}()
+	now := s.now()
+	compacted, err := s.store.CompactMeshObservations(ctx)
+	if err != nil {
+		logging.Errorw(ctx, "Mesh maintenance: compaction failed", "error", err)
+	}
+	prunedObs, err := s.store.PruneMeshObservations(ctx, now.Add(-s.meshMaint.ObservationRetention))
+	if err != nil {
+		logging.Errorw(ctx, "Mesh maintenance: pruning observations failed", "error", err)
+	}
+	prunedRollup, err := s.store.PruneMeshLinkRollup(ctx, now.Add(-s.meshMaint.RollupRetention))
+	if err != nil {
+		logging.Errorw(ctx, "Mesh maintenance: pruning rollup failed", "error", err)
+	}
+	logging.Infow(ctx, "Mesh maintenance tick", "compacted", compacted,
+		"prunedObservations", prunedObs, "prunedRollup", prunedRollup)
 }
 
 func (s *Scheduler) run(ctx context.Context, spec PollerSpec) {

@@ -3,9 +3,20 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
+)
+
+const (
+	// secondsPerDay truncates a heard_at unix time to its UTC day bucket.
+	secondsPerDay = 86400
+	// maxCompactBatch bounds one compaction transaction so a large backlog never
+	// holds the single writer for long; CompactMeshObservations loops over chunks.
+	maxCompactBatch = 5000
+	// watermarkKey is the mesh_meta row tracking the last observation id compacted.
+	watermarkKey = "compaction_watermark"
 )
 
 // MeshObservation is one received MeshCore advert — an immutable measurement,
@@ -68,4 +79,193 @@ func (s *Store) CountMeshObservations(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("store: counting mesh observations: %w", err)
 	}
 	return n, nil
+}
+
+// edgeKey identifies one undirected link on one day (canonical a < b).
+type edgeKey struct {
+	a, b   string
+	bucket int64
+}
+
+// edgeAgg accumulates a link's stats within a compaction chunk.
+type edgeAgg struct {
+	observations int
+	bestSNR      float64
+	firstSeen    int64
+	lastSeen     int64
+}
+
+// CompactMeshObservations folds new raw receptions (Tier 0) into the per-link-
+// per-day rollup (Tier 1). It reads observations past the stored watermark in
+// bounded chunks — each chunk its own transaction so a large backlog never holds
+// the single writer for long — explodes each [pubkey, ...pathNodes] chain into
+// canonical undirected edges (skipping unresolved hops), and upserts the day
+// bucket. Idempotent: the watermark advances only on commit, so a crash re-runs
+// the same chunk. Returns the number of observations processed.
+func (s *Store) CompactMeshObservations(ctx context.Context) (int, error) {
+	total := 0
+	for {
+		n, err := s.compactChunk(ctx)
+		if err != nil {
+			return total, err
+		}
+		total += n
+		if n < maxCompactBatch {
+			return total, nil
+		}
+	}
+}
+
+func (s *Store) compactChunk(ctx context.Context) (int, error) {
+	n := 0
+	err := s.inTx(ctx, func(tx *sql.Tx) error {
+		watermark, err := readWatermark(ctx, tx)
+		if err != nil {
+			return err
+		}
+		rows, err := tx.QueryContext(ctx, `
+			SELECT id, pubkey, heard_at, snr, path_nodes
+			FROM mesh_observations WHERE id > ? ORDER BY id LIMIT ?`,
+			watermark, maxCompactBatch)
+		if err != nil {
+			return fmt.Errorf("store: reading observations for compaction: %w", err)
+		}
+		agg := map[edgeKey]*edgeAgg{}
+		var maxID int64
+		for rows.Next() {
+			var id, heardAt int64
+			var pubkey, pathNodes string
+			var snr sql.NullFloat64
+			if err := rows.Scan(&id, &pubkey, &heardAt, &snr, &pathNodes); err != nil {
+				rows.Close()
+				return fmt.Errorf("store: scanning observation: %w", err)
+			}
+			maxID = id
+			n++
+			// The advert's relay chain is the origin then each resolved hop. SNR is
+			// our receiver's reading of the whole relayed packet, so attributing it
+			// to every edge is a coarse link-quality proxy (documented approximation).
+			bucket := heardAt - (heardAt % secondsPerDay)
+			chain := append([]string{pubkey}, splitList(pathNodes)...)
+			for i := 0; i+1 < len(chain); i++ {
+				a, b := chain[i], chain[i+1]
+				if a == "" || b == "" || a == b {
+					continue // unresolved hop or self-loop — no edge
+				}
+				if a > b {
+					a, b = b, a
+				}
+				k := edgeKey{a: a, b: b, bucket: bucket}
+				e := agg[k]
+				if e == nil {
+					e = &edgeAgg{bestSNR: snr.Float64, firstSeen: heardAt, lastSeen: heardAt}
+					agg[k] = e
+				}
+				e.observations++
+				if snr.Valid && snr.Float64 > e.bestSNR {
+					e.bestSNR = snr.Float64
+				}
+				if heardAt < e.firstSeen {
+					e.firstSeen = heardAt
+				}
+				if heardAt > e.lastSeen {
+					e.lastSeen = heardAt
+				}
+			}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return fmt.Errorf("store: iterating observations: %w", err)
+		}
+		rows.Close()
+		if n == 0 {
+			return nil // caught up
+		}
+		if len(agg) > 0 {
+			stmt, err := tx.PrepareContext(ctx, `
+				INSERT INTO mesh_link_rollup
+				  (a_pubkey, b_pubkey, bucket, observations, best_snr, first_seen, last_seen)
+				VALUES (?, ?, ?, ?, ?, ?, ?)
+				ON CONFLICT(a_pubkey, b_pubkey, bucket) DO UPDATE SET
+				  observations = observations + excluded.observations,
+				  best_snr     = max(best_snr, excluded.best_snr),
+				  first_seen   = min(first_seen, excluded.first_seen),
+				  last_seen    = max(last_seen, excluded.last_seen)`)
+			if err != nil {
+				return fmt.Errorf("store: prepare rollup upsert: %w", err)
+			}
+			defer stmt.Close()
+			for k, e := range agg {
+				if _, err := stmt.ExecContext(ctx,
+					k.a, k.b, k.bucket, e.observations, e.bestSNR, e.firstSeen, e.lastSeen,
+				); err != nil {
+					return fmt.Errorf("store: upsert rollup edge %s|%s: %w", k.a, k.b, err)
+				}
+			}
+		}
+		// Advance the watermark past every observation scanned (including ones with
+		// no resolvable edge — they must not be re-scanned each tick).
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO mesh_meta (key, value) VALUES (?, ?)
+			ON CONFLICT(key) DO UPDATE SET value = excluded.value`, watermarkKey, maxID); err != nil {
+			return fmt.Errorf("store: advancing compaction watermark: %w", err)
+		}
+		return nil
+	})
+	return n, err
+}
+
+// readWatermark returns the last compacted observation id (0 if none yet).
+func readWatermark(ctx context.Context, tx *sql.Tx) (int64, error) {
+	var v int64
+	err := tx.QueryRowContext(ctx, `SELECT value FROM mesh_meta WHERE key = ?`, watermarkKey).Scan(&v)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return 0, fmt.Errorf("store: reading compaction watermark: %w", err)
+	}
+	return v, nil
+}
+
+// PruneMeshObservations deletes raw receptions older than cutoff that have
+// already been compacted (id <= the watermark). Gating on the watermark ensures a
+// stalled compaction never drops un-rolled-up data. Returns rows removed.
+func (s *Store) PruneMeshObservations(ctx context.Context, cutoff time.Time) (int64, error) {
+	var affected int64
+	err := s.inTx(ctx, func(tx *sql.Tx) error {
+		watermark, err := readWatermark(ctx, tx)
+		if err != nil {
+			return err
+		}
+		res, err := tx.ExecContext(ctx,
+			`DELETE FROM mesh_observations WHERE heard_at < ? AND id <= ?`, cutoff.Unix(), watermark)
+		if err != nil {
+			return fmt.Errorf("store: pruning observations: %w", err)
+		}
+		affected, _ = res.RowsAffected()
+		return nil
+	})
+	return affected, err
+}
+
+// PruneMeshLinkRollup deletes rollup buckets older than cutoff (by day). Returns
+// rows removed.
+func (s *Store) PruneMeshLinkRollup(ctx context.Context, cutoff time.Time) (int64, error) {
+	var affected int64
+	err := s.inTx(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `DELETE FROM mesh_link_rollup WHERE bucket < ?`, cutoff.Unix())
+		if err != nil {
+			return fmt.Errorf("store: pruning rollup: %w", err)
+		}
+		affected, _ = res.RowsAffected()
+		return nil
+	})
+	return affected, err
+}
+
+// splitList splits a comma-joined hop list, mapping "" to nil (an empty
+// path_nodes yields no hops, not one blank hop).
+func splitList(s string) []string {
+	if s == "" {
+		return nil
+	}
+	return strings.Split(s, ",")
 }

@@ -370,6 +370,15 @@ grid:
     # the full over-the-air frame, stripped by meshcore.DecodeFrame, after which
     # real adverts verify. On by default so spoofed/corrupt adverts are dropped.
     requireValidSignature: true
+    # Relay-topology store (docs/mesh-topology-design.md). Every received advert is
+    # kept as an append-only observation (Tier 0); a maintenance tick folds those
+    # into a per-link-per-day rollup (Tier 1) and prunes. spamFloor caps the raw
+    # rate per (node, gateway) so a fast-adverting node can't flood Tier 0; multi-
+    # gateway copies of one advert are still kept (resilience signal).
+    spamFloor: "30s"
+    compactionInterval: "1h"
+    observationRetention: "48h" # Tier 0 raw: live-map freshness + hop re-resolution
+    rollupRetention: "17520h"   # Tier 1 link history: 2 years, cheap to keep
     # Geofence for node inclusion (a node's advertised location must fall inside a
     # box). Deliberately WIDER than the Ebbetts Pass hazard area: our Sierra
     # repeaters run in power-saver mode and are quiet, so we also track the busier

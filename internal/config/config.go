@@ -68,6 +68,17 @@ type MeshcoreConfig struct {
 	// one advert are unaffected (different gateways are kept — resilience signal).
 	// Defaults to 30s in cmd/server when unset. See docs/mesh-topology-design.md.
 	SpamFloor time.Duration `koanf:"spamFloor"`
+	// CompactionInterval is the cadence of the relay-topology maintenance tick
+	// (fold Tier 0 receptions into the Tier 1 per-link-per-day rollup, then prune).
+	// Defaults to 1h in cmd/server when unset.
+	CompactionInterval time.Duration `koanf:"compactionInterval"`
+	// ObservationRetention caps the age of Tier 0 raw receptions (they survive
+	// only long enough for live-map freshness + hop re-resolution once compacted).
+	// Defaults to 48h.
+	ObservationRetention time.Duration `koanf:"observationRetention"`
+	// RollupRetention caps the age of Tier 1 link history — the interesting,
+	// cheap-to-keep topology record. Defaults to 2 years.
+	RollupRetention time.Duration `koanf:"rollupRetention"`
 }
 
 // MeshcoreBroker is one MQTT endpoint. URL scheme selects transport

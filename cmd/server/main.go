@@ -157,11 +157,12 @@ func main() {
 	}
 
 	scheduler := ingest.NewScheduler(gridStore, ingest.SchedulerConfig{
-		Pollers:       pollers,
-		Tuning:        appConfig.Grid.Sources,
-		Enhancer:      nwsEnhancer,
-		EnhancerModel: model,
-		BudgetPerTick: appConfig.Grid.Enhancement.BudgetPerTick,
+		Pollers:         pollers,
+		Tuning:          appConfig.Grid.Sources,
+		Enhancer:        nwsEnhancer,
+		EnhancerModel:   model,
+		BudgetPerTick:   appConfig.Grid.Enhancement.BudgetPerTick,
+		MeshMaintenance: meshMaintenanceConfig(appConfig),
 	})
 	scheduler.Start(ctx)
 
@@ -318,6 +319,34 @@ func meshcoreClientConfig(cfg *config.Config) meshcore.Config {
 		RequireValidSignature: mc.RequireValidSignature,
 		RetainFor:             cfg.Grid.Sources["meshcore"].ExpireAfter,
 		SpamFloor:             spamFloor,
+	}
+}
+
+// meshMaintenanceConfig maps the grid.meshcore config onto the scheduler's
+// relay-topology maintenance tick (compaction + prune). A disabled meshcore
+// source returns a zero config (Interval 0), which turns the tick off entirely.
+// Cadence/retention default when unset (docs/mesh-topology-design.md §10).
+func meshMaintenanceConfig(cfg *config.Config) ingest.MeshMaintenance {
+	mc := cfg.Grid.Meshcore
+	if !mc.Enabled || len(mc.Brokers) == 0 {
+		return ingest.MeshMaintenance{}
+	}
+	interval := mc.CompactionInterval
+	if interval <= 0 {
+		interval = time.Hour
+	}
+	obsRetention := mc.ObservationRetention
+	if obsRetention <= 0 {
+		obsRetention = 48 * time.Hour
+	}
+	rollupRetention := mc.RollupRetention
+	if rollupRetention <= 0 {
+		rollupRetention = 2 * 365 * 24 * time.Hour
+	}
+	return ingest.MeshMaintenance{
+		Interval:             interval,
+		ObservationRetention: obsRetention,
+		RollupRetention:      rollupRetention,
 	}
 }
 
