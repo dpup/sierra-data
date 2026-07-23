@@ -1,10 +1,12 @@
 // pages/mesh.js — /mesh: the MeshCore relay-topology map.
 //
-// The whole mesh (not a single place): every node from GET /api/v1/events?layer=
-// network is a point, colored by role, and each node's resolved relay path
-// (telemetry.pathNodes — hops resolved to node pubkeys) becomes edges between
-// located nodes. Gateways/observers heard the node; the path is how the advert
-// relayed there. Everything is fetched same-origin through api.js.
+// Nodes come from GET /api/v1/events?layer=network (each located node is a point,
+// colored by role). Links come from GET /api/v1/mesh/links?window=… — the DURABLE
+// server-derived topology (an advert's relay path, rolled up over time), not a
+// client-side reconstruction. Each link fades by recency (lastSeen) and is
+// weighted by how often it was observed, so a shaky, intermittent mesh reads
+// honestly: a quiet-but-recent link is dim, not absent. A window selector trades
+// currency for history. Everything is fetched same-origin through api.js.
 
 import { get, ApiError } from '../api.js';
 import { BASE_STYLE } from '../basemap.js';
@@ -18,6 +20,15 @@ const ROLE = {
 const UNKNOWN = { color: '#8a8f94', label: 'Other', r: 3.5 };
 const DEFAULT_CENTER = [-121.7, 37.9]; // Bay Area → Sierra
 const DEFAULT_ZOOM = 6.5;
+
+// Window presets: the label trades currency (Live) for history (All). Values are
+// Go durations the /mesh/links endpoint parses + clamps.
+const WINDOWS = [
+  { key: '72h', label: 'Live · 72h' },
+  { key: '168h', label: '7 days' },
+  { key: '720h', label: '30 days' },
+  { key: '8760h', label: 'All' },
+];
 
 function el(tag, cls, text) {
   const n = document.createElement(tag);
@@ -35,11 +46,22 @@ function errorBlock(err) {
 }
 const roleOf = (r) => ROLE[r] || UNKNOWN;
 
+// Recency fade + weight, computed per link so MapLibre can key paint on them.
+const opacityForAge = (ageH) => Math.max(0.07, 0.6 * Math.exp(-ageH / 72));
+const widthForObs = (n) => Math.min(4, 0.6 + Math.log10(1 + (n || 0)));
+function relAge(ms) {
+  if (!isFinite(ms)) return 'unknown';
+  const h = ms / 3.6e6;
+  if (h < 1) return `${Math.round(h * 60)}m ago`;
+  if (h < 48) return `${Math.round(h)}h ago`;
+  return `${Math.round(h / 24)}d ago`;
+}
+
 export async function initMeshPage() {
   const errEl = document.getElementById('mesh-errors');
   const statEl = document.getElementById('mesh-stats');
 
-  // 1. fetch every network event (paginate)
+  // 1. fetch every network event (paginate) → located node index.
   let events = [];
   try {
     let tok = '';
@@ -55,65 +77,26 @@ export async function initMeshPage() {
     return;
   }
 
-  // 2. index nodes by pubkey (only located ones can be drawn)
   const nodes = new Map();
-  let hopsTotal = 0;
-  let hopsResolved = 0;
+  const roleCounts = {};
+  const nodeFeatures = [];
   for (const ev of events) {
     const n = ev.network || {};
     const pk = (n.publicKey || '').toLowerCase();
     const c = ev.geometry && ev.geometry.centroid;
-    const t = n.telemetry || {};
-    const pathNodes = (t.pathNodes || []).map((s) => (s || '').toLowerCase());
-    for (const hop of t.path || []) hopsTotal++;
-    for (const pn of pathNodes) if (pn) hopsResolved++;
     if (!pk || !c || c.lng == null || c.lat == null) continue;
-    nodes.set(pk, {
-      lng: c.lng, lat: c.lat, role: n.nodeType || 'other', name: n.name || '',
-      snr: t.snr, hop: t.hopCount || 0, gw: (t.gateways || []).length, pathNodes,
-    });
-  }
-
-  // 3. edges from resolved relay chains ([node, ...pathNodes]); break on gaps,
-  //    both ends must be located, undirected + deduped.
-  const seen = new Set();
-  const edgeFeatures = [];
-  for (const [pk, node] of nodes) {
-    const chain = [pk, ...node.pathNodes];
-    for (let i = 0; i < chain.length - 1; i++) {
-      const a = chain[i], b = chain[i + 1];
-      if (!a || !b || a === b || !nodes.has(a) || !nodes.has(b)) continue;
-      const key = a < b ? `${a}|${b}` : `${b}|${a}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      const na = nodes.get(a), nb = nodes.get(b);
-      edgeFeatures.push({
-        type: 'Feature',
-        geometry: { type: 'LineString', coordinates: [[na.lng, na.lat], [nb.lng, nb.lat]] },
-        properties: {},
-      });
-    }
-  }
-
-  // 4. node features
-  const nodeFeatures = [];
-  const roleCounts = {};
-  for (const [pk, node] of nodes) {
-    roleCounts[node.role] = (roleCounts[node.role] || 0) + 1;
+    const t = n.telemetry || {};
+    const role = n.nodeType || 'other';
+    nodes.set(pk, { lng: c.lng, lat: c.lat, role, name: n.name || '', snr: t.snr, hop: t.hopCount || 0, gw: (t.gateways || []).length });
+    roleCounts[role] = (roleCounts[role] || 0) + 1;
     nodeFeatures.push({
       type: 'Feature',
-      geometry: { type: 'Point', coordinates: [node.lng, node.lat] },
-      properties: { pubkey: pk, role: node.role, name: node.name, snr: node.snr, hop: node.hop, gw: node.gw },
+      geometry: { type: 'Point', coordinates: [c.lng, c.lat] },
+      properties: { pubkey: pk, role, name: n.name || '', snr: t.snr, hop: t.hopCount || 0, gw: (t.gateways || []).length },
     });
   }
 
-  // 5. stats line + legend
-  statEl.textContent = '';
-  const pct = hopsTotal ? Math.round((100 * hopsResolved) / hopsTotal) : 0;
-  statEl.append(
-    el('strong', '', `${nodes.size} located nodes`),
-    el('span', 'muted', ` · ${edgeFeatures.length} relay links · ${pct}% of relay hops resolved to a mapped node`)
-  );
+  // 2. legend + window selector.
   const legend = document.getElementById('mesh-legend');
   for (const key of ['repeater', 'room_server', 'companion', 'sensor']) {
     if (!roleCounts[key]) continue;
@@ -124,15 +107,68 @@ export async function initMeshPage() {
     legend.append(row);
   }
 
-  // 6. map
+  let currentWindow = WINDOWS[0].key;
+  const winEl = document.getElementById('mesh-window');
+  const winButtons = [];
+  for (const wdef of WINDOWS) {
+    const b = el('button', 'mesh-win-btn', wdef.label);
+    if (wdef.key === currentWindow) b.classList.add('active');
+    b.addEventListener('click', () => {
+      if (currentWindow === wdef.key) return;
+      currentWindow = wdef.key;
+      for (const wb of winButtons) wb.el.classList.toggle('active', wb.key === wdef.key);
+      loadLinks();
+    });
+    winButtons.push({ key: wdef.key, el: b });
+    winEl.append(b);
+  }
+
+  // 3. map + layers.
   const map = new maplibregl.Map({ container: 'mesh-canvas', style: BASE_STYLE, center: DEFAULT_CENTER, zoom: DEFAULT_ZOOM });
   map.addControl(new maplibregl.NavigationControl(), 'top-right');
 
+  async function loadLinks() {
+    let links = [];
+    try {
+      const d = await get('/api/v1/mesh/links', { window: currentWindow });
+      links = Array.isArray(d.links) ? d.links : [];
+    } catch (err) {
+      errEl.replaceChildren(errorBlock(err));
+      return;
+    }
+    errEl.replaceChildren();
+    const now = Date.now();
+    const feats = [];
+    for (const lk of links) {
+      const a = nodes.get((lk.a || '').toLowerCase());
+      const b = nodes.get((lk.b || '').toLowerCase());
+      if (!a || !b) continue; // an endpoint we haven't located — can't draw it
+      const ageH = lk.lastSeen ? (now - Date.parse(lk.lastSeen)) / 3.6e6 : 1e9;
+      feats.push({
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: [[a.lng, a.lat], [b.lng, b.lat]] },
+        properties: {
+          a: lk.a, b: lk.b, observations: lk.observations, daysActive: lk.daysActive,
+          lastSeen: lk.lastSeen, bestSnr: lk.bestSnr,
+          op: opacityForAge(ageH), w: widthForObs(lk.observations),
+        },
+      });
+    }
+    const src = map.getSource('mesh-edges');
+    if (src) src.setData({ type: 'FeatureCollection', features: feats });
+
+    statEl.replaceChildren(
+      el('strong', '', `${nodes.size} located nodes`),
+      el('span', 'muted', ` · ${feats.length} of ${links.length} relay links drawn · faded by recency, weighted by traffic`)
+    );
+  }
+
   map.on('load', () => {
-    map.addSource('mesh-edges', { type: 'geojson', data: { type: 'FeatureCollection', features: edgeFeatures } });
+    map.addSource('mesh-edges', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
     map.addLayer({
       id: 'mesh-edges', type: 'line', source: 'mesh-edges',
-      paint: { 'line-color': '#6aa9c9', 'line-width': 1, 'line-opacity': 0.35 },
+      layout: { 'line-cap': 'round' },
+      paint: { 'line-color': '#6aa9c9', 'line-width': ['get', 'w'], 'line-opacity': ['get', 'op'] },
     });
 
     map.addSource('mesh-nodes', { type: 'geojson', data: { type: 'FeatureCollection', features: nodeFeatures } });
@@ -148,13 +184,16 @@ export async function initMeshPage() {
     });
 
     if (nodeFeatures.length) {
-      const b = new maplibregl.LngLatBounds();
-      for (const f of nodeFeatures) b.extend(f.geometry.coordinates);
-      map.fitBounds(b, { padding: 44, maxZoom: 11 });
+      const bnds = new maplibregl.LngLatBounds();
+      for (const f of nodeFeatures) bnds.extend(f.geometry.coordinates);
+      map.fitBounds(bnds, { padding: 44, maxZoom: 11 });
     }
 
     map.on('mouseenter', 'mesh-nodes', () => (map.getCanvas().style.cursor = 'pointer'));
     map.on('mouseleave', 'mesh-nodes', () => (map.getCanvas().style.cursor = ''));
+    map.on('mouseenter', 'mesh-edges', () => (map.getCanvas().style.cursor = 'pointer'));
+    map.on('mouseleave', 'mesh-edges', () => (map.getCanvas().style.cursor = ''));
+
     map.on('click', 'mesh-nodes', (e) => {
       const p = (e.features && e.features[0] && e.features[0].properties) || {};
       const box = el('div', 'map-popup');
@@ -175,5 +214,23 @@ export async function initMeshPage() {
       box.append(dl);
       new maplibregl.Popup({ maxWidth: '260px' }).setLngLat(e.lngLat).setDOMContent(box).addTo(map);
     });
+
+    map.on('click', 'mesh-edges', (e) => {
+      const p = (e.features && e.features[0] && e.features[0].properties) || {};
+      const box = el('div', 'map-popup');
+      box.append(el('div', 'popup-headline', 'Relay link'));
+      const dl = el('dl', 'popup-details-dl');
+      const add = (k, v) => { if (v !== undefined && v !== null && v !== '') { dl.append(el('dt', '', k), el('dd', '', String(v))); } };
+      add('a', (p.a || '').slice(0, 12) + '…');
+      add('b', (p.b || '').slice(0, 12) + '…');
+      add('observations', p.observations);
+      add('days active', p.daysActive);
+      if (p.bestSnr !== undefined && p.bestSnr !== 0) add('best SNR', p.bestSnr + ' dB');
+      add('last seen', relAge(Date.now() - Date.parse(p.lastSeen)));
+      box.append(dl);
+      new maplibregl.Popup({ maxWidth: '260px' }).setLngLat(e.lngLat).setDOMContent(box).addTo(map);
+    });
+
+    loadLinks();
   });
 }

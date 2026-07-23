@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
@@ -146,15 +147,7 @@ func (s *Store) compactChunk(ctx context.Context) (int, error) {
 			// our receiver's reading of the whole relayed packet, so attributing it
 			// to every edge is a coarse link-quality proxy (documented approximation).
 			bucket := heardAt - (heardAt % secondsPerDay)
-			chain := append([]string{pubkey}, splitList(pathNodes)...)
-			for i := 0; i+1 < len(chain); i++ {
-				a, b := chain[i], chain[i+1]
-				if a == "" || b == "" || a == b {
-					continue // unresolved hop or self-loop — no edge
-				}
-				if a > b {
-					a, b = b, a
-				}
+			eachEdge(pubkey, splitList(pathNodes), func(a, b string) {
 				k := edgeKey{a: a, b: b, bucket: bucket}
 				e := agg[k]
 				if e == nil {
@@ -171,7 +164,7 @@ func (s *Store) compactChunk(ctx context.Context) (int, error) {
 				if heardAt > e.lastSeen {
 					e.lastSeen = heardAt
 				}
-			}
+			})
 		}
 		if err := rows.Err(); err != nil {
 			rows.Close()
@@ -268,4 +261,156 @@ func splitList(s string) []string {
 		return nil
 	}
 	return strings.Split(s, ",")
+}
+
+// eachEdge calls fn for every canonical undirected edge in an advert's relay
+// chain ([pubkey, ...pathNodes]) — consecutive pairs, skipping an unresolved hop
+// ("") or a self-loop. Shared by compaction and the windowed link read so both
+// derive topology identically.
+func eachEdge(pubkey string, pathNodes []string, fn func(a, b string)) {
+	prev := pubkey
+	for _, hop := range pathNodes {
+		a, b := prev, hop
+		prev = hop
+		if a == "" || b == "" || a == b {
+			continue
+		}
+		if a > b {
+			a, b = b, a
+		}
+		fn(a, b)
+	}
+}
+
+// MeshLink is one undirected relay link aggregated over a query window — the
+// derived topology a mesh map draws. LastSeen drives the recency fade;
+// DaysActive (distinct UTC days the link appeared) distinguishes a reliable
+// backbone link from a one-off long-haul shot on a shaky network.
+type MeshLink struct {
+	A, B         string
+	Observations int
+	BestSNR      float64
+	FirstSeen    time.Time
+	LastSeen     time.Time
+	DaysActive   int
+}
+
+type linkKey struct{ a, b string }
+
+type linkAcc struct {
+	observations int
+	bestSNR      float64
+	haveSNR      bool
+	firstSeen    int64
+	lastSeen     int64
+	days         map[int64]struct{}
+}
+
+// MeshLinks returns links observed since `since`, merging the Tier 1 rollup
+// (compacted per-day history) with the un-compacted Tier 0 raw tail (recent
+// freshness newer than the compaction watermark). Each link aggregates the
+// observation count, peak SNR, first/last seen, and daysActive (distinct UTC
+// days it appeared). Sorted strongest-first (observation count) for a stable,
+// legible draw order.
+func (s *Store) MeshLinks(ctx context.Context, since time.Time) ([]MeshLink, error) {
+	acc := map[linkKey]*linkAcc{}
+	get := func(a, b string) *linkAcc {
+		k := linkKey{a, b}
+		e := acc[k]
+		if e == nil {
+			e = &linkAcc{firstSeen: 1 << 62, days: map[int64]struct{}{}}
+			acc[k] = e
+		}
+		return e
+	}
+	note := func(e *linkAcc, count int, snr sql.NullFloat64, first, last, day int64) {
+		e.observations += count
+		if snr.Valid && (!e.haveSNR || snr.Float64 > e.bestSNR) {
+			e.bestSNR = snr.Float64
+			e.haveSNR = true
+		}
+		if first < e.firstSeen {
+			e.firstSeen = first
+		}
+		if last > e.lastSeen {
+			e.lastSeen = last
+		}
+		e.days[day] = struct{}{}
+	}
+
+	// (1) Rollup history — one row per (edge, day); observations already summed.
+	sinceBucket := since.Unix() - since.Unix()%secondsPerDay
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT a_pubkey, b_pubkey, bucket, observations, best_snr, first_seen, last_seen
+		FROM mesh_link_rollup WHERE bucket >= ?`, sinceBucket)
+	if err != nil {
+		return nil, fmt.Errorf("store: querying link rollup: %w", err)
+	}
+	for rows.Next() {
+		var a, b string
+		var bucket, obs, first, last int64
+		var snr sql.NullFloat64
+		if err := rows.Scan(&a, &b, &bucket, &obs, &snr, &first, &last); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("store: scanning link rollup: %w", err)
+		}
+		// A rollup row is a whole day of this edge: add its summed count, mark the day.
+		note(get(a, b), int(obs), snr, first, last, bucket)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, fmt.Errorf("store: iterating link rollup: %w", err)
+	}
+	rows.Close()
+
+	// (2) Un-compacted tail — raw receptions past the watermark, within the window.
+	var watermark int64
+	if err := s.db.QueryRowContext(ctx, `SELECT value FROM mesh_meta WHERE key = ?`, watermarkKey).
+		Scan(&watermark); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("store: reading watermark: %w", err)
+	}
+	rows2, err := s.db.QueryContext(ctx, `
+		SELECT pubkey, heard_at, snr, path_nodes FROM mesh_observations
+		WHERE id > ? AND heard_at >= ?`, watermark, since.Unix())
+	if err != nil {
+		return nil, fmt.Errorf("store: querying observation tail: %w", err)
+	}
+	for rows2.Next() {
+		var pubkey, pathNodes string
+		var heard int64
+		var snr sql.NullFloat64
+		if err := rows2.Scan(&pubkey, &heard, &snr, &pathNodes); err != nil {
+			rows2.Close()
+			return nil, fmt.Errorf("store: scanning observation tail: %w", err)
+		}
+		day := heard - heard%secondsPerDay
+		eachEdge(pubkey, splitList(pathNodes), func(a, b string) {
+			note(get(a, b), 1, snr, heard, heard, day)
+		})
+	}
+	if err := rows2.Err(); err != nil {
+		rows2.Close()
+		return nil, fmt.Errorf("store: iterating observation tail: %w", err)
+	}
+	rows2.Close()
+
+	out := make([]MeshLink, 0, len(acc))
+	for k, e := range acc {
+		out = append(out, MeshLink{
+			A: k.a, B: k.b, Observations: e.observations, BestSNR: e.bestSNR,
+			FirstSeen:  time.Unix(e.firstSeen, 0).UTC(),
+			LastSeen:   time.Unix(e.lastSeen, 0).UTC(),
+			DaysActive: len(e.days),
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Observations != out[j].Observations {
+			return out[i].Observations > out[j].Observations
+		}
+		if out[i].A != out[j].A {
+			return out[i].A < out[j].A
+		}
+		return out[i].B < out[j].B
+	})
+	return out, nil
 }

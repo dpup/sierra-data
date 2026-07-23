@@ -12,6 +12,14 @@ import PageHead from '../components/PageHead.astro';
     <style is:global>
       .mesh-topbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; margin: 20px 0 12px; }
       #mesh-stats { font-size: 13.5px; }
+      #mesh-window { display: inline-flex; gap: 4px; }
+      .mesh-win-btn {
+        font: inherit; font-size: 12px; padding: 3px 9px; cursor: pointer;
+        color: var(--text-2); background: var(--bg-card); border: 1px solid var(--border);
+        border-radius: 999px;
+      }
+      .mesh-win-btn:hover { color: var(--text); border-color: var(--text-faint); }
+      .mesh-win-btn.active { color: var(--text-hi); border-color: var(--accent-cyan, #6aa9c9); background: rgba(106, 169, 201, 0.14); }
       #mesh-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-left: auto; font-size: 12.5px; color: var(--text-2); }
       .mesh-leg { display: inline-flex; align-items: center; gap: 6px; }
       .mesh-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; border: 1px solid #0b0f12; }
@@ -40,17 +48,19 @@ import PageHead from '../components/PageHead.astro';
     <p class="lead">
       The whole MeshCore mesh as a topology map — every located node from
       <code class="inline">GET /api/v1/events?layer=network</code>, colored by role, with the
-      <strong>relay links</strong> reconstructed from each advert's path. A node's
-      <code class="inline">telemetry.path</code> is the repeater chain its advert traversed (public-key
-      prefix hashes); <code class="inline">pathNodes</code> resolves those to mapped nodes, and each
-      resolved hop becomes an edge. Coverage is deliberately wide (Bay Area → Sierra) so the
-      topology is legible. <strong class="accent-orange">A sparse map is not an all-clear — a node
-      is only drawn once we've heard it advertise a location.</strong>
+      <strong>relay links</strong> from
+      <code class="inline">GET /api/v1/mesh/links</code>: the server rolls up each advert's relay
+      path over time into a durable, weighted edge list. Links <strong>fade by recency</strong>
+      (a quiet-but-recent link is dim, not gone) and thicken with traffic; the window control trades
+      currency for history, so an intermittent, shaky mesh reads honestly. Coverage is deliberately
+      wide (Bay Area → Sierra). <strong class="accent-orange">A sparse map is not an all-clear — a
+      node is only drawn once we've heard it advertise a location.</strong>
     </p>
   </PageHead>
 
   <div class="mesh-topbar">
     <div id="mesh-stats" class="muted">Loading the mesh…</div>
+    <div id="mesh-window" aria-label="Time window"></div>
     <div id="mesh-legend"></div>
   </div>
 

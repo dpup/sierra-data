@@ -143,3 +143,42 @@ func TestPruneMesh(t *testing.T) {
 	assert.EqualValues(t, 1, dropped)
 	assert.Empty(t, readRollup(t, s))
 }
+
+func TestMeshLinks(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	day1 := time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC)
+	day2 := day1.Add(24 * time.Hour)
+
+	// day1 reception → compacted into the rollup.
+	require.NoError(t, s.InsertMeshObservations(ctx, []MeshObservation{
+		{PubKey: "aa", HeardAt: day1, SNR: -5, PathNodes: []string{"bb"}},
+	}))
+	_, err := s.CompactMeshObservations(ctx)
+	require.NoError(t, err)
+
+	// day2 reception → left in the un-compacted tail.
+	require.NoError(t, s.InsertMeshObservations(ctx, []MeshObservation{
+		{PubKey: "aa", HeardAt: day2, SNR: -3, PathNodes: []string{"bb"}},
+	}))
+
+	// Window covering both days: rollup history + raw tail merge into one link.
+	links, err := s.MeshLinks(ctx, day1.Add(-time.Hour))
+	require.NoError(t, err)
+	require.Len(t, links, 1)
+	l := links[0]
+	assert.Equal(t, "aa", l.A)
+	assert.Equal(t, "bb", l.B)
+	assert.Equal(t, 2, l.Observations, "rollup + tail counted")
+	assert.Equal(t, 2, l.DaysActive, "two distinct days")
+	assert.InDelta(t, -3, l.BestSNR, 1e-9, "peak SNR across both")
+	assert.Equal(t, day1.Unix(), l.FirstSeen.Unix())
+	assert.Equal(t, day2.Unix(), l.LastSeen.Unix())
+
+	// Narrower window drops the compacted day-1 bucket, leaving only the tail.
+	links, err = s.MeshLinks(ctx, day2.Add(-time.Hour))
+	require.NoError(t, err)
+	require.Len(t, links, 1)
+	assert.Equal(t, 1, links[0].Observations)
+	assert.Equal(t, 1, links[0].DaysActive)
+}

@@ -31,9 +31,17 @@ import (
 // after registering the GridService handler. (The place summary is now the
 // GetPlaceSummary RPC.)
 func (g *GridServer) RegisterGatewayRoutes(mux *runtime.ServeMux) error {
-	return mux.HandlePath("GET", "/api/v1/places/{place}/map/{layer}",
+	if err := mux.HandlePath("GET", "/api/v1/places/{place}/map/{layer}",
 		func(w http.ResponseWriter, r *http.Request, pp map[string]string) {
 			g.svc.serveMapLayer(w, r, pp["place"], strings.TrimSuffix(pp["layer"], ".geojson"))
+		}); err != nil {
+		return err
+	}
+	// The MeshCore relay topology — a global, windowed weighted edge list derived
+	// from the observation rollup (not place-scoped: a mesh spans places).
+	return mux.HandlePath("GET", "/api/v1/mesh/links",
+		func(w http.ResponseWriter, r *http.Request, _ map[string]string) {
+			g.svc.serveMeshLinks(w, r)
 		})
 }
 
