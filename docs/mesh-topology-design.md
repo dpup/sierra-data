@@ -303,9 +303,18 @@ Registry refinement, testable in isolation.
 Two edges handled explicitly:
 
 - **One-shot transients** (wide-geofence drive-throughs): a node with a single
-  advert has no interval yet → **moderate default window**, so a one-shot
-  evaporates in a few hours instead of squatting for days. The
-  "prune chatty/transient nodes" behavior falls out of the same rule.
+  advert has no interval yet → the **`graceFloor` window**, so a one-shot
+  evaporates instead of squatting for days. The "prune chatty/transient nodes"
+  behavior falls out of the same rule.
+  - **Sizing `graceFloor` for restarts (tuned 2026-07-24 → 14h).** The registry
+    restarts empty on every deploy, so *all* nodes momentarily read as
+    unknown-cadence and fall back to `graceFloor`. A 16h live watch showed a 3h
+    floor let a redeploy ~halve the live node count — slow repeaters heard only
+    once since the restart were reaped before their next (~12h) advert. So
+    `graceFloor` is set just over one backbone cycle (**14h**): a single advert
+    carries a slow node to its next one, cadence then widens the window, and a
+    restart barely dents presence. The trade — a genuine transient lingers 14h,
+    not 3h — is negligible on a repeater-dominated mesh.
 - **Brand-new slow node, first gap:** heard once, dropped after the default
   window, EXPIRED; re-adverts at 12h → reappears (one resolve→reappear revision).
   It flaps exactly once, on its first gap, before we have learned it is slow;
@@ -334,7 +343,7 @@ grid:
     rollupRetention: 17520h     # Tier 1, 2 years
     # cadence-aware presence
     cadenceK: 3                 # keep a node present within k × its measured interval
-    graceFloor: 3h              # min window (one-shot / unknown cadence)
+    graceFloor: 14h             # min window (one-shot / unknown cadence / post-restart)
     graceCeil: 72h              # max window; also the registry's in-memory retention
 ```
 

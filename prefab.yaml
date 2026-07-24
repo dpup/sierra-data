@@ -375,12 +375,21 @@ grid:
     requireValidSignature: true
     # Cadence-aware presence (docs/mesh-topology-design.md §9). A node stays in the
     # poll snapshot for cadenceK × its own measured inter-advert interval, clamped
-    # to [graceFloor, graceCeil]. A node with no cadence yet (one-shot / drive-
-    # through transient) gets graceFloor and evaporates fast; a slow backbone
-    # repeater (adverts every ~12h) is protected in proportion to its rhythm. The
-    # registry holds a node in memory for graceCeil. Defaults k=3 / 3h / 72h.
+    # to [graceFloor, graceCeil]. A node with no cadence yet — a one-shot transient
+    # OR any node right after a deploy (the registry restarts empty, so cadence is
+    # re-learned from scratch) — gets graceFloor.
+    #
+    # graceFloor is 14h, just over one backbone-repeater cycle (~12h). This is the
+    # key tuning for THIS mesh: a 16h live watch (2026-07-24) showed a redeploy
+    # ~halves the live node count, because a slow repeater heard only once since
+    # the restart was reaped before its next advert. A 14h floor lets a single
+    # advert carry a slow node to its next one (then cadence widens the window to
+    # ~3×12h), so restarts barely dent presence. The cost — a genuine drive-through
+    # transient lingers 14h instead of 3h — is negligible on a repeater-dominated
+    # mesh (recency-fade + daysActive de-emphasise one-offs anyway). The registry
+    # holds a node in memory for graceCeil.
     cadenceK: 3
-    graceFloor: "3h"
+    graceFloor: "14h"
     graceCeil: "72h"
     # Relay-topology store (docs/mesh-topology-design.md). Every received advert is
     # kept as an append-only observation (Tier 0); a maintenance tick folds those
