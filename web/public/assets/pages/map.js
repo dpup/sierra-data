@@ -43,6 +43,11 @@ export const MAP_LAYERS = [
   'earthquake',
   'wildfire',
   'evacuation',
+  // The relay topology as a self-contained subgraph (nodes in-region + their
+  // 1-hop neighbours, plus the edges). Last so it never drives the auto-fit —
+  // its neighbour nodes can sit well outside the place. The rich role-colored /
+  // recency-faded view is /mesh; here it renders generically like every layer.
+  'mesh_link',
 ];
 
 /** Default map view when no layer has features and no ?view= is present:
@@ -287,10 +292,22 @@ export function kindDetails(props) {
     const n = asObj(props.network) || {};
     add('type', n.nodeType); add('node', n.name);
     if (n.publicKey) add('pubkey', String(n.publicKey).slice(0, 12) + '…');
+    // On the mesh_link subgraph, nodes carry inRegion (true = inside the place,
+    // false = a 1-hop neighbour pulled in because it links to one).
+    if (n.inRegion === false) add('scope', 'neighbour (outside area)');
+    else if (n.inRegion === true) add('scope', 'in area');
     if (n.snr != null) add('SNR', n.snr + ' dB');
     if (n.rssi != null) add('RSSI', n.rssi + ' dBm');
     if (n.hopCount != null) add('hops', n.hopCount);
     if (Array.isArray(n.gateways) && n.gateways.length) add('gateways', n.gateways.join(', '));
+  } else if (layer === 'MESH_LINK') {
+    const m = asObj(props.meshLink) || {};
+    if (m.a) add('a', String(m.a).slice(0, 12) + '…');
+    if (m.b) add('b', String(m.b).slice(0, 12) + '…');
+    if (m.observations != null) add('observations', m.observations);
+    if (m.daysActive != null) add('days active', m.daysActive);
+    if (m.bestSnr != null && m.bestSnr !== 0) add('best SNR', m.bestSnr + ' dB');
+    if (m.lastSeen) add('last seen', timeAgo(m.lastSeen));
   }
 
   if (!rows.length && !props.description) return null;
