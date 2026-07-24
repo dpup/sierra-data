@@ -14,6 +14,24 @@ throughout; errors are gRPC-standard `{code, codeName, message, details}`). The
 by a snake_case `/v1` surface on 2026-07-05, which was in turn folded back onto the
 proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 
+## 2026-07-24
+
+### Added — place-scoped mesh topology layer `mesh_link.geojson`
+
+Makes the relay topology a drop-in map layer, consistent with every other
+`.geojson` layer (the global `GET /api/v1/mesh/links` stays for whole-mesh views).
+
+- **`GET /api/v1/places/{place}/map/mesh_link.geojson?window=<Go duration>`** —
+  the topology scoped to a place, as one self-contained subgraph
+  `FeatureCollection`: `Point` features for the nodes located **inside** the place
+  **plus the 1-hop neighbours they link to** (so a link out to the wider mesh
+  isn't amputated at the boundary), and `LineString` features for the edges among
+  them. Node `properties.network` gains **`inRegion`** (`true` = inside the place,
+  `false` = a pulled-in neighbour; omitted on the plain `mesh_node` layer). Edge
+  `properties.meshLink` carries `a`, `b`, `observations`, `daysActive`,
+  `firstSeen`, `lastSeen`, `bestSnr`. Same camelCase envelope + `metadata`
+  (`sourceStatus`, etc.) as the other layers; `window` defaults to `72h`.
+
 ## 2026-07-23
 
 ### Added — mesh relay topology endpoint `GET /api/v1/mesh/links`

@@ -61,6 +61,7 @@ var layerSourceIDs = map[string][]string{
 	hazards.LayerEarthquake:   {"usgs"},
 	hazards.LayerRoadIncident: {"chp", "caltrans"},
 	hazards.LayerNetwork:      {"meshcore"},
+	hazards.LayerMeshLink:     {"meshcore"},
 }
 
 // hazardsBuilder is the slice of *hazards.Service the condition-backed layers
@@ -86,6 +87,8 @@ func (s *Service) serveMapLayer(w http.ResponseWriter, r *http.Request, placeKey
 	}
 
 	switch {
+	case layer == hazards.LayerMeshLink:
+		s.serveMeshLinkLayer(w, r, place)
 	case eventLayers[layer] != gridv1.Layer_LAYER_UNSPECIFIED:
 		s.serveEventLayer(w, r, place, layer)
 	case conditionLayers[layer]:

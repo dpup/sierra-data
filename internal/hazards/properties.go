@@ -11,6 +11,7 @@ const (
 	LayerWildfire     = "wildfire"
 	LayerEvacuation   = "evacuation"
 	LayerNetwork      = "mesh_node"
+	LayerMeshLink     = "mesh_link"
 )
 
 // Properties is the common envelope shared by every hazard feature, plus a
@@ -41,6 +42,7 @@ type Properties struct {
 	Wildfire     *WildfireProps     `json:"wildfire,omitempty"`
 	Evacuation   *EvacuationProps   `json:"evacuation,omitempty"`
 	Network      *NetworkProps      `json:"network,omitempty"`
+	MeshLink     *MeshLinkProps     `json:"meshLink,omitempty"`
 }
 
 // Source identifies the upstream feed a feature came from.
@@ -125,6 +127,24 @@ type NetworkProps struct {
 	RSSI      int32    `json:"rssi,omitempty"`
 	HopCount  uint32   `json:"hopCount,omitempty"`
 	Gateways  []string `json:"gateways,omitempty"` // observers that heard the node
+	// InRegion is set ONLY on the mesh_link topology layer: true for a node inside
+	// the queried place, false for a 1-hop neighbour pulled in because it links to
+	// one. Nil (omitted) on the plain mesh_node layer, where every node is in-place.
+	InRegion *bool `json:"inRegion,omitempty"`
+}
+
+// MeshLinkProps is the mesh_link kind block — one relay link (LineString) on the
+// derived topology layer. A/B are node public keys (canonical A < B). DaysActive
+// (distinct days observed) and LastSeen let a client weight and recency-fade the
+// link; BestSnr is the peak SNR of an advert seen traversing it.
+type MeshLinkProps struct {
+	A            string  `json:"a"`
+	B            string  `json:"b"`
+	Observations int     `json:"observations"`
+	DaysActive   int     `json:"daysActive"`
+	FirstSeen    string  `json:"firstSeen,omitempty"`
+	LastSeen     string  `json:"lastSeen,omitempty"`
+	BestSnr      float64 `json:"bestSnr,omitempty"`
 }
 
 // setSeverity sets both Severity and the derived SeverityRank.

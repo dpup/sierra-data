@@ -236,6 +236,30 @@ newer than the watermark: `lastSeen = max(rollup, raw)`, `firstSeen = min`,
 The `/mesh` page drops its client-side edge reconstruction and just renders the
 two layers (`mesh_node` + `mesh_link`), with a window control that re-queries.
 
+### Place-scoped `mesh_link.geojson` (added 2026-07-24)
+
+The global JSON endpoint above powers the whole-mesh `/mesh` page. For embedding a
+**region's** topology on a place map (e.g. a consuming site showing just the
+Ebbetts Pass area), there is also a place-scoped **map layer**:
+`GET /api/v1/places/{place}/map/mesh_link.geojson?window=`. It fits the existing
+`{layer}.geojson` route family and is a **self-contained subgraph** in one
+`FeatureCollection`:
+
+- `Point` node features = the nodes located **inside** the place ∪ the **1-hop
+  neighbours** they link to. The neighbour inclusion is the key rule: it keeps a
+  link out to the wider mesh from being amputated at the region boundary, so the
+  region's outward connectivity is visible without dragging in the whole graph.
+  Node `properties.network.inRegion` distinguishes core (`true`) from neighbour
+  (`false`), so a client can render neighbours dimmer.
+- `LineString` edge features = the edges with **≥1 endpoint inside** the place,
+  carrying the `meshLink` block (`a/b/observations/daysActive/firstSeen/lastSeen/
+  bestSnr`).
+
+In-region membership reuses the store's existing place attachment (the same
+point-in-polygon / corridor-buffer join `mesh_node` uses), and the read reuses
+`MeshLinks()` + a pubkey→centroid map from the network events. The two surfaces
+coexist: global JSON for the whole mesh, place geojson for a region.
+
 ## 8. Presence event — slimmed to identity
 
 `NetworkTelemetry` sheds `path` and `path_nodes` (field numbers 4 and 7
