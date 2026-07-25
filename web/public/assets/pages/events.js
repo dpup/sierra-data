@@ -30,7 +30,7 @@ export const LAYER_OPTIONS = [
   'power',
   'gauge',
   'air_quality',
-  'network',
+  'mesh',
   'announcement',
 ];
 

@@ -41,7 +41,7 @@ export const DETAIL_FIELDS = [
   'power',
   'gauge',
   'airQuality',
-  'network',
+  'mesh',
   'announcement',
 ];
 

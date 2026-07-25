@@ -5,7 +5,7 @@ import PageHead from '../components/PageHead.astro';
 <Shell
   current="mesh"
   title="Mesh — relay topology · The Grid"
-  description="The MeshCore mesh as a topology map: every located node (colored by role) with the relay links reconstructed from each advert's path — the repeater chain it traversed, resolved to mapped nodes. Built from GET /api/v1/events?layer=network."
+  description="The MeshCore mesh as a topology map: every located node (colored by role) with the relay links reconstructed from each advert's path — the repeater chain it traversed, resolved to mapped nodes. Built from GET /api/v1/events?layer=mesh."
 >
   <Fragment slot="head">
     <link rel="stylesheet" href="/lib/maplibre-gl.css" />
@@ -47,7 +47,7 @@ import PageHead from '../components/PageHead.astro';
   <PageHead kicker="Relay topology" title="Mesh">
     <p class="lead">
       The whole MeshCore mesh as a topology map — every located node from
-      <code class="inline">GET /api/v1/events?layer=network</code>, colored by role, with the
+      <code class="inline">GET /api/v1/events?layer=mesh</code>, colored by role, with the
       <strong>relay links</strong> from
       <code class="inline">GET /api/v1/mesh/links</code>: the server rolls up each advert's relay
       path over time into a durable, weighted edge list. Links <strong>fade by recency</strong>

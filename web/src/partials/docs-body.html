@@ -373,14 +373,14 @@ Content-Type: application/json
       <tr><td class="mono">weatherAlert</td><td class="wrap mono">nwsSeverity, certainty, urgency, instruction, areaDesc (string), zones (repeated string)</td></tr>
       <tr><td class="mono">earthquake</td><td class="wrap mono">magnitude (double), depthKm (double), felt (int32)</td></tr>
       <tr><td class="mono">roadIncident</td><td class="wrap mono">logNumber (string), impact, duration (string), metadata (map&lt;string,string&gt;)</td></tr>
-      <tr><td class="mono">network</td><td class="wrap mono">publicKey (hex string), nodeType (companion | repeater | room_server | sensor), name (string), telemetry { snr (double), rssi (int32), hopCount (uint32), path (repeated string — relay hops as repeater pubkey-prefix hashes), pathNodes (repeated string — path resolved to full node public keys, parallel to path), gateways (repeated string), lastAdvertAt (timestamp) }</td></tr>
+      <tr><td class="mono">mesh</td><td class="wrap mono">publicKey (hex string), nodeType (companion | repeater | room_server | sensor), name (string), telemetry { snr (double), rssi (int32), hopCount (uint32), path (repeated string — relay hops as repeater pubkey-prefix hashes), pathNodes (repeated string — path resolved to full node public keys, parallel to path), gateways (repeated string), lastAdvertAt (timestamp) }</td></tr>
     </tbody>
   </table></div>
   <p class="small muted">
     Unit-bearing fields name their unit (<code class="inline">depthKm</code>).
     A <code class="inline">fire_weather</code> detail slot is reserved in the
     schema but fire weather is condition-backed (a map layer, not an event
-    stream). The <code class="inline">network</code> block's
+    stream). The <code class="inline">mesh</code> block's
     <code class="inline">telemetry</code> is the last-heard signal state and is
     volatile — it never mints a new event revision (only a node's identity,
     role, name, location, or status does). For "when did this node last
@@ -401,7 +401,7 @@ Content-Type: application/json
       <tr><td class="mono">FIRE_WEATHER</td><td class="num">4</td><td class="mono">fire_weather</td><td>conditions (map layer only)</td></tr>
       <tr><td class="mono">EARTHQUAKE</td><td class="num">5</td><td class="mono">earthquake</td><td>events</td></tr>
       <tr><td class="mono">ROAD_INCIDENT</td><td class="num">6</td><td class="mono">road_incident</td><td>events</td></tr>
-      <tr><td class="mono">NETWORK</td><td class="num">13</td><td class="mono">mesh_node</td><td>events (MeshCore presence) — <code class="inline">?layer=</code> accepts <code class="inline">mesh</code> (primary), <code class="inline">mesh_node</code>, or the legacy <code class="inline">network</code></td></tr>
+      <tr><td class="mono">MESH</td><td class="num">13</td><td class="mono">mesh_node</td><td>events (MeshCore presence) — <code class="inline">?layer=</code> accepts <code class="inline">mesh</code>, <code class="inline">mesh_node</code>, or the legacy <code class="inline">network</code></td></tr>
       <tr><td class="mono">POWER, GAUGE, AIR_QUALITY, ANNOUNCEMENT</td><td class="num">10–14</td><td class="mono">—</td><td>reserved for future pollers</td></tr>
     </tbody>
   </table></div>
@@ -590,12 +590,12 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
   }
 }</pre>
   <ul>
-    <li><strong>Per-kind data</strong> lives under a single namespaced key (<code class="inline">wildfire</code>, <code class="inline">earthquake</code>, <code class="inline">evacuation</code>, <code class="inline">weather</code>, <code class="inline">incident</code>, <code class="inline">network</code>) — consumers ignore kinds they don't handle; no field collisions.</li>
+    <li><strong>Per-kind data</strong> lives under a single namespaced key (<code class="inline">wildfire</code>, <code class="inline">earthquake</code>, <code class="inline">evacuation</code>, <code class="inline">weather</code>, <code class="inline">incident</code>, <code class="inline">mesh</code>) — consumers ignore kinds they don't handle; no field collisions.</li>
     <li><strong>Coordinate order is <code class="inline">[longitude, latitude]</code></strong> (GeoJSON axis order), WGS84, trimmed to 5 decimals (~1.1 m). Polygons are simplified to keep features small.</li>
     <li><strong>Null geometry is valid</strong> (e.g. a county-wide advisory): the feature has <code class="inline">"geometry": null</code> with the same properties envelope. Exclude it from the map layer and render it as a full-width banner/list card sorted by <code class="inline">severityRank</code> alongside located features, showing <code class="inline">headline</code>, <code class="inline">source.name</code>, <code class="inline">updatedAt</code>, and <code class="inline">source.url</code>.</li>
     <li><strong>URL fields are scheme-validated upstream</strong>: any upstream-sourced URL that is not <code class="inline">https://</code>/<code class="inline">http://</code> is dropped before it reaches the response. Treat all upstream text (headlines, descriptions) as untrusted anyway.</li>
     <li>Unit-bearing fields name their unit (<code class="inline">windGustMph</code>, <code class="inline">depthKm</code>).</li>
-    <li><strong><code class="inline">layer</code> has two forms, by role.</strong> As a <em>value</em> — <code class="inline">properties.layer</code> here, and <code class="inline">event.layer</code> / <code class="inline">topEvents[].layer</code> elsewhere — it is the UPPERCASE Layer enum name (<code class="inline">WILDFIRE</code>). As an <em>address</em> — the <code class="inline">{layer}</code> path segment, the <code class="inline">?layer=</code> query value, and the <code class="inline">metadata.layer</code> / <code class="inline">metadata.area</code> echoes above — it is the lowercase slug (<code class="inline">wildfire</code>). One rule: values are enum names, URLs and the metadata block are slugs. <strong>The one exception is mesh-node presence</strong>, whose enum name (<code class="inline">NETWORK</code>) differs from its slug (<code class="inline">mesh_node</code>): as a <code class="inline">?layer=</code> value the query accepts <code class="inline">mesh</code> (the primary token), plus <code class="inline">mesh_node</code> and the legacy <code class="inline">network</code> as aliases — all resolve to the same layer.</li>
+    <li><strong><code class="inline">layer</code> has two forms, by role.</strong> As a <em>value</em> — <code class="inline">properties.layer</code> here, and <code class="inline">event.layer</code> / <code class="inline">topEvents[].layer</code> elsewhere — it is the UPPERCASE Layer enum name (<code class="inline">WILDFIRE</code>). As an <em>address</em> — the <code class="inline">{layer}</code> path segment, the <code class="inline">?layer=</code> query value, and the <code class="inline">metadata.layer</code> / <code class="inline">metadata.area</code> echoes above — it is the lowercase slug (<code class="inline">wildfire</code>). One rule: values are enum names, URLs and the metadata block are slugs. <strong>Mesh-node presence is the one layer whose slug (<code class="inline">mesh_node</code>) is not just the lowercased enum name (<code class="inline">MESH</code>)</strong>: as a <code class="inline">?layer=</code> value the query accepts <code class="inline">mesh</code> (the enum name), <code class="inline">mesh_node</code> (the slug), and the legacy <code class="inline">network</code> — all resolve to the same layer. (Before 2026-07-25 this layer's enum was <code class="inline">NETWORK</code>; it was renamed to <code class="inline">MESH</code>, with <code class="inline">network</code> kept as a legacy query alias.)</li>
     <li><strong>This endpoint is not in the <a href="/api/openapi.json">OpenAPI spec</a>.</strong> The <code class="inline">.geojson</code> layers are hand-built (RFC 7946 geometry doesn't model cleanly in proto3), so a client generated from the spec alone will be missing all eight map layers — integrate them from this section.</li>
   </ul>
   <div class="live-examples">

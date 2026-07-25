@@ -289,7 +289,7 @@ export function kindDetails(props) {
     add('state', w.state);
     if (Array.isArray(w.zones) && w.zones.length) add('zones', w.zones.join(', '));
   } else if (layer === 'MESH_NODE') {
-    const n = asObj(props.network) || {};
+    const n = asObj(props.mesh) || {};
     add('type', n.nodeType); add('node', n.name);
     if (n.publicKey) add('pubkey', String(n.publicKey).slice(0, 12) + '…');
     // On the mesh_link subgraph, nodes carry inRegion (true = inside the place,

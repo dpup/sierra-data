@@ -10,7 +10,7 @@ const (
 	LayerEarthquake   = "earthquake"
 	LayerWildfire     = "wildfire"
 	LayerEvacuation   = "evacuation"
-	LayerNetwork      = "mesh_node"
+	LayerMesh         = "mesh_node"
 	LayerMeshLink     = "mesh_link"
 )
 
@@ -41,7 +41,7 @@ type Properties struct {
 	Earthquake   *EarthquakeProps   `json:"earthquake,omitempty"`
 	Wildfire     *WildfireProps     `json:"wildfire,omitempty"`
 	Evacuation   *EvacuationProps   `json:"evacuation,omitempty"`
-	Network      *NetworkProps      `json:"network,omitempty"`
+	Mesh         *MeshProps         `json:"mesh,omitempty"`
 	MeshLink     *MeshLinkProps     `json:"meshLink,omitempty"`
 }
 
@@ -115,11 +115,11 @@ type EvacuationProps struct {
 	County    string `json:"county,omitempty"`
 }
 
-// NetworkProps is the mesh_node (MeshCore) kind block. The signal metrics are
+// MeshProps is the mesh_node (MeshCore) kind block. The signal metrics are
 // the last-heard values (volatile; not part of the event's content hash). The
 // relay path is NOT here — a path is per-reception, not per-node; the drawable
 // topology is served derived at GET /api/v1/mesh/links.
-type NetworkProps struct {
+type MeshProps struct {
 	PublicKey string   `json:"publicKey"`
 	NodeType  string   `json:"nodeType,omitempty"` // companion | repeater | room_server | sensor
 	Name      string   `json:"name,omitempty"`

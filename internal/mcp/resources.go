@@ -46,7 +46,7 @@ list broadly and processing the rows yourself:
   grid_events with layer=mesh (legacy alias "network"); unscoped is fine, the
   mesh spans places. Each row is one node: name in headline/areaLabel, pubkey +
   radio telemetry in detail. Match the node by name (e.g. "SIERRA…"). Freshness
-  is the row's observedAt = when the Grid last heard it; detail.network.telemetry.lastAdvertAt
+  is the row's observedAt = when the Grid last heard it; detail.mesh.telemetry.lastAdvertAt
   is the node's own advert stamp and is diagnostic only (node clocks skew). A
   node missing from the list is not proof it's down.
 

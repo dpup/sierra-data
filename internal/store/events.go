@@ -43,7 +43,7 @@ func ContentHash(ev *gridv1.Event) string {
 	c.Enhancement = nil
 	c.Summary = ""
 	c.PlaceIds = nil
-	if n := c.GetNetwork(); n != nil {
+	if n := c.GetMesh(); n != nil {
 		n.Telemetry = nil
 	}
 	b, err := proto.MarshalOptions{Deterministic: true}.Marshal(c)

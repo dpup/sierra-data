@@ -42,7 +42,7 @@ type MeshRegistry interface {
 // NetworkNormalizer projects MeshCore node presence into NETWORK events. It
 // wraps the long-lived MQTT subscriber (a push source) behind the pull-based
 // Normalizer contract: Poll returns a snapshot of the in-region nodes heard
-// recently. Per-packet signal metrics ride in NetworkTelemetry, which the
+// recently. Per-packet signal metrics ride in MeshTelemetry, which the
 // store excludes from the content hash — so the advert firehose refreshes
 // liveness without minting a revision.
 type NetworkNormalizer struct {
@@ -93,7 +93,7 @@ func (n *NetworkNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult,
 
 		ev := NewEvent(
 			meshSourceID+":"+nd.PubKey,
-			gridv1.Layer_NETWORK,
+			gridv1.Layer_MESH,
 			gridv1.Severity_INFO,
 			gridv1.EventStatus_ACTIVE,
 			meshHeadline(nd),
@@ -111,11 +111,11 @@ func (n *NetworkNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult,
 		// telemetry.lastAdvertAt (diagnostic; reveals the skew).
 		ev.ObservedAt = tsProto(nd.LastHeardAt)
 		ev.Provenance = n.meshProvenance(nd.Brokers)
-		ev.Detail = &gridv1.Event_Network{Network: &gridv1.NetworkDetail{
+		ev.Detail = &gridv1.Event_Mesh{Mesh: &gridv1.MeshDetail{
 			PublicKey: nd.PubKey,
 			NodeType:  nd.Role,
 			Name:      nd.Name,
-			Telemetry: &gridv1.NetworkTelemetry{
+			Telemetry: &gridv1.MeshTelemetry{
 				Snr:          nd.SNR,
 				Rssi:         nd.RSSI,
 				HopCount:     nd.HopCount,

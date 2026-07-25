@@ -388,7 +388,7 @@ func seedMeshRegistry(ctx context.Context, reg *meshcore.Registry, st *store.Sto
 	}
 	seeds := make([]meshcore.SeedNode, 0, len(events))
 	for _, se := range events {
-		d := se.Event.GetNetwork()
+		d := se.Event.GetMesh()
 		pk := d.GetPublicKey()
 		if pk == "" {
 			continue

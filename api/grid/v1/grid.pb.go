@@ -38,7 +38,7 @@ const (
 	Layer_POWER        Layer = 10
 	Layer_GAUGE        Layer = 11
 	Layer_AIR_QUALITY  Layer = 12
-	Layer_NETWORK      Layer = 13
+	Layer_MESH         Layer = 13
 	Layer_ANNOUNCEMENT Layer = 14
 )
 
@@ -55,7 +55,7 @@ var (
 		10: "POWER",
 		11: "GAUGE",
 		12: "AIR_QUALITY",
-		13: "NETWORK",
+		13: "MESH",
 		14: "ANNOUNCEMENT",
 	}
 	Layer_value = map[string]int32{
@@ -69,7 +69,7 @@ var (
 		"POWER":             10,
 		"GAUGE":             11,
 		"AIR_QUALITY":       12,
-		"NETWORK":           13,
+		"MESH":              13,
 		"ANNOUNCEMENT":      14,
 	}
 )
@@ -355,7 +355,7 @@ type Event struct {
 	//	*Event_FireWeather
 	//	*Event_Earthquake
 	//	*Event_RoadIncident
-	//	*Event_Network
+	//	*Event_Mesh
 	Detail        isEvent_Detail `protobuf_oneof:"detail"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -585,10 +585,10 @@ func (x *Event) GetRoadIncident() *RoadIncidentDetail {
 	return nil
 }
 
-func (x *Event) GetNetwork() *NetworkDetail {
+func (x *Event) GetMesh() *MeshDetail {
 	if x != nil {
-		if x, ok := x.Detail.(*Event_Network); ok {
-			return x.Network
+		if x, ok := x.Detail.(*Event_Mesh); ok {
+			return x.Mesh
 		}
 	}
 	return nil
@@ -622,8 +622,8 @@ type Event_RoadIncident struct {
 	RoadIncident *RoadIncidentDetail `protobuf:"bytes,25,opt,name=road_incident,json=roadIncident,proto3,oneof"`
 }
 
-type Event_Network struct {
-	Network *NetworkDetail `protobuf:"bytes,26,opt,name=network,proto3,oneof"`
+type Event_Mesh struct {
+	Mesh *MeshDetail `protobuf:"bytes,26,opt,name=mesh,proto3,oneof"`
 }
 
 func (*Event_Wildfire) isEvent_Detail() {}
@@ -638,7 +638,7 @@ func (*Event_Earthquake) isEvent_Detail() {}
 
 func (*Event_RoadIncident) isEvent_Detail() {}
 
-func (*Event_Network) isEvent_Detail() {}
+func (*Event_Mesh) isEvent_Detail() {}
 
 type Geometry struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1611,35 +1611,35 @@ func (x *RoadIncidentDetail) GetMetadata() map[string]string {
 	return nil
 }
 
-// MeshCore mesh-node presence (Layer_NETWORK). One event per node, keyed by
+// MeshCore mesh-node presence (Layer_MESH). One event per node, keyed by
 // its Ed25519 public key. Stable identity + advertised location live here (and
 // mint a revision on change); the per-packet signal metrics live in the nested
-// NetworkTelemetry, which the store's ContentHash zeroes — so the firehose of
+// MeshTelemetry, which the store's ContentHash zeroes — so the firehose of
 // adverts refreshes liveness (last_seen_at) without ever writing a revision.
-type NetworkDetail struct {
+type MeshDetail struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	PublicKey     string                 `protobuf:"bytes,1,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"` // full Ed25519 public key, hex (also the Event.id native part)
 	NodeType      string                 `protobuf:"bytes,2,opt,name=node_type,json=nodeType,proto3" json:"node_type,omitempty"`    // companion | repeater | room_server | sensor
 	Name          string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`                            // advertised node name
-	Telemetry     *NetworkTelemetry      `protobuf:"bytes,4,opt,name=telemetry,proto3" json:"telemetry,omitempty"`                  // VOLATILE — excluded from the content hash
+	Telemetry     *MeshTelemetry         `protobuf:"bytes,4,opt,name=telemetry,proto3" json:"telemetry,omitempty"`                  // VOLATILE — excluded from the content hash
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *NetworkDetail) Reset() {
-	*x = NetworkDetail{}
+func (x *MeshDetail) Reset() {
+	*x = MeshDetail{}
 	mi := &file_grid_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *NetworkDetail) String() string {
+func (x *MeshDetail) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*NetworkDetail) ProtoMessage() {}
+func (*MeshDetail) ProtoMessage() {}
 
-func (x *NetworkDetail) ProtoReflect() protoreflect.Message {
+func (x *MeshDetail) ProtoReflect() protoreflect.Message {
 	mi := &file_grid_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -1651,43 +1651,43 @@ func (x *NetworkDetail) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use NetworkDetail.ProtoReflect.Descriptor instead.
-func (*NetworkDetail) Descriptor() ([]byte, []int) {
+// Deprecated: Use MeshDetail.ProtoReflect.Descriptor instead.
+func (*MeshDetail) Descriptor() ([]byte, []int) {
 	return file_grid_proto_rawDescGZIP(), []int{14}
 }
 
-func (x *NetworkDetail) GetPublicKey() string {
+func (x *MeshDetail) GetPublicKey() string {
 	if x != nil {
 		return x.PublicKey
 	}
 	return ""
 }
 
-func (x *NetworkDetail) GetNodeType() string {
+func (x *MeshDetail) GetNodeType() string {
 	if x != nil {
 		return x.NodeType
 	}
 	return ""
 }
 
-func (x *NetworkDetail) GetName() string {
+func (x *MeshDetail) GetName() string {
 	if x != nil {
 		return x.Name
 	}
 	return ""
 }
 
-func (x *NetworkDetail) GetTelemetry() *NetworkTelemetry {
+func (x *MeshDetail) GetTelemetry() *MeshTelemetry {
 	if x != nil {
 		return x.Telemetry
 	}
 	return nil
 }
 
-// NetworkTelemetry is the volatile, per-advert signal state. It is deliberately
+// MeshTelemetry is the volatile, per-advert signal state. It is deliberately
 // grouped into one sub-message so store.ContentHash can zero the whole field:
 // none of it mints a revision.
-type NetworkTelemetry struct {
+type MeshTelemetry struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Snr           float64                `protobuf:"fixed64,1,opt,name=snr,proto3" json:"snr,omitempty"`                                       // last SNR (dB), gateway-reported
 	Rssi          int32                  `protobuf:"varint,2,opt,name=rssi,proto3" json:"rssi,omitempty"`                                      // last RSSI (dBm), gateway-reported
@@ -1698,20 +1698,20 @@ type NetworkTelemetry struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *NetworkTelemetry) Reset() {
-	*x = NetworkTelemetry{}
+func (x *MeshTelemetry) Reset() {
+	*x = MeshTelemetry{}
 	mi := &file_grid_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *NetworkTelemetry) String() string {
+func (x *MeshTelemetry) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*NetworkTelemetry) ProtoMessage() {}
+func (*MeshTelemetry) ProtoMessage() {}
 
-func (x *NetworkTelemetry) ProtoReflect() protoreflect.Message {
+func (x *MeshTelemetry) ProtoReflect() protoreflect.Message {
 	mi := &file_grid_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -1723,40 +1723,40 @@ func (x *NetworkTelemetry) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use NetworkTelemetry.ProtoReflect.Descriptor instead.
-func (*NetworkTelemetry) Descriptor() ([]byte, []int) {
+// Deprecated: Use MeshTelemetry.ProtoReflect.Descriptor instead.
+func (*MeshTelemetry) Descriptor() ([]byte, []int) {
 	return file_grid_proto_rawDescGZIP(), []int{15}
 }
 
-func (x *NetworkTelemetry) GetSnr() float64 {
+func (x *MeshTelemetry) GetSnr() float64 {
 	if x != nil {
 		return x.Snr
 	}
 	return 0
 }
 
-func (x *NetworkTelemetry) GetRssi() int32 {
+func (x *MeshTelemetry) GetRssi() int32 {
 	if x != nil {
 		return x.Rssi
 	}
 	return 0
 }
 
-func (x *NetworkTelemetry) GetHopCount() uint32 {
+func (x *MeshTelemetry) GetHopCount() uint32 {
 	if x != nil {
 		return x.HopCount
 	}
 	return 0
 }
 
-func (x *NetworkTelemetry) GetGateways() []string {
+func (x *MeshTelemetry) GetGateways() []string {
 	if x != nil {
 		return x.Gateways
 	}
 	return nil
 }
 
-func (x *NetworkTelemetry) GetLastAdvertAt() *timestamppb.Timestamp {
+func (x *MeshTelemetry) GetLastAdvertAt() *timestamppb.Timestamp {
 	if x != nil {
 		return x.LastAdvertAt
 	}
@@ -3619,7 +3619,7 @@ var File_grid_proto protoreflect.FileDescriptor
 const file_grid_proto_rawDesc = "" +
 	"\n" +
 	"\n" +
-	"grid.proto\x12\agrid.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1egoogle/protobuf/wrappers.proto\"\xcf\t\n" +
+	"grid.proto\x12\agrid.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1egoogle/protobuf/wrappers.proto\"\xc6\t\n" +
 	"\x05Event\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12$\n" +
 	"\x05layer\x18\x02 \x01(\x0e2\x0e.grid.v1.LayerR\x05layer\x12\x1a\n" +
@@ -3655,8 +3655,8 @@ const file_grid_proto_rawDesc = "" +
 	"\n" +
 	"earthquake\x18\x18 \x01(\v2\x19.grid.v1.EarthquakeDetailH\x00R\n" +
 	"earthquake\x12B\n" +
-	"\rroad_incident\x18\x19 \x01(\v2\x1b.grid.v1.RoadIncidentDetailH\x00R\froadIncident\x122\n" +
-	"\anetwork\x18\x1a \x01(\v2\x16.grid.v1.NetworkDetailH\x00R\anetworkB\b\n" +
+	"\rroad_incident\x18\x19 \x01(\v2\x1b.grid.v1.RoadIncidentDetailH\x00R\froadIncident\x12)\n" +
+	"\x04mesh\x18\x1a \x01(\v2\x13.grid.v1.MeshDetailH\x00R\x04meshB\b\n" +
 	"\x06detailJ\x04\b\x1b\x10\x1f\"{\n" +
 	"\bGeometry\x12\x18\n" +
 	"\ageojson\x18\x01 \x01(\fR\ageojson\x12(\n" +
@@ -3743,14 +3743,15 @@ const file_grid_proto_rawDesc = "" +
 	"\bmetadata\x18\a \x03(\v2).grid.v1.RoadIncidentDetail.MetadataEntryR\bmetadata\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\x02\x10\x03J\x04\b\x03\x10\x04J\x04\b\x06\x10\a\"\x98\x01\n" +
-	"\rNetworkDetail\x12\x1d\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\x02\x10\x03J\x04\b\x03\x10\x04J\x04\b\x06\x10\a\"\x92\x01\n" +
+	"\n" +
+	"MeshDetail\x12\x1d\n" +
 	"\n" +
 	"public_key\x18\x01 \x01(\tR\tpublicKey\x12\x1b\n" +
 	"\tnode_type\x18\x02 \x01(\tR\bnodeType\x12\x12\n" +
-	"\x04name\x18\x03 \x01(\tR\x04name\x127\n" +
-	"\ttelemetry\x18\x04 \x01(\v2\x19.grid.v1.NetworkTelemetryR\ttelemetry\"\xd1\x01\n" +
-	"\x10NetworkTelemetry\x12\x10\n" +
+	"\x04name\x18\x03 \x01(\tR\x04name\x124\n" +
+	"\ttelemetry\x18\x04 \x01(\v2\x16.grid.v1.MeshTelemetryR\ttelemetry\"\xce\x01\n" +
+	"\rMeshTelemetry\x12\x10\n" +
 	"\x03snr\x18\x01 \x01(\x01R\x03snr\x12\x12\n" +
 	"\x04rssi\x18\x02 \x01(\x05R\x04rssi\x12\x1b\n" +
 	"\thop_count\x18\x03 \x01(\rR\bhopCount\x12\x1a\n" +
@@ -3898,7 +3899,7 @@ const file_grid_proto_rawDesc = "" +
 	"\aweather\x18\x01 \x03(\v2\x1a.grid.v1.WeatherConditionsR\aweather\x12A\n" +
 	"\ffire_weather\x18\x02 \x01(\v2\x1e.grid.v1.FireWeatherConditionsR\vfireWeather\x12=\n" +
 	"\flast_updated\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\vlastUpdated\"\x14\n" +
-	"\x12ListSourcesRequest*\xca\x01\n" +
+	"\x12ListSourcesRequest*\xc7\x01\n" +
 	"\x05Layer\x12\x15\n" +
 	"\x11LAYER_UNSPECIFIED\x10\x00\x12\f\n" +
 	"\bWILDFIRE\x10\x01\x12\x0e\n" +
@@ -3912,8 +3913,8 @@ const file_grid_proto_rawDesc = "" +
 	"\x05POWER\x10\n" +
 	"\x12\t\n" +
 	"\x05GAUGE\x10\v\x12\x0f\n" +
-	"\vAIR_QUALITY\x10\f\x12\v\n" +
-	"\aNETWORK\x10\r\x12\x10\n" +
+	"\vAIR_QUALITY\x10\f\x12\b\n" +
+	"\x04MESH\x10\r\x12\x10\n" +
 	"\fANNOUNCEMENT\x10\x0e*F\n" +
 	"\bSeverity\x12\b\n" +
 	"\x04INFO\x10\x00\x12\t\n" +
@@ -3992,8 +3993,8 @@ var file_grid_proto_goTypes = []any{
 	(*FireWeatherDetail)(nil),      // 16: grid.v1.FireWeatherDetail
 	(*EarthquakeDetail)(nil),       // 17: grid.v1.EarthquakeDetail
 	(*RoadIncidentDetail)(nil),     // 18: grid.v1.RoadIncidentDetail
-	(*NetworkDetail)(nil),          // 19: grid.v1.NetworkDetail
-	(*NetworkTelemetry)(nil),       // 20: grid.v1.NetworkTelemetry
+	(*MeshDetail)(nil),             // 19: grid.v1.MeshDetail
+	(*MeshTelemetry)(nil),          // 20: grid.v1.MeshTelemetry
 	(*EventList)(nil),              // 21: grid.v1.EventList
 	(*EventRevision)(nil),          // 22: grid.v1.EventRevision
 	(*EventRevisionList)(nil),      // 23: grid.v1.EventRevisionList
@@ -4045,7 +4046,7 @@ var file_grid_proto_depIdxs = []int32{
 	16, // 13: grid.v1.Event.fire_weather:type_name -> grid.v1.FireWeatherDetail
 	17, // 14: grid.v1.Event.earthquake:type_name -> grid.v1.EarthquakeDetail
 	18, // 15: grid.v1.Event.road_incident:type_name -> grid.v1.RoadIncidentDetail
-	19, // 16: grid.v1.Event.network:type_name -> grid.v1.NetworkDetail
+	19, // 16: grid.v1.Event.mesh:type_name -> grid.v1.MeshDetail
 	7,  // 17: grid.v1.Geometry.bbox:type_name -> grid.v1.BoundingBox
 	8,  // 18: grid.v1.Geometry.centroid:type_name -> grid.v1.LatLng
 	52, // 19: grid.v1.Provenance.fetched_at:type_name -> google.protobuf.Timestamp
@@ -4056,8 +4057,8 @@ var file_grid_proto_depIdxs = []int32{
 	4,  // 24: grid.v1.Place.kind:type_name -> grid.v1.PlaceKind
 	6,  // 25: grid.v1.Place.geometry:type_name -> grid.v1.Geometry
 	50, // 26: grid.v1.RoadIncidentDetail.metadata:type_name -> grid.v1.RoadIncidentDetail.MetadataEntry
-	20, // 27: grid.v1.NetworkDetail.telemetry:type_name -> grid.v1.NetworkTelemetry
-	52, // 28: grid.v1.NetworkTelemetry.last_advert_at:type_name -> google.protobuf.Timestamp
+	20, // 27: grid.v1.MeshDetail.telemetry:type_name -> grid.v1.MeshTelemetry
+	52, // 28: grid.v1.MeshTelemetry.last_advert_at:type_name -> google.protobuf.Timestamp
 	5,  // 29: grid.v1.EventList.events:type_name -> grid.v1.Event
 	52, // 30: grid.v1.EventRevision.observed_at:type_name -> google.protobuf.Timestamp
 	52, // 31: grid.v1.EventRevision.ingested_at:type_name -> google.protobuf.Timestamp
@@ -4121,7 +4122,7 @@ func file_grid_proto_init() {
 		(*Event_FireWeather)(nil),
 		(*Event_Earthquake)(nil),
 		(*Event_RoadIncident)(nil),
-		(*Event_Network)(nil),
+		(*Event_Mesh)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

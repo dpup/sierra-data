@@ -91,12 +91,12 @@ func TestServeMeshLinkLayer(t *testing.T) {
 	}
 	for _, n := range nodes {
 		_, err := s.Store.UpsertEvent(ctx, &gridv1.Event{
-			Id: n.id, Layer: gridv1.Layer_NETWORK, Severity: gridv1.Severity_INFO,
+			Id: n.id, Layer: gridv1.Layer_MESH, Severity: gridv1.Severity_INFO,
 			Status: gridv1.EventStatus_ACTIVE, Headline: n.name,
 			Geometry:   pointGeom(n.lat, n.lng),
 			ObservedAt: timestamppb.New(base),
 			Provenance: &gridv1.Provenance{SourceId: "meshcore"},
-			Detail:     &gridv1.Event_Network{Network: &gridv1.NetworkDetail{PublicKey: n.pk, NodeType: "repeater", Name: n.name}},
+			Detail:     &gridv1.Event_Mesh{Mesh: &gridv1.MeshDetail{PublicKey: n.pk, NodeType: "repeater", Name: n.name}},
 		})
 		require.NoError(t, err)
 	}
@@ -132,8 +132,8 @@ func TestServeMeshLinkLayer(t *testing.T) {
 	// Nodes: A in-region + B the pulled-in neighbour; C/D absent.
 	inRegion := map[string]*bool{}
 	for _, p := range points {
-		require.NotNil(t, p.Properties.Network)
-		inRegion[p.Properties.Network.PublicKey] = p.Properties.Network.InRegion
+		require.NotNil(t, p.Properties.Mesh)
+		inRegion[p.Properties.Mesh.PublicKey] = p.Properties.Mesh.InRegion
 	}
 	require.Len(t, points, 2)
 	require.NotNil(t, inRegion["aa"])

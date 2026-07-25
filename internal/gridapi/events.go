@@ -38,24 +38,23 @@ func stripRevisionsIO(revs []*gridv1.EventRevision, keep bool) {
 
 // --- query-param parsers (shared by events, history, places) ---
 
-// layerAlias maps friendly query tokens to their canonical enum name. The
-// MeshCore mesh-node presence layer is enum NETWORK, but the rest of the surface
-// calls it "mesh" (the mesh_node map layer, the /api/v1/mesh endpoints), so
-// "mesh" is the primary query token and "network" stays accepted as a legacy
-// alias. "mesh_node" (the map-layer routing slug) resolves here too so one token
-// addresses both the .geojson layer and ?layer=.
+// layerAlias maps friendly query tokens onto their canonical enum name. The
+// mesh-node presence layer's enum is MESH, but the map layer is slugged
+// "mesh_node" and the layer was historically "network" (pre-rename); both
+// resolve here so one query token addresses the .geojson layer and ?layer=
+// alike, and pre-rename clients passing "network" keep working.
 var layerAlias = map[string]string{
-	"MESH":      "NETWORK",
-	"MESH_NODE": "NETWORK",
+	"NETWORK":   "MESH", // legacy: the layer's enum was NETWORK before the mesh rename
+	"MESH_NODE": "MESH", // the map-layer routing slug
 }
 
 // parseLayers accepts repeated layer params; each value is an enum name
 // matched case-insensitively, which also covers the shipped lowercase layer
 // slugs ("wildfire", "road_incident") since those uppercase onto the enum
-// names exactly. A small alias table (layerAlias) covers the one layer whose
-// slug diverges from its enum name — "mesh"/"mesh_node" -> NETWORK, with
-// "network" still accepted. Comma-separated lists inside one param are accepted
-// too. LAYER_UNSPECIFIED and unknown values are rejected.
+// names exactly. A small alias table (layerAlias) covers the mesh layer whose
+// slug/legacy name diverge from its enum name — "mesh_node" and the legacy
+// "network" both resolve to MESH. Comma-separated lists inside one param are
+// accepted too. LAYER_UNSPECIFIED and unknown values are rejected.
 func parseLayers(vals []string) ([]gridv1.Layer, error) {
 	var out []gridv1.Layer
 	for _, raw := range vals {

@@ -16,27 +16,33 @@ proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 
 ## 2026-07-25
 
-### Added — `?layer=mesh` / `mesh_node` aliases for the mesh-node presence layer
+### BREAKING — mesh-node presence layer renamed `NETWORK` → `MESH`
 
-Non-breaking discoverability fix. MeshCore mesh-node presence is the event-store
-enum `NETWORK`, but the rest of the surface calls the layer `mesh_node` (the map
-layer, the `/api/v1/mesh` endpoints). Previously the event query only accepted the
-enum name, so **`GET /api/v1/events?layer=mesh_node` returned `400 unknown layer`**
-while `?layer=network` worked — the one layer where the "query value = the
-lowercase slug" rule broke, which led API clients (and MCP agents) to conclude no
-per-node presence data existed.
+The mesh-node presence layer was enum `NETWORK` while the rest of the surface
+called it `mesh_node` (map layer, `/api/v1/mesh` endpoints). That split made the
+layer undiscoverable — `?layer=mesh_node` returned `400 unknown layer` while only
+`?layer=network` worked, so clients (and MCP agents) concluded no per-node presence
+data existed. The layer is now uniformly **mesh**.
 
-- **`GET /api/v1/events?layer=…` (and `/api/v1/history`) now accept `mesh` and
-  `mesh_node` as aliases for the `NETWORK` layer.** `mesh` is the primary token;
-  `network` stays accepted as a legacy alias. No response shape changes — events
-  still carry `layer: "NETWORK"` and the map layer is still `mesh_node.geojson`.
-- Per-node fields are unchanged and already present: each row's `headline` /
-  `areaLabel` carry the node name, `detail.network` carries `publicKey` + radio
-  telemetry, `observedAt` is when the Grid last heard the node, and
-  `detail.network.telemetry.lastAdvertAt` is the node's self-reported advert time
+**Migration for consumers (ersn.net, sierragridteam.org):**
+
+- **`event.layer` / `topEvents[].layer` now serialize as `"MESH"`** (was
+  `"NETWORK"`). Update any equality check on the old string.
+- **The event detail block renamed `detail.network` → `detail.mesh`** (same
+  fields: `publicKey`, `nodeType`, `name`, `telemetry{…}`). The `.geojson` feature
+  property renamed `properties.network` → `properties.mesh` to match.
+- **Query values:** `?layer=mesh` is now canonical; `?layer=mesh_node` also works;
+  **`?layer=network` is kept as a legacy alias** so existing URLs don't break.
+  Applies to `/api/v1/events` and `/api/v1/history`.
+- **Unchanged:** the enum *number* (13) — so persisted data needs no migration —
+  the map-layer slug/URL (`mesh_node.geojson`), and `properties.layer` on that
+  layer (`"MESH_NODE"`, the uppercased slug).
+- Per-node fields are otherwise unchanged: `headline`/`areaLabel` carry the node
+  name, `observedAt` is when the Grid last heard the node, and
+  `detail.mesh.telemetry.lastAdvertAt` is the node's self-reported advert time
   (diagnostic only — node clocks skew).
-- The MCP server (`internal/mcp`) now advertises the `mesh` layer and how to find
-  a node by name in its `grid_events` tool schema and the `grid://reference`
+- The MCP server (`internal/mcp`) advertises the `mesh` layer and how to find a
+  node by name in its `grid_events` tool schema and the `grid://reference`
   resource.
 
 ## 2026-07-24

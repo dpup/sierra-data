@@ -171,7 +171,7 @@ func (s *Service) buildPlaceSummary(ctx context.Context, hb hazardsBuilder, plac
 	// those; byLayer (built from the full set) still feeds the comms domain.
 	hazardEvents := make([]*gridv1.Event, 0, len(events))
 	for _, ev := range events {
-		if ev.GetLayer() != gridv1.Layer_NETWORK {
+		if ev.GetLayer() != gridv1.Layer_MESH {
 			hazardEvents = append(hazardEvents, ev)
 		}
 	}
@@ -247,8 +247,8 @@ func (s *Service) buildPlaceSummary(ctx context.Context, hb hazardsBuilder, plac
 	// a deliberately-off source must not surface as a dark/UNAVAILABLE domain.
 	if s.Cfg.Grid.Meshcore.Enabled {
 		out.Domains = append(out.Domains, buildDomain("comms",
-			[]string{eventLayerStatus(hazards.LayerNetwork)},
-			eventItems(byLayer[gridv1.Layer_NETWORK])))
+			[]string{eventLayerStatus(hazards.LayerMesh)},
+			eventItems(byLayer[gridv1.Layer_MESH])))
 	}
 
 	// --- mode --- (event layers use the same served/degraded statuses the
@@ -257,7 +257,7 @@ func (s *Service) buildPlaceSummary(ctx context.Context, hb hazardsBuilder, plac
 		condSegment.status == "UNAVAILABLE" || condFireWx.status == "UNAVAILABLE"
 	for layer := range eventLayers {
 		// A deliberately-off comms source is not a data gap in the hazard picture.
-		if layer == hazards.LayerNetwork && !s.Cfg.Grid.Meshcore.Enabled {
+		if layer == hazards.LayerMesh && !s.Cfg.Grid.Meshcore.Enabled {
 			continue
 		}
 		if eventLayerStatus(layer) == "UNAVAILABLE" {

@@ -1,6 +1,6 @@
 // pages/mesh.js — /mesh: the MeshCore relay-topology map.
 //
-// Nodes come from GET /api/v1/events?layer=network (each located node is a point,
+// Nodes come from GET /api/v1/events?layer=mesh (each located node is a point,
 // colored by role). Links come from GET /api/v1/mesh/links?window=… — the DURABLE
 // server-derived topology (an advert's relay path, rolled up over time), not a
 // client-side reconstruction. Each link fades by recency (lastSeen) and is
@@ -61,12 +61,12 @@ export async function initMeshPage() {
   const errEl = document.getElementById('mesh-errors');
   const statEl = document.getElementById('mesh-stats');
 
-  // 1. fetch every network event (paginate) → located node index.
+  // 1. fetch every mesh-node event (paginate) → located node index.
   let events = [];
   try {
     let tok = '';
     for (let i = 0; i < 20; i++) {
-      const d = await get('/api/v1/events', { layer: 'network', page_size: 200, page_token: tok });
+      const d = await get('/api/v1/events', { layer: 'mesh', page_size: 200, page_token: tok });
       events = events.concat(Array.isArray(d.events) ? d.events : []);
       tok = d.nextPageToken || '';
       if (!tok) break;
@@ -81,7 +81,7 @@ export async function initMeshPage() {
   const roleCounts = {};
   const nodeFeatures = [];
   for (const ev of events) {
-    const n = ev.network || {};
+    const n = ev.mesh || {};
     const pk = (n.publicKey || '').toLowerCase();
     const c = ev.geometry && ev.geometry.centroid;
     if (!pk || !c || c.lng == null || c.lat == null) continue;

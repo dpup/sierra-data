@@ -18,12 +18,12 @@ func TestParseLayers(t *testing.T) {
 		{name: "enum name", in: []string{"WILDFIRE"}, want: []gridv1.Layer{gridv1.Layer_WILDFIRE}},
 		{name: "lowercase slug", in: []string{"road_incident"}, want: []gridv1.Layer{gridv1.Layer_ROAD_INCIDENT}},
 		{name: "comma list", in: []string{"wildfire,earthquake"}, want: []gridv1.Layer{gridv1.Layer_WILDFIRE, gridv1.Layer_EARTHQUAKE}},
-		// The mesh-node layer is enum NETWORK, but "mesh" is the primary token and
-		// "network"/"mesh_node" are accepted aliases (case-insensitive).
-		{name: "mesh alias", in: []string{"mesh"}, want: []gridv1.Layer{gridv1.Layer_NETWORK}},
-		{name: "network legacy alias", in: []string{"network"}, want: []gridv1.Layer{gridv1.Layer_NETWORK}},
-		{name: "mesh_node slug alias", in: []string{"mesh_node"}, want: []gridv1.Layer{gridv1.Layer_NETWORK}},
-		{name: "mesh uppercase", in: []string{"MESH"}, want: []gridv1.Layer{gridv1.Layer_NETWORK}},
+		// The mesh-node layer's enum is MESH; "mesh_node" (map slug) and the legacy
+		// "network" resolve to it as aliases (case-insensitive).
+		{name: "mesh enum name", in: []string{"mesh"}, want: []gridv1.Layer{gridv1.Layer_MESH}},
+		{name: "network legacy alias", in: []string{"network"}, want: []gridv1.Layer{gridv1.Layer_MESH}},
+		{name: "mesh_node slug alias", in: []string{"mesh_node"}, want: []gridv1.Layer{gridv1.Layer_MESH}},
+		{name: "mesh uppercase", in: []string{"MESH"}, want: []gridv1.Layer{gridv1.Layer_MESH}},
 		{name: "unknown", in: []string{"volcano"}, err: true},
 		{name: "unspecified rejected", in: []string{"LAYER_UNSPECIFIED"}, err: true},
 	}

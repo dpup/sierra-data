@@ -722,8 +722,8 @@
         "roadIncident": {
           "$ref": "#/definitions/v1RoadIncidentDetail"
         },
-        "network": {
-          "$ref": "#/definitions/v1NetworkDetail"
+        "mesh": {
+          "$ref": "#/definitions/v1MeshDetail"
         }
       }
     },
@@ -870,13 +870,13 @@
         "POWER",
         "GAUGE",
         "AIR_QUALITY",
-        "NETWORK",
+        "MESH",
         "ANNOUNCEMENT"
       ],
       "default": "LAYER_UNSPECIFIED",
       "title": "- POWER: condition-backed layers (ROAD_SEGMENT, CHAIN_CONTROL) are projections, not events"
     },
-    "v1NetworkDetail": {
+    "v1MeshDetail": {
       "type": "object",
       "properties": {
         "publicKey": {
@@ -892,13 +892,13 @@
           "title": "advertised node name"
         },
         "telemetry": {
-          "$ref": "#/definitions/v1NetworkTelemetry",
+          "$ref": "#/definitions/v1MeshTelemetry",
           "title": "VOLATILE — excluded from the content hash"
         }
       },
-      "description": "MeshCore mesh-node presence (Layer_NETWORK). One event per node, keyed by\nits Ed25519 public key. Stable identity + advertised location live here (and\nmint a revision on change); the per-packet signal metrics live in the nested\nNetworkTelemetry, which the store's ContentHash zeroes — so the firehose of\nadverts refreshes liveness (last_seen_at) without ever writing a revision."
+      "description": "MeshCore mesh-node presence (Layer_MESH). One event per node, keyed by\nits Ed25519 public key. Stable identity + advertised location live here (and\nmint a revision on change); the per-packet signal metrics live in the nested\nMeshTelemetry, which the store's ContentHash zeroes — so the firehose of\nadverts refreshes liveness (last_seen_at) without ever writing a revision."
     },
-    "v1NetworkTelemetry": {
+    "v1MeshTelemetry": {
       "type": "object",
       "properties": {
         "snr": {
@@ -929,7 +929,7 @@
           "title": "sender-stamped time of the last advert"
         }
       },
-      "description": "NetworkTelemetry is the volatile, per-advert signal state. It is deliberately\ngrouped into one sub-message so store.ContentHash can zero the whole field:\nnone of it mints a revision."
+      "description": "MeshTelemetry is the volatile, per-advert signal state. It is deliberately\ngrouped into one sub-message so store.ContentHash can zero the whole field:\nnone of it mints a revision."
     },
     "v1Place": {
       "type": "object",

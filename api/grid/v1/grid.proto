@@ -46,7 +46,7 @@ message Event {
     FireWeatherDetail fire_weather = 23;
     EarthquakeDetail earthquake = 24;
     RoadIncidentDetail road_incident = 25;
-    NetworkDetail network = 26;
+    MeshDetail mesh = 26;
   }
 
   // Power/Gauge/AirQuality/Announcement details — defined with their pollers.
@@ -65,7 +65,7 @@ enum Layer {
   POWER = 10;
   GAUGE = 11;
   AIR_QUALITY = 12;
-  NETWORK = 13;
+  MESH = 13;
   ANNOUNCEMENT = 14;
 }
 
@@ -229,23 +229,23 @@ message RoadIncidentDetail {
   map<string, string> metadata = 7; // structured extras from AI analysis (internal keys stripped)
 }
 
-// MeshCore mesh-node presence (Layer_NETWORK). One event per node, keyed by
+// MeshCore mesh-node presence (Layer_MESH). One event per node, keyed by
 // its Ed25519 public key. Stable identity + advertised location live here (and
 // mint a revision on change); the per-packet signal metrics live in the nested
-// NetworkTelemetry, which the store's ContentHash zeroes — so the firehose of
+// MeshTelemetry, which the store's ContentHash zeroes — so the firehose of
 // adverts refreshes liveness (last_seen_at) without ever writing a revision.
-message NetworkDetail {
+message MeshDetail {
   string public_key = 1;   // full Ed25519 public key, hex (also the Event.id native part)
   string node_type = 2;    // companion | repeater | room_server | sensor
   string name = 3;         // advertised node name
 
-  NetworkTelemetry telemetry = 4;   // VOLATILE — excluded from the content hash
+  MeshTelemetry telemetry = 4;   // VOLATILE — excluded from the content hash
 }
 
-// NetworkTelemetry is the volatile, per-advert signal state. It is deliberately
+// MeshTelemetry is the volatile, per-advert signal state. It is deliberately
 // grouped into one sub-message so store.ContentHash can zero the whole field:
 // none of it mints a revision.
-message NetworkTelemetry {
+message MeshTelemetry {
   // Relay path (`path` = 4, `path_nodes` = 7) moved OUT of the event: a path is a
   // property of a single reception, not of a node, and one frozen sample on the
   // (hash-excluded) telemetry could never update. Per-advert receptions now land

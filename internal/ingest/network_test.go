@@ -52,7 +52,7 @@ func TestNetworkPollBuildsEvents(t *testing.T) {
 
 	ev := res.Events[0]
 	assert.Equal(t, "meshcore:aa11bb22cc33", ev.Id)
-	assert.Equal(t, gridv1.Layer_NETWORK, ev.Layer)
+	assert.Equal(t, gridv1.Layer_MESH, ev.Layer)
 	assert.Equal(t, gridv1.Severity_INFO, ev.Severity)
 	assert.Equal(t, gridv1.EventStatus_ACTIVE, ev.Status)
 	assert.Equal(t, "Murphys Ridge (repeater)", ev.Headline)
@@ -65,7 +65,7 @@ func TestNetworkPollBuildsEvents(t *testing.T) {
 	assert.InDelta(t, 38.1374, ev.Geometry.Centroid.Lat, 1e-9)
 	assert.InDelta(t, -120.4579, ev.Geometry.Centroid.Lng, 1e-9)
 
-	det := ev.GetNetwork()
+	det := ev.GetMesh()
 	require.NotNil(t, det)
 	assert.Equal(t, "aa11bb22cc33", det.PublicKey)
 	assert.Equal(t, "repeater", det.NodeType)

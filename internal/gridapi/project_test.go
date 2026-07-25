@@ -377,7 +377,7 @@ func TestProjectEvents_Network_MeshNode(t *testing.T) {
 	const point = `{"type":"Point","coordinates":[-120.4579,38.1374]}`
 	node := &gridv1.Event{
 		Id:           "meshcore:aa11bb22",
-		Layer:        gridv1.Layer_NETWORK,
+		Layer:        gridv1.Layer_MESH,
 		Category:     "repeater",
 		Severity:     gridv1.Severity_INFO,
 		Status:       gridv1.EventStatus_ACTIVE,
@@ -387,15 +387,15 @@ func TestProjectEvents_Network_MeshNode(t *testing.T) {
 		Geometry:     geom(point),
 		ObservedAt:   ts("2026-07-15T10:00:00Z"),
 		Provenance:   &gridv1.Provenance{SourceId: "meshcore", SourceName: "MeshCore Mesh"},
-		Detail: &gridv1.Event_Network{Network: &gridv1.NetworkDetail{
+		Detail: &gridv1.Event_Mesh{Mesh: &gridv1.MeshDetail{
 			PublicKey: "aa11bb22", NodeType: "repeater", Name: "Murphys Ridge",
-			Telemetry: &gridv1.NetworkTelemetry{
+			Telemetry: &gridv1.MeshTelemetry{
 				Snr: 4.5, Rssi: -93, HopCount: 2, Gateways: []string{"ag loft rpt"},
 			},
 		}},
 	}
 
-	feats := ProjectEvents(hazards.LayerNetwork, []*gridv1.Event{node})
+	feats := ProjectEvents(hazards.LayerMesh, []*gridv1.Event{node})
 	require.Len(t, feats, 1)
 	assert.JSONEq(t, `{
 	  "type": "Feature",
@@ -412,7 +412,7 @@ func TestProjectEvents_Network_MeshNode(t *testing.T) {
 	    "updatedAt": "2026-07-15T10:00:00Z",
 	    "areaLabel": "Murphys Ridge",
 	    "source": {"id": "meshcore", "name": "MeshCore Mesh", "url": "https://map.meshcore.io", "attribution": "MeshCore community mesh"},
-	    "network": {"publicKey": "aa11bb22", "nodeType": "repeater", "name": "Murphys Ridge", "snr": 4.5, "rssi": -93, "hopCount": 2, "gateways": ["ag loft rpt"]}
+	    "mesh": {"publicKey": "aa11bb22", "nodeType": "repeater", "name": "Murphys Ridge", "snr": 4.5, "rssi": -93, "hopCount": 2, "gateways": ["ag loft rpt"]}
 	  }
 	}`, featJSON(t, feats[0]))
 }

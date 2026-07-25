@@ -109,7 +109,7 @@ func (s *Service) serveMeshLinkLayer(w http.ResponseWriter, r *http.Request, pla
 	}
 	byPub := make(map[string]*gridv1.Event, len(allNodes))
 	for _, ev := range allNodes {
-		pk := strings.ToLower(ev.GetNetwork().GetPublicKey())
+		pk := strings.ToLower(ev.GetMesh().GetPublicKey())
 		if pk != "" && ev.GetGeometry().GetCentroid() != nil {
 			byPub[pk] = ev
 		}
@@ -121,7 +121,7 @@ func (s *Service) serveMeshLinkLayer(w http.ResponseWriter, r *http.Request, pla
 	}
 	inRegion := make(map[string]bool, len(regionNodes))
 	for _, ev := range regionNodes {
-		if pk := strings.ToLower(ev.GetNetwork().GetPublicKey()); pk != "" {
+		if pk := strings.ToLower(ev.GetMesh().GetPublicKey()); pk != "" {
 			inRegion[pk] = true
 		}
 	}
@@ -159,8 +159,8 @@ func (s *Service) serveMeshLinkLayer(w http.ResponseWriter, r *http.Request, pla
 	for pk := range nodeSet {
 		f := projectNetwork(byPub[pk])
 		reg := inRegion[pk]
-		if f.Properties.Network != nil {
-			f.Properties.Network.InRegion = &reg
+		if f.Properties.Mesh != nil {
+			f.Properties.Mesh.InRegion = &reg
 		}
 		features = append(features, f)
 	}
@@ -189,7 +189,7 @@ func (s *Service) serveMeshLinkLayer(w http.ResponseWriter, r *http.Request, pla
 func (s *Service) queryNetworkEvents(ctx context.Context, placeID string) ([]*gridv1.Event, error) {
 	q := store.EventQuery{
 		PlaceID:  placeID,
-		Layers:   []gridv1.Layer{gridv1.Layer_NETWORK},
+		Layers:   []gridv1.Layer{gridv1.Layer_MESH},
 		Statuses: []gridv1.EventStatus{gridv1.EventStatus_ACTIVE, gridv1.EventStatus_SCHEDULED},
 		PageSize: 200,
 	}
@@ -239,10 +239,10 @@ func meshLinkHeadline(na, nb *gridv1.Event) string {
 }
 
 func meshNodeLabel(ev *gridv1.Event) string {
-	if name := ev.GetNetwork().GetName(); name != "" {
+	if name := ev.GetMesh().GetName(); name != "" {
 		return name
 	}
-	pk := ev.GetNetwork().GetPublicKey()
+	pk := ev.GetMesh().GetPublicKey()
 	if len(pk) > 8 {
 		return pk[:8]
 	}

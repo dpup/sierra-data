@@ -37,7 +37,7 @@ func ProjectEvents(layer string, events []*gridv1.Event) []hazards.Feature {
 			f = projectEarthquake(ev)
 		case hazards.LayerRoadIncident:
 			f = projectRoadIncident(ev)
-		case hazards.LayerNetwork:
+		case hazards.LayerMesh:
 			f = projectNetwork(ev)
 		default:
 			continue // not an event-backed layer
@@ -164,13 +164,13 @@ func projectRoadIncident(ev *gridv1.Event) hazards.Feature {
 // is the per-layer constant; per-feature signal metrics come from the volatile
 // telemetry block. properties.status is the UPPERCASE lifecycle enum.
 func projectNetwork(ev *gridv1.Event) hazards.Feature {
-	d := ev.GetNetwork()
+	d := ev.GetMesh()
 	t := d.GetTelemetry()
-	p := baseProps(ev, hazards.LayerNetwork, "Mesh node")
+	p := baseProps(ev, hazards.LayerMesh, "Mesh node")
 	p.Status = lifecycleStatus(ev)
 	p.UpdatedAt = rfc3339(ev.GetObservedAt())
 	p.Source = hazards.Source{ID: "meshcore", Name: "MeshCore Mesh", URL: safeURL(ev.GetCanonicalUrl()), Attribution: "MeshCore community mesh"}
-	p.Network = &hazards.NetworkProps{
+	p.Mesh = &hazards.MeshProps{
 		PublicKey: d.GetPublicKey(),
 		NodeType:  d.GetNodeType(),
 		Name:      d.GetName(),
