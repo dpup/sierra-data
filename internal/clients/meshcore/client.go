@@ -138,6 +138,29 @@ const (
 	cadenceAlpha = 0.3
 )
 
+// recordCadence folds one advert reception time into the node's cadence estimate,
+// collapsing multi-gateway echoes (< minCadenceSample apart) into a single advert.
+// Shared by live ingest and Seed's rehydration replay. Times must arrive in
+// ascending order.
+func (e *nodeEntry) recordCadence(t time.Time) {
+	if e.lastAdvertAt.IsZero() {
+		e.lastAdvertAt = t
+		e.advertCount = 1
+		return
+	}
+	gap := t.Sub(e.lastAdvertAt)
+	if gap < minCadenceSample {
+		return // same advert echoed off another gateway — not a new interval
+	}
+	if e.ewmaInterval <= 0 {
+		e.ewmaInterval = gap
+	} else {
+		e.ewmaInterval = time.Duration(cadenceAlpha*float64(gap) + (1-cadenceAlpha)*float64(e.ewmaInterval))
+	}
+	e.lastAdvertAt = t
+	e.advertCount++
+}
+
 // Registry subscribes to MeshCore MQTT bridges and accumulates node presence in
 // memory. It is safe for concurrent use: MQTT callbacks write, the ingest
 // normalizer reads via Snapshot on the scheduler's tick.
@@ -180,6 +203,59 @@ func NewRegistry(cfg Config) *Registry {
 		nodes:   make(map[string]*nodeEntry),
 		obsGate: make(map[string]time.Time),
 		now:     time.Now,
+	}
+}
+
+// SeedNode is one node's persisted presence, used to rehydrate the Registry on
+// startup. The grid store survives a restart but the in-memory Registry does not,
+// so without this a deploy drops the whole mesh to "unknown" until every node
+// re-adverts — and the disappearance sweep expires the slow ones first.
+type SeedNode struct {
+	PubKey      string
+	Role        string
+	Name        string
+	HasLocation bool
+	Lat, Lng    float64
+	// LastHeard is the fallback last-heard time (the store's last_seen_at) used
+	// when HeardTimes is empty. HeardTimes are recent advert receptions (ascending)
+	// replayed to reconstruct cadence so the per-node presence window is accurate
+	// immediately after boot, not just the GraceFloor.
+	LastHeard  time.Time
+	HeardTimes []time.Time
+}
+
+// Seed rehydrates node presence from persisted state. Call ONCE before Connect
+// (single-threaded — no MQTT callbacks yet). Live adverts then update seeded
+// nodes in place. Nodes seeded here appear in the next Snapshot within their
+// (reconstructed or GraceFloor) window, so a restart no longer looks like a
+// mesh-wide disappearance to the sweep.
+func (r *Registry) Seed(nodes []SeedNode) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, sn := range nodes {
+		if sn.PubKey == "" {
+			continue
+		}
+		e := r.nodes[sn.PubKey]
+		if e == nil {
+			e = &nodeEntry{gateways: make(map[string]struct{}), brokers: make(map[string]struct{})}
+			r.nodes[sn.PubKey] = e
+		}
+		e.PubKey = sn.PubKey
+		e.Role = sn.Role
+		e.Name = sn.Name
+		if sn.HasLocation {
+			e.HasLocation = true
+			e.Lat, e.Lng = sn.Lat, sn.Lng
+		}
+		last := sn.LastHeard
+		for _, t := range sn.HeardTimes {
+			e.recordCadence(t)
+			if t.After(last) {
+				last = t
+			}
+		}
+		e.LastHeardAt = last
 	}
 }
 
@@ -317,22 +393,7 @@ func (r *Registry) ingestPacket(env *packetEnvelope, brokerID string) {
 	e.HopCount = uint32(adv.HopCount)
 	e.LastAdvertAt = adv.Timestamp // node-reported; unreliable clock, diagnostic only
 	e.LastHeardAt = now            // our receive time — the trustworthy clock
-
-	// Update the cadence estimate from the interval between DISTINCT adverts (one
-	// advert echoes off several gateways within seconds — collapse those). Drives
-	// the per-node presence window in Snapshot.
-	if e.lastAdvertAt.IsZero() {
-		e.lastAdvertAt = now
-		e.advertCount = 1
-	} else if gap := now.Sub(e.lastAdvertAt); gap >= minCadenceSample {
-		if e.ewmaInterval <= 0 {
-			e.ewmaInterval = gap
-		} else {
-			e.ewmaInterval = time.Duration(cadenceAlpha*float64(gap) + (1-cadenceAlpha)*float64(e.ewmaInterval))
-		}
-		e.lastAdvertAt = now
-		e.advertCount++
-	}
+	e.recordCadence(now)           // per-node advert-interval estimate (drives Snapshot's window)
 	if gw != "" {
 		e.gateways[gw] = struct{}{}
 	}

@@ -309,3 +309,39 @@ func TestRegistryPrunesStaleNodes(t *testing.T) {
 	r.now = func() time.Time { return base.Add(2 * time.Hour) }
 	assert.Empty(t, r.Snapshot(), "node pruned past RetainFor")
 }
+
+func TestRegistrySeed(t *testing.T) {
+	base := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	r := NewRegistry(Config{CadenceK: 3, GraceFloor: time.Hour, GraceCeil: 100 * time.Hour, RetainFor: 1000 * time.Hour})
+	r.now = func() time.Time { return base }
+
+	// Rehydrate two nodes as a restart would: A with a reconstructable ~10h cadence
+	// (two adverts 10h apart), B with only a last-seen (no advert history).
+	r.Seed([]SeedNode{
+		{PubKey: "aa", Role: "repeater", Name: "Ridge", HasLocation: true, Lat: 38, Lng: -120,
+			HeardTimes: []time.Time{base.Add(-12 * time.Hour), base.Add(-2 * time.Hour)}},
+		{PubKey: "bb", Role: "companion", HasLocation: true, Lat: 38, Lng: -120,
+			LastHeard: base.Add(-30 * time.Minute)},
+	})
+
+	present := func() map[string]bool {
+		m := map[string]bool{}
+		for _, n := range r.Snapshot() {
+			m[n.PubKey] = true
+		}
+		return m
+	}
+
+	// Immediately after a restart both are present — no mesh-wide disappearance.
+	got := present()
+	assert.True(t, got["aa"])
+	assert.True(t, got["bb"])
+	assert.Equal(t, "Ridge", r.nodes["aa"].Name, "identity + location rehydrated")
+
+	// 25h later: A's reconstructed 30h window (3×10h) keeps it across the gap; B,
+	// with no cadence, falls to the 1h GraceFloor and is gone.
+	r.now = func() time.Time { return base.Add(25 * time.Hour) }
+	got = present()
+	assert.True(t, got["aa"], "reconstructed cadence carries the slow node across a restart")
+	assert.False(t, got["bb"], "unknown-cadence node uses GraceFloor")
+}

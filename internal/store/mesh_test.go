@@ -182,3 +182,29 @@ func TestMeshLinks(t *testing.T) {
 	assert.Equal(t, 1, links[0].Observations)
 	assert.Equal(t, 1, links[0].DaysActive)
 }
+
+func TestMeshNodeHeardTimes(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	t0 := time.Unix(1_700_000_000, 0)
+
+	var obs []MeshObservation
+	for i := 0; i < 5; i++ {
+		obs = append(obs, MeshObservation{PubKey: "aa", HeardAt: t0.Add(time.Duration(i) * time.Hour)})
+	}
+	obs = append(obs, MeshObservation{PubKey: "bb", HeardAt: t0})
+	require.NoError(t, s.InsertMeshObservations(ctx, obs))
+
+	all, err := s.MeshNodeHeardTimes(ctx, 0)
+	require.NoError(t, err)
+	require.Len(t, all["aa"], 5)
+	require.Len(t, all["bb"], 1)
+	assert.True(t, all["aa"][0].Before(all["aa"][4]), "ascending")
+
+	// Capped to the two most recent per node.
+	capped, err := s.MeshNodeHeardTimes(ctx, 2)
+	require.NoError(t, err)
+	require.Len(t, capped["aa"], 2)
+	assert.Equal(t, t0.Add(3*time.Hour).Unix(), capped["aa"][0].Unix())
+	assert.Equal(t, t0.Add(4*time.Hour).Unix(), capped["aa"][1].Unix())
+}

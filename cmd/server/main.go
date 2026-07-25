@@ -144,6 +144,10 @@ func main() {
 	// snapshot on the scheduler's tick. Enabled only when configured with brokers.
 	if appConfig.Grid.Meshcore.Enabled && len(appConfig.Grid.Meshcore.Brokers) > 0 {
 		meshcoreReg := meshcore.NewRegistry(meshcoreClientConfig(appConfig))
+		// Rehydrate presence from the persisted store BEFORE connecting, so a
+		// deploy doesn't drop the whole mesh to "unknown" (and let the sweep expire
+		// the slow SIERRA repeaters) until every node re-adverts.
+		seedMeshRegistry(ctx, meshcoreReg, gridStore)
 		if err := meshcoreReg.Connect(ctx); err != nil {
 			logging.Errorw(ctx, "Failed to start MeshCore subscriber", "error", err)
 		} else {
@@ -359,6 +363,56 @@ func meshMaintenanceConfig(cfg *config.Config) ingest.MeshMaintenance {
 		ObservationRetention: obsRetention,
 		RollupRetention:      rollupRetention,
 	}
+}
+
+// seedMeshRegistry rehydrates the MeshCore Registry from the persisted store so
+// node presence survives a restart. It seeds every ACTIVE/SCHEDULED network node
+// (identity + location + last-seen) and replays each node's recent advert times
+// (from the observation store) to reconstruct its cadence, so the per-node
+// presence window is right immediately after boot. Best-effort: a store read
+// failure logs and leaves the Registry to refill from live adverts (the prior
+// behavior), never blocks startup.
+func seedMeshRegistry(ctx context.Context, reg *meshcore.Registry, st *store.Store) {
+	events, err := st.ActiveEventsBySource(ctx, "meshcore")
+	if err != nil {
+		logging.Warnw(ctx, "MeshCore: presence rehydration skipped — loading active nodes failed", "error", err)
+		return
+	}
+	if len(events) == 0 {
+		return
+	}
+	heard, err := st.MeshNodeHeardTimes(ctx, 40)
+	if err != nil {
+		logging.Warnw(ctx, "MeshCore: cadence rehydration skipped — reading heard times failed", "error", err)
+		heard = nil
+	}
+	seeds := make([]meshcore.SeedNode, 0, len(events))
+	for _, se := range events {
+		d := se.Event.GetNetwork()
+		pk := d.GetPublicKey()
+		if pk == "" {
+			continue
+		}
+		sn := meshcore.SeedNode{
+			PubKey:     pk,
+			Role:       d.GetNodeType(),
+			Name:       d.GetName(),
+			HeardTimes: heard[pk],
+			LastHeard:  se.LastSeenAt,
+		}
+		if c := se.Event.GetGeometry().GetCentroid(); c != nil {
+			sn.HasLocation = true
+			sn.Lat, sn.Lng = c.GetLat(), c.GetLng()
+		}
+		if sn.LastHeard.IsZero() {
+			if ts := se.Event.GetObservedAt(); ts != nil {
+				sn.LastHeard = ts.AsTime()
+			}
+		}
+		seeds = append(seeds, sn)
+	}
+	reg.Seed(seeds)
+	logging.Infow(ctx, "MeshCore: rehydrated node presence from store", "nodes", len(seeds))
 }
 
 // gridSourceSeeds builds the source registry rows: ids + tuning from

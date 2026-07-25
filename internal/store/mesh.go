@@ -71,6 +71,41 @@ func (s *Store) InsertMeshObservations(ctx context.Context, obs []MeshObservatio
 	})
 }
 
+// MeshNodeHeardTimes returns, per node public key, the recent advert receive
+// times (ascending) held in mesh_observations — capped to the most recent
+// maxPerNode per node (0 = uncapped). It feeds Registry rehydration on boot:
+// replaying these reconstructs each node's advert cadence so presence survives a
+// restart instead of resetting to unknown-cadence. Bounded by the Tier-0
+// retention (48h), so this is a one-time indexed scan.
+func (s *Store) MeshNodeHeardTimes(ctx context.Context, maxPerNode int) (map[string][]time.Time, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT pubkey, heard_at FROM mesh_observations ORDER BY pubkey, heard_at`)
+	if err != nil {
+		return nil, fmt.Errorf("store: reading node heard times: %w", err)
+	}
+	defer rows.Close()
+	out := make(map[string][]time.Time)
+	for rows.Next() {
+		var pk string
+		var h int64
+		if err := rows.Scan(&pk, &h); err != nil {
+			return nil, fmt.Errorf("store: scanning heard time: %w", err)
+		}
+		out[pk] = append(out[pk], time.Unix(h, 0))
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: iterating heard times: %w", err)
+	}
+	if maxPerNode > 0 {
+		for pk, ts := range out {
+			if len(ts) > maxPerNode {
+				out[pk] = ts[len(ts)-maxPerNode:] // keep the most recent
+			}
+		}
+	}
+	return out, nil
+}
+
 // CountMeshObservations returns the number of rows in mesh_observations. A test
 // and diagnostic aid (the write path has no reader yet); cheap enough for the
 // volumes involved.
