@@ -38,11 +38,24 @@ func stripRevisionsIO(revs []*gridv1.EventRevision, keep bool) {
 
 // --- query-param parsers (shared by events, history, places) ---
 
+// layerAlias maps friendly query tokens to their canonical enum name. The
+// MeshCore mesh-node presence layer is enum NETWORK, but the rest of the surface
+// calls it "mesh" (the mesh_node map layer, the /api/v1/mesh endpoints), so
+// "mesh" is the primary query token and "network" stays accepted as a legacy
+// alias. "mesh_node" (the map-layer routing slug) resolves here too so one token
+// addresses both the .geojson layer and ?layer=.
+var layerAlias = map[string]string{
+	"MESH":      "NETWORK",
+	"MESH_NODE": "NETWORK",
+}
+
 // parseLayers accepts repeated layer params; each value is an enum name
 // matched case-insensitively, which also covers the shipped lowercase layer
 // slugs ("wildfire", "road_incident") since those uppercase onto the enum
-// names exactly. Comma-separated lists inside one param are accepted too.
-// LAYER_UNSPECIFIED and unknown values are rejected.
+// names exactly. A small alias table (layerAlias) covers the one layer whose
+// slug diverges from its enum name — "mesh"/"mesh_node" -> NETWORK, with
+// "network" still accepted. Comma-separated lists inside one param are accepted
+// too. LAYER_UNSPECIFIED and unknown values are rejected.
 func parseLayers(vals []string) ([]gridv1.Layer, error) {
 	var out []gridv1.Layer
 	for _, raw := range vals {
@@ -51,7 +64,11 @@ func parseLayers(vals []string) ([]gridv1.Layer, error) {
 			if v == "" {
 				continue
 			}
-			n, ok := gridv1.Layer_value[strings.ToUpper(v)]
+			key := strings.ToUpper(v)
+			if a, ok := layerAlias[key]; ok {
+				key = a
+			}
+			n, ok := gridv1.Layer_value[key]
 			if !ok || n == int32(gridv1.Layer_LAYER_UNSPECIFIED) {
 				return nil, fmt.Errorf("unknown layer: %q", v)
 			}

@@ -63,7 +63,7 @@ const situationResult = `{
 
 const tools = [
   ['grid_situation', 'location', 'Area mode (QUIET/WATCH/ACTIVE) + rollup for a place, address, or lat,lng. Start here.'],
-  ['grid_events', 'location?, layer?, severity_min?, status?, since?, limit?', 'List active events (wildfire, evacuation, weather alert, earthquake, road incident).'],
+  ['grid_events', 'location?, layer?, severity_min?, status?, since?, limit?', 'List active events (wildfire, evacuation, weather alert, earthquake, road incident, and mesh-node presence via layer=mesh).'],
   ['grid_event', 'id', 'Full detail on one event: summary, description, provenance, canonical link.'],
   ['grid_conditions', 'location?', 'Road + weather conditions (travel times, chain control, fire weather).'],
   ['grid_resolve', 'address | lat,lng', 'Resolve a location to the places that contain it, most-specific first.'],
@@ -78,6 +78,7 @@ const examples = [
   ['"What are road and weather conditions on Ebbetts Pass?"', 'grid_conditions { "location": "ebbetts-pass" }'],
   ['"I\'m at 38.03, -120.40 — what hazards affect me?"', 'grid_situation { "location": "38.03,-120.40" }'],
   ['"Which data feeds are currently down?"', 'grid_sources { }'],
+  ['"When did the SIERRA mesh node last check in?"', 'grid_events { "layer": "mesh" } → match the node by name; use its observedAt (last heard)'],
 ];
 ---
 <Shell

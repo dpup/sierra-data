@@ -14,6 +14,31 @@ throughout; errors are gRPC-standard `{code, codeName, message, details}`). The
 by a snake_case `/v1` surface on 2026-07-05, which was in turn folded back onto the
 proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 
+## 2026-07-25
+
+### Added — `?layer=mesh` / `mesh_node` aliases for the mesh-node presence layer
+
+Non-breaking discoverability fix. MeshCore mesh-node presence is the event-store
+enum `NETWORK`, but the rest of the surface calls the layer `mesh_node` (the map
+layer, the `/api/v1/mesh` endpoints). Previously the event query only accepted the
+enum name, so **`GET /api/v1/events?layer=mesh_node` returned `400 unknown layer`**
+while `?layer=network` worked — the one layer where the "query value = the
+lowercase slug" rule broke, which led API clients (and MCP agents) to conclude no
+per-node presence data existed.
+
+- **`GET /api/v1/events?layer=…` (and `/api/v1/history`) now accept `mesh` and
+  `mesh_node` as aliases for the `NETWORK` layer.** `mesh` is the primary token;
+  `network` stays accepted as a legacy alias. No response shape changes — events
+  still carry `layer: "NETWORK"` and the map layer is still `mesh_node.geojson`.
+- Per-node fields are unchanged and already present: each row's `headline` /
+  `areaLabel` carry the node name, `detail.network` carries `publicKey` + radio
+  telemetry, `observedAt` is when the Grid last heard the node, and
+  `detail.network.telemetry.lastAdvertAt` is the node's self-reported advert time
+  (diagnostic only — node clocks skew).
+- The MCP server (`internal/mcp`) now advertises the `mesh` layer and how to find
+  a node by name in its `grid_events` tool schema and the `grid://reference`
+  resource.
+
 ## 2026-07-24
 
 ### Added — place-scoped mesh topology layer `mesh_link.geojson`

@@ -86,18 +86,26 @@ func (s *Server) registerTools() []tool {
 		},
 		{
 			Name: "grid_events",
-			Description: "List active hazard events (wildfire, evacuation, weather alert, earthquake, road " +
-				"incident) — optionally scoped to a location and filtered by layer/severity/status/time. " +
+			Description: "List active events (wildfire, evacuation, weather alert, earthquake, road " +
+				"incident, and mesh-node presence) — optionally scoped to a location and filtered by " +
+				"layer/severity/status/time. " +
 				"Compact rows; call grid_event for full detail (incl. the verbatim report) on one. " +
 				"Geometry is omitted (a location centroid is included). " +
 				"There is no per-road or per-incident-type filter: to answer \"what happened on <a road>?\", " +
 				"a sub-type question (collisions vs. hazards vs. closures), or a count/tally, scope broadly " +
 				"— pass a county/area name or a corridor slug (e.g. location \"Calaveras County\", layer " +
 				"\"road_incident\") — and filter or count the returned rows yourself; each row's headline and " +
-				"areaLabel carry the road name and incident type. Raise limit (max 200) and follow " +
+				"areaLabel carry the road name and incident type. " +
+				"MeshCore mesh-node presence is layer \"mesh\" (legacy alias \"network\"): one INFO row per " +
+				"node, the node's name in headline/areaLabel and its pubkey + radio telemetry in detail. To " +
+				"find or check a specific node (e.g. one named \"SIERRA…\"), list layer=mesh — unscoped is " +
+				"fine, the mesh spans places — and match the name in the rows; a node's observedAt is when the " +
+				"Grid last heard it (the trustworthy freshness signal — detail.network.telemetry.lastAdvertAt " +
+				"is the node's self-reported advert time and is diagnostic only, clocks skew). Absence of a " +
+				"node here is not proof it's down. Raise limit (max 200) and follow " +
 				"nextPageToken to get the full set. (grid_situation already gives per-domain active counts " +
 				"for a single place.)",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"location":{"type":"string","description":"place slug/id, address, or lat,lng to scope to"},"layer":{"type":"string","description":"wildfire|evacuation|weather_alert|earthquake|road_incident"},"severity_min":{"type":"string","description":"INFO|MINOR|MODERATE|SEVERE|EXTREME"},"status":{"type":"string","description":"default ACTIVE,SCHEDULED; pass RESOLVED/EXPIRED to see closed"},"since":{"type":"string","description":"RFC3339; only events observed at/after"},"limit":{"type":"integer"},"page_token":{"type":"string"}}}`),
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"location":{"type":"string","description":"place slug/id, address, or lat,lng to scope to"},"layer":{"type":"string","description":"wildfire|evacuation|weather_alert|earthquake|road_incident|mesh (mesh = MeshCore node presence; \"network\" is a legacy alias)"},"severity_min":{"type":"string","description":"INFO|MINOR|MODERATE|SEVERE|EXTREME"},"status":{"type":"string","description":"default ACTIVE,SCHEDULED; pass RESOLVED/EXPIRED to see closed"},"since":{"type":"string","description":"RFC3339; only events observed at/after"},"limit":{"type":"integer"},"page_token":{"type":"string"}}}`),
 			Handler:     s.handleEvents,
 		},
 		{
