@@ -555,6 +555,14 @@
         "lastUpdated": {
           "type": "string",
           "format": "date-time"
+        },
+        "forecast": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1WeatherForecast"
+          },
+          "title": "per-location, joins by location_id"
         }
       }
     },
@@ -826,6 +834,38 @@
         }
       },
       "description": "fire_weather is condition-backed (a live projection, not an event); this\nmessage exists for the spec §3 oneof shape."
+    },
+    "v1ForecastPeriod": {
+      "type": "object",
+      "properties": {
+        "time": {
+          "type": "string",
+          "format": "date-time",
+          "title": "hourly period start, UTC"
+        },
+        "temperatureCelsius": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "humidityPercent": {
+          "type": "integer",
+          "format": "int32",
+          "title": "relative humidity"
+        },
+        "windSpeedKmh": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "windDirectionDegrees": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "windGustKmh": {
+          "type": "integer",
+          "format": "int32"
+        }
+      },
+      "description": "ForecastPeriod is one hourly step of a location's fire-weather forecast (NWS\ngridpoint). Absent numeric fields serialize as 0, like WeatherConditions."
     },
     "v1Geometry": {
       "type": "object",
@@ -1404,6 +1444,50 @@
           "format": "int32"
         }
       }
+    },
+    "v1WeatherForecast": {
+      "type": "object",
+      "properties": {
+        "locationId": {
+          "type": "string",
+          "title": "joins to WeatherConditions.location_id"
+        },
+        "source": {
+          "type": "string",
+          "title": "e.g. \"NWS (STO gridpoint)\""
+        },
+        "issuedAt": {
+          "type": "string",
+          "format": "date-time",
+          "title": "grid update time"
+        },
+        "horizonHours": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "periods": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1ForecastPeriod"
+          }
+        },
+        "peakWindGustKmh": {
+          "type": "integer",
+          "format": "int32",
+          "title": "summary: max over the horizon"
+        },
+        "peakWindGustAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "minHumidityPercent": {
+          "type": "integer",
+          "format": "int32",
+          "title": "summary: min over the horizon"
+        }
+      },
+      "description": "WeatherForecast is a location's short-range fire-weather forecast: the raw NWS\ngridpoint series (wind/gust/RH/temp) plus an at-a-glance summary. Informational\nonly — it never implies a fire-weather WARNING (issued products are in\nFireWeatherConditions). See docs/fire-weather-forecast-design.md."
     },
     "v1WildfireDetail": {
       "type": "object",

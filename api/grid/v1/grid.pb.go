@@ -3518,18 +3518,209 @@ func (x *FireWeatherConditions) GetZones() []string {
 	return nil
 }
 
+// ForecastPeriod is one hourly step of a location's fire-weather forecast (NWS
+// gridpoint). Absent numeric fields serialize as 0, like WeatherConditions.
+type ForecastPeriod struct {
+	state                protoimpl.MessageState `protogen:"open.v1"`
+	Time                 *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=time,proto3" json:"time,omitempty"` // hourly period start, UTC
+	TemperatureCelsius   int32                  `protobuf:"varint,2,opt,name=temperature_celsius,json=temperatureCelsius,proto3" json:"temperature_celsius,omitempty"`
+	HumidityPercent      int32                  `protobuf:"varint,3,opt,name=humidity_percent,json=humidityPercent,proto3" json:"humidity_percent,omitempty"` // relative humidity
+	WindSpeedKmh         int32                  `protobuf:"varint,4,opt,name=wind_speed_kmh,json=windSpeedKmh,proto3" json:"wind_speed_kmh,omitempty"`
+	WindDirectionDegrees int32                  `protobuf:"varint,5,opt,name=wind_direction_degrees,json=windDirectionDegrees,proto3" json:"wind_direction_degrees,omitempty"`
+	WindGustKmh          int32                  `protobuf:"varint,6,opt,name=wind_gust_kmh,json=windGustKmh,proto3" json:"wind_gust_kmh,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
+}
+
+func (x *ForecastPeriod) Reset() {
+	*x = ForecastPeriod{}
+	mi := &file_grid_proto_msgTypes[43]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ForecastPeriod) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ForecastPeriod) ProtoMessage() {}
+
+func (x *ForecastPeriod) ProtoReflect() protoreflect.Message {
+	mi := &file_grid_proto_msgTypes[43]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ForecastPeriod.ProtoReflect.Descriptor instead.
+func (*ForecastPeriod) Descriptor() ([]byte, []int) {
+	return file_grid_proto_rawDescGZIP(), []int{43}
+}
+
+func (x *ForecastPeriod) GetTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.Time
+	}
+	return nil
+}
+
+func (x *ForecastPeriod) GetTemperatureCelsius() int32 {
+	if x != nil {
+		return x.TemperatureCelsius
+	}
+	return 0
+}
+
+func (x *ForecastPeriod) GetHumidityPercent() int32 {
+	if x != nil {
+		return x.HumidityPercent
+	}
+	return 0
+}
+
+func (x *ForecastPeriod) GetWindSpeedKmh() int32 {
+	if x != nil {
+		return x.WindSpeedKmh
+	}
+	return 0
+}
+
+func (x *ForecastPeriod) GetWindDirectionDegrees() int32 {
+	if x != nil {
+		return x.WindDirectionDegrees
+	}
+	return 0
+}
+
+func (x *ForecastPeriod) GetWindGustKmh() int32 {
+	if x != nil {
+		return x.WindGustKmh
+	}
+	return 0
+}
+
+// WeatherForecast is a location's short-range fire-weather forecast: the raw NWS
+// gridpoint series (wind/gust/RH/temp) plus an at-a-glance summary. Informational
+// only — it never implies a fire-weather WARNING (issued products are in
+// FireWeatherConditions). See docs/fire-weather-forecast-design.md.
+type WeatherForecast struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	LocationId         string                 `protobuf:"bytes,1,opt,name=location_id,json=locationId,proto3" json:"location_id,omitempty"` // joins to WeatherConditions.location_id
+	Source             string                 `protobuf:"bytes,2,opt,name=source,proto3" json:"source,omitempty"`                           // e.g. "NWS (STO gridpoint)"
+	IssuedAt           *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=issued_at,json=issuedAt,proto3" json:"issued_at,omitempty"`       // grid update time
+	HorizonHours       int32                  `protobuf:"varint,4,opt,name=horizon_hours,json=horizonHours,proto3" json:"horizon_hours,omitempty"`
+	Periods            []*ForecastPeriod      `protobuf:"bytes,5,rep,name=periods,proto3" json:"periods,omitempty"`
+	PeakWindGustKmh    int32                  `protobuf:"varint,6,opt,name=peak_wind_gust_kmh,json=peakWindGustKmh,proto3" json:"peak_wind_gust_kmh,omitempty"` // summary: max over the horizon
+	PeakWindGustAt     *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=peak_wind_gust_at,json=peakWindGustAt,proto3" json:"peak_wind_gust_at,omitempty"`
+	MinHumidityPercent int32                  `protobuf:"varint,8,opt,name=min_humidity_percent,json=minHumidityPercent,proto3" json:"min_humidity_percent,omitempty"` // summary: min over the horizon
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *WeatherForecast) Reset() {
+	*x = WeatherForecast{}
+	mi := &file_grid_proto_msgTypes[44]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WeatherForecast) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WeatherForecast) ProtoMessage() {}
+
+func (x *WeatherForecast) ProtoReflect() protoreflect.Message {
+	mi := &file_grid_proto_msgTypes[44]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WeatherForecast.ProtoReflect.Descriptor instead.
+func (*WeatherForecast) Descriptor() ([]byte, []int) {
+	return file_grid_proto_rawDescGZIP(), []int{44}
+}
+
+func (x *WeatherForecast) GetLocationId() string {
+	if x != nil {
+		return x.LocationId
+	}
+	return ""
+}
+
+func (x *WeatherForecast) GetSource() string {
+	if x != nil {
+		return x.Source
+	}
+	return ""
+}
+
+func (x *WeatherForecast) GetIssuedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.IssuedAt
+	}
+	return nil
+}
+
+func (x *WeatherForecast) GetHorizonHours() int32 {
+	if x != nil {
+		return x.HorizonHours
+	}
+	return 0
+}
+
+func (x *WeatherForecast) GetPeriods() []*ForecastPeriod {
+	if x != nil {
+		return x.Periods
+	}
+	return nil
+}
+
+func (x *WeatherForecast) GetPeakWindGustKmh() int32 {
+	if x != nil {
+		return x.PeakWindGustKmh
+	}
+	return 0
+}
+
+func (x *WeatherForecast) GetPeakWindGustAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.PeakWindGustAt
+	}
+	return nil
+}
+
+func (x *WeatherForecast) GetMinHumidityPercent() int32 {
+	if x != nil {
+		return x.MinHumidityPercent
+	}
+	return 0
+}
+
 type Conditions struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Weather       []*WeatherConditions   `protobuf:"bytes,1,rep,name=weather,proto3" json:"weather,omitempty"`
 	FireWeather   *FireWeatherConditions `protobuf:"bytes,2,opt,name=fire_weather,json=fireWeather,proto3" json:"fire_weather,omitempty"`
 	LastUpdated   *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=last_updated,json=lastUpdated,proto3" json:"last_updated,omitempty"`
+	Forecast      []*WeatherForecast     `protobuf:"bytes,4,rep,name=forecast,proto3" json:"forecast,omitempty"` // per-location, joins by location_id
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Conditions) Reset() {
 	*x = Conditions{}
-	mi := &file_grid_proto_msgTypes[43]
+	mi := &file_grid_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3541,7 +3732,7 @@ func (x *Conditions) String() string {
 func (*Conditions) ProtoMessage() {}
 
 func (x *Conditions) ProtoReflect() protoreflect.Message {
-	mi := &file_grid_proto_msgTypes[43]
+	mi := &file_grid_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3554,7 +3745,7 @@ func (x *Conditions) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Conditions.ProtoReflect.Descriptor instead.
 func (*Conditions) Descriptor() ([]byte, []int) {
-	return file_grid_proto_rawDescGZIP(), []int{43}
+	return file_grid_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *Conditions) GetWeather() []*WeatherConditions {
@@ -3578,6 +3769,13 @@ func (x *Conditions) GetLastUpdated() *timestamppb.Timestamp {
 	return nil
 }
 
+func (x *Conditions) GetForecast() []*WeatherForecast {
+	if x != nil {
+		return x.Forecast
+	}
+	return nil
+}
+
 type ListSourcesRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -3586,7 +3784,7 @@ type ListSourcesRequest struct {
 
 func (x *ListSourcesRequest) Reset() {
 	*x = ListSourcesRequest{}
-	mi := &file_grid_proto_msgTypes[44]
+	mi := &file_grid_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3598,7 +3796,7 @@ func (x *ListSourcesRequest) String() string {
 func (*ListSourcesRequest) ProtoMessage() {}
 
 func (x *ListSourcesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_grid_proto_msgTypes[44]
+	mi := &file_grid_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3611,7 +3809,7 @@ func (x *ListSourcesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSourcesRequest.ProtoReflect.Descriptor instead.
 func (*ListSourcesRequest) Descriptor() ([]byte, []int) {
-	return file_grid_proto_rawDescGZIP(), []int{44}
+	return file_grid_proto_rawDescGZIP(), []int{46}
 }
 
 var File_grid_proto protoreflect.FileDescriptor
@@ -3893,12 +4091,30 @@ const file_grid_proto_rawDesc = "" +
 	"\x15FireWeatherConditions\x12\x14\n" +
 	"\x05state\x18\x01 \x01(\tR\x05state\x12\x1a\n" +
 	"\bheadline\x18\x02 \x01(\tR\bheadline\x12\x14\n" +
-	"\x05zones\x18\x03 \x03(\tR\x05zones\"\xc4\x01\n" +
+	"\x05zones\x18\x03 \x03(\tR\x05zones\"\x9c\x02\n" +
+	"\x0eForecastPeriod\x12.\n" +
+	"\x04time\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x04time\x12/\n" +
+	"\x13temperature_celsius\x18\x02 \x01(\x05R\x12temperatureCelsius\x12)\n" +
+	"\x10humidity_percent\x18\x03 \x01(\x05R\x0fhumidityPercent\x12$\n" +
+	"\x0ewind_speed_kmh\x18\x04 \x01(\x05R\fwindSpeedKmh\x124\n" +
+	"\x16wind_direction_degrees\x18\x05 \x01(\x05R\x14windDirectionDegrees\x12\"\n" +
+	"\rwind_gust_kmh\x18\x06 \x01(\x05R\vwindGustKmh\"\x81\x03\n" +
+	"\x0fWeatherForecast\x12\x1f\n" +
+	"\vlocation_id\x18\x01 \x01(\tR\n" +
+	"locationId\x12\x16\n" +
+	"\x06source\x18\x02 \x01(\tR\x06source\x127\n" +
+	"\tissued_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\bissuedAt\x12#\n" +
+	"\rhorizon_hours\x18\x04 \x01(\x05R\fhorizonHours\x121\n" +
+	"\aperiods\x18\x05 \x03(\v2\x17.grid.v1.ForecastPeriodR\aperiods\x12+\n" +
+	"\x12peak_wind_gust_kmh\x18\x06 \x01(\x05R\x0fpeakWindGustKmh\x12E\n" +
+	"\x11peak_wind_gust_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\x0epeakWindGustAt\x120\n" +
+	"\x14min_humidity_percent\x18\b \x01(\x05R\x12minHumidityPercent\"\xfa\x01\n" +
 	"\n" +
 	"Conditions\x124\n" +
 	"\aweather\x18\x01 \x03(\v2\x1a.grid.v1.WeatherConditionsR\aweather\x12A\n" +
 	"\ffire_weather\x18\x02 \x01(\v2\x1e.grid.v1.FireWeatherConditionsR\vfireWeather\x12=\n" +
-	"\flast_updated\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\vlastUpdated\"\x14\n" +
+	"\flast_updated\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\vlastUpdated\x124\n" +
+	"\bforecast\x18\x04 \x03(\v2\x18.grid.v1.WeatherForecastR\bforecast\"\x14\n" +
 	"\x12ListSourcesRequest*\xc7\x01\n" +
 	"\x05Layer\x12\x15\n" +
 	"\x11LAYER_UNSPECIFIED\x10\x00\x12\f\n" +
@@ -3972,7 +4188,7 @@ func file_grid_proto_rawDescGZIP() []byte {
 }
 
 var file_grid_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
-var file_grid_proto_msgTypes = make([]protoimpl.MessageInfo, 47)
+var file_grid_proto_msgTypes = make([]protoimpl.MessageInfo, 49)
 var file_grid_proto_goTypes = []any{
 	(Layer)(0),                     // 0: grid.v1.Layer
 	(Severity)(0),                  // 1: grid.v1.Severity
@@ -4022,12 +4238,14 @@ var file_grid_proto_goTypes = []any{
 	(*GetConditionsRequest)(nil),   // 45: grid.v1.GetConditionsRequest
 	(*WeatherConditions)(nil),      // 46: grid.v1.WeatherConditions
 	(*FireWeatherConditions)(nil),  // 47: grid.v1.FireWeatherConditions
-	(*Conditions)(nil),             // 48: grid.v1.Conditions
-	(*ListSourcesRequest)(nil),     // 49: grid.v1.ListSourcesRequest
-	nil,                            // 50: grid.v1.RoadIncidentDetail.MetadataEntry
-	nil,                            // 51: grid.v1.SummaryStats.SeverityCountsEntry
-	(*timestamppb.Timestamp)(nil),  // 52: google.protobuf.Timestamp
-	(*wrapperspb.Int32Value)(nil),  // 53: google.protobuf.Int32Value
+	(*ForecastPeriod)(nil),         // 48: grid.v1.ForecastPeriod
+	(*WeatherForecast)(nil),        // 49: grid.v1.WeatherForecast
+	(*Conditions)(nil),             // 50: grid.v1.Conditions
+	(*ListSourcesRequest)(nil),     // 51: grid.v1.ListSourcesRequest
+	nil,                            // 52: grid.v1.RoadIncidentDetail.MetadataEntry
+	nil,                            // 53: grid.v1.SummaryStats.SeverityCountsEntry
+	(*timestamppb.Timestamp)(nil),  // 54: google.protobuf.Timestamp
+	(*wrapperspb.Int32Value)(nil),  // 55: google.protobuf.Int32Value
 }
 var file_grid_proto_depIdxs = []int32{
 	0,  // 0: grid.v1.Event.layer:type_name -> grid.v1.Layer
@@ -4035,10 +4253,10 @@ var file_grid_proto_depIdxs = []int32{
 	2,  // 2: grid.v1.Event.status:type_name -> grid.v1.EventStatus
 	6,  // 3: grid.v1.Event.geometry:type_name -> grid.v1.Geometry
 	9,  // 4: grid.v1.Event.provenance:type_name -> grid.v1.Provenance
-	52, // 5: grid.v1.Event.effective:type_name -> google.protobuf.Timestamp
-	52, // 6: grid.v1.Event.expires:type_name -> google.protobuf.Timestamp
-	52, // 7: grid.v1.Event.observed_at:type_name -> google.protobuf.Timestamp
-	52, // 8: grid.v1.Event.ingested_at:type_name -> google.protobuf.Timestamp
+	54, // 5: grid.v1.Event.effective:type_name -> google.protobuf.Timestamp
+	54, // 6: grid.v1.Event.expires:type_name -> google.protobuf.Timestamp
+	54, // 7: grid.v1.Event.observed_at:type_name -> google.protobuf.Timestamp
+	54, // 8: grid.v1.Event.ingested_at:type_name -> google.protobuf.Timestamp
 	10, // 9: grid.v1.Event.enhancement:type_name -> grid.v1.Enhancement
 	13, // 10: grid.v1.Event.wildfire:type_name -> grid.v1.WildfireDetail
 	14, // 11: grid.v1.Event.evacuation:type_name -> grid.v1.EvacuationDetail
@@ -4049,65 +4267,70 @@ var file_grid_proto_depIdxs = []int32{
 	19, // 16: grid.v1.Event.mesh:type_name -> grid.v1.MeshDetail
 	7,  // 17: grid.v1.Geometry.bbox:type_name -> grid.v1.BoundingBox
 	8,  // 18: grid.v1.Geometry.centroid:type_name -> grid.v1.LatLng
-	52, // 19: grid.v1.Provenance.fetched_at:type_name -> google.protobuf.Timestamp
-	52, // 20: grid.v1.Enhancement.enhanced_at:type_name -> google.protobuf.Timestamp
-	52, // 21: grid.v1.Source.last_success_at:type_name -> google.protobuf.Timestamp
-	52, // 22: grid.v1.Source.last_attempt_at:type_name -> google.protobuf.Timestamp
+	54, // 19: grid.v1.Provenance.fetched_at:type_name -> google.protobuf.Timestamp
+	54, // 20: grid.v1.Enhancement.enhanced_at:type_name -> google.protobuf.Timestamp
+	54, // 21: grid.v1.Source.last_success_at:type_name -> google.protobuf.Timestamp
+	54, // 22: grid.v1.Source.last_attempt_at:type_name -> google.protobuf.Timestamp
 	3,  // 23: grid.v1.Source.status:type_name -> grid.v1.SourceStatus
 	4,  // 24: grid.v1.Place.kind:type_name -> grid.v1.PlaceKind
 	6,  // 25: grid.v1.Place.geometry:type_name -> grid.v1.Geometry
-	50, // 26: grid.v1.RoadIncidentDetail.metadata:type_name -> grid.v1.RoadIncidentDetail.MetadataEntry
+	52, // 26: grid.v1.RoadIncidentDetail.metadata:type_name -> grid.v1.RoadIncidentDetail.MetadataEntry
 	20, // 27: grid.v1.MeshDetail.telemetry:type_name -> grid.v1.MeshTelemetry
-	52, // 28: grid.v1.MeshTelemetry.last_advert_at:type_name -> google.protobuf.Timestamp
+	54, // 28: grid.v1.MeshTelemetry.last_advert_at:type_name -> google.protobuf.Timestamp
 	5,  // 29: grid.v1.EventList.events:type_name -> grid.v1.Event
-	52, // 30: grid.v1.EventRevision.observed_at:type_name -> google.protobuf.Timestamp
-	52, // 31: grid.v1.EventRevision.ingested_at:type_name -> google.protobuf.Timestamp
+	54, // 30: grid.v1.EventRevision.observed_at:type_name -> google.protobuf.Timestamp
+	54, // 31: grid.v1.EventRevision.ingested_at:type_name -> google.protobuf.Timestamp
 	5,  // 32: grid.v1.EventRevision.event:type_name -> grid.v1.Event
 	22, // 33: grid.v1.EventRevisionList.revisions:type_name -> grid.v1.EventRevision
 	12, // 34: grid.v1.PlaceList.places:type_name -> grid.v1.Place
 	11, // 35: grid.v1.SourceList.sources:type_name -> grid.v1.Source
-	52, // 36: grid.v1.PlaceSummary.generated_at:type_name -> google.protobuf.Timestamp
+	54, // 36: grid.v1.PlaceSummary.generated_at:type_name -> google.protobuf.Timestamp
 	28, // 37: grid.v1.PlaceSummary.summary:type_name -> grid.v1.SummaryStats
 	30, // 38: grid.v1.PlaceSummary.domains:type_name -> grid.v1.SummaryDomain
 	32, // 39: grid.v1.PlaceSummary.sources:type_name -> grid.v1.SummarySourceHealth
-	51, // 40: grid.v1.SummaryStats.severity_counts:type_name -> grid.v1.SummaryStats.SeverityCountsEntry
-	53, // 41: grid.v1.SummaryStats.active_evacuations:type_name -> google.protobuf.Int32Value
+	53, // 40: grid.v1.SummaryStats.severity_counts:type_name -> grid.v1.SummaryStats.SeverityCountsEntry
+	55, // 41: grid.v1.SummaryStats.active_evacuations:type_name -> google.protobuf.Int32Value
 	29, // 42: grid.v1.SummaryStats.top_events:type_name -> grid.v1.SummaryTopEvent
 	31, // 43: grid.v1.SummaryDomain.headlines:type_name -> grid.v1.SummaryDomainHeadline
-	52, // 44: grid.v1.SummarySourceHealth.last_success_at:type_name -> google.protobuf.Timestamp
+	54, // 44: grid.v1.SummarySourceHealth.last_success_at:type_name -> google.protobuf.Timestamp
 	40, // 45: grid.v1.ResolvePlaceResponse.query:type_name -> grid.v1.ResolveQuery
 	12, // 46: grid.v1.ResolvePlaceResponse.places:type_name -> grid.v1.Place
 	43, // 47: grid.v1.ScannerList.scanners:type_name -> grid.v1.Scanner
-	46, // 48: grid.v1.Conditions.weather:type_name -> grid.v1.WeatherConditions
-	47, // 49: grid.v1.Conditions.fire_weather:type_name -> grid.v1.FireWeatherConditions
-	52, // 50: grid.v1.Conditions.last_updated:type_name -> google.protobuf.Timestamp
-	33, // 51: grid.v1.GridService.ListEvents:input_type -> grid.v1.ListEventsRequest
-	34, // 52: grid.v1.GridService.GetEvent:input_type -> grid.v1.GetEventRequest
-	35, // 53: grid.v1.GridService.GetEventHistory:input_type -> grid.v1.GetEventHistoryRequest
-	36, // 54: grid.v1.GridService.ListHistory:input_type -> grid.v1.ListHistoryRequest
-	37, // 55: grid.v1.GridService.ListPlaces:input_type -> grid.v1.ListPlacesRequest
-	39, // 56: grid.v1.GridService.ResolvePlace:input_type -> grid.v1.ResolvePlaceRequest
-	38, // 57: grid.v1.GridService.GetPlace:input_type -> grid.v1.GetPlaceRequest
-	26, // 58: grid.v1.GridService.GetPlaceSummary:input_type -> grid.v1.GetPlaceSummaryRequest
-	42, // 59: grid.v1.GridService.ListScanners:input_type -> grid.v1.ListScannersRequest
-	45, // 60: grid.v1.GridService.GetConditions:input_type -> grid.v1.GetConditionsRequest
-	49, // 61: grid.v1.GridService.ListSources:input_type -> grid.v1.ListSourcesRequest
-	21, // 62: grid.v1.GridService.ListEvents:output_type -> grid.v1.EventList
-	5,  // 63: grid.v1.GridService.GetEvent:output_type -> grid.v1.Event
-	23, // 64: grid.v1.GridService.GetEventHistory:output_type -> grid.v1.EventRevisionList
-	23, // 65: grid.v1.GridService.ListHistory:output_type -> grid.v1.EventRevisionList
-	24, // 66: grid.v1.GridService.ListPlaces:output_type -> grid.v1.PlaceList
-	41, // 67: grid.v1.GridService.ResolvePlace:output_type -> grid.v1.ResolvePlaceResponse
-	12, // 68: grid.v1.GridService.GetPlace:output_type -> grid.v1.Place
-	27, // 69: grid.v1.GridService.GetPlaceSummary:output_type -> grid.v1.PlaceSummary
-	44, // 70: grid.v1.GridService.ListScanners:output_type -> grid.v1.ScannerList
-	48, // 71: grid.v1.GridService.GetConditions:output_type -> grid.v1.Conditions
-	25, // 72: grid.v1.GridService.ListSources:output_type -> grid.v1.SourceList
-	62, // [62:73] is the sub-list for method output_type
-	51, // [51:62] is the sub-list for method input_type
-	51, // [51:51] is the sub-list for extension type_name
-	51, // [51:51] is the sub-list for extension extendee
-	0,  // [0:51] is the sub-list for field type_name
+	54, // 48: grid.v1.ForecastPeriod.time:type_name -> google.protobuf.Timestamp
+	54, // 49: grid.v1.WeatherForecast.issued_at:type_name -> google.protobuf.Timestamp
+	48, // 50: grid.v1.WeatherForecast.periods:type_name -> grid.v1.ForecastPeriod
+	54, // 51: grid.v1.WeatherForecast.peak_wind_gust_at:type_name -> google.protobuf.Timestamp
+	46, // 52: grid.v1.Conditions.weather:type_name -> grid.v1.WeatherConditions
+	47, // 53: grid.v1.Conditions.fire_weather:type_name -> grid.v1.FireWeatherConditions
+	54, // 54: grid.v1.Conditions.last_updated:type_name -> google.protobuf.Timestamp
+	49, // 55: grid.v1.Conditions.forecast:type_name -> grid.v1.WeatherForecast
+	33, // 56: grid.v1.GridService.ListEvents:input_type -> grid.v1.ListEventsRequest
+	34, // 57: grid.v1.GridService.GetEvent:input_type -> grid.v1.GetEventRequest
+	35, // 58: grid.v1.GridService.GetEventHistory:input_type -> grid.v1.GetEventHistoryRequest
+	36, // 59: grid.v1.GridService.ListHistory:input_type -> grid.v1.ListHistoryRequest
+	37, // 60: grid.v1.GridService.ListPlaces:input_type -> grid.v1.ListPlacesRequest
+	39, // 61: grid.v1.GridService.ResolvePlace:input_type -> grid.v1.ResolvePlaceRequest
+	38, // 62: grid.v1.GridService.GetPlace:input_type -> grid.v1.GetPlaceRequest
+	26, // 63: grid.v1.GridService.GetPlaceSummary:input_type -> grid.v1.GetPlaceSummaryRequest
+	42, // 64: grid.v1.GridService.ListScanners:input_type -> grid.v1.ListScannersRequest
+	45, // 65: grid.v1.GridService.GetConditions:input_type -> grid.v1.GetConditionsRequest
+	51, // 66: grid.v1.GridService.ListSources:input_type -> grid.v1.ListSourcesRequest
+	21, // 67: grid.v1.GridService.ListEvents:output_type -> grid.v1.EventList
+	5,  // 68: grid.v1.GridService.GetEvent:output_type -> grid.v1.Event
+	23, // 69: grid.v1.GridService.GetEventHistory:output_type -> grid.v1.EventRevisionList
+	23, // 70: grid.v1.GridService.ListHistory:output_type -> grid.v1.EventRevisionList
+	24, // 71: grid.v1.GridService.ListPlaces:output_type -> grid.v1.PlaceList
+	41, // 72: grid.v1.GridService.ResolvePlace:output_type -> grid.v1.ResolvePlaceResponse
+	12, // 73: grid.v1.GridService.GetPlace:output_type -> grid.v1.Place
+	27, // 74: grid.v1.GridService.GetPlaceSummary:output_type -> grid.v1.PlaceSummary
+	44, // 75: grid.v1.GridService.ListScanners:output_type -> grid.v1.ScannerList
+	50, // 76: grid.v1.GridService.GetConditions:output_type -> grid.v1.Conditions
+	25, // 77: grid.v1.GridService.ListSources:output_type -> grid.v1.SourceList
+	67, // [67:78] is the sub-list for method output_type
+	56, // [56:67] is the sub-list for method input_type
+	56, // [56:56] is the sub-list for extension type_name
+	56, // [56:56] is the sub-list for extension extendee
+	0,  // [0:56] is the sub-list for field type_name
 }
 
 func init() { file_grid_proto_init() }
@@ -4130,7 +4353,7 @@ func file_grid_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_grid_proto_rawDesc), len(file_grid_proto_rawDesc)),
 			NumEnums:      5,
-			NumMessages:   47,
+			NumMessages:   49,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

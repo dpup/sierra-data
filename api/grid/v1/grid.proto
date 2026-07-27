@@ -501,9 +501,34 @@ message FireWeatherConditions {
   string headline = 2;
   repeated string zones = 3;
 }
+// ForecastPeriod is one hourly step of a location's fire-weather forecast (NWS
+// gridpoint). Absent numeric fields serialize as 0, like WeatherConditions.
+message ForecastPeriod {
+  google.protobuf.Timestamp time = 1;      // hourly period start, UTC
+  int32 temperature_celsius = 2;
+  int32 humidity_percent = 3;              // relative humidity
+  int32 wind_speed_kmh = 4;
+  int32 wind_direction_degrees = 5;
+  int32 wind_gust_kmh = 6;
+}
+// WeatherForecast is a location's short-range fire-weather forecast: the raw NWS
+// gridpoint series (wind/gust/RH/temp) plus an at-a-glance summary. Informational
+// only — it never implies a fire-weather WARNING (issued products are in
+// FireWeatherConditions). See docs/fire-weather-forecast-design.md.
+message WeatherForecast {
+  string location_id = 1;                  // joins to WeatherConditions.location_id
+  string source = 2;                       // e.g. "NWS (STO gridpoint)"
+  google.protobuf.Timestamp issued_at = 3; // grid update time
+  int32 horizon_hours = 4;
+  repeated ForecastPeriod periods = 5;
+  int32 peak_wind_gust_kmh = 6;            // summary: max over the horizon
+  google.protobuf.Timestamp peak_wind_gust_at = 7;
+  int32 min_humidity_percent = 8;          // summary: min over the horizon
+}
 message Conditions {
   repeated WeatherConditions weather = 1;
   FireWeatherConditions fire_weather = 2;
   google.protobuf.Timestamp last_updated = 3;
+  repeated WeatherForecast forecast = 4;   // per-location, joins by location_id
 }
 message ListSourcesRequest {}
