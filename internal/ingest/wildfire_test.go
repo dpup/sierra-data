@@ -3,6 +3,9 @@ package ingest
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -422,4 +425,47 @@ func TestWildfirePoll_BothFail(t *testing.T) {
 	n := newWildfireNormalizer(&fakeDoer{err: assert.AnError}, &fakeDoer{err: assert.AnError})
 	_, err := n.Poll(testCtx(), nil)
 	assert.Error(t, err)
+}
+
+// wfEditDoer answers the WFIGS metadata endpoint (?f=json, no returnGeometry)
+// with a fixed dataLastEditDate and the feature query with a fixture, counting
+// how many times the expensive perimeter query runs.
+type wfEditDoer struct {
+	editMillis int64
+	perimResp  string
+	queries    int
+}
+
+func (d *wfEditDoer) Do(req *http.Request) (*http.Response, error) {
+	body := fmt.Sprintf(`{"editingInfo":{"dataLastEditDate":%d}}`, d.editMillis)
+	if strings.Contains(req.URL.RawQuery, "returnGeometry=true") {
+		d.queries++
+		body = d.perimResp
+	}
+	return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+}
+
+func TestWildfireGatesPerimeterFetchOnLastEdit(t *testing.T) {
+	wf := &wfEditDoer{editMillis: 1000, perimResp: wfigsFixture}
+	n := NewWildfireNormalizer(
+		testConfig(),
+		calfire.NewClientWithHTTPDoer("https://calfire.test", &fakeDoer{resp: calfireFixture}),
+		wfigs.NewClientWithHTTPDoer("https://wfigs.test/query", wf),
+	)
+
+	// First poll fetches perimeters (no cache yet).
+	_, err := n.Poll(testCtx(), nil)
+	require.NoError(t, err)
+	assert.Equal(t, 1, wf.queries)
+
+	// Unchanged dataLastEditDate → the expensive query is skipped; last-good served.
+	_, err = n.Poll(testCtx(), nil)
+	require.NoError(t, err)
+	assert.Equal(t, 1, wf.queries, "unchanged lastEdit must not re-query perimeters")
+
+	// Advancing the stamp triggers exactly one refetch.
+	wf.editMillis = 2000
+	_, err = n.Poll(testCtx(), nil)
+	require.NoError(t, err)
+	assert.Equal(t, 2, wf.queries)
 }

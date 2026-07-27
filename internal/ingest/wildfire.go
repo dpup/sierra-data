@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/dpup/prefab/logging"
 
@@ -26,6 +27,15 @@ type WildfireNormalizer struct {
 	cfg     *config.Config
 	calfire *calfire.Client
 	wfigs   *wfigs.Client
+
+	// The WFIGS perimeter query is expensive and rate-limited (NIFC's shared org
+	// quota — see the note in the wfigs client). gatedPerimeters only refetches
+	// when the layer's dataLastEditDate advanced, otherwise reusing this in-process
+	// last-good set. Touched only by Poll's single wfigs goroutine, serially across
+	// ticks (no lock needed), and keyed on the static configured bounds.
+	lastPerimEdit  time.Time
+	cachedPerims   []wfigs.Perimeter
+	havePerimCache bool
 }
 
 // NewWildfireNormalizer wires the normalizer to its two clients (tests inject
@@ -74,7 +84,7 @@ func (n *WildfireNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult
 	go func() { defer wg.Done(); incidents, ierr = n.calfire.GetActiveIncidents(ctx) }()
 	go func() {
 		defer wg.Done()
-		perims, perr = n.wfigs.GetPerimeters(ctx, wfigs.Bounds{
+		perims, perr = n.gatedPerimeters(ctx, wfigs.Bounds{
 			MinLatitude:  minLat,
 			MaxLatitude:  maxLat,
 			MinLongitude: minLng,
@@ -202,6 +212,35 @@ func (n *WildfireNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult
 		perSource = nil
 	}
 	return &PollResult{Events: events, PerSource: perSource}, nil
+}
+
+// gatedPerimeters returns the current WFIGS perimeters, running the expensive,
+// 429-prone feature query ONLY when the layer's dataLastEditDate advanced since
+// our last successful fetch (see the rate-limit note in the wfigs client).
+// Between changes it serves the in-process last-good set — a genuine success,
+// since the data has not changed, so the disappearance sweep can act on it. The
+// bounds are static config, so a cached set stays valid for that scope.
+//
+// On a WFIGS error we do NOT advance the stamp (the next tick retries) and return
+// the error so the caller flags the source failed and the sweep is skipped
+// (fail-loud). If the cheap metadata check itself fails, we fall back to a direct
+// GetPerimeters — exactly the pre-gating behavior, never worse.
+func (n *WildfireNormalizer) gatedPerimeters(ctx context.Context, b wfigs.Bounds) ([]wfigs.Perimeter, error) {
+	edit, err := n.wfigs.LastEdit(ctx)
+	if err != nil {
+		// Metadata check failed (rare — it's CDN-cached). Fall back to a direct
+		// fetch so a metadata hiccup never blocks perimeters.
+		return n.wfigs.GetPerimeters(ctx, b)
+	}
+	if n.havePerimCache && edit.Equal(n.lastPerimEdit) {
+		return n.cachedPerims, nil // unchanged — skip the expensive origin query
+	}
+	perims, perr := n.wfigs.GetPerimeters(ctx, b)
+	if perr != nil {
+		return nil, perr // stamp not advanced → retried next tick; sweep skipped
+	}
+	n.cachedPerims, n.lastPerimEdit, n.havePerimCache = perims, edit, true
+	return perims, nil
 }
 
 // standalonePerimeterEvents emits perimeters no CAL FIRE incident adopted

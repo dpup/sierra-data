@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 type fakeDoer struct {
@@ -62,5 +63,22 @@ func TestGetPerimeters(t *testing.T) {
 		if !strings.Contains(doer.lastURL, want) {
 			t.Errorf("query missing %q: %s", want, doer.lastURL)
 		}
+	}
+}
+
+func TestLastEdit(t *testing.T) {
+	doer := &fakeDoer{resp: `{"editingInfo":{"dataLastEditDate":1785172006484}}`}
+	c := NewClientWithHTTPDoer("https://wfigs.test/query", doer)
+
+	got, err := c.LastEdit(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := time.UnixMilli(1785172006484); !got.Equal(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	// Hits the cheap metadata endpoint (?f=json), NOT the feature /query.
+	if strings.Contains(doer.lastURL, "/query") || !strings.Contains(doer.lastURL, "f=json") {
+		t.Errorf("LastEdit URL = %s (want metadata, /query stripped)", doer.lastURL)
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -57,6 +58,55 @@ type Perimeter struct {
 	GeometryCoords   json.RawMessage
 }
 
+// --- Rate limiting: the 429s are NIFC's shared ORG quota, not our request rate ---
+//
+// Findings from live header inspection (2026-07-27). Re-verify any time with:
+//
+//	curl -sD- '<baseURL>?where=1=1&returnCountOnly=true&f=json' | grep -i x-esri
+//
+// The recurring "429 Too many requests" is NOT a per-IP/app limit on us. ArcGIS
+// Online meters queries in "request units per minute" against the org that OWNS
+// the layer (NIFC), and anonymous public access is billed to that owner. The
+// service says so in its own response headers:
+//
+//	X-Esri-Org-Request-Units-Per-Min: usage=71253; max=192000
+//	X-Esri-Query-Request-Units: 2      (cost of one query)
+//
+// When NIFC's org hits that ceiling, ArcGIS opens a ~60s cooling-off and 429s
+// every non-cacheable query for ALL consumers. In fire season the ceiling is
+// saturated by the whole world; we poll ~6x/hour at 2 units — a rounding error.
+// So throttling our own poll interval barely helps (it didn't, 5m->10m); we are
+// collateral, not the cause.
+//
+// Cache behaviour differs sharply by request type (verified live):
+//   - Feature query (returnGeometry=true, ANY f=): Cache-Control "private",
+//     X-Cache PRIVATE_NOSTORE — always hits origin, costs units, 429-exposed.
+//     (f=json vs f=geojson makes no difference; the split is feature-data vs
+//     metadata, not output format.)
+//   - Layer metadata (FeatureServer/0?f=json): Cache-Control "public,
+//     max-age=300", X-Cache TCP_HIT, carries an ETag and
+//     editingInfo.dataLastEditDate — served from the CDN, ~free, survives 429s.
+//
+// Mitigation — gate the expensive, uncacheable feature query behind the free,
+// cached metadata check. Implemented as Client.LastEdit (below) +
+// ingest.WildfireNormalizer.gatedPerimeters:
+//  1. Each tick, LastEdit() reads editingInfo.dataLastEditDate off the cached
+//     metadata endpoint (FeatureServer/0?f=json — ~free, CDN-served).
+//  2. GetPerimeters (this expensive, uncacheable query) runs ONLY when that stamp
+//     advanced since our last successful fetch. Perimeters update ~daily (after an
+//     IR/mapping flight), so the expensive call drops from ~6/hr to ~1-2/day.
+//  3. On any WFIGS error the normalizer serves its in-process last-good perimeters
+//     and does NOT advance the stamp, so the next tick retries — a fire-season 429
+//     storm ages the perimeter rather than dropping it. The whole national dataset
+//     is ~208 tiny features. (If the metadata check itself fails, we fall back to
+//     a direct GetPerimeters, exactly as before the gating — never worse.)
+//
+// What does NOT help: an API key / auth (public usage is charged to the OWNER,
+// and API keys can't be used with an ArcGIS Online account); switching output
+// format; polling less often. A fallback source, if ever needed, is the NIFC
+// Open Data GeoJSON export (data-nifc.opendata.arcgis.com) — a pre-generated
+// export with a different cache/quota profile, but it can lag the live service.
+//
 // GetPerimeters returns perimeters intersecting bounds, geometry simplified
 // server-side (maxAllowableOffset).
 func (c *Client) GetPerimeters(ctx context.Context, b Bounds) ([]Perimeter, error) {
@@ -72,24 +122,12 @@ func (c *Client) GetPerimeters(ctx context.Context, b Bounds) ([]Perimeter, erro
 	params.Set("returnGeometry", "true")
 	params.Set("maxAllowableOffset", "0.001") // ~100m vertex tolerance
 
-	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"?"+params.Encode(), nil)
+	body, err := c.get(ctx, c.baseURL+"?"+params.Encode(), "application/geo+json", maxBody)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create WFIGS request: %w", err)
+		return nil, err
 	}
-	req.Header.Set("Accept", "application/geo+json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to execute WFIGS request: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, fmt.Errorf("WFIGS API error %d: %s", resp.StatusCode, string(body))
-	}
-
 	var parsed perimeterResponse
-	if err := json.NewDecoder(io.LimitReader(resp.Body, maxBody)).Decode(&parsed); err != nil {
+	if err := json.Unmarshal(body, &parsed); err != nil {
 		return nil, fmt.Errorf("failed to decode WFIGS response: %w", err)
 	}
 	// ArcGIS signals quota/throttle/token errors with HTTP 200 + an error
@@ -109,6 +147,55 @@ func (c *Client) GetPerimeters(ctx context.Context, b Bounds) ([]Perimeter, erro
 		})
 	}
 	return out, nil
+}
+
+// LastEdit returns the layer's dataLastEditDate — when WFIGS last changed ANY
+// perimeter nationally. It hits the cheap, CDN-cached metadata endpoint (see the
+// rate-limit note above), so a caller can gate the expensive GetPerimeters query
+// on it and only refetch when the data actually changed.
+func (c *Client) LastEdit(ctx context.Context) (time.Time, error) {
+	metaURL := strings.TrimSuffix(c.baseURL, "/query") + "?f=json"
+	body, err := c.get(ctx, metaURL, "application/json", 1<<20)
+	if err != nil {
+		return time.Time{}, err
+	}
+	var meta struct {
+		EditingInfo struct {
+			DataLastEditDate int64 `json:"dataLastEditDate"`
+		} `json:"editingInfo"`
+		Error *arcgisError `json:"error"`
+	}
+	if err := json.Unmarshal(body, &meta); err != nil {
+		return time.Time{}, fmt.Errorf("failed to decode WFIGS metadata: %w", err)
+	}
+	if meta.Error != nil {
+		return time.Time{}, fmt.Errorf("WFIGS ArcGIS error %d: %s", meta.Error.Code, meta.Error.Message)
+	}
+	if meta.EditingInfo.DataLastEditDate == 0 {
+		return time.Time{}, fmt.Errorf("WFIGS metadata: no dataLastEditDate")
+	}
+	return time.UnixMilli(meta.EditingInfo.DataLastEditDate), nil
+}
+
+// get executes a GET and returns the size-limited body. HTTP >=400 (incl. a 429
+// throttle) becomes an error; the ArcGIS 200-with-error envelope is left for the
+// caller to detect (its shape is endpoint-specific).
+func (c *Client) get(ctx context.Context, url, accept string, limit int64) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create WFIGS request: %w", err)
+	}
+	req.Header.Set("Accept", accept)
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute WFIGS request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, fmt.Errorf("WFIGS API error %d: %s", resp.StatusCode, string(body))
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, limit))
 }
 
 func ftoa(f float64) string { return strconv.FormatFloat(f, 'f', -1, 64) }
