@@ -14,6 +14,28 @@ throughout; errors are gRPC-standard `{code, codeName, message, details}`). The
 by a snake_case `/v1` surface on 2026-07-05, which was in turn folded back onto the
 proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 
+## 2026-07-27
+
+### Added — per-location fire-weather forecast (`conditions` + `fire_weather` layer)
+
+Adds a short-range NWS fire-weather forecast — keyless, additive, informational
+(never an un-issued Red Flag). See `docs/fire-weather-forecast-design.md`.
+
+- **`GET /api/v1/conditions` gains `forecast[]`** — a per-location NWS gridpoint
+  forecast (48h hourly), joined to `weather[]` by `locationId`. Each
+  `WeatherForecast`: `source`, `issuedAt`, `horizonHours`, `periods[]` (`time`,
+  `temperatureCelsius`, `humidityPercent`, `windSpeedKmh`, `windDirectionDegrees`,
+  `windGustKmh`), plus an at-a-glance summary (`peakWindGustKmh`/`peakWindGustAt`,
+  `minHumidityPercent`). Honors `?place=` (same location set as `weather[]`).
+- **The `fire_weather` map layer gains per-location forecast Points.** Alongside
+  the region banner (issued state), each in-area configured location now emits a
+  `Point` feature with `properties.fireWeather.forecast`
+  (`peakWindGustKmh`/`peakWindGustAt`/`minHumidityPercent`/`source`/`issuedAt`/
+  `horizonHours`). These are **`severity: INFO`** — a windy/dry *forecast* never
+  colors the layer like an issued Red Flag; only the banner carries the issued
+  state. Fail-soft: a forecast outage omits the block/points, never blocks
+  conditions.
+
 ## 2026-07-25
 
 ### BREAKING — mesh-node presence layer renamed `NETWORK` → `MESH`

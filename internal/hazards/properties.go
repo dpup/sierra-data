@@ -84,11 +84,26 @@ type WeatherProps struct {
 	Zones  []string `json:"zones,omitempty"`
 }
 
-// FireWeatherProps is the fire_weather kind block.
+// FireWeatherProps is the fire_weather kind block. On the region banner it carries
+// the issued State/zones; on a per-location forecast Point it carries Forecast
+// (State empty) — informational, never an issued warning.
 type FireWeatherProps struct {
-	State       string   `json:"state"` // normal | elevated | red-flag
-	SourceEvent string   `json:"sourceEvent,omitempty"`
-	Zones       []string `json:"zones,omitempty"`
+	State       string           `json:"state,omitempty"` // normal | elevated | red-flag (banner only)
+	SourceEvent string           `json:"sourceEvent,omitempty"`
+	Zones       []string         `json:"zones,omitempty"`
+	Forecast    *ForecastSummary `json:"forecast,omitempty"`
+}
+
+// ForecastSummary is the at-a-glance NWS fire-weather forecast for a location:
+// worst wind gust + lowest humidity over the horizon. Informational only — it
+// never sets/escalates the feature's severity.
+type ForecastSummary struct {
+	Source             string `json:"source,omitempty"`
+	IssuedAt           string `json:"issuedAt,omitempty"`
+	HorizonHours       int    `json:"horizonHours,omitempty"`
+	PeakWindGustKmh    int32  `json:"peakWindGustKmh,omitempty"`
+	PeakWindGustAt     string `json:"peakWindGustAt,omitempty"`
+	MinHumidityPercent int32  `json:"minHumidityPercent,omitempty"`
 }
 
 // EarthquakeProps is the earthquake kind block.

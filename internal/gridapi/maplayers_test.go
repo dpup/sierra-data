@@ -22,6 +22,7 @@ import (
 
 	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
 	api "github.com/dpup/sierra-data/api/v1"
+	"github.com/dpup/sierra-data/internal/clients/nws"
 	"github.com/dpup/sierra-data/internal/config"
 	"github.com/dpup/sierra-data/internal/hazards"
 	"github.com/dpup/sierra-data/internal/store"
@@ -386,11 +387,15 @@ func (h *hazRoads) ListIncidents(context.Context, *api.ListIncidentsRequest) (*a
 	return &api.ListIncidentsResponse{}, nil
 }
 
-type hazWeather struct{ resp *api.ListWeatherResponse }
+type hazWeather struct {
+	resp      *api.ListWeatherResponse
+	forecasts map[string]*nws.Forecast
+}
 
 func (h *hazWeather) ListWeather(context.Context, *api.ListWeatherRequest) (*api.ListWeatherResponse, error) {
 	return h.resp, nil
 }
+func (h *hazWeather) LocationForecasts(context.Context) map[string]*nws.Forecast { return h.forecasts }
 func (h *hazWeather) ListWeatherAlerts(context.Context, *api.ListWeatherAlertsRequest) (*api.ListWeatherAlertsResponse, error) {
 	return &api.ListWeatherAlertsResponse{}, nil
 }

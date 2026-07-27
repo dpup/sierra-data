@@ -11,15 +11,18 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/dpup/prefab/plugins/etag"
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
 	api "github.com/dpup/sierra-data/api/v1"
 	"github.com/dpup/sierra-data/internal/clients/census"
+	"github.com/dpup/sierra-data/internal/clients/nws"
 	"github.com/dpup/sierra-data/internal/store"
 )
 
@@ -468,7 +471,50 @@ func (g *GridServer) GetConditions(ctx context.Context, req *gridv1.GetCondition
 			Zones:    fw.GetZones(),
 		}
 	}
+	// Per-location fire-weather forecast (fail-soft), joined to the weather set
+	// we're returning so it inherits the place filter.
+	if fcs := g.svc.Weather.LocationForecasts(ctx); len(fcs) > 0 {
+		for _, wc := range out.Weather {
+			if f := fcs[wc.GetLocationId()]; f != nil {
+				out.Forecast = append(out.Forecast, projectForecast(wc.GetLocationId(), f))
+			}
+		}
+	}
 	return out, nil
+}
+
+// projectForecast maps a client forecast onto the proto WeatherForecast. Rounded
+// int32 scalars match WeatherConditions; absent min-humidity stays 0.
+func projectForecast(locID string, f *nws.Forecast) *gridv1.WeatherForecast {
+	wf := &gridv1.WeatherForecast{
+		LocationId:      locID,
+		Source:          f.Source,
+		IssuedAt:        tsOrNil(f.IssuedAt),
+		HorizonHours:    int32(f.HorizonHours),
+		PeakWindGustKmh: int32(math.Round(f.PeakGustKmh)),
+		PeakWindGustAt:  tsOrNil(f.PeakGustAt),
+	}
+	if f.HasMinHumidity {
+		wf.MinHumidityPercent = int32(math.Round(f.MinHumidityPct))
+	}
+	for _, p := range f.Points {
+		wf.Periods = append(wf.Periods, &gridv1.ForecastPeriod{
+			Time:                 tsOrNil(p.Time),
+			TemperatureCelsius:   int32(math.Round(p.TempC)),
+			HumidityPercent:      int32(math.Round(p.HumidityPct)),
+			WindSpeedKmh:         int32(math.Round(p.WindKmh)),
+			WindDirectionDegrees: int32(math.Round(p.WindDirDeg)),
+			WindGustKmh:          int32(math.Round(p.WindGustKmh)),
+		})
+	}
+	return wf
+}
+
+func tsOrNil(t time.Time) *timestamppb.Timestamp {
+	if t.IsZero() {
+		return nil
+	}
+	return timestamppb.New(t)
 }
 
 // ListSources returns the source registry with per-source health (OK / STALE /

@@ -236,7 +236,18 @@ type WeatherConfig struct {
 	NWS       NWSConfig         `koanf:"nws"`
 	// RefreshInterval is the cache TTL; entries are servable-stale until 2x
 	// this value (the "very stale" bound), then eligible for eviction.
+	RefreshInterval time.Duration  `koanf:"refreshInterval"`
+	Forecast        ForecastConfig `koanf:"forecast"`
+}
+
+// ForecastConfig gates the per-location NWS fire-weather forecast (wind/gust/RH,
+// on conditions + the fire_weather layer). Keyless, reuses NWS.UserAgent. See
+// docs/fire-weather-forecast-design.md. Zero RefreshInterval/HorizonHours default
+// to 1h / 48h.
+type ForecastConfig struct {
+	Enabled         bool          `koanf:"enabled"`
 	RefreshInterval time.Duration `koanf:"refreshInterval"`
+	HorizonHours    int           `koanf:"horizonHours"`
 }
 
 // NWSConfig holds National Weather Service (api.weather.gov) settings used for

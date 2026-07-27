@@ -146,6 +146,17 @@ weather:
   # (1,000/day cap) is deliberately unused; see internal/clients/weather.
   refreshInterval: "15m"  # Cache TTL; stale data is servable until 2x this, then evicted.
 
+  # Per-location fire-weather FORECAST (wind/gust/RH out 48h) from the NWS
+  # gridpoint API (keyless, reuses nws.userAgent). Surfaced on /api/v1/conditions
+  # (forecast[]) and as per-location points on the fire_weather map layer —
+  # informational, never an issued Red Flag. See docs/fire-weather-forecast-design.md.
+  # The static /points->grid mapping is resolved once per location; the grid
+  # refreshes on refreshInterval (~168 keyless calls/day for 7 locations).
+  forecast:
+    enabled: true
+    refreshInterval: "1h"
+    horizonHours: 48
+
   # National Weather Service zone alerts (issue #4) + fire-weather
   # classification (issue #5). These foothill/mountain zones cover the
   # Calaveras & Tuolumne service area. NWS requires a descriptive User-Agent

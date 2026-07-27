@@ -1,6 +1,6 @@
 # Fire-Weather Forecast — Technical Design
 
-Status: **Proposed** · Owner: The Grid (S.I.E.R.R.A) · Last updated: 2026-07-27
+Status: **Implemented** · Owner: The Grid (S.I.E.R.R.A) · Last updated: 2026-07-27
 
 ## 1. Summary
 

@@ -19,6 +19,7 @@ import (
 
 	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
 	api "github.com/dpup/sierra-data/api/v1"
+	"github.com/dpup/sierra-data/internal/clients/nws"
 	"github.com/dpup/sierra-data/internal/config"
 	"github.com/dpup/sierra-data/internal/places"
 	"github.com/dpup/sierra-data/internal/store"
@@ -79,13 +80,15 @@ func testConfig() *config.Config {
 // fakeWeather / fakeCensus are the narrow-interface stubs. (roadsResp lives
 // here too — the hazards fake in maplayers_test.go reuses it.)
 type fakeWeather struct {
-	resp *api.ListWeatherResponse
-	err  error
+	resp      *api.ListWeatherResponse
+	err       error
+	forecasts map[string]*nws.Forecast
 }
 
 func (f *fakeWeather) ListWeather(context.Context, *api.ListWeatherRequest) (*api.ListWeatherResponse, error) {
 	return f.resp, f.err
 }
+func (f *fakeWeather) LocationForecasts(context.Context) map[string]*nws.Forecast { return f.forecasts }
 
 type fakeCensus struct {
 	lat, lng float64

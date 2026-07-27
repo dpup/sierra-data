@@ -3,6 +3,8 @@ package hazards
 import (
 	"context"
 	"errors"
+	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -12,6 +14,7 @@ import (
 	"github.com/dpup/sierra-data/internal/cache"
 	"github.com/dpup/sierra-data/internal/clients/caloes"
 	"github.com/dpup/sierra-data/internal/clients/caltrans"
+	"github.com/dpup/sierra-data/internal/clients/nws"
 	"github.com/dpup/sierra-data/internal/config"
 )
 
@@ -24,6 +27,9 @@ type RoadsAPI interface {
 }
 type WeatherAPI interface {
 	ListWeather(context.Context, *api.ListWeatherRequest) (*api.ListWeatherResponse, error)
+	// LocationForecasts returns per-location fire-weather forecasts (fail-soft;
+	// nil/partial, never an error).
+	LocationForecasts(context.Context) map[string]*nws.Forecast
 }
 
 // Service projects the roads/weather feeds into the unified GeoJSON hazard
@@ -342,35 +348,84 @@ func (s *Service) fireWeather(ctx context.Context, area config.HazardArea) ([]Fe
 	if err != nil {
 		return nil, err
 	}
-	fw := resp.GetFireWeather()
-	if fw == nil {
-		return nil, nil
+	var out []Feature
+
+	// Banner: the region's ISSUED state (per-zone), colored by severity. Only for
+	// areas whose zones the product covers.
+	if fw := resp.GetFireWeather(); fw != nil && zonesMatch(area.Zones, fw.GetZones()) {
+		state := strings.ToLower(strings.TrimPrefix(fw.GetState().String(), "FIRE_WEATHER_STATE_"))
+		state = strings.ReplaceAll(state, "_", "-")
+		p := Properties{
+			ID:        "fw:region",
+			Layer:     strings.ToUpper(LayerFireWeather),
+			Kind:      "Fire weather",
+			Category:  state,
+			Headline:  nonEmpty(fw.GetHeadline(), "Fire weather: "+state),
+			Effective: tsToRFC3339(fw.GetEffective()),
+			Expires:   tsToRFC3339(fw.GetExpires()),
+			Source:    Source{ID: "nws", Name: nonEmpty(fw.GetSenderName(), "National Weather Service")},
+			FireWeather: &FireWeatherProps{
+				State:       state,
+				SourceEvent: fw.GetSourceEvent(),
+				Zones:       fw.GetZones(),
+			},
+		}
+		p.setSeverity(fromFireWeatherState(state))
+		out = append(out, Feature{Type: "Feature", Geometry: nil, Properties: p}) // null geometry = banner
 	}
-	// Fire-weather products are issued per NWS zone; only surface it for areas
-	// whose zones the product covers.
-	if !zonesMatch(area.Zones, fw.GetZones()) {
-		return nil, nil
+
+	// Per-location forecast Points: geolocated wind/RH outlook, INFO severity —
+	// informational, never an issued warning (see docs/fire-weather-forecast-design.md).
+	// Fail-soft: LocationForecasts never errors, so a forecast outage just omits points.
+	if forecasts := s.weather.LocationForecasts(ctx); len(forecasts) > 0 {
+		for _, loc := range s.cfg.Weather.Locations {
+			if !area.Bounds.Contains(loc.Coordinates.Latitude, loc.Coordinates.Longitude) {
+				continue
+			}
+			if f := forecasts[loc.ID]; f != nil {
+				out = append(out, forecastPointFeature(loc, f))
+			}
+		}
 	}
-	state := strings.ToLower(strings.TrimPrefix(fw.GetState().String(), "FIRE_WEATHER_STATE_"))
-	state = strings.ReplaceAll(state, "_", "-")
+	return out, nil
+}
+
+// forecastPointFeature builds the INFO-severity Point for a location's forecast
+// summary. Severity is always INFO — a windy/dry forecast never colors like an
+// issued Red Flag.
+func forecastPointFeature(loc config.WeatherLocation, f *nws.Forecast) Feature {
+	gust := int32(math.Round(f.PeakGustKmh))
+	summary := &ForecastSummary{
+		Source:          f.Source,
+		IssuedAt:        rfc3339Time(f.IssuedAt),
+		HorizonHours:    f.HorizonHours,
+		PeakWindGustKmh: gust,
+		PeakWindGustAt:  rfc3339Time(f.PeakGustAt),
+	}
+	if f.HasMinHumidity {
+		summary.MinHumidityPercent = int32(math.Round(f.MinHumidityPct))
+	}
 	p := Properties{
-		ID:        "fw:region",
+		ID:        "fw:forecast:" + loc.ID,
 		Layer:     strings.ToUpper(LayerFireWeather),
-		Kind:      "Fire weather",
-		Category:  state,
-		Headline:  nonEmpty(fw.GetHeadline(), "Fire weather: "+state),
-		Effective: tsToRFC3339(fw.GetEffective()),
-		Expires:   tsToRFC3339(fw.GetExpires()),
-		Source:    Source{ID: "nws", Name: nonEmpty(fw.GetSenderName(), "National Weather Service")},
+		Kind:      "Fire-weather forecast",
+		AreaLabel: loc.Name,
+		Headline:  fmt.Sprintf("%s forecast — peak gust %d km/h", loc.Name, gust),
+		Source:    Source{ID: "nws", Name: "National Weather Service"},
 		FireWeather: &FireWeatherProps{
-			State:       state,
-			SourceEvent: fw.GetSourceEvent(),
-			Zones:       fw.GetZones(),
+			Forecast: summary,
 		},
 	}
-	p.setSeverity(fromFireWeatherState(state))
-	// Region-wide, so null geometry (banner).
-	return []Feature{{Type: "Feature", Geometry: nil, Properties: p}}, nil
+	p.setSeverity(SevInfo)
+	return Feature{Type: "Feature", Geometry: PointGeom(loc.Coordinates.Latitude, loc.Coordinates.Longitude), Properties: p}
+}
+
+// rfc3339Time renders a time as RFC 3339 UTC, "" for the zero value.
+func rfc3339Time(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
 }
 
 // normFireName normalizes an incident/perimeter name for joining CAL FIRE and

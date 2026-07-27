@@ -23,11 +23,12 @@ type HTTPDoer interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
-// Client provides access to the NWS active-alerts API.
+// Client provides access to the NWS active-alerts + gridpoint-forecast API.
 type Client struct {
 	httpClient HTTPDoer
 	baseURL    string
 	userAgent  string
+	now        func() time.Time // injectable clock for the forecast horizon (tests); nil → time.Now
 }
 
 // NewClient creates a new NWS client. userAgent should identify the app and

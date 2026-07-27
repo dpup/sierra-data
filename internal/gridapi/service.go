@@ -15,6 +15,7 @@ import (
 	"time"
 
 	api "github.com/dpup/sierra-data/api/v1"
+	"github.com/dpup/sierra-data/internal/clients/nws"
 	"github.com/dpup/sierra-data/internal/config"
 	"github.com/dpup/sierra-data/internal/hazards"
 	"github.com/dpup/sierra-data/internal/store"
@@ -29,6 +30,9 @@ const maxAgeConditions = 60
 // fire_weather map layer consume.
 type WeatherAPI interface {
 	ListWeather(context.Context, *api.ListWeatherRequest) (*api.ListWeatherResponse, error)
+	// LocationForecasts returns per-location fire-weather forecasts (fail-soft;
+	// nil/partial, never an error). See internal/services WeatherService.
+	LocationForecasts(context.Context) map[string]*nws.Forecast
 }
 
 // CensusAPI is the geocoder slice /api/v1/places:resolve?address= consumes
