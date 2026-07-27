@@ -3,6 +3,7 @@ package nws
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -11,6 +12,13 @@ import (
 	"strings"
 	"time"
 )
+
+// ErrNotFound signals a NWS 404 — e.g. a cached gridpoint URL that stopped
+// resolving because NWS re-tiled the grid. Callers use it to invalidate + re-resolve.
+var ErrNotFound = errors.New("nws: not found")
+
+// IsNotFound reports whether err is (or wraps) ErrNotFound.
+func IsNotFound(err error) bool { return errors.Is(err, ErrNotFound) }
 
 // ForecastPoint is one hourly step of a location's fire-weather forecast. Speeds
 // are km/h, temperature °C, humidity/direction as-is — the NWS gridpoint's native
@@ -93,20 +101,25 @@ func (c *Client) GetGridForecast(ctx context.Context, gridURL string, horizon ti
 	}
 	minRH := math.MaxFloat64
 	for t := start; t.Before(end); t = t.Add(time.Hour) {
+		// Summary is computed from the presence maps, independent of which points
+		// are emitted, so a gust- or RH-only hour still counts.
+		if g, ok := gust[t]; ok && g > f.PeakGustKmh {
+			f.PeakGustKmh, f.PeakGustAt = g, t
+		}
+		if h, ok := rh[t]; ok && h < minRH {
+			minRH, f.HasMinHumidity = h, true
+		}
+		// Emit an hourly point ONLY when both core fire variables are present, so an
+		// absent wind or RH is never serialized as a false 0 (a false 0% RH reads as
+		// catastrophic dryness; a false 0 km/h hides a windy hour).
 		w, hasW := wind[t]
 		h, hasH := rh[t]
-		if !hasW && !hasH {
-			continue // a period with neither wind nor RH carries no fire signal
+		if !hasW || !hasH {
+			continue
 		}
 		f.Points = append(f.Points, ForecastPoint{
 			Time: t, TempC: temp[t], HumidityPct: h, WindKmh: w, WindDirDeg: dir[t], WindGustKmh: gust[t],
 		})
-		if g, ok := gust[t]; ok && g > f.PeakGustKmh {
-			f.PeakGustKmh, f.PeakGustAt = g, t
-		}
-		if hasH && h < minRH {
-			minRH, f.HasMinHumidity = h, true
-		}
 	}
 	if f.HasMinHumidity {
 		f.MinHumidityPct = minRH
@@ -127,6 +140,9 @@ func (c *Client) getJSON(ctx context.Context, url string, dst any) error {
 		return fmt.Errorf("failed to execute NWS request: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode == http.StatusNotFound {
+		return fmt.Errorf("NWS API error 404 (%s): %w", url, ErrNotFound)
+	}
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return fmt.Errorf("NWS API error %d: %s", resp.StatusCode, string(body))

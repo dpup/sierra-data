@@ -89,7 +89,7 @@ func main() {
 		"weather_locations", len(appConfig.Weather.Locations))
 
 	// Start periodic refresh to maintain cache warmth (replaces complex cache warmer)
-	periodicRefresh := services.NewPeriodicRefreshService(roadsService, appConfig)
+	periodicRefresh := services.NewPeriodicRefreshService(roadsService, weatherService, appConfig)
 	if err := periodicRefresh.StartPeriodicRefresh(ctx); err != nil {
 		logging.Errorw(ctx, "Failed to start periodic refresh", "error", err)
 	}

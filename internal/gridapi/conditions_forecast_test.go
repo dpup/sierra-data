@@ -1,9 +1,15 @@
 package gridapi
 
 import (
+	"context"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
+	api "github.com/dpup/sierra-data/api/v1"
 	"github.com/dpup/sierra-data/internal/clients/nws"
 )
 
@@ -43,4 +49,29 @@ func TestProjectForecast_AbsentMinHumidity(t *testing.T) {
 	if wf.GetMinHumidityPercent() != 0 {
 		t.Errorf("absent min RH = %d, want 0", wf.GetMinHumidityPercent())
 	}
+}
+
+// GetConditions joins the per-location forecast to the weather set it returns
+// (only locations that have a forecast get one) — the integration projectForecast
+// alone doesn't cover.
+func TestGetConditions_ForecastJoin(t *testing.T) {
+	wresp := &api.ListWeatherResponse{WeatherData: []*api.WeatherData{
+		{LocationId: "arnold", LocationName: "Arnold"},
+		{LocationId: "sonora", LocationName: "Sonora"},
+	}}
+	forecasts := map[string]*nws.Forecast{
+		"arnold": {Source: "NWS (STO 90,41)", HorizonHours: 48, PeakGustKmh: 40,
+			Points: []nws.ForecastPoint{{Time: time.Now().UTC(), WindKmh: 10, HumidityPct: 20}}},
+		// sonora deliberately absent → no forecast joined for it.
+	}
+	g := NewGridServer(&Service{Weather: &fakeWeather{resp: wresp, forecasts: forecasts}})
+
+	resp, err := g.GetConditions(context.Background(), &gridv1.GetConditionsRequest{})
+	require.NoError(t, err)
+	require.Len(t, resp.GetWeather(), 2)
+	require.Len(t, resp.GetForecast(), 1, "forecast joined only for locations that have one")
+	fc := resp.GetForecast()[0]
+	assert.Equal(t, "arnold", fc.GetLocationId())
+	assert.Equal(t, int32(40), fc.GetPeakWindGustKmh())
+	assert.Len(t, fc.GetPeriods(), 1)
 }

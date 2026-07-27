@@ -35,6 +35,12 @@ Adds a short-range NWS fire-weather forecast — keyless, additive, informationa
   colors the layer like an issued Red Flag; only the banner carries the issued
   state. Fail-soft: a forecast outage omits the block/points, never blocks
   conditions.
+  - **Consumer note (behavioral):** `fire_weather` is now a **multi-feature**
+    collection. Discriminate features by `kind` — `Fire weather` (the null-geometry
+    banner) vs `Fire-weather forecast` (the per-location `Point`). `properties.
+    fireWeather.state`/`category` are **banner-only** (now `omitempty`); code that
+    read `features[0]` as the issued state, or assumed `state` on every feature,
+    must select the banner by `kind`.
 
 ## 2026-07-25
 

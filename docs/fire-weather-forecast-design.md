@@ -133,14 +133,22 @@ type Forecast struct { Source string; IssuedAt time.Time; Points []ForecastPoint
 
 ## 6. Service + caching (`internal/services/weather*.go`)
 
-Mirror the NWS-alerts cache (cache-first, serve-stale, fail-soft):
+**Read/refresh split so the request path never fetches NWS:**
 
-- `nws:gridurl:{locID}` — resolved once, cached ~forever.
-- `nws:forecast:{locID}` — TTL `weather.forecast.refreshInterval` (default **1h**),
-  servable-stale to 2×.
-- `getLocationForecast(loc)` is **additive + fail-soft**: on error serve stale or
-  omit — it never blocks `conditions`.
-- Rate: ~7 locations × 1/h = **~168 keyless calls/day**. Negligible; cache hard.
+- `RefreshForecasts(ctx)` — the **background** warmer (`periodic_refresh.go`):
+  fetches each location, caches `nws:forecast:{locID}` (TTL
+  `weather.forecast.refreshInterval`, default **1h**). Skips still-fresh entries,
+  so it runs on the forecast's hourly cadence even though the refresher ticks on
+  the roads interval. On a **404** (NWS re-tiled the grid → the cached
+  `nws:gridurl:{locID}` is dead) it `Delete`s the URL and re-resolves once. Never
+  caches an empty result.
+- `LocationForecasts(ctx)` — the **request-path READ** (`GetConditions` + the
+  `fire_weather` builder): reads the warmed cache only (fresh, or last-good within
+  the 2× very-stale bound), **no fetch**. Additive + fail-soft: a location with no
+  warm entry is omitted; a forecast outage never blocks/slows `conditions`.
+- `nws:gridurl:{locID}` — the static `/points`→grid mapping, cached ~forever
+  (`gridURLTTL` 30d), invalidated on a 404.
+- Rate: ~7 locations × 1/h = **~168 keyless calls/day**, all off the request path.
 
 ## 7. Projection
 

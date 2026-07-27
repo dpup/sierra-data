@@ -58,35 +58,89 @@ func forecastConfig(enabled bool) *config.Config {
 	return cfg
 }
 
-func TestLocationForecasts_Success(t *testing.T) {
-	doer := forecastDoer{points: `{"properties":{"forecastGridData":"https://nws.test/gridpoints/STO/90,41"}}`, grid: gridBody()}
-	svc := NewWeatherService(nil, nws.NewClientWithHTTPDoer("test", "https://nws.test", doer), cache.NewCache(), forecastConfig(true))
+const pointsBody = `{"properties":{"forecastGridData":"https://nws.test/gridpoints/STO/90,41"}}`
 
+func newForecastSvc(c *cache.Cache, doer nws.HTTPDoer, enabled bool) *WeatherService {
+	return NewWeatherService(nil, nws.NewClientWithHTTPDoer("test", "https://nws.test", doer), c, forecastConfig(enabled))
+}
+
+func TestForecasts_WarmThenRead(t *testing.T) {
+	svc := newForecastSvc(cache.NewCache(), forecastDoer{points: pointsBody, grid: gridBody()}, true)
+
+	// The request path never fetches: before warming, LocationForecasts is empty.
+	assert.Empty(t, svc.LocationForecasts(testCtx()), "request path must not fetch on a cold cache")
+
+	// The background refresher warms the cache; the read then returns it.
+	svc.RefreshForecasts(testCtx())
 	fcs := svc.LocationForecasts(testCtx())
 	require.Len(t, fcs, 1)
 	f := fcs["arnold"]
 	require.NotNil(t, f)
 	assert.Len(t, f.Points, 6)
 	assert.Equal(t, float64(30), f.PeakGustKmh)
-	assert.True(t, f.HasMinHumidity)
 	assert.Equal(t, float64(15), f.MinHumidityPct)
 	assert.Contains(t, f.Source, "STO 90,41")
-
-	// Second call is served from the fresh cache — no additional upstream fetch is
-	// needed (the gridurl + forecast are both cached).
-	assert.NotNil(t, svc.LocationForecasts(testCtx())["arnold"])
 }
 
-func TestLocationForecasts_Disabled(t *testing.T) {
-	doer := forecastDoer{points: `{}`, grid: gridBody()}
-	svc := NewWeatherService(nil, nws.NewClientWithHTTPDoer("test", "https://nws.test", doer), cache.NewCache(), forecastConfig(false))
+func TestForecasts_Disabled(t *testing.T) {
+	svc := newForecastSvc(cache.NewCache(), forecastDoer{points: pointsBody, grid: gridBody()}, false)
+	svc.RefreshForecasts(testCtx()) // no-op
 	assert.Nil(t, svc.LocationForecasts(testCtx()))
 }
 
-func TestLocationForecasts_FailSoft(t *testing.T) {
-	// Upstream errors with no prior cache → the location is omitted, never an error.
-	doer := forecastDoer{err: errors.New("boom")}
-	svc := NewWeatherService(nil, nws.NewClientWithHTTPDoer("test", "https://nws.test", doer), cache.NewCache(), forecastConfig(true))
-	fcs := svc.LocationForecasts(testCtx())
-	assert.Empty(t, fcs, "a failed forecast fetch omits the location rather than erroring")
+func TestForecasts_RefreshFailSoft(t *testing.T) {
+	// Upstream errors, no prior cache → the location is omitted, never a panic/error.
+	svc := newForecastSvc(cache.NewCache(), forecastDoer{err: errors.New("boom")}, true)
+	svc.RefreshForecasts(testCtx())
+	assert.Empty(t, svc.LocationForecasts(testCtx()))
+}
+
+func TestForecasts_ServeStaleThenOmit(t *testing.T) {
+	c := cache.NewCache()
+	svc := newForecastSvc(c, forecastDoer{points: pointsBody, grid: gridBody()}, true)
+	svc.RefreshForecasts(testCtx())
+	require.NotNil(t, svc.LocationForecasts(testCtx())["arnold"])
+
+	// Stale (past the 1h TTL) but within the 2× very-stale bound → still served.
+	c.Backdate("nws:forecast:arnold", 90*time.Minute)
+	require.NotNil(t, svc.LocationForecasts(testCtx())["arnold"], "stale within 2x TTL is served")
+
+	// Past the very-stale bound → omitted (never fabricate a forecast).
+	c.Backdate("nws:forecast:arnold", 60*time.Minute) // ~150m total > 120m
+	assert.Empty(t, svc.LocationForecasts(testCtx()), "past very-stale is omitted")
+}
+
+// reResolveDoer 404s the first grid fetch (a re-tiled gridpoint) and serves the
+// grid on the second, so the re-resolve path can be exercised.
+type reResolveDoer struct {
+	points, grid           string
+	pointsCalls, gridCalls int
+}
+
+func (d *reResolveDoer) Do(req *http.Request) (*http.Response, error) {
+	body, status := d.grid, 200
+	if strings.Contains(req.URL.Path, "/points/") {
+		d.pointsCalls++
+		body = d.points
+	} else {
+		d.gridCalls++
+		if d.gridCalls == 1 {
+			status = 404
+			body = "not found"
+		}
+	}
+	return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+}
+
+func TestForecasts_ReResolveOnGrid404(t *testing.T) {
+	d := &reResolveDoer{points: pointsBody, grid: gridBody()}
+	svc := newForecastSvc(cache.NewCache(), d, true)
+
+	svc.RefreshForecasts(testCtx())
+
+	// A 404 on the cached grid URL must invalidate it and re-resolve via /points,
+	// so the forecast still lands (self-heals a moved gridpoint).
+	require.NotNil(t, svc.LocationForecasts(testCtx())["arnold"], "forecast recovered after a grid 404")
+	assert.Equal(t, 2, d.pointsCalls, "gridpoint URL was re-resolved after the 404")
+	assert.Equal(t, 2, d.gridCalls)
 }

@@ -119,3 +119,45 @@ func TestResolveForecastURL(t *testing.T) {
 		t.Errorf("points URL = %q", doer.lastURL)
 	}
 }
+
+// gridGapFixture: wind covers only hour 12; RH covers 12+13; gust covers all 3h.
+const gridGapFixture = `{
+  "properties": {
+    "updateTime": "2026-07-27T11:30:00+00:00",
+    "temperature":      {"uom":"wmoUnit:degC","values":[{"validTime":"2026-07-27T12:00:00+00:00/PT3H","value":20}]},
+    "relativeHumidity": {"uom":"wmoUnit:percent","values":[{"validTime":"2026-07-27T12:00:00+00:00/PT2H","value":40}]},
+    "windSpeed":        {"uom":"wmoUnit:km_h-1","values":[{"validTime":"2026-07-27T12:00:00+00:00/PT1H","value":10}]},
+    "windDirection":    {"uom":"wmoUnit:degree_(angle)","values":[{"validTime":"2026-07-27T12:00:00+00:00/PT3H","value":180}]},
+    "windGust":         {"uom":"wmoUnit:km_h-1","values":[{"validTime":"2026-07-27T12:00:00+00:00/PT3H","value":35}]}
+  }
+}`
+
+// A missing wind or RH hour must be DROPPED, never emitted as a false 0; the
+// summary is still computed from the presence maps (peak gust counts point-less
+// hours).
+func TestGetGridForecast_GapsDroppedNotZeroed(t *testing.T) {
+	doer := &fakeDoer{resp: gridGapFixture}
+	c := NewClientWithHTTPDoer("test-agent", "https://nws.test", doer)
+	c.now = func() time.Time { return time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC) }
+
+	f, err := c.GetGridForecast(context.Background(), "https://nws.test/gridpoints/STO/90,41", 3*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Hour 12 has both wind+RH → 1 point. Hour 13 (RH only) and 14 (neither) are
+	// dropped, NOT emitted with wind=0.
+	if len(f.Points) != 1 {
+		t.Fatalf("got %d points, want 1 (gap hours dropped, not zero-filled)", len(f.Points))
+	}
+	if f.Points[0].WindKmh != 10 || f.Points[0].HumidityPct != 40 {
+		t.Errorf("p0 = %+v", f.Points[0])
+	}
+	// Peak gust is 35 from the gust presence map, even though hours 13/14 emit no
+	// point — proving the summary isn't limited to emitted points.
+	if f.PeakGustKmh != 35 {
+		t.Errorf("peak gust = %v, want 35 (from presence map incl. point-less hours)", f.PeakGustKmh)
+	}
+	if f.MinHumidityPct != 40 {
+		t.Errorf("min RH = %v, want 40", f.MinHumidityPct)
+	}
+}

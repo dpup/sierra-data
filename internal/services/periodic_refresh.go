@@ -13,20 +13,24 @@ import (
 // PeriodicRefreshService simulates regular API requests to maintain cache warmth
 // Replaces complex CacheWarmer with simple periodic calls to existing refresh logic
 type PeriodicRefreshService struct {
-	roadsService *RoadsService
-	config       *config.Config
+	roadsService   *RoadsService
+	weatherService *WeatherService // may be nil (forecast warming is optional)
+	config         *config.Config
 
 	// Background refresh control
 	stopChan chan struct{}
 	running  bool
 }
 
-// NewPeriodicRefreshService creates a new periodic refresh service
-func NewPeriodicRefreshService(roadsService *RoadsService, config *config.Config) *PeriodicRefreshService {
+// NewPeriodicRefreshService creates a new periodic refresh service. weatherService
+// may be nil; when set, its fire-weather forecast cache is warmed so the request
+// path never fetches NWS synchronously.
+func NewPeriodicRefreshService(roadsService *RoadsService, weatherService *WeatherService, config *config.Config) *PeriodicRefreshService {
 	return &PeriodicRefreshService{
-		roadsService: roadsService,
-		config:       config,
-		stopChan:     make(chan struct{}),
+		roadsService:   roadsService,
+		weatherService: weatherService,
+		config:         config,
+		stopChan:       make(chan struct{}),
 	}
 }
 
@@ -109,5 +113,15 @@ func (p *PeriodicRefreshService) refreshCacheData(ctx context.Context) {
 		logging.Errorw(ctx, "Periodic refresh: failed to cache roads", "error", err)
 	} else {
 		logging.Infow(ctx, "Periodic refresh: successfully cached roads", "road_count", len(roads))
+	}
+
+	// Warm the fire-weather forecast cache so /api/v1/conditions + the fire_weather
+	// layer read a warm cache instead of fetching NWS on the request path.
+	// RefreshForecasts skips still-fresh entries, so it effectively runs on the
+	// forecast's own (hourly) cadence even though the refresher ticks faster.
+	if p.weatherService != nil {
+		fcCtx, fcCancel := context.WithTimeout(ctx, 2*time.Minute)
+		p.weatherService.RefreshForecasts(fcCtx)
+		fcCancel()
 	}
 }
