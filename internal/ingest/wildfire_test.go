@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -433,16 +434,102 @@ func TestWildfirePoll_BothFail(t *testing.T) {
 type wfEditDoer struct {
 	editMillis int64
 	perimResp  string
+	failQuery  bool // when true, the returnGeometry feature query errors (HTTP 500)
 	queries    int
 }
 
 func (d *wfEditDoer) Do(req *http.Request) (*http.Response, error) {
-	body := fmt.Sprintf(`{"editingInfo":{"dataLastEditDate":%d}}`, d.editMillis)
 	if strings.Contains(req.URL.RawQuery, "returnGeometry=true") {
 		d.queries++
-		body = d.perimResp
+		if d.failQuery {
+			return &http.Response{StatusCode: 500, Body: io.NopCloser(strings.NewReader("boom")), Header: make(http.Header)}, nil
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(d.perimResp)), Header: make(http.Header)}, nil
 	}
+	body := fmt.Sprintf(`{"editingInfo":{"dataLastEditDate":%d}}`, d.editMillis)
 	return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+}
+
+func newGatingNormalizer(wf *wfEditDoer) *WildfireNormalizer {
+	return NewWildfireNormalizer(
+		testConfig(),
+		calfire.NewClientWithHTTPDoer("https://calfire.test", &fakeDoer{resp: calfireFixture}),
+		wfigs.NewClientWithHTTPDoer("https://wfigs.test/query", wf),
+	)
+}
+
+// The exact scenario the gating targets: the cheap metadata check succeeds but the
+// expensive feature /query fails (429/500). It must fail loud (PerSource[wfigs]
+// set → sweep skipped) and NOT advance the stamp, so the next tick retries.
+func TestWildfirePerimeterQueryErrorFailsLoud(t *testing.T) {
+	wf := &wfEditDoer{editMillis: 1000, perimResp: wfigsFixture}
+	n := newGatingNormalizer(wf)
+
+	// First poll establishes a cached set (stamp 1000).
+	res, err := n.Poll(testCtx(), nil)
+	require.NoError(t, err)
+	require.Nil(t, res.PerSource)
+	require.Equal(t, 1, wf.queries)
+
+	// Stamp advances → gate attempts a refetch, but the feature query now fails.
+	wf.editMillis = 2000
+	wf.failQuery = true
+	res, err = n.Poll(testCtx(), nil)
+	require.NoError(t, err) // calfire is up → no hard Poll error
+	require.Error(t, res.PerSource["wfigs"], "failed feature query must flag the source (sweep skipped)")
+	assert.Equal(t, 2, wf.queries)
+
+	// Self-heal: the failed fetch must NOT have advanced the stamp, so the next
+	// tick refetches (stamp 2000 still != cached 1000) and succeeds.
+	wf.failQuery = false
+	res, err = n.Poll(testCtx(), nil)
+	require.NoError(t, err)
+	require.Nil(t, res.PerSource)
+	assert.Equal(t, 3, wf.queries, "unadvanced stamp → next tick refetches")
+}
+
+// The unchanged-stamp path serves the cache AS A SUCCESS the sweep acts on, so it
+// must reproduce the fresh event set (a regression to nil/empty would keep the
+// query count at 1 and silently blank every standalone perimeter).
+func TestWildfireCachedServeMatchesFreshFetch(t *testing.T) {
+	wf := &wfEditDoer{editMillis: 1000, perimResp: wfigsFixture}
+	n := newGatingNormalizer(wf)
+
+	res1, err := n.Poll(testCtx(), nil)
+	require.NoError(t, err)
+	require.Equal(t, 1, wf.queries)
+
+	res2, err := n.Poll(testCtx(), nil) // unchanged stamp → served from cache
+	require.NoError(t, err)
+	require.Equal(t, 1, wf.queries, "served from cache, no new query")
+	assert.ElementsMatch(t, eventIDs(res1.Events), eventIDs(res2.Events),
+		"cached serve must reproduce the fresh event set, not silently blank perimeters")
+	lonely := eventByID(t, res2.Events, "wfigs:lonely")
+	assert.True(t, lonely.GetWildfire().GetHasPerimeter(), "a standalone perimeter must survive the cached serve")
+}
+
+// The safety valve: even with an unchanged stamp, a cache aged past maxPerimCacheAge
+// forces a refetch, so a stalled/CDN-pinned dataLastEditDate can't freeze the map.
+func TestWildfirePerimeterCacheMaxAge(t *testing.T) {
+	wf := &wfEditDoer{editMillis: 1000, perimResp: wfigsFixture}
+	n := newGatingNormalizer(wf)
+	base := time.Date(2026, 7, 27, 0, 0, 0, 0, time.UTC)
+	clk := base
+	n.now = func() time.Time { return clk }
+
+	_, err := n.Poll(testCtx(), nil) // fetch #1 at base
+	require.NoError(t, err)
+	require.Equal(t, 1, wf.queries)
+
+	clk = base.Add(maxPerimCacheAge - time.Minute) // still fresh → cache served
+	_, err = n.Poll(testCtx(), nil)
+	require.NoError(t, err)
+	require.Equal(t, 1, wf.queries)
+
+	clk = base.Add(maxPerimCacheAge + time.Minute) // past the valve → forced refetch
+	_, err = n.Poll(testCtx(), nil)
+	require.NoError(t, err)
+	assert.Equal(t, 2, wf.queries, "stale cache past maxPerimCacheAge forces a refetch despite an unchanged stamp")
 }
 
 func TestWildfireGatesPerimeterFetchOnLastEdit(t *testing.T) {

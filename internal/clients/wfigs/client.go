@@ -95,11 +95,14 @@ type Perimeter struct {
 //  2. GetPerimeters (this expensive, uncacheable query) runs ONLY when that stamp
 //     advanced since our last successful fetch. Perimeters update ~daily (after an
 //     IR/mapping flight), so the expensive call drops from ~6/hr to ~1-2/day.
-//  3. On any WFIGS error the normalizer serves its in-process last-good perimeters
-//     and does NOT advance the stamp, so the next tick retries — a fire-season 429
-//     storm ages the perimeter rather than dropping it. The whole national dataset
-//     is ~208 tiny features. (If the metadata check itself fails, we fall back to
-//     a direct GetPerimeters, exactly as before the gating — never worse.)
+//  3. On a WFIGS feature-query error gatedPerimeters returns the error and does NOT
+//     advance the stamp, so the source is flagged failed (its disappearance sweep
+//     is SKIPPED — fail-loud) and the next tick retries. Under the `expire` policy
+//     that ages the existing perimeter (carried forward) rather than dropping it;
+//     it does NOT serve the cache on error. The last-good set is reused only while
+//     the stamp is unchanged (a genuine success), bounded by maxPerimCacheAge. (If
+//     the cheap metadata check itself fails, we fall back to a direct GetPerimeters
+//     — never worse than pre-gating.) The whole national dataset is ~208 features.
 //
 // What does NOT help: an API key / auth (public usage is charged to the OWNER,
 // and API keys can't be used with an ArcGIS Online account); switching output

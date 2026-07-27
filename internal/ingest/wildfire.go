@@ -30,18 +30,27 @@ type WildfireNormalizer struct {
 
 	// The WFIGS perimeter query is expensive and rate-limited (NIFC's shared org
 	// quota — see the note in the wfigs client). gatedPerimeters only refetches
-	// when the layer's dataLastEditDate advanced, otherwise reusing this in-process
-	// last-good set. Touched only by Poll's single wfigs goroutine, serially across
-	// ticks (no lock needed), and keyed on the static configured bounds.
+	// when the layer's dataLastEditDate advanced (or the last-good set aged past
+	// maxPerimCacheAge), otherwise reusing this in-process last-good set. Touched
+	// only by Poll's single wfigs goroutine, serially across ticks (no lock
+	// needed), and keyed on the static configured bounds.
 	lastPerimEdit  time.Time
 	cachedPerims   []wfigs.Perimeter
+	lastPerimFetch time.Time
 	havePerimCache bool
+	now            func() time.Time // injectable clock (maxPerimCacheAge valve; tests)
 }
+
+// maxPerimCacheAge bounds how long the last-good perimeter set is served without a
+// re-fetch while dataLastEditDate is unchanged — a safety valve so a stalled or
+// CDN-pinned stamp can't silently freeze the fire map indefinitely. Still ~36x
+// fewer expensive queries than the 10m poll, and WFIGS updates ~daily anyway.
+const maxPerimCacheAge = 6 * time.Hour
 
 // NewWildfireNormalizer wires the normalizer to its two clients (tests inject
 // ones built with NewClientWithHTTPDoer).
 func NewWildfireNormalizer(cfg *config.Config, cf *calfire.Client, wf *wfigs.Client) *WildfireNormalizer {
-	return &WildfireNormalizer{cfg: cfg, calfire: cf, wfigs: wf}
+	return &WildfireNormalizer{cfg: cfg, calfire: cf, wfigs: wf, now: time.Now}
 }
 
 // SourceIDs implements Normalizer. One poller, two source rows.
@@ -216,30 +225,38 @@ func (n *WildfireNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult
 
 // gatedPerimeters returns the current WFIGS perimeters, running the expensive,
 // 429-prone feature query ONLY when the layer's dataLastEditDate advanced since
-// our last successful fetch (see the rate-limit note in the wfigs client).
-// Between changes it serves the in-process last-good set — a genuine success,
+// our last successful fetch, or the last-good set has aged past maxPerimCacheAge
+// (see the rate-limit note in the wfigs client). While the stamp is unchanged and
+// the cache is fresh it serves the in-process last-good set — a genuine success,
 // since the data has not changed, so the disappearance sweep can act on it. The
 // bounds are static config, so a cached set stays valid for that scope.
 //
 // On a WFIGS error we do NOT advance the stamp (the next tick retries) and return
 // the error so the caller flags the source failed and the sweep is skipped
-// (fail-loud). If the cheap metadata check itself fails, we fall back to a direct
-// GetPerimeters — exactly the pre-gating behavior, never worse.
+// (fail-loud). If the cheap metadata check itself fails, we log it and fall back
+// to a direct GetPerimeters — exactly the pre-gating behavior, never worse.
 func (n *WildfireNormalizer) gatedPerimeters(ctx context.Context, b wfigs.Bounds) ([]wfigs.Perimeter, error) {
 	edit, err := n.wfigs.LastEdit(ctx)
 	if err != nil {
-		// Metadata check failed (rare — it's CDN-cached). Fall back to a direct
-		// fetch so a metadata hiccup never blocks perimeters.
+		// Metadata check failed (rare — it's CDN-cached). Log it so a persistently
+		// failing check — which silently reverts to a fetch every tick and disables
+		// the gating — is visible; then fall back to a direct fetch so a metadata
+		// hiccup never blocks perimeters. Best-effort: if that also errors it fails
+		// loud exactly like pre-gating.
+		logging.Warnw(ctx, "WFIGS metadata check failed; falling back to a direct perimeter fetch", "error", err)
 		return n.wfigs.GetPerimeters(ctx, b)
 	}
-	if n.havePerimCache && edit.Equal(n.lastPerimEdit) {
-		return n.cachedPerims, nil // unchanged — skip the expensive origin query
+	// Reuse the in-process last-good set only while the stamp is unchanged AND the
+	// cache is still fresh. The maxPerimCacheAge valve forces a refetch if
+	// dataLastEditDate ever stalls upstream while the perimeter data changed.
+	if n.havePerimCache && edit.Equal(n.lastPerimEdit) && n.now().Sub(n.lastPerimFetch) <= maxPerimCacheAge {
+		return n.cachedPerims, nil // unchanged + fresh — skip the expensive origin query
 	}
 	perims, perr := n.wfigs.GetPerimeters(ctx, b)
 	if perr != nil {
 		return nil, perr // stamp not advanced → retried next tick; sweep skipped
 	}
-	n.cachedPerims, n.lastPerimEdit, n.havePerimCache = perims, edit, true
+	n.cachedPerims, n.lastPerimEdit, n.lastPerimFetch, n.havePerimCache = perims, edit, n.now(), true
 	return perims, nil
 }
 
