@@ -347,17 +347,27 @@ func TestPolygonEventPlaceMatching(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
 	seedSource(t, s, "firis")
+	// Calaveras: a rectangle the perimeter genuinely overlaps (its SW corner is
+	// inside the perimeter) — attaches.
 	require.NoError(t, s.UpsertPlace(ctx, testPlace(
 		"county:calaveras", "calaveras", "Calaveras County",
 		gridv1.PlaceKind_COUNTY, polyGeometry(38.0, -120.9, 38.5, -120.0))))
+	// Faraway: disjoint bbox — never attaches.
 	require.NoError(t, s.UpsertPlace(ctx, testPlace(
 		"county:faraway", "faraway", "Faraway County",
 		gridv1.PlaceKind_COUNTY, polyGeometry(40.0, -122.0, 40.5, -121.0))))
+	// Clipped: a triangle in the NE of its bbox. Its BBOX overlaps the perimeter
+	// (the Dove case — a large county whose rectangular bbox clips a nearby fire),
+	// but the triangle body is well NE of the perimeter, so the geometries do NOT
+	// actually intersect → must NOT attach (the bbox-only rule wrongly would).
+	require.NoError(t, s.UpsertPlace(ctx, testPlace(
+		"county:clipped", "clipped", "Clipped County", gridv1.PlaceKind_COUNTY,
+		geomFromGeoJSON(`{"type":"Polygon","coordinates":[[[-120.4,39.0],[-119.9,39.0],[-119.9,38.5],[-120.4,39.0]]]}`))))
 
-	// Perimeter straddling the county's north edge: event centroid is outside
-	// the county and the county's bbox center is outside the perimeter, so
-	// only the permissive polygon-polygon bbox-overlap rule attaches it —
-	// over-attach beats missing a perimeter crossing a boundary.
+	// Perimeter straddling Calaveras's north edge: event centroid is outside every
+	// county and no county's bbox center is inside the perimeter, so the
+	// polygon-overlap rule decides — and it must attach ONLY the county the
+	// perimeter actually intersects.
 	ev := testEvent("firis:test-fire", gridv1.Severity_SEVERE, gridv1.EventStatus_ACTIVE, "Test Fire")
 	ev.Layer = gridv1.Layer_WILDFIRE
 	ev.Provenance.SourceId = "firis"
@@ -368,7 +378,7 @@ func TestPolygonEventPlaceMatching(t *testing.T) {
 	got, err := s.GetEvent(ctx, "firis:test-fire")
 	require.NoError(t, err)
 	assert.Equal(t, []string{"county:calaveras"}, got.GetPlaceIds(),
-		"bbox-overlapping county attaches; disjoint county does not")
+		"genuinely-overlapping county attaches; bbox-only (clipped) and disjoint (faraway) do not")
 }
 
 func TestRtreeConsistencyAcrossGeometryChanges(t *testing.T) {

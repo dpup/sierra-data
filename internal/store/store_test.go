@@ -58,6 +58,12 @@ func polyGeometry(minLat, minLng, maxLat, maxLng float64) *gridv1.Geometry {
 	return &gridv1.Geometry{Geojson: geojson.BboxPolygonGeoJSON(minLat, minLng, maxLat, maxLng)}
 }
 
+// geomFromGeoJSON wraps a raw GeoJSON geometry (for non-rectangular test shapes;
+// bbox/centroid are backfilled at ingest).
+func geomFromGeoJSON(raw string) *gridv1.Geometry {
+	return &gridv1.Geometry{Geojson: []byte(raw)}
+}
+
 func testPlace(id, slug, name string, kind gridv1.PlaceKind, geom *gridv1.Geometry) *gridv1.Place {
 	return &gridv1.Place{Id: id, Slug: slug, Name: name, Kind: kind, Geometry: geom}
 }

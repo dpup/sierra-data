@@ -540,8 +540,11 @@ const (
 //     centroid): attach every place whose polygon contains the centroid;
 //   - polygon/multipolygon events: attach a place when the bboxes intersect
 //     AND (the event centroid is in the place, OR the place's bbox center is
-//     in the event geometry, OR both geometries are polygons — permissive
-//     bbox-overlap);
+//     in the event geometry, OR the place is polygonal and the two geometries
+//     ACTUALLY intersect). The last rule is a real polygon-overlap test, not a
+//     bbox one — county bboxes are large interlocking rectangles, so a bare
+//     bbox-overlap rule attached a fire to every county whose bbox it clipped
+//     (e.g. a Tuolumne fire falsely tagged Calaveras + Stanislaus);
 //   - other event types (linestrings): bbox intersect AND centroid in place.
 //
 // Zone-carrying weather alerts are handled by the caller pre-setting
@@ -605,8 +608,8 @@ func (s *Store) matchPlaces(tx *sql.Tx, ev *gridv1.Event) ([]string, error) {
 			matched = append(matched, pl.id)
 			continue
 		}
-		if pl.polygonal {
-			matched = append(matched, pl.id) // permissive polygon-polygon bbox overlap
+		if pl.polygonal && geojson.Intersects(evGeom, pl.geom) {
+			matched = append(matched, pl.id) // actual polygon overlap, not just bbox
 		}
 	}
 	return matched, nil
