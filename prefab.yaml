@@ -291,7 +291,7 @@ grid:
     budgetPerTick: 5
 
   # Per-source poll cadence + lifecycle policy. A poller may update several
-  # source rows (wildfire tick -> calfire + wfigs; incidents tick -> chp +
+  # source rows (wildfire tick -> calfire + firis; incidents tick -> chp +
   # caltrans; the poller runs at the fastest of its sources' intervals).
   #
   # disappearance says what happens when an event vanishes from its feed:
@@ -314,17 +314,22 @@ grid:
       # A quake aging out of the 7-day M2.5+ query window is its natural end
       # of life; the window is authoritative for "current", so resolve.
       disappearance: "resolve"
-    # CAL FIRE + WFIGS share ONE poller (the wildfire normalizer joins incidents
+    # CAL FIRE + FIRIS share ONE poller (the wildfire normalizer joins incidents
     # with perimeters), which ticks at the FASTER of the two intervals and fetches
-    # both each tick — so these must move together to actually slow WFIGS. Raised
-    # 5m -> 10m to ease WFIGS' ArcGIS rate limit (occasional 429s, worst right
-    # after a deploy when a fresh instance re-fetches). Fire freshness at 10m is
-    # ample; the life-safety urgency lives in the 2m evacuation poll.
+    # both each tick — so these move together. The FIRIS perimeter query is gated on
+    # the layer's dataLastEditDate (a cheap metadata check). NOTE the gate is a
+    # STATEWIDE stamp: in active fire season it advances most ticks (a fire changed
+    # somewhere in CA), so the gate mainly saves the expensive query in the
+    # off-season; its real protection here is that the combo feed is on CAL FIRE's
+    # org, not NIFC's 429-saturated one. The metadata endpoint is CDN-cached ~1h, so
+    # perimeter freshness is bounded nearer ~1h than 5m — still hours better than
+    # WFIGS (the reason we moved), just not literally 5m. 5m keeps CAL FIRE incident
+    # scalars fresh and bounds the gate's detection latency.
     calfire:
-      pollInterval: "10m"
+      pollInterval: "5m"
       disappearance: "resolve"
-    wfigs:
-      pollInterval: "10m"
+    firis:
+      pollInterval: "5m"
       # Perimeter uploads lag the fire; a perimeter missing from one poll is
       # not containment. Expire only after a day without reappearing.
       disappearance: "expire"

@@ -228,7 +228,7 @@ system of record; a restart rehydrates events and revisions with no re-fetch.
 │                                                                                │
 │  ┌────────────┐   Poll(ctx, prior)   ┌──────────────────┐                      │
 │  │ Normalizer │ ───────────────────▶ │ upstream clients │  usgs / calfire /    │
-│  │ (1 scope)  │ ◀─── PollResult ──── │ (internal/clients│  wfigs / caloes /    │
+│  │ (1 scope)  │ ◀─── PollResult ──── │ (internal/clients│  firis / caloes /    │
 │  └────────────┘   {Events, PerSource,│  + Roads/Weather │  nws / chp / caltrans│
 │        │           SweepSuppress}    │  services)       │                      │
 │        ▼                             └──────────────────┘                      │

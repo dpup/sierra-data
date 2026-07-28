@@ -63,7 +63,7 @@ func TestSeverityMappings(t *testing.T) {
 }
 
 func TestNormFireName(t *testing.T) {
-	// CAL FIRE "Salt Springs Fire" and WFIGS "Salt Springs" must join.
+	// CAL FIRE "Salt Springs Fire" and FIRIS "Salt Springs" must join.
 	if normFireName("Salt Springs Fire") != normFireName("Salt Springs") {
 		t.Errorf("%q != %q", normFireName("Salt Springs Fire"), normFireName("Salt Springs"))
 	}

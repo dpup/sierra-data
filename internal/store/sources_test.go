@@ -128,3 +128,25 @@ func TestRecordAttemptUnseededSource(t *testing.T) {
 	err := s.RecordAttempt(context.Background(), "ghost", nil)
 	assert.Error(t, err)
 }
+
+func TestDeleteSource(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	require.NoError(t, s.SeedSources(ctx, []SourceSeed{
+		{ID: "keep", Name: "Keep", PollInterval: time.Minute, Disappearance: DisappearanceResolve},
+		{ID: "gone", Name: "Gone", PollInterval: time.Minute, Disappearance: DisappearanceResolve},
+	}))
+
+	require.NoError(t, s.DeleteSource(ctx, "gone"))
+	srcs, err := s.ListSources(ctx)
+	require.NoError(t, err)
+	ids := make([]string, len(srcs))
+	for i, src := range srcs {
+		ids[i] = src.GetId()
+	}
+	assert.Contains(t, ids, "keep")
+	assert.NotContains(t, ids, "gone")
+
+	// Idempotent: deleting an absent id is a no-op, not an error.
+	require.NoError(t, s.DeleteSource(ctx, "gone"))
+}

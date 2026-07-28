@@ -426,7 +426,7 @@ func allSourcesOK(t *testing.T, st *store.Store) {
 	for _, id := range []string{"usgs", "calfire", "nws", "chp"} { // seeded by seedEvents
 		recordOK(t, st, id)
 	}
-	for _, id := range []string{"wfigs", "caltrans", "caloes"} {
+	for _, id := range []string{"firis", "caltrans", "caloes"} {
 		seedSource(t, st, id)
 		recordOK(t, st, id)
 	}

@@ -107,7 +107,7 @@ message LatLng {
 message Provenance {
   string source_id = 1;
   string source_name = 2;           // denormalized: "CAL FIRE"
-  string attribution = 3;           // "CAL FIRE / WFIGS"
+  string attribution = 3;           // "CAL FIRE / FIRIS"
   string source_url = 4;
   google.protobuf.Timestamp fetched_at = 5;
 }
@@ -173,7 +173,7 @@ message WildfireDetail {
   int32 containment = 2;            // percent contained, 0-100
   string county = 3;
   string cause = 4;
-  bool has_perimeter = 5;           // true when geometry is a WFIGS perimeter polygon
+  bool has_perimeter = 5;           // true when geometry is a FIRIS perimeter polygon
 }
 
 message EvacuationDetail {

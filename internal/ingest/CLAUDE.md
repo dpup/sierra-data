@@ -19,7 +19,7 @@ type Normalizer interface {
 ```
 
 - **`SourceIDs`** — the source rows this one poller writes health for. A poller may
-  span several (wildfire → `calfire`+`wfigs`; road incidents → `chp`+`caltrans`).
+  span several (wildfire → `calfire`+`firis`; road incidents → `chp`+`caltrans`).
 - **`Prior`** — a read-only view of the store's current ACTIVE/SCHEDULED events for
   this poller's sources (`ByID`, `ForSource`), built by the scheduler before each
   tick. Normalizers use it to keep **identity/state stable across ticks** — e.g.
@@ -64,7 +64,7 @@ Never return a partial `Events` as if complete.
 - **`resolve`** — the feed is authoritatively active-only (Cal OES, CAL FIRE, CHP,
   Caltrans). Missing from a good poll ⇒ RESOLVED immediately.
 - **`expire`** — the feed going quiet proves nothing (NWS alerts drop at
-  end-of-product, WFIGS perimeter uploads lag). EXPIRED only once past the event's
+  end-of-product, FIRIS/CAL FIRE perimeter uploads lag). EXPIRED only once past the event's
   own `expires`, or past the `expireAfter` grace since it was **last seen**;
   otherwise it stays active.
 

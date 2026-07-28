@@ -81,47 +81,47 @@ func TestProjectEvents_Wildfire_CalfireAdoptedPerimeter(t *testing.T) {
 	      "id": "calfire",
 	      "name": "CAL FIRE",
 	      "url": "https://www.fire.ca.gov/incidents/salt-springs",
-	      "attribution": "CAL FIRE / WFIGS"
+	      "attribution": "CAL FIRE / FIRIS"
 	    },
 	    "wildfire": {"acres": 1200, "containment": 35, "county": "Calaveras", "hasPerimeter": true}
 	  }
 	}`, featJSON(t, feats[0]))
 }
 
-func TestProjectEvents_Wildfire_StandaloneWfigsPerimeter(t *testing.T) {
+func TestProjectEvents_Wildfire_StandaloneFirisPerimeter(t *testing.T) {
 	const poly = `{"type":"Polygon","coordinates":[[[-119.9,38.0],[-119.8,38.0],[-119.8,38.1],[-119.9,38.1],[-119.9,38.0]]]}`
 	ev := &gridv1.Event{
-		Id:         "wfigs:lonely",
+		Id:         "firis:lonely",
 		Layer:      gridv1.Layer_WILDFIRE,
 		Category:   "wildfire",
 		Severity:   gridv1.Severity_SEVERE,
 		Status:     gridv1.EventStatus_ACTIVE,
-		Headline:   "Lonely — 250 ac, 10% contained",
+		Headline:   "Lonely — 250 ac",
 		Geometry:   geom(poly),
-		Provenance: &gridv1.Provenance{SourceId: "wfigs", SourceName: "NIFC WFIGS"},
+		Provenance: &gridv1.Provenance{SourceId: "firis", SourceName: "CAL FIRE / FIRIS"},
 		Detail: &gridv1.Event_Wildfire{Wildfire: &gridv1.WildfireDetail{
-			Acres: 250.4, Containment: 10, Cause: "Human", HasPerimeter: true,
+			Acres: 250.4, HasPerimeter: true, // combo feed carries no containment/cause
 		}},
 	}
 
 	feats := ProjectEvents(hazards.LayerWildfire, []*gridv1.Event{ev})
 	require.Len(t, feats, 1)
-	// wfigs-sourced fires emit the shipped standalone-perimeter source block
-	// (no URL — WFIGS features carry none).
+	// firis-sourced fires emit the standalone-perimeter source block (no URL —
+	// combo-feed features carry none).
 	assert.JSONEq(t, `{
 	  "type": "Feature",
 	  "geometry": `+poly+`,
 	  "properties": {
-	    "id": "wfigs:lonely",
+	    "id": "firis:lonely",
 	    "layer": "WILDFIRE",
 	    "kind": "Wildfire",
 	    "category": "wildfire",
 	    "severity": "SEVERE",
 	    "severityRank": 3,
-	    "headline": "Lonely — 250 ac, 10% contained",
+	    "headline": "Lonely — 250 ac",
 	    "status": "ACTIVE",
-	    "source": {"id": "wfigs", "name": "NIFC WFIGS", "attribution": "NIFC / WFIGS"},
-	    "wildfire": {"acres": 250.4, "containment": 10, "cause": "Human", "hasPerimeter": true}
+	    "source": {"id": "firis", "name": "CAL FIRE / FIRIS", "attribution": "CAL FIRE / FIRIS / NIFC"},
+	    "wildfire": {"acres": 250.4, "containment": 0, "hasPerimeter": true}
 	  }
 	}`, featJSON(t, feats[0]))
 }

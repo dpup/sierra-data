@@ -28,7 +28,7 @@ import (
 // the store to apply per-source disappearance policy.
 type Normalizer interface {
 	// SourceIDs lists the source-registry rows this poller updates. A poller
-	// may update several (wildfire → calfire + wfigs); poller ≠ source.
+	// may update several (wildfire → calfire + firis); poller ≠ source.
 	SourceIDs() []string
 	// Poll fetches the upstream(s). prior is the store's current active set
 	// for this poller's sources — normalizers use it to carry identity and

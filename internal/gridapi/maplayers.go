@@ -55,7 +55,7 @@ var conditionLayers = map[string]bool{
 // decision 4: poller ≠ source — wildfire and road_incident aggregate two
 // feeds each).
 var layerSourceIDs = map[string][]string{
-	hazards.LayerWildfire:     {"calfire", "wfigs"},
+	hazards.LayerWildfire:     {"calfire", "firis"},
 	hazards.LayerEvacuation:   {"caloes"},
 	hazards.LayerWeatherAlert: {"nws"},
 	hazards.LayerEarthquake:   {"usgs"},
@@ -260,7 +260,7 @@ func (s *Service) resolveHazardArea(place *gridv1.Place) (config.HazardArea, boo
 // LayerSourceStatus derives an event-backed layer's metadata.source_status
 // from its source registry rows (the fail-loud honesty mechanism now that the
 // store, not a live fetch, backs these layers). Single-source layers map
-// directly; multi-source layers (wildfire = calfire+wfigs, road_incident =
+// directly; multi-source layers (wildfire = calfire+firis, road_incident =
 // chp+caltrans): all OK -> OK, all down -> UNAVAILABLE, otherwise (some
 // degraded) -> STALE — partial data must not present as complete, matching
 // the shipped partialData semantics. A missing or never-polled row counts as

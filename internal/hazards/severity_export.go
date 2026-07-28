@@ -70,6 +70,7 @@ func EvacStatusInactive(status string) bool {
 	return false
 }
 
-// NormFireName normalizes an incident/perimeter name for joining CAL FIRE and
-// WFIGS (e.g. "Salt Springs Fire" and "Salt Springs" → "saltsprings").
+// NormFireName normalizes an incident/perimeter name for joining CAL FIRE
+// incidents and FIRIS perimeters (e.g. "Salt Springs Fire" and "Salt Springs" →
+// "saltsprings").
 func NormFireName(s string) string { return normFireName(s) }

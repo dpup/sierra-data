@@ -76,7 +76,7 @@ func recordErr(t *testing.T, st *store.Store, id string) {
 	require.NoError(t, st.RecordAttempt(context.Background(), id, errors.New("upstream 500")))
 }
 
-// seedSource adds a registry row seedEvents doesn't (wfigs, caloes, caltrans).
+// seedSource adds a registry row seedEvents doesn't (firis, caloes, caltrans).
 func seedSource(t *testing.T, st *store.Store, id string) {
 	t.Helper()
 	require.NoError(t, st.SeedSources(context.Background(),
@@ -179,9 +179,9 @@ func TestMapLayer_SourceStatusMatrix(t *testing.T) {
 
 	t.Run("multi source one down is STALE", func(t *testing.T) {
 		s := newTestService(t)
-		seedSource(t, s.Store, "wfigs")
+		seedSource(t, s.Store, "firis")
 		recordOK(t, s.Store, "calfire")
-		recordErr(t, s.Store, "wfigs") // never succeeded => down
+		recordErr(t, s.Store, "firis") // never succeeded => down
 		md := getFC(t, s, "/v1/places/calaveras/map/wildfire.geojson").Metadata
 		assert.Equal(t, "STALE", md.SourceStatus, "partial data must not present as complete")
 		assert.NotEmpty(t, md.LastSourceUpdate, "carries the surviving source's last success")
@@ -189,9 +189,9 @@ func TestMapLayer_SourceStatusMatrix(t *testing.T) {
 
 	t.Run("multi source all down with stored events is STALE", func(t *testing.T) {
 		s := newTestService(t)
-		seedSource(t, s.Store, "wfigs")
+		seedSource(t, s.Store, "firis")
 		recordErr(t, s.Store, "calfire")
-		recordErr(t, s.Store, "wfigs")
+		recordErr(t, s.Store, "firis")
 		fc := getFC(t, s, "/v1/places/calaveras/map/wildfire.geojson")
 		assert.Equal(t, "STALE", fc.Metadata.SourceStatus, "stored calfire:f1 is last-good data")
 		require.Len(t, fc.Features, 1)
@@ -210,9 +210,9 @@ func TestMapLayer_SourceStatusMatrix(t *testing.T) {
 
 	t.Run("multi source all OK is OK", func(t *testing.T) {
 		s := newTestService(t)
-		seedSource(t, s.Store, "wfigs")
+		seedSource(t, s.Store, "firis")
 		recordOK(t, s.Store, "calfire")
-		recordOK(t, s.Store, "wfigs")
+		recordOK(t, s.Store, "firis")
 		md := getFC(t, s, "/v1/places/calaveras/map/wildfire.geojson").Metadata
 		assert.Equal(t, "OK", md.SourceStatus)
 	})
@@ -240,7 +240,7 @@ func TestLayerSourceStatus_Unit(t *testing.T) {
 	// Multi-source: STALE carries the MOST RECENT last_success_at.
 	status, last = LayerSourceStatus([]*gridv1.Source{
 		src("calfire", gridv1.SourceStatus_OK, now),
-		src("wfigs", gridv1.SourceStatus_UNAVAILABLE, now.Add(-time.Hour)),
+		src("firis", gridv1.SourceStatus_UNAVAILABLE, now.Add(-time.Hour)),
 	}, "wildfire")
 	assert.Equal(t, "STALE", status)
 	assert.Equal(t, now, last)

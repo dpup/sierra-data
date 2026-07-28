@@ -450,37 +450,37 @@ func TestTickPerSourcePartialFailure(t *testing.T) {
 func TestTickSweepSuppression(t *testing.T) {
 	ctx := testCtx()
 	st := newSchedStore(t)
-	seedSchedSources(t, st, "wfigs")
+	seedSchedSources(t, st, "firis")
 
 	fn := &fakeNormalizer{
-		ids:    []string{"wfigs"},
-		result: &PollResult{Events: []*gridv1.Event{schedEvent("wfigs:fire", "wfigs", gridv1.Layer_WILDFIRE)}},
+		ids:    []string{"firis"},
+		result: &PollResult{Events: []*gridv1.Event{schedEvent("firis:fire", "firis", gridv1.Layer_WILDFIRE)}},
 	}
 	sched := NewScheduler(st, SchedulerConfig{
-		Tuning: map[string]config.SourceTuning{"wfigs": {Disappearance: store.DisappearanceResolve}},
+		Tuning: map[string]config.SourceTuning{"firis": {Disappearance: store.DisappearanceResolve}},
 	})
 	spec := PollerSpec{Normalizer: fn, Interval: time.Minute}
 	sched.tick(ctx, spec)
-	require.Equal(t, gridv1.EventStatus_ACTIVE, eventStatus(t, st, "wfigs:fire"))
+	require.Equal(t, gridv1.EventStatus_ACTIVE, eventStatus(t, st, "firis:fire"))
 
 	// The event disappears but the poller suppresses the sweep: fetch OK,
 	// disappearance evidence incomplete.
-	fn.result = &PollResult{SweepSuppress: []string{"wfigs"}}
+	fn.result = &PollResult{SweepSuppress: []string{"firis"}}
 	sched.tick(ctx, spec)
 
-	ev, err := st.GetEvent(ctx, "wfigs:fire")
+	ev, err := st.GetEvent(ctx, "firis:fire")
 	require.NoError(t, err)
 	assert.Equal(t, gridv1.EventStatus_ACTIVE, ev.GetStatus(),
 		"suppressed sweep must not transition disappeared events")
 	assert.Equal(t, uint32(1), ev.GetRevision())
-	src := sourceByID(t, st, "wfigs")
+	src := sourceByID(t, st, "firis")
 	assert.Equal(t, gridv1.SourceStatus_OK, src.GetStatus(), "suppression still records success")
 	assert.Empty(t, src.GetLastError())
 
 	// Suppression lifted, still missing: the disappearance now resolves.
 	fn.result = &PollResult{}
 	sched.tick(ctx, spec)
-	assert.Equal(t, gridv1.EventStatus_RESOLVED, eventStatus(t, st, "wfigs:fire"))
+	assert.Equal(t, gridv1.EventStatus_RESOLVED, eventStatus(t, st, "firis:fire"))
 }
 
 // Poll receives a Prior populated from the store's active/scheduled sets for
@@ -488,19 +488,19 @@ func TestTickSweepSuppression(t *testing.T) {
 func TestTickPriorPopulatedFromStore(t *testing.T) {
 	ctx := testCtx()
 	st := newSchedStore(t)
-	seedSchedSources(t, st, "calfire", "wfigs")
+	seedSchedSources(t, st, "calfire", "firis")
 
 	fn := &fakeNormalizer{
-		ids: []string{"calfire", "wfigs"},
+		ids: []string{"calfire", "firis"},
 		result: &PollResult{Events: []*gridv1.Event{
 			schedEvent("calfire:one", "calfire", gridv1.Layer_WILDFIRE),
-			schedEvent("wfigs:two", "wfigs", gridv1.Layer_WILDFIRE),
+			schedEvent("firis:two", "firis", gridv1.Layer_WILDFIRE),
 		}},
 	}
 	sched := NewScheduler(st, SchedulerConfig{
 		Tuning: map[string]config.SourceTuning{
 			"calfire": {Disappearance: store.DisappearanceResolve},
-			"wfigs":   {Disappearance: store.DisappearanceResolve},
+			"firis":   {Disappearance: store.DisappearanceResolve},
 		},
 	})
 	spec := PollerSpec{Normalizer: fn, Interval: time.Minute}
@@ -519,8 +519,8 @@ func TestTickPriorPopulatedFromStore(t *testing.T) {
 	forCalfire := prior.ForSource("calfire")
 	require.Len(t, forCalfire, 1, "ForSource splits by source id")
 	assert.Equal(t, "calfire:one", forCalfire[0].GetId())
-	forWfigs := prior.ForSource("wfigs")
+	forWfigs := prior.ForSource("firis")
 	require.Len(t, forWfigs, 1)
-	assert.Equal(t, "wfigs:two", forWfigs[0].GetId())
+	assert.Equal(t, "firis:two", forWfigs[0].GetId())
 	assert.Empty(t, prior.ForSource("caloes"), "sources outside the poller are not loaded")
 }

@@ -346,7 +346,7 @@ func TestTouchSeenAndLastSeenAt(t *testing.T) {
 func TestPolygonEventPlaceMatching(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
-	seedSource(t, s, "wfigs")
+	seedSource(t, s, "firis")
 	require.NoError(t, s.UpsertPlace(ctx, testPlace(
 		"county:calaveras", "calaveras", "Calaveras County",
 		gridv1.PlaceKind_COUNTY, polyGeometry(38.0, -120.9, 38.5, -120.0))))
@@ -358,14 +358,14 @@ func TestPolygonEventPlaceMatching(t *testing.T) {
 	// the county and the county's bbox center is outside the perimeter, so
 	// only the permissive polygon-polygon bbox-overlap rule attaches it —
 	// over-attach beats missing a perimeter crossing a boundary.
-	ev := testEvent("wfigs:test-fire", gridv1.Severity_SEVERE, gridv1.EventStatus_ACTIVE, "Test Fire")
+	ev := testEvent("firis:test-fire", gridv1.Severity_SEVERE, gridv1.EventStatus_ACTIVE, "Test Fire")
 	ev.Layer = gridv1.Layer_WILDFIRE
-	ev.Provenance.SourceId = "wfigs"
+	ev.Provenance.SourceId = "firis"
 	ev.Geometry = polyGeometry(38.4, -120.5, 38.7, -120.3)
 	_, err := s.UpsertEvent(ctx, ev)
 	require.NoError(t, err)
 
-	got, err := s.GetEvent(ctx, "wfigs:test-fire")
+	got, err := s.GetEvent(ctx, "firis:test-fire")
 	require.NoError(t, err)
 	assert.Equal(t, []string{"county:calaveras"}, got.GetPlaceIds(),
 		"bbox-overlapping county attaches; disjoint county does not")
@@ -374,14 +374,14 @@ func TestPolygonEventPlaceMatching(t *testing.T) {
 func TestRtreeConsistencyAcrossGeometryChanges(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
-	seedSource(t, s, "wfigs")
+	seedSource(t, s, "firis")
 
 	geoRows := func() (n int, minLat, maxLat, minLng, maxLng float64) {
 		t.Helper()
 		rows, err := s.db.Query(`
 			SELECT g.min_lat, g.max_lat, g.min_lng, g.max_lng
 			FROM event_geo g JOIN event_geo_map m ON m.rowid = g.rowid
-			WHERE m.event_id = ?`, "wfigs:fire")
+			WHERE m.event_id = ?`, "firis:fire")
 		require.NoError(t, err)
 		defer rows.Close()
 		for rows.Next() {
@@ -392,9 +392,9 @@ func TestRtreeConsistencyAcrossGeometryChanges(t *testing.T) {
 		return
 	}
 
-	ev := testEvent("wfigs:fire", gridv1.Severity_SEVERE, gridv1.EventStatus_ACTIVE, "fire v1")
+	ev := testEvent("firis:fire", gridv1.Severity_SEVERE, gridv1.EventStatus_ACTIVE, "fire v1")
 	ev.Layer = gridv1.Layer_WILDFIRE
-	ev.Provenance.SourceId = "wfigs"
+	ev.Provenance.SourceId = "firis"
 	ev.Geometry = polyGeometry(38.1, -120.6, 38.3, -120.4)
 	_, err := s.UpsertEvent(ctx, ev)
 	require.NoError(t, err)
@@ -433,7 +433,7 @@ func TestRtreeConsistencyAcrossGeometryChanges(t *testing.T) {
 	assert.Equal(t, 0, n)
 	var mapRows int
 	require.NoError(t, s.db.QueryRow(
-		`SELECT COUNT(*) FROM event_geo_map WHERE event_id = ?`, "wfigs:fire").Scan(&mapRows))
+		`SELECT COUNT(*) FROM event_geo_map WHERE event_id = ?`, "firis:fire").Scan(&mapRows))
 	assert.Equal(t, 0, mapRows)
 }
 

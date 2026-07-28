@@ -50,17 +50,17 @@ func ProjectEvents(layer string, events []*gridv1.Event) []hazards.Feature {
 // projectWildfire mirrors the shipped wildfires builder. The source block is a
 // projection constant derived from the provenance source id (plan §5 item 5):
 // CAL FIRE incidents (adopted-perimeter or point) emit the calfire block with
-// the event's canonical URL; standalone WFIGS perimeters emit the wfigs block.
+// the event's canonical URL; standalone FIRIS perimeters emit the firis block.
 func projectWildfire(ev *gridv1.Event) hazards.Feature {
 	d := ev.GetWildfire()
 	p := baseProps(ev, hazards.LayerWildfire, "Wildfire")
 	p.Status = lifecycleStatus(ev) // UPPERCASE lifecycle (ACTIVE/SCHEDULED/…); matches Event.status
 	p.Effective = rfc3339(ev.GetEffective())
 	p.UpdatedAt = rfc3339(ev.GetObservedAt())
-	if ev.GetProvenance().GetSourceId() == "wfigs" {
-		p.Source = hazards.Source{ID: "wfigs", Name: "NIFC WFIGS", Attribution: "NIFC / WFIGS"}
+	if ev.GetProvenance().GetSourceId() == "firis" {
+		p.Source = hazards.Source{ID: "firis", Name: "CAL FIRE / FIRIS", Attribution: "CAL FIRE / FIRIS / NIFC"}
 	} else {
-		p.Source = hazards.Source{ID: "calfire", Name: "CAL FIRE", URL: safeURL(ev.GetCanonicalUrl()), Attribution: "CAL FIRE / WFIGS"}
+		p.Source = hazards.Source{ID: "calfire", Name: "CAL FIRE", URL: safeURL(ev.GetCanonicalUrl()), Attribution: "CAL FIRE / FIRIS"}
 	}
 	p.Wildfire = &hazards.WildfireProps{
 		Acres:        d.GetAcres(),

@@ -15,8 +15,8 @@ import (
 	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
 	"github.com/dpup/sierra-data/internal/clients/calfire"
 	"github.com/dpup/sierra-data/internal/clients/caloes"
+	"github.com/dpup/sierra-data/internal/clients/firis"
 	"github.com/dpup/sierra-data/internal/clients/usgs"
-	"github.com/dpup/sierra-data/internal/clients/wfigs"
 	"github.com/dpup/sierra-data/internal/config"
 )
 
@@ -146,7 +146,7 @@ func TestPollEmptyScopeIsError(t *testing.T) {
 		"earthquake": NewEarthquakeNormalizer(cfg, usgs.NewClientWithHTTPDoer("https://usgs.test", doer)),
 		"wildfire": NewWildfireNormalizer(cfg,
 			calfire.NewClientWithHTTPDoer("https://calfire.test", doer),
-			wfigs.NewClientWithHTTPDoer("https://wfigs.test", doer)),
+			firis.NewClientWithHTTPDoer("https://firis.test", doer)),
 		"road_incident": NewRoadIncidentNormalizer(cfg, roads),
 	}
 	for name, n := range norms {

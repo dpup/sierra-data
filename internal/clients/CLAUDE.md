@@ -10,6 +10,7 @@ enhancement live in `internal/services`, not here.
 | `caltrans` | quickmap.dot.ca.gov KML | none                        | Lane closures, CHP incidents, chain control. |
 | `weather`  | OpenWeatherMap        | `PF__OPENWEATHER__API_KEY`    | Current conditions only. `GetWeatherAlerts` (One Call 3.0, 1,000/day cap) is CLI-diagnostic only — the server sources alerts from `nws`. |
 | `nws`      | api.weather.gov       | none (User-Agent required)    | Authoritative zone alerts + fire-weather products. |
+| `firis`    | ArcGIS (CAL FIRE org) | none (public)                 | CAL FIRE/FIRIS combo fire perimeters. Dedup + `LastEdit` gating live in `internal/ingest` (wildfire). Replaced `wfigs` (retained unused). |
 
 All clients accept an `HTTPDoer` interface and expose a `NewClientWithHTTPDoer`
 constructor so tests can inject canned responses instead of hitting the network.

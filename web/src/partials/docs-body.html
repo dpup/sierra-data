@@ -137,7 +137,7 @@ Content-Type: application/json
   <div class="table-wrap"><table class="data-table">
     <thead><tr><th>Layer slug</th><th>Backing</th><th>Contents</th></tr></thead>
     <tbody>
-      <tr><td class="mono">wildfire</td><td>event store</td><td class="wrap">CAL FIRE incidents + WFIGS perimeters (polygon when available, else point)</td></tr>
+      <tr><td class="mono">wildfire</td><td>event store</td><td class="wrap">CAL FIRE incidents + FIRIS perimeters (polygon when available, else point)</td></tr>
       <tr><td class="mono">evacuation</td><td>event store</td><td class="wrap">Cal OES evacuation zones — fail-loud, see <a href="#evac">§6</a></td></tr>
       <tr><td class="mono">weather_alert</td><td>event store</td><td class="wrap">NWS watches / warnings / advisories for the place's zones</td></tr>
       <tr><td class="mono">earthquake</td><td>event store</td><td class="wrap">USGS quakes (point epicenters)</td></tr>
@@ -334,7 +334,7 @@ Content-Type: application/json
   <div class="table-wrap"><table class="data-table">
     <thead><tr><th>Field</th><th>Type</th><th>Semantics</th></tr></thead>
     <tbody>
-      <tr><td class="mono">id</td><td class="mono">string</td><td class="wrap">Globally unique, source-namespaced: <code>{namespace}:{native_id}</code>. Namespaces: <code>chp:</code> (road incidents), <code>wx:</code> (weather alerts), <code>usgs:</code> (earthquakes), <code>calfire:</code> (CAL FIRE incidents), <code>wfigs:</code> (fire perimeters), <code>evac:</code> (evacuation zones), <code>meshcore:</code> (mesh nodes, keyed by Ed25519 public key). WFIGS ids are <code>wfigs:{normalized-name}</code> with <code>-2</code>, <code>-3</code> disambiguators.</td></tr>
+      <tr><td class="mono">id</td><td class="mono">string</td><td class="wrap">Globally unique, source-namespaced: <code>{namespace}:{native_id}</code>. Namespaces: <code>chp:</code> (road incidents), <code>wx:</code> (weather alerts), <code>usgs:</code> (earthquakes), <code>calfire:</code> (CAL FIRE incidents), <code>firis:</code> (fire perimeters), <code>evac:</code> (evacuation zones), <code>meshcore:</code> (mesh nodes, keyed by Ed25519 public key). FIRIS standalone ids are <code>firis:{normalized-name}</code> with <code>-2</code>, <code>-3</code> disambiguators.</td></tr>
       <tr><td class="mono">layer</td><td class="mono">Layer</td><td class="wrap">Layer taxonomy (table below)</td></tr>
       <tr><td class="mono">category</td><td class="mono">string</td><td class="wrap">Source sub-type slug (<code>"active"</code>, <code>"order"</code>, …)</td></tr>
       <tr><td class="mono">severity</td><td class="mono">Severity</td><td class="wrap">Unified 5-level scale (table below)</td></tr>
@@ -445,7 +445,7 @@ Content-Type: application/json
       <tr><td class="mono">SCHEDULED</td><td class="num">1</td><td class="wrap"><code>effective</code> is in the future — e.g. an NWS watch issued ahead of its window, a planned PSPS</td></tr>
       <tr><td class="mono">ACTIVE</td><td class="num">2</td><td class="wrap">In effect now</td></tr>
       <tr><td class="mono">RESOLVED</td><td class="num">3</td><td class="wrap">Disappeared from an authoritative active-only feed (Cal OES, CAL FIRE, CHP, Caltrans) — upstream confirmed it over</td></tr>
-      <tr><td class="mono">EXPIRED</td><td class="num">4</td><td class="wrap">Missing from feed <em>and</em> past <code>expires</code> (or a per-source grace period) — sources that don't confirm endings (NWS, WFIGS)</td></tr>
+      <tr><td class="mono">EXPIRED</td><td class="num">4</td><td class="wrap">Missing from feed <em>and</em> past <code>expires</code> (or a per-source grace period) — sources that don't confirm endings (NWS, FIRIS)</td></tr>
     </tbody>
   </table></div>
   <p class="small">
@@ -582,7 +582,7 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
     "source": {
       "id": "calfire", "name": "CAL FIRE",
       "url": "https://www.fire.ca.gov/incidents/…",
-      "attribution": "CAL FIRE / WFIGS",
+      "attribution": "CAL FIRE / FIRIS",
       "fetchedAt": "2026-07-05T15:42:10Z"
     },
     // ---- per-kind typed block (only the relevant one) ----
@@ -709,7 +709,7 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
       <tr><td class="mono">nws</td><td class="wrap">National Weather Service zone alerts (api.weather.gov) — weather_alert events; also the authority behind fire_weather conditions</td><td class="mono">wx:</td><td class="mono">5m</td><td class="wrap"><code>expire</code> — missing and past <code>expires</code> ⇒ EXPIRED</td></tr>
       <tr><td class="mono">usgs</td><td class="wrap">USGS earthquake feed for the service-area bounds</td><td class="mono">usgs:</td><td class="mono">5m</td><td class="wrap">— (see notes)</td></tr>
       <tr><td class="mono">calfire</td><td class="wrap">CAL FIRE active incidents (acres, containment)</td><td class="mono">calfire:</td><td class="mono">5m</td><td class="wrap"><code>resolve</code> — active-only feed; missing ⇒ RESOLVED</td></tr>
-      <tr><td class="mono">wfigs</td><td class="wrap">WFIGS fire perimeters (joined to CAL FIRE incidents by name; standalone perimeters get <code>wfigs:</code> ids)</td><td class="mono">wfigs:</td><td class="mono">5m</td><td class="wrap"><code>expire</code></td></tr>
+      <tr><td class="mono">firis</td><td class="wrap">CAL FIRE / FIRIS fire perimeters (joined to CAL FIRE incidents by name; standalone perimeters get <code>firis:</code> ids)</td><td class="mono">firis:</td><td class="mono">5m</td><td class="wrap"><code>expire</code></td></tr>
       <tr><td class="mono">caloes</td><td class="wrap">Cal OES California Evacuation Aggregation Layer (Zonehaven/Genasys zone schema) — <strong>reference only</strong>, see §6</td><td class="mono">evac:</td><td class="mono">2m</td><td class="wrap"><code>resolve</code></td></tr>
       <tr><td class="mono">chp</td><td class="wrap">CHP incidents (AI-enhanced road_incident events)</td><td class="mono">chp:</td><td class="mono">5m</td><td class="wrap"><code>resolve</code></td></tr>
       <tr><td class="mono">caltrans</td><td class="wrap">Caltrans lane closures (road_incident events); also attributed for chain-control conditions</td><td class="mono">chp:</td><td class="mono">5m</td><td class="wrap"><code>resolve</code></td></tr>
@@ -717,7 +717,7 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
   </table></div>
   <p class="small muted">
     A poller may update multiple source rows (the wildfire tick updates
-    <code class="inline">calfire</code> + <code class="inline">wfigs</code>;
+    <code class="inline">calfire</code> + <code class="inline">firis</code>;
     the incidents tick updates <code class="inline">chp</code> +
     <code class="inline">caltrans</code>) — poller ≠ source. Poll intervals
     and staleness thresholds are server configuration; read the live values

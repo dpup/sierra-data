@@ -354,7 +354,7 @@ block, on a single severity scale `INFO | MINOR | MODERATE | SEVERE | EXTREME`
     "layer": "wildfire", "area": "ebbetts-pass",
     "source_status": "OK",                 // OK | STALE | UNAVAILABLE
     "last_source_update": "",              // RFC3339 time of last good fetch (STALE only)
-    "attribution": "CAL FIRE / WFIGS", "schema_version": 1
+    "attribution": "CAL FIRE / FIRIS", "schema_version": 1
   },
   "features": [{
     "type": "Feature",

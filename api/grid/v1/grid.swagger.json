@@ -1074,7 +1074,7 @@
         },
         "attribution": {
           "type": "string",
-          "title": "\"CAL FIRE / WFIGS\""
+          "title": "\"CAL FIRE / FIRIS\""
         },
         "sourceUrl": {
           "type": "string"
@@ -1509,7 +1509,7 @@
         },
         "hasPerimeter": {
           "type": "boolean",
-          "title": "true when geometry is a WFIGS perimeter polygon"
+          "title": "true when geometry is a FIRIS perimeter polygon"
         }
       }
     }

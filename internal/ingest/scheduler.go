@@ -17,7 +17,7 @@ import (
 
 // maxStartJitter spreads each poller's first tick over this window so a restart
 // (or a rolling deploy's overlapping old+new tasks) doesn't hit every upstream
-// at once — notably WFIGS, whose ArcGIS endpoint 429s under a post-deploy burst.
+// at once — notably ArcGIS feature endpoints that 429 under a post-deploy burst.
 // Wider than the old 15s so a fresh instance's first fetch is less likely to
 // coincide with the draining instance's poll; still well under the poll
 // intervals, so first data lands within ~90s of boot.

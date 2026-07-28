@@ -20,12 +20,12 @@ import (
 	"github.com/dpup/sierra-data/internal/clients/caloes"
 	"github.com/dpup/sierra-data/internal/clients/caltrans"
 	"github.com/dpup/sierra-data/internal/clients/census"
+	"github.com/dpup/sierra-data/internal/clients/firis"
 	"github.com/dpup/sierra-data/internal/clients/google"
 	"github.com/dpup/sierra-data/internal/clients/meshcore"
 	"github.com/dpup/sierra-data/internal/clients/nws"
 	"github.com/dpup/sierra-data/internal/clients/usgs"
 	"github.com/dpup/sierra-data/internal/clients/weather"
-	"github.com/dpup/sierra-data/internal/clients/wfigs"
 	"github.com/dpup/sierra-data/internal/config"
 	"github.com/dpup/sierra-data/internal/gridapi"
 	"github.com/dpup/sierra-data/internal/hazards"
@@ -112,6 +112,7 @@ func main() {
 		logging.Errorw(ctx, "Failed to seed grid sources", "error", err)
 		log.Fatalf("Failed to seed grid sources: %v", err)
 	}
+	retireOrphanedSources(ctx, gridStore)
 	if err := places.Seed(ctx, gridStore, appConfig); err != nil {
 		logging.Errorw(ctx, "Failed to seed grid places", "error", err)
 		log.Fatalf("Failed to seed grid places: %v", err)
@@ -133,7 +134,7 @@ func main() {
 	// services' cached, budgeted pipelines (plan decision 6).
 	pollers := []ingest.PollerSpec{
 		{Normalizer: ingest.NewEarthquakeNormalizer(appConfig, usgs.NewClient()), Interval: gridPollInterval(appConfig, "usgs")},
-		{Normalizer: ingest.NewWildfireNormalizer(appConfig, calfire.NewClient(), wfigs.NewClient()), Interval: gridPollInterval(appConfig, "calfire", "wfigs")},
+		{Normalizer: ingest.NewWildfireNormalizer(appConfig, calfire.NewClient(), firis.NewClient()), Interval: gridPollInterval(appConfig, "calfire", "firis")},
 		{Normalizer: ingest.NewEvacuationNormalizer(appConfig, caloes.NewClient()), Interval: gridPollInterval(appConfig, "caloes")},
 		{Normalizer: ingest.NewWeatherAlertNormalizer(appConfig, weatherService), Interval: gridPollInterval(appConfig, "nws")},
 		{Normalizer: ingest.NewRoadIncidentNormalizer(appConfig, roadsService), Interval: gridPollInterval(appConfig, "chp", "caltrans")},
@@ -253,14 +254,53 @@ func (d *deferredHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	d.h.ServeHTTP(w, r)
 }
 
+// retiredSourceIDs are source ids no poller declares anymore. The disappearance
+// sweep only runs for a live poller's SourceIDs(), so ACTIVE events left behind by
+// a removed/renamed source (e.g. the standalone "wfigs:" perimeters after the
+// wfigs→firis swap) would otherwise persist ACTIVE forever — stale duplicates on
+// the fire map beside the fresh "firis:" events. Retire them once at boot.
+// Entries may be dropped after a deploy has drained them (the transition is
+// idempotent — once expired, ActiveEventsBySource returns none).
+var retiredSourceIDs = []string{"wfigs"}
+
+// retireOrphanedSources expires any ACTIVE/SCHEDULED events still attached to a
+// retired source (a proper EXPIRED revision, history preserved) and then removes
+// the defunct source registry row so /api/v1/sources doesn't list it forever.
+// Best effort: a failure logs and continues — it must never block startup.
+// Idempotent: once drained, ActiveEventsBySource returns none and the delete is a
+// no-op.
+func retireOrphanedSources(ctx context.Context, st *store.Store) {
+	for _, src := range retiredSourceIDs {
+		evs, err := st.ActiveEventsBySource(ctx, src)
+		if err != nil {
+			logging.Warnw(ctx, "Could not scan retired source for orphaned events", "source", src, "error", err)
+			continue
+		}
+		if len(evs) > 0 {
+			ids := make([]string, len(evs))
+			for i, e := range evs {
+				ids[i] = e.Event.GetId()
+			}
+			if err := st.TransitionEvents(ctx, ids, gridv1.EventStatus_EXPIRED, time.Now()); err != nil {
+				logging.Warnw(ctx, "Could not retire orphaned events for retired source", "source", src, "count", len(ids), "error", err)
+				continue
+			}
+			logging.Infow(ctx, "Retired orphaned events for a removed source", "source", src, "count", len(ids))
+		}
+		if err := st.DeleteSource(ctx, src); err != nil {
+			logging.Warnw(ctx, "Could not remove retired source registry row", "source", src, "error", err)
+		}
+	}
+}
+
 // gridSourceInfo is the static registry of source display names and
 // attributions. It must match the normalizers' provenance constants (which
 // in turn match the shipped hazards Source blocks) so /api/v1/sources and event
 // provenance agree.
 var gridSourceInfo = map[string]struct{ name, attribution string }{
 	"usgs":     {"USGS", "U.S. Geological Survey"},
-	"calfire":  {"CAL FIRE", "CAL FIRE / WFIGS"},
-	"wfigs":    {"NIFC WFIGS", "NIFC / WFIGS"},
+	"calfire":  {"CAL FIRE", "CAL FIRE / FIRIS"},
+	"firis":    {"CAL FIRE / FIRIS", "CAL FIRE / FIRIS / NIFC"},
 	"caloes":   {"Cal OES", "Cal OES — reference only"},
 	"nws":      {"National Weather Service", "NOAA / National Weather Service"},
 	"chp":      {"CHP / Caltrans", "quickmap.dot.ca.gov"},

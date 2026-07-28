@@ -68,6 +68,20 @@ func (s *Store) SeedSources(ctx context.Context, seeds []SourceSeed) error {
 	})
 }
 
+// DeleteSource removes a source registry row (health + config). Used to retire a
+// source no poller declares anymore, so /api/v1/sources doesn't list a defunct
+// entry forever (SeedSources is upsert-only and never removes). Idempotent —
+// deleting an absent id is a no-op. Events keep their own source_id in the proto
+// blob and are unaffected (retire them separately via TransitionEvents).
+func (s *Store) DeleteSource(ctx context.Context, id string) error {
+	return s.inTx(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`DELETE FROM sources WHERE id = ?`, id); err != nil {
+			return fmt.Errorf("store: delete source %s: %w", id, err)
+		}
+		return nil
+	})
+}
+
 // RecordAttempt records the outcome of one poll of a source. last_attempt is
 // always stamped. On success: last_success=now, last_error cleared,
 // status=OK. On failure: last_error set, and status degrades to STALE while

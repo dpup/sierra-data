@@ -824,7 +824,7 @@ type Provenance struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	SourceId      string                 `protobuf:"bytes,1,opt,name=source_id,json=sourceId,proto3" json:"source_id,omitempty"`
 	SourceName    string                 `protobuf:"bytes,2,opt,name=source_name,json=sourceName,proto3" json:"source_name,omitempty"` // denormalized: "CAL FIRE"
-	Attribution   string                 `protobuf:"bytes,3,opt,name=attribution,proto3" json:"attribution,omitempty"`                 // "CAL FIRE / WFIGS"
+	Attribution   string                 `protobuf:"bytes,3,opt,name=attribution,proto3" json:"attribution,omitempty"`                 // "CAL FIRE / FIRIS"
 	SourceUrl     string                 `protobuf:"bytes,4,opt,name=source_url,json=sourceUrl,proto3" json:"source_url,omitempty"`
 	FetchedAt     *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=fetched_at,json=fetchedAt,proto3" json:"fetched_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -1192,7 +1192,7 @@ type WildfireDetail struct {
 	Containment   int32                  `protobuf:"varint,2,opt,name=containment,proto3" json:"containment,omitempty"` // percent contained, 0-100
 	County        string                 `protobuf:"bytes,3,opt,name=county,proto3" json:"county,omitempty"`
 	Cause         string                 `protobuf:"bytes,4,opt,name=cause,proto3" json:"cause,omitempty"`
-	HasPerimeter  bool                   `protobuf:"varint,5,opt,name=has_perimeter,json=hasPerimeter,proto3" json:"has_perimeter,omitempty"` // true when geometry is a WFIGS perimeter polygon
+	HasPerimeter  bool                   `protobuf:"varint,5,opt,name=has_perimeter,json=hasPerimeter,proto3" json:"has_perimeter,omitempty"` // true when geometry is a FIRIS perimeter polygon
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }

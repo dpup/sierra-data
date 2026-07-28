@@ -428,8 +428,9 @@ func rfc3339Time(t time.Time) string {
 	return t.UTC().Format(time.RFC3339)
 }
 
-// normFireName normalizes an incident/perimeter name for joining CAL FIRE and
-// WFIGS (e.g. "Salt Springs Fire" and "Salt Springs" → "saltsprings").
+// normFireName normalizes an incident/perimeter name for joining CAL FIRE
+// incidents and FIRIS perimeters (e.g. "Salt Springs Fire" and "Salt Springs" →
+// "saltsprings").
 func normFireName(s string) string {
 	s = strings.ToLower(s)
 	s = strings.TrimSuffix(strings.TrimSpace(s), " fire")

@@ -1,6 +1,12 @@
 // Package wfigs provides a client for the NIFC WFIGS interagency fire-perimeter
 // ArcGIS feature service (public, keyless, CORS-enabled, GeoJSON). We proxy it
 // for caching + a consistent shape, and to simplify geometry server-side.
+//
+// RETAINED, CURRENTLY UNUSED: the wildfire normalizer moved to the CAL FIRE/FIRIS
+// combo feed (internal/clients/firis), a superset of WFIGS with a healthier quota.
+// This client is kept in the tree so re-adding WFIGS as a fallback for a CAL
+// FIRE-org outage is cheap — see docs/firis-perimeter-source-design.md §3. Do not
+// delete without revisiting that decision.
 package wfigs
 
 import (

@@ -16,6 +16,47 @@ proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 
 ## 2026-07-27
 
+### BREAKING — wildfire perimeter source WFIGS → CAL FIRE / FIRIS combo feed
+
+The `wildfire` layer's perimeter source moved from the NIFC WFIGS interagency
+upload to the **CAL FIRE / FIRIS combo feed** (`CA_Perimeters_NIFC_FIRIS_public_
+view` — the layer CAL FIRE's own public map uses). It combines CAL FIRE Intel +
+FIRIS IR-flight + WFIGS perimeters and updates every ~5 min, so mapped perimeters
+now appear **hours sooner** (the Dove Fire had a perimeter here while WFIGS still
+returned none). Fire geometry/adoption semantics are unchanged; the feed carries
+many rows per fire, deduped to one (latest IR flight) before the name-join. See
+`docs/firis-perimeter-source-design.md`.
+
+**Breaking (source id + event-id namespace renamed).** Migration: repoint any code
+keyed on the source id `wfigs`, or on stored `wfigs:` event ids, to `firis`. On
+deploy, the old standalone `wfigs:` events are transitioned to `EXPIRED` once (a
+recorded revision) and superseded by fresh `firis:` events — a consumer that
+cached a `wfigs:` id will get a 404 for it after the swap.
+
+Consumer-visible changes (no field *renames*, but value changes):
+
+- **`GET /api/v1/sources`**: the `wfigs` source row is replaced by **`firis`**
+  (name `CAL FIRE / FIRIS`, attribution `CAL FIRE / FIRIS / NIFC`).
+- **Event provenance / geojson `source`**: adopted CAL FIRE incidents now carry
+  attribution `CAL FIRE / FIRIS` (was `CAL FIRE / WFIGS`); standalone perimeters
+  emit `{id: firis, name: "CAL FIRE / FIRIS", attribution: "CAL FIRE / FIRIS /
+  NIFC"}` (was the `wfigs`/`NIFC WFIGS` block).
+- **Standalone perimeter event ids** use the **`firis:`** namespace (was
+  `wfigs:`) — e.g. `firis:{normname}`. Adopted fires keep their `calfire:` ids.
+- Standalone perimeters carry **no `containment`/`cause`** (the combo feed has
+  neither); `wildfire.containment` is `0` and `cause` is omitted on them. Adopted
+  CAL FIRE incidents keep their containment/cause. The wildfire layer's
+  `metadata.sourceStatus` now aggregates `calfire` + `firis`.
+- **Severity of standalone perimeters may read higher.** With containment unknown
+  (treated as 0%), `severity`/`severityRank` sit at the uncontained floor
+  (`SEVERE`+), where a WFIGS standalone that reported partial containment could
+  previously read lower — a deliberately conservative default for an
+  un-cross-referenced active perimeter. Adopted incidents are unaffected (they use
+  CAL FIRE's containment). Consumers that style/sort by `severityRank` should
+  expect this.
+- **Standalone `headline` format** drops the containment clause: `"{name} — {N}
+  ac"` (was `"{name} — {N} ac, {P}% contained"`).
+
 ### Added — per-location fire-weather forecast (`conditions` + `fire_weather` layer)
 
 Adds a short-range NWS fire-weather forecast — keyless, additive, informational
