@@ -43,6 +43,8 @@ Last updated: 2026-07-06
 ├── data/places/               # Checked-in Census county polygons (counties.geojson)
 ├── site/                      # Embedded data.sierragridteam.org static site (served at /)
 ├── tests/                     # Test files and test data
+├── docs/solutions/            # documented solutions to past problems (bugs, best practices, patterns), by category with YAML frontmatter (module, tags, problem_type)
+├── CONCEPTS.md                # shared domain vocabulary (entities, named processes, status concepts)
 └── Makefile                   # Build automation
 ```
 
