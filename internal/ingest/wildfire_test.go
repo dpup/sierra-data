@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
 	"github.com/dpup/sierra-data/internal/clients/calfire"
 	"github.com/dpup/sierra-data/internal/clients/firis"
+	"github.com/dpup/sierra-data/internal/config"
 	"github.com/dpup/sierra-data/internal/store"
 )
 
@@ -763,4 +765,237 @@ func TestWildfireGatesPerimeterFetchOnLastEdit(t *testing.T) {
 	_, err = n.Poll(testCtx(), nil)
 	require.NoError(t, err)
 	assert.Equal(t, 2, fc.queries)
+}
+
+// --- Widened fire geography (grid.wildfire.marginDegrees) -------------------
+//
+// Fire is the only layer with its own geography: wider than the hazards union
+// every other poller uses, and in-scope by PERIMETER as well as by CAL FIRE's
+// single origin point.
+
+func TestWildfireScope_WidensHazardUnionByMargin(t *testing.T) {
+	cfg := testConfig() // hazard union (37.7, -120.9)..(38.5, -119.2)
+
+	// Unset margin falls back to the default rather than collapsing to the bare
+	// union — an omitted key must never silently narrow fire coverage.
+	scope, ok := wildfireScope(cfg)
+	require.True(t, ok)
+	assert.InDelta(t, 37.7-config.DefaultWildfireMarginDegrees, scope.MinLatitude, 1e-9)
+	assert.InDelta(t, 38.5+config.DefaultWildfireMarginDegrees, scope.MaxLatitude, 1e-9)
+	assert.InDelta(t, -120.9-config.DefaultWildfireMarginDegrees, scope.MinLongitude, 1e-9)
+	assert.InDelta(t, -119.2+config.DefaultWildfireMarginDegrees, scope.MaxLongitude, 1e-9)
+
+	// An explicit margin is honored.
+	cfg.Grid.Wildfire.MarginDegrees = 1.25
+	scope, ok = wildfireScope(cfg)
+	require.True(t, ok)
+	assert.InDelta(t, 36.45, scope.MinLatitude, 1e-9)
+	assert.InDelta(t, 39.75, scope.MaxLatitude, 1e-9)
+
+	// The fire box must be strictly wider than the CHP/Caltrans incident box —
+	// the whole point of giving this layer its own geography.
+	chp := cfg.Roads.IncidentAreas[0].Bounds
+	assert.Less(t, scope.MinLatitude, chp.MinLatitude)
+	assert.Greater(t, scope.MaxLatitude, chp.MaxLatitude)
+	assert.Less(t, scope.MinLongitude, chp.MinLongitude)
+	assert.Greater(t, scope.MaxLongitude, chp.MaxLongitude)
+
+	// No hazard areas is not an empty scope — it's a hard error at the caller.
+	_, ok = wildfireScope(&config.Config{})
+	assert.False(t, ok)
+}
+
+func TestWildfirePoll_PerimeterQueryUsesWidenedScope(t *testing.T) {
+	fc := &fakeDoer{resp: firisFixture}
+	n := newWildfireNormalizer(&fakeDoer{resp: calfireFixture}, fc)
+	_, err := n.Poll(testCtx(), nil)
+	require.NoError(t, err)
+
+	// The ArcGIS envelope is minLng,minLat,maxLng,maxLat of the WIDENED box
+	// (union -120.9/37.7/-119.2/38.5, default margin 0.5), URL-encoded.
+	assert.Contains(t, fc.lastURL, "geometry="+url.QueryEscape("-121.4,37.2,-118.7,39"))
+}
+
+// The edge case that motivated all of this: CAL FIRE reports ONE origin point
+// per incident, and it can sit outside the box while the fire's perimeter burns
+// into it. Dropping the incident would leave only the bare standalone perimeter
+// — no acreage, no containment, no incident URL.
+func TestWildfirePoll_IncidentOutsidePointButPerimeterReachesIn(t *testing.T) {
+	// Origin at 39.9N, ~0.9° north of the widened box's 39.0 ceiling.
+	const calfireEdge = `[{
+	  "UniqueId": "edge-1", "Name": "Ridge Fire", "County": "Amador",
+	  "AcresBurned": 8000.0, "PercentContained": 5.0,
+	  "Latitude": 39.9, "Longitude": -120.4, "IsActive": true
+	}]`
+	// Its perimeter is a long north-south polygon whose southern end (38.9)
+	// reaches inside the widened box.
+	const firisEdge = `{"features":[{
+	  "properties": {"incident_name": "Ridge Fire", "area_acres": 7900.0, "poly_DateCurrent": 1000, "source": "FIRIS", "displayStatus": "Active"},
+	  "geometry": {"type":"Polygon","coordinates":[[[-120.45,38.9],[-120.35,38.9],[-120.35,40.0],[-120.45,40.0],[-120.45,38.9]]]}
+	}]}`
+
+	n := newWildfireNormalizer(&fakeDoer{resp: calfireEdge}, &fakeDoer{resp: firisEdge})
+	res, err := n.Poll(testCtx(), nil)
+	require.NoError(t, err)
+
+	// The incident is kept and adopts the polygon — NOT dropped in favour of a
+	// standalone firis: event.
+	assert.Equal(t, []string{"calfire:edge-1"}, eventIDs(res.Events))
+	ev := eventByID(t, res.Events, "calfire:edge-1")
+	assert.True(t, ev.GetWildfire().HasPerimeter)
+	assert.Equal(t, 8000.0, ev.GetWildfire().Acres, "the CAL FIRE scalars are exactly what a bare perimeter would lose")
+	assert.Equal(t, int32(5), ev.GetWildfire().Containment)
+}
+
+// A fire whose point AND perimeter are both far outside stays out — the widened
+// box is wider, not unbounded.
+func TestWildfirePoll_IncidentFullyOutsideStaysDropped(t *testing.T) {
+	const calfireFar = `[{
+	  "UniqueId": "far-1", "Name": "Shasta Fire", "AcresBurned": 100.0,
+	  "Latitude": 40.9, "Longitude": -122.0, "IsActive": true
+	}]`
+	const firisFar = `{"features":[{
+	  "properties": {"incident_name": "Shasta Fire", "area_acres": 90.0, "poly_DateCurrent": 1000, "source": "FIRIS", "displayStatus": "Active"},
+	  "geometry": {"type":"Polygon","coordinates":[[[-122.05,40.85],[-121.95,40.85],[-121.95,40.95],[-122.05,40.95],[-122.05,40.85]]]}
+	}]}`
+
+	n := newWildfireNormalizer(&fakeDoer{resp: calfireFar}, &fakeDoer{resp: firisFar})
+	res, err := n.Poll(testCtx(), nil)
+	require.NoError(t, err)
+	// Only the orphan perimeter (which the real ArcGIS envelope would not have
+	// returned) — no calfire: event.
+	assert.NotContains(t, eventIDs(res.Events), "calfire:far-1")
+}
+
+// Scope must be STABLE across a FIRIS outage. A perimeter-only in-scope fire
+// that silently left Events would be RESOLVED by the disappearance sweep — a
+// fabricated all-clear on a life-safety layer.
+func TestWildfirePoll_PerimeterOnlyScopeSurvivesFirisOutage(t *testing.T) {
+	const calfireEdge = `[{
+	  "UniqueId": "edge-1", "Name": "Ridge Fire", "AcresBurned": 8000.0,
+	  "PercentContained": 5.0, "Latitude": 39.9, "Longitude": -120.4, "IsActive": true
+	}]`
+	const firisEdge = `{"features":[{
+	  "properties": {"incident_name": "Ridge Fire", "area_acres": 7900.0, "poly_DateCurrent": 1000, "source": "FIRIS", "displayStatus": "Active"},
+	  "geometry": {"type":"Polygon","coordinates":[[[-120.45,38.9],[-120.35,38.9],[-120.35,40.0],[-120.45,40.0],[-120.45,38.9]]]}
+	}]}`
+
+	// Tick 1: healthy, in scope via the perimeter.
+	n := newWildfireNormalizer(&fakeDoer{resp: calfireEdge}, &fakeDoer{resp: firisEdge})
+	res1, err := n.Poll(testCtx(), nil)
+	require.NoError(t, err)
+	healthy := eventByID(t, res1.Events, "calfire:edge-1")
+
+	// Tick 2: FIRIS down. The carried-forward polygon must keep it in scope AND
+	// hash-equal, so the sweep neither resolves it nor writes a false revision.
+	n = newWildfireNormalizer(&fakeDoer{resp: calfireEdge}, &fakeDoer{err: assert.AnError})
+	res2, err := n.Poll(testCtx(), &scriptedPrior{events: res1.Events})
+	require.NoError(t, err)
+	carried := eventByID(t, res2.Events, "calfire:edge-1")
+	assert.True(t, carried.GetWildfire().HasPerimeter)
+	assert.Equal(t, store.ContentHash(healthy), store.ContentHash(carried))
+}
+
+// --- Supersession: a standalone perimeter absorbed by a CAL FIRE incident ---
+//
+// While no incident claims a perimeter it is emitted as firis:<name>. Once one
+// does, that id stops being emitted — and because firis is an `expire` source,
+// the sweep alone would hold the orphan ACTIVE for the full 24h grace, drawing
+// the same fire twice for a day. Naming the successor ends it immediately.
+
+func TestWildfireSupersedesAdoptedStandalone(t *testing.T) {
+	// The store already holds Salt Springs as a standalone perimeter (the state
+	// after a tick where CAL FIRE had not yet listed the incident, or before the
+	// scope widened). "firis:lonely" stays standalone and must be untouched.
+	prior := &scriptedPrior{events: []*gridv1.Event{
+		priorWildfireEvent("firis:saltsprings", "firis", 38.2, -120.4, true),
+		priorWildfireEvent("firis:lonely", "firis", 38.05, -119.85, true),
+	}}
+
+	n := newWildfireNormalizer(&fakeDoer{resp: calfireFixture}, &fakeDoer{resp: firisFixture})
+	res, err := n.Poll(testCtx(), prior)
+	require.NoError(t, err)
+
+	// The incident adopted the perimeter, so the standalone id is gone from
+	// Events — and named as superseded rather than left to the grace.
+	assert.NotContains(t, eventIDs(res.Events), "firis:saltsprings")
+	assert.Contains(t, eventIDs(res.Events), "calfire:abc-123")
+	assert.Equal(t, []string{"firis:saltsprings"}, res.Superseded)
+
+	// The genuinely-standalone fire is still emitted and NOT superseded.
+	assert.Contains(t, eventIDs(res.Events), "firis:lonely")
+}
+
+func TestWildfireSupersedesNothingWithoutAPriorStandalone(t *testing.T) {
+	// Same adoption, but the store never held the standalone: nothing to retire.
+	n := newWildfireNormalizer(&fakeDoer{resp: calfireFixture}, &fakeDoer{resp: firisFixture})
+	res, err := n.Poll(testCtx(), &scriptedPrior{})
+	require.NoError(t, err)
+	assert.Empty(t, res.Superseded)
+}
+
+// Supersession must rest on positive evidence only. With FIRIS down, adoption
+// is uncomputable — the standalone's absence proves nothing, so it keeps its
+// grace.
+func TestWildfireSupersedesNothingWhileFirisDown(t *testing.T) {
+	prior := &scriptedPrior{events: []*gridv1.Event{
+		priorWildfireEvent("firis:saltsprings", "firis", 38.2, -120.4, true),
+	}}
+	n := newWildfireNormalizer(&fakeDoer{resp: calfireFixture}, &fakeDoer{err: assert.AnError})
+	res, err := n.Poll(testCtx(), prior)
+	require.NoError(t, err)
+	require.Error(t, res.PerSource["firis"])
+	assert.Empty(t, res.Superseded)
+}
+
+// Same for CAL FIRE down: no incidents, so nothing adopts, so nothing is
+// superseded (the standalone is in fact still emitted).
+func TestWildfireSupersedesNothingWhileCalfireDown(t *testing.T) {
+	prior := &scriptedPrior{events: []*gridv1.Event{
+		priorWildfireEvent("firis:saltsprings", "firis", 38.2, -120.4, true),
+	}}
+	n := newWildfireNormalizer(&fakeDoer{err: assert.AnError}, &fakeDoer{resp: firisFixture})
+	res, err := n.Poll(testCtx(), prior)
+	require.NoError(t, err)
+	require.Error(t, res.PerSource["calfire"])
+	assert.Empty(t, res.Superseded)
+	assert.Contains(t, eventIDs(res.Events), "firis:saltsprings", "still standalone while CAL FIRE is down")
+}
+
+// An ambiguous name (two distinct same-named fires) blocks adoption, so both
+// perimeters stay standalone and neither is superseded.
+func TestWildfireSupersedesNothingWhenAmbiguous(t *testing.T) {
+	prior := &scriptedPrior{events: []*gridv1.Event{
+		priorWildfireEvent("firis:ambiguous", "firis", 38.0, -120.25, true),
+	}}
+	n := newWildfireNormalizer(&fakeDoer{resp: calfireFixture}, &fakeDoer{resp: firisFixture})
+	res, err := n.Poll(testCtx(), prior)
+	require.NoError(t, err)
+	assert.NotContains(t, res.Superseded, "firis:ambiguous")
+	assert.Contains(t, eventIDs(res.Events), "firis:ambiguous")
+}
+
+// Precision: when a name had TWO clusters and only the surviving one is
+// adopted, the sibling that genuinely dropped out of the feed keeps its grace —
+// its absence is still ambiguous. Only the adopted id is named.
+func TestWildfireSupersedesOnlyTheAdoptedSibling(t *testing.T) {
+	// Prior holds both "ambiguous" clusters as standalones. This tick's FIRIS
+	// feed carries only the SOUTHERN one (38.0), which the CAL FIRE "Ambiguous
+	// Fire" incident (38.0, -120.2) then adopts unambiguously.
+	const firisOneCluster = `{"features":[{
+	  "properties": {"incident_name": "Ambiguous Fire", "area_acres": 30.0, "poly_DateCurrent": 1000, "source": "FIRIS", "displayStatus": "Active"},
+	  "geometry": {"type":"Polygon","coordinates":[[[-120.3,37.95],[-120.2,37.95],[-120.2,38.05],[-120.3,38.05],[-120.3,37.95]]]}
+	}]}`
+	prior := &scriptedPrior{events: []*gridv1.Event{
+		priorWildfireEvent("firis:ambiguous", "firis", 38.0, -120.25, true),   // southern
+		priorWildfireEvent("firis:ambiguous-2", "firis", 38.4, -120.25, true), // northern, gone from the feed
+	}}
+
+	n := newWildfireNormalizer(&fakeDoer{resp: calfireFixture}, &fakeDoer{resp: firisOneCluster})
+	res, err := n.Poll(testCtx(), prior)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"firis:ambiguous"}, res.Superseded,
+		"only the adopted id is proven gone; the sibling merely vanished and keeps its grace")
+	assert.NotContains(t, eventIDs(res.Events), "firis:ambiguous-2")
 }

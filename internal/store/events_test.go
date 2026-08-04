@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -610,4 +611,157 @@ func TestUpsertPersistsEnhancementOnHashEqual(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, got.GetEnhancement(), "a no-enhancement poll must not erase the stored enhancement")
 	assert.Equal(t, "prompt v2", got.GetEnhancement().GetRequest())
+}
+
+// newProximityStore is newTestStore with the wildfire proximity buffer enabled.
+func newProximityStore(t *testing.T, meters float64) *Store {
+	t.Helper()
+	s, err := Open(filepath.Join(t.TempDir(), "grid.db"), WithWildfireProximity(meters))
+	require.NoError(t, err)
+	t.Cleanup(func() { s.Close() })
+	return s
+}
+
+// seedProximityPlaces lays out one place of each kind around a common
+// neighbourhood so the buffered-kinds rule can be checked in one pass. None of
+// them contains or overlaps the fire used below.
+func seedProximityPlaces(t *testing.T, s *Store) {
+	t.Helper()
+	ctx := context.Background()
+	// Coverage area: 38.0..38.3 N, -120.6..-120.3 W.
+	require.NoError(t, s.UpsertPlace(ctx, testPlace(
+		"area:ebbetts", "ebbetts", "Ebbetts Pass",
+		gridv1.PlaceKind_AREA, polyGeometry(38.0, -120.6, 38.3, -120.3))))
+	// Town point just inside the area's eastern half.
+	require.NoError(t, s.UpsertPlace(ctx, testPlace(
+		"town:arnold", "arnold", "Arnold",
+		gridv1.PlaceKind_TOWN, pointGeometry(38.25, -120.35))))
+	// County covering the same ground, extended east past the fire.
+	require.NoError(t, s.UpsertPlace(ctx, testPlace(
+		"county:calaveras", "calaveras", "Calaveras County",
+		gridv1.PlaceKind_COUNTY, polyGeometry(38.0, -120.9, 38.3, -120.25))))
+	// Corridor LineString running north-south inside the area.
+	require.NoError(t, s.UpsertPlace(ctx, testPlace(
+		"corridor:hwy4", "hwy4", "Hwy 4",
+		gridv1.PlaceKind_CORRIDOR,
+		geomFromGeoJSON(`{"type":"LineString","coordinates":[[-120.5,38.05],[-120.4,38.25]]}`))))
+}
+
+// nearbyFire is a perimeter east of every place above: its western edge is at
+// -120.2, i.e. ~0.1° (~8.8 km at this latitude) east of the area's -120.3 edge.
+// It overlaps nothing.
+func nearbyFire(id string) *gridv1.Event {
+	ev := testEvent(id, gridv1.Severity_SEVERE, gridv1.EventStatus_ACTIVE, "Nearby Fire")
+	ev.Layer = gridv1.Layer_WILDFIRE
+	ev.Provenance.SourceId = "firis"
+	ev.Geometry = polyGeometry(38.1, -120.2, 38.2, -120.1)
+	return ev
+}
+
+// The point of the buffer: a fire APPROACHING the coverage area attaches to it
+// (and to the towns in it) before its perimeter crosses the boundary, so it
+// shows on that place's map and summary while there is still time to act.
+func TestWildfireProximityAttachesApproachingFire(t *testing.T) {
+	ctx := context.Background()
+	s := newProximityStore(t, 20000) // 20 km
+	seedSource(t, s, "firis")
+	seedProximityPlaces(t, s)
+
+	_, err := s.UpsertEvent(ctx, nearbyFire("firis:nearby"))
+	require.NoError(t, err)
+
+	got, err := s.GetEvent(ctx, "firis:nearby")
+	require.NoError(t, err)
+	// area + town attach by proximity (~8.8 km / ~13 km). The county does NOT:
+	// counties tile the map, so buffering them smears one fire across every
+	// neighbour. The corridor keeps its own 1.5 km point rule.
+	assert.Equal(t, []string{"area:ebbetts", "town:arnold"}, got.GetPlaceIds())
+}
+
+// Wider, not unbounded: the same fire outside the buffer attaches to nothing.
+func TestWildfireProximityRespectsBufferDistance(t *testing.T) {
+	ctx := context.Background()
+	s := newProximityStore(t, 3000) // 3 km — closer than the ~8.8 km gap
+	seedSource(t, s, "firis")
+	seedProximityPlaces(t, s)
+
+	_, err := s.UpsertEvent(ctx, nearbyFire("firis:nearby"))
+	require.NoError(t, err)
+
+	got, err := s.GetEvent(ctx, "firis:nearby")
+	require.NoError(t, err)
+	assert.Empty(t, got.GetPlaceIds())
+}
+
+// The buffer is wildfire-only. An identically-placed event on another layer
+// keeps the strict overlap rules — a quake 9 km outside the area is not "in" it.
+func TestWildfireProximityDoesNotApplyToOtherLayers(t *testing.T) {
+	ctx := context.Background()
+	s := newProximityStore(t, 20000)
+	seedSource(t, s, "usgs")
+	seedProximityPlaces(t, s)
+
+	ev := nearbyFire("usgs:quake")
+	ev.Layer = gridv1.Layer_EARTHQUAKE
+	ev.Provenance.SourceId = "usgs"
+	_, err := s.UpsertEvent(ctx, ev)
+	require.NoError(t, err)
+
+	got, err := s.GetEvent(ctx, "usgs:quake")
+	require.NoError(t, err)
+	assert.Empty(t, got.GetPlaceIds())
+}
+
+// Unset buffer (the store default) = today's behaviour exactly.
+func TestWildfireProximityDisabledByDefault(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	seedSource(t, s, "firis")
+	seedProximityPlaces(t, s)
+
+	_, err := s.UpsertEvent(ctx, nearbyFire("firis:nearby"))
+	require.NoError(t, err)
+
+	got, err := s.GetEvent(ctx, "firis:nearby")
+	require.NoError(t, err)
+	assert.Empty(t, got.GetPlaceIds())
+}
+
+// A point-geometry fire (no FIRIS perimeter adopted) still gets the buffer —
+// matchPlaces must synthesize a point geom rather than skipping the rule.
+func TestWildfireProximityAppliesToPointFires(t *testing.T) {
+	ctx := context.Background()
+	s := newProximityStore(t, 20000)
+	seedSource(t, s, "calfire")
+	seedProximityPlaces(t, s)
+
+	ev := testEvent("calfire:point-fire", gridv1.Severity_SEVERE, gridv1.EventStatus_ACTIVE, "Point Fire")
+	ev.Layer = gridv1.Layer_WILDFIRE
+	ev.Provenance.SourceId = "calfire"
+	ev.Geometry = pointGeometry(38.15, -120.15) // ~13 km east of the area edge
+	_, err := s.UpsertEvent(ctx, ev)
+	require.NoError(t, err)
+
+	got, err := s.GetEvent(ctx, "calfire:point-fire")
+	require.NoError(t, err)
+	assert.Contains(t, got.GetPlaceIds(), "area:ebbetts")
+}
+
+// A fire that genuinely overlaps must still attach by the exact rules,
+// including to counties the buffer deliberately excludes.
+func TestWildfireProximityKeepsExactOverlapRules(t *testing.T) {
+	ctx := context.Background()
+	s := newProximityStore(t, 20000)
+	seedSource(t, s, "firis")
+	seedProximityPlaces(t, s)
+
+	ev := nearbyFire("firis:overlapping")
+	ev.Geometry = polyGeometry(38.1, -120.5, 38.2, -120.4) // inside the area + county
+	_, err := s.UpsertEvent(ctx, ev)
+	require.NoError(t, err)
+
+	got, err := s.GetEvent(ctx, "firis:overlapping")
+	require.NoError(t, err)
+	assert.Contains(t, got.GetPlaceIds(), "county:calaveras", "exact overlap still attaches a county")
+	assert.Contains(t, got.GetPlaceIds(), "area:ebbetts")
 }

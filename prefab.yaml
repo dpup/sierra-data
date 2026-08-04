@@ -269,7 +269,7 @@ hazards:
 # SQLite, and derives per-source health for /v1/sources.
 grid:
   # SQLite database. Local dev writes under ./data (git-ignored); production
-  # points at the persistent mount via PF__GRID__DBPATH=/data/grid.db.
+  # points at the persistent mount via PF__GRID__DB_PATH=/data/grid.db.
   dbPath: "./data/grid.db"
 
   # SQLite journal mode. TRUNCATE works on both local disk and a network
@@ -277,8 +277,32 @@ grid:
   # reads but its memory-mapped -shm sidecar does NOT work over NFS/EFS — use it
   # only on a real local disk. TRUNCATE/DELETE/PERSIST run with synchronous=FULL
   # (crash-safe rollback journal); WAL runs with synchronous=NORMAL.
-  # Override per environment via PF__GRID__JOURNALMODE.
+  # Override per environment via PF__GRID__JOURNAL_MODE.
   journalMode: "TRUNCATE"
+
+  # Wildfire geography. Fire is the ONLY layer with its own, wider geography:
+  # every other source matters where it happens, but a fire outside the coverage
+  # footprint is a threat TO it — it moves, it closes the roads out, and an hour
+  # of warning changes what people do.
+  #
+  # marginDegrees grows the hazards.areas union bbox on every side to form the
+  # INGEST scope (the FIRIS perimeter query envelope + the in-scope test applied
+  # to CAL FIRE's statewide incident list). 0.5° ≈ 55 km puts the fire box just
+  # outside the CHP/Caltrans incident box (roads.incidentAreas mother-lode),
+  # which is the intent — fire should be the widest thing we watch. That in-scope
+  # test also checks the fire's PERIMETER, not only CAL FIRE's single origin
+  # point: a large fire's polygon reaches tens of km from that point.
+  #
+  # placeBufferMeters is how close a fire must come to an AREA or TOWN place to
+  # ATTACH to it, so an approaching fire shows on that place's map and summary
+  # before its perimeter crosses the boundary. NOTE this means a nearby fire
+  # counts toward the place's active events and can lift its summary mode.
+  # Counties/corridors are excluded (counties tile the map; corridors have their
+  # own 1.5 km point buffer). Both keys default in code when unset or <= 0
+  # (0.5° / 20000 m) — an omitted key must not silently narrow fire coverage.
+  wildfire:
+    marginDegrees: 0.5
+    placeBufferMeters: 20000
 
   # NWS weather-alert AI enhancement (condense + localize; spec §3.1 — the
   # enhancer translates, never asserts). budgetPerTick caps OpenAI calls per

@@ -22,7 +22,7 @@ type Config struct {
 
 // GridConfig holds the grid event store + ingest scheduler configuration
 // (docs/v2-implementation-plan.md). DBPath locates the SQLite database
-// (production overrides via PF__GRID__DBPATH); Sources keys are source
+// (production overrides via PF__GRID__DB_PATH); Sources keys are source
 // registry ids ("usgs", "nws", ...) — a poller may span several.
 type GridConfig struct {
 	DBPath string `koanf:"dbPath"`
@@ -33,6 +33,60 @@ type GridConfig struct {
 	Enhancement GridEnhancement         `koanf:"enhancement"`
 	Sources     map[string]SourceTuning `koanf:"sources"`
 	Meshcore    MeshcoreConfig          `koanf:"meshcore"`
+	Wildfire    WildfireConfig          `koanf:"wildfire"`
+}
+
+// Default wildfire geography. Both are applied when the corresponding
+// grid.wildfire key is unset or non-positive, so a deployment that never heard
+// of this section still gets the wide fire scope — the narrow, footprint-only
+// behaviour is not something anyone should fall back into by omission.
+const (
+	// DefaultWildfireMarginDegrees ~ 55 km on a side. It puts the fire box a
+	// little outside the CHP/Caltrans incident box (roads.incidentAreas), which
+	// is the intent: fire should be the widest thing we watch.
+	DefaultWildfireMarginDegrees = 0.5
+	// DefaultWildfirePlaceBufferMeters ~ 20 km: far enough that a fire gets on
+	// the board while there is still time to act on it, close enough that a fire
+	// on the far side of a county is not "at" a town.
+	DefaultWildfirePlaceBufferMeters = 20000
+)
+
+// WildfireConfig widens the wildfire layer's geography relative to every other
+// source. Fire is the one hazard where something OUTSIDE the coverage footprint
+// is a threat TO it — it moves, it closes the highways out, and an hour of
+// warning changes what people do. Every other source only matters where it
+// actually happens, so only this layer gets its own, wider geography.
+type WildfireConfig struct {
+	// MarginDegrees grows the hazards.areas union bbox on every side to form the
+	// wildfire INGEST scope: the FIRIS perimeter query envelope and the in-scope
+	// test applied to CAL FIRE's statewide incident list. Expressed in degrees
+	// (not metres) because it feeds bounding boxes, like every other bounds key.
+	// Unset/<=0 => DefaultWildfireMarginDegrees. It can only widen the union,
+	// never narrow it.
+	MarginDegrees float64 `koanf:"marginDegrees"`
+	// PlaceBufferMeters is how close a wildfire has to come to an AREA or TOWN
+	// place to ATTACH to it — so an approaching fire shows on that place's map
+	// and summary before its perimeter crosses the boundary. Counties and
+	// corridors are excluded: counties tile the map (a nearby fire already
+	// attaches to some county exactly) and corridors have their own tuned 1.5 km
+	// buffer for point events. Unset/<=0 => DefaultWildfirePlaceBufferMeters.
+	PlaceBufferMeters float64 `koanf:"placeBufferMeters"`
+}
+
+// Margin is MarginDegrees with the default applied.
+func (w WildfireConfig) Margin() float64 {
+	if w.MarginDegrees > 0 {
+		return w.MarginDegrees
+	}
+	return DefaultWildfireMarginDegrees
+}
+
+// PlaceBuffer is PlaceBufferMeters with the default applied.
+func (w WildfireConfig) PlaceBuffer() float64 {
+	if w.PlaceBufferMeters > 0 {
+		return w.PlaceBufferMeters
+	}
+	return DefaultWildfirePlaceBufferMeters
 }
 
 // MeshcoreConfig configures the MeshCore mesh-node presence source: a set of

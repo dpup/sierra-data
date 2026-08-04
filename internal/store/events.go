@@ -547,6 +547,17 @@ const (
 //     (e.g. a Tuolumne fire falsely tagged Calaveras + Stanislaus);
 //   - other event types (linestrings): bbox intersect AND centroid in place.
 //
+// One layer gets an extra, looser rule on top: a WILDFIRE event also attaches to
+// an AREA or TOWN place it comes within wildfireBuffer metres of
+// (WithWildfireProximity / grid.wildfire.placeBufferMeters). Fire is the hazard
+// that MOVES toward you, so a fire 12 km outside the coverage polygon belongs on
+// that area's map and summary — waiting for the perimeter to cross the line is
+// waiting too long. It is scoped to those two kinds deliberately: counties tile
+// the map, so a nearby fire already attaches to some county exactly and buffering
+// them would smear one fire across four; corridors already have their own tuned
+// 1.5 km buffer, and a 20 km fire buffer would pin every regional fire to every
+// highway segment.
+//
 // Zone-carrying weather alerts are handled by the caller pre-setting
 // ev.place_ids; UpsertEvent unions those with these matches.
 func (s *Store) matchPlaces(tx *sql.Tx, ev *gridv1.Event) ([]string, error) {
@@ -583,36 +594,76 @@ func (s *Store) matchPlaces(tx *sql.Tx, ev *gridv1.Event) ([]string, error) {
 		return nil, err
 	}
 
+	// The extra wildfire proximity rule, resolved once: the buffer distance (0
+	// disables it) and the geometry to measure from — the parsed GeoJSON, or a
+	// synthetic point when only a centroid survived parsing.
+	var nearBuffer float64
+	var nearGeom *geojson.Geom
+	if ev.GetLayer() == gridv1.Layer_WILDFIRE && s.wildfireBuffer > 0 {
+		nearBuffer, nearGeom = s.wildfireBuffer, evGeom
+		if nearGeom == nil {
+			nearGeom = &geojson.Geom{
+				Type:  "Point",
+				Point: geojson.Position{centroid.GetLng(), centroid.GetLat()},
+			}
+		}
+	}
+
+	eg := eventGeo{
+		geom: evGeom, centroid: centroid,
+		minLat: evMinLat, minLng: evMinLng, maxLat: evMaxLat, maxLng: evMaxLng,
+		pointLike: pointLike, polygonal: evPolygonal,
+	}
+
 	var matched []string
 	for _, pl := range places {
-		if pointLike {
-			// Polygon places: exact point-in-polygon. Corridor (LineString) places:
-			// within corridorBufferMeters of the road line. Same test resolve uses.
-			if geojson.PointInOrNearGeometry(centroid.GetLat(), centroid.GetLng(), pl.geom, corridorBufferMeters) {
-				matched = append(matched, pl.id)
-			}
-			continue
-		}
-		if !geojson.BboxIntersects(evMinLat, evMinLng, evMaxLat, evMaxLng,
-			pl.minLat, pl.minLng, pl.maxLat, pl.maxLng) {
-			continue
-		}
-		if geojson.PointInGeometry(centroid.GetLat(), centroid.GetLng(), pl.geom) {
+		near := nearBuffer > 0 && wildfireBufferedKind(pl.kind) &&
+			geojson.WithinDistance(nearGeom, pl.geom, nearBuffer)
+		if eg.matches(pl) || near {
 			matched = append(matched, pl.id)
-			continue
-		}
-		if !evPolygonal {
-			continue
-		}
-		if geojson.PointInGeometry(pl.centLat, pl.centLng, evGeom) {
-			matched = append(matched, pl.id)
-			continue
-		}
-		if pl.polygonal && geojson.Intersects(evGeom, pl.geom) {
-			matched = append(matched, pl.id) // actual polygon overlap, not just bbox
 		}
 	}
 	return matched, nil
+}
+
+// eventGeo is an event's geometry, derived once by matchPlaces and tested
+// against each place.
+type eventGeo struct {
+	geom                           *geojson.Geom // nil when the GeoJSON would not parse
+	centroid                       *gridv1.LatLng
+	minLat, minLng, maxLat, maxLng float64
+	pointLike, polygonal           bool
+}
+
+// matches applies the geometry attachment rules documented on matchPlaces. The
+// wildfire proximity rule is separate and layered on by the caller.
+func (e eventGeo) matches(pl parsedPlace) bool {
+	if e.pointLike {
+		// Polygon places: exact point-in-polygon. Corridor (LineString) places:
+		// within corridorBufferMeters of the road line. Same test resolve uses.
+		return geojson.PointInOrNearGeometry(e.centroid.GetLat(), e.centroid.GetLng(), pl.geom, corridorBufferMeters)
+	}
+	if !geojson.BboxIntersects(e.minLat, e.minLng, e.maxLat, e.maxLng,
+		pl.minLat, pl.minLng, pl.maxLat, pl.maxLng) {
+		return false
+	}
+	if geojson.PointInGeometry(e.centroid.GetLat(), e.centroid.GetLng(), pl.geom) {
+		return true
+	}
+	if !e.polygonal {
+		return false
+	}
+	if geojson.PointInGeometry(pl.centLat, pl.centLng, e.geom) {
+		return true
+	}
+	return pl.polygonal && geojson.Intersects(e.geom, pl.geom) // actual overlap, not just bbox
+}
+
+// wildfireBufferedKind reports whether a place kind participates in the wildfire
+// proximity rule (see matchPlaces): the deployment's own coverage footprint and
+// the communities inside it. Counties and corridors are deliberately excluded.
+func wildfireBufferedKind(k gridv1.PlaceKind) bool {
+	return k == gridv1.PlaceKind_AREA || k == gridv1.PlaceKind_TOWN
 }
 
 // loadPlaceGeoms returns the parsed place geometries, rebuilding the cache from
@@ -653,7 +704,7 @@ func (s *Store) loadPlaceGeoms(tx *sql.Tx) ([]parsedPlace, error) {
 		minLat, minLng, maxLat, maxLng := g.Bbox()
 		clat, clng := g.Centroid()
 		out = append(out, parsedPlace{
-			id: id, geom: g,
+			id: id, kind: place.GetKind(), geom: g,
 			minLat: minLat, minLng: minLng, maxLat: maxLat, maxLng: maxLng,
 			centLat: clat, centLng: clng,
 			polygonal: g.Type == "Polygon" || g.Type == "MultiPolygon",

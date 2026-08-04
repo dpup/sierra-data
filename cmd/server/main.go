@@ -101,7 +101,9 @@ func main() {
 		logging.Error(ctx, "grid.dbPath is required (default ./data/grid.db in prefab.yaml)")
 		log.Fatal("grid.dbPath is required (default ./data/grid.db in prefab.yaml)")
 	}
-	gridStore, err := store.Open(appConfig.Grid.DBPath, store.WithJournalMode(appConfig.Grid.JournalMode))
+	gridStore, err := store.Open(appConfig.Grid.DBPath,
+		store.WithJournalMode(appConfig.Grid.JournalMode),
+		store.WithWildfireProximity(appConfig.Grid.Wildfire.PlaceBuffer()))
 	if err != nil {
 		logging.Errorw(ctx, "Failed to open grid store", "path", appConfig.Grid.DBPath, "error", err)
 		log.Fatalf("Failed to open grid store: %v", err)

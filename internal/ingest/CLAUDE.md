@@ -32,6 +32,8 @@ type Normalizer interface {
     succeeded (its events still returned). Nil/absent = success.
   - `SweepSuppress` — sources that fetched cleanly but whose full current set could
     not be computed this tick (see below).
+  - `Superseded` — the **inverse** of `SweepSuppress`: ids the poller *proves* are
+    gone because it knows the successor (see below).
 
 ## THE fail-loud sweep invariant
 
@@ -58,6 +60,38 @@ error must never become an all-clear. Four mechanisms enforce it; keep all four:
 
 Corollary: `Events` is the whole truth for the scope, or you must fail/suppress.
 Never return a partial `Events` as if complete.
+
+## `Superseded` — the one way to skip the grace, and why it is still fail-loud
+
+`SweepSuppress` says *"I can't prove this is gone."* `Superseded` says the
+opposite: *"I can prove it, and here is what replaced it."* Those ids transition
+to **RESOLVED immediately**, ignoring the source's disappearance policy.
+
+This does not weaken the invariant above, because the invariant is about
+**absence being ambiguous**. The `expire` grace exists for a perimeter whose
+upload lagged or an alert that dropped at end-of-product — cases where "missing"
+might just mean "not re-listed yet". When the poller can name the successor,
+missing is not ambiguous, and holding the old id ACTIVE for the grace just draws
+the same hazard twice.
+
+Two rules keep it honest, and both are load-bearing:
+
+- **Positive evidence only.** Populate `Superseded` from something you observed,
+  never from "I didn't see it" — that is what the sweep is for. The only producer
+  today is wildfire: a perimeter that was standalone (`firis:<name>`) and is now
+  **adopted** by a CAL FIRE incident (`calfire:<uuid>`). The perimeter is *still
+  in the feed*; we know precisely which event absorbed it
+  (`supersededStandalones`).
+- **Same guard as the sweep.** The scheduler only supersedes for sources whose
+  fetch succeeded and wasn't suppressed, so a failed fetch still transitions
+  nothing. And it is deliberately *narrow*: wildfire names only the id this exact
+  candidate would have been emitted under (`standaloneContinuityID`). A sibling
+  cluster that genuinely dropped out of the feed keeps its grace — absence is
+  still ambiguous for that one.
+
+Without this, every standalone→adopted transition (CAL FIRE adding a fire to its
+curated list, or a scope change bringing the incident in) shows the fire twice
+for the full 24h `firis` grace.
 
 ## Per-source disappearance policies (prefab.yaml `grid.sources`)
 
@@ -108,6 +142,35 @@ AI-enhanced from the `RoadsService` pipeline — do not re-enhance them).
   exhausted budget are picked up on their next content change.
 - Enhancement failure is log-and-continue (serve raw); the enhancer may localize
   only against the event's attached place **names** (grounding, not a requirement).
+
+## Wildfire has its own, wider geography
+
+Every other spatial poller (earthquake, evacuation) fetches over `unionBounds`
+— the bare union of `hazards.areas[].bounds`. **Wildfire does not.** It uses
+`wildfireScope`, that union grown by `grid.wildfire.marginDegrees` (default
+0.5° ≈ 55 km), which puts the fire box just outside the CHP/Caltrans incident
+box. The reason is asymmetric: every other hazard only matters where it
+happens, but a fire *outside* the coverage footprint is a threat *to* it — it
+moves, it closes the roads out, and an hour of warning changes what people do.
+Scoping fire to the footprint meant a fire on the edge was invisible until it
+crossed the line. Don't "simplify" it back onto `unionBounds`.
+
+Two consequences to preserve when touching `wildfire.go`:
+
+- **Geometry is resolved BEFORE the in-scope test**, because `inWildfireScope`
+  consults it. CAL FIRE publishes one origin point per incident; a large fire's
+  FIRIS perimeter reaches far beyond it, so a point-only test drops precisely
+  the fire burning into the region — and drops the acreage/containment/URL that
+  only the CAL FIRE row carries.
+- **Testing the *published* geometry (not the freshly-adopted perimeter) is what
+  keeps scope stable across a FIRIS outage.** On an unusable perimeter set the
+  prior polygon is carried forward, which keeps a perimeter-only fire in
+  `Events`. If it silently dropped out instead, the disappearance sweep would
+  RESOLVE it — a fabricated all-clear, the exact failure the sweep invariant
+  above exists to prevent. Scope is part of "the whole truth for the scope".
+
+The matching store-side rule (a fire attaching to an area/town place it is
+merely *near*) lives in `store.matchPlaces` — see `internal/store/CLAUDE.md`.
 
 ## Adding a poller
 

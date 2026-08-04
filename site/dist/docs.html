@@ -138,7 +138,7 @@ Content-Type: application/json
   <div class="table-wrap"><table class="data-table">
     <thead><tr><th>Layer slug</th><th>Backing</th><th>Contents</th></tr></thead>
     <tbody>
-      <tr><td class="mono">wildfire</td><td>event store</td><td class="wrap">CAL FIRE incidents + FIRIS perimeters (polygon when available, else point)</td></tr>
+      <tr><td class="mono">wildfire</td><td>event store</td><td class="wrap">CAL FIRE incidents + FIRIS perimeters (polygon when available, else point). Scoped <em>wider</em> than every other layer: a fire within ~20&nbsp;km of an area or town is included even if its perimeter has not reached the boundary, so an approaching fire is on the map before it arrives. Render as "in or near".</td></tr>
       <tr><td class="mono">evacuation</td><td>event store</td><td class="wrap">Cal OES evacuation zones — fail-loud, see <a href="#evac">§6</a></td></tr>
       <tr><td class="mono">weather_alert</td><td>event store</td><td class="wrap">NWS watches / warnings / advisories for the place's zones</td></tr>
       <tr><td class="mono">earthquake</td><td>event store</td><td class="wrap">USGS quakes (point epicenters)</td></tr>

@@ -524,3 +524,84 @@ func TestTickPriorPopulatedFromStore(t *testing.T) {
 	assert.Equal(t, "firis:two", forWfigs[0].GetId())
 	assert.Empty(t, prior.ForSource("caloes"), "sources outside the poller are not loaded")
 }
+
+// --- Supersession (PollResult.Superseded) -----------------------------------
+//
+// The inverse of SweepSuppress: an event the poller proves is gone because it
+// knows its successor. It must resolve NOW rather than sit out the expire
+// grace, which exists only for ambiguous absence.
+
+func TestTickSupersededResolvesImmediatelyDespiteExpireGrace(t *testing.T) {
+	ctx := testCtx()
+	st := newSchedStore(t)
+	seedSchedSources(t, st, "nws")
+	t0 := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	now := t0
+
+	old := schedEvent("wx:old", "nws", gridv1.Layer_WEATHER_ALERT)
+	other := schedEvent("wx:other", "nws", gridv1.Layer_WEATHER_ALERT)
+	fn := &fakeNormalizer{
+		ids:    []string{"nws"},
+		result: &PollResult{Events: []*gridv1.Event{old, other}},
+	}
+	sched := NewScheduler(st, SchedulerConfig{
+		Tuning: map[string]config.SourceTuning{"nws": {
+			Disappearance: store.DisappearanceExpire,
+			ExpireAfter:   24 * time.Hour,
+		}},
+	})
+	sched.now = func() time.Time { return now }
+	spec := PollerSpec{Normalizer: fn, Interval: time.Minute}
+	sched.tick(ctx, spec)
+
+	// Next tick: both drop out of Events, but only wx:old has a named successor.
+	successor := schedEvent("wx:new", "nws", gridv1.Layer_WEATHER_ALERT)
+	fn.result = &PollResult{Events: []*gridv1.Event{successor}, Superseded: []string{"wx:old"}}
+	now = t0.Add(time.Minute)
+	sched.tick(ctx, spec)
+
+	assert.Equal(t, gridv1.EventStatus_RESOLVED, eventStatus(t, st, "wx:old"),
+		"a named successor makes absence unambiguous: resolve now, don't wait out the 24h grace")
+	assert.Equal(t, gridv1.EventStatus_ACTIVE, eventStatus(t, st, "wx:other"),
+		"merely absent: the expire grace still protects it")
+	assert.Equal(t, gridv1.EventStatus_ACTIVE, eventStatus(t, st, "wx:new"))
+
+	// The transition is a recorded revision, not a delete — history is kept.
+	hist, _, err := st.EventHistory(ctx, "wx:old", 50, "")
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, len(hist), 2, "supersession writes a revision")
+
+	// Idempotent: re-superseding an already-resolved id is a no-op.
+	now = t0.Add(2 * time.Minute)
+	sched.tick(ctx, spec)
+	assert.Equal(t, gridv1.EventStatus_RESOLVED, eventStatus(t, st, "wx:old"))
+}
+
+// Fail-loud: supersession obeys the same guard as the sweep. A source whose
+// fetch failed transitions NOTHING, even if the poller named ids.
+func TestTickSupersededSkippedWhenSourceFailed(t *testing.T) {
+	ctx := testCtx()
+	st := newSchedStore(t)
+	seedSchedSources(t, st, "nws")
+	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+
+	old := schedEvent("wx:old", "nws", gridv1.Layer_WEATHER_ALERT)
+	fn := &fakeNormalizer{ids: []string{"nws"}, result: &PollResult{Events: []*gridv1.Event{old}}}
+	sched := NewScheduler(st, SchedulerConfig{
+		Tuning: map[string]config.SourceTuning{"nws": {
+			Disappearance: store.DisappearanceExpire, ExpireAfter: 24 * time.Hour,
+		}},
+	})
+	sched.now = func() time.Time { return now }
+	spec := PollerSpec{Normalizer: fn, Interval: time.Minute}
+	sched.tick(ctx, spec)
+
+	fn.result = &PollResult{
+		PerSource:  map[string]error{"nws": assert.AnError},
+		Superseded: []string{"wx:old"},
+	}
+	now = now.Add(time.Minute)
+	sched.tick(ctx, spec)
+	assert.Equal(t, gridv1.EventStatus_ACTIVE, eventStatus(t, st, "wx:old"),
+		"a failed fetch must never transition events, supersession included")
+}

@@ -23,6 +23,7 @@ import (
 	"syscall"
 	"time"
 
+	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
 	"github.com/dpup/sierra-data/internal/lib/geojson"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	_ "modernc.org/sqlite" // pure-Go driver: CGO_ENABLED=0 cross-compile requirement
@@ -100,11 +101,16 @@ type Store struct {
 	// matchPlaces (inside inTx) and UpsertPlace (the only invalidator) hold it.
 	placesGeo      []parsedPlace
 	placesGeoValid bool
+
+	// wildfireBuffer is how close (metres) a WILDFIRE event may come to an AREA
+	// or TOWN place and still attach to it. See WithWildfireProximity.
+	wildfireBuffer float64
 }
 
 // parsedPlace is a place's geometry pre-parsed for point-in-place / bbox tests.
 type parsedPlace struct {
 	id                             string
+	kind                           gridv1.PlaceKind
 	geom                           *geojson.Geom
 	minLat, minLng, maxLat, maxLng float64
 	centLat, centLng               float64
@@ -114,7 +120,10 @@ type parsedPlace struct {
 // Option configures Open.
 type Option func(*openConfig)
 
-type openConfig struct{ journalMode string }
+type openConfig struct {
+	journalMode    string
+	wildfireBuffer float64
+}
 
 // journalModeSynchronous maps a journal mode to the synchronous level that
 // keeps it crash-safe. Whitelisted (also guards against DSN injection): only
@@ -141,6 +150,20 @@ func WithJournalMode(mode string) Option {
 	return func(c *openConfig) {
 		if m := strings.ToUpper(strings.TrimSpace(mode)); m != "" {
 			c.journalMode = m
+		}
+	}
+}
+
+// WithWildfireProximity sets how close (in metres) a WILDFIRE event has to come
+// to an AREA or TOWN place to attach to it, even without overlapping — so an
+// approaching fire appears on that place's map and summary before its perimeter
+// crosses the boundary. Zero (the default) keeps the strict overlap rules for
+// every layer. Configured via grid.wildfire.placeBufferMeters; see matchPlaces
+// for why only these two place kinds are buffered.
+func WithWildfireProximity(meters float64) Option {
+	return func(c *openConfig) {
+		if meters > 0 {
+			c.wildfireBuffer = meters
 		}
 	}
 }
@@ -188,7 +211,7 @@ func Open(path string, opts ...Option) (*Store, error) {
 		lockFile.Close()
 		return nil, fmt.Errorf("store: open %s: %w", path, err)
 	}
-	s := &Store{db: db, lockFile: lockFile}
+	s := &Store{db: db, lockFile: lockFile, wildfireBuffer: cfg.wildfireBuffer}
 	if err := s.migrate(); err != nil {
 		db.Close()
 		lockFile.Close()
@@ -226,7 +249,7 @@ func acquireDBLock(dbPath string) (*os.File, error) {
 			f.Close()
 			return nil, fmt.Errorf("store: database %q is already open by another process "+
 				"(concurrent writers corrupt SQLite); stop the other server or point "+
-				"PF__GRID__DBPATH at a different file: %w", dbPath, lockErr)
+				"PF__GRID__DB_PATH at a different file: %w", dbPath, lockErr)
 		}
 		time.Sleep(250 * time.Millisecond)
 	}

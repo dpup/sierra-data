@@ -16,6 +16,7 @@ import (
 	"github.com/dpup/sierra-data/internal/clients/firis"
 	"github.com/dpup/sierra-data/internal/config"
 	"github.com/dpup/sierra-data/internal/hazards"
+	"github.com/dpup/sierra-data/internal/lib/geojson"
 )
 
 // WildfireNormalizer joins CAL FIRE incidents (id namespace "calfire:") with
@@ -80,7 +81,7 @@ func priorForSource(p Prior, sourceID string) []*gridv1.Event {
 // Poll implements Normalizer. One source failing degrades to a PerSource
 // entry (the survivor's events still return); both failing is a hard error.
 func (n *WildfireNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult, error) {
-	minLat, minLng, maxLat, maxLng, ok := unionBounds(n.cfg.Hazards.Areas)
+	scope, ok := wildfireScope(n.cfg)
 	if !ok {
 		return nil, errEmptyScope("hazard areas")
 	}
@@ -98,10 +99,10 @@ func (n *WildfireNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult
 	go func() {
 		defer wg.Done()
 		perims, perr = n.gatedPerimeters(ctx, firis.Bounds{
-			MinLatitude:  minLat,
-			MaxLatitude:  maxLat,
-			MinLongitude: minLng,
-			MaxLongitude: maxLng,
+			MinLatitude:  scope.MinLatitude,
+			MaxLatitude:  scope.MaxLatitude,
+			MinLongitude: scope.MinLongitude,
+			MaxLongitude: scope.MaxLongitude,
 		})
 	}()
 	wg.Wait()
@@ -150,13 +151,54 @@ func (n *WildfireNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult
 		if in.Lat == 0 && in.Lng == 0 {
 			continue
 		}
-		// CAL FIRE's list is statewide; scope to the configured areas' union.
-		if in.Lat < minLat || in.Lat > maxLat || in.Lng < minLng || in.Lng > maxLng {
+		norm := hazards.NormFireName(in.Name)
+		id := "calfire:" + nonEmpty(in.UniqueID, norm)
+
+		// Resolve geometry BEFORE the in-scope test, because the test consults it
+		// (inWildfireScope): CAL FIRE reports one origin point per incident, and a
+		// large fire's perimeter reaches far beyond it.
+		detail := &gridv1.WildfireDetail{
+			Acres:       in.Acres,
+			Containment: in.PercentContained,
+			County:      in.County,
+		}
+		var geom *gridv1.Geometry
+		adopted := false
+		cand, matched := byName[norm]
+		switch {
+		case matched && !ambiguous[norm]:
+			// Geometry was already parsed + validated during dedup.
+			geom = cand.geom
+			detail.HasPerimeter = true
+			adopted = true
+		case perimsUnusable:
+			// The perimeter set is unusable (source down, or a non-authoritative
+			// wholesale-empty response). Downgrading an incident that held a perimeter
+			// last tick to a point + has_perimeter=false would write a false "perimeter
+			// gone" revision and throw away real spatial extent. Carry the PRIOR
+			// geometry and has_perimeter forward instead; the scalar fields (acres,
+			// containment, headline) still update from CAL FIRE — those are genuine
+			// revisions.
+			if pe := priorByID(prior, id); pe.GetWildfire().GetHasPerimeter() && pe.GetGeometry() != nil {
+				geom = pe.GetGeometry()
+				detail.HasPerimeter = true
+			} else {
+				geom = GeometryFromPoint(in.Lat, in.Lng)
+			}
+		default:
+			geom = GeometryFromPoint(in.Lat, in.Lng)
+		}
+
+		// CAL FIRE's list is statewide; scope it to the widened fire rectangle.
+		if !inWildfireScope(scope, in.Lat, in.Lng, geom) {
 			continue
+		}
+		if adopted {
+			used[norm] = true
 		}
 
 		ev := NewEvent(
-			"calfire:"+nonEmpty(in.UniqueID, hazards.NormFireName(in.Name)),
+			id,
 			gridv1.Layer_WILDFIRE,
 			SeverityFromLabel(hazards.SeverityFromWildfire(in.Acres, in.PercentContained)),
 			gridv1.EventStatus_ACTIVE,
@@ -168,35 +210,7 @@ func (n *WildfireNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult
 		ev.Effective = tsProto(in.Started)
 		ev.ObservedAt = tsProto(in.Updated)
 		ev.Provenance = NewProvenance("calfire", "CAL FIRE", "CAL FIRE / FIRIS", safeURL(in.URL))
-
-		detail := &gridv1.WildfireDetail{
-			Acres:       in.Acres,
-			Containment: in.PercentContained,
-			County:      in.County,
-		}
-		norm := hazards.NormFireName(in.Name)
-		if cand, matched := byName[norm]; matched && !ambiguous[norm] {
-			// Geometry was already parsed + validated during dedup.
-			ev.Geometry = cand.geom
-			detail.HasPerimeter = true
-			used[norm] = true
-		} else if perimsUnusable {
-			// The perimeter set is unusable (source down, or a non-authoritative
-			// wholesale-empty response). Downgrading an incident that held a perimeter
-			// last tick to a point + has_perimeter=false would write a false "perimeter
-			// gone" revision and throw away real spatial extent. Carry the PRIOR
-			// geometry and has_perimeter forward instead; the scalar fields (acres,
-			// containment, headline) still update from CAL FIRE — those are genuine
-			// revisions.
-			if pe := priorByID(prior, ev.Id); pe.GetWildfire().GetHasPerimeter() && pe.GetGeometry() != nil {
-				ev.Geometry = pe.GetGeometry()
-				detail.HasPerimeter = true
-			} else {
-				ev.Geometry = GeometryFromPoint(in.Lat, in.Lng)
-			}
-		} else {
-			ev.Geometry = GeometryFromPoint(in.Lat, in.Lng)
-		}
+		ev.Geometry = geom
 		ev.Detail = &gridv1.Event_Wildfire{Wildfire: detail}
 		events = append(events, ev)
 	}
@@ -230,7 +244,81 @@ func (n *WildfireNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult
 	if len(perSource) == 0 {
 		perSource = nil
 	}
-	return &PollResult{Events: events, PerSource: perSource}, nil
+	return &PollResult{
+		Events:     events,
+		PerSource:  perSource,
+		Superseded: supersededStandalones(byName, used, prior),
+	}, nil
+}
+
+// supersededStandalones returns the standalone `firis:` ids that this tick's
+// adoptions have definitively replaced (PollResult.Superseded).
+//
+// A fire's perimeter is emitted standalone only while no CAL FIRE incident
+// claims it. The moment one does — CAL FIRE adds the fire to its curated list,
+// or a scope change brings the incident in — the perimeter folds into
+// `calfire:<uuid>` and the old `firis:<name>` id stops being emitted. The sweep
+// sees only "absent", and because `firis` is an `expire` source it holds the
+// orphan ACTIVE for the full 24h grace: the same fire, drawn twice, for a day.
+//
+// The grace is right for a perimeter that merely vanished (uploads lag). It is
+// wrong here, because we are not guessing — the perimeter is still in the feed
+// and we know exactly which event absorbed it. So we name the dead id instead of
+// waiting the clock out.
+//
+// Precision matters more than coverage here: an id is superseded ONLY if it is
+// the id this very candidate would have been emitted under
+// (standaloneContinuityID — the same function the standalone path uses) AND the
+// store currently holds it. A sibling cluster that genuinely dropped out of the
+// feed keeps its grace, because absence is still ambiguous for that one.
+//
+// Empty whenever adoption was uncomputable: `used` is only populated when both
+// feeds returned usable data, so a CAL FIRE or FIRIS outage supersedes nothing.
+func supersededStandalones(byName map[string]perimCandidate, used map[string]bool, prior Prior) []string {
+	var out []string
+	for norm := range used {
+		cand, ok := byName[norm]
+		if !ok {
+			continue
+		}
+		id := standaloneContinuityID(prior, norm, cand.geom)
+		if priorByID(prior, id) != nil {
+			out = append(out, id)
+		}
+	}
+	sort.Strings(out) // map iteration is random; the result must be deterministic
+	return out
+}
+
+// inWildfireScope reports whether a CAL FIRE incident belongs to this
+// deployment's fire scope: its reported point is inside the widened rectangle,
+// OR the geometry we are about to publish for it overlaps that rectangle.
+//
+// The point alone is not enough, which is the whole reason this takes geometry.
+// CAL FIRE publishes a single origin coordinate per incident; a large fire's
+// FIRIS perimeter can extend tens of kilometres from it, so a point-only test
+// drops precisely the fire that is burning INTO the region — and drops it
+// together with the acreage, containment and incident URL that only the CAL FIRE
+// row carries (the orphaned perimeter would still surface, but as a bare
+// standalone with unknown containment).
+//
+// Testing the published geometry rather than the freshly-adopted perimeter is
+// also what keeps scope STABLE across a FIRIS outage. On an unusable perimeter
+// set the caller carries the prior polygon forward, so a perimeter-only fire
+// stays in scope; if it silently dropped out of Events instead, the disappearance
+// sweep would RESOLVE it — a fabricated all-clear on a life-safety layer
+// (internal/ingest/CLAUDE.md).
+func inWildfireScope(b config.GeoBounds, lat, lng float64, geom *gridv1.Geometry) bool {
+	if b.Contains(lat, lng) {
+		return true
+	}
+	bb := geom.GetBbox()
+	if bb == nil {
+		return false
+	}
+	return geojson.BboxIntersects(
+		bb.GetMinLat(), bb.GetMinLng(), bb.GetMaxLat(), bb.GetMaxLng(),
+		b.MinLatitude, b.MinLongitude, b.MaxLatitude, b.MaxLongitude)
 }
 
 // gatedPerimeters returns the current perimeters, running the expensive feature

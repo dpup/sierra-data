@@ -61,6 +61,22 @@ type PollResult struct {
 	// an event missing from Events proves nothing. RecordAttempt still
 	// records the success — health and lifecycle are deliberately separate.
 	SweepSuppress []string
+	// Superseded lists event ids this poll proves are GONE rather than merely
+	// absent from Events — the poller knows exactly what replaced them. They
+	// transition to RESOLVED immediately, bypassing the source's disappearance
+	// grace, and only for sources whose fetch succeeded and wasn't suppressed.
+	//
+	// This is the deliberate INVERSE of SweepSuppress, and it does not weaken the
+	// fail-loud invariant: the grace on an `expire` source exists because absence
+	// is AMBIGUOUS (a perimeter upload lags, an alert drops at end-of-product).
+	// When the poller can name the successor, absence is unambiguous, and holding
+	// the old id ACTIVE for the full grace just shows the same hazard twice.
+	//
+	// Only populate this from positive evidence — never from "I didn't see it".
+	// The one producer today: a fire whose FIRIS perimeter was standalone
+	// (`firis:<name>`) and is now ADOPTED by a CAL FIRE incident (`calfire:<uuid>`),
+	// where the perimeter is still in the feed and we know precisely where it went.
+	Superseded []string
 	// MeshObservations is the mesh-node reception firehose drained from the push
 	// source's buffer this tick (nil for every other poller). Receptions are
 	// measurements, not events — the scheduler batch-inserts them into the
@@ -189,6 +205,31 @@ func unionBounds(areas []config.HazardArea) (minLat, minLng, maxLat, maxLng floa
 		maxLng = math.Max(maxLng, b.MaxLongitude)
 	}
 	return minLat, minLng, maxLat, maxLng, len(areas) > 0
+}
+
+// wildfireScope is the wildfire layer's rectangle: the hazard areas' union bbox
+// grown by grid.wildfire.marginDegrees on every side. ok is false when no areas
+// are configured (the caller must then fail loud — see errEmptyScope).
+//
+// Fire is deliberately the WIDEST source we ingest — wider than the
+// CHP/Caltrans incident box, wider than the earthquake/evacuation box, which
+// both stay on the bare hazards union. A fire outside the coverage footprint is
+// a threat TO the footprint: it moves, it closes the roads out, and it is the
+// one hazard where an hour of warning changes what people do. Scoping fire to
+// the footprint itself (what we did before) meant a fire on the region's edge
+// was invisible until it had already crossed the line.
+func wildfireScope(cfg *config.Config) (config.GeoBounds, bool) {
+	minLat, minLng, maxLat, maxLng, ok := unionBounds(cfg.Hazards.Areas)
+	if !ok {
+		return config.GeoBounds{}, false
+	}
+	m := cfg.Grid.Wildfire.Margin()
+	return config.GeoBounds{
+		MinLatitude:  math.Max(minLat-m, -90),
+		MaxLatitude:  math.Min(maxLat+m, 90),
+		MinLongitude: math.Max(minLng-m, -180),
+		MaxLongitude: math.Min(maxLng+m, 180),
+	}, true
 }
 
 // zonesMatch reports whether a zone-carrying record belongs to an area, by

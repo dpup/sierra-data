@@ -14,6 +14,64 @@ throughout; errors are gRPC-standard `{code, codeName, message, details}`). The
 by a snake_case `/v1` surface on 2026-07-05, which was in turn folded back onto the
 proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 
+## 2026-08-04
+
+### Wildfire detection widened, and fires now attach to a place by perimeter and by proximity
+
+Fire is now the **widest** thing The Grid watches. Previously the `wildfire`
+layer was scoped to the same box as everything else — the union of
+`hazards.areas[].bounds` — which was in fact *narrower* than the CHP/Caltrans
+incident box, so a fire on the edge of the coverage region could be invisible
+until it had already crossed in. No field names, types or status codes change;
+what changes is **which fires appear, and on which places**.
+
+Three changes, all wildfire-only (`layer=wildfire` events, the `wildfire`
+geojson layer, and the `fire` summary domain):
+
+- **Wider ingest scope.** The CAL FIRE incident filter and the FIRIS perimeter
+  query now run over the hazard-area union grown by
+  `grid.wildfire.marginDegrees` (default 0.5° ≈ 55 km a side). Expect more
+  `wildfire` events in `GET /api/v1/events?layer=wildfire`, including fires
+  outside the coverage footprint.
+- **In scope by perimeter, not just by point.** CAL FIRE publishes one origin
+  coordinate per incident; a large fire's perimeter can reach tens of km from
+  it. An incident whose *perimeter* overlaps the scope is now kept along with
+  its acreage, containment and incident URL. Previously it was dropped and only
+  the orphaned perimeter surfaced, as a bare `firis:` standalone with unknown
+  containment.
+- **Approaching fires attach to a place.** A wildfire within
+  `grid.wildfire.placeBufferMeters` (default 20 km) of an **area** or **town**
+  place now attaches to it, so it appears in that place's
+  `map/wildfire.geojson`, in `?place=`-filtered event queries, and in the place
+  summary — before the perimeter crosses the boundary. Counties and corridors
+  are unchanged (strict geometry).
+
+**Consumer note:** a proximity-attached fire is a normal active event for that
+place. It counts toward `summary.totalActive` and `severityCounts`, is eligible
+for `topEvents`, and can lift `summary.mode` to WATCH/ACTIVE. A place can
+therefore report an active fire whose perimeter is not inside its boundary —
+that is intended, but if you render "fires in <place>" you may want to say
+"fires in or near <place>".
+
+**Event ids can change for fires that were previously perimeter-only.** A fire
+whose CAL FIRE origin point sat outside the old box surfaced as a bare
+standalone `firis:<name>` (perimeter acreage, no containment, no incident link).
+Now that the incident itself is in scope, the same fire is the richer
+`calfire:<uuid>` event with the perimeter adopted. Verified live on the **Gann
+Fire** (3,760 ac, Valley Springs): it was `firis:gann` attached only to Calaveras
+County and absent from the Ebbetts Pass map entirely; it is now
+`calfire:e51208a8-…` with the CAL FIRE incident URL and location, attached to
+`area:ebbetts-pass`.
+
+The old `firis:<name>` event is **RESOLVED on the first tick** after its
+perimeter is adopted, so the fire is never drawn twice. Previously the `firis`
+source's `disappearance: expire` policy would have held the orphan ACTIVE for its
+full 24h grace. This applies in steady state too, not just at deploy: any fire
+CAL FIRE adds to its curated list after we already had its perimeter now
+transitions cleanly. A consumer holding the old id sees `status: RESOLVED` (a
+recorded revision — the history is kept, nothing is deleted) and should follow
+the `calfire:` event.
+
 ## 2026-07-27
 
 ### BREAKING — wildfire perimeter source WFIGS → CAL FIRE / FIRIS combo feed

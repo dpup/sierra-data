@@ -258,10 +258,18 @@ func (s *Scheduler) tick(ctx context.Context, spec PollerSpec) {
 	for _, src := range result.SweepSuppress {
 		suppressed[src] = true
 	}
+	superseded := make(map[string]bool, len(result.Superseded))
+	for _, id := range result.Superseded {
+		superseded[id] = true
+	}
 	for _, src := range sourceIDs {
 		if result.PerSource[src] != nil || suppressed[src] {
 			continue
 		}
+		// Supersession runs BEFORE the sweep so a named-successor event is
+		// resolved on its own terms rather than sitting out the expire grace;
+		// once resolved it is no longer active, so the sweep skips it.
+		s.supersede(ctx, src, superseded, now)
 		s.sweepDisappeared(ctx, src, polled[src], now)
 	}
 
@@ -365,6 +373,46 @@ func (s *Scheduler) placeNames(ctx context.Context, ev *gridv1.Event) []string {
 		}
 	}
 	return names
+}
+
+// supersede immediately RESOLVES this source's active events that the poller
+// named in PollResult.Superseded — events it proved are gone because it knows
+// what replaced them (a standalone FIRIS perimeter absorbed into a CAL FIRE
+// incident). Unlike the sweep this ignores the disappearance policy: the
+// `expire` grace exists for AMBIGUOUS absence, and there is nothing ambiguous
+// about an event with a named successor. Holding it would just draw the same
+// hazard twice for the length of the grace.
+//
+// Called only for sources whose fetch succeeded and wasn't suppressed (same
+// guard as the sweep), so the fail-loud invariant still holds: a failed fetch
+// transitions nothing. RESOLVED is a recorded revision — the supersession is
+// part of the event's history, not a delete.
+func (s *Scheduler) supersede(ctx context.Context, src string, ids map[string]bool, now time.Time) {
+	if len(ids) == 0 {
+		return
+	}
+	active, err := s.store.ActiveEventsBySource(ctx, src)
+	if err != nil {
+		logging.Errorw(ctx, "Ingest tick: listing active events failed; skipping supersession",
+			"source", src, "error", err)
+		return
+	}
+	var match []string
+	for _, se := range active {
+		if ids[se.Event.GetId()] {
+			match = append(match, se.Event.GetId())
+		}
+	}
+	if len(match) == 0 {
+		return
+	}
+	if err := s.store.TransitionEvents(ctx, match, gridv1.EventStatus_RESOLVED, now); err != nil {
+		logging.Errorw(ctx, "Ingest tick: superseding transition failed",
+			"source", src, "error", err)
+		return
+	}
+	logging.Infow(ctx, "Ingest tick: resolved superseded events",
+		"source", src, "count", len(match), "ids", match)
 }
 
 // sweepDisappeared applies the source's disappearance policy to active

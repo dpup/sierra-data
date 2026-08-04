@@ -103,6 +103,31 @@ retroactively. Keep `event_places` and the blob's `place_ids` in lockstep — re
 rehydrate from the blob, so a divergence would make place queries and event detail
 disagree.
 
+### The one layer with a looser rule: wildfire proximity
+
+On top of the geometry rules, a `WILDFIRE` event also attaches to an **AREA** or
+**TOWN** place it comes within `wildfireBuffer` metres of
+(`WithWildfireProximity`, from `grid.wildfire.placeBufferMeters`, default 20 km;
+`geojson.WithinDistance` is the predicate). Fire is the hazard that *moves toward
+you*, so a fire 12 km outside the coverage polygon belongs on that area's map and
+summary — waiting for the perimeter to cross the line is waiting too long.
+
+Two boundaries on it, both deliberate:
+
+- **Only AREA and TOWN.** Counties tile the map, so a nearby fire already
+  attaches to *some* county exactly and buffering them would smear one fire
+  across four (the same over-attach failure the bbox rule caused). Corridors
+  already have their own tuned 1.5 km point buffer, and a 20 km fire buffer would
+  pin every regional fire to every highway segment.
+- **Only WILDFIRE.** Every other layer keeps strict containment/overlap. A quake
+  9 km outside an area is not in it.
+
+Downstream consequence to keep in mind: a proximity-attached fire is an ordinary
+active event for that place — it counts in the summary's `totalActive`,
+`severityCounts` and `mode`. That is intended (a fire 12 km out *should* raise the
+mode), but it means a place can report an active fire whose perimeter is outside
+its boundary.
+
 ## Single-writer discipline
 
 Writes go through `inTx` (or `TouchSeen`), which take the store mutex — the ingest
