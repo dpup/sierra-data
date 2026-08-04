@@ -143,7 +143,7 @@ one, it must also hold `mu`.
 ## Journal mode / filesystem (`WithJournalMode`)
 
 `Open` takes a journal mode; default **TRUNCATE**, config `grid.journalMode`
-(`PF__GRID__JOURNALMODE`). It is whitelisted and paired with a `synchronous`
+(`PF__GRID__JOURNAL_MODE`). It is whitelisted and paired with a `synchronous`
 level in `journalModeSynchronous`:
 
 - **TRUNCATE / DELETE / PERSIST** (rollback journals) → `synchronous=FULL`. No
@@ -169,7 +169,7 @@ task acquires once the old one drains and exits (releasing its flock on the
 shared EFS volume) rather than failing on the brief overlap. It coordinates within
 one kernel only — a writer reaching the file from a separate host via the mount
 can still slip past — so **for dev, keep the DB off the bind mount**: point
-`PF__GRID__DBPATH` at a container-local path outside `/workspace` (e.g.
+`PF__GRID__DB_PATH` at a container-local path outside `/workspace` (e.g.
 `$HOME/.local/state/grid/grid.db`, set in `.envrc`) rather than relying on the
 lock alone. A single writer is corruption-free on every filesystem; only
 concurrent writers are the hazard.

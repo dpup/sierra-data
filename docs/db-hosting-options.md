@@ -10,7 +10,7 @@ matters. Options considered:
 Keep SQLite unchanged; run it on the task's **local ephemeral disk in WAL mode**
 and stream continuously to S3 with Litestream (https://litestream.io).
 
-- **No code change** — WAL is a config flip (`PF__GRID__JOURNALMODE=WAL`), local
+- **No code change** — WAL is a config flip (`PF__GRID__JOURNAL_MODE=WAL`), local
   disk is a real FS where WAL works (fast, no NFS corruption risk). Undoes the EFS
   constraint rather than adding to it.
 - **Durability + PITR** — Litestream ships WAL frames to versioned S3 at ~1s RPO.
@@ -54,7 +54,7 @@ dbs:
   ECS deploy `maximumPercent:100 / minimumHealthyPercent:0` (brief redeploy
   downtime, fine here).
 
-Env: `PF__GRID__DBPATH=/data/grid.db`, `PF__GRID__JOURNALMODE=WAL`, local `/data`.
+Env: `PF__GRID__DB_PATH=/data/grid.db`, `PF__GRID__JOURNAL_MODE=WAL`, local `/data`.
 
 ## 2. Managed Postgres (Aurora Serverless v2 / small RDS)
 

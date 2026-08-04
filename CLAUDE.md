@@ -11,7 +11,7 @@ Last updated: 2026-07-06
 
 **Language/Version**: Go 1.25+ (`go.mod` declares 1.25.0 — a transitive dep, `golang.org/x/sys`, requires it; the Dockerfile builds on `golang:1.25-alpine`)  
 **Primary Dependencies**: gRPC, gRPC Gateway, Prefab framework (github.com/dpup/prefab), Protocol Buffers  
-**Storage**: SQLite (pure-Go `modernc.org/sqlite`, WAL) is the grid event store's system of record — events, revision history, the place directory, and source health, persisted at `grid.dbPath` (`PF__GRID__DBPATH`). In-memory TTL caches remain on the read path for the roads/weather/hazards services.  
+**Storage**: SQLite (pure-Go `modernc.org/sqlite`, WAL) is the grid event store's system of record — events, revision history, the place directory, and source health, persisted at `grid.dbPath` (`PF__GRID__DB_PATH`). In-memory TTL caches remain on the read path for the roads/weather/hazards services.  
 **Testing**: Go testing framework with testify, contract tests for gRPC services  
 **Target Platform**: Linux/macOS server, containerizable
 
@@ -117,7 +117,7 @@ path — prefer it over ad-hoc kills. When you must kill a server by hand:
 - Port `8181` may be served by an instance **outside** the sandbox (forwarded
   in) that this container cannot see or kill. To verify a local build, run it on
   a different port with a throwaway DB (`PF__SERVER__PORT=<port>
-  PF__GRID__DBPATH=<scratch>/verify.db ./bin/server`) rather than fighting 8181,
+  PF__GRID__DB_PATH=<scratch>/verify.db ./bin/server`) rather than fighting 8181,
   and confirm you bound it by checking the "Listening for traffic" log line.
 
 ### Testing
@@ -192,13 +192,25 @@ export PORT=8181
 # Grid event store database path (default ./data/grid.db via prefab.yaml).
 # Production points this at the EBS mount; the Dockerfile sets it and declares
 # a /data volume so events/revisions/source-health survive container replacement.
-export PF__GRID__DBPATH=/data/grid.db
+export PF__GRID__DB_PATH=/data/grid.db
 ```
+
+**Env-var naming — a camelCase config key needs an underscore.** prefab maps
+`PF__A__B_C` → `a.bC`, so `grid.dbPath` is **`PF__GRID__DB_PATH`**;
+`PF__GRID__DBPATH` maps to `grid.dbpath` and matches nothing. This is **enforced,
+not just documented**: `config.ValidateEnvOverrides` (called from `LoadConfig`)
+reflects over `Config` and refuses to start on a `PF__` override in our
+namespaces that resolves to no real key, naming the variable you meant. You don't
+need to remember the rule or register new keys — just read the error.
 
 **Configuration Files**:
 - `prefab.yaml` - Application configuration (API refresh intervals, route
   definitions, and the `grid` section: `dbPath`, per-source poll intervals +
-  disappearance policy, NWS-alert enhancement budget)
+  disappearance policy, NWS-alert enhancement budget, and `grid.wildfire` —
+  the fire layer's own, deliberately **wider** geography: `marginDegrees`
+  grows the `hazards.areas` union for fire ingest, `placeBufferMeters` lets an
+  approaching fire attach to an area/town it has not reached yet. Fire is the
+  only layer with its own geography; see `internal/ingest/CLAUDE.md`.)
 - Environment variables override config file values for secrets
 - Use `.envrc` for local development (already in .gitignore)
 

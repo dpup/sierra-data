@@ -2,6 +2,7 @@ package config
 
 import (
 	"log"
+	"os"
 	"time"
 
 	"github.com/dpup/prefab"
@@ -347,6 +348,15 @@ func (w WeatherLocation) ToProto() *api.Coordinates {
 // LoadConfig loads configuration using Prefab's config system
 // Configuration is loaded from prefab.yaml and environment variables with PF__ prefix
 func LoadConfig() *Config {
+	// Fail before reading anything: an env override that maps to no real key is
+	// silently dropped by koanf, so the value below would be prefab.yaml's while
+	// the operator believes it is theirs. See ValidateEnvOverrides — this is a
+	// hard stop precisely because the symptom is "it works" (the wrong DB path
+	// costs the entire event history on the next container replacement).
+	if err := ValidateEnvOverrides(os.Environ()); err != nil {
+		log.Fatalf("Invalid configuration: %v", err)
+	}
+
 	appConfig := &Config{}
 	// Unmarshal client configurations
 	if err := prefab.Config.Unmarshal("googleRoutes", &appConfig.GoogleRoutes); err != nil {

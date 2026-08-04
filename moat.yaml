@@ -7,7 +7,7 @@ env:
   # workspace). Two servers writing the same SQLite file on virtiofs corrupt it
   # (virtiofs doesn't honor cross-process locking); a container-local path can't
   # collide with the host process. Absolute (moat.yaml env doesn't expand $HOME).
-  PF__GRID__DBPATH: /home/moatuser/.local/state/grid/grid.db
+  PF__GRID__DB_PATH: /home/moatuser/.local/state/grid/grid.db
 grants:
   - github
   - ssh:github
