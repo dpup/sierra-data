@@ -9,8 +9,15 @@ env:
   # collide with the host process. Absolute (moat.yaml env doesn't expand $HOME).
   PF__GRID__DB_PATH: /home/moatuser/.local/state/grid/grid.db
 grants:
+  # The SSH grant identifier is `ssh:<hostname>` — the host is part of the name,
+  # so it must be `ssh:github.com`, not `ssh:github`. A bare `ssh:github` matches
+  # no host: the agent proxy forwards keys only for the granted hostname, so the
+  # container gets no key for github.com and `git@github.com:` fails at host-key
+  # verification. `origin` is an SSH remote, so that means no fetch/push at all.
+  # (The `github` grant above only covers HTTPS — api.github.com and git
+  # smart-HTTP — which is why gh worked while ssh did not.)
   - github
-  - ssh:github
+  - ssh:github.com
 dependencies:
   - git
   - go
