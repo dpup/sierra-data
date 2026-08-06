@@ -14,6 +14,33 @@ throughout; errors are gRPC-standard `{code, codeName, message, details}`). The
 by a snake_case `/v1` surface on 2026-07-05, which was in turn folded back onto the
 proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 
+## 2026-08-06
+
+### CORS is now open (`Access-Control-Allow-Origin: *`)
+
+Every `/api/v1/...` response (and the `.geojson` map layers) now returns
+`Access-Control-Allow-Origin: *`, so **any** web origin can fetch The Grid
+directly from the browser. Previously only an explicit allowlist
+(`ersn.net`, `sierragridteam.org`, and localhost dev ports) got a CORS header;
+every other origin's cross-origin fetch was blocked by the browser.
+
+**Impact for consumers**: purely additive — nothing that worked before stops
+working. If you were on the old allowlist, no change is needed. If you were
+building a browser client from any other origin (or a local dev server on a
+non-standard port) and hitting CORS errors, those are gone.
+
+No field names, types, status codes, or URLs change. This is a response-header
+change only.
+
+Notes:
+- The API stays public, read-only, keyless, and **credential-less** — `*` CORS
+  is served with `Access-Control-Allow-Credentials: false` (the two are required
+  to go together). Don't send cookies/credentials on cross-origin requests; they
+  won't be honored.
+- Only `GET` is granted cross-origin (`Access-Control-Allow-Methods: GET`). The
+  `/mcp` JSON-RPC endpoint is POST and remains not callable cross-origin from a
+  browser.
+
 ## 2026-08-04
 
 ### Wildfire detection widened, and fires now attach to a place by perimeter and by proximity

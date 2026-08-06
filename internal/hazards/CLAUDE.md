@@ -62,9 +62,10 @@ underlying service (no double-caching).
 ## Served through prefab's HTTP security wrapper
 
 The package no longer registers any handler itself; `gridapi` serves `/api/v1`
-(via prefab's gRPC-Gateway) and calls `BuildLayer` in-process. CORS / the
-`*.ersn.net` allowlist are applied by prefab's `securityMiddleware` on the
-mounted handlers — do not add manual `SecurityHeaders` calls.
+(via prefab's gRPC-Gateway) and calls `BuildLayer` in-process. CORS is applied by
+prefab's `securityMiddleware` on the mounted handlers from `prefab.yaml`
+(`server.security`) — now open (`corsOrigins: ["*"]`, GET-only; see the CORS note
+in the root `CLAUDE.md`) — do not add manual `SecurityHeaders` calls.
 
 ## Changing a condition layer
 

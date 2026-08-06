@@ -157,7 +157,15 @@ curl -s http://localhost:8181/api/v1/events?layer=road_incident | jq .
 
 **API Design**:
 - REST endpoints via gRPC Gateway
-- CORS enabled for static website integration
+- **CORS is open**: `corsOrigins: ["*"]` in `prefab.yaml` emits a literal
+  `Access-Control-Allow-Origin: *` for every origin (prefab >= v0.6.1's wildcard
+  sentinel). Safe here because the API is public, read-only, and keyless — a
+  cross-origin page gets only what `curl` already gets. Two invariants keep it
+  safe and MUST hold: `corsAllowMethods: [GET]` (this, not the origin list, is
+  what keeps the `/mcp` POST surface browser-unreachable cross-origin — POST
+  preflights are denied) and `corsAllowCredentials: false` (required with `*`;
+  prefab refuses to start on `*` + credentials). Never reflect an origin *with*
+  credentials — that's the CORS hole this deliberately avoids.
 - Consistent JSON response format
 - No authentication required
 - Cache-friendly with appropriate TTLs
