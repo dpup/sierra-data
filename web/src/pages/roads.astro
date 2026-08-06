@@ -60,6 +60,28 @@ import SectionHead from '../components/SectionHead.astro';
       .rd-inc-meta { font-family: var(--font-mono); }
 
       .notice-bad { border-left: 2px solid var(--st-UNAVAILABLE); }
+
+      /* Phones: the segment/chain tables carry more columns than a 390px screen
+       * holds, so travel time, delay and distance scroll off unseen. Reflow each
+       * row into a stacked card (cells captioned by their column via data-label,
+       * set in roads.js) so every value stays visible without a sideways scroll. */
+      @media (max-width: 640px) {
+        .rd-scroll { overflow-x: visible; }
+        table.rd thead { display: none; }
+        table.rd, table.rd tbody, table.rd tr, table.rd td { display: block; width: 100%; }
+        table.rd tr {
+          border: 1px solid var(--border); border-radius: var(--radius);
+          margin-bottom: 10px; padding: 6px 2px;
+        }
+        table.rd tr:last-child td { border-bottom: none; }
+        table.rd td { border: none; padding: 4px 14px; white-space: normal; }
+        table.rd td.num { white-space: normal; }
+        .rd-wrap { max-width: none; }
+        table.rd td[data-label]::before {
+          content: attr(data-label); display: block; margin-bottom: 1px;
+          font-size: 9px; letter-spacing: 0.11em; text-transform: uppercase; color: var(--text-dim);
+        }
+      }
     </style>
   </Fragment>
 

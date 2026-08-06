@@ -279,6 +279,13 @@ function eventRow(ev, onSelect) {
   // revision is a proto uint32; protojson omits 0.
   tr.append(el('td', 'num', 'r' + String(ev.revision ?? 0)));
 
+  // On phones the row reflows into a stacked card (app.css ≤640px); caption the
+  // secondary columns so Source/Rev don't clip off-screen. Severity/Event carry
+  // their own badge + headline, so they read fine without a caption.
+  const tds = tr.querySelectorAll(':scope > td');
+  if (tds[2]) tds[2].dataset.label = 'Source';
+  if (tds[3]) tds[3].dataset.label = 'Revision';
+
   tr._select = () => onSelect(ev, tr, sevColor);
   tr.addEventListener('click', tr._select);
   return tr;

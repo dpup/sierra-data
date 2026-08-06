@@ -101,6 +101,18 @@ site-shots:
 	cd tools/screenshots && NODE_PATH=$$(npm root -g) \
 		BASE_URL=$(or $(BASE_URL),http://localhost:8190) LABEL=$(or $(LABEL),current) node shots.mjs
 
+# Self-contained screenshots with MOCKED /api/v1 data — no server, no API keys,
+# deterministic. Builds the site, serves site/dist, intercepts every /api/v1
+# fetch from web/screenshots/fixtures.mjs so pages render populated state, and
+# captures each page at phone/tablet/desktop into web/screenshots/out/
+# (git-ignored). This is the one to reach for when reviewing the rendered UI —
+# especially mobile — without standing up the Go server + live upstreams.
+# Pass PAGES=events,map or ONLY=mobile to narrow a run. Uses web/'s own
+# Playwright devDependency (not the global one site-shots uses).
+site-shots-mock:
+	cd web && (test -f package-lock.json && npm ci || npm install) && npm run build
+	cd web && node screenshots/capture.mjs $(if $(PAGES),--pages $(PAGES),) $(if $(ONLY),--only $(ONLY),)
+
 # Guard against deploying a stale site. The Docker image embeds the COMMITTED
 # site/dist (the image build is deliberately Node-free), so a change under web/
 # that wasn't rebuilt+committed would ship silently stale. This rebuilds the

@@ -250,6 +250,13 @@ function revisionRow(rev) {
   }
   row.append(head);
 
+  // On phones the row reflows into a stacked card (app.css ≤640px); caption each
+  // cell by its column so nothing — least of all the event headline — clips off.
+  const labels = ['Observed', '', 'Layer', 'Rev', 'Status', 'Event'];
+  row.querySelectorAll(':scope > td').forEach((td, i) => {
+    if (labels[i]) td.dataset.label = labels[i];
+  });
+
   return row;
 }
 

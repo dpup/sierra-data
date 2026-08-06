@@ -96,6 +96,14 @@ function chainBadge(level) {
 
 /* ---------- per-layer renderers ---------- */
 
+// On phones each row reflows into a stacked card (roads.astro ≤640px); caption
+// every cell by its column via data-label so travel/delay/distance stay visible.
+function labelRow(tr, labels) {
+  tr.querySelectorAll(':scope > td').forEach((td, i) => {
+    if (labels[i]) td.dataset.label = labels[i];
+  });
+}
+
 function scrollTable(headers) {
   const wrap = el('div', 'rd-scroll');
   const table = el('table', 'rd');
@@ -134,6 +142,7 @@ function renderSegments(container, feats) {
     tr.append(el('td', 'num', num(r.durationMinutes, ' min')));
     tr.append(delayTd(r.delayMinutes));
     tr.append(el('td', 'num', num(r.distanceKm, ' km')));
+    labelRow(tr, ['', 'Road', 'Status', 'Congestion', 'Travel', 'Delay', 'Distance']);
     tbody.append(tr);
   }
   container.append(wrap);
@@ -151,6 +160,7 @@ function renderChain(container, feats) {
     tr.append(el('td', '', c.highway || '—'));
     tr.append(el('td', '', c.direction || '—'));
     tr.append(el('td', 'rd-wrap muted', p.headline || '—'));
+    labelRow(tr, ['Level', 'Highway', 'Direction', 'Note']);
     tbody.append(tr);
   }
   container.append(wrap);

@@ -87,6 +87,11 @@ S.I.E.R.R.A is an all-volunteer 501(c)(3). This service runs on donated time and
           else { errCell.textContent = '—'; errCell.style.color = 'var(--text-dim)'; }
           tr.append(errCell);
 
+          // On phones the row reflows into a stacked card (app.css ≤640px);
+          // caption each cell by its column via data-label.
+          ['Source', 'Status', 'Poll', 'Last success', 'Error'].forEach((lbl, i) => {
+            if (tr.children[i]) tr.children[i].dataset.label = lbl;
+          });
           body.append(tr);
         }
       } catch (err) {

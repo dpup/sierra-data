@@ -271,6 +271,14 @@ export function initSourcesPage() {
     'Last error',
   ];
 
+  // On phones the row reflows into a stacked card (app.css ≤640px); each cell is
+  // captioned by its column via data-label, so no column scrolls off-screen.
+  function labelCells(tr, labels) {
+    tr.querySelectorAll(':scope > td').forEach((td, i) => {
+      if (labels[i]) td.dataset.label = labels[i];
+    });
+  }
+
   function renderRow(s) {
     const status = normStatus(s.status);
     const tr = el('tr', status === 'OK' ? '' : `row-${status}`);
@@ -339,6 +347,7 @@ export function initSourcesPage() {
     }
     tr.append(errTd);
 
+    labelCells(tr, COLUMNS);
     return tr;
   }
 

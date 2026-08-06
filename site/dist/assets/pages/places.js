@@ -201,6 +201,14 @@ function el(tag, className, text) {
   return node;
 }
 
+// On phones each row reflows into a stacked card (app.css ≤640px); caption every
+// cell by its column via data-label so the id/parent columns don't clip off.
+function labelRow(tr, labels) {
+  tr.querySelectorAll(':scope > td').forEach((td, i) => {
+    if (labels[i]) td.dataset.label = labels[i];
+  });
+}
+
 /** Inline error block naming the failed URL — never a blank page. */
 function errorBlock(err) {
   const div = el('div', 'error-block');
@@ -431,6 +439,7 @@ export function initPlacesPage() {
         }
         tr.append(parentTd);
 
+        labelRow(tr, ['Name', 'Slug', 'Id', 'Parent']);
         tbody.append(tr);
       }
       table.append(thead, tbody);
@@ -575,6 +584,7 @@ export function initPlacesPage() {
       tr.append(nameTd);
       tr.append(el('td', 'mono', p.slug || '—'));
       tr.append(el('td', 'mono', p.id || '—'));
+      labelRow(tr, ['Kind', 'Name', 'Slug', 'Id']);
       tbody.append(tr);
     }
     table.append(thead, tbody);

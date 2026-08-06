@@ -80,6 +80,9 @@ site/dist/content-modules.mjs
 # Screenshot/layout-diagnosis artifacts (tools/screenshots) — regenerated.
 tools/screenshots/out/
 
+# Mocked-data screenshot review artifacts (web/screenshots) — regenerated.
+web/screenshots/out/
+
 # Optional npm cache directory
 .npm
 
