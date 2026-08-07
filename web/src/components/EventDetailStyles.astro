@@ -1,0 +1,106 @@
+---
+// EventDetailStyles.astro — everything renderEventDetail() (pages/event-detail.js)
+// needs to render correctly, in ONE place.
+//
+// The renderer is shared by two screens: the /event permalink page and the
+// /events browser's detail column. Its stylesheet and its MapLibre dependency
+// must therefore be shared too — when they lived only in event.astro, the
+// identical markup mounted into /events came out unstyled and silently dropped
+// every geometry map (while printing a reason that was not the real one).
+//
+// Include from a page's `head` slot: <EventDetailStyles slot="head" />
+---
+    <link rel="stylesheet" href="/lib/maplibre-gl.css" />
+    <style is:global>
+      /* Page-local: meta chips, AI-enhancement panel, revision cards + diff
+         table, raw-protojson toggles, request lines. Everything else is the
+         shared design system in app.css. */
+
+      .crumb-back { margin-bottom: 18px; }
+
+      /* Neutral outlined chip for status / layer beside the severity badge. */
+      .meta-chip {
+        font-size: 10.5px; letter-spacing: 0.04em; text-transform: uppercase;
+        border: 1px solid var(--border-input); border-radius: var(--radius-sm);
+        padding: 2px 7px; line-height: 1.4; color: var(--text-2);
+      }
+      .ai-chip { border-color: var(--grn-border-2); color: var(--grn); }
+
+      /* Class-based, not id-based: the same block is rendered by the shared
+         renderer into both this page and the Events browser's detail column. */
+      .ed-head-block { margin-bottom: 8px; }
+      .ed-headline {
+        margin: 10px 0 8px; overflow-wrap: anywhere;
+        font-size: clamp(22px, 2.8vw, 30px); letter-spacing: -0.03em;
+      }
+      .ed-errors:empty { display: none; }
+
+      /* The two GET lines that produced this page. */
+      .query-line { margin: 10px 0 4px; }
+      .query-row {
+        display: flex; align-items: baseline; gap: 10px;
+        padding: 3px 0; white-space: nowrap; overflow-x: auto;
+        font-family: var(--font-mono); font-size: 12.5px;
+      }
+
+      /* Raw-protojson disclosure at the foot of each section. */
+      .raw-toggle { margin-top: 12px; font-family: var(--font-mono); font-size: 11px; }
+      .raw-toggle summary {
+        cursor: pointer; color: var(--text-dim); text-transform: uppercase;
+        letter-spacing: 0.09em; list-style: none;
+      }
+      .raw-toggle summary::-webkit-details-marker { display: none; }
+      .raw-toggle summary::before { content: "\25B8  "; color: var(--text-fainter); }
+      .raw-toggle[open] summary { color: var(--grn); }
+      .raw-toggle[open] summary::before { content: "\25BE  "; color: var(--grn); }
+      .raw-toggle pre.code { margin-top: 8px; max-height: 26rem; overflow: auto; }
+
+      /* AI enhancement — the model's structured output shown beside the verbatim
+         original. Green accent reads as "translation", never as authority. */
+      .ai-badge {
+        display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 4px 9px;
+        border: 1px solid var(--grn-border); border-left: 3px solid var(--grn-line);
+        border-radius: var(--radius-sm);
+        background: color-mix(in srgb, var(--grn-bg) 70%, var(--bg-card));
+        padding: 7px 12px; font-size: 12px; margin: 4px 0 2px; color: var(--text-2);
+      }
+      .ai-badge-tag {
+        font-family: var(--font-mono); font-weight: 600; letter-spacing: 0.06em;
+        text-transform: uppercase; font-size: 10px; color: var(--grn);
+      }
+      .original-text {
+        white-space: pre-wrap; overflow-wrap: anywhere;
+        font-family: var(--font-mono); font-size: 12.5px; line-height: 1.6;
+        background: var(--bg-code); border: 1px solid var(--border);
+        border-left: 3px solid var(--border-input); border-radius: var(--radius-sm);
+        padding: 10px 13px; margin: 0; color: #cfe6da;
+      }
+      /* AI-enhancement section: one consistent vertical rhythm so the badge,
+         note, headings, and pre blocks don't stack with mismatched margins. */
+      .enh-body { display: flex; flex-direction: column; gap: 10px; align-items: stretch; }
+      .enh-body > * { margin: 0; }
+      /* The explanatory note is running text and needs the measure; the code
+         panes beside it are data and keep the full panel width. */
+      .enh-body > p { max-width: var(--measure); }
+      .enh-body .ai-badge { align-self: flex-start; }
+      .enh-body h3 { margin-top: 4px; font-size: 12px; color: var(--text-2); }
+      .enh-body pre.code { margin: 0; }
+
+      /* Revision timeline. */
+      .timeline { display: flex; flex-direction: column; gap: 12px; }
+      .rev-card {
+        border: 1px solid var(--border); border-radius: var(--radius);
+        background: var(--bg-card); padding: 11px 14px;
+      }
+      .rev-card-head {
+        display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 16px;
+        margin-bottom: 8px;
+      }
+      .diff-wrap { margin: 4px 0; }
+      .diff-table td.diff-val { max-width: 22rem; overflow-wrap: anywhere; }
+      .diff-kind { font-family: var(--font-mono); white-space: nowrap; }
+      .k-added { color: var(--st-OK); }
+      .k-removed { color: var(--st-UNAVAILABLE); }
+      .k-changed { color: var(--st-STALE); }
+      .timeline-foot { margin-top: 12px; }
+    </style>

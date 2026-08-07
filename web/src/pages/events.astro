@@ -2,55 +2,86 @@
 import Shell from '../layouts/Shell.astro';
 import PageHead from '../components/PageHead.astro';
 import GetChip from '../components/GetChip.astro';
+// The detail column mounts the SHARED renderer, so it needs the renderer's own
+// stylesheet + MapLibre — exactly what the /event page loads.
+import EventDetailStyles from '../components/EventDetailStyles.astro';
 ---
 <Shell
   current="events"
   title="Events · The Grid"
   description="Event explorer over GET /api/v1/events — the cross-layer query of every discrete occurrence the Grid tracks, with filters that map 1:1 to the endpoint's parameters and a URL that is the shareable permalink."
 >
+  <EventDetailStyles slot="head" />
+
   <style is:global slot="head">
     /* Page-local: the query bar, the pill filter rows, and the two-column
        results + JSON inspector layout. Every color/size resolves to an
        app.css token — nothing here overrides the design system. */
 
-    /* Query bar — the exact GET behind the table, bg = code surface. */
-    .qbar { background: var(--bg-code); }
-    .qbar-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-    .qbar-chips { display: flex; flex-wrap: wrap; gap: 8px; flex: 1; min-width: 0; }
-    .qbar-hint { font-size: 12px; color: var(--text-dim); }
-    .qbar-copy { margin-left: auto; }
-    .qbar-curl { margin-top: 10px; overflow-x: auto; white-space: nowrap; }
-    .qchip .x { user-select: none; }
-
     /* .fcell / .fcell-actions / .pill-row / .lbl-note are shared components in app.css. */
     .fspacer { display: block; }
 
-    /* Results + sticky inspector. */
-    .results-grid { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 16px; align-items: start; }
-    .results-col { min-width: 0; }
-    .results-grid .inspector {
-      position: sticky; top: 68px; align-self: start;
-      max-height: calc(100vh - 92px); overflow: auto;
+    /* since / page_size: real parameters, but not what anyone filters by first. */
+    .fmore { font-family: var(--font-mono); font-size: 11px; }
+    .fmore summary {
+      cursor: pointer; color: var(--text-muted-p); list-style: none;
+      letter-spacing: 0.04em; padding: 4px 0;
     }
-    .ev-insp-body { min-height: 140px; }
-    .insp-placeholder { color: var(--text-dim); }
+    .fmore summary::-webkit-details-marker { display: none; }
+    .fmore summary::before { content: "+ "; color: var(--text-tertiary); }
+    .fmore[open] summary::before { content: "— "; }
+    .fmore-body {
+      display: flex; align-items: center; gap: 8px 14px; flex-wrap: wrap;
+      padding: 8px 0 2px;
+    }
 
-    /* Two-line event cell + selectable row. */
-    .events-table tbody tr { cursor: pointer; }
-    .events-table tbody tr.ev-selected { background: var(--bg-selected); }
-    .events-table tbody tr.ev-selected td:first-child {
-      box-shadow: inset 3px 0 0 var(--row-sev, var(--grn-line));
+    /* The echoed request, per spec: mono, muted, directly under the rule. */
+    .echo-query { display: flex; align-items: baseline; gap: 10px; }
+    .echo-query .method { color: var(--signal); font-weight: 700; }
+    .echo-query #ev-url { overflow-wrap: anywhere; white-space: normal; color: var(--text-primary); }
+    .echo-query .copy-btn { margin-left: auto; flex: none; }
+
+    /* Results: a single full-width list until a record is selected, then a
+       narrow list beside the full record. Under 900px the two SWAP — the
+       detail replaces the list — so a phone never renders a 380px column of
+       truncated headlines beside a cramped record. */
+    /* CONTAINER query, not a viewport media query. The results grid lives
+       inside .content, which is inset by the 244px sidebar — so a 920px
+       VIEWPORT leaves only ~600px here, and a viewport-keyed two-column rule
+       collapsed the detail column to ~213px of clipped values. Keying on the
+       grid's own width is the only measurement that is actually true. */
+    /* The container must be an ANCESTOR of what it styles — an element cannot
+       query its own container, which silently makes the rule never match. */
+    #ev-results { container-type: inline-size; container-name: results; }
+    .results-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 28px; align-items: start; }
+    @container results (min-width: 760px) {
+      .results-grid.has-selection { grid-template-columns: minmax(280px, 380px) minmax(0, 1fr); }
     }
-    .ev-head { color: var(--text); font-size: 13.5px; line-height: 1.4; }
-    .ev-head a { color: var(--text-hi); }
-    .ev-sub { margin-top: 3px; font-size: 12px; color: var(--text-faint); white-space: normal; }
-    .ev-sub .sep { color: var(--text-dimmer); }
+    .results-col { min-width: 0; }
+    .detail-col { min-width: 0; }
+    .results-grid.has-selection .detail-col {
+      position: sticky; top: 20px; align-self: start;
+      max-height: calc(100vh - 40px); overflow: auto;
+    }
+    .ev-back {
+      display: inline-block; margin-bottom: 12px; font-family: var(--font-mono);
+      font-size: 11px; letter-spacing: 0.06em;
+    }
+    /* Any `display` rule beats the [hidden] attribute's UA `display:none`, so a
+       hidden-by-default control needs this explicitly or it shows everywhere. */
+    .ev-back[hidden] { display: none; }
+    #ev-list { border-top: 1px solid var(--rule); }
 
     .results-foot { display: flex; align-items: center; gap: 16px; margin-top: 14px; margin-bottom: 8px; }
 
+    /* Below the container threshold there is only room for one pane, so the
+       detail REPLACES the list (events.js adds .narrow-detail). */
+    @container results (max-width: 759.98px) {
+      .results-grid.has-selection .detail-col { position: static; max-height: none; overflow: visible; }
+      .results-grid.narrow-detail .results-col { display: none; }
+    }
     @media (max-width: 900px) {
-      .results-grid { grid-template-columns: 1fr; }
-      .results-grid .inspector { position: static; max-height: none; }
+      .results-grid.has-selection .detail-col { position: static; max-height: none; overflow: visible; }
     }
   </style>
 
@@ -70,17 +101,11 @@ import GetChip from '../components/GetChip.astro';
     <GetChip slot="badges" path="/api/v1/events" />
   </PageHead>
 
-  <!-- The exact request behind the table: endpoint + active filter chips. -->
-  <section class="panel qbar" aria-label="Request behind these results">
-    <div class="qbar-line">
-      <GetChip path="/api/v1/events" />
-      <span id="ev-qchips" class="qbar-chips"></span>
-      <button type="button" id="ev-copyurl" class="copy-btn qbar-copy">copy url</button>
-    </div>
-    <div id="ev-curl" class="qbar-curl mono small muted"></div>
-  </section>
-
-  <!-- Filters: each control is one /api/v1/events query parameter. -->
+  <!-- Filter bar (design spec §2): labelled chip groups above a 3px rule, with
+       the resulting GET printed beneath. Every control refetches on change —
+       there is no Apply step, so the chips ARE the query. `since` and
+       `page_size` sit in a disclosure: they complete the 1:1 mapping onto the
+       endpoint's parameters without putting two more rows in front of everyone. -->
   <div class="filters">
     <label for="ev-place">place</label>
     <div class="fcell"><select id="ev-place"></select></div>
@@ -88,43 +113,43 @@ import GetChip from '../components/GetChip.astro';
     <label id="ev-layers-label">layer<span class="lbl-note">any of · empty = all layers</span></label>
     <div id="ev-layers" class="pill-row" role="group" aria-labelledby="ev-layers-label"></div>
 
+    <label id="ev-sev-label">severity_min<span class="lbl-note">inclusive floor</span></label>
+    <div id="ev-sev" class="pill-row" role="group" aria-labelledby="ev-sev-label"></div>
+
     <label id="ev-status-label">status<span class="lbl-note">default ACTIVE + SCHEDULED</span></label>
     <div id="ev-status" class="pill-row" role="group" aria-labelledby="ev-status-label"></div>
 
-    <label for="ev-sev">severity_min</label>
-    <div class="fcell"><select id="ev-sev"></select></div>
-
-    <label for="ev-since">since<span class="lbl-note">local time</span></label>
-    <div class="fcell"><input type="datetime-local" id="ev-since"></div>
-
-    <label for="ev-size">page_size</label>
-    <div class="fcell"><select id="ev-size"></select></div>
-
     <span class="fspacer" aria-hidden="true"></span>
     <div class="fcell fcell-actions">
-      <button type="button" id="ev-apply">Apply filters</button>
+      <details class="fmore">
+        <summary>since &amp; page_size</summary>
+        <div class="fmore-body">
+          <label for="ev-since">since<span class="lbl-note">local time</span></label>
+          <input type="datetime-local" id="ev-since">
+          <label for="ev-size">page_size</label>
+          <select id="ev-size"></select>
+        </div>
+      </details>
       <button type="button" id="ev-reset">Reset</button>
     </div>
   </div>
 
+  <!-- The exact request behind the results below. -->
+  <div class="echo-query">
+    <span class="method">GET</span> <span id="ev-url"></span>
+    <button type="button" id="ev-copyurl" class="copy-btn">copy curl</button>
+  </div>
+
   <div id="ev-errors"></div>
 
-  <!-- Results table (left) + sticky raw-JSON inspector (right). -->
-  <div class="results-grid">
-    <div class="results-col">
-      <div class="table-wrap">
-        <table class="data-table events-table">
-          <thead>
-            <tr>
-              <th style="width:104px">Severity</th>
-              <th>Event</th>
-              <th style="width:120px">Source</th>
-              <th class="num" style="width:64px">Rev</th>
-            </tr>
-          </thead>
-          <tbody id="ev-tbody" aria-live="polite"></tbody>
-        </table>
-      </div>
+  <!-- Record list (left) + the full record (right). The right column is rendered
+       by renderEventDetail() — the SAME renderer as the /event permalink page —
+       so the browser and the permalink can never show a record differently.
+       Under 900px the two swap: selecting replaces the list (see events.js). -->
+  <div id="ev-results">
+  <div class="results-grid" id="ev-grid">
+    <div class="results-col" id="ev-list-col">
+      <div id="ev-list" aria-live="polite"></div>
       <div id="ev-empty"></div>
       <div class="results-foot">
         <button type="button" id="ev-more" hidden>Load more</button>
@@ -132,15 +157,16 @@ import GetChip from '../components/GetChip.astro';
       </div>
     </div>
 
-    <aside class="inspector" id="ev-inspector" aria-label="Selected event JSON">
-      <div class="inspector-head">
-        <span>Response</span>
-        <span class="meta">application/json · grid.v1.Event</span>
-      </div>
-      <pre id="ev-insp-body" class="ev-insp-body"></pre>
-    </aside>
+    <div class="detail-col" id="ev-detail-col" hidden>
+      <button type="button" id="ev-back" class="ev-back" hidden>&larr; back to list</button>
+      <div id="ev-detail"></div>
+    </div>
+  </div>
   </div>
 
+  <!-- renderEventDetail draws each record's geometry when MapLibre is present;
+       without it the detail column silently degrades to bbox/centroid text. -->
+  <script is:inline src="/lib/maplibre-gl.js"></script>
   <script is:inline type="module">
     import { initEventsPage } from '/assets/pages/events.js';
     initEventsPage();

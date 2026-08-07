@@ -24,7 +24,7 @@ import {
   sevChip,
   sourceDot,
   layerLabel,
-  SEVERITY_COLORS,
+  SEVERITY_COLORS_ON_INK,
 } from '../format.js';
 import { BASE_STYLE } from '../basemap.js';
 
@@ -194,16 +194,18 @@ export function bboxOfFeatures(features) {
 }
 
 /**
- * MapLibre paint expression coloring by properties.severity on the canonical
- * ramp. Unknown severities fall through to the INFO gray — never uncolored.
- * @returns {Array} ['match', ['get','severity'], 'EXTREME', '#7f1d1d', ...]
+ * MapLibre paint expression coloring by properties.severity. Uses the ON-INK
+ * ramp: this geometry is drawn over the dark basemap, where the paper ramp's
+ * print reds go muddy. Unknown severities fall through to INFO — never
+ * uncolored.
+ * @returns {Array} ['match', ['get','severity'], 'EXTREME', '#ff5544', ...]
  */
 export function severityColorExpression() {
   const expr = ['match', ['get', 'severity']];
-  for (const [label, color] of Object.entries(SEVERITY_COLORS)) {
+  for (const [label, color] of Object.entries(SEVERITY_COLORS_ON_INK)) {
     expr.push(label, color);
   }
-  expr.push(SEVERITY_COLORS.INFO); // default
+  expr.push(SEVERITY_COLORS_ON_INK.INFO); // default
   return expr;
 }
 
@@ -353,6 +355,8 @@ function init() {
     panel: document.getElementById('honesty-panel'),
     unlocated: document.getElementById('unlocated'),
     errors: document.getElementById('page-errors'),
+    mapMount: document.getElementById('map-mount'),
+    suppressed: document.getElementById('map-suppressed'),
   };
 
   const params = new URLSearchParams(location.search);
@@ -370,6 +374,10 @@ function init() {
     fitted: Boolean(initialView), // an explicit ?view= wins over auto-fit
     programmaticMove: false,
     boundLayerIds: new Set(),
+    /** last decoded coverage outline, replayed on remount */
+    areaBoundary: null,
+    /** last camera position, so a remount does not reset the view */
+    lastView: null,
   };
 
   /* ---- URL state ---- */
@@ -401,34 +409,199 @@ function init() {
     els.errors.appendChild(block);
   }
 
-  /* ---- map ---- */
+  /* ---- map: mounted only when there is something true to draw ---- */
 
-  // Shared OSM raster basemap (basemap.js) under the hazard geometry. API data
-  // is still only ever fetched same-origin from /api/v1/* through api.js.
-  const map = new maplibregl.Map({
-    container: 'map-canvas',
-    style: BASE_STYLE,
-    center: initialView ? [initialView.lng, initialView.lat] : DEFAULT_CENTER,
-    zoom: initialView ? initialView.zoom : DEFAULT_ZOOM,
-  });
-  map.addControl(new maplibregl.NavigationControl(), 'top-right');
+  // THE CONTRACT (API spec §5): an empty basemap reads as "all clear", and this
+  // API never lets absence mean that. So the map element does not exist until a
+  // selected layer has actually returned features, and it is REMOVED again when
+  // none do — not hidden, not overlaid, not faded. `map` is therefore null much
+  // of the time and every caller must guard.
+  //
+  // Layers already loaded while the map was absent are replayed by ensureMap()
+  // from state.results, so mounting is idempotent and order-independent.
+  /** @type {maplibregl.Map|null} */
+  let map = null;
+  let pendingResize = false;
 
-  map.on('moveend', () => {
-    if (state.programmaticMove) {
-      state.programmaticMove = false;
+  /** True when a layer's result is something a map could honestly draw. */
+  function drawable(r) {
+    return Boolean(r && !r.error && r.located && r.located.length > 0);
+  }
+
+  /** Any selected layer with drawable features? The mount predicate. */
+  function anyDrawable() {
+    return selected.some((l) => drawable(state.results.get(l)));
+  }
+
+  /** Create the map element + instance. No-op if already mounted. */
+  function ensureMap() {
+    if (map || !els.mapMount) return;
+    const canvas = document.createElement('div');
+    canvas.id = 'map-canvas';
+    els.mapMount.appendChild(canvas);
+
+    // Remounting must not yank the camera back to where the page loaded. The
+    // last known camera (recorded on every moveend) wins; initialView is only
+    // the seed for the very first mount.
+    const view = state.lastView || initialView;
+
+    // Shared OSM raster basemap (basemap.js) under the hazard geometry. API data
+    // is still only ever fetched same-origin from /api/v1/* through api.js.
+    map = new maplibregl.Map({
+      container: canvas,
+      style: BASE_STYLE,
+      center: view ? [view.lng, view.lat] : DEFAULT_CENTER,
+      zoom: view ? view.zoom : DEFAULT_ZOOM,
+    });
+    map.addControl(new maplibregl.NavigationControl(), 'top-right');
+    wireMapEvents(map);
+
+    map.on('load', () => {
+      map.resize();
+      state.boundLayerIds.clear();
+      // Replay whatever arrived before the map existed.
+      for (const layer of selected) {
+        const r = state.results.get(layer);
+        if (drawable(r)) addLayerToMap(layer, r.located);
+      }
+      if (state.areaBoundary) addAreaBoundary(state.areaBoundary);
+      if (pendingResize) {
+        fitToFirstNonEmptyLayer();
+        pendingResize = false;
+      }
+    });
+  }
+
+  /** Tear the map down entirely and say why. */
+  function suppressMap(reason) {
+    if (map) {
+      map.remove();
+      map = null;
+    }
+    if (els.mapMount) els.mapMount.textContent = '';
+    state.boundLayerIds.clear();
+    renderSuppressedBanner(reason);
+  }
+
+  /**
+   * The three loud cases, per the design's banner spec. Each names what is
+   * unknown and links the authoritative source when the metadata gave us one.
+   */
+  function renderSuppressedBanner(reason) {
+    if (!els.suppressed) return;
+    els.suppressed.textContent = '';
+    if (!reason) return;
+    const box = document.createElement('div');
+    box.className = 'loud-banner';
+    const title = document.createElement('div');
+    title.className = 'loud-title';
+    title.textContent = reason.title;
+    const body = document.createElement('div');
+    body.textContent = reason.body;
+    box.append(title, body);
+    if (reason.sourceUrl) {
+      const p = document.createElement('div');
+      p.style.marginTop = '6px';
+      const a = document.createElement('a');
+      a.href = reason.sourceUrl;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.textContent = 'check the authoritative source ↗';
+      p.appendChild(a);
+      box.appendChild(p);
+    }
+    els.suppressed.appendChild(box);
+  }
+
+  /**
+   * Decide the map's existence from the current results. Called after every
+   * load; this is the single place the mount rule lives.
+   */
+  function syncMapPresence() {
+    if (anyDrawable()) {
+      renderSuppressedBanner(null);
+      ensureMap();
       return;
     }
-    const c = map.getCenter();
-    updateURL({
-      view: serializeView({ lat: c.lat, lng: c.lng, zoom: map.getZoom() }),
+
+    // Nothing drawable — work out which loud case this is.
+    if (!urlState.place || selected.length === 0) {
+      suppressMap({
+        title: 'no layer selected',
+        body: 'Pick a place and at least one layer. Nothing is drawn until a layer answers.',
+      });
+      return;
+    }
+    const results = selected.map((l) => state.results.get(l));
+    if (results.some((r) => !r)) return; // still loading; leave the map as-is
+
+    const failed = results.filter((r) => r && r.error);
+    const unavailable = results.filter((r) => {
+      const md = r && r.fc && r.fc.metadata;
+      return md && String(md.sourceStatus || '').toUpperCase() === 'UNAVAILABLE';
     });
-  });
+    const withUrl = [...unavailable, ...results].find(
+      (r) => r && r.fc && r.fc.metadata && safeHttpUrl(r.fc.metadata.sourceUrl)
+    );
+    const sourceUrl = withUrl ? safeHttpUrl(withUrl.fc.metadata.sourceUrl) : null;
+
+    if (failed.length) {
+      // ANY failure poisons the claim. A partial failure is still an unknown:
+      // the layer that errored is exactly where the thing we are not seeing
+      // would be, so "some layers answered OK and were empty" must never be
+      // reported as a confirmed empty region.
+      const all = failed.length === results.length;
+      suppressMap({
+        title: 'layer unavailable — state unknown, not clear',
+        body: all
+          ? 'Every selected layer failed to fetch or timed out. Nothing is drawn, because ' +
+            'an empty map would claim there is nothing there — and we do not know that. ' +
+            'The exact requests are listed in the feed metadata below; replay them yourself.'
+          : `${failed.length} of ${results.length} selected layers failed to fetch or timed out, ` +
+            'and the rest returned no features. That is not a confirmed empty region — the ' +
+            'failed layers are unknown, and nothing is drawn rather than implying they are clear. ' +
+            'Per-layer status is in the feed metadata below.',
+        sourceUrl,
+      });
+    } else if (unavailable.length) {
+      suppressMap({
+        title: 'sourceStatus: UNAVAILABLE — layer suppressed',
+        body:
+          'The upstream feed errored, so this layer arrives with empty features by contract. ' +
+          'It is suppressed rather than drawn: showing nothing is not the same as reporting nothing.',
+        sourceUrl,
+      });
+    } else {
+      suppressMap({
+        title: 'no features in range',
+        body:
+          'Every selected layer answered OK and returned no features for this place. That is a ' +
+          'confirmed empty result — not a failure — but the map is left unmounted so an empty ' +
+          'basemap is never mistaken for a surveyed all-clear.',
+        sourceUrl,
+      });
+    }
+  }
+
+  /** Map-instance event wiring, re-run on each mount. */
+  function wireMapEvents(m) {
+    m.on('moveend', () => {
+      if (state.programmaticMove) {
+        state.programmaticMove = false;
+        return;
+      }
+      const c = m.getCenter();
+      state.lastView = { lat: c.lat, lng: c.lng, zoom: m.getZoom() };
+      updateURL({ view: serializeView(state.lastView) });
+    });
+  }
 
   function sublayerIds(layer) {
     return ['fill', 'line', 'circle'].map((s) => `grid-${layer}-${s}`);
   }
 
   function removeLayerFromMap(layer) {
+    if (!map) return; // map unmounted — nothing bound, nothing to remove
     for (const id of sublayerIds(layer)) {
       if (map.getLayer(id)) map.removeLayer(id);
     }
@@ -436,6 +609,9 @@ function init() {
   }
 
   function addLayerToMap(layer, located) {
+    // May be called before the map exists (a layer resolving while suppressed);
+    // ensureMap()'s load handler replays state.results, so dropping it is safe.
+    if (!map || !map.isStyleLoaded()) return;
     removeLayerFromMap(layer);
     if (!located.length) return;
     const color = severityColorExpression();
@@ -505,6 +681,7 @@ function init() {
   }
 
   function removeAreaBoundary() {
+    if (!map) return;
     if (map.getLayer('grid-area-boundary-line')) map.removeLayer('grid-area-boundary-line');
     if (map.getSource('grid-area-boundary')) map.removeSource('grid-area-boundary');
   }
@@ -514,6 +691,7 @@ function init() {
   // layers, and a place without polygon geometry simply shows none.
   async function loadAreaBoundary(token) {
     removeAreaBoundary();
+    state.areaBoundary = null; // the old place's outline must not survive a remount
     if (!urlState.place) return;
     let geom;
     try {
@@ -523,7 +701,15 @@ function init() {
     } catch {
       return;
     }
-    if (!geom || token !== state.loadToken || map.getSource('grid-area-boundary')) return;
+    if (!geom || token !== state.loadToken) return;
+    // Remember it so a later mount can redraw the outline (see ensureMap()).
+    state.areaBoundary = geom;
+    addAreaBoundary(geom);
+  }
+
+  /** Draw the remembered coverage outline. No-op without a live map. */
+  function addAreaBoundary(geom) {
+    if (!map || !map.isStyleLoaded() || map.getSource('grid-area-boundary')) return;
     map.addSource('grid-area-boundary', {
       type: 'geojson',
       data: { type: 'Feature', geometry: geom, properties: {} },
@@ -856,6 +1042,11 @@ function init() {
 
   function fitToFirstNonEmptyLayer() {
     if (state.fitted) return;
+    if (!map) {
+      // Nothing to fit yet; ensureMap() re-runs this once the style loads.
+      pendingResize = true;
+      return;
+    }
     state.fitted = true; // one shot: later toggles never yank the view
     for (const layer of MAP_LAYERS) {
       if (!selected.includes(layer)) continue;
@@ -884,9 +1075,17 @@ function init() {
     renderPanel();
     renderUnlocated();
     loadAreaBoundary(token); // coverage footprint — independent of hazard layers
-    if (!urlState.place || selected.length === 0) return;
+    if (!urlState.place || selected.length === 0) {
+      syncMapPresence();
+      return;
+    }
     await Promise.allSettled(selected.map((l) => loadLayer(l, token)));
-    if (token === state.loadToken) fitToFirstNonEmptyLayer();
+    if (token !== state.loadToken) return;
+    // The mount rule runs once, here, on the settled result set — never
+    // per-layer, or a slow UNAVAILABLE layer would tear down a map that a
+    // fast OK layer had legitimately populated.
+    syncMapPresence();
+    fitToFirstNonEmptyLayer();
   }
 
   /* ---- controls ---- */
@@ -900,13 +1099,16 @@ function init() {
       input.type = 'checkbox';
       input.value = layer;
       input.checked = selected.includes(layer);
-      input.addEventListener('change', () => {
+      input.addEventListener('change', async () => {
         if (input.checked) {
           selected = MAP_LAYERS.filter(
             (l) => selected.includes(l) || l === layer
           );
           updateURL();
-          if (urlState.place) loadLayer(layer, state.loadToken);
+          // await: loadLayer must have settled before the mount rule can judge
+          // the result set, or a newly-ticked layer with real features would be
+          // judged as "still loading" and leave the map suppressed.
+          if (urlState.place) await loadLayer(layer, state.loadToken);
           renderPanelEntry(layer);
         } else {
           selected = selected.filter((l) => l !== layer);
@@ -916,6 +1118,12 @@ function init() {
           renderPanelEntry(layer);
           renderUnlocated();
         }
+        // THE MOUNT RULE MUST RUN ON EVERY PATH THAT CHANGES THE RESULT SET.
+        // Toggling is such a path: unticking the last drawable layer would
+        // otherwise leave a rendered basemap with zero features on screen — the
+        // "all clear" the contract forbids — and ticking a layer while
+        // suppressed would leave a stale banner over real data.
+        syncMapPresence();
       });
       label.append(input, ` ${layerLabel(layer)}`);
       els.layerChecks.appendChild(label);
@@ -991,14 +1199,13 @@ function init() {
   renderPanel();
   renderUnlocated();
 
-  map.on('load', async () => {
-    map.resize(); // fill the container once the style is ready
+  (async () => {
     await loadPlaces();
     updateURL(); // canonicalize: resolved place (+ layers if non-default)
     await reloadAll();
-  });
+  })();
 }
 
-if (typeof document !== 'undefined' && document.getElementById('map-canvas')) {
+if (typeof document !== 'undefined' && document.getElementById('map-mount')) {
   init();
 }

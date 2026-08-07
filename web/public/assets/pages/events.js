@@ -12,7 +12,8 @@
 // this module. All DOM work happens inside initEventsPage().
 
 import { get, apiURL, curlFor, ApiError } from '../api.js';
-import { sevChip, layerLabel, timeAgo, timeAbs, SEVERITY_COLORS } from '../format.js';
+import { layerLabel, recordRow } from '../format.js';
+import { renderEventDetail } from './event-detail.js';
 
 /**
  * Event layers accepted by /api/v1/events' `layer` param, as the lowercase
@@ -237,108 +238,35 @@ function errorBlock(err) {
  * One results row for an Event (protojson, camelCase). Four columns:
  * severity badge · two-line headline+subline (layer · area · relative time) ·
  * source · r<rev>. Clicking the row runs `onSelect(ev, tr, sevColor)` to load
- * the raw JSON into the inspector; the headline stays a deep link to the event
- * detail page (stopPropagation so it navigates instead of inspecting).
+ * Build one result row using the SHARED record row (format.js), the same item
+ * the front-page feed, Roads and History render — so a record looks identical
+ * wherever it appears.
+ *
+ * The row is a real <a> to the /event permalink, so middle-click and
+ * cmd/ctrl-click open it in a new tab as any link should. A PLAIN left click is
+ * intercepted instead and selects the record in-page, which is what the
+ * two-column browser is for. Losing the permalink to make selection work would
+ * be a regression; losing selection to keep the link would be a different one.
+ *
  * @param {Object} ev protojson Event
- * @param {(ev:Object, tr:HTMLElement, sevColor:string)=>void} onSelect
+ * @param {(ev:Object, row:HTMLElement)=>void} onSelect
  */
 function eventRow(ev, onSelect) {
-  // protojson omits default enum values: absent severity is INFO.
-  const sev = String(ev.severity || 'INFO').toUpperCase();
-  const sevColor = SEVERITY_COLORS[sev] || 'var(--grn-line)';
-
-  const tr = el('tr', 'ev-row');
-
-  const sevTd = document.createElement('td');
-  sevTd.append(sevChip(sev));
-  tr.append(sevTd);
-
-  const headTd = el('td', 'wrap');
-  const head = el('div', 'ev-head');
-  if (ev.id) {
-    const link = document.createElement('a');
-    link.href = `/event?id=${encodeURIComponent(ev.id)}`;
-    link.textContent = ev.headline || ev.id; // textContent: upstream text is untrusted
-    link.title = 'open event detail';
-    link.addEventListener('click', (e) => e.stopPropagation());
-    head.append(link);
-  } else {
-    head.textContent = ev.headline || '(no headline)';
-  }
-  const sub = el('div', 'ev-sub');
-  sub.append(document.createTextNode(layerLabel(ev.layer || '')));
-  sub.append(el('span', 'sep', ' · '));
-  sub.append(document.createTextNode(ev.areaLabel || '—'));
-  sub.append(el('span', 'sep', ' · '));
-  sub.append(document.createTextNode(timeAgo(ev.observedAt || '')));
-  sub.title = timeAbs(ev.observedAt || '');
-  headTd.append(head, sub);
-  tr.append(headTd);
-
-  tr.append(el('td', 'src', (ev.provenance && ev.provenance.sourceId) || '—'));
-  // revision is a proto uint32; protojson omits 0.
-  tr.append(el('td', 'num', 'r' + String(ev.revision ?? 0)));
-
-  // On phones the row reflows into a stacked card (app.css ≤640px); caption the
-  // secondary columns so Source/Rev don't clip off-screen. Severity/Event carry
-  // their own badge + headline, so they read fine without a caption.
-  const tds = tr.querySelectorAll(':scope > td');
-  if (tds[2]) tds[2].dataset.label = 'Source';
-  if (tds[3]) tds[3].dataset.label = 'Revision';
-
-  tr._select = () => onSelect(ev, tr, sevColor);
-  tr.addEventListener('click', tr._select);
-  return tr;
-}
-
-/** A syntax-highlight <span> (keys/strings/numbers/bools/punctuation). */
-function jspan(cls, text) {
-  const s = document.createElement('span');
-  s.className = cls;
-  s.textContent = text;
-  return s;
+  const row = recordRow(ev, { href: `/event?id=${encodeURIComponent(ev.id || '')}` });
+  row._select = () => onSelect(ev, row);
+  row.addEventListener('click', (e) => {
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return; // let the link win
+    e.preventDefault();
+    row._select();
+  });
+  return row;
 }
 
 /**
- * Pretty-print a value as syntax-colored JSON into a DocumentFragment, built
- * entirely from text nodes and classed spans (never innerHTML). Keys, strings,
- * numbers, and booleans/null are colored; whitespace and structural
- * punctuation fall through to the .jpunc class.
- * @param {*} value
- * @returns {DocumentFragment}
- */
-function highlightJSON(value) {
-  const frag = document.createDocumentFragment();
-  const text = JSON.stringify(value, null, 2);
-  if (text === undefined) {
-    frag.append(document.createTextNode(String(value)));
-    return frag;
-  }
-  const re = /("(?:\\.|[^"\\])*")(\s*:)?|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|\b(true|false|null)\b/g;
-  let last = 0;
-  let m;
-  while ((m = re.exec(text)) !== null) {
-    if (m.index > last) frag.append(jspan('jpunc', text.slice(last, m.index)));
-    if (m[1] !== undefined) {
-      const isKey = m[2] !== undefined;
-      frag.append(jspan(isKey ? 'jkey' : 'jstr', m[1]));
-      if (isKey) frag.append(jspan('jpunc', m[2]));
-    } else if (m[3] !== undefined) {
-      frag.append(jspan('jnum', m[3]));
-    } else if (m[4] !== undefined) {
-      frag.append(jspan('jbool', m[4]));
-    }
-    last = re.lastIndex;
-  }
-  if (last < text.length) frag.append(jspan('jpunc', text.slice(last)));
-  return frag;
-}
-
-/**
- * Wire up the /events page. Expects the element ids laid out in events.html
+ * Wire up the /events page. Expects the element ids laid out in events.astro
  * (ev-place, ev-layers, ev-status, ev-sev, ev-since, ev-size, ev-apply,
- * ev-reset, ev-qchips, ev-curl, ev-copyurl, ev-errors, ev-tbody, ev-empty,
- * ev-more, ev-status-line, ev-insp-body).
+ * ev-reset, ev-qchips, ev-curl, ev-copyurl, ev-errors, ev-list, ev-empty,
+ * ev-more, ev-status-line, ev-grid, ev-detail-col, ev-detail, ev-back).
  */
 export function initEventsPage() {
 
@@ -346,27 +274,37 @@ export function initEventsPage() {
   const placeSel = $('ev-place');
   const layersBox = $('ev-layers');
   const statusBox = $('ev-status');
-  const sevSel = $('ev-sev');
+  const sevBox = $('ev-sev');
   const sinceInput = $('ev-since');
   const sizeSel = $('ev-size');
-  const applyBtn = $('ev-apply');
   const resetBtn = $('ev-reset');
-  const qchipsEl = $('ev-qchips');
-  const curlEl = $('ev-curl');
+  const urlEl = $('ev-url');
   const copyUrlBtn = $('ev-copyurl');
   const errorsEl = $('ev-errors');
-  const tbody = $('ev-tbody');
+  const listEl = $('ev-list');
   const emptyEl = $('ev-empty');
   const moreBtn = $('ev-more');
   const statusLine = $('ev-status-line');
-  const inspBody = $('ev-insp-body');
+  const gridEl = $('ev-grid');
+  const detailCol = $('ev-detail-col');
+  const detailEl = $('ev-detail');
+  const backBtn = $('ev-back');
+  // Must agree with the @container threshold in events.astro — and be measured
+  // the same way. A viewport media query would disagree with the CSS between
+  // ~760 and ~1000px (the sidebar's 244px), leaving the layout in two columns
+  // while the JS believed it was in one.
+  const NARROW_AT = 760;
+  const wrapEl = $('ev-results');
+  const isNarrow = () => ((wrapEl || gridEl) ? (wrapEl || gridEl).clientWidth < NARROW_AT : window.innerWidth < 1004);
+  const narrow = { get matches() { return isNarrow(); } };
 
   let state = readState(new URLSearchParams(location.search));
   let nextToken = '';
   let loadedCount = 0;
   let loading = false;
   let lastReqUrl = '';
-  let selectedTr = null;
+  let selectedRow = null;
+  let selectedId = '';
 
   // ---- controls ----------------------------------------------------
 
@@ -382,6 +320,7 @@ export function initEventsPage() {
       b.addEventListener('click', () => {
         const now = b.classList.toggle('on');
         b.setAttribute('aria-pressed', now ? 'true' : 'false');
+        applyNow();
       });
       box.append(b);
     }
@@ -390,17 +329,24 @@ export function initEventsPage() {
   makePills(layersBox, LAYER_OPTIONS, state.layers, (v) => layerLabel(v));
   makePills(statusBox, STATUS_OPTIONS, state.statuses, (v) => v);
 
-  const anySev = document.createElement('option');
-  anySev.value = '';
-  anySev.textContent = '(no floor)';
-  sevSel.append(anySev);
-  for (const sev of SEVERITY_OPTIONS) {
-    const opt = document.createElement('option');
-    opt.value = sev;
-    opt.textContent = sev;
-    sevSel.append(opt);
+  // severity_min is a FLOOR, so exactly one value applies — a single-select
+  // chip group rather than the multi-select pills used for layer and status.
+  // '' is "any", which is the API's own default rather than a special case.
+  function makeRadioPills(box, values, selected) {
+    for (const value of values) {
+      const on = value === selected;
+      const b = el('button', 'pill' + (on ? ' on' : ''), value === '' ? 'any' : value);
+      b.type = 'button';
+      b.dataset.value = value;
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      b.addEventListener('click', () => {
+        for (const other of box.querySelectorAll('.pill')) setPill(other, other === b);
+        applyNow();
+      });
+      box.append(b);
+    }
   }
-  sevSel.value = state.severityMin;
+  makeRadioPills(sevBox, ['', ...SEVERITY_OPTIONS], state.severityMin);
 
   for (const size of PAGE_SIZES) {
     const opt = document.createElement('option');
@@ -479,10 +425,10 @@ export function initEventsPage() {
       place: placeSel.value,
       layers: [...layersBox.querySelectorAll('.pill.on')].map((b) => b.dataset.value),
       statuses: statuses.length ? statuses : [...DEFAULT_STATUSES],
-      severityMin: sevSel.value,
+      severityMin: (sevBox.querySelector('.pill.on') || {}).dataset?.value || '',
       since: fromLocalInput(sinceInput.value) || '',
       pageSize: sizeSel.value,
-      pageToken: '', // Apply always restarts from the first page
+      pageToken: '', // a filter change always restarts from the first page
     };
   }
 
@@ -494,7 +440,9 @@ export function initEventsPage() {
     for (const b of statusBox.querySelectorAll('.pill')) {
       setPill(b, state.statuses.includes(b.dataset.value));
     }
-    sevSel.value = state.severityMin;
+    for (const b of sevBox.querySelectorAll('.pill')) {
+      setPill(b, b.dataset.value === state.severityMin);
+    }
     sinceInput.value = toLocalInput(state.since);
     sizeSel.value = PAGE_SIZES.includes(state.pageSize) ? state.pageSize : '';
   }
@@ -504,127 +452,105 @@ export function initEventsPage() {
     history.replaceState(null, '', qs ? `?${qs}` : location.pathname);
   }
 
-  // ---- query bar ----------------------------------------------------
+  /**
+   * A control changed: adopt it, rewrite the permalink, refetch from page one.
+   * Per the design spec the chips ARE the query — there is no Apply step, so
+   * every control funnels through here.
+   */
+  function applyNow() {
+    state = readControls();
+    writeURL();
+    runQuery('', false);
+  }
+
+  placeSel.addEventListener('change', applyNow);
+  sinceInput.addEventListener('change', applyNow);
+  sizeSel.addEventListener('change', applyNow);
+
+  // ---- echoed query --------------------------------------------------
 
   function absURL(url) {
     return /^https?:\/\//.test(url) ? url : `https://data.sierragridteam.org${url}`;
   }
 
   /**
-   * Removing a filter chip mutates state in place, resets pagination, mirrors
-   * the change back into the controls, rewrites the permalink, and re-runs the
-   * query from page one — the chip set is the live, editable query.
-   */
-  function removeFilter(mutate) {
-    mutate();
-    state.pageToken = '';
-    syncControls();
-    writeURL();
-    runQuery('', false);
-  }
-
-  /**
-   * Render the request behind the current results: the endpoint, one removable
-   * .qchip per active filter (status/layer repeat), and the copyable curl line.
-   * The default status set (ACTIVE,SCHEDULED) is omitted — it is the API's own
-   * default and never a chip, so the chips are exactly the URL's params.
+   * Print the exact request behind the results (design spec §2: the GET URL in
+   * mono beneath the filter rule).
+   *
+   * There used to be a second row of removable filter chips here. It duplicated
+   * the pills directly above it — which are now live — so the same filter was
+   * removable in two places and the panel restated a query the controls already
+   * showed. One line, one truth.
    */
   function renderQueryBar(params) {
     lastReqUrl = apiURL('/api/v1/events', params);
-    curlEl.textContent = curlFor(lastReqUrl);
-
-    qchipsEl.textContent = '';
-    const chip = (key, value, onRemove) => {
-      const c = el('span', 'qchip');
-      c.append(el('span', 'k', key + '='), document.createTextNode(value));
-      const x = el('span', 'x', '✕');
-      x.setAttribute('role', 'button');
-      x.setAttribute('tabindex', '0');
-      x.setAttribute('aria-label', `remove ${key}=${value} filter`);
-      x.title = `remove ${key} filter`;
-      x.addEventListener('click', onRemove);
-      x.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          onRemove();
-        }
-      });
-      c.append(x);
-      qchipsEl.append(c);
-    };
-
-    if (state.place) {
-      chip('place', state.place, () => removeFilter(() => { state.place = ''; }));
-    }
-    for (const layer of state.layers) {
-      chip('layer', layer, () =>
-        removeFilter(() => {
-          state.layers = state.layers.filter((l) => l !== layer);
-        })
-      );
-    }
-    if (!isDefaultStatuses(state.statuses)) {
-      for (const st of state.statuses) {
-        chip('status', st, () =>
-          removeFilter(() => {
-            state.statuses = state.statuses.filter((s) => s !== st);
-            if (!state.statuses.length) state.statuses = [...DEFAULT_STATUSES];
-          })
-        );
-      }
-    }
-    if (state.severityMin) {
-      chip('severity_min', state.severityMin, () => removeFilter(() => { state.severityMin = ''; }));
-    }
-    if (state.since) {
-      chip('since', state.since, () => removeFilter(() => { state.since = ''; }));
-    }
-    if (state.pageSize) {
-      chip('page_size', state.pageSize, () => removeFilter(() => { state.pageSize = ''; }));
-    }
-    if (!qchipsEl.children.length) {
-      qchipsEl.append(el('span', 'qbar-hint', 'no filters · status defaults to ACTIVE,SCHEDULED'));
-    }
+    urlEl.textContent = lastReqUrl;
   }
 
   copyUrlBtn.addEventListener('click', () => {
-    navigator.clipboard.writeText(absURL(lastReqUrl)).then(
+    navigator.clipboard.writeText(curlFor(absURL(lastReqUrl))).then(
       () => {
         copyUrlBtn.textContent = 'copied';
-        setTimeout(() => (copyUrlBtn.textContent = 'copy url'), 1200);
+        setTimeout(() => (copyUrlBtn.textContent = 'copy curl'), 1400);
       },
-      () => {
-        copyUrlBtn.textContent = 'failed';
-      }
+      () => (copyUrlBtn.textContent = 'failed')
     );
   });
 
-  // ---- inspector ----------------------------------------------------
+  // ---- selection ------------------------------------------------------
 
-  function inspectorPlaceholder() {
-    inspBody.textContent = '';
-    inspBody.append(
-      jspan(
-        'insp-placeholder',
-        'Select a row to inspect its raw grid.v1.Event JSON —\n' +
-          'the exact bytes GET /api/v1/events returned for that occurrence.'
-      )
-    );
-  }
+  /**
+   * Show one record in the detail column, rendered by the same function the
+   * /event permalink page uses. On a narrow viewport the detail REPLACES the
+   * list (the design's swap) and a back button appears; on desktop the two sit
+   * side by side and the grid gains its second track.
+   */
+  function selectEvent(ev, row) {
+    if (selectedRow) selectedRow.classList.remove('selected');
+    selectedRow = row;
+    selectedId = ev.id || '';
+    if (row) row.classList.add('selected');
 
-  function selectEvent(ev, tr, sevColor) {
-    if (selectedTr) {
-      selectedTr.classList.remove('ev-selected');
-      selectedTr.style.removeProperty('--row-sev');
+    gridEl.classList.add('has-selection');
+    detailCol.hidden = false;
+    if (narrow.matches) {
+      gridEl.classList.add('narrow-detail');
+      backBtn.hidden = false;
+      detailCol.scrollIntoView({ block: 'start' });
     }
-    selectedTr = tr;
-    tr.classList.add('ev-selected');
-    tr.style.setProperty('--row-sev', sevColor);
-    inspBody.textContent = '';
-    inspBody.append(highlightJSON(ev));
+    // setTitle:false — selecting inside the browser must not retitle the page
+    // away from "Events"; only the permalink page owns the document title.
+    renderEventDetail(detailEl, selectedId, { setTitle: false, headingLevel: 2 });
   }
 
-  inspectorPlaceholder();
+  /** Narrow-viewport "back to list": drop the detail, restore the list. */
+  function clearSelection() {
+    gridEl.classList.remove('narrow-detail');
+    backBtn.hidden = true;
+    if (narrow.matches) {
+      // Keep the record selected (so returning to it is one tap) but hide the
+      // pane; on desktop the pane stays visible beside the list.
+      detailCol.hidden = true;
+      gridEl.classList.remove('has-selection');
+    }
+  }
+
+  backBtn.addEventListener('click', clearSelection);
+
+  // Crossing the 900px boundary changes which pane is authoritative; re-apply
+  // so a resize never leaves both hidden or both fighting for the column.
+  // No matchMedia to listen to now; watch the grid's own box instead.
+  const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(() => onWidthChange()) : null;
+  if (ro && (wrapEl || gridEl)) ro.observe(wrapEl || gridEl);
+  else window.addEventListener('resize', () => onWidthChange());
+
+  function onWidthChange() {
+    if (!selectedId) return;
+    gridEl.classList.remove('narrow-detail');
+    backBtn.hidden = true;
+    detailCol.hidden = false;
+    gridEl.classList.add('has-selection');
+  }
 
   // ---- results ------------------------------------------------------
 
@@ -635,16 +561,19 @@ export function initEventsPage() {
   async function runQuery(token, append) {
     if (loading) return;
     loading = true;
-    applyBtn.disabled = true;
     moreBtn.disabled = true;
 
     if (!append) {
-      tbody.textContent = '';
+      listEl.textContent = '';
       emptyEl.textContent = '';
       loadedCount = 0;
       nextToken = '';
-      selectedTr = null;
-      inspectorPlaceholder();
+      selectedRow = null;
+      selectedId = '';
+      detailEl.textContent = '';
+      detailCol.hidden = true;
+      backBtn.hidden = true;
+      gridEl.classList.remove('has-selection', 'narrow-detail');
     }
     errorsEl.textContent = '';
 
@@ -660,11 +589,13 @@ export function initEventsPage() {
       for (const ev of events) {
         const row = eventRow(ev, selectEvent);
         if (!firstRow) firstRow = row;
-        tbody.append(row);
+        listEl.append(row);
       }
-      // Populate the inspector immediately with the top (highest-severity,
-      // newest) row, so the raw JSON is visible without a first click.
-      if (!append && firstRow) firstRow._select();
+      // Open the top (highest-severity, newest) record straight away so the
+      // pane is never an empty prompt — but only on desktop: on a phone the
+      // detail replaces the list, and auto-selecting would hide the results the
+      // reader just asked for.
+      if (!append && firstRow && !narrow.matches) firstRow._select();
       loadedCount += events.length;
       nextToken = data.nextPageToken || '';
       moreBtn.hidden = !nextToken;
@@ -701,17 +632,10 @@ export function initEventsPage() {
       moreBtn.hidden = true;
     } finally {
       loading = false;
-      applyBtn.disabled = false;
     }
   }
 
   // ---- events ---------------------------------------------------------
-
-  applyBtn.addEventListener('click', () => {
-    state = readControls();
-    writeURL(); // the permalink is the artifact: Apply writes the full query
-    runQuery('', false);
-  });
 
   resetBtn.addEventListener('click', () => {
     // Clear layers/severity/since/place, restore the default status set, and
@@ -755,8 +679,8 @@ export function initEventsPage() {
       el(
         'div',
         'muted small',
-        'This URL carries a page_token, so the table starts mid-stream at ' +
-          'that cursor. Press Apply to restart from the first page.'
+        'This URL carries a page_token, so the list starts mid-stream at ' +
+          'that cursor. Change any filter to restart from the first page.'
       )
     );
     errorsEl.after(note);

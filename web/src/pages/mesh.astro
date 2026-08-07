@@ -16,7 +16,7 @@ import PageHead from '../components/PageHead.astro';
       .mesh-win-btn {
         font: inherit; font-size: 12px; padding: 3px 9px; cursor: pointer;
         color: var(--text-2); background: var(--bg-card); border: 1px solid var(--border);
-        border-radius: 999px;
+        /* radii-0: the broadsheet has no pills. */
       }
       .mesh-win-btn:hover { color: var(--text); border-color: var(--text-faint); }
       .mesh-win-btn.active { color: var(--text-hi); border-color: var(--accent-cyan, #6aa9c9); background: rgba(106, 169, 201, 0.14); }
@@ -25,16 +25,18 @@ import PageHead from '../components/PageHead.astro';
       .mesh-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; border: 1px solid #0b0f12; }
       #mesh-canvas {
         width: 100%; height: 620px; border: 1px solid var(--border); border-radius: var(--radius);
-        background: #0f1417; overflow: hidden;
+        background: var(--ink); overflow: hidden;
       }
-      /* popup, dev-console themed (mirrors the map page) */
+      /* Popup: an ink surface over the dark basemap, mirroring the map page —
+         no radius, no drop shadow, and the .on-ink severity ramp. */
       .maplibregl-popup-content {
-        background: var(--bg-card); color: var(--text); border: 1px solid var(--border);
-        border-radius: var(--radius); font-family: var(--font-mono); font-size: 12.5px;
-        padding: 10px 12px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+        background: var(--ink); color: var(--on-ink-2); border: 1px solid var(--ink-rule);
+        font-family: var(--font-mono); font-size: 12px; padding: 10px 12px; box-shadow: none;
+        --sev-EXTREME: #ff5544; --sev-SEVERE: #e0913f; --sev-MODERATE: #d0a24a;
+        --sev-MINOR: #4d9c3a; --sev-INFO: #3d8bff;
       }
-      .maplibregl-popup-close-button { color: var(--text-faint); font-size: 17px; }
-      .map-popup .popup-headline { font-weight: 600; color: var(--text-hi); margin-bottom: 5px; }
+      .maplibregl-popup-close-button { color: var(--on-ink-muted); font-size: 17px; }
+      .map-popup .popup-headline { font-family: var(--font-display); font-weight: 700; font-size: 14px; color: var(--on-ink); margin-bottom: 5px; }
       .map-popup .popup-chips { margin-bottom: 6px; }
       .mesh-roletag { font-weight: 600; }
       .popup-details-dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 0; }
@@ -66,6 +68,40 @@ import PageHead from '../components/PageHead.astro';
 
   <div id="mesh-canvas"></div>
   <div id="mesh-errors" class="section-gap"></div>
+
+  <!-- The node roster. The map answers "where is the mesh"; this answers "what
+       exactly did we hear, and how long ago" — including nodes whose telemetry
+       is partial, which a map dot cannot express. -->
+  <div class="section-gap">
+    <div class="section-head">
+      <div class="left"><h2>Nodes heard</h2></div>
+      <span class="cap">node · type · snr / rssi · hops · heard</span>
+    </div>
+    <p class="prose" style="font-size:13.5px;">
+      Mesh presence is ambient <code class="inline">INFO</code> state: it is excluded from a place's
+      <code class="inline">totalActive</code>, its severity counts, its top events and its area mode —
+      a busy mesh does not raise an alert level, and a quiet one does not lower it.
+      Telemetry (SNR, RSSI, hop count) is <strong>volatile and deliberately excluded from the content
+      hash</strong>, so it never mints a revision; only a node's identity, location or status does.
+      <strong class="accent-orange">To ask when a node last spoke, read the event's
+      <code class="inline">observedAt</code>, not <code class="inline">telemetry.lastAdvertAt</code></strong>
+      — the latter is stamped by the node's own unsynchronized clock. Missing telemetry renders as
+      <span class="mono">—</span>, never as <span class="mono">0</span>.
+    </p>
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Node</th><th style="width:130px">Type</th>
+            <th style="width:140px">SNR / RSSI</th>
+            <th class="num" style="width:70px">Hops</th>
+            <th style="width:150px">Heard</th>
+          </tr>
+        </thead>
+        <tbody id="mesh-tbody"><tr><td colspan="5"><span class="loading">Loading nodes…</span></td></tr></tbody>
+      </table>
+    </div>
+  </div>
 
   <script is:inline src="/lib/maplibre-gl.js"></script>
   <script is:inline type="module">

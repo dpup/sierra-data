@@ -67,7 +67,18 @@ const PLACES = [
   },
   { id: 'evac_zone:CAL-E043', slug: 'cal-e043', name: 'CAL-E043 (Avery / Hathaway Pines)', kind: 'EVAC_ZONE',
     parentId: 'county:calaveras-county', geometry: { centroid: { lat: 38.20, lng: -120.37 } } },
+  // A deliberately QUIET area. The default fixtures exercise the loud paths
+  // (null evacuations, an UNAVAILABLE layer, a STALE source); nothing exercised
+  // the CALM one, which is the harder assertion to get right — calm is a
+  // positive claim requiring every input to be known, so a regression that
+  // makes it too easy to reach would never show up in a screenshot without this.
+  { id: 'area:quiet-meadow', slug: 'quiet-meadow', name: 'Quiet Meadow', kind: 'AREA',
+    geometry: { centroid: { lat: 38.44, lng: -120.22 },
+      bbox: { minLat: 38.40, minLng: -120.30, maxLat: 38.48, maxLng: -120.14 } } },
 ];
+
+/** The slug whose fixtures represent a fully-known, nothing-happening region. */
+const CALM_PLACE = 'quiet-meadow';
 
 // ---- events --------------------------------------------------------------
 // Each event carries the fields events.js / event-detail.js / mesh.js read.
@@ -75,67 +86,78 @@ const PLACES = [
 const EVENTS = [
   {
     id: 'evt-wildfire-mudflat', layer: 'wildfire', severity: 'EXTREME', status: 'ACTIVE',
+    wildfire: { acres: 2340, containment: 15, county: 'Calaveras', cause: 'under investigation', hasPerimeter: true },
     headline: 'Mudflat Fire — 2,340 acres, 15% contained', areaLabel: 'Ebbetts Pass', category: 'wildfire',
     observedAt: ago(11), revision: 7, provenance: { sourceId: 'firis' },
     description: 'Fast-moving wildfire east of Arnold along the Hwy 4 corridor. Forward spread driven by afternoon winds; spot fires reported north of the highway.',
-    enhancement: {
-      summary: 'Extreme fire behavior near Arnold; evacuation warning in effect for zones along Hwy 4.',
-      impact: 'severe', duration: 'ongoing',
-    },
+    summary: 'Extreme fire behavior near Arnold; evacuation warning in effect for zones along Hwy 4.',
+    enhancement: { model: 'claude-haiku-4-5', enhancedAt: ago(6), fields: ['summary'] },
     geometry: { centroid: { lat: 38.27, lng: -120.30 },
       geojson: geo({ type: 'Point', coordinates: [-120.30, 38.27] }) },
   },
   {
     id: 'evt-evac-e043', layer: 'evacuation', severity: 'SEVERE', status: 'ACTIVE',
+    evacuation: { zoneId: 'CAL-E043', level: 'WARNING', eventType: 'wildfire', county: 'Calaveras' },
     headline: 'Evacuation WARNING — Zone CAL-E043 (Avery / Hathaway Pines)', areaLabel: 'Calaveras County',
     category: 'evacuation', observedAt: ago(24), revision: 2, provenance: { sourceId: 'genasys' },
     description: 'Cal OES / Genasys evacuation warning issued for zone CAL-E043 due to the Mudflat Fire. Be ready to leave.',
-    enhancement: { summary: 'Warning (not order) — prepare to evacuate.', impact: 'severe', duration: 'ongoing' },
+    summary: 'Warning (not order) — prepare to evacuate.',
+    enhancement: { model: 'claude-haiku-4-5', enhancedAt: ago(6), fields: ['summary'] },
     geometry: { centroid: { lat: 38.20, lng: -120.37 },
       geojson: geo({ type: 'Point', coordinates: [-120.37, 38.20] }) },
   },
   {
     id: 'evt-redflag', layer: 'fire_weather', severity: 'SEVERE', status: 'ACTIVE',
+    weatherAlert: { nwsSeverity: 'Severe', certainty: 'Likely', urgency: 'Expected', areaDesc: 'Calaveras and Tuolumne Counties below 5000 ft', zones: ['CAZ138'], instruction: 'Outdoor burning is not recommended. Report new fires immediately.' },
     headline: 'Red Flag Warning — gusts to 40 mph, RH 8%', areaLabel: 'CAZ138 (3000–5000 ft)',
     category: 'fire_weather', observedAt: ago(95), revision: 1, provenance: { sourceId: 'nws-sto' },
     description: 'National Weather Service Red Flag Warning in effect through this evening for gusty winds and critically low humidity.',
-    enhancement: { summary: 'Critical fire weather; new ignitions may spread rapidly.', impact: 'moderate', duration: 'several hours' },
+    summary: 'Critical fire weather; new ignitions may spread rapidly.',
+    enhancement: { model: 'claude-haiku-4-5', enhancedAt: ago(6), fields: ['summary'] },
     geometry: { centroid: { lat: 38.25, lng: -120.20 },
       geojson: geo({ type: 'Point', coordinates: [-120.20, 38.25] }) },
   },
   {
     id: 'evt-chp-hwy4', layer: 'road_incident', severity: 'MODERATE', status: 'ACTIVE',
+    roadIncident: { logNumber: '250814-0631', impact: 'moderate', duration: '< 1 hour', metadata: { lanesAffected: '1', emergencyServices: 'CHP, Cal Fire' } },
     headline: 'Traffic collision — Hwy 4 near Avery, right lane blocked', areaLabel: 'Hwy 4 · Murphys → Arnold',
     category: 'road_incident', observedAt: ago(6), revision: 3, provenance: { sourceId: 'chp-caltrans' },
     description: 'Two-vehicle collision blocking the eastbound right lane. Emergency crews on scene; expect delays.',
-    enhancement: { summary: 'Right lane blocked near Avery; one-lane traffic control.', impact: 'moderate', duration: '< 1 hour' },
+    summary: 'Right lane blocked near Avery; one-lane traffic control.',
+    enhancement: { model: 'claude-haiku-4-5', enhancedAt: ago(6), fields: ['summary'] },
     geometry: { centroid: { lat: 38.19, lng: -120.36 },
       geojson: geo({ type: 'Point', coordinates: [-120.36, 38.19] }) },
   },
   {
     id: 'evt-wx-winter', layer: 'weather_alert', severity: 'MODERATE', status: 'ACTIVE',
+    weatherAlert: { nwsSeverity: 'Moderate', certainty: 'Likely', urgency: 'Expected', areaDesc: 'Ebbetts Pass above 5000 ft', zones: ['CAZ139'], instruction: 'Carry chains. Travel over the pass may be difficult.' },
     headline: 'Winter Weather Advisory — 3–6" snow above 5000 ft', areaLabel: 'CAZ139 (above 5000 ft)',
     category: 'weather_alert', observedAt: ago(140), revision: 1, provenance: { sourceId: 'nws-sto' },
     description: 'Snow accumulations of 3 to 6 inches above 5000 feet. Chain controls likely on Hwy 4 over Ebbetts Pass.',
-    enhancement: { summary: 'Travel over the pass may be difficult; carry chains.', impact: 'moderate', duration: 'several hours' },
+    summary: 'Travel over the pass may be difficult; carry chains.',
+    enhancement: { model: 'claude-haiku-4-5', enhancedAt: ago(6), fields: ['summary'] },
     geometry: { centroid: { lat: 38.48, lng: -120.04 },
       geojson: geo({ type: 'Point', coordinates: [-120.04, 38.48] }) },
   },
   {
     id: 'evt-quake', layer: 'earthquake', severity: 'MINOR', status: 'ACTIVE',
+    earthquake: { magnitude: 3.1, depthKm: 6.2, felt: 14 },
     headline: 'M 3.1 earthquake — 8 km NE of Markleeville', areaLabel: 'Alpine County',
     category: 'earthquake', observedAt: ago(52), revision: 1, provenance: { sourceId: 'usgs' },
     description: 'Light earthquake, depth 6.2 km. No damage expected.',
-    enhancement: { summary: 'Widely but weakly felt; no damage reports.', impact: 'light', duration: 'unknown' },
+    summary: 'Widely but weakly felt; no damage reports.',
+    enhancement: { model: 'claude-haiku-4-5', enhancedAt: ago(6), fields: ['summary'] },
     geometry: { centroid: { lat: 38.75, lng: -119.70 },
       geojson: geo({ type: 'Point', coordinates: [-119.70, 38.75] }) },
   },
   {
     id: 'evt-scheduled-closure', layer: 'road_incident', severity: 'MINOR', status: 'SCHEDULED',
+    roadIncident: { logNumber: 'CT-4-PAVE-08', impact: 'moderate', duration: 'ongoing', metadata: { lanesAffected: 'all', permitted: 'true' } },
     headline: 'Planned overnight closure — Hwy 4 paving, Mon 22:00–05:00', areaLabel: 'Hwy 4 · Murphys → Arnold',
     category: 'road_incident', observedAt: ahead(600), revision: 1, provenance: { sourceId: 'chp-caltrans' },
     description: 'Scheduled full closure for repaving between Murphys and Avery. Detour via Sheep Ranch Rd.',
-    enhancement: { summary: 'Overnight full closure for paving; plan an alternate route.', impact: 'moderate', duration: 'ongoing' },
+    summary: 'Overnight full closure for paving; plan an alternate route.',
+    enhancement: { model: 'claude-haiku-4-5', enhancedAt: ago(6), fields: ['summary'] },
     geometry: { centroid: { lat: 38.15, lng: -120.42 },
       geojson: geo({ type: 'Point', coordinates: [-120.42, 38.15] }) },
   },
@@ -196,7 +218,11 @@ const SOURCES = [
 // Each layer is an RFC 7946 FeatureCollection with the shared camelCase
 // properties envelope + a metadata block carrying sourceStatus honesty.
 
+// lastSourceUpdate is a real field on hazards.Metadata and is what the STALE
+// data-age indicator is computed from (generatedAt - lastSourceUpdate). A STALE
+// fixture without it silently skips that branch, so STALE defaults to a real age.
 const md = (status, extra = {}) => ({
+  ...(status === 'STALE' ? { lastSourceUpdate: ago(47) } : {}),
   sourceStatus: status, generatedAt: ago(2), attribution: 'Grid Info Service',
   sourceUrl: 'https://quickmap.dot.ca.gov/', ...extra,
 });
@@ -247,6 +273,7 @@ const GEOJSON = {
     features: [
       feat(pt(-120.36, 38.19), {
         id: 'evt-chp-hwy4', layer: 'road_incident', severity: 'MODERATE', severityRank: 2,
+    roadIncident: { logNumber: '250814-0631', impact: 'moderate', duration: '< 1 hour', metadata: { lanesAffected: '1', emergencyServices: 'CHP, Cal Fire' } },
         headline: 'Traffic collision — Hwy 4 near Avery, right lane blocked',
         summary: 'Two-vehicle collision blocking the eastbound right lane; crews on scene.',
         description: 'Right lane blocked near Avery; one-lane traffic control.',
@@ -259,6 +286,7 @@ const GEOJSON = {
     features: [
       feat({ type: 'Polygon', coordinates: [[[-120.34, 38.24], [-120.26, 38.24], [-120.26, 38.30], [-120.34, 38.30], [-120.34, 38.24]]] }, {
         id: 'evt-wildfire-mudflat', layer: 'wildfire', severity: 'EXTREME', severityRank: 4,
+    wildfire: { acres: 2340, containment: 15, county: 'Calaveras', cause: 'under investigation', hasPerimeter: true },
         headline: 'Mudflat Fire — 2,340 acres, 15% contained', source: { name: 'CAL FIRE' }, updatedAt: ago(11),
       }),
     ],
@@ -277,6 +305,7 @@ const GEOJSON = {
     features: [
       feat(pt(-119.70, 38.75), {
         id: 'evt-quake', layer: 'earthquake', severity: 'MINOR', severityRank: 1,
+    earthquake: { magnitude: 3.1, depthKm: 6.2, felt: 14 },
         headline: 'M 3.1 — 8 km NE of Markleeville', earthquake: { magnitude: 3.1, depthKm: 6.2 }, source: { name: 'USGS' },
       }),
     ],
@@ -290,11 +319,12 @@ const GEOJSON = {
     features: [
       feat({ type: 'Polygon', coordinates: [[[-120.2, 38.4], [-119.9, 38.4], [-119.9, 38.6], [-120.2, 38.6], [-120.2, 38.4]]] }, {
         id: 'evt-wx-winter', layer: 'weather_alert', severity: 'MODERATE', severityRank: 2,
+    weatherAlert: { nwsSeverity: 'Moderate', certainty: 'Likely', urgency: 'Expected', areaDesc: 'Ebbetts Pass above 5000 ft', zones: ['CAZ139'], instruction: 'Carry chains. Travel over the pass may be difficult.' },
         headline: 'Winter Weather Advisory — 3–6" snow above 5000 ft', source: { name: 'NWS' },
       }),
     ],
   },
-  mesh_node: {
+  mesh_link: {
     type: 'FeatureCollection', metadata: md('OK', { attribution: 'MeshCore' }),
     features: MESH_NODES.map((n) => feat(pt(n.lng, n.lat), {
       id: `mesh-${n.pk.slice(0, 8)}`, layer: 'mesh_node', severity: 'INFO', severityRank: 0,
@@ -307,11 +337,23 @@ const GEOJSON = {
 
 function eventsFor(params) {
   const layers = params.getAll('layer').map((l) => l.toLowerCase());
+  // The calm scenario: nothing above MINOR, so the front page's green state is
+  // reachable. Keyed on ?place= so it cannot leak into the default fixtures.
+  // page_size is honoured because the front page's "your first request" pane
+  // prints the response under a URL that says page_size=1 — returning seven
+  // events there would make the pane a lie about its own request.
+  const limit = Number(params.get('page_size')) || 0;
+  const cap = (list) => (limit > 0 ? list.slice(0, limit) : list);
+
+  if (params.get('place') === CALM_PLACE) {
+    const quiet = EVENTS.filter((e) => e.severity === 'MINOR' || e.severity === 'INFO');
+    return { events: cap(layers.length ? quiet.filter((e) => layers.includes(e.layer)) : quiet), nextPageToken: '' };
+  }
   const pool = [...EVENTS, ...MESH_EVENTS];
   let events = layers.length ? pool.filter((e) => layers.includes(e.layer)) : EVENTS;
   // Default status filter (ACTIVE,SCHEDULED) is the server default; our pool is
   // already active/scheduled, so no extra filtering needed for the demo.
-  return { events, nextPageToken: '' };
+  return { events: cap(events), nextPageToken: '' };
 }
 
 function historyFor() {
@@ -394,19 +436,86 @@ export function routeFor(pathname, params) {
 }
 
 function placeSummary(ref) {
+  if (ref === CALM_PLACE || ref === 'area:' + CALM_PLACE) {
+    return {
+      place: CALM_PLACE,
+      placeId: 'area:' + CALM_PLACE,
+      placeName: 'Quiet Meadow',
+      generatedAt: ago(0),
+      mode: 'QUIET',
+      // `summary` is a SummaryStats MESSAGE, not a string — see PlaceSummary in
+      // api/grid/v1/grid.proto. activeEvacuations/evacuationStatus/totalActive/
+      // severityCounts all live INSIDE it.
+      summary: {
+        highestSeverity: 'MINOR',
+        highestSeverityRank: 1,
+        severityCounts: { MINOR: 1, INFO: 1 },
+        totalActive: 2,
+        // 0, not null — a CONFIRMED empty, which is what makes calm assertable.
+        activeEvacuations: 0,
+        evacuationStatus: 'OK',
+        topEvents: [],
+      },
+      domains: [
+        { domain: 'fire', status: 'OK', highestSeverity: 'INFO', activeCount: 0, headlines: [] },
+        { domain: 'evacuation', status: 'OK', highestSeverity: 'INFO', activeCount: 0, headlines: [] },
+        { domain: 'weather', status: 'OK', highestSeverity: 'INFO', activeCount: 0, headlines: [] },
+        { domain: 'roads', status: 'OK', highestSeverity: 'MINOR', activeCount: 1, headlines: [
+          { id: 'evt-scheduled-closure', severity: 'MINOR', headline: 'Planned overnight closure — Hwy 4 paving' },
+        ] },
+        { domain: 'seismic', status: 'OK', highestSeverity: 'MINOR', activeCount: 1, headlines: [
+          { id: 'evt-quake', severity: 'MINOR', headline: 'M 3.1 earthquake — 8 km NE of Markleeville' },
+        ] },
+      ],
+      sources: SOURCES.filter((x) => x.status === 'OK').slice(0, 5),
+    };
+  }
+  const place = PLACES.find((x) => x.slug === ref || x.id === ref) || PLACES[0];
   return {
-    place: PLACES.find((x) => x.slug === ref || x.id === ref) || PLACES[0],
+    place: place.slug,
+    placeId: place.id,
+    placeName: place.name,
+    generatedAt: ago(0),
     mode: 'ACTIVE',
-    summary: 'Active wildfire with an evacuation warning along Hwy 4; Red Flag fire weather and chain controls over the pass.',
-    activeEvacuations: null,
-    totalActive: 6,
+    // SummaryStats sub-message — mirrors PlaceSummary in grid.proto exactly.
+    // Getting this shape wrong makes the UI render "unknown" for the RIGHT
+    // reason by accident, which hides real bugs; keep it faithful.
+    summary: {
+      highestSeverity: 'EXTREME',
+      highestSeverityRank: 4,
+      severityCounts: { EXTREME: 1, SEVERE: 2, MODERATE: 2, MINOR: 2 },
+      totalActive: 6,
+      // null = UNAVAILABLE (unknown), never 0. The loud path.
+      activeEvacuations: null,
+      evacuationStatus: 'UNAVAILABLE',
+      topEvents: EVENTS.slice(0, 3).map((e) => ({
+        id: e.id, layer: e.layer, severity: e.severity, headline: e.headline,
+      })),
+    },
+    // SummaryDomain.status is the worst SOURCE status across the domain's
+    // layers (OK | STALE | UNAVAILABLE) — NOT an activity level. Severity lives
+    // in highestSeverity, and headlines is a repeated SummaryDomainHeadline.
     domains: [
-      { domain: 'fire', status: 'ACTIVE', headline: 'Mudflat Fire — 2,340 acres, 15% contained' },
-      { domain: 'evacuation', status: 'UNAVAILABLE', headline: 'Genasys unreachable — check protect.genasys.com' },
-      { domain: 'weather', status: 'WATCH', headline: 'Red Flag Warning; winter advisory above 5000 ft' },
-      { domain: 'roads', status: 'WATCH', headline: 'Collision + chain controls on Hwy 4' },
-      { domain: 'seismic', status: 'OK', headline: 'M 3.1 near Markleeville' },
+      { domain: 'fire', status: 'OK', highestSeverity: 'EXTREME', activeCount: 1, headlines: [
+        { id: 'evt-wildfire-mudflat', severity: 'EXTREME', headline: 'Mudflat Fire — 2,340 acres, 15% contained' },
+      ] },
+      { domain: 'evacuation', status: 'UNAVAILABLE', highestSeverity: 'SEVERE', activeCount: 1, headlines: [
+        { id: 'evt-evac-e043', severity: 'SEVERE', headline: 'Evacuation WARNING — Zone CAL-E043 (Avery / Hathaway Pines)' },
+      ] },
+      { domain: 'weather', status: 'OK', highestSeverity: 'SEVERE', activeCount: 2, headlines: [
+        { id: 'evt-redflag', severity: 'SEVERE', headline: 'Red Flag Warning — gusts to 40 mph, RH 8%' },
+        { id: 'evt-wx-winter', severity: 'MODERATE', headline: 'Winter Weather Advisory — 3–6" snow above 5000 ft' },
+      ] },
+      { domain: 'roads', status: 'STALE', highestSeverity: 'MODERATE', activeCount: 2, headlines: [
+        { id: 'evt-chp-hwy4', severity: 'MODERATE', headline: 'Traffic collision — Hwy 4 near Avery, right lane blocked' },
+      ] },
+      { domain: 'seismic', status: 'OK', highestSeverity: 'MINOR', activeCount: 1, headlines: [
+        { id: 'evt-quake', severity: 'MINOR', headline: 'M 3.1 earthquake — 8 km NE of Markleeville' },
+      ] },
     ],
+    // The summary's source-health sidecar. isCalm() checks it for any
+    // UNAVAILABLE source, so the loud fixture must actually carry one.
+    sources: SOURCES.map((x) => ({ id: x.id, name: x.name, status: x.status, lastSuccessAt: x.lastSuccessAt })),
   };
 }
 

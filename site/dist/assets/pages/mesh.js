@@ -9,6 +9,7 @@
 // currency for history. Everything is fetched same-origin through api.js.
 
 import { get, ApiError } from '../api.js';
+import { timeCell } from '../format.js';
 import { BASE_STYLE } from '../basemap.js';
 
 const ROLE = {
@@ -87,7 +88,9 @@ export async function initMeshPage() {
     if (!pk || !c || c.lng == null || c.lat == null) continue;
     const t = n.telemetry || {};
     const role = n.nodeType || 'other';
-    nodes.set(pk, { lng: c.lng, lat: c.lat, role, name: n.name || '', snr: t.snr, hop: t.hopCount || 0, gw: (t.gateways || []).length });
+    // hopCount is NOT defaulted to 0 here: absent telemetry must stay absent so
+    // the roster can render "—". (The map's own paint still treats it as 0.)
+    nodes.set(pk, { lng: c.lng, lat: c.lat, role, name: n.name || '', snr: t.snr, hop: t.hopCount, gw: (t.gateways || []).length, ev, telemetry: t });
     roleCounts[role] = (roleCounts[role] || 0) + 1;
     nodeFeatures.push({
       type: 'Feature',
@@ -106,6 +109,8 @@ export async function initMeshPage() {
     row.append(dot, document.createTextNode(`${ROLE[key].label} (${roleCounts[key]})`));
     legend.append(row);
   }
+
+  renderNodeTable(nodes);
 
   let currentWindow = WINDOWS[0].key;
   const winEl = document.getElementById('mesh-window');
@@ -233,4 +238,83 @@ export async function initMeshPage() {
 
     loadLinks();
   });
+}
+
+/**
+ * The node roster beneath the map.
+ *
+ * Missing telemetry renders as an em dash, NEVER as 0: a node we have not heard
+ * a SNR from is not a node with 0 dB SNR, and -0 dBm is not "no signal". The
+ * fail-loud rule applies to ambient data too, even though nothing here is
+ * life-safety — a habit of writing 0 for unknown is how a 0 ends up somewhere
+ * that matters.
+ *
+ * "Heard" is the event's observedAt, not telemetry.lastAdvertAt: the latter is
+ * stamped by the node's own unsynchronized clock and can be days out.
+ *
+ * @param {Map<string, Object>} nodes keyed by public key
+ */
+function renderNodeTable(nodes) {
+  const tbody = document.getElementById('mesh-tbody');
+  if (!tbody) return;
+  tbody.textContent = '';
+
+  const rows = [...nodes.entries()].sort((a, b) => {
+    const ta = Date.parse((a[1].ev && a[1].ev.observedAt) || 0) || 0;
+    const tb = Date.parse((b[1].ev && b[1].ev.observedAt) || 0) || 0;
+    return tb - ta; // most recently heard first
+  });
+
+  if (!rows.length) {
+    const tr = el('tr');
+    const td = el('td');
+    td.colSpan = 5;
+    td.append(
+      el('div', 'mono', 'No located nodes in this window.'),
+      el('div', 'muted small',
+        'The query succeeded and returned no node with a known location. A node is only ' +
+        'listed once we have heard it advertise one — a short list is not a claim that ' +
+        'the mesh is small.')
+    );
+    tr.append(td);
+    tbody.append(tr);
+    return;
+  }
+
+  // Telemetry may be absent, and 0 is a legitimate reading for SNR — so test
+  // for null/undefined explicitly rather than falsiness.
+  const num = (v, unit) => (v === undefined || v === null ? '—' : `${v}${unit || ''}`);
+
+  for (const [pk, n] of rows) {
+    const tr = el('tr');
+
+    const nameCell = el('td');
+    nameCell.append(
+      el('div', 'cell-name', n.name || '(unnamed node)'),
+      el('div', 'cell-sub', pk.length > 16 ? `${pk.slice(0, 16)}…` : pk)
+    );
+    tr.append(nameCell);
+
+    const roleDef = ROLE[n.role];
+    const typeCell = el('td');
+    const dot = el('span', 'mesh-dot');
+    dot.style.background = roleDef ? roleDef.color : 'var(--text-tertiary)';
+    dot.style.marginRight = '7px';
+    typeCell.append(dot, document.createTextNode(roleDef ? roleDef.label : n.role || 'unknown'));
+    tr.append(typeCell);
+
+    const t = n.telemetry || {};
+    tr.append(el('td', undefined, `${num(t.snr, ' dB')} / ${num(t.rssi, ' dBm')}`));
+    tr.append(el('td', 'num', n.hop === undefined || n.hop === null ? '—' : String(n.hop)));
+
+    const heard = (n.ev && n.ev.observedAt) || '';
+    const heardCell = el('td');
+    heardCell.append(timeCell(heard));
+    tr.append(heardCell);
+
+    ['Node', 'Type', 'SNR / RSSI', 'Hops', 'Heard'].forEach((lbl, i) => {
+      if (tr.children[i]) tr.children[i].dataset.label = lbl;
+    });
+    tbody.append(tr);
+  }
 }

@@ -30,9 +30,20 @@ const OUT = join(__dirname, 'out');
 // maps to the built <name>.html the Go siteHandler serves.
 const PAGES = [
   { name: 'home', url: '/index.html' },
+  // The CALM path. Calm is a positive assertion requiring every input to be
+  // known (see isCalm in pages/home.js), so it needs its own fixture place —
+  // the default one is deliberately loud. If this shot ever shows red accents,
+  // or the default `home` shot ever shows green ones, the predicate has broken.
+  { name: 'home-calm', url: '/index.html?place=quiet-meadow' },
   { name: 'events', url: '/events.html' },
   { name: 'event-detail', url: '/event.html?id=evt-wildfire-mudflat' },
-  { name: 'map', url: '/map.html?place=ebbetts-pass&view=wildfire' },
+  { name: 'map', url: '/map.html?place=ebbetts-pass&layer=wildfire' },
+  // The fail-loud path: `evacuation` is the fixture layer whose metadata carries
+  // sourceStatus UNAVAILABLE, so selecting it alone must produce NO map element
+  // at all plus the loud banner (API contract §5 — an empty basemap would read
+  // as an all-clear). If a future change makes this shot show a map, the
+  // contract has been broken.
+  { name: 'map-suppressed', url: '/map.html?place=ebbetts-pass&layer=evacuation' },
   { name: 'roads', url: '/roads.html?place=ebbetts-pass' },
   { name: 'mesh', url: '/mesh.html' },
   { name: 'places', url: '/places.html' },
@@ -40,6 +51,7 @@ const PAGES = [
   { name: 'sources', url: '/sources.html' },
   { name: 'history', url: '/history.html' },
   { name: 'docs', url: '/docs.html' },
+  { name: 'mcp-guide', url: '/mcp-guide.html' },
 ];
 
 const VIEWPORTS = [

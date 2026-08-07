@@ -63,8 +63,14 @@ coverage/
 # Bower dependency directory (https://bower.io/)
 bower_components
 
-# node_modules (if any JS tools are used)
+# node_modules (if any JS tools are used).
+# Both forms on purpose: `node_modules/` matches a real directory, but the site
+# build makes web/node_modules a SYMLINK to an off-mount store (see the
+# SITE_DEPS note in the Makefile), and a trailing-slash pattern does not match a
+# symlink — so without the second line git would happily commit a link to an
+# absolute path that exists on exactly one machine.
 node_modules/
+node_modules
 
 # Astro build cache (web/). NOTE: the build OUTPUT (site/dist) is committed on
 # purpose — like the generated *.pb.go — so the Docker `go build` stays Node-free.

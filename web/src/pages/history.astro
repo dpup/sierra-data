@@ -74,7 +74,7 @@ import GetChip from '../components/GetChip.astro';
     <GetChip slot="badges" path="/api/v1/history" />
   </PageHead>
 
-  <p class="muted small" style="margin-top:12px;max-width:96ch;">
+  <p class="muted small" style="margin-top:12px;">
     <code class="inline">GET /api/v1/history?place=&amp;layer=&amp;from=&amp;to=</code>
     returns every stored revision of every event in the range, newest first — the
     camelCase protojson of <code class="inline">grid.v1.EventRevisionList</code>
@@ -83,6 +83,19 @@ import GetChip from '../components/GetChip.astro';
     date-range view of an incident's whole arc is a shareable permalink; paging
     follows <code class="inline">next_page_token</code>. Timestamps are RFC&nbsp;3339;
     days are grouped in UTC.
+  </p>
+
+  <!-- A measured caveat, not a theoretical one: mesh nodes stamp their own
+       adverts and their clocks drift, so the ordering key can be in the future.
+       Worth saying here because it is the one place the archive looks wrong. -->
+  <p class="notice">
+    <strong>Ordering is by <code class="inline">observedAt</code>, which is upstream-stamped.</strong>
+    Most sources are accurate, but mesh nodes timestamp their own adverts from an
+    unsynchronized on-board clock, so a <code class="inline">MESH</code> revision can carry a
+    time days or weeks in the future and sort above genuinely newer records. That is the
+    upstream value reported verbatim — we do not silently rewrite it. To ask
+    <em>when this service learned something</em>, read
+    <code class="inline">ingestedAt</code>, which is stamped by us and always monotonic.
   </p>
 
   <!-- Filters: each control is one /api/v1/history query parameter. -->

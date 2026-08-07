@@ -15,7 +15,7 @@ import SectionHead from '../components/SectionHead.astro';
       .rd-curl { display:flex; align-items:center; gap:7px; margin-left:auto; }
       .rd-curl code {
         font-family: var(--font-mono); font-size: 11px; background: var(--bg-code);
-        border: 1px solid var(--border-soft); border-radius: 2px; padding: 2px 6px;
+        border: 1px solid var(--rule); padding: 2px 6px;
         overflow-wrap: anywhere; user-select: all; color: #9db8cf;
       }
       .rd-copy {
@@ -34,7 +34,7 @@ import SectionHead from '../components/SectionHead.astro';
       table.rd td { padding: 9px 12px 9px 0; border-bottom: 1px solid var(--border-row); vertical-align: top; }
       table.rd tr:last-child td { border-bottom: none; }
       table.rd td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
-      .rd-wrap { max-width: 34ch; }
+      .rd-wrap { max-width: var(--measure-tight); }
       .rd-road { font-weight: 600; color: var(--text-hi); }
       .rd-explain { margin-top: 3px; }
       .rd-delay { color: var(--st-STALE); }
@@ -42,7 +42,7 @@ import SectionHead from '../components/SectionHead.astro';
       /* status / level badges */
       .rd-badge {
         display: inline-block; font-family: var(--font-mono); font-size: 11px; font-weight: 600;
-        padding: 1px 8px; border-radius: 999px; white-space: nowrap; border: 1px solid transparent;
+        padding: 2px 8px; white-space: nowrap; border: 1px solid transparent;
       }
       .rd-ok      { color: var(--st-OK);          background: color-mix(in srgb, var(--st-OK) 14%, transparent);          border-color: color-mix(in srgb, var(--st-OK) 40%, transparent); }
       .rd-warn    { color: #d9a441;               background: color-mix(in srgb, #d9a441 14%, transparent);              border-color: color-mix(in srgb, #d9a441 40%, transparent); }
@@ -56,7 +56,7 @@ import SectionHead from '../components/SectionHead.astro';
       .rd-incident:last-child { border-bottom: none; padding-bottom: 0; }
       .rd-inc-head { display: flex; align-items: center; gap: 9px; margin-bottom: 4px; }
       .rd-inc-headline { font-weight: 600; color: var(--text-hi); }
-      .rd-inc-body { margin: 2px 0 5px; max-width: 78ch; }
+      .rd-inc-body { margin: 2px 0 5px; max-width: var(--measure); }
       .rd-inc-meta { font-family: var(--font-mono); }
 
       .notice-bad { border-left: 2px solid var(--st-UNAVAILABLE); }

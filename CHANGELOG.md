@@ -14,6 +14,61 @@ throughout; errors are gRPC-standard `{code, codeName, message, details}`). The
 by a snake_case `/v1` surface on 2026-07-05, which was in turn folded back onto the
 proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 
+## 2026-08-06 (later)
+
+### `/api/v1/history` is much faster (no API change)
+
+No request or response shape changed — this is purely a latency fix, recorded
+here because consumers were feeling it. The cross-event revision archive was
+measured at **6–40s** (`page_size=50` took 18.7s, 39.0s and once timed out at
+40s); a browser client with any sane request deadline saw it as a hang.
+
+Cause: `event_revisions` had no index on `observed_at`, so the query behind
+`/api/v1/history` scanned the whole revision table and sorted it in a temp
+B-tree on every call. Store migration **v4** adds
+`idx_revisions_observed(observed_at DESC, event_id ASC, revision DESC)`,
+matching the query's `ORDER BY` exactly, so the range filter and the sort are
+both satisfied by an index walk. The migration applies automatically on boot
+(append-only ladder); no operator action.
+
+**If you previously worked around this** by avoiding `/api/v1/history`, capping
+`page_size`, or setting a long client timeout, you can undo that. The per-event
+timeline (`/api/v1/events/{id}/history`) was never affected — it keys on the
+primary key.
+
+Two things worth knowing that did **not** change, because they are sometimes
+misreported as bugs:
+
+- The `from` / `to` bounds **do** filter (verified: `from=2027-01-01` returns 0
+  revisions; `to=2026-08-01` returns only July). The window is half-open,
+  `[from, to)`, over `observedAt`.
+- `observedAt` is **upstream-stamped**, and mesh nodes timestamp their own
+  adverts from unsynchronized on-board clocks. A `MESH` revision can therefore
+  carry a future time and sort above genuinely newer records. That is the
+  upstream value reported verbatim. To ask *when this service learned
+  something*, read `ingestedAt`, which we stamp and which is monotonic.
+
+### Site: the documentation site has been rebuilt (no API change)
+
+`data.sierragridteam.org` has moved from the dark dev-console layout to a
+"broadsheet" design — paper for reading, black for data. The API is untouched;
+this affects only the human-facing site. Three changes worth noting for anyone
+who links to or embeds it:
+
+- **The Map screen no longer draws a basemap when nothing can honestly be
+  drawn.** If every selected layer is `UNAVAILABLE`, errored, or empty, the map
+  element is removed from the page and replaced with a banner naming which case
+  it is. A rendered basemap with zero features reads as an all-clear, which this
+  API's contract forbids. A *partial* failure counts too: one failed layer among
+  eight empty ones is an unknown, not a confirmed-clear region.
+- **Events is now a list + full record**, replacing the table + raw-JSON
+  inspector. The record shown is rendered by the same code as the `/event`
+  permalink page, so the two can no longer disagree. `/event?id=…` is unchanged
+  and remains the permalink.
+- **Docs endpoint examples are runnable.** Each carries a RUN button that
+  fetches that exact URL live and prints the real response, so an example that
+  has gone stale now fails visibly instead of quietly misleading.
+
 ## 2026-08-06
 
 ### CORS is now open (`Access-Control-Allow-Origin: *`)

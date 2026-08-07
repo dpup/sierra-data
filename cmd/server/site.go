@@ -104,6 +104,12 @@ func siteCacheControl(name, ext string) string {
 	switch {
 	case ext == ".html":
 		return "no-cache"
+	case strings.HasPrefix(name, "_astro/"):
+		// Astro's own bundled output, named by CONTENT HASH
+		// (_astro/docs.oe4bHGyF.css). The filename changes whenever the bytes
+		// do, so the file at a given URL can never change — the one case where
+		// immutable is exactly right rather than merely convenient.
+		return "public, max-age=31536000, immutable"
 	case strings.HasPrefix(name, "assets/"):
 		return "public, max-age=300"
 	case strings.HasPrefix(name, "lib/"):

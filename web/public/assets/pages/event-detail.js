@@ -21,7 +21,8 @@ import {
   sevChip,
   layerLabel,
   decodeGeometry,
-  SEVERITY_COLORS,
+  SEVERITY_COLORS_ON_INK,
+  fmtNum,
 } from '../format.js';
 import { diffObjects } from '../diff.js';
 import { BASE_STYLE } from '../basemap.js';
@@ -315,6 +316,13 @@ function kvRow(dl, key, value) {
 /** Render an arbitrary detail-field value (primitive / array / object). */
 function valueNode(v) {
   if (v === null || v === undefined) return '—';
+  // Thousands separators on magnitudes. On a service whose whole claim is that
+  // it normalizes upstream feeds, "10374" reads as a value we never parsed.
+  // Small integers (containment %, depth, magnitude, counts under 1000) are
+  // left alone — a separator there would be noise.
+  if (typeof v === 'number' && Number.isFinite(v) && Math.abs(v) >= 1000) {
+    return fmtNum(v, 2);
+  }
   if (Array.isArray(v)) {
     if (v.every((x) => typeof x !== 'object' || x === null)) return v.map(String).join(', ');
     const pre = el('pre', 'code');
@@ -341,7 +349,8 @@ function fmtCoord(n) {
 function renderEventMap(container, decoded, bounds, severity) {
   const lib = typeof window !== 'undefined' ? window.maplibregl : undefined;
   if (!lib || typeof lib.Map !== 'function') return false;
-  const color = SEVERITY_COLORS[String(severity || '').toUpperCase()] || SEVERITY_COLORS.INFO;
+  // On the dark basemap — the ink ramp, not the paper one.
+  const color = SEVERITY_COLORS_ON_INK[String(severity || '').toUpperCase()] || SEVERITY_COLORS_ON_INK.INFO;
   try {
     const center = bounds
       ? [(bounds.minLng + bounds.maxLng) / 2, (bounds.minLat + bounds.maxLat) / 2]
@@ -411,19 +420,48 @@ function renderEventMap(container, decoded, bounds, severity) {
  * event.html (ed-loading, ed-errors, ed-head, ed-chips, ed-headline,
  * ed-sub, ed-query, ed-sections).
  */
-export function initEventPage() {
+/**
+ * Render one event's full record into `root`: badge row, headline, envelope,
+ * typed detail, geometry (with a map when the geometry decodes), the revision
+ * timeline with client-side field diffs, the requests that produced the pane,
+ * and the raw protojson.
+ *
+ * This is THE event detail renderer. Two callers share it:
+ *   - /event?id=…  — the standalone permalink page (initEventPage below)
+ *   - /events      — the desktop right-hand column of the browser
+ * Both must show the same record identically; duplicating the envelope and diff
+ * logic across two screens is how they drift apart.
+ *
+ * The skeleton is built here rather than read from page markup, so the caller
+ * only supplies an empty container. `setTitle` is opt-out because the browser
+ * selecting a record should not retitle the whole Events page.
+ *
+ * @param {HTMLElement} root       container; its contents are replaced
+ * @param {string} id              event id
+ * @param {{setTitle?: boolean, headingLevel?: number}=} opts
+ * @returns {Promise<void>} resolves once the pane has rendered (or failed loud)
+ */
+export async function renderEventDetail(root, id, opts = {}) {
+  const setTitle = opts.setTitle !== false;
+  // The permalink page's record IS the page, so it gets the <h1>. Inside the
+  // Events browser the page already has one, and a second would outrank the
+  // page's own heading in the document outline — so the caller drops it to h2.
+  const headingTag = `h${opts.headingLevel || 1}`;
+  root.textContent = '';
 
-  const $ = (id) => document.getElementById(id);
-  const loadingEl = $('ed-loading');
-  const errorsEl = $('ed-errors');
-  const headEl = $('ed-head');
-  const chipsEl = $('ed-chips');
-  const headlineEl = $('ed-headline');
-  const subEl = $('ed-sub');
-  const queryEl = $('ed-query');
-  const sectionsEl = $('ed-sections');
+  const errorsEl = el('div', 'ed-errors');
+  const loadingEl = el('div', 'loading', `Loading GET /api/v1/events/${id} …`);
+  const headEl = el('header', 'ed-head-block');
+  headEl.hidden = true;
+  const chipsEl = el('div', 'chip-row');
+  const headlineEl = el(headingTag, 'ed-headline');
+  const subEl = el('div', 'muted mono small');
+  headEl.append(chipsEl, headlineEl, subEl);
+  const queryEl = el('div', 'query-line');
+  queryEl.setAttribute('aria-label', 'Requests behind this pane');
+  const sectionsEl = el('div');
+  root.append(errorsEl, loadingEl, headEl, queryEl, sectionsEl);
 
-  const id = new URLSearchParams(location.search).get('id');
   if (!id) {
     loadingEl.remove();
     const block = el('div', 'error-block');
@@ -448,7 +486,7 @@ export function initEventPage() {
     requestLine(apiURL(historyPath, ioParams))
   );
 
-  load();
+  await load();
 
   async function load() {
     const [evRes, histRes] = await Promise.allSettled([
@@ -492,7 +530,7 @@ export function initEventPage() {
 
     function renderEvent(ev) {
       headEl.hidden = false;
-      document.title = `${ev.headline || ev.id || id} · Event · The Grid`;
+      if (setTitle) document.title = `${ev.headline || ev.id || id} · Event · The Grid`;
 
       chipsEl.textContent = '';
       chipsEl.append(sevChip(ev.severity || 'INFO'));
@@ -821,4 +859,16 @@ export function initEventPage() {
       }
     }
   }
+}
+
+/**
+ * The /event?id=… page: read the id from the URL and render into the page's
+ * container. All the work is renderEventDetail's; this only supplies the page
+ * chrome (which the Events browser provides for itself).
+ */
+export function initEventPage() {
+  const root = document.getElementById('ed-root');
+  if (!root) return;
+  const id = new URLSearchParams(location.search).get('id') || '';
+  renderEventDetail(root, id, { setTitle: true });
 }

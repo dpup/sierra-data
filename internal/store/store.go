@@ -77,11 +77,23 @@ CREATE INDEX idx_mesh_link_bucket ON mesh_link_rollup(bucket);
 
 CREATE TABLE mesh_meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL);`
 
+// migrationV4 indexes event_revisions by observed_at so QueryHistory (the
+// cross-event /api/v1/history archive) can walk an index instead of scanning
+// every revision and sorting. The column order mirrors that query's ORDER BY
+// exactly — observed_at DESC, event_id ASC, revision DESC — so SQLite satisfies
+// both the [from, to) range and the sort from the same index, and the keyset
+// cursor seeks rather than skips. Without it the endpoint degraded to 6–40s at
+// page_size=50 in production (measured 2026-08-06); the per-event timeline
+// (EventHistory) was always fine because it keys on the PRIMARY KEY prefix.
+const migrationV4 = `
+CREATE INDEX idx_revisions_observed
+  ON event_revisions(observed_at DESC, event_id ASC, revision DESC);`
+
 // migrations[i] is the DDL for schema version i+1. Applied versions are
 // recorded in schema_migrations; already-applied versions are skipped, so
 // Open is idempotent across restarts and an existing dev DB at an older
 // version picks up only the missing migrations.
-var migrations = []string{schemaV1, migrationV2, migrationV3}
+var migrations = []string{schemaV1, migrationV2, migrationV3, migrationV4}
 
 // ErrNotFound is returned by point lookups (GetEvent, GetPlace) when no row
 // matches. Callers map it to a 404.

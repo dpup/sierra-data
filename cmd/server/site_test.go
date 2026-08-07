@@ -139,3 +139,25 @@ func TestSiteHandler(t *testing.T) {
 		assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
 	})
 }
+
+// TestSiteCacheControl pins the cache policy per file class. The _astro/ case is
+// the one that matters most and is easiest to get wrong: Astro names those files
+// by content hash, so the bytes at a given URL can never change and they must be
+// immutable — while everything else must stay revalidating, because an HTML page
+// or a hand-authored asset served stale for a year is unrecoverable.
+func TestSiteCacheControl(t *testing.T) {
+	cases := []struct{ name, ext, want string }{
+		{"index.html", ".html", "no-cache"},
+		{"_astro/docs.oe4bHGyF.css", ".css", "public, max-age=31536000, immutable"},
+		{"assets/app.css", ".css", "public, max-age=300"},
+		{"assets/pages/home.js", ".js", "public, max-age=300"},
+		{"lib/maplibre-gl.js", ".js", "public, max-age=86400"},
+		{"lib/fonts/archivo-900.woff2", ".woff2", "public, max-age=86400"},
+		{"robots.txt", ".txt", "no-cache"},
+	}
+	for _, c := range cases {
+		if got := siteCacheControl(c.name, c.ext); got != c.want {
+			t.Errorf("siteCacheControl(%q, %q) = %q, want %q", c.name, c.ext, got, c.want)
+		}
+	}
+}
