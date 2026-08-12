@@ -57,7 +57,11 @@ func TestNetworkPollBuildsEvents(t *testing.T) {
 	assert.Equal(t, gridv1.EventStatus_ACTIVE, ev.Status)
 	assert.Equal(t, "Murphys Ridge (repeater)", ev.Headline)
 	assert.Equal(t, "repeater", ev.Category)
-	assert.Equal(t, "Murphys Ridge", ev.AreaLabel)
+	// AreaLabel is a description of WHERE, and a mesh node has no such
+	// description — only coordinates. It used to be set to the node's name,
+	// which made the event claim a location it does not have.
+	assert.Empty(t, ev.AreaLabel, "a mesh node has no area description")
+	assert.Equal(t, "Murphys Ridge", ev.GetMesh().GetName(), "the name lives on the detail block")
 	assert.Equal(t, meshMapURL, ev.CanonicalUrl)
 
 	// Location is quantized to ~4dp (~11m) to damp jitter into the hash.

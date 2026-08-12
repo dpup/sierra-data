@@ -106,6 +106,33 @@ func (n *EvacuationNormalizer) Poll(ctx context.Context, prior Prior) (*PollResu
 	return &PollResult{Events: events}, nil
 }
 
+// evacHeadline names the zone the order applies to.
+//
+// The headline has to DISTINGUISH, because these records arrive in batches: a
+// county-wide activation produces a dozen zones at once and they are read as a
+// list. The shipped format fell back to the county when a zone had no name, so
+// twelve simultaneous orders in Calaveras all read "Evacuation Order —
+// CALAVERAS" and the only thing telling them apart was the id. The zone ID is
+// unique and is what an evacuee is told over the radio, so it is the better
+// fallback — and when a zone has both, both are useful.
+//
+// Format stays "Evacuation {Level} — {what}" so existing consumers keying on
+// the prefix are unaffected.
+func evacHeadline(z caloes.EvacZone, level string) string {
+	what := z.ZoneName
+	switch {
+	case what != "" && z.ZoneID != "" && !strings.Contains(what, z.ZoneID):
+		what = fmt.Sprintf("%s (%s)", what, z.ZoneID)
+	case what == "" && z.ZoneID != "":
+		what = z.ZoneID
+	case what == "":
+		// No zone identity at all from upstream. The county is all there is;
+		// it does not distinguish, so say which it is rather than implying it.
+		what = nonEmpty(z.County, "zone not identified by source")
+	}
+	return fmt.Sprintf("Evacuation %s — %s", humanEvacLevel(level), what)
+}
+
 // buildEvent converts one active zone into an event with its base id.
 func (n *EvacuationNormalizer) buildEvent(ctx context.Context, z caloes.EvacZone, level string) *gridv1.Event {
 	ev := NewEvent(
@@ -113,7 +140,7 @@ func (n *EvacuationNormalizer) buildEvent(ctx context.Context, z caloes.EvacZone
 		gridv1.Layer_EVACUATION,
 		SeverityFromLabel(hazards.SeverityFromEvacLevel(level)),
 		gridv1.EventStatus_ACTIVE,
-		fmt.Sprintf("Evacuation %s — %s", humanEvacLevel(level), nonEmpty(z.ZoneName, z.County)), // shipped headline format
+		evacHeadline(z, level),
 	)
 	ev.Category = strings.ToLower(level)
 	// Life-safety: PublicInfo is directive text and is carried VERBATIM.
