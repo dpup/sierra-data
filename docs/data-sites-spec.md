@@ -1,7 +1,8 @@
 # data.sierragridteam.org — Site Spec (Draft v0.1)
 
 > **Visual design (2026-08-06): the "broadsheet" redesign.** The site moved off
-> the dark dev-console look to a paper/ink split — paper (`#f4f1ea`) for reading,
+> the dark dev-console look to a paper/ink split — paper (`#fbfbfa` — warm
+> `#f4f1ea` until 2026-08-11) for reading,
 > ink (`#14161a`) for anything that *is* the API (the front-page deck, response
 > panes, code, the sidebar, map frames). Archivo carries display type, IBM Plex
 > Sans prose, IBM Plex Mono every value. The design system, its two severity

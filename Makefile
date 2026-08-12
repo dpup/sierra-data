@@ -1,5 +1,5 @@
 # Live Data API Server - Build, Test, and Deployment Tasks
-.PHONY: build test proto proto-tools clean server tools site site-modules site-install site-dev site-shots site-shots-mock check-site run dev lint fmt docker docker-build docker-run docker-run-dev docker-push docker-clean deploy install help test-meshcore
+.PHONY: build test proto proto-tools clean server tools site site-modules site-install site-dev site-shots site-shots-mock check-site check-wiring run dev lint fmt docker docker-build docker-run docker-run-dev docker-push docker-clean deploy install help test-meshcore
 
 # Go parameters
 GOCMD=go
@@ -101,7 +101,7 @@ site-modules:
 	@rm -rf web/node_modules
 	@ln -sfn "$(SITE_DEPS)/node_modules" web/node_modules
 
-site: site-modules
+site: site-modules check-wiring
 	@echo "Building site (Astro → site/dist)..."
 	cd web && npm run build
 	@# Astro emits build-internal *.mjs at the dist root (content-*.mjs stubs, a
@@ -140,6 +140,13 @@ site-shots:
 site-shots-mock: site-modules
 	cd web && npm run build
 	cd web && node screenshots/capture.mjs $(if $(PAGES),--pages $(PAGES),) $(if $(ONLY),--only $(ONLY),)
+
+# Islands bind to markup by id string, so a rename on one side only surfaces in
+# a browser as a null-deref halfway through init. This is that check, statically:
+# every getElementById/requireEls id in an island must exist in its page. It runs
+# as part of `site`, so the mismatch cannot reach a build.
+check-wiring:
+	@cd web && node screenshots/wiring-check.mjs
 
 # Guard against deploying a stale site. The Docker image embeds the COMMITTED
 # site/dist (the image build is deliberately Node-free), so a change under web/
