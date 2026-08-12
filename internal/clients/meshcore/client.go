@@ -385,11 +385,25 @@ func (r *Registry) ingestPacket(env *packetEnvelope, brokerID string) {
 		e.HasLocation = true
 		e.Lat, e.Lng = adv.Lat, adv.Lng
 	}
-	e.SNR = env.SNR.float()
-	e.RSSI = int32(env.RSSI.int())
-	// Hop count is the last-heard advert's path length (from the authoritative
-	// over-the-air frame). The path itself is per-reception — captured in the
-	// observation below, not on node presence.
+	// Keep last-known telemetry, for the same reason as the location above: an
+	// advert that omits SNR/RSSI must not erase what we already measured. Absent
+	// and zero are different facts, and `present()` is what tells them apart —
+	// before it existed, every bridge that left these keys out reset the node's
+	// signal to 0 and the UI dutifully reported "0 dB".
+	if env.SNR.present() {
+		e.SNR = env.SNR.float()
+	}
+	// RSSI additionally rejects a literal 0: received signal strength is
+	// negative dBm, so 0 is not a reading any radio produces — a bridge sending
+	// it means "unknown", whatever the JSON says.
+	if env.RSSI.present() && env.RSSI.int() != 0 {
+		e.RSSI = int32(env.RSSI.int())
+	}
+	// Hop count is the last-heard advert's path length, decoded from the
+	// authoritative over-the-air frame rather than the bridge's envelope — so it
+	// is always present, and 0 is MEANINGFUL (a zero-hop beacon heard directly).
+	// It must not get the absent-vs-zero treatment above. The path itself is
+	// per-reception — captured in the observation below, not on node presence.
 	e.HopCount = uint32(adv.HopCount)
 	e.LastAdvertAt = adv.Timestamp // node-reported; unreliable clock, diagnostic only
 	e.LastHeardAt = now            // our receive time — the trustworthy clock
@@ -602,11 +616,27 @@ type packetEnvelope struct {
 	Path       string    `json:"path"`
 }
 
-type flexInt struct{ v int64 }
-type flexFloat struct{ v float64 }
+// flexInt / flexFloat tolerate the several shapes community bridges send a
+// number in ("-91", -91, "-91.0", "", null, or the key omitted entirely).
+//
+// `set` records whether a REAL value arrived, which absence and an explicit
+// null do not provide. Without it a missing SNR is indistinguishable from a
+// measured 0, and the node-state merge wiped a known reading every time a
+// bridge left the field out — the same class of bug the location merge already
+// guards against a few lines above it.
+type flexInt struct {
+	v   int64
+	set bool
+}
+type flexFloat struct {
+	v   float64
+	set bool
+}
 
 func (f *flexInt) int() int64       { return f.v }
+func (f *flexInt) present() bool    { return f.set }
 func (f *flexFloat) float() float64 { return f.v }
+func (f *flexFloat) present() bool  { return f.set }
 
 func (f *flexInt) UnmarshalJSON(b []byte) error {
 	s := strings.Trim(strings.TrimSpace(string(b)), `"`)
@@ -624,6 +654,7 @@ func (f *flexInt) UnmarshalJSON(b []byte) error {
 		n = int64(fl)
 	}
 	f.v = n
+	f.set = true
 	return nil
 }
 
@@ -638,6 +669,7 @@ func (f *flexFloat) UnmarshalJSON(b []byte) error {
 		return err
 	}
 	f.v = fl
+	f.set = true
 	return nil
 }
 
