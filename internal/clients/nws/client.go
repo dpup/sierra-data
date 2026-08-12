@@ -64,14 +64,47 @@ type Alert struct {
 	Severity    string // Extreme | Severe | Moderate | Minor | Unknown
 	Certainty   string
 	Urgency     string
-	Headline    string
+	Headline    string // CAP properties.headline — boilerplate, see ShortHeadline
+	NWSHeadline string // parameters.NWSheadline — ALL CAPS, carries the reason
 	Description string
 	Instruction string
 	SenderName  string
 	AreaDesc    string
-	Effective   time.Time
-	Expires     time.Time
-	Zones       []string // UGC zone codes, e.g. ["CAZ064", "CAZ065"]
+	// The four CAP times, and they are two different pairs. Effective/Expires
+	// describe the PRODUCT — when it was issued and when the office must
+	// re-issue it. Onset/Ends describe the HAZARD. They routinely disagree: a
+	// Fire Weather Watch issued Tuesday for Thursday's storms carries
+	// effective=Tue 09:57, expires=Wed 16:00, onset=Thu 05:00, ends=Thu 21:00.
+	// Use Begins/EndsAt for anything a reader would call "when"; Effective is
+	// kept raw because NWSAlertID's fallback is keyed on issuance.
+	Effective time.Time
+	Expires   time.Time
+	Onset     time.Time
+	Ends      time.Time
+	Zones     []string // UGC zone codes, e.g. ["CAZ064", "CAZ065"]
+}
+
+// Begins is when the hazard starts: CAP `onset`, falling back to `effective`
+// (issuance) for the products that publish no onset.
+func (a Alert) Begins() time.Time {
+	if !a.Onset.IsZero() {
+		return a.Onset
+	}
+	return a.Effective
+}
+
+// EndsAt is when the hazard stops: CAP `ends`, falling back to `expires`.
+//
+// `expires` alone was wrong and visibly so: the Watch above advertised
+// expires=Wed 16:00 for a hazard running to Thu 21:00, so the record said the
+// alert was over a day and a half before the storms it warns about. It is the
+// product's re-issue deadline, not a hazard end — an office that lets it lapse
+// has stopped updating, not stopped warning.
+func (a Alert) EndsAt() time.Time {
+	if !a.Ends.IsZero() {
+		return a.Ends
+	}
+	return a.Expires
 }
 
 // GetActiveZoneAlerts returns active alerts for the given NWS zone codes
@@ -141,19 +174,22 @@ type alertFeature struct {
 }
 
 type alertProperties struct {
-	ID          string   `json:"id"`
-	Event       string   `json:"event"`
-	Severity    string   `json:"severity"`
-	Certainty   string   `json:"certainty"`
-	Urgency     string   `json:"urgency"`
-	Headline    string   `json:"headline"`
-	Description string   `json:"description"`
-	Instruction string   `json:"instruction"`
-	SenderName  string   `json:"senderName"`
-	AreaDesc    string   `json:"areaDesc"`
-	Effective   string   `json:"effective"`
-	Expires     string   `json:"expires"`
-	Geocode     alertGeo `json:"geocode"`
+	ID          string              `json:"id"`
+	Event       string              `json:"event"`
+	Severity    string              `json:"severity"`
+	Certainty   string              `json:"certainty"`
+	Urgency     string              `json:"urgency"`
+	Headline    string              `json:"headline"`
+	Description string              `json:"description"`
+	Instruction string              `json:"instruction"`
+	SenderName  string              `json:"senderName"`
+	AreaDesc    string              `json:"areaDesc"`
+	Effective   string              `json:"effective"`
+	Expires     string              `json:"expires"`
+	Onset       string              `json:"onset"`
+	Ends        string              `json:"ends"`
+	Geocode     alertGeo            `json:"geocode"`
+	Parameters  map[string][]string `json:"parameters"` // NWSheadline lives here
 }
 
 type alertGeo struct {
@@ -171,16 +207,29 @@ func (r alertsResponse) toAlerts() []Alert {
 			Certainty:   p.Certainty,
 			Urgency:     p.Urgency,
 			Headline:    p.Headline,
+			NWSHeadline: firstParam(p.Parameters, "NWSheadline"),
 			Description: p.Description,
 			Instruction: p.Instruction,
 			SenderName:  p.SenderName,
 			AreaDesc:    p.AreaDesc,
 			Effective:   parseTime(p.Effective),
 			Expires:     parseTime(p.Expires),
+			Onset:       parseTime(p.Onset),
+			Ends:        parseTime(p.Ends),
 			Zones:       p.Geocode.UGC,
 		})
 	}
 	return alerts
+}
+
+// firstParam returns the first value of a CAP `parameters` entry, or "".
+// The block is map[string][]string in the wire format even where a single
+// value is the only sensible shape.
+func firstParam(params map[string][]string, key string) string {
+	if v, ok := params[key]; ok && len(v) > 0 {
+		return strings.TrimSpace(v[0])
+	}
+	return ""
 }
 
 func parseTime(s string) time.Time {

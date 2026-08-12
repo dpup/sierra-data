@@ -124,6 +124,24 @@ mesh-specific rules:
   advert firehose refreshes `last_seen_at` without minting a revision. Only a
   node's identity, role, name, location, or status change writes history.
 
+## Weather-alert headline: deterministic, never AI
+
+`nws.Alert.ShortHeadline` composes `<Event> — <reason>` from the product name
+and the reason clause in `parameters.NWSheadline`. CAP's own
+`properties.headline` is issuance boilerplate — its every token is already
+`category`, `effective`, `expires` and `provenance.sourceName` — so shipping it
+verbatim repeated the record back at the reader in four places.
+
+**Do not move this to the enhancer.** `store.ContentHash` zeroes `Enhancement`
+and `Summary` but *not* `Headline`, so an AI headline would differ from the
+normalizer's on every tick: `NeedsUpdate` would fire forever (288 calls/day/alert
+against a `budgetPerTick` of 5) and each wording drift would mint a revision.
+Deterministic composition also makes it structurally impossible for a model to
+render a Watch as a Warning — the product name is copied from `Event`.
+
+Both consumers use it: the event card (`weather_alert.go`) and the fire-weather
+banner (`nws.fireWeatherFromAlert`, which does not go through the store).
+
 ## Enhancement budget + carry-forward
 
 Only the `WEATHER_ALERT` layer is enhanced here (road incidents arrive already
@@ -142,6 +160,14 @@ AI-enhanced from the `RoadsService` pipeline — do not re-enhance them).
   exhausted budget are picked up on their next content change.
 - Enhancement failure is log-and-continue (serve raw); the enhancer may localize
   only against the event's attached place **names** (grounding, not a requirement).
+- **The summary is a regional summary, capped at 2 sentences / 320 characters.**
+  Policies 4-7 of `nwsSystemPrompt` exist because the unbounded version produced
+  865-character summaries whose bulk was a roster of out-of-area forecast zones
+  and a restatement of the timestamps the card already shows. It must not repeat
+  the headline it sits under, name zone identifiers, or state the office or the
+  times — all of those are typed fields on the same record. Prompt policy cannot
+  be unit-tested; `TestNWSEnhancerLive` (skipped unless `NWS_ENHANCE_LIVE=1`)
+  runs the real prompt against a real product and asserts these.
 
 ## Wildfire has its own, wider geography
 

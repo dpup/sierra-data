@@ -81,10 +81,13 @@ func fireWeatherFromAlert(state string, a *Alert) FireWeather {
 	return FireWeather{
 		State:       state,
 		SourceEvent: a.Event,
-		Headline:    a.Headline,
-		SenderName:  a.SenderName,
-		Effective:   a.Effective,
-		Expires:     a.Expires,
-		Zones:       a.Zones,
+		// The banner takes the same compact line as the event card; it used to
+		// carry the CAP boilerplate, which put the issuing office and two
+		// timestamps into conditions.fireWeather.headline.
+		Headline:   a.ShortHeadline(),
+		SenderName: a.SenderName,
+		Effective:  a.Begins(),
+		Expires:    a.EndsAt(),
+		Zones:      a.Zones,
 	}
 }

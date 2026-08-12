@@ -26,12 +26,16 @@ func (f *fakeWeatherAPI) RawNWSAlerts(ctx context.Context) ([]nws.Alert, time.Ti
 func testNWSAlerts(now time.Time) []nws.Alert {
 	return []nws.Alert{
 		{
-			ID:          "urn:oid:2.49.0.1.840.0.abc",
-			Event:       "Red Flag Warning",
-			Severity:    "Severe",
-			Certainty:   "Likely",
-			Urgency:     "Expected",
-			Headline:    "Red Flag Warning until 8 PM PDT",
+			ID:        "urn:oid:2.49.0.1.840.0.abc",
+			Event:     "Red Flag Warning",
+			Severity:  "Severe",
+			Certainty: "Likely",
+			Urgency:   "Expected",
+			// Both headline fields, as the wire carries them: CAP's boilerplate
+			// `headline` and the ALL-CAPS `parameters.NWSheadline` that holds
+			// the reason. The event's headline is composed from the latter.
+			Headline:    "Red Flag Warning issued August 11 at 9:57AM PDT until August 11 at 8:00PM PDT by NWS Sacramento CA",
+			NWSHeadline: "RED FLAG WARNING IN EFFECT UNTIL 8 PM PDT FOR GUSTY WINDS AND LOW HUMIDITY",
 			Description: "* WHAT...Gusty winds and low humidity.",
 			Instruction: "Avoid outdoor burning.",
 			SenderName:  "NWS Sacramento CA",
@@ -41,12 +45,19 @@ func testNWSAlerts(now time.Time) []nws.Alert {
 			Zones:       []string{"CAZ064"},
 		},
 		{
+			// The shape that broke decision 8: NWS issues a watch as soon as it
+			// is written, so `effective` is already past, and only `onset` says
+			// the hazard is still ahead. Its `expires` is likewise the office's
+			// re-issue deadline, well before `ends`.
 			ID:         "urn:oid:2.49.0.1.840.0.def",
 			Event:      "Winter Storm Watch",
 			Severity:   "Moderate",
 			SenderName: "NWS Sacramento CA",
 			Zones:      []string{"CAZ258"},
-			Effective:  now.Add(6 * time.Hour), // not yet effective
+			Effective:  now.Add(-1 * time.Hour), // issued an hour ago
+			Expires:    now.Add(20 * time.Hour), // re-issue deadline
+			Onset:      now.Add(30 * time.Hour), // the snow starts tomorrow
+			Ends:       now.Add(48 * time.Hour),
 		},
 		{
 			ID:         "urn:oid:2.49.0.1.840.0.ghi",
@@ -72,7 +83,8 @@ func TestWeatherAlertPoll(t *testing.T) {
 	active := res.Events[0]
 	assert.Equal(t, "wx:urn:oid:2.49.0.1.840.0.abc", active.Id, "id must be wx:+NWSAlertID, byte-identical to shipped ids")
 	assert.Equal(t, gridv1.Layer_WEATHER_ALERT, active.Layer)
-	assert.Equal(t, "Red Flag Warning until 8 PM PDT", active.Headline)
+	// The reason, not the issuance boilerplate — see nws.Alert.ShortHeadline.
+	assert.Equal(t, "Red Flag Warning — gusty winds and low humidity", active.Headline)
 	assert.Equal(t, "Red Flag Warning", active.Category)
 	assert.Equal(t, gridv1.Severity_SEVERE, active.Severity)
 	assert.Equal(t, gridv1.EventStatus_ACTIVE, active.Status)
@@ -97,9 +109,17 @@ func TestWeatherAlertPoll(t *testing.T) {
 	assert.Equal(t, "West Slope Northern Sierra Nevada", d.AreaDesc)
 	assert.Equal(t, []string{"CAZ064"}, d.Zones)
 
-	// Future effective time => SCHEDULED; missing headline falls back to event.
+	// Decision 8: a hazard that has not started yet is SCHEDULED. The test is
+	// on `onset` — this product's `effective` is already an hour past, because
+	// NWS issues a watch the moment it is written, so keying on `effective`
+	// made every advance watch ACTIVE on publication.
 	scheduled := res.Events[1]
 	assert.Equal(t, gridv1.EventStatus_SCHEDULED, scheduled.Status)
+	assert.Equal(t, now.Add(30*time.Hour), scheduled.Effective.AsTime(),
+		"effective is the hazard's onset, not the product's issuance")
+	assert.Equal(t, now.Add(48*time.Hour), scheduled.Expires.AsTime(),
+		"expires is the hazard's end, not the product's re-issue deadline")
+	// No NWSheadline on this product: the bare event name is the headline.
 	assert.Equal(t, "Winter Storm Watch", scheduled.Headline)
 	assert.Equal(t, gridv1.Severity_MODERATE, scheduled.Severity)
 	assert.Equal(t, []string{"area:tuolumne"}, scheduled.PlaceIds)

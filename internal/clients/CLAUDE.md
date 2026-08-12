@@ -51,6 +51,20 @@ even in a minimal container.
 - `ClassifyFireWeather` derives Normal → Elevated → Red Flag purely from active
   products (Fire Weather Watch → elevated, Red Flag Warning → red-flag). It never
   invents a Red Flag that NWS hasn't issued — see issue #5.
+- **Four timestamps, two pairs. Use `Begins()`/`EndsAt()`, not the raw fields.**
+  `effective`/`expires` are the PRODUCT's window (issued at / re-issue by);
+  `onset`/`ends` are the HAZARD's. A watch is issued the moment it is written, so
+  they routinely disagree by a day or more — reading `expires` as a hazard end
+  made records claim an alert was over before its weather arrived, and reading
+  `effective` as a hazard start meant an advance watch was never `SCHEDULED`.
+  `NWSAlertID`'s fallback still keys on raw `Effective`: an id is an identity,
+  not a schedule, and changing it would rewrite every synthesized id.
+- **`Alert.ShortHeadline()` is the display line**, not `Headline`. CAP's
+  `properties.headline` is issuance boilerplate ("… issued August 11 at 9:57AM
+  PDT until … by NWS Sacramento CA") whose every token is already a structured
+  field. `ShortHeadline` composes `<Event> — <reason>` from the product name and
+  the reason clause in `parameters.NWSheadline`. Deterministic on purpose — see
+  `internal/ingest/CLAUDE.md` for why this must never become an AI field.
 - Zone codes for the service area (verify with `api.weather.gov/points/{lat},{lng}`,
   don't guess): CAZ137 (1000–3000 ft), CAZ138 (3000–5000 ft), CAZ139 (above
   5000 ft) — NWS Sacramento (STO), covering Calaveras & Tuolumne.
