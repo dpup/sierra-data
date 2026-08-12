@@ -58,6 +58,11 @@ const VIEWPORTS = [
   { name: 'mobile', width: 390, height: 844, dpr: 3 },   // iPhone 14 Pro-ish
   { name: 'tablet', width: 768, height: 1024, dpr: 2 },  // iPad portrait
   { name: 'desktop', width: 1440, height: 900, dpr: 1 },
+  // The column stops growing at --content-max (1280), but the prose measure is
+  // fixed at 540 — so the empty half beside a paragraph is WIDEST here, and
+  // every report of "narrow column, lots of whitespace" so far has come from a
+  // window wider than the widest thing we captured.
+  { name: 'wide', width: 1920, height: 1080, dpr: 1 },
 ];
 
 const MIME = {

@@ -19,6 +19,22 @@ const now = Date.now();
 const ago = (mins) => new Date(now - mins * 60_000).toISOString().replace('.000Z', 'Z');
 const ahead = (mins) => new Date(now + mins * 60_000).toISOString().replace('.000Z', 'Z');
 
+/**
+ * `ingestedAt` for a revision observed at `iso`.
+ *
+ * EventRevision.ingested_at is populated on every revision the store writes —
+ * it is OUR monotonic stamp for "when this service learned it", as against the
+ * upstream-stamped `observed_at`. Omitting it made the History page's ingest-age
+ * line unreachable in every screenshot, which is the fixture failure mode the
+ * review called out: the UI was verified against a shape the server never emits.
+ *
+ * Modelled as a short ingest lag, clamped to now — so a FUTURE-dated upstream
+ * observation (the mesh clock-skew case) still ingests in the present, which is
+ * exactly the discrepancy the History page warns about.
+ */
+const ingested = (iso) =>
+  new Date(Math.min(now, Date.parse(iso) + 90_000)).toISOString().replace('.000Z', 'Z');
+
 // Encode a GeoJSON geometry the way the API carries Place/Event geometry: a
 // proto `bytes` field, i.e. base64 of the JSON (format.js decodeGeometry).
 const geo = (obj) => Buffer.from(JSON.stringify(obj)).toString('base64');
@@ -87,8 +103,8 @@ const EVENTS = [
   {
     id: 'evt-wildfire-mudflat', layer: 'wildfire', severity: 'EXTREME', status: 'ACTIVE',
     wildfire: { acres: 2340, containment: 15, county: 'Calaveras', cause: 'under investigation', hasPerimeter: true },
-    headline: 'Mudflat Fire — 2,340 acres, 15% contained', areaLabel: 'Ebbetts Pass', category: 'wildfire',
-    observedAt: ago(11), revision: 7, provenance: { sourceId: 'firis' },
+    headline: 'Mudflat Fire — 2,340 ac, 15% contained', areaLabel: 'Ebbetts Pass', category: 'wildfire',
+    observedAt: ago(11), ingestedAt: ingested(ago(11)), revision: 7, provenance: { sourceId: 'firis', sourceName: 'CAL FIRE', attribution: 'CAL FIRE FIRIS', sourceUrl: 'https://www.fire.ca.gov/incidents', fetchedAt: ago(3) },
     description: 'Fast-moving wildfire east of Arnold along the Hwy 4 corridor. Forward spread driven by afternoon winds; spot fires reported north of the highway.',
     summary: 'Extreme fire behavior near Arnold; evacuation warning in effect for zones along Hwy 4.',
     enhancement: { model: 'claude-haiku-4-5', enhancedAt: ago(6), fields: ['summary'] },
@@ -97,9 +113,13 @@ const EVENTS = [
   },
   {
     id: 'evt-evac-e043', layer: 'evacuation', severity: 'SEVERE', status: 'ACTIVE',
-    evacuation: { zoneId: 'CAL-E043', level: 'WARNING', eventType: 'wildfire', county: 'Calaveras' },
+    // eventType is deliberately EMPTY here. The gateway marshals with
+    // EmitUnpopulated, so an unfilled string arrives as `""` rather than being
+    // omitted — which is how a detail row came to render as a blank line
+    // against live data. Kept empty so that path stays covered.
+    evacuation: { zoneId: 'CAL-E043', level: 'WARNING', eventType: '', county: 'Calaveras' },
     headline: 'Evacuation WARNING — Zone CAL-E043 (Avery / Hathaway Pines)', areaLabel: 'Calaveras County',
-    category: 'evacuation', observedAt: ago(24), revision: 2, provenance: { sourceId: 'genasys' },
+    category: 'evacuation', observedAt: ago(24), ingestedAt: ingested(ago(24)), revision: 2, provenance: { sourceId: 'genasys', sourceName: 'Genasys Protect', attribution: 'Genasys Protect (reference only — verify at protect.genasys.com)', sourceUrl: 'https://protect.genasys.com/search', fetchedAt: ago(210) },
     description: 'Cal OES / Genasys evacuation warning issued for zone CAL-E043 due to the Mudflat Fire. Be ready to leave.',
     summary: 'Warning (not order) — prepare to evacuate.',
     enhancement: { model: 'claude-haiku-4-5', enhancedAt: ago(6), fields: ['summary'] },
@@ -110,7 +130,7 @@ const EVENTS = [
     id: 'evt-redflag', layer: 'fire_weather', severity: 'SEVERE', status: 'ACTIVE',
     weatherAlert: { nwsSeverity: 'Severe', certainty: 'Likely', urgency: 'Expected', areaDesc: 'Calaveras and Tuolumne Counties below 5000 ft', zones: ['CAZ138'], instruction: 'Outdoor burning is not recommended. Report new fires immediately.' },
     headline: 'Red Flag Warning — gusts to 40 mph, RH 8%', areaLabel: 'CAZ138 (3000–5000 ft)',
-    category: 'fire_weather', observedAt: ago(95), revision: 1, provenance: { sourceId: 'nws-sto' },
+    category: 'fire_weather', observedAt: ago(95), ingestedAt: ingested(ago(95)), revision: 1, provenance: { sourceId: 'nws-sto', sourceName: 'NWS Sacramento', attribution: 'NOAA / National Weather Service Sacramento', sourceUrl: 'https://api.weather.gov/alerts', fetchedAt: ago(3) },
     description: 'National Weather Service Red Flag Warning in effect through this evening for gusty winds and critically low humidity.',
     summary: 'Critical fire weather; new ignitions may spread rapidly.',
     enhancement: { model: 'claude-haiku-4-5', enhancedAt: ago(6), fields: ['summary'] },
@@ -121,7 +141,7 @@ const EVENTS = [
     id: 'evt-chp-hwy4', layer: 'road_incident', severity: 'MODERATE', status: 'ACTIVE',
     roadIncident: { logNumber: '250814-0631', impact: 'moderate', duration: '< 1 hour', metadata: { lanesAffected: '1', emergencyServices: 'CHP, Cal Fire' } },
     headline: 'Traffic collision — Hwy 4 near Avery, right lane blocked', areaLabel: 'Hwy 4 · Murphys → Arnold',
-    category: 'road_incident', observedAt: ago(6), revision: 3, provenance: { sourceId: 'chp-caltrans' },
+    category: 'road_incident', observedAt: ago(6), ingestedAt: ingested(ago(6)), revision: 3, provenance: { sourceId: 'chp-caltrans', sourceName: 'CHP Stockton', attribution: 'Caltrans / California Highway Patrol', sourceUrl: 'https://quickmap.dot.ca.gov/', fetchedAt: ago(1) },
     description: 'Two-vehicle collision blocking the eastbound right lane. Emergency crews on scene; expect delays.',
     summary: 'Right lane blocked near Avery; one-lane traffic control.',
     enhancement: { model: 'claude-haiku-4-5', enhancedAt: ago(6), fields: ['summary'] },
@@ -132,7 +152,7 @@ const EVENTS = [
     id: 'evt-wx-winter', layer: 'weather_alert', severity: 'MODERATE', status: 'ACTIVE',
     weatherAlert: { nwsSeverity: 'Moderate', certainty: 'Likely', urgency: 'Expected', areaDesc: 'Ebbetts Pass above 5000 ft', zones: ['CAZ139'], instruction: 'Carry chains. Travel over the pass may be difficult.' },
     headline: 'Winter Weather Advisory — 3–6" snow above 5000 ft', areaLabel: 'CAZ139 (above 5000 ft)',
-    category: 'weather_alert', observedAt: ago(140), revision: 1, provenance: { sourceId: 'nws-sto' },
+    category: 'weather_alert', observedAt: ago(140), ingestedAt: ingested(ago(140)), revision: 1, provenance: { sourceId: 'nws-sto', sourceName: 'NWS Sacramento', attribution: 'NOAA / National Weather Service Sacramento', sourceUrl: 'https://api.weather.gov/alerts', fetchedAt: ago(3) },
     description: 'Snow accumulations of 3 to 6 inches above 5000 feet. Chain controls likely on Hwy 4 over Ebbetts Pass.',
     summary: 'Travel over the pass may be difficult; carry chains.',
     enhancement: { model: 'claude-haiku-4-5', enhancedAt: ago(6), fields: ['summary'] },
@@ -143,7 +163,7 @@ const EVENTS = [
     id: 'evt-quake', layer: 'earthquake', severity: 'MINOR', status: 'ACTIVE',
     earthquake: { magnitude: 3.1, depthKm: 6.2, felt: 14 },
     headline: 'M 3.1 earthquake — 8 km NE of Markleeville', areaLabel: 'Alpine County',
-    category: 'earthquake', observedAt: ago(52), revision: 1, provenance: { sourceId: 'usgs' },
+    category: 'earthquake', observedAt: ago(52), ingestedAt: ingested(ago(52)), revision: 1, provenance: { sourceId: 'usgs', sourceName: 'USGS', attribution: 'U.S. Geological Survey', sourceUrl: 'https://earthquake.usgs.gov/earthquakes/map/', fetchedAt: ago(2) },
     description: 'Light earthquake, depth 6.2 km. No damage expected.',
     summary: 'Widely but weakly felt; no damage reports.',
     enhancement: { model: 'claude-haiku-4-5', enhancedAt: ago(6), fields: ['summary'] },
@@ -154,7 +174,7 @@ const EVENTS = [
     id: 'evt-scheduled-closure', layer: 'road_incident', severity: 'MINOR', status: 'SCHEDULED',
     roadIncident: { logNumber: 'CT-4-PAVE-08', impact: 'moderate', duration: 'ongoing', metadata: { lanesAffected: 'all', permitted: 'true' } },
     headline: 'Planned overnight closure — Hwy 4 paving, Mon 22:00–05:00', areaLabel: 'Hwy 4 · Murphys → Arnold',
-    category: 'road_incident', observedAt: ahead(600), revision: 1, provenance: { sourceId: 'chp-caltrans' },
+    category: 'road_incident', observedAt: ahead(600), ingestedAt: ingested(ahead(600)), revision: 1, provenance: { sourceId: 'chp-caltrans', sourceName: 'CHP Stockton', attribution: 'Caltrans / California Highway Patrol', sourceUrl: 'https://quickmap.dot.ca.gov/', fetchedAt: ago(1) },
     description: 'Scheduled full closure for repaving between Murphys and Avery. Detour via Sheep Ranch Rd.',
     summary: 'Overnight full closure for paving; plan an alternate route.',
     enhancement: { model: 'claude-haiku-4-5', enhancedAt: ago(6), fields: ['summary'] },
@@ -175,7 +195,8 @@ const MESH_NODES = [
 const MESH_EVENTS = MESH_NODES.map((n, i) => ({
   id: `mesh-${n.pk.slice(0, 8)}`, layer: 'mesh', severity: 'INFO', status: 'ACTIVE',
   headline: n.name, areaLabel: 'Ebbetts Pass', category: 'mesh', observedAt: ago(5 + i * 7),
-  revision: 1, provenance: { sourceId: 'meshcore' },
+  ingestedAt: ingested(ago(5 + i * 7)),
+  revision: 1, provenance: { sourceId: 'meshcore', sourceName: 'MeshCore MQTT bridge', attribution: 'MeshCore community MQTT bridge (gomesh.dev)', sourceUrl: 'https://gomesh.dev/', fetchedAt: ago(1) },
   mesh: {
     publicKey: n.pk, name: n.name, nodeType: n.role,
     telemetry: { snr: n.snr, hopCount: n.hop, gateways: n.gw ? ['gomesh.dev'] : [] },
@@ -194,24 +215,33 @@ const MESH_LINKS = [
 // ---- sources -------------------------------------------------------------
 
 const SOURCES = [
-  { id: 'firis', name: 'FIRIS (CAL FIRE fire perimeters)', status: 'OK', homepageUrl: 'https://www.fire.ca.gov/',
+  { id: 'firis', name: 'FIRIS (CAL FIRE fire perimeters)', attribution: 'CAL FIRE FIRIS', status: 'OK', homepageUrl: 'https://www.fire.ca.gov/',
     pollIntervalSeconds: 300, lastSuccessAt: ago(4), lastAttemptAt: ago(4), staleAfterSeconds: 900, expireAfterSeconds: 3600 },
-  { id: 'nws-sto', name: 'NWS Sacramento (alerts + fire weather)', status: 'OK', homepageUrl: 'https://api.weather.gov/',
+  { id: 'nws-sto', name: 'NWS Sacramento (alerts + fire weather)', attribution: 'NOAA / National Weather Service Sacramento', status: 'OK', homepageUrl: 'https://api.weather.gov/',
     pollIntervalSeconds: 300, lastSuccessAt: ago(3), lastAttemptAt: ago(3), staleAfterSeconds: 900, expireAfterSeconds: 3600 },
-  { id: 'usgs', name: 'USGS Earthquakes', status: 'OK', homepageUrl: 'https://earthquake.usgs.gov/',
+  { id: 'usgs', name: 'USGS Earthquakes', attribution: 'U.S. Geological Survey', status: 'OK', homepageUrl: 'https://earthquake.usgs.gov/',
     pollIntervalSeconds: 300, lastSuccessAt: ago(2), lastAttemptAt: ago(2), staleAfterSeconds: 900, expireAfterSeconds: 3600 },
-  { id: 'chp-caltrans', name: 'Caltrans / CHP incidents', status: 'STALE', homepageUrl: 'https://quickmap.dot.ca.gov/',
+  { id: 'chp-caltrans', name: 'Caltrans / CHP incidents', attribution: 'Caltrans / California Highway Patrol', status: 'STALE', homepageUrl: 'https://quickmap.dot.ca.gov/',
     pollIntervalSeconds: 300, lastSuccessAt: ago(23), lastAttemptAt: ago(1), staleAfterSeconds: 900, expireAfterSeconds: 3600,
     lastError: 'upstream timeout after 10s (attempt is retrying)' },
-  { id: 'google-routes', name: 'Google Routes (travel times)', status: 'OK', homepageUrl: 'https://developers.google.com/maps/documentation/routes',
+  { id: 'google-routes', name: 'Google Routes (travel times)', attribution: 'Google Routes API', status: 'OK', homepageUrl: 'https://developers.google.com/maps/documentation/routes',
     pollIntervalSeconds: 2700, lastSuccessAt: ago(18), lastAttemptAt: ago(18), staleAfterSeconds: 5400, expireAfterSeconds: 10800 },
-  { id: 'genasys', name: 'Genasys Protect (evacuation zones)', status: 'UNAVAILABLE', homepageUrl: 'https://protect.genasys.com/',
+  { id: 'genasys', name: 'Genasys Protect (evacuation zones)', attribution: 'Genasys Protect (reference only — verify at protect.genasys.com)', status: 'UNAVAILABLE', homepageUrl: 'https://protect.genasys.com/',
     pollIntervalSeconds: 300, lastSuccessAt: ago(210), lastAttemptAt: ago(1), staleAfterSeconds: 900, expireAfterSeconds: 3600,
     lastError: 'HTTP 503 from protect.genasys.com — evacuation status is UNAVAILABLE, not an all-clear' },
-  { id: 'openweather', name: 'OpenWeatherMap (current conditions)', status: 'OK', homepageUrl: 'https://openweathermap.org/',
+  { id: 'openweather', name: 'OpenWeatherMap (current conditions)', attribution: 'OpenWeatherMap', status: 'OK', homepageUrl: 'https://openweathermap.org/',
     pollIntervalSeconds: 900, lastSuccessAt: ago(7), lastAttemptAt: ago(7), staleAfterSeconds: 1800, expireAfterSeconds: 3600 },
-  { id: 'meshcore', name: 'MeshCore MQTT bridge (gomesh.dev)', status: 'OK', homepageUrl: 'https://gomesh.dev/',
+  { id: 'meshcore', name: 'MeshCore MQTT bridge (gomesh.dev)', attribution: 'MeshCore community MQTT bridge', status: 'OK', homepageUrl: 'https://gomesh.dev/',
     pollIntervalSeconds: 60, lastSuccessAt: ago(1), lastAttemptAt: ago(1), staleAfterSeconds: 259200, expireAfterSeconds: 604800 },
+  // A source that has not completed a poll cycle yet. protojson emits an enum's
+  // ZERO value BY NAME, so this arrives as the literal
+  // `SOURCE_STATUS_UNSPECIFIED` — observed against a live server, where three
+  // feeds sat in this state for the first ~30 seconds after boot. It must render
+  // as UNKNOWN: never as OK, and never as the raw proto identifier (which is
+  // both a leak and 25 characters wide in a narrow column). Also the only
+  // fixture with no lastSuccessAt ("never") and no thresholds.
+  { id: 'nifc', name: 'NIFC (national incident feed)', attribution: 'NIFC', status: 'SOURCE_STATUS_UNSPECIFIED',
+    homepageUrl: 'https://www.nifc.gov/', pollIntervalSeconds: 600, lastAttemptAt: ago(1) },
 ];
 
 // ---- geojson map layers --------------------------------------------------
@@ -287,7 +317,7 @@ const GEOJSON = {
       feat({ type: 'Polygon', coordinates: [[[-120.34, 38.24], [-120.26, 38.24], [-120.26, 38.30], [-120.34, 38.30], [-120.34, 38.24]]] }, {
         id: 'evt-wildfire-mudflat', layer: 'wildfire', severity: 'EXTREME', severityRank: 4,
     wildfire: { acres: 2340, containment: 15, county: 'Calaveras', cause: 'under investigation', hasPerimeter: true },
-        headline: 'Mudflat Fire — 2,340 acres, 15% contained', source: { name: 'CAL FIRE' }, updatedAt: ago(11),
+        headline: 'Mudflat Fire — 2,340 ac, 15% contained', source: { name: 'CAL FIRE' }, updatedAt: ago(11),
       }),
     ],
   },
@@ -297,6 +327,16 @@ const GEOJSON = {
       feat({ type: 'Polygon', coordinates: [[[-120.5, 38.1], [-119.9, 38.1], [-119.9, 38.5], [-120.5, 38.5], [-120.5, 38.1]]] }, {
         id: 'fw-redflag', layer: 'fire_weather', severity: 'SEVERE', severityRank: 3,
         headline: 'Red Flag Warning — gusts to 40 mph, RH 8%', fireWeather: { state: 'red-flag' }, source: { name: 'NWS' },
+      }),
+      // An UNLOCATED feature — `geometry: null` is valid (a zone-wide product
+      // that cannot be drawn) and the Map lists it rather than dropping it.
+      // It deliberately carries NO `updatedAt`: a live run found this shape,
+      // and the Updated column rendered it as a doubled dash. Every other
+      // fixture stamps a time, so nothing exercised the absent branch.
+      feat(null, {
+        id: 'fw-watch-zonewide', layer: 'fire_weather', severity: 'MODERATE', severityRank: 2,
+        headline: 'Fire Weather Watch — thunderstorms and strong outflow winds',
+        fireWeather: { state: 'elevated' }, source: { name: 'NWS Sacramento CA' },
       }),
     ],
   },
@@ -360,9 +400,11 @@ function historyFor() {
   const revisions = [];
   for (const e of EVENTS) {
     for (let r = e.revision; r >= 1; r--) {
+      const observedAt = new Date(Date.parse(e.observedAt) - (e.revision - r) * 18 * 60_000).toISOString().replace('.000Z', 'Z');
       revisions.push({
         revision: r,
-        observedAt: new Date(Date.parse(e.observedAt) - (e.revision - r) * 18 * 60_000).toISOString().replace('.000Z', 'Z'),
+        observedAt,
+        ingestedAt: ingested(observedAt),
         event: { id: e.id, headline: e.headline, layer: e.layer, severity: e.severity, status: e.status, observedAt: e.observedAt },
       });
     }
@@ -410,11 +452,34 @@ export function routeFor(pathname, params) {
     const id = decodeURIComponent(m[1]);
     const e = [...EVENTS, ...MESH_EVENTS].find((x) => x.id === id) || EVENTS[0];
     return {
-      revisions: Array.from({ length: e.revision }, (_, i) => e.revision - i).map((r) => ({
-        revision: r,
-        observedAt: new Date(Date.parse(e.observedAt) - (e.revision - r) * 18 * 60_000).toISOString().replace('.000Z', 'Z'),
-        event: { ...e, revision: r },
-      })),
+      revisions: Array.from({ length: e.revision }, (_, i) => e.revision - i).map((r) => {
+        const observedAt = new Date(Date.parse(e.observedAt) - (e.revision - r) * 18 * 60_000).toISOString().replace('.000Z', 'Z');
+        // Older revisions differ in the fields a source actually revises, not
+        // only in the revision number. Every revision used to be `{...e,
+        // revision: r}`, so the ONLY diff row ever rendered was `revision 6 → 7`
+        // — which meant the diff layout was never tested against the values it
+        // exists for: a rewritten headline, a nested detail object, a shifted
+        // timestamp. A wildfire's containment climbing is the canonical case.
+        const back = e.revision - r; // 0 for the current revision
+        const ev = { ...e, revision: r, observedAt };
+        if (back > 0) {
+          if (e.wildfire) {
+            const containment = Math.max(0, (e.wildfire.containment ?? 0) - back * 7);
+            ev.wildfire = { ...e.wildfire, containment };
+            ev.headline = String(e.headline).replace(
+              /(\d+)% contained/,
+              `${containment}% contained`
+            );
+          } else if (e.evacuation) {
+            // Warnings escalate to orders; the level and the headline move together.
+            ev.evacuation = { ...e.evacuation, level: 'WARNING' };
+            ev.headline = String(e.headline).replace('Order', 'Warning');
+          } else {
+            ev.headline = `${e.headline} (rev ${r})`;
+          }
+        }
+        return { revision: r, observedAt, ingestedAt: ingested(observedAt), event: ev };
+      }),
     };
   }
   if ((m = p.match(/^\/v1\/events\/([^/]+)$/))) {
@@ -497,7 +562,7 @@ function placeSummary(ref) {
     // in highestSeverity, and headlines is a repeated SummaryDomainHeadline.
     domains: [
       { domain: 'fire', status: 'OK', highestSeverity: 'EXTREME', activeCount: 1, headlines: [
-        { id: 'evt-wildfire-mudflat', severity: 'EXTREME', headline: 'Mudflat Fire — 2,340 acres, 15% contained' },
+        { id: 'evt-wildfire-mudflat', severity: 'EXTREME', headline: 'Mudflat Fire — 2,340 ac, 15% contained' },
       ] },
       { domain: 'evacuation', status: 'UNAVAILABLE', highestSeverity: 'SEVERE', activeCount: 1, headlines: [
         { id: 'evt-evac-e043', severity: 'SEVERE', headline: 'Evacuation WARNING — Zone CAL-E043 (Avery / Hathaway Pines)' },
