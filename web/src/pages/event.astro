@@ -11,16 +11,10 @@ import EventDetailStyles from '../components/EventDetailStyles.astro';
 
   <p class="crumb-back muted small mono"><a href="/events">&larr; events explorer</a></p>
 
-  <p class="lead">
-    Everything the store holds for one event. Two live requests render the page:
-    <code class="inline">/api/v1/events/&#123;id&#125;</code> for the current revision and
-    <code class="inline">&hellip;/history</code> for every prior one. You get the
-    full protojson envelope, the typed detail block, the geometry on a map,
-    provenance, and — where present — the AI enhancement shown beside the verbatim
-    source text it was built from. The model translates the wording into plain
-    language; it never adds facts, and every revision is kept. Replay either
-    request yourself.
-  </p>
+  <!-- No standfirst. This is a permalink: a reader arrives having already chosen
+       a record, so the page owes them the record, not a paragraph about the
+       page. What the pane is built from is stated exactly by the two GET lines
+       at its foot, which is a better explanation than prose. -->
 
   <!-- The whole record is built by renderEventDetail() (event-detail.js), the
        SAME renderer the /events browser mounts in its right-hand column — so the

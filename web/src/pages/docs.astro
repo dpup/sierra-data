@@ -1,5 +1,6 @@
 ---
 import Shell from '../layouts/Shell.astro';
+import PageHead from '../components/PageHead.astro';
 // The reference body is a large, fully-static HTML document dense with literal
 // braces (JSON snippets, {place}/{id} path templates). Importing it raw and
 // injecting via set:html keeps it verbatim and avoids Astro trying to evaluate
@@ -27,23 +28,21 @@ import docsBody from '../partials/docs-body.html?raw';
       display: inline-block;
       font-family: var(--font-mono);
       font-size: 11.5px;
-      color: var(--blu);
-      background: var(--blu-bg);
-      border: 1px solid var(--blu-border);
-      border-radius: var(--radius-sm);
+      color: var(--text-primary);
+      background: var(--paper-sunken);
+      border: 1px solid var(--rule);
       padding: 2px 8px;
       margin: 3px 5px 3px 0;
       word-break: break-all;
     }
-    .live-examples a:hover { text-decoration: none; border-color: var(--grn-line); }
-    .live-examples a::before { content: "GET "; color: var(--grn); }
+    .live-examples a:hover { text-decoration: none; border-color: var(--ink); }
+    .live-examples a::before { content: "GET "; color: var(--signal); }
 
     /* The evac fail-loud contract gets the loudest chrome on the page. */
     .contract-callout {
       border: 1px solid var(--st-UNAVAILABLE);
       border-left-width: 4px;
-      border-radius: var(--radius);
-      background: color-mix(in srgb, var(--st-UNAVAILABLE) 7%, var(--bg-card));
+      background: color-mix(in srgb, var(--st-UNAVAILABLE) 7%, var(--paper));
       padding: 18px 22px;
       margin: 16px 0 24px;
     }
@@ -51,7 +50,7 @@ import docsBody from '../partials/docs-body.html?raw';
     .contract-callout .invariant {
       font-family: var(--font-mono);
       font-weight: 700;
-      color: var(--text-hi);
+      color: var(--text-primary);
       font-size: 16px;
       letter-spacing: 0.01em;
       margin: 6px 0 12px;
@@ -83,7 +82,7 @@ import docsBody from '../partials/docs-body.html?raw';
     .backtop {
       font-family: var(--font-mono);
       font-size: 11px;
-      color: var(--text-dim);
+      color: var(--text-tertiary);
     }
 
     /* Reference tables: app.css sets .data-table to white-space:nowrap, which
@@ -181,6 +180,27 @@ import docsBody from '../partials/docs-body.html?raw';
   </style>
 
   <nav id="docs-rail" aria-label="On this page"></nav>
+  <PageHead kicker="The Grid · /api/v1" title="API reference">
+    <p class="lead">The public contract, in one page.</p>
+    <Fragment slot="badges">
+      <span class="chip chip-green">no key required</span>
+      <span class="chip chip-blue">CORS-open</span>
+      <a class="chip chip-blue" href="/api/openapi.json">OpenAPI spec</a>
+    </Fragment>
+  </PageHead>
+
+  <p class="rail-caption">
+    <b>Conventions</b>base URL <code class="inline">https://data.sierragridteam.org</code>,
+    everything under <code class="inline">/api/v1/</code> · read-only, keyless, CORS-open ·
+    responses are camelCase throughout, timestamps RFC&nbsp;3339, errors gRPC-standard
+    <code class="inline">&#123;code, codeName, message, details&#125;</code>, most reads carry an
+    ETag · every <span class="chip-get"><b>GET</b></span> below is a live link into the running
+    service · a feed's <code class="inline">sourceStatus</code> is
+    <code class="inline">OK</code>, <code class="inline">STALE</code> or
+    <code class="inline">UNAVAILABLE</code> — an unavailable feed is reported as such, never as
+    an all-clear (§6)
+  </p>
+
   <Fragment set:html={docsBody} />
 
   <script is:inline type="module" src="/assets/pages/docs.js"></script>

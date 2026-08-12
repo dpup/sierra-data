@@ -3,6 +3,7 @@ import Shell from '../layouts/Shell.astro';
 import PageHead from '../components/PageHead.astro';
 import SectionHead from '../components/SectionHead.astro';
 import GetChip from '../components/GetChip.astro';
+import FilterGroup from '../components/FilterGroup.astro';
 ---
 <Shell
   current="places"
@@ -15,50 +16,8 @@ import GetChip from '../components/GetChip.astro';
   </Fragment>
 
   <PageHead kicker="grid.v1 · place directory" title="Places">
-    <p class="lead">
-      Every event, alert, and summary in the Grid is scoped to a
-      <em>place</em> — an area, county, town, evacuation zone, or highway corridor.
-      Places are addressable by slug (<code class="inline">ebbetts-pass</code>) or by
-      <code class="inline">kind:slug</code> id (<code class="inline">county:calaveras-county</code>),
-      and <code class="inline">/resolve</code> turns a lat·lng or a street address into
-      the places that contain it, <strong>most-specific first</strong>. This is the live
-      directory, the per-place geometry, and the resolve tester — every row is a browser
-      fetch you can replay yourself.
-    </p>
+    <p class="lead">Everything in the Grid is scoped to a place.</p>
   </PageHead>
-
-  <!-- endpoints reference -->
-  <div class="section-gap"></div>
-  <SectionHead heading="Three ways in" cap="directory · detail · resolve" />
-  <section class="card" aria-labelledby="endpoints-h">
-    <h3 id="endpoints-h" style="margin-top:0">Endpoints</h3>
-    <div style="display:flex;flex-direction:column;gap:16px;margin-top:12px;">
-      <div>
-        <GetChip path="/api/v1/places" />
-        <p class="prose" style="margin:8px 0 0;font-size:13px;">
-          The directory. Filter by <code class="inline">kind</code>
-          (AREA, COUNTY, TOWN, EVAC_ZONE, CORRIDOR, SITE) or <code class="inline">q</code>
-          (name search). <a href="/api/v1/places?kind=COUNTY">Try&nbsp;?kind=COUNTY</a>.
-        </p>
-      </div>
-      <div>
-        <GetChip path="/api/v1/places/{place}" />
-        <p class="prose" style="margin:8px 0 0;font-size:13px;">
-          One place by slug or id — geometry (base64 GeoJSON in
-          <code class="inline">geometry.geojson</code>), centroid, bbox, and
-          <code class="inline">parentId</code>. <a href="/api/v1/places/ebbetts-pass">Try&nbsp;/ebbetts-pass</a>.
-        </p>
-      </div>
-      <div>
-        <GetChip path="/api/v1/places:resolve" />
-        <p class="prose" style="margin:8px 0 0;font-size:13px;">
-          <code class="inline">?lat=&amp;lng=</code> or <code class="inline">?address=</code>
-          &rarr; the containing places, most-specific first (SITE&nbsp;&rarr;&nbsp;AREA).
-          <a href="/api/v1/places:resolve?lat=38.0679&amp;lng=-120.5385">Try&nbsp;a&nbsp;point</a>.
-        </p>
-      </div>
-    </div>
-  </section>
 
   <!-- selected place detail (hidden until a place is chosen) -->
   <section id="place-view" hidden aria-labelledby="place-name">
@@ -67,15 +26,46 @@ import GetChip from '../components/GetChip.astro';
     <div id="place-detail"><span class="loading">Loading place&hellip;</span></div>
   </section>
 
-  <!-- directory grouped by kind -->
+  <!-- The directory is this page's data, so it takes the Events/History order:
+       caption under the hero's rule, filters, the echoed request, then the rows.
+       It used to open with a section head and a paragraph before any control,
+       which put two blocks between the hero and the thing the page is for. -->
   <section id="directory-view" aria-labelledby="directory-h">
-    <SectionHead cap="grouped by kind · most-specific to broadest">
-      <Fragment slot="left">
-        <h2 id="directory-h">Directory</h2>
-        <GetChip path="/api/v1/places" />
-      </Fragment>
-    </SectionHead>
-    <div id="directory"><span class="loading">Loading /api/v1/places&hellip;</span></div>
+    <h2 id="directory-h" class="sr-only">Directory</h2>
+
+    <p class="rail-caption">
+      <b>Kind</b>filtered in your browser — the directory is
+      <strong>not paginated</strong> and returns whole, so this is not another request
+    </p>
+
+    <div class="filter-set">
+      <FilterGroup param="kind" control="grid-chip-row" id="pl-kinds" mode="single" />
+    </div>
+    <div id="pl-query" class="req-echo"></div>
+
+    <div class="with-rail">
+      <div class="rail-main">
+        <div id="directory"><span class="loading">Loading /api/v1/places&hellip;</span></div>
+      </div>
+      <aside class="page-rail" aria-label="About place ids">
+        <div class="rail-block">
+          <div class="rail-label">Place ids</div>
+          <p>
+            An id is <code class="inline">&#123;kind&#125;:&#123;slug&#125;</code> and slugs are
+            globally unique — <code class="inline">ebbetts-pass</code> and
+            <code class="inline">area:ebbetts-pass</code> both work anywhere a
+            <code class="inline">&#123;place&#125;</code> appears.
+          </p>
+        </div>
+        <div class="rail-block">
+          <div class="rail-label">Geometry</div>
+          <p>
+            The column distinguishes a full GeoJSON body from <span class="mono">bbox only</span> —
+            worth knowing before you rely on a place for point-in-polygon work.
+          </p>
+        </div>
+      </aside>
+    </div>
   </section>
 
   <!-- shared map + resolve tester -->
@@ -89,7 +79,7 @@ import GetChip from '../components/GetChip.astro';
     </SectionHead>
     <p id="map-hint" class="small muted">Click anywhere on the map to resolve that point to its containing places.</p>
     <div id="map" class="map-canvas" role="application" aria-label="Map. Click a point to resolve it to containing places."></div>
-    <div class="filter-bar">
+    <div class="query-form">
       <form id="point-form" class="row">
         <div class="field">
           <label for="lat-input">lat</label>

@@ -9,6 +9,14 @@
 // can import and test this module directly.
 
 /** Typed error for non-2xx responses. */
+/**
+ * The service's public origin, for URLs a THIRD PARTY would use — the .geojson
+ * a map client points at, the curl a reader copies. Never used to fetch: this
+ * page always reads same-origin (see the note on get() below), so a deploy
+ * behind another host still works.
+ */
+export const PUBLIC_ORIGIN = 'https://data.sierragridteam.org';
+
 export class ApiError extends Error {
   /**
    * @param {number} status HTTP status code (0 for network-level failures)

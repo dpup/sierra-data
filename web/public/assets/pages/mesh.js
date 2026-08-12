@@ -10,7 +10,7 @@
 
 import { get, ApiError } from '../api.js';
 import { timeCell } from '../format.js';
-import { BASE_STYLE } from '../basemap.js';
+import { BASE_STYLE, BASE_ATTRIBUTION_OPTS, ensureBasemap, deferInteraction } from '../basemap.js';
 
 const ROLE = {
   repeater: { color: '#4bbd82', label: 'Repeater', r: 5 },
@@ -115,13 +115,23 @@ export async function initMeshPage() {
   let currentWindow = WINDOWS[0].key;
   const winEl = document.getElementById('mesh-window');
   const winButtons = [];
+  // Single-select chip group — the shared .pill control (Events severity_min
+  // uses the same radio behaviour). `.on` is the visual state, aria-pressed the
+  // announced one.
   for (const wdef of WINDOWS) {
-    const b = el('button', 'mesh-win-btn', wdef.label);
-    if (wdef.key === currentWindow) b.classList.add('active');
+    const on = wdef.key === currentWindow;
+    const b = el('button', 'pill' + (on ? ' on' : ''), wdef.label);
+    b.type = 'button';
+    b.dataset.value = wdef.key;
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
     b.addEventListener('click', () => {
       if (currentWindow === wdef.key) return;
       currentWindow = wdef.key;
-      for (const wb of winButtons) wb.el.classList.toggle('active', wb.key === wdef.key);
+      for (const wb of winButtons) {
+        const lit = wb.key === wdef.key;
+        wb.el.classList.toggle('on', lit);
+        wb.el.setAttribute('aria-pressed', lit ? 'true' : 'false');
+      }
       loadLinks();
     });
     winButtons.push({ key: wdef.key, el: b });
@@ -129,7 +139,16 @@ export async function initMeshPage() {
   }
 
   // 3. map + layers.
-  const map = new maplibregl.Map({ container: 'mesh-canvas', style: BASE_STYLE, center: DEFAULT_CENTER, zoom: DEFAULT_ZOOM });
+  const map = new maplibregl.Map({
+    container: 'mesh-canvas',
+    style: BASE_STYLE,
+    center: DEFAULT_CENTER,
+    zoom: DEFAULT_ZOOM,
+    // Credit comes from the TileJSON; this only makes it compact.
+    attributionControl: BASE_ATTRIBUTION_OPTS,
+  });
+  ensureBasemap(map);
+  deferInteraction(map, document.getElementById('mesh-canvas'));
   map.addControl(new maplibregl.NavigationControl(), 'top-right');
 
   async function loadLinks() {
@@ -168,7 +187,7 @@ export async function initMeshPage() {
     );
   }
 
-  map.on('load', () => {
+  map.on('style.load', () => {
     map.addSource('mesh-edges', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
     map.addLayer({
       id: 'mesh-edges', type: 'line', source: 'mesh-edges',
@@ -213,7 +232,7 @@ export async function initMeshPage() {
       const dl = el('dl', 'popup-details-dl');
       const add = (k, v) => { if (v !== undefined && v !== null && v !== '') { dl.append(el('dt', '', k), el('dd', '', String(v))); } };
       if (p.snr !== undefined && p.snr !== 0) add('SNR', p.snr + ' dB');
-      add('hops', p.hop);
+      add('hops', p.hop === undefined || p.hop === null ? null : hopCell(p.hop));
       add('gateways', p.gw);
       add('pubkey', (p.pubkey || '').slice(0, 16) + '…');
       box.append(dl);
@@ -254,6 +273,19 @@ export async function initMeshPage() {
  *
  * @param {Map<string, Object>} nodes keyed by public key
  */
+/**
+ * Hop count with its unit: "0 hops", "1 hop", "8 hops" — and "—" when the node
+ * reported none. Absent is not zero: zero hops is a real reading (heard
+ * direct), and the two must not collapse into one rendering.
+ * @param {number|undefined|null} hop
+ * @returns {string}
+ */
+export function hopCell(hop) {
+  if (hop === undefined || hop === null || hop === '' || Number.isNaN(Number(hop))) return '—';
+  const n = Number(hop);
+  return `${n} ${n === 1 ? 'hop' : 'hops'}`;
+}
+
 function renderNodeTable(nodes) {
   const tbody = document.getElementById('mesh-tbody');
   if (!tbody) return;
@@ -305,7 +337,10 @@ function renderNodeTable(nodes) {
 
     const t = n.telemetry || {};
     tr.append(el('td', undefined, `${num(t.snr, ' dB')} / ${num(t.rssi, ' dBm')}`));
-    tr.append(el('td', 'num', n.hop === undefined || n.hop === null ? '—' : String(n.hop)));
+    // The unit rides in the cell. Every other column carries its own — "9 dB",
+    // "5 min ago" — and with the header row dropped (the section cap is the
+    // legend) a bare "2" was the one value you had to look up to read.
+    tr.append(el('td', 'num', hopCell(n.hop)));
 
     const heard = (n.ev && n.ev.observedAt) || '';
     const heardCell = el('td');

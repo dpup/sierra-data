@@ -1,0 +1,56 @@
+---
+// FilterGroup — a filter facet: its label, and the control beneath it.
+//
+// The label is named for the QUERY PARAMETER, not for a friendlier word: the
+// reader of this page is composing a URL, and `severity_min` is the string they
+// will type. Every facet on every screen uses this, so the label treatment is
+// defined once rather than re-declared per page (it had already drifted between
+// Events, Map and History — and Map, History, Places and Roads used a different
+// filter system entirely).
+//
+//   <FilterGroup param="layer" control="grid-chip-row"
+//                id="ev-layers" mode="multi" exclusive="" />
+//
+//   <FilterGroup param="place" note="scopes every layer below">
+//     <grid-menu id="rd-place" trigger-label="loading places…"></grid-menu>
+//   </FilterGroup>
+//
+// `control` names the element to render — a <grid-chip-row> for chips, or pass
+// children instead for anything bespoke (an input, a menu, a button).
+interface Props {
+  /** The query parameter this facet maps to; shown as the label. */
+  param: string;
+  /** Qualifier under the label, e.g. "any of · empty = all layers". */
+  note?: string;
+  /** Element to render as the control. Omit to use the default slot. */
+  control?: string;
+  /** id for the control element, so an island can find it. */
+  id?: string;
+  /** grid-chip-row: 'multi' | 'single'. */
+  mode?: string;
+  /** grid-chip-row: value that clears the others (the `all` chip). */
+  exclusive?: string;
+  /** Extra classes on the group, e.g. `filter-actions`. */
+  class?: string;
+}
+const { param, note, control, id, mode, exclusive, class: cls } = Astro.props;
+const labelId = id ? `${id}-label` : undefined;
+const Control = control as any;
+---
+<div class:list={['filter-group', cls]}>
+  {param && (
+    <span class="filter-label" id={labelId}>
+      {param}{note && <span class="filter-note">{note}</span>}
+    </span>
+  )}
+  {control ? (
+    <Control
+      id={id}
+      mode={mode}
+      exclusive={exclusive}
+      aria-labelledby={labelId}
+    />
+  ) : (
+    <slot />
+  )}
+</div>

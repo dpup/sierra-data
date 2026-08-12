@@ -12,6 +12,7 @@
 //     value a page shows is a replayable GET
 
 import { requests, API_REQUEST_EVENT, curlFor } from './api.js';
+import { copyButton } from './ui.js';
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, className, text) => {
@@ -166,18 +167,7 @@ function renderRequestLog(listEl, countEl, sideCountEl) {
     );
     if (entry.error) row.title = entry.error;
     const code = el('code', 'request-log-curl', curlFor(entry.url));
-    const copy = el('button', 'copy-btn', 'copy');
-    copy.type = 'button';
-    copy.addEventListener('click', () => {
-      navigator.clipboard.writeText(curlFor(entry.url)).then(
-        () => {
-          copy.textContent = 'copied';
-          setTimeout(() => (copy.textContent = 'copy'), 1400);
-        },
-        () => (copy.textContent = 'failed')
-      );
-    });
-    row.append(status, code, copy);
+    row.append(status, code, copyButton(curlFor(entry.url)));
     listEl.append(row);
   }
   countEl.textContent = String(requests.length);

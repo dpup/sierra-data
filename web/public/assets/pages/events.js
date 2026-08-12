@@ -12,8 +12,13 @@
 // this module. All DOM work happens inside initEventsPage().
 
 import { get, apiURL, curlFor, ApiError } from '../api.js';
-import { layerLabel, recordRow } from '../format.js';
+import { recordRow, fmtNum, timeAgo } from '../format.js';
+import { placeMenuOptions, placeMenuLabel } from '../place.js';
+import { el, requireEls, errorBlock, wireCopyButton } from '../ui.js';
 import { renderEventDetail } from './event-detail.js';
+// Importing these registers <grid-chip-row> and <grid-menu>.
+import '../components/chip-row.js';
+import '../components/menu.js';
 
 /**
  * Event layers accepted by /api/v1/events' `layer` param, as the lowercase
@@ -46,9 +51,6 @@ export const SEVERITY_OPTIONS = ['INFO', 'MINOR', 'MODERATE', 'SEVERE', 'EXTREME
 
 /** Page sizes offered in the control. Empty string = server default. */
 export const PAGE_SIZES = ['', '25', '50', '100', '200']; // 200 is the API max (store maxPageSize); >200 is a 400
-
-/** PlaceKind display order for the grouped place select. */
-export const KIND_ORDER = ['AREA', 'COUNTY', 'TOWN', 'EVAC_ZONE', 'CORRIDOR', 'SITE'];
 
 /**
  * RFC 3339 (UTC) -> value for <input type="datetime-local"> ("YYYY-MM-DDTHH:MM"
@@ -168,343 +170,352 @@ export function buildQuery(state, pageToken) {
   };
 }
 
-/**
- * Group a PlaceList's places by kind for the place <select>, in KIND_ORDER
- * (unknown kinds last, in first-seen order), each group name-sorted.
- * @param {Array<Object>} places protojson Place messages (camelCase)
- * @returns {Array<{kind: string, places: Array<Object>}>}
- */
-export function groupPlaces(places) {
-  const byKind = new Map();
-  for (const p of places || []) {
-    const kind = p.kind || 'PLACE_KIND_UNSPECIFIED';
-    if (!byKind.has(kind)) byKind.set(kind, []);
-    byKind.get(kind).push(p);
-  }
-  const kinds = [
-    ...KIND_ORDER.filter((k) => byKind.has(k)),
-    ...[...byKind.keys()].filter((k) => !KIND_ORDER.includes(k)),
-  ];
-  return kinds.map((kind) => ({
-    kind,
-    places: byKind
-      .get(kind)
-      .slice()
-      .sort((a, b) =>
-        String(a.name || a.slug || a.id).localeCompare(String(b.name || b.slug || b.id))
-      ),
-  }));
-}
-
-/* ------------------------------------------------------------------ */
-/* DOM code below — only runs when initEventsPage() is called.         */
-/* ------------------------------------------------------------------ */
-
-function el(tag, className, text) {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
-
-function errorBlock(err) {
-  const div = el('div', 'error-block');
-  div.append(
-    el(
-      'div',
-      '',
-      err instanceof ApiError
-        ? `Request failed (HTTP ${err.status || 'network error'}):`
-        : 'Request failed:'
-    ),
-    el(
-      'div',
-      'error-url',
-      err instanceof ApiError ? `GET ${err.url}` : String(err.message || err)
-    )
-  );
-  if (
-    err instanceof ApiError &&
-    err.body &&
-    typeof err.body === 'object' &&
-    err.body.message
-  ) {
-    div.append(el('div', 'muted', err.body.message));
-  }
-  return div;
-}
 
 /**
- * One results row for an Event (protojson, camelCase). Four columns:
- * severity badge · two-line headline+subline (layer · area · relative time) ·
- * source · r<rev>. Clicking the row runs `onSelect(ev, tr, sevColor)` to load
- * Build one result row using the SHARED record row (format.js), the same item
- * the front-page feed, Roads and History render — so a record looks identical
- * wherever it appears.
- *
- * The row is a real <a> to the /event permalink, so middle-click and
- * cmd/ctrl-click open it in a new tab as any link should. A PLAIN left click is
- * intercepted instead and selects the record in-page, which is what the
- * two-column browser is for. Losing the permalink to make selection work would
- * be a regression; losing selection to keep the link would be a different one.
- *
- * @param {Object} ev protojson Event
- * @param {(ev:Object, row:HTMLElement)=>void} onSelect
- */
-function eventRow(ev, onSelect) {
-  const row = recordRow(ev, { href: `/event?id=${encodeURIComponent(ev.id || '')}` });
-  row._select = () => onSelect(ev, row);
-  row.addEventListener('click', (e) => {
-    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return; // let the link win
-    e.preventDefault();
-    row._select();
-  });
-  return row;
-}
-
-/**
- * Wire up the /events page. Expects the element ids laid out in events.astro
- * (ev-place, ev-layers, ev-status, ev-sev, ev-since, ev-size, ev-apply,
- * ev-reset, ev-qchips, ev-curl, ev-copyurl, ev-errors, ev-list, ev-empty,
- * ev-more, ev-status-line, ev-grid, ev-detail-col, ev-detail, ev-back).
+ * Wire up the /events page.
  */
 export function initEventsPage() {
+  // One resolution, and it FAILS BY NAME. This island used to look up ~25 ids
+  // one at a time; a renamed id surfaced as a null-deref somewhere in the
+  // middle of init, with the page half-wired.
+  const $ = requireEls('events.js', {
+    scopeMetaEl: 'ev-scope-meta',
+    placeMenu: 'ev-place',
+    layersBox: 'ev-layers',
+    sevBox: 'ev-sev',
+    statusBox: 'ev-status',
+    sinceInput: 'ev-since',
+    sinceEcho: 'ev-since-echo',
+    echoEl: 'ev-echo',
+    urlEl: 'ev-url',
+    copyUrlBtn: 'ev-copyurl',
+    errorsEl: 'ev-errors',
+    countEl: 'ev-count',
+    listEl: 'ev-list',
+    emptyEl: 'ev-empty',
+    pageEl: 'ev-page',
+    gridEl: 'ev-grid',
+    detailCol: 'ev-detail-col',
+    detailEl: 'ev-detail',
+    backBtn: 'ev-back',
+    wrapEl: 'ev-results',
+  });
+  const {
+    scopeMetaEl, placeMenu, layersBox, sevBox, statusBox,
+    sinceInput, sinceEcho, echoEl, urlEl, copyUrlBtn, errorsEl,
+    countEl, listEl, emptyEl, pageEl, gridEl, detailCol, detailEl,
+    backBtn, wrapEl,
+  } = $;
 
-  const $ = (id) => document.getElementById(id);
-  const placeSel = $('ev-place');
-  const layersBox = $('ev-layers');
-  const statusBox = $('ev-status');
-  const sevBox = $('ev-sev');
-  const sinceInput = $('ev-since');
-  const sizeSel = $('ev-size');
-  const resetBtn = $('ev-reset');
-  const urlEl = $('ev-url');
-  const copyUrlBtn = $('ev-copyurl');
-  const errorsEl = $('ev-errors');
-  const listEl = $('ev-list');
-  const emptyEl = $('ev-empty');
-  const moreBtn = $('ev-more');
-  const statusLine = $('ev-status-line');
-  const gridEl = $('ev-grid');
-  const detailCol = $('ev-detail-col');
-  const detailEl = $('ev-detail');
-  const backBtn = $('ev-back');
-  // Must agree with the @container threshold in events.astro — and be measured
-  // the same way. A viewport media query would disagree with the CSS between
-  // ~760 and ~1000px (the sidebar's 244px), leaving the layout in two columns
-  // while the JS believed it was in one.
+  // Must agree with the @container thresholds in events.astro, and be measured
+  // the same way: this grid is inset by the 244px sidebar, so a viewport query
+  // would disagree with the CSS between ~760 and ~1000px.
   const NARROW_AT = 760;
-  const wrapEl = $('ev-results');
-  const isNarrow = () => ((wrapEl || gridEl) ? (wrapEl || gridEl).clientWidth < NARROW_AT : window.innerWidth < 1004);
-  const narrow = { get matches() { return isNarrow(); } };
+  const isNarrow = () => (wrapEl ? wrapEl.clientWidth < NARROW_AT : window.innerWidth < 1004);
 
   let state = readState(new URLSearchParams(location.search));
+  let places = [];
+  let loadedEvents = [];
   let nextToken = '';
-  let loadedCount = 0;
+  let pageIndex = 1;
   let loading = false;
   let lastReqUrl = '';
+  let lastGoodAt = '';
   let selectedRow = null;
   let selectedId = '';
 
-  // ---- controls ----------------------------------------------------
+  /* ---- the echo's height feeds the sticky list column ---------------- */
+  function measureEcho() {
+    const h = echoEl ? echoEl.getBoundingClientRect().height : 0;
+    document.documentElement.style.setProperty('--ev-echo-h', `${Math.round(h) + 8}px`);
+  }
 
-  // Layer and status are multi-select toggle pills (spec §2 /events): each
-  // pill is a button carrying its enum value; `.on` = selected.
-  function makePills(box, values, selected, labelOf) {
-    for (const value of values) {
-      const on = selected.includes(value);
-      const b = el('button', 'pill' + (on ? ' on' : ''), labelOf(value));
-      b.type = 'button';
-      b.dataset.value = value;
-      b.setAttribute('aria-pressed', on ? 'true' : 'false');
-      b.addEventListener('click', () => {
-        const now = b.classList.toggle('on');
-        b.setAttribute('aria-pressed', now ? 'true' : 'false');
-        applyNow();
-      });
-      box.append(b);
+  /* ---- A. scope ------------------------------------------------------ */
+
+  const placeLabel = (slug) => placeMenuLabel(places, slug, 'all places');
+
+  /** `summary.totalActive` for the scoped place, or null when not obtainable. */
+  let activeCount = null;
+
+  /**
+   * Beside the title: how many records are on screen, and how many are active
+   * in the scoped place.
+   *
+   * `/events` returns no total — it is keyset pagination over an opaque cursor —
+   * so for a long time this said "live count unknown". That is true of the event
+   * list but not of the service: `GET /places/{place}/summary` reports
+   * `totalActive` for a place, which is a real, live count. So when a place is
+   * scoped, say the number; when it is not, there is no place to count over and
+   * the line simply does not claim one.
+   *
+   * It is never inferred from the loaded page. A count derived from whatever
+   * happened to fit in one response would be a fabricated total, which is the
+   * one thing this site must not print.
+   */
+  function renderScope() {
+    const n = loadedEvents.length;
+    const bits = [`${fmtNum(n)} record${n === 1 ? '' : 's'} loaded`];
+    if (state.place) {
+      bits.push(
+        activeCount === null
+          ? 'active count unavailable'
+          : `${fmtNum(activeCount)} active in ${placeLabel(state.place)}`
+      );
     }
-  }
-
-  makePills(layersBox, LAYER_OPTIONS, state.layers, (v) => layerLabel(v));
-  makePills(statusBox, STATUS_OPTIONS, state.statuses, (v) => v);
-
-  // severity_min is a FLOOR, so exactly one value applies — a single-select
-  // chip group rather than the multi-select pills used for layer and status.
-  // '' is "any", which is the API's own default rather than a special case.
-  function makeRadioPills(box, values, selected) {
-    for (const value of values) {
-      const on = value === selected;
-      const b = el('button', 'pill' + (on ? ' on' : ''), value === '' ? 'any' : value);
-      b.type = 'button';
-      b.dataset.value = value;
-      b.setAttribute('aria-pressed', on ? 'true' : 'false');
-      b.addEventListener('click', () => {
-        for (const other of box.querySelectorAll('.pill')) setPill(other, other === b);
-        applyNow();
-      });
-      box.append(b);
-    }
-  }
-  makeRadioPills(sevBox, ['', ...SEVERITY_OPTIONS], state.severityMin);
-
-  for (const size of PAGE_SIZES) {
-    const opt = document.createElement('option');
-    opt.value = size;
-    opt.textContent = size === '' ? 'default' : size;
-    sizeSel.append(opt);
-  }
-  sizeSel.value = PAGE_SIZES.includes(state.pageSize) ? state.pageSize : '';
-
-  sinceInput.value = toLocalInput(state.since);
-
-  // Place select: "(any place)" first; options filled from /api/v1/places.
-  // Until (or if) that load fails, the URL-provided place is kept as a
-  // provisional option so shared links never lose their filter.
-  const anyPlace = document.createElement('option');
-  anyPlace.value = '';
-  anyPlace.textContent = '(any place)';
-  placeSel.append(anyPlace);
-  if (state.place) {
-    const opt = document.createElement('option');
-    opt.value = state.place;
-    opt.textContent = state.place;
-    placeSel.append(opt);
-    placeSel.value = state.place;
-  }
-
-  async function loadPlaces() {
-    try {
-      const data = await get('/api/v1/places');
-      const groups = groupPlaces(Array.isArray(data.places) ? data.places : []);
-      const current = placeSel.value;
-      placeSel.textContent = '';
-      placeSel.append(anyPlace);
-      let currentFound = current === '';
-      for (const { kind, places } of groups) {
-        const og = document.createElement('optgroup');
-        og.label = layerLabel(kind);
-        for (const p of places) {
-          const opt = document.createElement('option');
-          opt.value = p.slug || p.id || '';
-          opt.textContent = p.name ? `${p.name} (${opt.value})` : opt.value;
-          if (opt.value === current) currentFound = true;
-          og.append(opt);
-        }
-        placeSel.append(og);
-      }
-      if (!currentFound && current) {
-        // Keep a URL-supplied place the directory doesn't know about.
-        const opt = document.createElement('option');
-        opt.value = current;
-        opt.textContent = current;
-        placeSel.append(opt);
-      }
-      placeSel.value = current;
-    } catch (err) {
-      // The select still works with the URL-provided value; just say why
-      // the directory is empty.
-      errorsEl.append(errorBlock(err));
-    }
-  }
-
-  function setPill(b, on) {
-    b.classList.toggle('on', on);
-    b.setAttribute('aria-pressed', on ? 'true' : 'false');
-  }
-
-  function readControls() {
-    const statuses = [...statusBox.querySelectorAll('.pill.on')].map((b) => b.dataset.value);
-    if (statuses.length === 0) {
-      // No pills lit = the API default; reflect it back in the UI.
-      for (const b of statusBox.querySelectorAll('.pill')) {
-        setPill(b, DEFAULT_STATUSES.includes(b.dataset.value));
-      }
-    }
-    return {
-      place: placeSel.value,
-      layers: [...layersBox.querySelectorAll('.pill.on')].map((b) => b.dataset.value),
-      statuses: statuses.length ? statuses : [...DEFAULT_STATUSES],
-      severityMin: (sevBox.querySelector('.pill.on') || {}).dataset?.value || '',
-      since: fromLocalInput(sinceInput.value) || '',
-      pageSize: sizeSel.value,
-      pageToken: '', // a filter change always restarts from the first page
-    };
-  }
-
-  function syncControls() {
-    placeSel.value = state.place;
-    for (const b of layersBox.querySelectorAll('.pill')) {
-      setPill(b, state.layers.includes(b.dataset.value));
-    }
-    for (const b of statusBox.querySelectorAll('.pill')) {
-      setPill(b, state.statuses.includes(b.dataset.value));
-    }
-    for (const b of sevBox.querySelectorAll('.pill')) {
-      setPill(b, b.dataset.value === state.severityMin);
-    }
-    sinceInput.value = toLocalInput(state.since);
-    sizeSel.value = PAGE_SIZES.includes(state.pageSize) ? state.pageSize : '';
-  }
-
-  function writeURL() {
-    const qs = stateToSearch(state);
-    history.replaceState(null, '', qs ? `?${qs}` : location.pathname);
+    scopeMetaEl.textContent = bits.join(' · ');
+    placeMenu.triggerLabel = placeLabel(state.place).toLowerCase();
+    placeMenu.classList.toggle('is-set', Boolean(state.place));
   }
 
   /**
-   * A control changed: adopt it, rewrite the permalink, refetch from page one.
-   * Per the design spec the chips ARE the query — there is no Apply step, so
-   * every control funnels through here.
+   * Fetch the scoped place's active count. A failure leaves `activeCount` null,
+   * which renders as "active count unavailable" — never as 0, which would read
+   * as "nothing is happening here".
    */
+  async function loadActiveCount() {
+    if (!state.place) {
+      activeCount = null;
+      renderScope();
+      return;
+    }
+    const want = state.place;
+    try {
+      const data = await get(`/api/v1/places/${encodeURIComponent(want)}/summary`);
+      if (want !== state.place) return; // the scope changed while in flight
+      const total = data && data.summary && data.summary.totalActive;
+      activeCount = typeof total === 'number' ? total : null;
+    } catch {
+      if (want === state.place) activeCount = null;
+    }
+    renderScope();
+  }
+
+  function renderPlaceMenu() {
+    placeMenu.options = placeMenuOptions(places, {
+      anyLabel: 'All places',
+      current: state.place,
+      group: true,
+    });
+    placeMenu.value = state.place;
+  }
+
+  placeMenu.addEventListener('change', (e) => {
+    state.place = e.detail.value;
+    activeCount = null;
+    renderScope();
+    loadActiveCount();
+    writeURL();
+    runQuery('', false);
+  });
+
+  /* ---- B. filter region ----------------------------------------------
+     Plain and always visible. The chips ARE the query: every click refetches,
+     so there is no draft state, no APPLY and nothing to expand. An earlier pass
+     put all of this behind an EDIT panel with a commit step; it was more
+     machinery than four facets deserve. */
+
+  // Each facet is a <grid-chip-row>: the element owns the chips, the selection
+  // and the aria state, and tells us when it changed. What is left here is the
+  // only part that is actually about events — which options exist, and what a
+  // change means for the query.
+
+  function wire(row, onChange) {
+    row.addEventListener('change', (e) => {
+      onChange(e.detail.value);
+      applyNow();
+    });
+  }
+
+  layersBox.options = [
+    { value: '', label: 'all' },
+    ...LAYER_OPTIONS.map((v) => ({ value: v, label: v })),
+  ];
+  wire(layersBox, (v) => { state.layers = v; });
+
+  sevBox.options = [
+    { value: '', label: 'any' },
+    ...SEVERITY_OPTIONS.map((v) => ({ value: v, label: v })),
+  ];
+  wire(sevBox, (v) => { state.severityMin = v; });
+
+  // STATUS is two states, not four checkboxes. The endpoint takes any subset of
+  // ACTIVE/SCHEDULED/RESOLVED/EXPIRED, but the question a reader has is "am I
+  // seeing things that are over?". `open only` is the API default (and so is
+  // omitted from the request); the full subset stays expressible in the URL,
+  // which the echo prints.
+  statusBox.options = [
+    { value: 'open', label: 'open only' },
+    { value: 'all', label: 'include closed' },
+  ];
+  wire(statusBox, (v) => {
+    state.statuses = v === 'all' ? [...STATUS_OPTIONS] : [...DEFAULT_STATUSES];
+  });
+
+  /** Push the current state into the controls (boot, popstate, empty-state chips). */
+  function buildControls() {
+    layersBox.value = state.layers;
+    sevBox.value = state.severityMin;
+    statusBox.value = isDefaultStatuses(state.statuses) ? 'open' : 'all';
+    sinceInput.value = toLocalInput(state.since);
+    renderSinceEcho();
+  }
+
+  /**
+   * SINCE echoes the exact value it will send and the offset applied — it is
+   * the only local-time control on a page that is otherwise strictly Z.
+   */
+  function renderSinceEcho() {
+    const iso = fromLocalInput(sinceInput.value);
+    if (!iso) {
+      sinceEcho.textContent = '→ since omitted';
+      sinceEcho.classList.add('omitted');
+      return;
+    }
+    sinceEcho.classList.remove('omitted');
+    const mins = -new Date().getTimezoneOffset();
+    const sign = mins >= 0 ? '+' : '-';
+    const a = Math.abs(mins);
+    const off = `${sign}${String(Math.floor(a / 60)).padStart(2, '0')}:${String(a % 60).padStart(2, '0')}`;
+    sinceEcho.textContent = `→ sends since=${iso} (your time ${off})`;
+  }
+  sinceInput.addEventListener('input', renderSinceEcho);
+  sinceInput.addEventListener('change', () => {
+    state.since = fromLocalInput(sinceInput.value) || '';
+    applyNow();
+  });
+
+  /** A control changed: rewrite the permalink and refetch from page one. */
   function applyNow() {
-    state = readControls();
+    state.pageToken = '';
+    buildControls();
     writeURL();
     runQuery('', false);
   }
 
-  placeSel.addEventListener('change', applyNow);
-  sinceInput.addEventListener('change', applyNow);
-  sizeSel.addEventListener('change', applyNow);
-
-  // ---- echoed query --------------------------------------------------
+  /* ---- C. request echo ------------------------------------------------ */
 
   function absURL(url) {
     return /^https?:\/\//.test(url) ? url : `https://data.sierragridteam.org${url}`;
   }
 
   /**
-   * Print the exact request behind the results (design spec §2: the GET URL in
-   * mono beneath the filter rule).
-   *
-   * There used to be a second row of removable filter chips here. It duplicated
-   * the pills directly above it — which are now live — so the same filter was
-   * removable in two places and the panel restated a query the controls already
-   * showed. One line, one truth.
+   * Print the exact request, with defaulted params dimmed and explicit ones in
+   * cream — the same distinction the collapsed summary makes, carried into the
+   * URL so the two can never disagree.
    */
-  function renderQueryBar(params) {
+  function renderEcho(params) {
     lastReqUrl = apiURL('/api/v1/events', params);
-    urlEl.textContent = lastReqUrl;
+    // The ABSOLUTE url: this line exists to be copied, and a relative path is
+    // not something anyone can paste anywhere. Defaults never appear in it —
+    // they are omitted from the request, so stating them here would be a lie
+    // about the wire; line 2 names them instead.
+    urlEl.textContent = absURL(lastReqUrl);
   }
 
-  copyUrlBtn.addEventListener('click', () => {
-    navigator.clipboard.writeText(curlFor(absURL(lastReqUrl))).then(
-      () => {
-        copyUrlBtn.textContent = 'copied';
-        setTimeout(() => (copyUrlBtn.textContent = 'copy curl'), 1400);
-      },
-      () => (copyUrlBtn.textContent = 'failed')
-    );
-  });
+  /**
+   * The echo is ONE line: the request.
+   *
+   * It carried a second line — "50 records loaded · page_size 50 · cursor page 1
+   * · more available · server sort … · shown newest ingested first" — which
+   * restated the filter controls sitting directly above it and the count sitting
+   * beside the title. Three surfaces describing the same query is two too many.
+   *
+   * NOTE ON THE ABSENT TOTAL. `EventList` is {events, nextPageToken} — keyset
+   * pagination over an opaque cursor, with no total and no page count. Nothing
+   * here or in the header may imply otherwise; where a real count IS obtainable
+   * it comes from the place summary (see renderScope).
+   */
 
-  // ---- selection ------------------------------------------------------
+  // The URL tracks the filters, so the payload is read at click time.
+  wireCopyButton(copyUrlBtn, () => curlFor(absURL(lastReqUrl)));
+
+  /* ---- D. list -------------------------------------------------------- */
 
   /**
-   * Show one record in the detail column, rendered by the same function the
-   * /event permalink page uses. On a narrow viewport the detail REPLACES the
-   * list (the design's swap) and a back button appears; on desktop the two sit
-   * side by side and the grid gains its second track.
+   * Newest first, always. There is no sort control: the server orders by
+   * severity and the page re-orders by recency, which is the order a feed is
+   * read in. `ingestedAt` is the key rather than `observedAt` because the store
+   * stamps it on every write — it always exists and is monotonic, where an
+   * upstream `observedAt` can be absent or (mesh nodes) dated in the future.
+   * It is also the age the row displays, so the sort matches what you can see.
    */
+  function sortLoaded(list) {
+    return list
+      .slice()
+      .sort(
+        (a, b) =>
+          (Date.parse(b.ingestedAt || 0) || 0) - (Date.parse(a.ingestedAt || 0) || 0) ||
+          (Date.parse(b.observedAt || 0) || 0) - (Date.parse(a.observedAt || 0) || 0) ||
+          String(a.id || '').localeCompare(String(b.id || ''))
+      );
+  }
+
+  function eventRow(ev) {
+    // A real <a> to the permalink, so middle-click and cmd-click behave. A plain
+    // left click is intercepted and selects in-page instead — losing the
+    // permalink to make selection work would be a regression, and so would the
+    // reverse.
+    const row = recordRow(ev, {
+      href: `/event?id=${encodeURIComponent(ev.id || '')}`,
+      timeBlock: true,
+      selected: ev.id === selectedId,
+    });
+    row.addEventListener('click', (e) => {
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+      e.preventDefault();
+      selectEvent(ev, row);
+    });
+    return row;
+  }
+
+  function renderList() {
+    listEl.textContent = '';
+    selectedRow = null;
+    for (const ev of sortLoaded(loadedEvents)) {
+      const row = eventRow(ev);
+      if (ev.id === selectedId) selectedRow = row;
+      listEl.append(row);
+    }
+    countEl.textContent = loadedEvents.length
+      ? `${fmtNum(loadedEvents.length)} RESULT${loadedEvents.length === 1 ? '' : 'S'}`
+      : ' ';
+    // The header's count reads from the same list, so it cannot disagree with
+    // the one above the rows — and it refreshes here rather than only at boot,
+    // where it raced the places fetch and printed 0 beside seven results.
+    renderScope();
+    renderPagination();
+  }
+
+  function renderPagination() {
+    pageEl.textContent = '';
+    if (!loadedEvents.length) return;
+    if (!nextToken && pageIndex === 1) {
+      pageEl.append(el('span', '', `ALL ${fmtNum(loadedEvents.length)} RESULTS SHOWN`));
+      return;
+    }
+    // No total exists (see the note above renderEcho), so this counts loaded and
+    // says whether more follow — it never claims "of N".
+    pageEl.append(
+      el('span', '', `SHOWING ${fmtNum(loadedEvents.length)} FROM ${fmtNum(pageIndex)} CURSOR PAGE${pageIndex === 1 ? '' : 'S'}`)
+    );
+    if (nextToken) {
+      const b = el('button', 'ev-next', 'NEXT PAGE →');
+      b.type = 'button';
+      b.addEventListener('click', () => {
+        const token = nextToken;
+        runQuery(token, true).then(() => {
+          state.pageToken = token;
+          writeURL();
+        });
+      });
+      pageEl.append(b);
+    } else {
+      pageEl.append(el('span', '', '· END OF RESULTS'));
+    }
+  }
+
+  /* ---- selection ------------------------------------------------------ */
+
   function selectEvent(ev, row) {
     if (selectedRow) selectedRow.classList.remove('selected');
     selectedRow = row;
@@ -513,7 +524,8 @@ export function initEventsPage() {
 
     gridEl.classList.add('has-selection');
     detailCol.hidden = false;
-    if (narrow.matches) {
+    backBtn.textContent = `← BACK TO ${fmtNum(loadedEvents.length)} RESULTS`;
+    if (isNarrow()) {
       gridEl.classList.add('narrow-detail');
       backBtn.hidden = false;
       detailCol.scrollIntoView({ block: 'start' });
@@ -523,50 +535,94 @@ export function initEventsPage() {
     renderEventDetail(detailEl, selectedId, { setTitle: false, headingLevel: 2 });
   }
 
-  /** Narrow-viewport "back to list": drop the detail, restore the list. */
-  function clearSelection() {
+  backBtn.addEventListener('click', () => {
     gridEl.classList.remove('narrow-detail');
     backBtn.hidden = true;
-    if (narrow.matches) {
-      // Keep the record selected (so returning to it is one tap) but hide the
-      // pane; on desktop the pane stays visible beside the list.
+    if (isNarrow()) {
       detailCol.hidden = true;
       gridEl.classList.remove('has-selection');
     }
-  }
+  });
 
-  backBtn.addEventListener('click', clearSelection);
-
-  // Crossing the 900px boundary changes which pane is authoritative; re-apply
-  // so a resize never leaves both hidden or both fighting for the column.
-  // No matchMedia to listen to now; watch the grid's own box instead.
   const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(() => onWidthChange()) : null;
-  if (ro && (wrapEl || gridEl)) ro.observe(wrapEl || gridEl);
-  else window.addEventListener('resize', () => onWidthChange());
+  if (ro && wrapEl) ro.observe(wrapEl);
+  else window.addEventListener('resize', onWidthChange);
 
   function onWidthChange() {
+    measureEcho();
     if (!selectedId) return;
-    gridEl.classList.remove('narrow-detail');
-    backBtn.hidden = true;
-    detailCol.hidden = false;
-    gridEl.classList.add('has-selection');
+    if (!isNarrow()) {
+      gridEl.classList.remove('narrow-detail');
+      backBtn.hidden = true;
+      detailCol.hidden = false;
+      gridEl.classList.add('has-selection');
+    }
   }
 
-  // ---- results ------------------------------------------------------
+  /* ---- fetching -------------------------------------------------------- */
 
-  /**
-   * Fetch one page. `token` is the page_token to request ('' = first page);
-   * `append` keeps existing rows (Load more) instead of restarting the table.
-   */
+  function skeleton() {
+    const wrap = el('div');
+    wrap.append(el('div', 'ev-fetching', 'FETCHING /events…'));
+    for (let i = 0; i < 3; i++) {
+      const row = el('div', 'ev-skel-row');
+      const body = el('div', 'ev-skel-body');
+      body.append(el('div', 'ev-skel-bar w1'), el('div', 'ev-skel-bar w2'), el('div', 'ev-skel-bar w3'));
+      row.append(el('div', 'ev-skel-spine'), body);
+      wrap.append(row);
+    }
+    return wrap;
+  }
+
+  function renderEmpty() {
+    emptyEl.textContent = '';
+    const box = el('div');
+    box.append(el('div', 'ev-empty-head', '0 RESULTS'));
+    box.append(
+      el('p', 'prose', 'The request succeeded and matched nothing. That is an empty result, not a source failure — a failed feed surfaces as a red band above, never as a quiet empty list.')
+    );
+    const chips = el('div');
+    const removable = [];
+    if (state.severityMin) {
+      removable.push([`remove severity ≥ ${state.severityMin}`, () => { state.severityMin = ''; }]);
+    }
+    for (const l of state.layers) {
+      removable.push([`remove layer ${l}`, () => { state.layers = state.layers.filter((x) => x !== l); }]);
+    }
+    if (state.since) removable.push([`remove since ${state.since}`, () => { state.since = ''; }]);
+    if (!isDefaultStatuses(state.statuses)) {
+      removable.push(['reset status to default', () => { state.statuses = [...DEFAULT_STATUSES]; }]);
+    }
+    if (state.place) removable.push([`widen scope from ${placeLabel(state.place)}`, () => { state.place = ''; renderScope(); }]);
+
+    for (const [label, apply] of removable) {
+      const b = el('button', 'ev-remove-chip', label);
+      b.type = 'button';
+      b.addEventListener('click', () => {
+        apply();
+        applyNow();
+      });
+      chips.append(b);
+    }
+    if (removable.length) box.append(chips);
+    emptyEl.append(box);
+  }
+
+  function writeURL() {
+    const qs = stateToSearch(state);
+    history.replaceState(null, '', qs ? `?${qs}` : location.pathname);
+  }
+
   async function runQuery(token, append) {
     if (loading) return;
     loading = true;
-    moreBtn.disabled = true;
 
     if (!append) {
       listEl.textContent = '';
       emptyEl.textContent = '';
-      loadedCount = 0;
+      pageEl.textContent = '';
+      loadedEvents = [];
+      pageIndex = 1;
       nextToken = '';
       selectedRow = null;
       selectedId = '';
@@ -574,118 +630,72 @@ export function initEventsPage() {
       detailCol.hidden = true;
       backBtn.hidden = true;
       gridEl.classList.remove('has-selection', 'narrow-detail');
+      listEl.append(skeleton());
     }
     errorsEl.textContent = '';
+    listEl.classList.remove('ev-stale-body');
 
     const params = buildQuery(state, token);
-    renderQueryBar(params);
-    statusLine.textContent = 'Loading /api/v1/events…';
-    statusLine.className = 'loading';
+    renderEcho(params);
 
     try {
       const data = await get('/api/v1/events', params);
       const events = Array.isArray(data.events) ? data.events : [];
-      let firstRow = null;
-      for (const ev of events) {
-        const row = eventRow(ev, selectEvent);
-        if (!firstRow) firstRow = row;
-        listEl.append(row);
-      }
-      // Open the top (highest-severity, newest) record straight away so the
-      // pane is never an empty prompt — but only on desktop: on a phone the
-      // detail replaces the list, and auto-selecting would hide the results the
-      // reader just asked for.
-      if (!append && firstRow && !narrow.matches) firstRow._select();
-      loadedCount += events.length;
+      loadedEvents = append ? [...loadedEvents, ...events] : events;
+      if (append) pageIndex += 1;
       nextToken = data.nextPageToken || '';
-      moreBtn.hidden = !nextToken;
-      moreBtn.disabled = false;
+      lastGoodAt = new Date().toISOString();
 
-      if (loadedCount === 0) {
-        // Distinct from an API error: the query succeeded, nothing matched.
-        const empty = el('div', 'notice');
-        empty.append(
-          el('div', 'mono', 'No events match — this is not an all-clear.'),
-          el(
-            'div',
-            'muted small',
-            'The request succeeded (HTTP 200) and returned zero events for these ' +
-              'filters — an empty result, not a source failure. A failed feed surfaces ' +
-              'as an error above, never as a quiet empty table. Loosen the ' +
-              'status/severity filters, clear `since`, or widen the place.'
-          )
-        );
-        emptyEl.append(empty);
-        statusLine.textContent = '0 events';
-      } else {
-        statusLine.textContent =
-          `${loadedCount} event(s) loaded` +
-          (state.pageToken ? ' (resumed from page_token in URL)' : '') +
-          (nextToken ? ' — more available' : ' — end of results');
+      renderList();
+
+      if (!loadedEvents.length) {
+        renderEmpty();
+      } else if (!append && !isNarrow()) {
+        // Open the top record so the pane is never an empty prompt — but not on
+        // a phone, where the detail replaces the list and auto-selecting would
+        // hide the results the reader just asked for.
+        const first = listEl.querySelector('.rec');
+        if (first) first.click();
       }
-      statusLine.className = 'muted small mono';
     } catch (err) {
-      // API error is never a blank page and never mistaken for "no data".
-      errorsEl.append(errorBlock(err));
-      statusLine.textContent = 'Request failed — see error above.';
-      statusLine.className = 'small mono';
-      moreBtn.hidden = true;
+      // The last good data stays on screen, dimmed and labelled. A failure that
+      // blanks the list is indistinguishable from a genuinely empty result.
+      listEl.querySelectorAll('.ev-skel-row, .ev-fetching').forEach((n) => n.remove());
+      errorsEl.append(errorBand(err, lastGoodAt, () => runQuery(token, append)));
+      if (loadedEvents.length) {
+        listEl.classList.add('ev-stale-body');
+        errorsEl.append(el('div', 'ev-lastgood', `LAST GOOD RESPONSE · ${timeAgo(lastGoodAt)}`));
+      }
     } finally {
       loading = false;
     }
   }
 
-  // ---- events ---------------------------------------------------------
-
-  resetBtn.addEventListener('click', () => {
-    // Clear layers/severity/since/place, restore the default status set, and
-    // rerun from page one — the canonical empty query.
-    state = {
-      place: '',
-      layers: [],
-      statuses: [...DEFAULT_STATUSES],
-      severityMin: '',
-      since: '',
-      pageSize: '',
-      pageToken: '',
-    };
-    syncControls();
-    writeURL();
-    runQuery('', false);
-  });
-
-  moreBtn.addEventListener('click', async () => {
-    if (!nextToken) return;
-    const token = nextToken;
-    await runQuery(token, true);
-    // Record the tail cursor so this exact view (rows from `token` on) is
-    // shareable; Apply clears it back to page one.
-    state.pageToken = token;
-    writeURL();
-  });
+  /* ---- boot ------------------------------------------------------------ */
 
   window.addEventListener('popstate', () => {
     state = readState(new URLSearchParams(location.search));
-    syncControls();
+    renderScope();
+    buildControls();
     runQuery(state.pageToken, false);
   });
+  window.addEventListener('resize', measureEcho);
 
-  // ---- go -------------------------------------------------------------
+  (async () => {
+    renderScope();
+    buildControls();
+    measureEcho();
+    try {
+      const data = await get('/api/v1/places');
+      places = Array.isArray(data.places) ? data.places : [];
+    } catch (err) {
+      // The scope still works from the URL; say why the picker is bare.
+      errorsEl.append(errorBand(err, '', () => location.reload()));
+    }
+    renderScope();
+    renderPlaceMenu();
+    loadActiveCount();
+  })();
 
-  if (state.pageToken) {
-    const note = el('div', 'notice');
-    note.append(
-      el('div', 'mono', 'Resuming from a pagination cursor.'),
-      el(
-        'div',
-        'muted small',
-        'This URL carries a page_token, so the list starts mid-stream at ' +
-          'that cursor. Change any filter to restart from the first page.'
-      )
-    );
-    errorsEl.after(note);
-  }
-
-  loadPlaces();
   runQuery(state.pageToken, false);
 }

@@ -16,7 +16,7 @@
 // MapLibre is loaded by map.html as a classic script (window.maplibregl) —
 // this module never imports it, keeping node imports clean.
 
-import { get, ApiError } from '../api.js';
+import { get, ApiError, PUBLIC_ORIGIN } from '../api.js';
 import {
   timeAgo,
   timeAbs,
@@ -24,9 +24,15 @@ import {
   sevChip,
   sourceDot,
   layerLabel,
-  SEVERITY_COLORS_ON_INK,
+  SEVERITY_COLORS,
 } from '../format.js';
-import { BASE_STYLE } from '../basemap.js';
+import { BASE_STYLE, BASE_ATTRIBUTION_OPTS, ensureBasemap, deferInteraction } from '../basemap.js';
+import { placeMenuOptions, placeMenuLabel } from '../place.js';
+import { el, copyOnClick } from '../ui.js';
+// Registers <grid-chip-row> and <grid-menu>; guarded so node imports of this
+// module stay clean.
+import '../components/chip-row.js';
+import '../components/menu.js';
 
 /* ------------------------------------------------------------------ */
 /* Pure helpers (node-testable)                                       */
@@ -56,7 +62,7 @@ export const DEFAULT_CENTER = [-120.55, 38.2];
 export const DEFAULT_ZOOM = 8.5;
 
 /** Canonical public origin, for the copyable third-party-client URL. */
-export const PUBLIC_ORIGIN = 'https://data.sierragridteam.org';
+export { PUBLIC_ORIGIN } from '../api.js'; // re-exported: tests import it from here
 
 /**
  * Path for a layer's FeatureCollection.
@@ -194,18 +200,18 @@ export function bboxOfFeatures(features) {
 }
 
 /**
- * MapLibre paint expression coloring by properties.severity. Uses the ON-INK
- * ramp: this geometry is drawn over the dark basemap, where the paper ramp's
- * print reds go muddy. Unknown severities fall through to INFO — never
- * uncolored.
+ * MapLibre paint expression coloring by properties.severity. Uses the PAPER
+ * ramp: the basemap is Positron, a light style, and the on-ink values this used
+ * to take are tuned for a black backdrop — over light they wash out. Unknown
+ * severities fall through to INFO — never uncolored.
  * @returns {Array} ['match', ['get','severity'], 'EXTREME', '#ff5544', ...]
  */
 export function severityColorExpression() {
   const expr = ['match', ['get', 'severity']];
-  for (const [label, color] of Object.entries(SEVERITY_COLORS_ON_INK)) {
+  for (const [label, color] of Object.entries(SEVERITY_COLORS)) {
     expr.push(label, color);
   }
-  expr.push(SEVERITY_COLORS_ON_INK.INFO); // default
+  expr.push(SEVERITY_COLORS.INFO); // default
   return expr;
 }
 
@@ -352,6 +358,7 @@ function init() {
   const els = {
     place: document.getElementById('place-select'),
     layerChecks: document.getElementById('layer-checks'),
+    queryEcho: document.getElementById('map-query'),
     panel: document.getElementById('honesty-panel'),
     unlocated: document.getElementById('unlocated'),
     errors: document.getElementById('page-errors'),
@@ -422,6 +429,18 @@ function init() {
   /** @type {maplibregl.Map|null} */
   let map = null;
   let pendingResize = false;
+  /** A draw was dropped because the style was not ready; flush on the next event. */
+  let pendingDraw = false;
+  /**
+   * Has the style loaded at least once? NOT the same question as
+   * `map.isStyleLoaded()`, which also reports whether every SOURCE has finished
+   * loading — so adding the first layer's source made it return false, and
+   * every later layer in the same pass early-returned. One layer bound per
+   * pass, and re-running the pass rebound the same first layer and invalidated
+   * the style again: a livelock that showed up as "only road_incident draws".
+   * What we actually need to know is whether the style object exists to add to.
+   */
+  let styleReady = false;
 
   /** True when a layer's result is something a map could honestly draw. */
   function drawable(r) {
@@ -445,30 +464,38 @@ function init() {
     // the seed for the very first mount.
     const view = state.lastView || initialView;
 
-    // Shared OSM raster basemap (basemap.js) under the hazard geometry. API data
+    // Shared light OSM vector basemap (basemap.js) under the hazard geometry. API data
     // is still only ever fetched same-origin from /api/v1/* through api.js.
     map = new maplibregl.Map({
       container: canvas,
       style: BASE_STYLE,
       center: view ? [view.lng, view.lat] : DEFAULT_CENTER,
       zoom: view ? view.zoom : DEFAULT_ZOOM,
+      // Credit comes from the TileJSON; this only makes it compact.
+      attributionControl: BASE_ATTRIBUTION_OPTS,
     });
+    ensureBasemap(map);
+    deferInteraction(map, canvas);
     map.addControl(new maplibregl.NavigationControl(), 'top-right');
     wireMapEvents(map);
 
-    map.on('load', () => {
+    map.on('style.load', () => {
+      styleReady = true;
       map.resize();
+      // setStyle discarded every source we had added, so the bookkeeping is
+      // stale before the reconciler runs.
       state.boundLayerIds.clear();
-      // Replay whatever arrived before the map existed.
-      for (const layer of selected) {
-        const r = state.results.get(layer);
-        if (drawable(r)) addLayerToMap(layer, r.located);
-      }
-      if (state.areaBoundary) addAreaBoundary(state.areaBoundary);
+      syncMapLayers();
       if (pendingResize) {
         fitToFirstNonEmptyLayer();
         pendingResize = false;
       }
+    });
+
+    // The style can finish without another style.load — a fallback swap that
+    // completes between a drop and the next event would otherwise strand it.
+    map.on('idle', () => {
+      if (pendingDraw) syncMapLayers();
     });
   }
 
@@ -477,6 +504,7 @@ function init() {
     if (map) {
       map.remove();
       map = null;
+      styleReady = false;
     }
     if (els.mapMount) els.mapMount.textContent = '';
     state.boundLayerIds.clear();
@@ -608,10 +636,49 @@ function init() {
     if (map.getSource(`grid-${layer}`)) map.removeSource(`grid-${layer}`);
   }
 
+  /**
+   * Bind exactly the layers that should be drawn, and unbind the rest.
+   *
+   * Idempotent and cheap, so it can be called after ANY change — a result
+   * arriving, a chip toggling, the style reloading — instead of each of those
+   * paths remembering to add its own layer. The previous split (add on arrival,
+   * replay on style.load) had a window between the last style.load and a late
+   * result where an add was silently dropped and nothing ever retried it.
+   */
+  function syncMapLayers() {
+    if (!map || !styleReady) {
+      pendingDraw = true;
+      return;
+    }
+    pendingDraw = false;
+    for (const layer of MAP_LAYERS) {
+      // One layer failing must not strand the rest — that is precisely how a
+      // whole map ends up blank because of a single malformed geometry.
+      try {
+        const r = state.results.get(layer);
+        if (selected.includes(layer) && drawable(r)) addLayerToMap(layer, r.located);
+        else removeLayerFromMap(layer);
+      } catch (err) {
+        pendingDraw = true;
+        // eslint-disable-next-line no-console
+        console.warn(`map: could not bind ${layer}`, err);
+      }
+    }
+    if (state.areaBoundary) addAreaBoundary(state.areaBoundary);
+  }
+
   function addLayerToMap(layer, located) {
-    // May be called before the map exists (a layer resolving while suppressed);
-    // ensureMap()'s load handler replays state.results, so dropping it is safe.
-    if (!map || !map.isStyleLoaded()) return;
+    // A layer can resolve while the style is mid-swap (ensureBasemap falls back
+    // to FALLBACK_STYLE when the tile host is unreachable, and setStyle discards
+    // every added source). Dropping it used to be "safe" on the theory that
+    // style.load replays state.results — but style.load may ALREADY have fired,
+    // and then the drop is permanent. That is the "no data until you toggle a
+    // layer off and on" bug: measured live, 3 of 9 layers bound on load and 6
+    // after one toggle. Record the miss and flush it on the next style event.
+    if (!map || !styleReady) {
+      pendingDraw = true;
+      return;
+    }
     removeLayerFromMap(layer);
     if (!located.length) return;
     const color = severityColorExpression();
@@ -709,7 +776,7 @@ function init() {
 
   /** Draw the remembered coverage outline. No-op without a live map. */
   function addAreaBoundary(geom) {
-    if (!map || !map.isStyleLoaded() || map.getSource('grid-area-boundary')) return;
+    if (!map || !styleReady || map.getSource('grid-area-boundary')) return;
     map.addSource('grid-area-boundary', {
       type: 'geojson',
       data: { type: 'Feature', geometry: geom, properties: {} },
@@ -787,174 +854,176 @@ function init() {
 
   // One container per layer, in canonical order; visibility follows the
   // checkbox so entries never reorder.
-  const panelEntries = new Map();
-  for (const layer of MAP_LAYERS) {
-    const entry = document.createElement('div');
-    entry.className = 'layer-meta';
-    entry.id = `meta-${layer}`;
-    entry.hidden = true;
-    els.panel.appendChild(entry);
-    panelEntries.set(layer, entry);
+  /* ---- feed metadata: one table, one row per selected layer ----------
+   *
+   * This was nine stacked cards, each with a key/value list and its absolute
+   * URL in an ink-black code box. On near-white paper those nine black bars
+   * were the heaviest thing on the page, the values never lined up column to
+   * column, and the whole block read as a different site to the Unlocated
+   * table 200px below it — which is the same information shape and looks
+   * right. So it is that: a .data-table.
+   *
+   * The URL rides under the layer name as a .cell-sub and copies on click
+   * (ui.js copyOnClick), which is how every other long value on this site
+   * behaves. No black box, no per-row button.
+   *
+   * Fail-loud is NOT flattened into a cell. A layer that errored, is
+   * UNAVAILABLE, is STALE, or answered without a metadata block gets a tinted
+   * row plus a full-width note row under it saying which, in words. A table is
+   * allowed to be scannable; it is not allowed to make a failure look like a
+   * value. */
+
+  function metaHeadRow() {
+    const tr = document.createElement('tr');
+    for (const h of ['Layer', 'Status', 'Generated', 'Features', 'Attribution']) {
+      const th = document.createElement('th');
+      th.textContent = h;
+      tr.appendChild(th);
+    }
+    return tr;
   }
 
-  function copyButton(text) {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'copy-btn';
-    btn.textContent = 'copy';
-    btn.addEventListener('click', () => {
-      if (!navigator.clipboard) {
-        btn.textContent = 'failed';
-        return;
-      }
-      navigator.clipboard.writeText(text).then(
-        () => {
-          btn.textContent = 'copied';
-          setTimeout(() => (btn.textContent = 'copy'), 1200);
-        },
-        () => {
-          btn.textContent = 'failed';
-        }
-      );
-    });
-    return btn;
+  /** A full-width note beneath a layer's row — the loud channel. */
+  function noteRow(cls, text, extra) {
+    const tr = document.createElement('tr');
+    tr.className = `row-note ${cls}`;
+    const td = document.createElement('td');
+    td.colSpan = 5;
+    td.className = 'wrap';
+    td.textContent = text;
+    if (extra) td.append(' ', extra);
+    tr.appendChild(td);
+    return tr;
   }
 
-  function urlRow(path) {
-    const wrap = document.createElement('div');
-    wrap.className = 'geojson-url';
-    const caption = document.createElement('div');
-    caption.className = 'muted geojson-url-caption';
-    caption.textContent = 'what a third-party map client would use:';
-    const line = document.createElement('div');
-    line.className = 'geojson-url-line';
-    const code = document.createElement('code');
-    code.textContent = `${PUBLIC_ORIGIN}${path}`;
-    line.append(code, copyButton(`${PUBLIC_ORIGIN}${path}`));
-    wrap.append(caption, line);
-    return wrap;
-  }
-
-  function metaRow(label, valueNode) {
-    const row = document.createElement('div');
-    row.className = 'meta-row';
-    const key = document.createElement('span');
-    key.className = 'meta-key';
-    key.textContent = label;
-    row.append(key, ' ');
-    row.appendChild(valueNode);
-    return row;
-  }
-
-  function textNode(cls, text) {
-    const span = document.createElement('span');
-    if (cls) span.className = cls;
-    span.textContent = text;
-    return span;
-  }
-
-  function renderPanelEntry(layer) {
-    const entry = panelEntries.get(layer);
-    entry.textContent = '';
-    entry.hidden = !selected.includes(layer);
-    if (entry.hidden) return;
-
-    const r = state.results.get(layer);
-
-    const head = document.createElement('div');
-    head.className = 'layer-meta-head';
-    const name = document.createElement('strong');
-    name.textContent = layerLabel(layer);
-    head.appendChild(name);
-    entry.appendChild(head);
-
-    if (!r && !urlState.place) {
-      head.appendChild(textNode('muted small', 'no place selected'));
-      return;
+  /** The layer cell: its name, and the absolute URL a client would point at. */
+  function layerCell(layer, path) {
+    const td = document.createElement('td');
+    td.appendChild(el('div', 'cell-name', layerLabel(layer)));
+    if (path) {
+      const url = `${PUBLIC_ORIGIN}${path}`;
+      const sub = el('div', 'cell-sub geojson-url', url);
+      copyOnClick(sub, url, 'URL');
+      td.appendChild(sub);
     }
-    const path = r ? r.path : geojsonPath(urlState.place, layer);
-    if (!r) {
-      head.appendChild(textNode('muted small', 'fetching…'));
-      entry.appendChild(urlRow(path));
-      return;
-    }
-
-    if (r.error) {
-      head.appendChild(sourceDot('UNAVAILABLE'));
-      const note = document.createElement('div');
-      note.className = 'meta-unavailable';
-      note.textContent =
-        'request failed — showing nothing ≠ all clear. Layer state is unknown.';
-      const errLine = document.createElement('div');
-      errLine.className = 'error-block meta-error';
-      errLine.textContent =
-        r.error instanceof ApiError
-          ? `GET ${r.error.url} → ${r.error.status || 'network error'}: ${r.error.message}`
-          : String(r.error && r.error.message ? r.error.message : r.error);
-      entry.append(note, errLine, urlRow(path));
-      return;
-    }
-
-    const md =
-      r.fc && r.fc.metadata && typeof r.fc.metadata === 'object'
-        ? r.fc.metadata
-        : null;
-    const status = md ? String(md.sourceStatus || '').toUpperCase() : '';
-    head.appendChild(sourceDot(status || 'UNKNOWN'));
-
-    if (!md) {
-      const warn = document.createElement('div');
-      warn.className = 'meta-note';
-      warn.textContent =
-        'response has no metadata member — freshness unknown.';
-      entry.appendChild(warn);
-    } else if (status === 'UNAVAILABLE') {
-      const note = document.createElement('div');
-      note.className = 'meta-unavailable';
-      note.textContent =
-        'UNAVAILABLE — the upstream feed errored. Showing nothing ≠ all clear.';
-      entry.appendChild(note);
-      const src = safeHttpUrl(md.sourceUrl);
-      if (src) {
-        const p = document.createElement('div');
-        p.className = 'meta-note';
-        const a = document.createElement('a');
-        a.href = src;
-        a.target = '_blank';
-        a.rel = 'noopener noreferrer';
-        a.textContent = 'check the authoritative source ↗';
-        p.appendChild(a);
-        entry.appendChild(p);
-      }
-    } else if (status === 'STALE') {
-      const note = document.createElement('div');
-      note.className = 'meta-note meta-stale';
-      note.textContent = md.lastSourceUpdate
-        ? `STALE — serving last-good data; last source update ${timeAgo(
-            md.lastSourceUpdate
-          )} (${timeAbs(md.lastSourceUpdate)}).`
-        : 'STALE — serving last-good data; last source update unknown.';
-      entry.appendChild(note);
-    }
-
-    if (md) {
-      entry.appendChild(metaRow('generatedAt', timeCell(md.generatedAt)));
-      if (status === 'STALE' && md.lastSourceUpdate) {
-        entry.appendChild(
-          metaRow('lastSourceUpdate', timeCell(md.lastSourceUpdate))
-        );
-      }
-      entry.appendChild(
-        metaRow('attribution', textNode('', md.attribution || '—'))
-      );
-    }
-    const counts = `${r.located.length} on map · ${r.unlocated.length} unlocated`;
-    entry.appendChild(metaRow('features', textNode('', counts)));
-    entry.appendChild(urlRow(path));
+    return td;
   }
 
   function renderPanel() {
-    for (const layer of MAP_LAYERS) renderPanelEntry(layer);
+    els.panel.textContent = '';
+    const shown = MAP_LAYERS.filter((l) => selected.includes(l));
+    if (!shown.length) {
+      els.panel.append(el('p', 'muted small', 'No layer selected — nothing was requested.'));
+      return;
+    }
+
+    const wrap = el('div', 'table-wrap');
+    const table = el('table', 'data-table meta-table');
+    const thead = document.createElement('thead');
+    thead.appendChild(metaHeadRow());
+    const tbody = document.createElement('tbody');
+
+    for (const layer of shown) {
+      const r = state.results.get(layer);
+      const path = r ? r.path : (urlState.place ? geojsonPath(urlState.place, layer) : '');
+      const tr = document.createElement('tr');
+      tr.id = `meta-${layer}`;
+
+      // --- not fetched yet, or nothing to fetch ---
+      if (!r) {
+        tr.appendChild(layerCell(layer, path));
+        const td = document.createElement('td');
+        td.colSpan = 4;
+        td.className = 'muted';
+        td.textContent = urlState.place ? 'fetching…' : 'no place selected';
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+        continue;
+      }
+
+      // --- the request itself failed ---
+      if (r.error) {
+        tr.className = 'row-UNAVAILABLE';
+        tr.appendChild(layerCell(layer, path));
+        const tdStatus = document.createElement('td');
+        tdStatus.appendChild(sourceDot('UNAVAILABLE'));
+        const tdRest = document.createElement('td');
+        tdRest.colSpan = 3;
+        tdRest.className = 'muted';
+        tdRest.textContent = 'unknown — the request did not answer';
+        tr.append(tdStatus, tdRest);
+        tbody.appendChild(tr);
+        tbody.appendChild(noteRow('note-fault',
+          'Request failed — showing nothing ≠ all clear. Layer state is unknown. ' +
+          (r.error instanceof ApiError
+            ? `GET ${r.error.url} → ${r.error.status || 'network error'}: ${r.error.message}`
+            : String((r.error && r.error.message) || r.error))));
+        continue;
+      }
+
+      const md = r.fc && r.fc.metadata && typeof r.fc.metadata === 'object' ? r.fc.metadata : null;
+      const status = md ? String(md.sourceStatus || '').toUpperCase() : '';
+      if (status === 'UNAVAILABLE') tr.className = 'row-UNAVAILABLE';
+      else if (status === 'STALE') tr.className = 'row-STALE';
+
+      tr.appendChild(layerCell(layer, path));
+
+      const tdStatus = document.createElement('td');
+      tdStatus.appendChild(sourceDot(status || 'UNKNOWN'));
+      tr.appendChild(tdStatus);
+
+      const tdGen = document.createElement('td');
+      tdGen.appendChild(timeCell(md && md.generatedAt));
+      tr.appendChild(tdGen);
+
+      const tdFeat = document.createElement('td');
+      tdFeat.textContent = `${r.located.length} on map · ${r.unlocated.length} unlocated`;
+      tr.appendChild(tdFeat);
+
+      // Attribution is an obligation, not an optional column: when a layer
+      // does not state one, say that rather than printing a dash that reads as
+      // "nothing to credit".
+      const tdAttr = document.createElement('td');
+      tdAttr.className = 'wrap';
+      if (md && md.attribution) {
+        tdAttr.textContent = md.attribution;
+      } else {
+        tdAttr.appendChild(el('span', 'attr-absent', 'not stated by source'));
+      }
+      tr.appendChild(tdAttr);
+      tbody.appendChild(tr);
+
+      // --- the loud channel, beneath the row ---
+      if (!md) {
+        tbody.appendChild(noteRow('note-fault',
+          'Response carried no metadata member — freshness and source health are unknown.'));
+      } else if (status === 'UNAVAILABLE') {
+        let link = null;
+        const src = safeHttpUrl(md.sourceUrl);
+        if (src) {
+          link = document.createElement('a');
+          link.href = src;
+          link.target = '_blank';
+          link.rel = 'noopener noreferrer';
+          link.textContent = 'check the authoritative source ↗';
+        }
+        tbody.appendChild(noteRow('note-fault',
+          'UNAVAILABLE — the upstream feed errored. Showing nothing ≠ all clear.', link));
+      } else if (status === 'STALE') {
+        tbody.appendChild(noteRow('note-stale', md.lastSourceUpdate
+          ? `STALE — serving last-good data; last source update ${timeAgo(md.lastSourceUpdate)} (${timeAbs(md.lastSourceUpdate)}).`
+          : 'STALE — serving last-good data; last source update unknown.'));
+      }
+    }
+
+    table.append(thead, tbody);
+    wrap.appendChild(table);
+    els.panel.appendChild(wrap);
+  }
+
+  // Every entry lives in one table, so a single layer changing re-renders it.
+  function renderPanelEntry() {
+    renderPanel();
   }
 
   /* ---- unlocated (null-geometry) feature list ---- */
@@ -1030,7 +1099,9 @@ function init() {
       if (token !== state.loadToken) return;
       const { located, unlocated } = splitFeatures(fc);
       state.results.set(layer, { path, fc, located, unlocated, error: null });
-      addLayerToMap(layer, located);
+      // Reconcile rather than add: if the style is not ready this records the
+      // miss and the next style/idle event flushes it.
+      syncMapLayers();
     } catch (err) {
       if (token !== state.loadToken) return;
       state.results.set(layer, { path, error: err });
@@ -1091,43 +1162,80 @@ function init() {
   /* ---- controls ---- */
 
   function renderLayerChecks() {
-    els.layerChecks.textContent = '';
-    for (const layer of MAP_LAYERS) {
-      const label = document.createElement('label');
-      label.className = 'layer-check';
-      const input = document.createElement('input');
-      input.type = 'checkbox';
-      input.value = layer;
-      input.checked = selected.includes(layer);
-      input.addEventListener('change', async () => {
-        if (input.checked) {
-          selected = MAP_LAYERS.filter(
-            (l) => selected.includes(l) || l === layer
-          );
-          updateURL();
-          // await: loadLayer must have settled before the mount rule can judge
-          // the result set, or a newly-ticked layer with real features would be
-          // judged as "still loading" and leave the map suppressed.
-          if (urlState.place) await loadLayer(layer, state.loadToken);
-          renderPanelEntry(layer);
-        } else {
-          selected = selected.filter((l) => l !== layer);
-          updateURL();
-          state.results.delete(layer);
-          removeLayerFromMap(layer);
-          renderPanelEntry(layer);
-          renderUnlocated();
-        }
-        // THE MOUNT RULE MUST RUN ON EVERY PATH THAT CHANGES THE RESULT SET.
-        // Toggling is such a path: unticking the last drawable layer would
-        // otherwise leave a rendered basemap with zero features on screen — the
-        // "all clear" the contract forbids — and ticking a layer while
-        // suppressed would leave a stale banner over real data.
-        syncMapPresence();
-      });
-      label.append(input, ` ${layerLabel(layer)}`);
-      els.layerChecks.appendChild(label);
+    els.layerChecks.options = MAP_LAYERS.map((l) => ({ value: l, label: layerLabel(l) }));
+    els.layerChecks.value = selected;
+    renderQueryEcho();
+  }
+
+  // The chip row reports the whole new selection, so this reconciles rather
+  // than handling one chip: whatever was added gets loaded, whatever was
+  // removed gets torn down.
+  els.layerChecks.addEventListener('change', async (e) => {
+    const next = MAP_LAYERS.filter((l) => e.detail.value.includes(l));
+    const added = next.filter((l) => !selected.includes(l));
+    const removed = selected.filter((l) => !next.includes(l));
+    selected = next;
+    updateURL();
+
+    for (const layer of removed) {
+      state.results.delete(layer);
+      removeLayerFromMap(layer);
+      renderPanelEntry(layer);
     }
+    if (removed.length) renderUnlocated();
+
+    for (const layer of added) {
+      // await: loadLayer must have settled before the mount rule can judge the
+      // result set, or a newly-ticked layer with real features would be judged
+      // as "still loading" and leave the map suppressed.
+      if (urlState.place) await loadLayer(layer, state.loadToken);
+      renderPanelEntry(layer);
+    }
+
+    // THE MOUNT RULE MUST RUN ON EVERY PATH THAT CHANGES THE RESULT SET.
+    // Untoggling the last drawable layer would otherwise leave a rendered
+    // basemap with zero features on screen — the "all clear" the contract
+    // forbids — and toggling one on while suppressed would leave a stale banner
+    // over real data.
+    syncMapPresence();
+    renderQueryEcho();
+  });
+
+  /**
+   * Echo the request behind what is drawn: the TEMPLATE, and how many times it
+   * ran. One line.
+   *
+   * This screen makes one request per selected layer, and the layer names are
+   * on the page twice already — the lit chips directly above, and the ledger
+   * below, which prints every URL in full, absolute and copyable. Listing them
+   * here too was a third copy: first as nine stacked lines (267px, pushing the
+   * map below the fold), then as a wrapped run of nine `.geojson` names, which
+   * read as a wall of near-identical text. The template plus a count says the
+   * same thing and adds nothing the reader must scan.
+   *
+   * With nothing selected it says so in words rather than printing an empty
+   * line: no request was made, which is a different statement from a request
+   * that returned nothing.
+   */
+  function renderQueryEcho() {
+    const box = els.queryEcho;
+    if (!box) return;
+    box.textContent = '';
+    if (!urlState.place) return;
+    if (!selected.length) {
+      box.append(el('span', 'muted', 'no layer selected — no request made'));
+      return;
+    }
+
+    const m = document.createElement('span');
+    m.className = 'method';
+    m.textContent = 'GET';
+    const place = encodeURIComponent(urlState.place);
+    box.append(m, document.createTextNode(`/api/v1/places/${place}/map/{layer}.geojson`));
+
+    const n = selected.length;
+    box.append(el('span', 'muted',
+      n === 1 ? 'one selected layer' : `${n} selected layers, one request each`));
   }
 
   function placeSlug(p) {
@@ -1136,60 +1244,55 @@ function init() {
     return id.includes(':') ? id.slice(id.indexOf(':') + 1) : id;
   }
 
+  /** The AREA directory, kept so the trigger can name the selection. */
+  let placeDir = [];
+
+  /** Paint the picker's current selection onto its trigger. */
+  function showPlace() {
+    els.place.value = urlState.place;
+    els.place.triggerLabel = placeMenuLabel(placeDir, urlState.place, 'no place');
+  }
+
   async function loadPlaces() {
     try {
-      const data = await get('/api/v1/places', { kind: 'AREA' });
-      const places = Array.isArray(data.places) ? data.places : [];
-      const slugs = [];
-      els.place.textContent = '';
-      for (const p of places) {
-        const slug = placeSlug(p);
-        if (!slug) continue;
-        slugs.push(slug);
-        const opt = document.createElement('option');
-        opt.value = slug;
-        opt.textContent = p.name ? `${p.name} (${slug})` : slug;
-        els.place.appendChild(opt);
-      }
-      if (urlState.place && !slugs.includes(urlState.place)) {
-        // Honor a URL-provided place the picker doesn't know (deep link).
-        const opt = document.createElement('option');
-        opt.value = urlState.place;
-        opt.textContent = urlState.place;
-        els.place.appendChild(opt);
-        slugs.push(urlState.place);
-      }
+      // The WHOLE directory, grouped by kind — not just `kind=AREA`. Every map
+      // layer is addressable by any {place}, so scoping to a corridor, a town
+      // or a county is a legitimate thing to want, and the AREA-only fetch
+      // offered a menu with one entry in it. The DEFAULT is still an area: a
+      // reader who has chosen nothing wants the whole region, and an evacuation
+      // zone would be an odd place to open on.
+      const data = await get('/api/v1/places');
+      placeDir = (Array.isArray(data.places) ? data.places : []).filter(placeSlug);
+      const areas = placeDir.filter((p) => p.kind === 'AREA').map(placeSlug);
       if (!urlState.place) {
-        urlState.place = slugs.includes('ebbetts-pass')
+        urlState.place = areas.includes('ebbetts-pass')
           ? 'ebbetts-pass'
-          : slugs[0] || '';
+          : areas[0] || placeSlug(placeDir[0] || {}) || '';
       }
-      els.place.value = urlState.place;
-      els.place.disabled = slugs.length === 0;
-      if (slugs.length === 0) {
+      // A ?place= the directory does not list is kept by placeMenuOptions — a
+      // deep link must not be re-scoped to somewhere else.
+      els.place.options = placeMenuOptions(placeDir, { current: urlState.place, group: true });
+      showPlace();
+      if (placeDir.length === 0) {
         pageError(
-          'No AREA places returned by /api/v1/places?kind=AREA — nothing to map.',
+          'No places returned by /api/v1/places — nothing to map.',
           new Error('empty place list')
         );
       }
     } catch (err) {
       pageError('Failed to load the place picker.', err);
-      els.place.textContent = '';
-      if (urlState.place) {
-        // Still try the layers for the place named in the URL.
-        const opt = document.createElement('option');
-        opt.value = urlState.place;
-        opt.textContent = urlState.place;
-        els.place.appendChild(opt);
-        els.place.value = urlState.place;
-      } else {
-        els.place.disabled = true;
-      }
+      // The directory is gone, but a place named in the URL is still a valid
+      // path segment — keep it selected and let its layers be tried.
+      els.place.options = placeMenuOptions([], { current: urlState.place, group: true });
+      showPlace();
+      if (!urlState.place) els.place.triggerLabel = 'unavailable';
     }
   }
 
-  els.place.addEventListener('change', () => {
-    updateURL({ place: els.place.value });
+  els.place.addEventListener('change', (e) => {
+    updateURL({ place: e.detail.value });
+    showPlace();
+    renderQueryEcho(); // the echoed paths carry the place — they change with it
     reloadAll();
   });
 
@@ -1202,6 +1305,7 @@ function init() {
   (async () => {
     await loadPlaces();
     updateURL(); // canonicalize: resolved place (+ layers if non-default)
+    renderQueryEcho(); // only now is there a place to name in the paths
     await reloadAll();
   })();
 }

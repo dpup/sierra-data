@@ -117,6 +117,15 @@ const here = (NAV.find((n) => n.key === current) || {}).crumb || 'The Grid';
       </span>
     </div>
 
+    <!-- A full-bleed band renders HERE, outside main, for the same reason the
+         footer does: main is a centred 1280px column, so a child of it cannot
+         reach past 1280px however far its negative margins break out of the
+         padding. The deck did exactly that and stopped short on wide screens,
+         with paper down both sides of a band whose whole job is to run edge to
+         edge. Its own .deck-inner re-establishes the 1280px measure, so the
+         text still lines up with main's. -->
+    <slot name="deck" />
+
     <main>
       <slot />
     </main>

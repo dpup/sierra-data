@@ -18,6 +18,7 @@
 import { get, ApiError, curlFor } from '../api.js';
 import { ENDPOINTS, FIELD_DOCS } from '../spec.js';
 import { fmtNum, timeAgo } from '../format.js';
+import { copyButton } from '../ui.js';
 
 const el = (t, c, x) => {
   const n = document.createElement(t);
@@ -39,15 +40,7 @@ async function runExample(url, pane) {
   const foot = el('div', 'resp-foot');
   const head = el('div', 'resp-head');
   head.append(el('span', 'method', 'GET'), el('span', null, url));
-  const copy = el('button', 'copy-btn', 'copy curl');
-  copy.type = 'button';
-  copy.addEventListener('click', () => {
-    navigator.clipboard.writeText(curlFor(url)).then(() => {
-      copy.textContent = 'copied';
-      setTimeout(() => (copy.textContent = 'copy curl'), 1400);
-    });
-  });
-  head.append(copy);
+  head.append(copyButton(curlFor(url), 'copy curl'));
   pane.append(head, body, foot);
 
   const t0 = Date.now();

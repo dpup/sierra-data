@@ -1,40 +1,20 @@
 <!DOCTYPE html><html lang="en"> <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>API Reference · The Grid</title><meta name="description" content="Reference for the Grid /api/v1 API: endpoints, the Event envelope, severity scale, place id scheme, GeoJSON layer contract, and the evacuation fail-loud contract."><!-- Preload only the faces above the fold: mono/sans body + the two Archivo
-       display weights. More preloads cost more than the FOUT they save. --><link rel="preload" href="/lib/fonts/ibm-plex-mono-400.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/lib/fonts/ibm-plex-sans-400.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/lib/fonts/archivo-800.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/lib/fonts/archivo-900.woff2" as="font" type="font/woff2" crossorigin><link rel="stylesheet" href="/assets/app.css"><link rel="stylesheet" href="/_astro/docs.oJlbUN_e.css"></head> <body> <div class="app"> <aside class="sidebar" id="sidebar"> <a class="brand-block" href="/"> <div class="brand-line"> <span class="brand-name">THE GRID</span> <span class="brand-sub">S.I.E.R.R.A</span> </div> <div class="brand-host">data.sierragridteam.org</div> </a> <div class="health-chip"> <div class="health-row"> <span class="dot st-OK live" id="health-dot"></span> <span id="health-text">checking sources…</span> </div> <div class="health-sub"><span id="sidebar-clock">––:––:––Z</span> · read-only · no key</div> </div> <nav class="nav" aria-label="Sections">  <div class="nav-group-label">OVERVIEW</div> <a class="nav-item" href="/"> <span>Grid Info</span><span class="hint">/api/v1</span> </a> <div class="nav-group-label">EXPLORE</div> <a class="nav-item" href="/events"> <span>Events</span><span class="hint">/events</span> </a><a class="nav-item" href="/map"> <span>Map</span><span class="hint">/map</span> </a><a class="nav-item" href="/roads"> <span>Roads</span><span class="hint">/roads</span> </a><a class="nav-item" href="/mesh"> <span>Mesh</span><span class="hint">/mesh</span> </a><a class="nav-item" href="/places"> <span>Places</span><span class="hint">/places</span> </a><a class="nav-item" href="/sources"> <span>Sources</span><span class="hint">/sources</span> </a><a class="nav-item" href="/history"> <span>History</span><span class="hint">/history</span> </a> <div class="nav-group-label">REFERENCE</div> <a class="nav-item current" href="/docs" aria-current="page"> <span>Docs</span><span class="hint">/api/v1 ref</span> </a><a class="nav-item" href="/mcp-guide"> <span>MCP</span><span class="hint">for agents</span> </a> </nav> <div class="sidebar-foot"> <div>grid.v1 · schema 2026-07</div> <div><span id="side-req-count">0</span> request(s) this page</div> </div> </aside> <div class="content"> <!-- Mobile chrome: CSS shows this only under 900px (app.css §15). --> <div class="topbar"> <button class="topbar-burger" id="nav-toggle" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar">≡</button> <span class="topbar-here">Docs</span> <span class="topbar-right"> <span class="dot st-OK live" id="health-dot-m"></span><span id="health-text-m">checking…</span> </span> </div> <main>   <nav id="docs-rail" aria-label="On this page"></nav> <div class="page-head">
-  <div>
-    <div class="hero-kicker">The Grid · /api/v1</div>
-    <h1>API reference</h1>
-    <p class="lead">
-      The public contract of the Grid's <code class="inline">/api/v1</code> API. Base URL
-      <code class="inline">https://data.sierragridteam.org</code>; everything lives
-      under <code class="inline">/api/v1/</code>. Read-only, keyless, and CORS-open — no
-      registration or token. Responses are <strong>camelCase</strong> throughout
-      (<code class="inline">observedAt</code>, <code class="inline">nextPageToken</code>,
-      <code class="inline">sourceStatus</code>, <code class="inline">severityRank</code>) —
-      the proto RPCs via the gRPC-Gateway marshaler, the hand-built
-      <code class="inline">.geojson</code> layers via matching camelCase keys.
-      Timestamps are RFC&nbsp;3339, errors are gRPC-standard
-      <code class="inline">{code, codeName, message, details}</code>, and most reads
-      carry an ETag (<code class="inline">If-None-Match</code> → 304). The proto RPCs
-      are described by the OpenAPI spec at
-      <a href="/api/openapi.json"><code class="inline">/api/openapi.json</code></a>;
-      the hand-built <code class="inline">.geojson</code> map layers are not in it
-      (see §5), so read those from this page.
-      Each example below is a live link into the running
-      service: click any <span class="chip-get"><b>GET</b> /api/v1/…</span> to see the exact
-      JSON a client receives. A feed's <code class="inline">sourceStatus</code> is
-      <code class="inline">OK</code>, <code class="inline">STALE</code>, or
-      <code class="inline">UNAVAILABLE</code>; an unavailable feed is reported as such,
-      never as an all-clear (see §6).
-    </p>
-  </div>
-  <div class="badges">
-    <span class="chip chip-green">no key required</span>
-    <span class="chip chip-blue">CORS-open</span>
-    <a class="chip chip-blue" href="/api/openapi.json">OpenAPI spec</a>
-  </div>
-</div>
-
-<!-- The table of contents lives in the sticky "on this page" rail that
+       display weights. More preloads cost more than the FOUT they save. --><link rel="preload" href="/lib/fonts/ibm-plex-mono-400.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/lib/fonts/ibm-plex-sans-400.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/lib/fonts/archivo-800.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/lib/fonts/archivo-900.woff2" as="font" type="font/woff2" crossorigin><link rel="stylesheet" href="/assets/app.css"><link rel="stylesheet" href="/_astro/docs.CAN0WdQg.css"></head> <body> <div class="app"> <aside class="sidebar" id="sidebar"> <a class="brand-block" href="/"> <div class="brand-line"> <span class="brand-name">THE GRID</span> <span class="brand-sub">S.I.E.R.R.A</span> </div> <div class="brand-host">data.sierragridteam.org</div> </a> <div class="health-chip"> <div class="health-row"> <span class="dot st-OK live" id="health-dot"></span> <span id="health-text">checking sources…</span> </div> <div class="health-sub"><span id="sidebar-clock">––:––:––Z</span> · read-only · no key</div> </div> <nav class="nav" aria-label="Sections">  <div class="nav-group-label">OVERVIEW</div> <a class="nav-item" href="/"> <span>Grid Info</span><span class="hint">/api/v1</span> </a> <div class="nav-group-label">EXPLORE</div> <a class="nav-item" href="/events"> <span>Events</span><span class="hint">/events</span> </a><a class="nav-item" href="/map"> <span>Map</span><span class="hint">/map</span> </a><a class="nav-item" href="/roads"> <span>Roads</span><span class="hint">/roads</span> </a><a class="nav-item" href="/mesh"> <span>Mesh</span><span class="hint">/mesh</span> </a><a class="nav-item" href="/places"> <span>Places</span><span class="hint">/places</span> </a><a class="nav-item" href="/sources"> <span>Sources</span><span class="hint">/sources</span> </a><a class="nav-item" href="/history"> <span>History</span><span class="hint">/history</span> </a> <div class="nav-group-label">REFERENCE</div> <a class="nav-item current" href="/docs" aria-current="page"> <span>Docs</span><span class="hint">/api/v1 ref</span> </a><a class="nav-item" href="/mcp-guide"> <span>MCP</span><span class="hint">for agents</span> </a> </nav> <div class="sidebar-foot"> <div>grid.v1 · schema 2026-07</div> <div><span id="side-req-count">0</span> request(s) this page</div> </div> </aside> <div class="content"> <!-- Mobile chrome: CSS shows this only under 900px (app.css §15). --> <div class="topbar"> <button class="topbar-burger" id="nav-toggle" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar">≡</button> <span class="topbar-here">Docs</span> <span class="topbar-right"> <span class="dot st-OK live" id="health-dot-m"></span><span id="health-text-m">checking…</span> </span> </div> <!-- A full-bleed band renders HERE, outside main, for the same reason the
+         footer does: main is a centred 1280px column, so a child of it cannot
+         reach past 1280px however far its negative margins break out of the
+         padding. The deck did exactly that and stopped short on wide screens,
+         with paper down both sides of a band whose whole job is to run edge to
+         edge. Its own .deck-inner re-establishes the 1280px measure, so the
+         text still lines up with main's. -->  <main>   <nav id="docs-rail" aria-label="On this page"></nav> <header class="page-head"> <div class="page-head-main"> <div class="hero-kicker">The Grid · /api/v1</div> <div class="page-head-title"> <h1>API reference</h1>  </div>  <p class="lead">The public contract, in one page.</p>   </div> <div class="page-head-aside"> <div class="badges">  <span class="chip chip-green">no key required</span> <span class="chip chip-blue">CORS-open</span> <a class="chip chip-blue" href="/api/openapi.json">OpenAPI spec</a>  </div> </div> </header> <p class="rail-caption"> <b>Conventions</b>base URL <code class="inline">https://data.sierragridteam.org</code>,
+    everything under <code class="inline">/api/v1/</code> · read-only, keyless, CORS-open ·
+    responses are camelCase throughout, timestamps RFC&nbsp;3339, errors gRPC-standard
+<code class="inline">&#123;code, codeName, message, details&#125;</code>, most reads carry an
+    ETag · every <span class="chip-get"><b>GET</b></span> below is a live link into the running
+    service · a feed's <code class="inline">sourceStatus</code> is
+<code class="inline">OK</code>, <code class="inline">STALE</code> or
+<code class="inline">UNAVAILABLE</code> — an unavailable feed is reported as such, never as
+    an all-clear (§6)
+</p> <!-- The table of contents lives in the sticky "on this page" rail that
      pages/docs.js builds from these section headings (docs.astro). A second,
      static copy here duplicated all seven links immediately below it and went
      stale the moment a section was renamed. -->

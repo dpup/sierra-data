@@ -88,20 +88,21 @@ const examples = [
 >
   <style is:global slot="head">
     .tool-name { white-space: nowrap; }
-    .nl-example { color: var(--text-hi); }
-    .arrow-note { color: var(--text-dim); }
+    .nl-example { color: var(--text-primary); }
+    .arrow-note { color: var(--text-tertiary); }
     .subhead { font-size: 15px; margin-top: var(--space-sub); margin-bottom: 10px; }
   </style>
 
   <PageHead kicker="The Grid · for LLM agents" title="MCP — agent access">
-    <p class="lead">
-      Point an LLM agent at The Grid over the <strong>Model Context Protocol</strong>.
-      It's the same public, read-only data as <code class="inline">/api/v1</code>, exposed as
-      agent tools: ask about hazards, evacuations, roads, and weather for the central Sierra
-      in natural language, and the model calls the right tool. <strong>No key, no auth,
-      read-only</strong> — like the rest of the API.
-    </p>
+    <p class="lead">The same public data, as agent tools.</p>
   </PageHead>
+
+  <p class="rail-caption">
+    <b>MCP</b>point an LLM agent at The Grid over the Model Context Protocol · the same
+    read-only <code class="inline">/api/v1</code> data exposed as tools — ask about hazards,
+    evacuations, roads and weather in natural language and the model calls the right one ·
+    no key, no auth
+  </p>
 
   <div class="section-gap"></div>
   <SectionHead heading="The endpoint" cap="Streamable HTTP · JSON-RPC 2.0" />
@@ -176,7 +177,7 @@ const examples = [
         {tools.map(([name, args, desc]) => (
           <tr>
             <td class="mono tool-name">{name}</td>
-            <td class="mono" style="font-size:12px;color:var(--text-2)">{args}</td>
+            <td class="mono" style="font-size:12px;color:var(--text-2nd)">{args}</td>
             <td class="wrap">{desc}</td>
           </tr>
         ))}
@@ -217,11 +218,21 @@ const examples = [
 
   <div class="section-gap"></div>
   <SectionHead heading="Reading the data honestly" cap="required of every consumer" />
+  <div class="with-notes">
   <p class="prose">
     This is <strong class="accent-orange">reference-only, life-safety data</strong>. Every
     result carries a <code class="inline">disclaimer</code>, and an agent relaying it must
     respect the fail-loud contract:
   </p>
+  <aside class="sidenote">
+    <div class="rail-label">The full model</div>
+    <p>
+      Severity scale, place ids and the evacuation contract are in the
+      <a href="/docs">/api/v1 reference</a>. The MCP server also exposes it in-band as
+      <code class="inline">grid://reference</code>, so an agent can read the rules it is
+      being held to without leaving the protocol.
+    </p>
+  </aside>
   <ul class="prose">
     <li>Every source reports <span class="mono">OK</span> / <span class="mono">STALE</span> /
       <span class="mono">UNAVAILABLE</span>. <strong>UNAVAILABLE means the status is unknown,
@@ -233,9 +244,5 @@ const examples = [
     <li>Evacuation orders and directive text are shown verbatim; link the authoritative source,
       don't paraphrase.</li>
   </ul>
-  <p class="prose">
-    The full model — severity scale, place ids, the evacuation contract — is in the
-    <a href="/docs">/api/v1 reference</a>. The MCP server also exposes it as an in-band resource
-    (<code class="inline">grid://reference</code>).
-  </p>
+  </div>
 </Shell>

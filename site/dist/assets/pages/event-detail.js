@@ -17,15 +17,20 @@
 
 import { get, apiURL, curlFor, ApiError } from '../api.js';
 import {
+  timeAgo,
   timeCell,
   sevChip,
   layerLabel,
   decodeGeometry,
-  SEVERITY_COLORS_ON_INK,
+  SEVERITY_COLORS,
   fmtNum,
+  ABSENT,
+  absentValue,
 } from '../format.js';
+import { copyOnClick, copyButton } from '../ui.js';
+import { FIELD_DOCS } from '../spec.js';
 import { diffObjects } from '../diff.js';
-import { BASE_STYLE } from '../basemap.js';
+import { BASE_STYLE, BASE_ATTRIBUTION_OPTS, ensureBasemap, deferInteraction } from '../basemap.js';
 
 /**
  * The Event.detail oneof's protojson field names (grid.proto fields 20–30).
@@ -154,10 +159,19 @@ export function geometryBounds(geometry, decoded) {
 export function fmtDiffValue(v, max = 120) {
   if (v === undefined) return '';
   let s;
-  try {
-    s = JSON.stringify(v);
-  } catch {
-    s = String(v);
+  // A string renders as ITSELF, not as its JSON encoding. A changed headline is
+  // the most common diff on this page and it was showing as
+  // `"Mudflat Fire — 2,340 acres, 0% contained"` — the quotes are noise on the
+  // one row a reader most wants to skim, and they cost two of the characters
+  // before truncation. Objects and arrays keep JSON, which is what they are.
+  if (typeof v === 'string') {
+    s = v;
+  } else {
+    try {
+      s = JSON.stringify(v);
+    } catch {
+      s = String(v);
+    }
   }
   if (typeof s !== 'string') s = String(s);
   return s.length > max ? `${s.slice(0, max - 1)}…` : s;
@@ -173,37 +187,18 @@ export function fmtDiffValueFull(v) {
 }
 
 /**
- * Build an expandable diff-value <td>. Shows the truncated value; when the value
- * is longer than the truncation, it carries a title tooltip and can be toggled
- * to the full text (the caller wires the click/keydown so both cells in a row
- * expand together). DOM-dependent — only called from the render path.
+ * A diff value as text: truncated for the row, full in the title.
+ *
+ * This replaced a `<td>` builder with click-to-expand. The values in a diff are
+ * a headline, a timestamp, and a serialized detail object — lengths that have
+ * nothing in common — and a table column sized for one made the others useless.
+ * They now flow inline and wrap, with the untruncated value one hover away.
+ *
  * @param {*} v
- * @returns {{td: HTMLTableCellElement, truncated: boolean,
- *   setExpanded: (on: boolean) => void, isExpanded: () => boolean}}
+ * @returns {string}
  */
-function diffValueCell(v) {
-  const short = fmtDiffValue(v);
-  const full = fmtDiffValueFull(v);
-  const td = el('td', 'mono wrap diff-val', short);
-  const truncated = full !== short;
-  if (truncated) {
-    td.title = full;
-    td.classList.add('diff-expandable');
-    td.setAttribute('role', 'button');
-    td.tabIndex = 0;
-  }
-  return {
-    td,
-    truncated,
-    setExpanded(on) {
-      if (!truncated) return;
-      td.textContent = on ? full : short;
-      td.classList.toggle('is-expanded', on);
-    },
-    isExpanded() {
-      return td.classList.contains('is-expanded');
-    },
-  };
+function diffText(v) {
+  return fmtDiffValue(v);
 }
 
 /**
@@ -250,38 +245,82 @@ function errorBlock(err, context) {
   return div;
 }
 
-/** Copyable request line: GET <url> [copy] curl … */
+/**
+ * The exact request behind this pane, in the site's one echo treatment.
+ *
+ * This was a seventh variant (`.query-row`): 12.5px, `white-space: nowrap` and
+ * `overflow-x: auto`, so at 390px the URL and its copy button ran 230px past
+ * the column and the reader had to find a horizontal scrollbar to see the end
+ * of the thing they were being invited to copy. `.req-echo` wraps.
+ */
 function requestLine(url) {
-  const row = el('div', 'query-row');
-  const code = el('code', 'inline', `GET ${url}`);
-  const copy = el('button', 'copy-btn', 'copy');
-  copy.type = 'button';
-  copy.addEventListener('click', () => {
-    navigator.clipboard.writeText(curlFor(url)).then(
-      () => {
-        copy.textContent = 'copied';
-        setTimeout(() => (copy.textContent = 'copy'), 1200);
-      },
-      () => {
-        copy.textContent = 'failed';
-      }
-    );
-  });
-  row.append(code, ' ', copy);
+  const row = el('div', 'req-echo');
+  row.append(
+    el('span', 'method', 'GET'),
+    el('span', '', url),
+    copyButton(curlFor(url), 'copy curl')
+  );
   return row;
 }
 
 /**
- * Section panel with a heading and a raw-protojson toggle at the bottom.
+ * A section of the record: a small all-caps heading over a thick rule, then the
+ * rows. Every section gets the same treatment — Envelope, Detail, Geometry,
+ * Provenance are peers, and all of them are open.
+ *
+ * Two earlier attempts were wrong in opposite directions. Bordered cards of
+ * equal weight made the pane a stack of boxes with no reading order; collapsing
+ * the secondary ones behind disclosures hid content the reader came for and
+ * made the pane's shape depend on what they had clicked. A shared heading and a
+ * rule give the order without hiding anything.
+ *
+ * The per-section `raw` disclosures are still gone: there was one per card, each
+ * showing a slice of the same object, so "show me the JSON" had six answers.
+ * There is one now, at the foot of the pane.
+ *
+ * @param {string} title
  * @returns {{panel: HTMLElement, body: HTMLElement}}
  */
-function section(title, rawObj) {
-  const panel = el('section', 'panel');
+function section(title) {
+  const panel = el('section', 'ed-section');
   panel.append(el('h2', '', title));
   const body = el('div', 'sec-body');
   panel.append(body);
-  if (rawObj !== undefined) panel.append(rawToggle(rawObj));
   return { panel, body };
+}
+
+/**
+ * Which KIND of absence is this?
+ *
+ * The distinction is the whole reason the fail-loud contract exists, so it has
+ * to be visible in the envelope rather than flattened into one dash:
+ *
+ *  - a FAULT — the value must exist and does not. `ingestedAt` is stamped by
+ *    the store on every write, so its absence is a bug in us; `observedAt`
+ *    missing on an ACTIVE life-safety record means we cannot say when it was
+ *    true, which a reader has to be told loudly.
+ *  - NOT APPLICABLE — the field belongs to a different layer.
+ *  - NOT PROVIDED — the source simply did not send it this time.
+ *
+ * @param {string} key envelope field name
+ * @param {Object} ev  the event, for layer/status context
+ * @returns {{text:string, cls:string, sourceUrl?:string}}
+ */
+function absenceFor(key, ev) {
+  const sourceUrl = (ev.provenance && ev.provenance.sourceUrl) || '';
+  if (key === 'ingestedAt') return ABSENT.missing(sourceUrl);
+  if (key === 'observedAt') {
+    const active = String(ev.status || '').toUpperCase() === 'ACTIVE';
+    return active ? ABSENT.missing(sourceUrl) : ABSENT.notProvided();
+  }
+  // `expires`/`effective` are meaningful only for the layers that schedule.
+  if (key === 'expires' || key === 'effective') {
+    const layer = String(ev.layer || '').toLowerCase();
+    if (layer && !['weather_alert', 'fire_weather', 'evacuation', 'road_incident'].includes(layer)) {
+      return ABSENT.notApplicable(layer);
+    }
+  }
+  return ABSENT.notProvided();
 }
 
 /** Pretty-print a JSON string if it parses; otherwise return it unchanged. */
@@ -293,29 +332,37 @@ function prettyJSON(s) {
   }
 }
 
-/** <details> raw toggle with pretty-printed protojson. */
-function rawToggle(obj) {
-  const details = el('details', 'raw-toggle');
-  details.append(el('summary', '', 'raw'));
-  const pre = el('pre', 'code');
-  pre.textContent = JSON.stringify(obj, null, 2);
-  details.append(pre);
-  return details;
-}
-
-/** Append one dt/dd row to a .kv list; value may be a node or string. */
-function kvRow(dl, key, value) {
+/**
+ * Append one dt/dd row to a .kv list; value may be a node or string.
+ *
+ * `doc` is the field's spec sentence from assets/spec.js, printed under the
+ * value. This is the site's whole thesis applied to one record: the reference
+ * for a field and an actual value of that field, in the same place, so you are
+ * never reading the docs in one tab and guessing at the shape in another.
+ */
+function kvRow(dl, key, value, doc) {
   dl.append(el('dt', '', key));
   const dd = document.createElement('dd');
   if (value instanceof Node) dd.append(value);
   else dd.textContent = value; // textContent: upstream text is untrusted
+  // FIELD_DOCS entries are [type, sentence]; the sentence is what belongs here.
+  if (doc && doc[1]) dd.append(el('div', 'kv-doc', doc[1]));
   dl.append(dd);
   return dd;
 }
 
-/** Render an arbitrary detail-field value (primitive / array / object). */
+/**
+ * Render an arbitrary detail-field value (primitive / array / object).
+ *
+ * An empty value is NAMED, never left blank and never a dash. protojson omits
+ * empty strings, so a detail field the source did not fill arrived here as
+ * `undefined` and rendered as nothing at all — `eventType` on an evacuation
+ * record was a blank row, which reads as a rendering bug rather than as the
+ * fact it is. The envelope has said this properly for a while; the typed detail
+ * block was still using a dash, and then not even that.
+ */
 function valueNode(v) {
-  if (v === null || v === undefined) return '—';
+  if (v === null || v === undefined || v === '') return absentValue(ABSENT.notProvided());
   // Thousands separators on magnitudes. On a service whose whole claim is that
   // it normalizes upstream feeds, "10374" reads as a value we never parsed.
   // Small integers (containment %, depth, magnitude, counts under 1000) are
@@ -324,6 +371,7 @@ function valueNode(v) {
     return fmtNum(v, 2);
   }
   if (Array.isArray(v)) {
+    if (v.length === 0) return absentValue(ABSENT.notProvided());
     if (v.every((x) => typeof x !== 'object' || x === null)) return v.map(String).join(', ');
     const pre = el('pre', 'code');
     pre.textContent = JSON.stringify(v, null, 2);
@@ -350,12 +398,13 @@ function renderEventMap(container, decoded, bounds, severity) {
   const lib = typeof window !== 'undefined' ? window.maplibregl : undefined;
   if (!lib || typeof lib.Map !== 'function') return false;
   // On the dark basemap — the ink ramp, not the paper one.
-  const color = SEVERITY_COLORS_ON_INK[String(severity || '').toUpperCase()] || SEVERITY_COLORS_ON_INK.INFO;
+  // PAPER ramp: the basemap is light (see basemap.js).
+  const color = SEVERITY_COLORS[String(severity || '').toUpperCase()] || SEVERITY_COLORS.INFO;
   try {
     const center = bounds
       ? [(bounds.minLng + bounds.maxLng) / 2, (bounds.minLat + bounds.maxLat) / 2]
       : [-120.35, 38.2];
-    // Shared OSM raster basemap (basemap.js) for geographic context under the
+    // Shared light OSM vector basemap (basemap.js) for geographic context under the
     // event geometry; the bbox/centroid text above the map is the fallback when
     // the map library fails to load. API data stays same-origin /api/v1/* via api.js.
     const map = new lib.Map({
@@ -363,11 +412,15 @@ function renderEventMap(container, decoded, bounds, severity) {
       style: BASE_STYLE,
       center,
       zoom: 9,
+      // Credit comes from the TileJSON; this only makes it compact.
+      attributionControl: BASE_ATTRIBUTION_OPTS,
     });
+    ensureBasemap(map);
+    deferInteraction(map, container);
     map.addControl(new lib.NavigationControl(), 'top-right');
     // Insurance against a container that gains its final size just after init:
     // resize once the style is ready so the canvas fills the 24rem box.
-    map.on('load', () => {
+    map.on('style.load', () => {
       map.resize();
       map.addSource('event-geom', {
         type: 'geojson',
@@ -452,15 +505,26 @@ export async function renderEventDetail(root, id, opts = {}) {
   const errorsEl = el('div', 'ed-errors');
   const loadingEl = el('div', 'loading', `Loading GET /api/v1/events/${id} …`);
   const headEl = el('header', 'ed-head-block');
+  // When this pane is EMBEDDED in the /events browser it has no address of its
+  // own, so the record it is showing was unreachable as a link — you could see
+  // it but not send it to anyone. This is the record's own URL.
+  if (!setTitle && id) {
+    const perma = el('a', 'ed-permalink', 'open permalink \u2197');
+    perma.href = `/event?id=${encodeURIComponent(id)}`;
+    headEl.append(perma);
+  }
   headEl.hidden = true;
   const chipsEl = el('div', 'chip-row');
   const headlineEl = el(headingTag, 'ed-headline');
   const subEl = el('div', 'muted mono small');
   headEl.append(chipsEl, headlineEl, subEl);
-  const queryEl = el('div', 'query-line');
+  // The two GET lines sit at the FOOT of the pane, not between the headline and
+  // the record. They say how this was fetched — a footnote to the record, not a
+  // preamble to it, and putting them first pushed the geometry below the fold.
+  const queryEl = el('div', 'ed-requests');
   queryEl.setAttribute('aria-label', 'Requests behind this pane');
-  const sectionsEl = el('div');
-  root.append(errorsEl, loadingEl, headEl, queryEl, sectionsEl);
+  const sectionsEl = el('div', 'ed-sections');
+  root.append(errorsEl, loadingEl, headEl, sectionsEl, queryEl);
 
   if (!id) {
     loadingEl.remove();
@@ -479,6 +543,14 @@ export async function renderEventDetail(root, id, opts = {}) {
   const historyPath = `/api/v1/events/${encodeURIComponent(id)}/history`;
   // Opt into the model I/O (enhancement.request/response) — the detail page
   // shows it; list endpoints omit it by default to stay lean.
+  //
+  // DO NOT strip this from the echoed requests to tidy them. It is a real API
+  // parameter — `GetEventRequest.enhancement_io` (field 2) and
+  // `GetEventHistoryRequest` (field 4), not a proxy artifact — and without it
+  // the server omits `enhancement.request/response`, which is exactly what the
+  // AI-enhancement card below renders. A copyable request that returns a
+  // different record than the pane shows breaks the one promise this site
+  // makes: the printed request is the request that ran.
   const ioParams = { enhancement_io: 'true' };
 
   queryEl.append(
@@ -525,6 +597,19 @@ export async function renderEventDetail(root, id, opts = {}) {
 
     if (event) renderEvent(event);
     renderTimeline(event);
+    // ONE raw view, at the foot, for the whole record. There used to be one per
+    // card, each showing a slice of the same object, so "show me the JSON" had
+    // six different answers depending on which disclosure you happened to open.
+    if (event) {
+      const raw = el('details', 'ed-section ed-raw');
+      raw.append(el('summary', '', 'Raw protojson'));
+      const rawBody = el('div', 'sec-body');
+      const pre = el('pre', 'code');
+      pre.textContent = JSON.stringify(event, null, 2);
+      rawBody.append(pre);
+      raw.append(rawBody);
+      sectionsEl.append(raw);
+    }
 
     /* ---- header + sections ---- */
 
@@ -536,55 +621,37 @@ export async function renderEventDetail(root, id, opts = {}) {
       chipsEl.append(sevChip(ev.severity || 'INFO'));
       chipsEl.append(el('span', 'meta-chip mono', ev.status || 'EVENT_STATUS_UNSPECIFIED'));
       chipsEl.append(el('span', 'meta-chip mono', layerLabel(ev.layer || '')));
-      if (ev.enhancement) chipsEl.append(el('span', 'meta-chip ai-chip mono', 'AI-enhanced'));
+      // No AI-ENHANCED chip in the badge row. Enhancement is not a property of
+      // the event on a par with its severity or status, and putting it there
+      // implied the whole record was generated. The AI ENHANCEMENT section
+      // below states it precisely — which fields, which model, and the verbatim
+      // original beside them.
 
+      // The headline, as the row shows it — see the note on composeTitle's
+      // removal in format.js.
       headlineEl.textContent = ev.headline || ev.id || '(no headline)';
-      subEl.textContent = [ev.id, ev.category, ev.areaLabel].filter(Boolean).join(' · ');
-
-      // Envelope — every common field, in proto order.
-      const envelope = section('Envelope', ev);
-      const dl = el('dl', 'kv');
-      for (const [key, type] of ENVELOPE_FIELDS) {
-        const v = ev[key];
-        if (type === 'severity') {
-          kvRow(dl, key, sevChip(v || 'INFO'));
-        } else if (type === 'time') {
-          kvRow(dl, key, v ? timeCell(v) : '—');
-        } else if (type === 'number') {
-          kvRow(dl, key, String(v ?? 0));
-        } else if (type === 'list') {
-          kvRow(dl, key, Array.isArray(v) && v.length ? v.join(', ') : '—');
-        } else if (type === 'link' && typeof v === 'string' && /^https?:\/\//i.test(v)) {
-          const a = el('a', '', v);
-          a.href = v;
-          a.rel = 'noopener';
-          a.target = '_blank';
-          kvRow(dl, key, a);
-        } else {
-          kvRow(dl, key, v === undefined || v === null || v === '' ? '—' : String(v));
-        }
+      // The id leads the sub-line and is the long part: clip it and let a click
+      // hand over the whole thing, rather than wrapping a 70-character
+      // `meshcore:…` across two lines under the headline.
+      subEl.textContent = '';
+      if (ev.id) {
+        const idEl = el('span', 'id-clip ed-subid', ev.id);
+        copyOnClick(idEl, ev.id, 'id');
+        subEl.append(idEl);
       }
-      envelope.body.append(dl);
-      sectionsEl.append(envelope.panel);
+      const rest = [ev.category, ev.areaLabel].filter(Boolean).join(' · ');
+      if (rest) subEl.append(document.createTextNode(`${ev.id ? ' · ' : ''}${rest}`));
 
-      // Typed detail — whichever oneof field is present.
-      const detail = detailOf(ev);
-      if (detail) {
-        const sec = section(`Detail — ${detail.field}`, detail.value);
-        const ddl = el('dl', 'kv');
-        for (const [k, v] of Object.entries(detail.value)) kvRow(ddl, k, valueNode(v));
-        sec.body.append(ddl);
-        sectionsEl.append(sec.panel);
-      } else {
-        const sec = section('Detail', undefined);
-        sec.body.append(
-          el('p', 'muted small', 'No typed detail block on this event (none of the detail oneof fields is set).')
-        );
-        sectionsEl.append(sec.panel);
-      }
-
+      // GEOMETRY FIRST. Where a thing is, is the first question a reader has
+      // about a hazard record, and the mock puts the map immediately under the
+      // headline. An envelope table above it buried the one part of the record
+      // that is not text.
       // Geometry — map when possible, textual bbox/centroid always.
-      const geomSec = section('Geometry', ev.geometry);
+      // Decode first: the summary line names the geometry type, so a reader can
+      // tell a Polygon from a null without opening the section.
+      const geomDecodedForSummary = ev.geometry ? decodeGeometry(ev.geometry.geojson) : null;
+      const geomType = geomDecodedForSummary ? geomDecodedForSummary.type || 'untyped' : '';
+      const geomSec = section(geomType ? `Geometry — ${geomType}` : 'Geometry — null (valid)');
       if (!ev.geometry) {
         geomSec.body.append(
           el('p', 'muted small', 'No geometry on this event (county-wide advisories often carry none).')
@@ -592,23 +659,22 @@ export async function renderEventDetail(root, id, opts = {}) {
       } else {
         const decoded = decodeGeometry(ev.geometry.geojson);
         const bounds = geometryBounds(ev.geometry, decoded);
-        const gdl = el('dl', 'kv');
-        kvRow(gdl, 'type', decoded ? decoded.type || '(untyped)' : '(geojson bytes did not decode)');
-        kvRow(
-          gdl,
-          'bbox',
-          bounds
-            ? `lat ${fmtCoord(bounds.minLat)} … ${fmtCoord(bounds.maxLat)}, ` +
-                `lng ${fmtCoord(bounds.minLng)} … ${fmtCoord(bounds.maxLng)}`
-            : '—'
-        );
         const c = ev.geometry.centroid;
-        kvRow(
-          gdl,
-          'centroid',
-          c ? `${fmtCoord(c.lat ?? 0)}, ${fmtCoord(c.lng ?? 0)}` : '—'
-        );
-        geomSec.body.append(gdl);
+        // One muted line under the map, not a three-row table: these are
+        // captions for the picture above them, and a kv grid gave them the
+        // weight of envelope fields they do not have.
+        const bits = [];
+        if (bounds) {
+          bits.push(
+            `bbox ${fmtCoord(bounds.minLat)}, ${fmtCoord(bounds.minLng)}, ` +
+              `${fmtCoord(bounds.maxLat)}, ${fmtCoord(bounds.maxLng)}`
+          );
+        }
+        if (c) bits.push(`centroid ${fmtCoord(c.lat ?? 0)}, ${fmtCoord(c.lng ?? 0)}`);
+        bits.push(decoded ? 'decoded from geometry.geojson (base64)' : 'geometry.geojson did not decode');
+        var geomCaption = el('div', 'geom-caption', bits.join(' · '));
+        // No decodable geometry means no map, so the caption is all there is.
+        if (!decoded) geomSec.body.append(geomCaption);
 
         // The map is created AFTER the panel is attached to the document below,
         // so MapLibre measures the container at its real laid-out size (24rem ×
@@ -618,6 +684,7 @@ export async function renderEventDetail(root, id, opts = {}) {
         if (decoded) {
           const mapBox = el('div', 'map-canvas');
           geomSec.body.append(mapBox);
+          geomSec.body.append(geomCaption);
           renderMap = () => {
             if (!renderEventMap(mapBox, decoded, bounds, ev.severity || 'INFO')) {
               mapBox.remove();
@@ -635,9 +702,56 @@ export async function renderEventDetail(root, id, opts = {}) {
       sectionsEl.append(geomSec.panel);
       if (typeof renderMap === 'function') renderMap();
 
+      // Envelope — every common field, in proto order.
+      const envelope = section('Envelope');
+      const dl = el('dl', 'kv');
+      for (const [key, type] of ENVELOPE_FIELDS) {
+        const v = ev[key];
+        const empty = v === undefined || v === null || v === '' ||
+          (Array.isArray(v) && v.length === 0);
+        if (empty) {
+          kvRow(dl, key, absentValue(absenceFor(key, ev)), FIELD_DOCS[key]);
+        } else if (type === 'severity') {
+          kvRow(dl, key, sevChip(v), FIELD_DOCS[key]);
+        } else if (type === 'time') {
+          kvRow(dl, key, timeCell(v), FIELD_DOCS[key]);
+        } else if (type === 'number') {
+          kvRow(dl, key, fmtNum(v, 2), FIELD_DOCS[key]);
+        } else if (type === 'list') {
+          kvRow(dl, key, v.join(', '), FIELD_DOCS[key]);
+        } else if (type === 'link' && typeof v === 'string' && /^https?:\/\//i.test(v)) {
+          const a = el('a', '', v);
+          a.href = v;
+          a.rel = 'noopener';
+          a.target = '_blank';
+          kvRow(dl, key, a, FIELD_DOCS[key]);
+        } else {
+          kvRow(dl, key, String(v), FIELD_DOCS[key]);
+        }
+      }
+      envelope.body.append(dl);
+      sectionsEl.append(envelope.panel);
+
+      // Typed detail — whichever oneof field is present.
+      const detail = detailOf(ev);
+      if (detail) {
+        const sec = section(`Detail — ${detail.field}`);
+        const ddl = el('dl', 'kv');
+        for (const [k, v] of Object.entries(detail.value)) kvRow(ddl, k, valueNode(v));
+        sec.body.append(ddl);
+        sectionsEl.append(sec.panel);
+      } else {
+        const sec = section('Detail');
+        sec.body.append(
+          el('p', 'muted small', 'No typed detail block on this event (none of the detail oneof fields is set).')
+        );
+        sectionsEl.append(sec.panel);
+      }
+
+
       // Provenance.
       const prov = ev.provenance || {};
-      const provSec = section('Provenance', ev.provenance);
+      const provSec = section('Provenance');
       const pdl = el('dl', 'kv');
       kvRow(pdl, 'sourceId', prov.sourceId || '—');
       kvRow(pdl, 'sourceName', prov.sourceName || '—');
@@ -660,7 +774,7 @@ export async function renderEventDetail(root, id, opts = {}) {
       // raw dump: the request and response are rendered explicitly below.
       if (ev.enhancement) {
         const enh = ev.enhancement;
-        const sec = section('AI enhancement', undefined);
+        const sec = section('AI enhancement');
         sec.body.classList.add('enh-body');
         const badge = el('div', 'ai-badge');
         badge.append(
@@ -720,8 +834,25 @@ export async function renderEventDetail(root, id, opts = {}) {
     /* ---- revision timeline ---- */
 
     function renderTimeline(currentEvent) {
-      const sec = section('Revision timeline', undefined);
+      const n = Array.isArray(revisions) ? revisions.length : 0;
+      const sec = section(
+        n ? `Revision timeline · ${n} revision${n === 1 ? '' : 's'}` : 'Revision timeline'
+      );
       sec.panel.id = 'ed-timeline';
+
+      // This timeline is THIS record's history. The same data across every
+      // event is the History screen, and a reader looking at one event's arc is
+      // one click from wanting the rest — but nothing on this page said the
+      // other screen existed. Scoped to the same layer so the link lands on
+      // something related rather than the whole archive.
+      const layer = currentEvent && currentEvent.layer;
+      const archive = el('p', 'ed-archive-link muted small');
+      const a = el('a', '', 'every revision of every event →');
+      a.href = layer
+        ? `/history?layer=${encodeURIComponent(String(layer).toLowerCase())}`
+        : '/history';
+      archive.append('This is one event\u2019s arc. ', a);
+      sec.body.append(archive);
 
       if (histRes.status === 'rejected') {
         sec.body.append(errorBlock(histRes.reason, 'Could not load the revision history.'));
@@ -778,83 +909,70 @@ export async function renderEventDetail(root, id, opts = {}) {
 
       function revisionCard(rev, prevRev, isOldestLoaded) {
         const card = el('div', 'rev-card');
-
-        const head = el('div', 'rev-card-head');
-        head.append(el('strong', 'mono', `rev ${rev.revision ?? 0}`));
-        const observed = el('span', 'muted small');
-        observed.append('observed ', timeCell(rev.observedAt || ''));
-        const ingested = el('span', 'muted small');
-        ingested.append('ingested ', timeCell(rev.ingestedAt || ''));
-        head.append(observed, ingested);
         const revEvent = rev.event || {};
-        head.append(sevChip(revEvent.severity || 'INFO'));
-        head.append(el('span', 'muted small mono', revEvent.status || '—'));
+
+        // Header: the revision number, then everything about it on ONE line.
+        // The severity and status chips that used to sit here are gone — they
+        // describe the record, which the envelope above already covers, and
+        // they pushed the thing a reader is here for (what changed) down.
+        const head = el('div', 'rev-card-head');
+        head.append(el('span', 'rev-n', `rev ${rev.revision ?? 0}`));
+        const when = el('span', 'rev-when');
+        when.textContent =
+          `observed ${timeAgo(rev.observedAt || '')} · ingested ${timeAgo(rev.ingestedAt || '')}`;
+        when.title = `observed ${rev.observedAt || 'unknown'}\ningested ${rev.ingestedAt || 'unknown'}`;
+        head.append(when);
+
+        const entries = prevRev ? diffObjects(prevRev.event || {}, revEvent) : [];
+        const note = el('span', 'rev-note');
+        if (!prevRev) {
+          note.textContent = isOldestLoaded && histNext
+            ? 'oldest loaded revision — load older to diff further back'
+            : 'first recorded revision — nothing to diff against';
+        } else if (entries.length === 0) {
+          note.textContent = `no field-level changes vs rev ${prevRev.revision ?? 0}`;
+        } else {
+          note.textContent = `${entries.length} field${entries.length === 1 ? '' : 's'} changed`;
+        }
+        head.append(note);
         card.append(head);
 
-        if (!prevRev) {
-          card.append(
-            el(
-              'p',
-              'muted small',
-              isOldestLoaded && histNext
-                ? 'Oldest loaded revision — load older revisions to diff further back.'
-                : 'First recorded revision — nothing earlier to diff against.'
-            )
-          );
-        } else {
-          const entries = diffObjects(prevRev.event || {}, revEvent);
-          if (entries.length === 0) {
-            card.append(
-              el('p', 'muted small', `No field-level changes vs rev ${prevRev.revision ?? 0}.`)
-            );
-          } else {
-            const wrap = el('div', 'table-wrap diff-wrap');
-            const table = el('table', 'data-table diff-table');
-            const thead = document.createElement('thead');
-            const hr = document.createElement('tr');
-            for (const h of ['', 'field', `rev ${prevRev.revision ?? 0}`, `rev ${rev.revision ?? 0}`]) {
-              hr.append(el('th', '', h));
-            }
-            thead.append(hr);
-            table.append(thead);
-            const tbody = document.createElement('tbody');
-            for (const entry of entries) {
-              const tr = document.createElement('tr');
-              const marks = { added: '+ added', removed: '− removed', changed: 'Δ changed' };
-              tr.append(el('td', `diff-kind k-${entry.kind}`, marks[entry.kind] || entry.kind));
-              tr.append(el('td', 'mono diff-path', entry.path));
-              // Long values (e.g. a verbatim description) are truncated; clicking
-              // either value cell expands both so the full before/after can be
-              // compared. A native title tooltip carries the full text too.
-              const before = diffValueCell(entry.before);
-              const after = diffValueCell(entry.after);
-              if (before.truncated || after.truncated) {
-                const toggle = () => {
-                  const on = !(before.isExpanded() || after.isExpanded());
-                  before.setExpanded(on);
-                  after.setExpanded(on);
-                };
-                for (const c of [before, after]) {
-                  if (!c.truncated) continue;
-                  c.td.addEventListener('click', toggle);
-                  c.td.addEventListener('keydown', (e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      toggle();
-                    }
-                  });
-                }
-              }
-              tr.append(before.td, after.td);
-              tbody.append(tr);
-            }
-            table.append(tbody);
-            wrap.append(table);
-            card.append(wrap);
-          }
-        }
+        if (!entries.length) return card;
 
-        card.append(rawToggle(rev));
+        // The diff: one row per field, indented behind a hairline so the run of
+        // changes reads as belonging to the revision above it. Each row is the
+        // field name, then `old → new` as ONE flowing line that wraps — not a
+        // three-column table. The values here are a headline, a timestamp and a
+        // serialized detail object, lengths with nothing in common, and a column
+        // sized for one made the others unreadable.
+        const body = el('div', 'rev-diff');
+        for (const entry of entries) {
+          const row = el('div', 'diff-row');
+          row.append(el('div', 'diff-field', entry.path));
+
+          const vals = el('div', 'diff-vals');
+          if (entry.kind !== 'added') {
+            const before = el('span', 'diff-before', diffText(entry.before));
+            before.title = fmtDiffValueFull(entry.before);
+            vals.append(before, ' ');
+          }
+          // The arrow carries direction; `added` and `removed` say so in words
+          // too, because an arrow alone cannot tell "this appeared" from "this
+          // changed from empty".
+          vals.append(el('span', 'diff-arrow', entry.kind === 'added' ? '+' : '\u2192'), ' ');
+          if (entry.kind === 'removed') {
+            vals.append(el('span', 'diff-removed-note', 'removed'));
+          } else {
+            const after = el('span', 'diff-after', diffText(entry.after));
+            after.title = fmtDiffValueFull(entry.after);
+            vals.append(after);
+          }
+          row.append(vals);
+          body.append(row);
+        }
+        card.append(body);
+
+        // (no per-revision raw: one RAW disclosure lives at the foot of the pane)
         return card;
       }
     }

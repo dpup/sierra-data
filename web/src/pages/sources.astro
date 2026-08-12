@@ -1,7 +1,7 @@
 ---
 import Shell from '../layouts/Shell.astro';
 import PageHead from '../components/PageHead.astro';
-import SectionHead from '../components/SectionHead.astro';
+import GetChip from '../components/GetChip.astro';
 ---
 <Shell
   current="sources"
@@ -19,29 +19,74 @@ import SectionHead from '../components/SectionHead.astro';
       background: color-mix(in srgb, var(--st-UNAVAILABLE) 11%, transparent);
     }
     .data-table td.err-cell { color: var(--st-UNAVAILABLE); }
+    /* Attribution sits under the source name; it is an obligation, not an id,
+       so it is set apart from the id line above it. */
+    .data-table .src-attr { color: var(--text-2nd); font-style: italic; max-width: 22rem; }
   </style>
 
   <PageHead kicker="System status" title="Sources">
-    <p class="lead">
-      The board that makes the whole service trustworthy: every upstream feed
-      the Grid polls, reporting its own health out loud. For each
-      source you get the poll interval, the last successful fetch, how close it
-      is to going <span class="mono">STALE</span>, the staleness thresholds, and
-      the last error verbatim — the honest-freshness contract, exposed. A feed
-      that fails says so; <span class="accent-orange">absence of data is never
-      shown as an all-clear.</span> This whole page is one live fetch of
-      <code class="inline">/api/v1/sources</code> — replay it yourself.
-    </p>
+    <p class="lead">Every upstream feed, reporting its own health.</p>
+    <GetChip slot="badges" path="/api/v1/sources" />
   </PageHead>
 
-  <div class="section-gap"></div>
-  <SectionHead heading="Feed health" get="/api/v1/sources" cap="unhealthy first · poll → last success → freshness" />
+  <!-- No "Feed health" section head. It was the only heading on the page and it
+       restated the hero — "Sources / every upstream feed, reporting its own
+       health" then "Feed health" — which made this the one screen that opens
+       with two titles. Every other page goes hero → caption → data, and the
+       head's `get` and `cap` had somewhere better to be: the request is a badge
+       in the hero, the column order is the caption. -->
+  <p class="rail-caption">
+    <b>Board</b>one row per upstream feed, unhealthy first · poll → last success → freshness
+  </p>
+
+  <!-- SIDENOTES, not a rail. The board below is a wide table — six columns of
+       per-source health — and a 300px rail would take a third of its width. A
+       page whose data needs the full measure keeps it, and the asides move
+       beside the prose instead. -->
+  <div class="with-notes">
+    <p class="section-intro">
+      Every event and every layer traces to one of these feeds. For each you get the poll
+      interval, the last successful fetch, how close it is to going
+      <span class="mono">STALE</span>, the staleness thresholds and the last error verbatim —
+      the honest-freshness contract, exposed. A feed that fails says so;
+      <span class="accent-orange">absence of data is never shown as an all-clear.</span>
+    </p>
+    <aside class="sidenote">
+      <div class="rail-label">Reading the board</div>
+      <p>
+        A source goes <span class="mono">STALE</span> once its last success is older than
+        <code class="inline">staleAfterSeconds</code> — three poll intervals by default — and
+        <span class="mono">UNAVAILABLE</span> on persistent failure.
+      </p>
+      <p><strong>Read the live values here rather than hard-coding intervals.</strong> They are
+        per-source tunables and they change.</p>
+    </aside>
+  </div>
 
   <div id="summary-line" class="chip-row" aria-live="polite"></div>
   <div id="degradation-alert"></div>
   <div id="page-errors"></div>
   <div id="board"><div class="loading">Loading /api/v1/sources…</div></div>
   <p id="refresh-line" class="freshness"></p>
+
+  <!-- The obligation that rides with the data. Stated here because this is the
+       page that enumerates the feeds, and it is the one place a consumer sees
+       every attribution string at once. The evacuation clause is life-safety,
+       so it takes the accent label rather than sitting mid-paragraph. -->
+  <div class="with-notes section-gap">
+    <p class="section-intro">
+      Display the <code class="inline">attribution</code> string wherever you render a
+      source's data, and link the upstream. Every row above carries one.
+    </p>
+    <aside class="sidenote">
+      <div class="rail-label alert">Evacuation is reference-only</div>
+      <p>
+        In every state, and it must always be shown with its link to the authoritative
+        <a href="https://protect.genasys.com/search" target="_blank" rel="noopener noreferrer">Genasys</a>
+        viewer — a zone count from this API is never the instruction to act on.
+      </p>
+    </aside>
+  </div>
 
   <script is:inline type="module">
     import { initSourcesPage } from '/assets/pages/sources.js';

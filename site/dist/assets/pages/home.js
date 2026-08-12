@@ -19,6 +19,7 @@ import { get, ApiError, apiURL, curlFor } from '../api.js';
 import { activePlace } from '../place.js';
 import { CONVENTIONS } from '../spec.js';
 import { recordRow, timeAgo, fmtNum } from '../format.js';
+import { wireCopyButton } from '../ui.js';
 
 const $ = (id) => document.getElementById(id);
 const el = (t, c, x) => {
@@ -243,16 +244,7 @@ function elideLongStrings(json, limit = 120) {
 async function renderFirstRequest(place) {
   const path = apiURL('/api/v1/events', { place, page_size: 1 });
   $('first-req-path').textContent = path;
-  $('first-req-copy').addEventListener('click', () => {
-    const btn = $('first-req-copy');
-    navigator.clipboard.writeText(curlFor(path)).then(
-      () => {
-        btn.textContent = 'copied';
-        setTimeout(() => (btn.textContent = 'copy curl'), 1400);
-      },
-      () => (btn.textContent = 'failed')
-    );
-  });
+  wireCopyButton($('first-req-copy'), () => curlFor(path));
 
   const t0 = Date.now();
   const body = $('first-req-body');
