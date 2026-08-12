@@ -83,6 +83,13 @@ func seedSource(t *testing.T, st *store.Store, id string) {
 		[]store.SourceSeed{{ID: id, Name: id, PollInterval: 5 * time.Minute}}))
 }
 
+func seedSourceWithAttribution(t *testing.T, st *store.Store, id, name, attribution string) {
+	t.Helper()
+	require.NoError(t, st.SeedSources(context.Background(), []store.SourceSeed{
+		{ID: id, Name: name, Attribution: attribution, PollInterval: 5 * time.Minute},
+	}))
+}
+
 // TestMapLayer_EventLayerEnvelope: a store-backed layer serves the place's
 // ACTIVE events through the shared projection with the shipped metadata block.
 func TestMapLayer_EventLayerEnvelope(t *testing.T) {
@@ -452,4 +459,41 @@ func TestMapLayer_ETag(t *testing.T) {
 	assert.Equal(t, http.StatusNotModified, rec.Code)
 	assert.Empty(t, rec.Body.String())
 	assert.Equal(t, etag, rec.Header().Get("ETag"))
+}
+
+// Fail-loud rule 7 — attribution renders wherever data does — applies to the
+// layer ENVELOPE, which is the documented place a consumer reads it. It was
+// hardcoded to "" for every layer except evacuation, so eight of the nine
+// served an empty attribution while the features inside them each carried one.
+func TestMapLayer_AttributionComesFromTheSourceRegistry(t *testing.T) {
+	s := newTestService(t)
+	seedSourceWithAttribution(t, s.Store, "usgs", "USGS", "U.S. Geological Survey")
+	recordOK(t, s.Store, "usgs")
+
+	md := getFC(t, s, "/v1/places/calaveras/map/earthquake.geojson").Metadata
+	assert.Equal(t, "U.S. Geological Survey", md.Attribution,
+		"the registry already carries this line; the envelope must publish it")
+}
+
+// A layer that aggregates two feeds credits both, deduped, in declared order.
+func TestMapLayer_AttributionCreditsEveryFeed(t *testing.T) {
+	s := newTestService(t)
+	seedSourceWithAttribution(t, s.Store, "chp", "CHP", "California Highway Patrol")
+	seedSourceWithAttribution(t, s.Store, "caltrans", "Caltrans", "quickmap.dot.ca.gov")
+	recordOK(t, s.Store, "chp")
+	recordOK(t, s.Store, "caltrans")
+
+	md := getFC(t, s, "/v1/places/calaveras/map/road_incident.geojson").Metadata
+	assert.Equal(t, "California Highway Patrol · quickmap.dot.ca.gov", md.Attribution)
+}
+
+// A registry row with no attribution yields an empty one rather than a
+// fabricated line — the layer still serves and the envelope simply claims
+// nothing. (The harness seeds `nws` with a name and no attribution; production
+// gives all eight one, see gridSourceInfo in cmd/server/main.go.)
+func TestMapLayer_AttributionAbsentWhenRegistrySilent(t *testing.T) {
+	s := newTestService(t)
+	recordOK(t, s.Store, "nws")
+	md := getFC(t, s, "/v1/places/calaveras/map/weather_alert.geojson").Metadata
+	assert.Empty(t, md.Attribution)
 }

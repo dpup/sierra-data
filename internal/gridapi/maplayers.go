@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
@@ -142,7 +143,7 @@ func (s *Service) serveEventLayer(w http.ResponseWriter, r *http.Request, place 
 	// differently for one store state, and UNAVAILABLE (a contract-level
 	// "draw nothing") is only ever emitted with empty features.
 	status, lastUpdate = hazards.DegradeStoreStatus(status, len(events) > 0, lastUpdate)
-	attribution, sourceURL := eventLayerMeta(layer)
+	attribution, sourceURL := eventLayerMeta(layer, sources)
 	s.writeFeatureCollection(w, r, ProjectEvents(layer, events), &hazards.Metadata{
 		Layer:            layer,
 		Area:             place.GetSlug(),
@@ -317,11 +318,40 @@ func LayerSourceStatus(sources []*gridv1.Source, layer string) (status string, l
 // (life-safety framing: "no active zones per Cal OES" is a caveated
 // confirmed-empty, never a guarantee). Other layers carry per-feature source
 // blocks instead.
-func eventLayerMeta(layer string) (attribution, sourceURL string) {
+// eventLayerMeta returns the layer's attribution line and canonical source URL.
+//
+// Attribution comes from the SOURCE REGISTRY, which already carries a line for
+// every feed. It used to be hardcoded here and returned "" for everything
+// except evacuation, so eight of the nine layers served
+// `metadata.attribution: ""` — while every feature inside them carried a
+// populated `properties.source.attribution`. Fail-loud rule 7 is that
+// attribution renders wherever data does, and a consumer reading the envelope
+// (the documented place to read it) got nothing to display.
+//
+// Evacuation keeps its explicit line: it is the one layer whose attribution is
+// also a legal caveat ("reference only"), and it must not silently degrade to
+// a bare source name if the registry row is ever reworded.
+func eventLayerMeta(layer string, sources []*gridv1.Source) (attribution, sourceURL string) {
 	if layer == hazards.LayerEvacuation {
 		return "Cal OES / California County Governments — reference only", caloes.SourceURL
 	}
-	return "", ""
+	byID := make(map[string]*gridv1.Source, len(sources))
+	for _, src := range sources {
+		byID[src.GetId()] = src
+	}
+	// A layer can aggregate two feeds (wildfire, road_incident); credit both,
+	// in the registry's declared order, deduped.
+	var parts []string
+	seen := map[string]bool{}
+	for _, id := range layerSourceIDs[layer] {
+		a := strings.TrimSpace(byID[id].GetAttribution())
+		if a == "" || seen[a] {
+			continue
+		}
+		seen[a] = true
+		parts = append(parts, a)
+	}
+	return strings.Join(parts, " · "), ""
 }
 
 // writeFeatureCollection emits the shipped GeoJSON envelope through the
