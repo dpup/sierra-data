@@ -399,7 +399,12 @@ Used by five or more screens — reach for these before writing page CSS:
   the band stopped at 1280px with paper down both sides on a wide screen. The
   padding lives on `.deck-inner`, which re-establishes the column so the hero
   still lines up with main's text. Same split as `.site-footer`/`.footer-inner`;
-  any new full-bleed band follows it.
+  any new full-bleed band follows it. **`.deck-body` is a plain block and
+  `.deck-lede` runs the full column** — the one place prose is deliberately not
+  on a measure. It is display copy on the band, read once, and the counts belong
+  under the sentence they summarize rather than beside it. It was a two-column
+  grid above 1180px; do not reinstate one. The measure rule still governs
+  everything inside `main`.
 - **`.ledger`** — the count strip. **Four fixed tracks.** Never `auto-fit`: it
   wraps to 3 + 1 and paints the empty fourth slot as a dark void. The 1px grid
   gap over an `--ink-rule` background is what paints the hairlines.

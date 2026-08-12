@@ -1337,16 +1337,17 @@ button:disabled { opacity: 0.45; cursor: default; }
    that produced them. Wrapped onto multiple lines on a phone they ran together
    into one block; a little air separates the claim from its provenance. */
 .subline > div + div { margin-top: 7px; color: var(--on-ink-faint); }
-.deck-lede { font-size: clamp(15px, 1.6vw, 18px); line-height: 1.45; color: var(--on-ink-2); max-width: var(--measure-lead); margin-top: 24px; }
+/* The deck lede runs the full width of the deck column rather than holding the
+   reading measure — it is display copy on the black band, one short paragraph
+   read once, not running prose. The measure rule still governs everything in
+   `main`. */
+.deck-lede { font-size: clamp(15px, 1.6vw, 18px); line-height: 1.45; color: var(--on-ink-2); margin-top: 24px; }
 
-/* On a wide screen the lede holds its measure and the ledger moves up beside
-   it, so the deck's right half carries the counts instead of empty ink. Below
-   1180px they stack, which is the natural order on a narrower column. */
-@media (min-width: 1180px) {
-  .deck-body { display: grid; grid-template-columns: minmax(0, var(--measure-lead)) minmax(0, 1fr); gap: 28px 48px; align-items: start; }
-  .deck-body .deck-lede { margin-top: 24px; }
-  .deck-body .ledger { margin-top: 24px; }
-}
+/* .deck-body is a plain block: the lede, then the ledger on its own line
+   beneath it, at every width. It was a two-column grid above 1180px, which
+   pinned the lede to --measure-lead and left the counts beside it; the counts
+   read better as a full-width strip under the sentence they summarize. */
+.deck-body .ledger { margin-top: 24px; }
 
 /* Count ledger — FOUR FIXED TRACKS. Do not use auto-fit/minmax here: it wraps
    to 3 + 1 and paints the empty fourth slot as a dark void. The 1px gap over an
