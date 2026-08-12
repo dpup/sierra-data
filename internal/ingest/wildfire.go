@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -202,7 +203,7 @@ func (n *WildfireNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult
 			gridv1.Layer_WILDFIRE,
 			SeverityFromLabel(hazards.SeverityFromWildfire(in.Acres, in.PercentContained)),
 			gridv1.EventStatus_ACTIVE,
-			fmt.Sprintf("%s — %.0f ac, %d%% contained", in.Name, in.Acres, in.PercentContained), // shipped headline format
+			fmt.Sprintf("%s — %s ac, %d%% contained", in.Name, commaNum(in.Acres), in.PercentContained),
 		)
 		ev.Category = "wildfire"
 		ev.AreaLabel = nonEmpty(in.Location, in.County)
@@ -725,4 +726,31 @@ func centroidDistSq(a, b *gridv1.Geometry) float64 {
 	dLat := ca.GetLat() - cb.GetLat()
 	dLng := ca.GetLng() - cb.GetLng()
 	return dLat*dLat + dLng*dLng
+}
+
+// commaNum renders acreage with thousands separators: 10339 -> "10,339".
+//
+// A big fire is the one that most needs reading at a glance, and it was the one
+// rendered least readably — "Gann Fire — 10339 ac, 90% contained". The site
+// separates every other 4+ digit number it prints (its own screenshot contract
+// asserts there are none unseparated), and this headline is the most prominent
+// number the service emits.
+func commaNum(v float64) string {
+	n := int64(v + 0.5)
+	neg := n < 0
+	if neg {
+		n = -n
+	}
+	digits := strconv.FormatInt(n, 10)
+	var b strings.Builder
+	if neg {
+		b.WriteByte('-')
+	}
+	for i, c := range digits {
+		if i > 0 && (len(digits)-i)%3 == 0 {
+			b.WriteByte(',')
+		}
+		b.WriteRune(c)
+	}
+	return b.String()
 }
