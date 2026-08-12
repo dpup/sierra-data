@@ -35,7 +35,28 @@ dependencies:
   - mockgen
   - node
   - node-dev
-  # Headless browser for site layout/spacing diagnosis (tools/screenshots). The
-  # Moat playwright dependency bundles Chromium + its OS libraries, so no browser
-  # install step is needed.
+  # Headless browser for the screenshot harnesses — the live-server layout/spacing
+  # diagnosis in tools/screenshots (make site-shots) and the self-contained,
+  # mocked-data UI review in web/screenshots (make site-shots-mock). This
+  # dependency provides the global `playwright` CLI (/usr/bin/playwright) and the
+  # Chromium + OS libraries under PLAYWRIGHT_BROWSERS_PATH (/ms-playwright); the
+  # post_build_root hook below pins the browser install so it survives a version
+  # bump of the npm `playwright` the web project depends on.
   - playwright
+hooks:
+  # Bake the Playwright browser (+ its OS libraries) into the image as root, so
+  # the screenshot harnesses run with no per-container download. This mirrors the
+  # `playwright` dependency above but makes the install explicit and durable:
+  # PLAYWRIGHT_BROWSERS_PATH is /ms-playwright, which is root-owned, so moatuser
+  # can't write it — if web/package.json's `playwright` ever pins a version whose
+  # Chromium revision differs from the bundled one, `npx playwright install` as
+  # the container user fails with EACCES on /ms-playwright/__dirlock. Installing
+  # here (root, build time) sidesteps that. `install --with-deps` also runs the
+  # apt step for Chromium's shared libraries; `chmod a+rX` keeps the tree readable
+  # by moatuser (same pattern as the fonts recipe). Idempotent — a browser already
+  # present is skipped. Keep the version in sync with web/package.json.
+  post_build_root: |
+    set -e
+    export PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+    npx --yes playwright@1.61.1 install --with-deps chromium
+    chmod -R a+rX /ms-playwright

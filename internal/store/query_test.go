@@ -273,3 +273,59 @@ func TestQueryHistory(t *testing.T) {
 	}
 	assert.Equal(t, []string{"wx:a1@1", "usgs:q1@2", "usgs:q1@1"}, seen)
 }
+
+// planFor returns the EXPLAIN QUERY PLAN detail lines for a query, joined.
+func planFor(t *testing.T, s *Store, query string, args ...any) string {
+	t.Helper()
+	rows, err := s.db.QueryContext(context.Background(), "EXPLAIN QUERY PLAN "+query, args...)
+	require.NoError(t, err)
+	defer rows.Close()
+	var plan string
+	for rows.Next() {
+		var id, parent, notused int
+		var detail string
+		require.NoError(t, rows.Scan(&id, &parent, &notused, &detail))
+		plan += detail + "\n"
+	}
+	require.NoError(t, rows.Err())
+	return plan
+}
+
+// TestQueryHistoryUsesObservedIndex pins the cross-event history query to
+// idx_revisions_observed (migration v4). Without it SQLite scans every revision
+// and sorts into a temp B-tree, which is what took an unscoped /api/v1/history
+// 6-40s in production (measured 2026-08-06). A regression here is invisible in
+// behavior and shows up only as latency, so assert the plan rather than trusting
+// the index to stay matched to QueryHistory's ORDER BY.
+func TestQueryHistoryUsesObservedIndex(t *testing.T) {
+	s := newTestStore(t)
+
+	// The unscoped / time-bounded shape — the pathological one, since without
+	// the index there is nothing to narrow the scan.
+	const unscoped = `SELECT r.revision, r.observed_at, r.ingested_at, r.proto, r.event_id
+		FROM event_revisions r JOIN events e ON e.id = r.event_id
+		WHERE 1=1 AND r.observed_at >= ? AND r.observed_at < ?
+		ORDER BY r.observed_at DESC, r.event_id ASC, r.revision DESC LIMIT ?`
+
+	plan := planFor(t, s, unscoped, 0, 1<<40, 51)
+	assert.Contains(t, plan, "idx_revisions_observed",
+		"unscoped history must use the observed_at index; plan was:\n%s", plan)
+	assert.NotContains(t, plan, "TEMP B-TREE",
+		"the index must satisfy the ORDER BY without a sort; plan was:\n%s", plan)
+
+	// The place-scoped shape deliberately drives from event_places instead: that
+	// join is far more selective than a time range, so SQLite sorts the narrowed
+	// set rather than walking the observed_at index and filtering. That is the
+	// right plan (place-scoped calls were already ~6x faster than unscoped ones
+	// in the same production measurement) - asserted here so a future index
+	// change that flips it gets noticed rather than silently pessimized.
+	const scoped = `SELECT r.revision, r.observed_at, r.ingested_at, r.proto, r.event_id
+		FROM event_revisions r JOIN events e ON e.id = r.event_id
+		JOIN event_places ep ON ep.event_id = r.event_id AND ep.place_id = ?
+		WHERE 1=1
+		ORDER BY r.observed_at DESC, r.event_id ASC, r.revision DESC LIMIT ?`
+
+	plan = planFor(t, s, scoped, "area:test", 51)
+	assert.Contains(t, plan, "idx_event_places_place",
+		"place-scoped history should drive from event_places; plan was:\n%s", plan)
+}

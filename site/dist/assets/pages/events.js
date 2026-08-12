@@ -12,7 +12,13 @@
 // this module. All DOM work happens inside initEventsPage().
 
 import { get, apiURL, curlFor, ApiError } from '../api.js';
-import { sevChip, layerLabel, timeAgo, timeAbs, SEVERITY_COLORS } from '../format.js';
+import { recordRow, fmtNum, timeAgo } from '../format.js';
+import { placeMenuOptions, placeMenuLabel } from '../place.js';
+import { el, requireEls, errorBlock, wireCopyButton } from '../ui.js';
+import { renderEventDetail } from './event-detail.js';
+// Importing these registers <grid-chip-row> and <grid-menu>.
+import '../components/chip-row.js';
+import '../components/menu.js';
 
 /**
  * Event layers accepted by /api/v1/events' `layer` param, as the lowercase
@@ -45,9 +51,6 @@ export const SEVERITY_OPTIONS = ['INFO', 'MINOR', 'MODERATE', 'SEVERE', 'EXTREME
 
 /** Page sizes offered in the control. Empty string = server default. */
 export const PAGE_SIZES = ['', '25', '50', '100', '200']; // 200 is the API max (store maxPageSize); >200 is a 400
-
-/** PlaceKind display order for the grouped place select. */
-export const KIND_ORDER = ['AREA', 'COUNTY', 'TOWN', 'EVAC_ZONE', 'CORRIDOR', 'SITE'];
 
 /**
  * RFC 3339 (UTC) -> value for <input type="datetime-local"> ("YYYY-MM-DDTHH:MM"
@@ -167,329 +170,442 @@ export function buildQuery(state, pageToken) {
   };
 }
 
-/**
- * Group a PlaceList's places by kind for the place <select>, in KIND_ORDER
- * (unknown kinds last, in first-seen order), each group name-sorted.
- * @param {Array<Object>} places protojson Place messages (camelCase)
- * @returns {Array<{kind: string, places: Array<Object>}>}
- */
-export function groupPlaces(places) {
-  const byKind = new Map();
-  for (const p of places || []) {
-    const kind = p.kind || 'PLACE_KIND_UNSPECIFIED';
-    if (!byKind.has(kind)) byKind.set(kind, []);
-    byKind.get(kind).push(p);
-  }
-  const kinds = [
-    ...KIND_ORDER.filter((k) => byKind.has(k)),
-    ...[...byKind.keys()].filter((k) => !KIND_ORDER.includes(k)),
-  ];
-  return kinds.map((kind) => ({
-    kind,
-    places: byKind
-      .get(kind)
-      .slice()
-      .sort((a, b) =>
-        String(a.name || a.slug || a.id).localeCompare(String(b.name || b.slug || b.id))
-      ),
-  }));
-}
-
-/* ------------------------------------------------------------------ */
-/* DOM code below — only runs when initEventsPage() is called.         */
-/* ------------------------------------------------------------------ */
-
-function el(tag, className, text) {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
-
-function errorBlock(err) {
-  const div = el('div', 'error-block');
-  div.append(
-    el(
-      'div',
-      '',
-      err instanceof ApiError
-        ? `Request failed (HTTP ${err.status || 'network error'}):`
-        : 'Request failed:'
-    ),
-    el(
-      'div',
-      'error-url',
-      err instanceof ApiError ? `GET ${err.url}` : String(err.message || err)
-    )
-  );
-  if (
-    err instanceof ApiError &&
-    err.body &&
-    typeof err.body === 'object' &&
-    err.body.message
-  ) {
-    div.append(el('div', 'muted', err.body.message));
-  }
-  return div;
-}
 
 /**
- * One results row for an Event (protojson, camelCase). Four columns:
- * severity badge · two-line headline+subline (layer · area · relative time) ·
- * source · r<rev>. Clicking the row runs `onSelect(ev, tr, sevColor)` to load
- * the raw JSON into the inspector; the headline stays a deep link to the event
- * detail page (stopPropagation so it navigates instead of inspecting).
- * @param {Object} ev protojson Event
- * @param {(ev:Object, tr:HTMLElement, sevColor:string)=>void} onSelect
- */
-function eventRow(ev, onSelect) {
-  // protojson omits default enum values: absent severity is INFO.
-  const sev = String(ev.severity || 'INFO').toUpperCase();
-  const sevColor = SEVERITY_COLORS[sev] || 'var(--grn-line)';
-
-  const tr = el('tr', 'ev-row');
-
-  const sevTd = document.createElement('td');
-  sevTd.append(sevChip(sev));
-  tr.append(sevTd);
-
-  const headTd = el('td', 'wrap');
-  const head = el('div', 'ev-head');
-  if (ev.id) {
-    const link = document.createElement('a');
-    link.href = `/event?id=${encodeURIComponent(ev.id)}`;
-    link.textContent = ev.headline || ev.id; // textContent: upstream text is untrusted
-    link.title = 'open event detail';
-    link.addEventListener('click', (e) => e.stopPropagation());
-    head.append(link);
-  } else {
-    head.textContent = ev.headline || '(no headline)';
-  }
-  const sub = el('div', 'ev-sub');
-  sub.append(document.createTextNode(layerLabel(ev.layer || '')));
-  sub.append(el('span', 'sep', ' · '));
-  sub.append(document.createTextNode(ev.areaLabel || '—'));
-  sub.append(el('span', 'sep', ' · '));
-  sub.append(document.createTextNode(timeAgo(ev.observedAt || '')));
-  sub.title = timeAbs(ev.observedAt || '');
-  headTd.append(head, sub);
-  tr.append(headTd);
-
-  tr.append(el('td', 'src', (ev.provenance && ev.provenance.sourceId) || '—'));
-  // revision is a proto uint32; protojson omits 0.
-  tr.append(el('td', 'num', 'r' + String(ev.revision ?? 0)));
-
-  tr._select = () => onSelect(ev, tr, sevColor);
-  tr.addEventListener('click', tr._select);
-  return tr;
-}
-
-/** A syntax-highlight <span> (keys/strings/numbers/bools/punctuation). */
-function jspan(cls, text) {
-  const s = document.createElement('span');
-  s.className = cls;
-  s.textContent = text;
-  return s;
-}
-
-/**
- * Pretty-print a value as syntax-colored JSON into a DocumentFragment, built
- * entirely from text nodes and classed spans (never innerHTML). Keys, strings,
- * numbers, and booleans/null are colored; whitespace and structural
- * punctuation fall through to the .jpunc class.
- * @param {*} value
- * @returns {DocumentFragment}
- */
-function highlightJSON(value) {
-  const frag = document.createDocumentFragment();
-  const text = JSON.stringify(value, null, 2);
-  if (text === undefined) {
-    frag.append(document.createTextNode(String(value)));
-    return frag;
-  }
-  const re = /("(?:\\.|[^"\\])*")(\s*:)?|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|\b(true|false|null)\b/g;
-  let last = 0;
-  let m;
-  while ((m = re.exec(text)) !== null) {
-    if (m.index > last) frag.append(jspan('jpunc', text.slice(last, m.index)));
-    if (m[1] !== undefined) {
-      const isKey = m[2] !== undefined;
-      frag.append(jspan(isKey ? 'jkey' : 'jstr', m[1]));
-      if (isKey) frag.append(jspan('jpunc', m[2]));
-    } else if (m[3] !== undefined) {
-      frag.append(jspan('jnum', m[3]));
-    } else if (m[4] !== undefined) {
-      frag.append(jspan('jbool', m[4]));
-    }
-    last = re.lastIndex;
-  }
-  if (last < text.length) frag.append(jspan('jpunc', text.slice(last)));
-  return frag;
-}
-
-/**
- * Wire up the /events page. Expects the element ids laid out in events.html
- * (ev-place, ev-layers, ev-status, ev-sev, ev-since, ev-size, ev-apply,
- * ev-reset, ev-qchips, ev-curl, ev-copyurl, ev-errors, ev-tbody, ev-empty,
- * ev-more, ev-status-line, ev-insp-body).
+ * Wire up the /events page.
  */
 export function initEventsPage() {
+  // One resolution, and it FAILS BY NAME. This island used to look up ~25 ids
+  // one at a time; a renamed id surfaced as a null-deref somewhere in the
+  // middle of init, with the page half-wired.
+  const $ = requireEls('events.js', {
+    scopeMetaEl: 'ev-scope-meta',
+    placeMenu: 'ev-place',
+    layersBox: 'ev-layers',
+    sevBox: 'ev-sev',
+    statusBox: 'ev-status',
+    sinceInput: 'ev-since',
+    sinceEcho: 'ev-since-echo',
+    echoEl: 'ev-echo',
+    urlEl: 'ev-url',
+    copyUrlBtn: 'ev-copyurl',
+    errorsEl: 'ev-errors',
+    countEl: 'ev-count',
+    listEl: 'ev-list',
+    emptyEl: 'ev-empty',
+    pageEl: 'ev-page',
+    gridEl: 'ev-grid',
+    detailCol: 'ev-detail-col',
+    detailEl: 'ev-detail',
+    backBtn: 'ev-back',
+    wrapEl: 'ev-results',
+  });
+  const {
+    scopeMetaEl, placeMenu, layersBox, sevBox, statusBox,
+    sinceInput, sinceEcho, echoEl, urlEl, copyUrlBtn, errorsEl,
+    countEl, listEl, emptyEl, pageEl, gridEl, detailCol, detailEl,
+    backBtn, wrapEl,
+  } = $;
 
-  const $ = (id) => document.getElementById(id);
-  const placeSel = $('ev-place');
-  const layersBox = $('ev-layers');
-  const statusBox = $('ev-status');
-  const sevSel = $('ev-sev');
-  const sinceInput = $('ev-since');
-  const sizeSel = $('ev-size');
-  const applyBtn = $('ev-apply');
-  const resetBtn = $('ev-reset');
-  const qchipsEl = $('ev-qchips');
-  const curlEl = $('ev-curl');
-  const copyUrlBtn = $('ev-copyurl');
-  const errorsEl = $('ev-errors');
-  const tbody = $('ev-tbody');
-  const emptyEl = $('ev-empty');
-  const moreBtn = $('ev-more');
-  const statusLine = $('ev-status-line');
-  const inspBody = $('ev-insp-body');
+  // Must agree with the @container thresholds in events.astro, and be measured
+  // the same way: this grid is inset by the 244px sidebar, so a viewport query
+  // would disagree with the CSS between ~760 and ~1000px.
+  const NARROW_AT = 760;
+  const isNarrow = () => (wrapEl ? wrapEl.clientWidth < NARROW_AT : window.innerWidth < 1004);
 
   let state = readState(new URLSearchParams(location.search));
+  let places = [];
+  let loadedEvents = [];
   let nextToken = '';
-  let loadedCount = 0;
+  let pageIndex = 1;
   let loading = false;
   let lastReqUrl = '';
-  let selectedTr = null;
+  let lastGoodAt = '';
+  let selectedRow = null;
+  let selectedId = '';
 
-  // ---- controls ----------------------------------------------------
+  /* ---- the echo's height feeds the sticky list column ---------------- */
+  function measureEcho() {
+    const h = echoEl ? echoEl.getBoundingClientRect().height : 0;
+    document.documentElement.style.setProperty('--ev-echo-h', `${Math.round(h) + 8}px`);
+  }
 
-  // Layer and status are multi-select toggle pills (spec §2 /events): each
-  // pill is a button carrying its enum value; `.on` = selected.
-  function makePills(box, values, selected, labelOf) {
-    for (const value of values) {
-      const on = selected.includes(value);
-      const b = el('button', 'pill' + (on ? ' on' : ''), labelOf(value));
-      b.type = 'button';
-      b.dataset.value = value;
-      b.setAttribute('aria-pressed', on ? 'true' : 'false');
-      b.addEventListener('click', () => {
-        const now = b.classList.toggle('on');
-        b.setAttribute('aria-pressed', now ? 'true' : 'false');
-      });
-      box.append(b);
+  /* ---- A. scope ------------------------------------------------------ */
+
+  const placeLabel = (slug) => placeMenuLabel(places, slug, 'all places');
+
+  /** `summary.totalActive` for the scoped place, or null when not obtainable. */
+  let activeCount = null;
+
+  /**
+   * Beside the title: how many records are on screen, and how many are active
+   * in the scoped place.
+   *
+   * `/events` returns no total — it is keyset pagination over an opaque cursor —
+   * so for a long time this said "live count unknown". That is true of the event
+   * list but not of the service: `GET /places/{place}/summary` reports
+   * `totalActive` for a place, which is a real, live count. So when a place is
+   * scoped, say the number; when it is not, there is no place to count over and
+   * the line simply does not claim one.
+   *
+   * It is never inferred from the loaded page. A count derived from whatever
+   * happened to fit in one response would be a fabricated total, which is the
+   * one thing this site must not print.
+   */
+  function renderScope() {
+    const n = loadedEvents.length;
+    const bits = [`${fmtNum(n)} record${n === 1 ? '' : 's'} loaded`];
+    if (state.place) {
+      bits.push(
+        activeCount === null
+          ? 'active count unavailable'
+          : `${fmtNum(activeCount)} active in ${placeLabel(state.place)}`
+      );
     }
+    scopeMetaEl.textContent = bits.join(' · ');
+    placeMenu.triggerLabel = placeLabel(state.place).toLowerCase();
+    placeMenu.classList.toggle('is-set', Boolean(state.place));
   }
 
-  makePills(layersBox, LAYER_OPTIONS, state.layers, (v) => layerLabel(v));
-  makePills(statusBox, STATUS_OPTIONS, state.statuses, (v) => v);
-
-  const anySev = document.createElement('option');
-  anySev.value = '';
-  anySev.textContent = '(no floor)';
-  sevSel.append(anySev);
-  for (const sev of SEVERITY_OPTIONS) {
-    const opt = document.createElement('option');
-    opt.value = sev;
-    opt.textContent = sev;
-    sevSel.append(opt);
-  }
-  sevSel.value = state.severityMin;
-
-  for (const size of PAGE_SIZES) {
-    const opt = document.createElement('option');
-    opt.value = size;
-    opt.textContent = size === '' ? 'default' : size;
-    sizeSel.append(opt);
-  }
-  sizeSel.value = PAGE_SIZES.includes(state.pageSize) ? state.pageSize : '';
-
-  sinceInput.value = toLocalInput(state.since);
-
-  // Place select: "(any place)" first; options filled from /api/v1/places.
-  // Until (or if) that load fails, the URL-provided place is kept as a
-  // provisional option so shared links never lose their filter.
-  const anyPlace = document.createElement('option');
-  anyPlace.value = '';
-  anyPlace.textContent = '(any place)';
-  placeSel.append(anyPlace);
-  if (state.place) {
-    const opt = document.createElement('option');
-    opt.value = state.place;
-    opt.textContent = state.place;
-    placeSel.append(opt);
-    placeSel.value = state.place;
-  }
-
-  async function loadPlaces() {
+  /**
+   * Fetch the scoped place's active count. A failure leaves `activeCount` null,
+   * which renders as "active count unavailable" — never as 0, which would read
+   * as "nothing is happening here".
+   */
+  async function loadActiveCount() {
+    if (!state.place) {
+      activeCount = null;
+      renderScope();
+      return;
+    }
+    const want = state.place;
     try {
-      const data = await get('/api/v1/places');
-      const groups = groupPlaces(Array.isArray(data.places) ? data.places : []);
-      const current = placeSel.value;
-      placeSel.textContent = '';
-      placeSel.append(anyPlace);
-      let currentFound = current === '';
-      for (const { kind, places } of groups) {
-        const og = document.createElement('optgroup');
-        og.label = layerLabel(kind);
-        for (const p of places) {
-          const opt = document.createElement('option');
-          opt.value = p.slug || p.id || '';
-          opt.textContent = p.name ? `${p.name} (${opt.value})` : opt.value;
-          if (opt.value === current) currentFound = true;
-          og.append(opt);
-        }
-        placeSel.append(og);
-      }
-      if (!currentFound && current) {
-        // Keep a URL-supplied place the directory doesn't know about.
-        const opt = document.createElement('option');
-        opt.value = current;
-        opt.textContent = current;
-        placeSel.append(opt);
-      }
-      placeSel.value = current;
-    } catch (err) {
-      // The select still works with the URL-provided value; just say why
-      // the directory is empty.
-      errorsEl.append(errorBlock(err));
+      const data = await get(`/api/v1/places/${encodeURIComponent(want)}/summary`);
+      if (want !== state.place) return; // the scope changed while in flight
+      const total = data && data.summary && data.summary.totalActive;
+      activeCount = typeof total === 'number' ? total : null;
+    } catch {
+      if (want === state.place) activeCount = null;
     }
+    renderScope();
   }
 
-  function setPill(b, on) {
-    b.classList.toggle('on', on);
-    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+  function renderPlaceMenu() {
+    placeMenu.options = placeMenuOptions(places, {
+      anyLabel: 'All places',
+      current: state.place,
+      group: true,
+    });
+    placeMenu.value = state.place;
   }
 
-  function readControls() {
-    const statuses = [...statusBox.querySelectorAll('.pill.on')].map((b) => b.dataset.value);
-    if (statuses.length === 0) {
-      // No pills lit = the API default; reflect it back in the UI.
-      for (const b of statusBox.querySelectorAll('.pill')) {
-        setPill(b, DEFAULT_STATUSES.includes(b.dataset.value));
-      }
-    }
-    return {
-      place: placeSel.value,
-      layers: [...layersBox.querySelectorAll('.pill.on')].map((b) => b.dataset.value),
-      statuses: statuses.length ? statuses : [...DEFAULT_STATUSES],
-      severityMin: sevSel.value,
-      since: fromLocalInput(sinceInput.value) || '',
-      pageSize: sizeSel.value,
-      pageToken: '', // Apply always restarts from the first page
-    };
+  placeMenu.addEventListener('change', (e) => {
+    state.place = e.detail.value;
+    activeCount = null;
+    renderScope();
+    loadActiveCount();
+    writeURL();
+    runQuery('', false);
+  });
+
+  /* ---- B. filter region ----------------------------------------------
+     Plain and always visible. The chips ARE the query: every click refetches,
+     so there is no draft state, no APPLY and nothing to expand. An earlier pass
+     put all of this behind an EDIT panel with a commit step; it was more
+     machinery than four facets deserve. */
+
+  // Each facet is a <grid-chip-row>: the element owns the chips, the selection
+  // and the aria state, and tells us when it changed. What is left here is the
+  // only part that is actually about events — which options exist, and what a
+  // change means for the query.
+
+  function wire(row, onChange) {
+    row.addEventListener('change', (e) => {
+      onChange(e.detail.value);
+      applyNow();
+    });
   }
 
-  function syncControls() {
-    placeSel.value = state.place;
-    for (const b of layersBox.querySelectorAll('.pill')) {
-      setPill(b, state.layers.includes(b.dataset.value));
-    }
-    for (const b of statusBox.querySelectorAll('.pill')) {
-      setPill(b, state.statuses.includes(b.dataset.value));
-    }
-    sevSel.value = state.severityMin;
+  layersBox.options = [
+    { value: '', label: 'all' },
+    ...LAYER_OPTIONS.map((v) => ({ value: v, label: v })),
+  ];
+  wire(layersBox, (v) => { state.layers = v; });
+
+  sevBox.options = [
+    { value: '', label: 'any' },
+    ...SEVERITY_OPTIONS.map((v) => ({ value: v, label: v })),
+  ];
+  wire(sevBox, (v) => { state.severityMin = v; });
+
+  // STATUS is two states, not four checkboxes. The endpoint takes any subset of
+  // ACTIVE/SCHEDULED/RESOLVED/EXPIRED, but the question a reader has is "am I
+  // seeing things that are over?". `open only` is the API default (and so is
+  // omitted from the request); the full subset stays expressible in the URL,
+  // which the echo prints.
+  statusBox.options = [
+    { value: 'open', label: 'open only' },
+    { value: 'all', label: 'include closed' },
+  ];
+  wire(statusBox, (v) => {
+    state.statuses = v === 'all' ? [...STATUS_OPTIONS] : [...DEFAULT_STATUSES];
+  });
+
+  /** Push the current state into the controls (boot, popstate, empty-state chips). */
+  function buildControls() {
+    layersBox.value = state.layers;
+    sevBox.value = state.severityMin;
+    statusBox.value = isDefaultStatuses(state.statuses) ? 'open' : 'all';
     sinceInput.value = toLocalInput(state.since);
-    sizeSel.value = PAGE_SIZES.includes(state.pageSize) ? state.pageSize : '';
+    renderSinceEcho();
+  }
+
+  /**
+   * SINCE echoes the exact value it will send and the offset applied — it is
+   * the only local-time control on a page that is otherwise strictly Z.
+   */
+  function renderSinceEcho() {
+    const iso = fromLocalInput(sinceInput.value);
+    if (!iso) {
+      sinceEcho.textContent = '→ since omitted';
+      sinceEcho.classList.add('omitted');
+      return;
+    }
+    sinceEcho.classList.remove('omitted');
+    const mins = -new Date().getTimezoneOffset();
+    const sign = mins >= 0 ? '+' : '-';
+    const a = Math.abs(mins);
+    const off = `${sign}${String(Math.floor(a / 60)).padStart(2, '0')}:${String(a % 60).padStart(2, '0')}`;
+    sinceEcho.textContent = `→ sends since=${iso} (your time ${off})`;
+  }
+  sinceInput.addEventListener('input', renderSinceEcho);
+  sinceInput.addEventListener('change', () => {
+    state.since = fromLocalInput(sinceInput.value) || '';
+    applyNow();
+  });
+
+  /** A control changed: rewrite the permalink and refetch from page one. */
+  function applyNow() {
+    state.pageToken = '';
+    buildControls();
+    writeURL();
+    runQuery('', false);
+  }
+
+  /* ---- C. request echo ------------------------------------------------ */
+
+  function absURL(url) {
+    return /^https?:\/\//.test(url) ? url : `https://data.sierragridteam.org${url}`;
+  }
+
+  /**
+   * Print the exact request, with defaulted params dimmed and explicit ones in
+   * cream — the same distinction the collapsed summary makes, carried into the
+   * URL so the two can never disagree.
+   */
+  function renderEcho(params) {
+    lastReqUrl = apiURL('/api/v1/events', params);
+    // The ABSOLUTE url: this line exists to be copied, and a relative path is
+    // not something anyone can paste anywhere. Defaults never appear in it —
+    // they are omitted from the request, so stating them here would be a lie
+    // about the wire; line 2 names them instead.
+    urlEl.textContent = absURL(lastReqUrl);
+  }
+
+  /**
+   * The echo is ONE line: the request.
+   *
+   * It carried a second line — "50 records loaded · page_size 50 · cursor page 1
+   * · more available · server sort … · shown newest ingested first" — which
+   * restated the filter controls sitting directly above it and the count sitting
+   * beside the title. Three surfaces describing the same query is two too many.
+   *
+   * NOTE ON THE ABSENT TOTAL. `EventList` is {events, nextPageToken} — keyset
+   * pagination over an opaque cursor, with no total and no page count. Nothing
+   * here or in the header may imply otherwise; where a real count IS obtainable
+   * it comes from the place summary (see renderScope).
+   */
+
+  // The URL tracks the filters, so the payload is read at click time.
+  wireCopyButton(copyUrlBtn, () => curlFor(absURL(lastReqUrl)));
+
+  /* ---- D. list -------------------------------------------------------- */
+
+  /**
+   * Newest first, always. There is no sort control: the server orders by
+   * severity and the page re-orders by recency, which is the order a feed is
+   * read in. `ingestedAt` is the key rather than `observedAt` because the store
+   * stamps it on every write — it always exists and is monotonic, where an
+   * upstream `observedAt` can be absent or (mesh nodes) dated in the future.
+   * It is also the age the row displays, so the sort matches what you can see.
+   */
+  function sortLoaded(list) {
+    return list
+      .slice()
+      .sort(
+        (a, b) =>
+          (Date.parse(b.ingestedAt || 0) || 0) - (Date.parse(a.ingestedAt || 0) || 0) ||
+          (Date.parse(b.observedAt || 0) || 0) - (Date.parse(a.observedAt || 0) || 0) ||
+          String(a.id || '').localeCompare(String(b.id || ''))
+      );
+  }
+
+  function eventRow(ev) {
+    // A real <a> to the permalink, so middle-click and cmd-click behave. A plain
+    // left click is intercepted and selects in-page instead — losing the
+    // permalink to make selection work would be a regression, and so would the
+    // reverse.
+    const row = recordRow(ev, {
+      href: `/event?id=${encodeURIComponent(ev.id || '')}`,
+      timeBlock: true,
+      selected: ev.id === selectedId,
+    });
+    row.addEventListener('click', (e) => {
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+      e.preventDefault();
+      selectEvent(ev, row);
+    });
+    return row;
+  }
+
+  function renderList() {
+    listEl.textContent = '';
+    selectedRow = null;
+    for (const ev of sortLoaded(loadedEvents)) {
+      const row = eventRow(ev);
+      if (ev.id === selectedId) selectedRow = row;
+      listEl.append(row);
+    }
+    countEl.textContent = loadedEvents.length
+      ? `${fmtNum(loadedEvents.length)} RESULT${loadedEvents.length === 1 ? '' : 'S'}`
+      : ' ';
+    // The header's count reads from the same list, so it cannot disagree with
+    // the one above the rows — and it refreshes here rather than only at boot,
+    // where it raced the places fetch and printed 0 beside seven results.
+    renderScope();
+    renderPagination();
+  }
+
+  function renderPagination() {
+    pageEl.textContent = '';
+    if (!loadedEvents.length) return;
+    if (!nextToken && pageIndex === 1) {
+      pageEl.append(el('span', '', `ALL ${fmtNum(loadedEvents.length)} RESULTS SHOWN`));
+      return;
+    }
+    // No total exists (see the note above renderEcho), so this counts loaded and
+    // says whether more follow — it never claims "of N".
+    pageEl.append(
+      el('span', '', `SHOWING ${fmtNum(loadedEvents.length)} FROM ${fmtNum(pageIndex)} CURSOR PAGE${pageIndex === 1 ? '' : 'S'}`)
+    );
+    if (nextToken) {
+      const b = el('button', 'ev-next', 'NEXT PAGE →');
+      b.type = 'button';
+      b.addEventListener('click', () => {
+        const token = nextToken;
+        runQuery(token, true).then(() => {
+          state.pageToken = token;
+          writeURL();
+        });
+      });
+      pageEl.append(b);
+    } else {
+      pageEl.append(el('span', '', '· END OF RESULTS'));
+    }
+  }
+
+  /* ---- selection ------------------------------------------------------ */
+
+  function selectEvent(ev, row) {
+    if (selectedRow) selectedRow.classList.remove('selected');
+    selectedRow = row;
+    selectedId = ev.id || '';
+    if (row) row.classList.add('selected');
+
+    gridEl.classList.add('has-selection');
+    detailCol.hidden = false;
+    backBtn.textContent = `← BACK TO ${fmtNum(loadedEvents.length)} RESULTS`;
+    if (isNarrow()) {
+      gridEl.classList.add('narrow-detail');
+      backBtn.hidden = false;
+      detailCol.scrollIntoView({ block: 'start' });
+    }
+    // setTitle:false — selecting inside the browser must not retitle the page
+    // away from "Events"; only the permalink page owns the document title.
+    renderEventDetail(detailEl, selectedId, { setTitle: false, headingLevel: 2 });
+  }
+
+  backBtn.addEventListener('click', () => {
+    gridEl.classList.remove('narrow-detail');
+    backBtn.hidden = true;
+    if (isNarrow()) {
+      detailCol.hidden = true;
+      gridEl.classList.remove('has-selection');
+    }
+  });
+
+  const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(() => onWidthChange()) : null;
+  if (ro && wrapEl) ro.observe(wrapEl);
+  else window.addEventListener('resize', onWidthChange);
+
+  function onWidthChange() {
+    measureEcho();
+    if (!selectedId) return;
+    if (!isNarrow()) {
+      gridEl.classList.remove('narrow-detail');
+      backBtn.hidden = true;
+      detailCol.hidden = false;
+      gridEl.classList.add('has-selection');
+    }
+  }
+
+  /* ---- fetching -------------------------------------------------------- */
+
+  function skeleton() {
+    const wrap = el('div');
+    wrap.append(el('div', 'ev-fetching', 'FETCHING /events…'));
+    for (let i = 0; i < 3; i++) {
+      const row = el('div', 'ev-skel-row');
+      const body = el('div', 'ev-skel-body');
+      body.append(el('div', 'ev-skel-bar w1'), el('div', 'ev-skel-bar w2'), el('div', 'ev-skel-bar w3'));
+      row.append(el('div', 'ev-skel-spine'), body);
+      wrap.append(row);
+    }
+    return wrap;
+  }
+
+  function renderEmpty() {
+    emptyEl.textContent = '';
+    const box = el('div');
+    box.append(el('div', 'ev-empty-head', '0 RESULTS'));
+    box.append(
+      el('p', 'prose', 'The request succeeded and matched nothing. That is an empty result, not a source failure — a failed feed surfaces as a red band above, never as a quiet empty list.')
+    );
+    const chips = el('div');
+    const removable = [];
+    if (state.severityMin) {
+      removable.push([`remove severity ≥ ${state.severityMin}`, () => { state.severityMin = ''; }]);
+    }
+    for (const l of state.layers) {
+      removable.push([`remove layer ${l}`, () => { state.layers = state.layers.filter((x) => x !== l); }]);
+    }
+    if (state.since) removable.push([`remove since ${state.since}`, () => { state.since = ''; }]);
+    if (!isDefaultStatuses(state.statuses)) {
+      removable.push(['reset status to default', () => { state.statuses = [...DEFAULT_STATUSES]; }]);
+    }
+    if (state.place) removable.push([`widen scope from ${placeLabel(state.place)}`, () => { state.place = ''; renderScope(); }]);
+
+    for (const [label, apply] of removable) {
+      const b = el('button', 'ev-remove-chip', label);
+      b.type = 'button';
+      b.addEventListener('click', () => {
+        apply();
+        applyNow();
+      });
+      chips.append(b);
+    }
+    if (removable.length) box.append(chips);
+    emptyEl.append(box);
   }
 
   function writeURL() {
@@ -497,264 +613,89 @@ export function initEventsPage() {
     history.replaceState(null, '', qs ? `?${qs}` : location.pathname);
   }
 
-  // ---- query bar ----------------------------------------------------
-
-  function absURL(url) {
-    return /^https?:\/\//.test(url) ? url : `https://data.sierragridteam.org${url}`;
-  }
-
-  /**
-   * Removing a filter chip mutates state in place, resets pagination, mirrors
-   * the change back into the controls, rewrites the permalink, and re-runs the
-   * query from page one — the chip set is the live, editable query.
-   */
-  function removeFilter(mutate) {
-    mutate();
-    state.pageToken = '';
-    syncControls();
-    writeURL();
-    runQuery('', false);
-  }
-
-  /**
-   * Render the request behind the current results: the endpoint, one removable
-   * .qchip per active filter (status/layer repeat), and the copyable curl line.
-   * The default status set (ACTIVE,SCHEDULED) is omitted — it is the API's own
-   * default and never a chip, so the chips are exactly the URL's params.
-   */
-  function renderQueryBar(params) {
-    lastReqUrl = apiURL('/api/v1/events', params);
-    curlEl.textContent = curlFor(lastReqUrl);
-
-    qchipsEl.textContent = '';
-    const chip = (key, value, onRemove) => {
-      const c = el('span', 'qchip');
-      c.append(el('span', 'k', key + '='), document.createTextNode(value));
-      const x = el('span', 'x', '✕');
-      x.setAttribute('role', 'button');
-      x.setAttribute('tabindex', '0');
-      x.setAttribute('aria-label', `remove ${key}=${value} filter`);
-      x.title = `remove ${key} filter`;
-      x.addEventListener('click', onRemove);
-      x.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          onRemove();
-        }
-      });
-      c.append(x);
-      qchipsEl.append(c);
-    };
-
-    if (state.place) {
-      chip('place', state.place, () => removeFilter(() => { state.place = ''; }));
-    }
-    for (const layer of state.layers) {
-      chip('layer', layer, () =>
-        removeFilter(() => {
-          state.layers = state.layers.filter((l) => l !== layer);
-        })
-      );
-    }
-    if (!isDefaultStatuses(state.statuses)) {
-      for (const st of state.statuses) {
-        chip('status', st, () =>
-          removeFilter(() => {
-            state.statuses = state.statuses.filter((s) => s !== st);
-            if (!state.statuses.length) state.statuses = [...DEFAULT_STATUSES];
-          })
-        );
-      }
-    }
-    if (state.severityMin) {
-      chip('severity_min', state.severityMin, () => removeFilter(() => { state.severityMin = ''; }));
-    }
-    if (state.since) {
-      chip('since', state.since, () => removeFilter(() => { state.since = ''; }));
-    }
-    if (state.pageSize) {
-      chip('page_size', state.pageSize, () => removeFilter(() => { state.pageSize = ''; }));
-    }
-    if (!qchipsEl.children.length) {
-      qchipsEl.append(el('span', 'qbar-hint', 'no filters · status defaults to ACTIVE,SCHEDULED'));
-    }
-  }
-
-  copyUrlBtn.addEventListener('click', () => {
-    navigator.clipboard.writeText(absURL(lastReqUrl)).then(
-      () => {
-        copyUrlBtn.textContent = 'copied';
-        setTimeout(() => (copyUrlBtn.textContent = 'copy url'), 1200);
-      },
-      () => {
-        copyUrlBtn.textContent = 'failed';
-      }
-    );
-  });
-
-  // ---- inspector ----------------------------------------------------
-
-  function inspectorPlaceholder() {
-    inspBody.textContent = '';
-    inspBody.append(
-      jspan(
-        'insp-placeholder',
-        'Select a row to inspect its raw grid.v1.Event JSON —\n' +
-          'the exact bytes GET /api/v1/events returned for that occurrence.'
-      )
-    );
-  }
-
-  function selectEvent(ev, tr, sevColor) {
-    if (selectedTr) {
-      selectedTr.classList.remove('ev-selected');
-      selectedTr.style.removeProperty('--row-sev');
-    }
-    selectedTr = tr;
-    tr.classList.add('ev-selected');
-    tr.style.setProperty('--row-sev', sevColor);
-    inspBody.textContent = '';
-    inspBody.append(highlightJSON(ev));
-  }
-
-  inspectorPlaceholder();
-
-  // ---- results ------------------------------------------------------
-
-  /**
-   * Fetch one page. `token` is the page_token to request ('' = first page);
-   * `append` keeps existing rows (Load more) instead of restarting the table.
-   */
   async function runQuery(token, append) {
     if (loading) return;
     loading = true;
-    applyBtn.disabled = true;
-    moreBtn.disabled = true;
 
     if (!append) {
-      tbody.textContent = '';
+      listEl.textContent = '';
       emptyEl.textContent = '';
-      loadedCount = 0;
+      pageEl.textContent = '';
+      loadedEvents = [];
+      pageIndex = 1;
       nextToken = '';
-      selectedTr = null;
-      inspectorPlaceholder();
+      selectedRow = null;
+      selectedId = '';
+      detailEl.textContent = '';
+      detailCol.hidden = true;
+      backBtn.hidden = true;
+      gridEl.classList.remove('has-selection', 'narrow-detail');
+      listEl.append(skeleton());
     }
     errorsEl.textContent = '';
+    listEl.classList.remove('ev-stale-body');
 
     const params = buildQuery(state, token);
-    renderQueryBar(params);
-    statusLine.textContent = 'Loading /api/v1/events…';
-    statusLine.className = 'loading';
+    renderEcho(params);
 
     try {
       const data = await get('/api/v1/events', params);
       const events = Array.isArray(data.events) ? data.events : [];
-      let firstRow = null;
-      for (const ev of events) {
-        const row = eventRow(ev, selectEvent);
-        if (!firstRow) firstRow = row;
-        tbody.append(row);
-      }
-      // Populate the inspector immediately with the top (highest-severity,
-      // newest) row, so the raw JSON is visible without a first click.
-      if (!append && firstRow) firstRow._select();
-      loadedCount += events.length;
+      loadedEvents = append ? [...loadedEvents, ...events] : events;
+      if (append) pageIndex += 1;
       nextToken = data.nextPageToken || '';
-      moreBtn.hidden = !nextToken;
-      moreBtn.disabled = false;
+      lastGoodAt = new Date().toISOString();
 
-      if (loadedCount === 0) {
-        // Distinct from an API error: the query succeeded, nothing matched.
-        const empty = el('div', 'notice');
-        empty.append(
-          el('div', 'mono', 'No events match — this is not an all-clear.'),
-          el(
-            'div',
-            'muted small',
-            'The request succeeded (HTTP 200) and returned zero events for these ' +
-              'filters — an empty result, not a source failure. A failed feed surfaces ' +
-              'as an error above, never as a quiet empty table. Loosen the ' +
-              'status/severity filters, clear `since`, or widen the place.'
-          )
-        );
-        emptyEl.append(empty);
-        statusLine.textContent = '0 events';
-      } else {
-        statusLine.textContent =
-          `${loadedCount} event(s) loaded` +
-          (state.pageToken ? ' (resumed from page_token in URL)' : '') +
-          (nextToken ? ' — more available' : ' — end of results');
+      renderList();
+
+      if (!loadedEvents.length) {
+        renderEmpty();
+      } else if (!append && !isNarrow()) {
+        // Open the top record so the pane is never an empty prompt — but not on
+        // a phone, where the detail replaces the list and auto-selecting would
+        // hide the results the reader just asked for.
+        const first = listEl.querySelector('.rec');
+        if (first) first.click();
       }
-      statusLine.className = 'muted small mono';
     } catch (err) {
-      // API error is never a blank page and never mistaken for "no data".
-      errorsEl.append(errorBlock(err));
-      statusLine.textContent = 'Request failed — see error above.';
-      statusLine.className = 'small mono';
-      moreBtn.hidden = true;
+      // The last good data stays on screen, dimmed and labelled. A failure that
+      // blanks the list is indistinguishable from a genuinely empty result.
+      listEl.querySelectorAll('.ev-skel-row, .ev-fetching').forEach((n) => n.remove());
+      errorsEl.append(errorBand(err, lastGoodAt, () => runQuery(token, append)));
+      if (loadedEvents.length) {
+        listEl.classList.add('ev-stale-body');
+        errorsEl.append(el('div', 'ev-lastgood', `LAST GOOD RESPONSE · ${timeAgo(lastGoodAt)}`));
+      }
     } finally {
       loading = false;
-      applyBtn.disabled = false;
     }
   }
 
-  // ---- events ---------------------------------------------------------
-
-  applyBtn.addEventListener('click', () => {
-    state = readControls();
-    writeURL(); // the permalink is the artifact: Apply writes the full query
-    runQuery('', false);
-  });
-
-  resetBtn.addEventListener('click', () => {
-    // Clear layers/severity/since/place, restore the default status set, and
-    // rerun from page one — the canonical empty query.
-    state = {
-      place: '',
-      layers: [],
-      statuses: [...DEFAULT_STATUSES],
-      severityMin: '',
-      since: '',
-      pageSize: '',
-      pageToken: '',
-    };
-    syncControls();
-    writeURL();
-    runQuery('', false);
-  });
-
-  moreBtn.addEventListener('click', async () => {
-    if (!nextToken) return;
-    const token = nextToken;
-    await runQuery(token, true);
-    // Record the tail cursor so this exact view (rows from `token` on) is
-    // shareable; Apply clears it back to page one.
-    state.pageToken = token;
-    writeURL();
-  });
+  /* ---- boot ------------------------------------------------------------ */
 
   window.addEventListener('popstate', () => {
     state = readState(new URLSearchParams(location.search));
-    syncControls();
+    renderScope();
+    buildControls();
     runQuery(state.pageToken, false);
   });
+  window.addEventListener('resize', measureEcho);
 
-  // ---- go -------------------------------------------------------------
+  (async () => {
+    renderScope();
+    buildControls();
+    measureEcho();
+    try {
+      const data = await get('/api/v1/places');
+      places = Array.isArray(data.places) ? data.places : [];
+    } catch (err) {
+      // The scope still works from the URL; say why the picker is bare.
+      errorsEl.append(errorBand(err, '', () => location.reload()));
+    }
+    renderScope();
+    renderPlaceMenu();
+    loadActiveCount();
+  })();
 
-  if (state.pageToken) {
-    const note = el('div', 'notice');
-    note.append(
-      el('div', 'mono', 'Resuming from a pagination cursor.'),
-      el(
-        'div',
-        'muted small',
-        'This URL carries a page_token, so the table starts mid-stream at ' +
-          'that cursor. Press Apply to restart from the first page.'
-      )
-    );
-    errorsEl.after(note);
-  }
-
-  loadPlaces();
   runQuery(state.pageToken, false);
 }

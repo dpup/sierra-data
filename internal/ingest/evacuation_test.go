@@ -75,7 +75,7 @@ func TestEvacuationPoll(t *testing.T) {
 
 	order := eventByID(t, res.Events, "evac:CAL-E-046")
 	assert.Equal(t, gridv1.Layer_EVACUATION, order.Layer)
-	assert.Equal(t, "Evacuation Order — Zone A", order.Headline) // shipped format, exact
+	assert.Equal(t, "Evacuation Order — Zone A (CAL-E-046)", order.Headline) // name + id: the headline has to distinguish
 	assert.Equal(t, "order", order.Category)
 	assert.Equal(t, gridv1.Severity_EXTREME, order.Severity)
 	assert.Equal(t, gridv1.EventStatus_ACTIVE, order.Status)
@@ -109,17 +109,46 @@ func TestEvacuationPoll(t *testing.T) {
 	assert.Equal(t, "WARNING", warn.GetEvacuation().Level)
 	assert.Equal(t, "warning", warn.Category)
 	assert.Equal(t, gridv1.Severity_SEVERE, warn.Severity)
-	assert.Equal(t, "Evacuation Warning — Zone C", warn.Headline)
+	assert.Equal(t, "Evacuation Warning — Zone C (TUO-E-101)", warn.Headline)
 
 	sip := eventByID(t, res.Events, "evac:TUO-E-102")
 	assert.Equal(t, "SHELTER_IN_PLACE", sip.GetEvacuation().Level)
 	assert.Equal(t, "shelter_in_place", sip.Category)
 	assert.Equal(t, gridv1.Severity_SEVERE, sip.Severity)
-	assert.Equal(t, "Evacuation Shelter In Place — Zone D", sip.Headline)
+	assert.Equal(t, "Evacuation Shelter In Place — Zone D (TUO-E-102)", sip.Headline)
 }
 
 // evacFeature renders one Cal OES feature; geometry is a small square at
 // (lat, lng) unless rawGeometry overrides it.
+// A county-wide activation produces many zones at once, and they are read as a
+// list. When upstream sends no ZONE_NAME the headline used to fall back to the
+// county, so every simultaneous order in Calaveras read "Evacuation Order —
+// CALAVERAS" and only the id told them apart. The zone id is unique and is what
+// an evacuee hears on the radio, so it leads instead.
+func TestEvacuationHeadlinesDistinguishUnnamedZones(t *testing.T) {
+	body := evacCollection(
+		evacFeature("CAL-E-109-C", "", "Calaveras", "Evacuation Order", "Leave now.", 38.1, -120.4),
+		evacFeature("CAL-E-139-D", "", "Calaveras", "Evacuation Order", "Leave now.", 38.2, -120.5),
+		evacFeature("CAL-E-147-D", "", "Calaveras", "Evacuation Order", "Leave now.", 38.3, -120.6),
+	)
+	n := NewEvacuationNormalizer(testConfig(),
+		caloes.NewClientWithHTTPDoer("https://caloes.test", &fakeDoer{resp: body}))
+
+	res, err := n.Poll(testCtx(), nil)
+	require.NoError(t, err)
+	require.Len(t, res.Events, 3)
+
+	seen := map[string]bool{}
+	for _, ev := range res.Events {
+		assert.NotContains(t, strings.ToUpper(ev.Headline), "CALAVERAS",
+			"an unnamed zone must not fall back to the county — it does not distinguish")
+		assert.False(t, seen[ev.Headline],
+			"headlines must be unique across simultaneous zones: %q", ev.Headline)
+		seen[ev.Headline] = true
+	}
+	assert.True(t, seen["Evacuation Order — CAL-E-109-C"], "got %v", seen)
+}
+
 func evacFeature(zoneID, zoneName, county, status, publicInfo string, lat, lng float64) string {
 	return fmt.Sprintf(`{
 	  "properties": {"ZONE_ID": %q, "ZONE_NAME": %q, "COUNTY": %q, "STATUS": %q, "PUBLIC_INFO": %q},
@@ -155,7 +184,7 @@ func TestEvacuationPoll_BlankStatusKeptAsWarning(t *testing.T) {
 	assert.Equal(t, "WARNING", blank.GetEvacuation().Level)
 	assert.Equal(t, gridv1.Severity_SEVERE, blank.Severity)
 	assert.Equal(t, gridv1.EventStatus_ACTIVE, blank.Status)
-	assert.Equal(t, "Evacuation Warning — Zone Blank", blank.Headline)
+	assert.Equal(t, "Evacuation Warning — Zone Blank (CAL-E-050)", blank.Headline)
 	assert.Equal(t, "Await instructions.", blank.Description)
 }
 

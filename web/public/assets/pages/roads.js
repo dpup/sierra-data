@@ -1,28 +1,44 @@
 // pages/roads.js — /roads: the road-conditions view.
 //
-// Roads surface through three layers the API projects for a place, each a live
-// GeoJSON FeatureCollection from GET /api/v1/places/{place}/map/{layer}.geojson:
+// The screen teaches one thing before it shows anything: roads split across two
+// idioms. Road INCIDENTS are events; road CONDITIONS are not. Both are read here
+// from the layers the API projects for a place — a live GeoJSON FeatureCollection
+// from GET /api/v1/places/{place}/map/{layer}.geojson:
+//
+//   road_incident — CHP/Caltrans incidents, AI-enhanced (projected events)
 //   road_segment  — per-road travel time, delay, congestion, status (Google Routes + Caltrans)
 //   chain_control — active chain controls, R1/R2/R3 (Caltrans)
-//   road_incident — CHP/Caltrans incidents, AI-enhanced (projected events)
 //
-// This page renders each layer's per-kind properties — the data the generic map
-// popup drops — and each layer's metadata.sourceStatus honestly: an UNAVAILABLE
-// layer is shown loud, an empty OK layer reads as "a clean report, not an
-// all-clear". State is just the selected place, kept in the URL as a permalink.
+// Incidents render as the shared record row and link to /event?id=, so they read
+// as what they are — events with an id and a revision history.
+//
+// WHY THE INCIDENT LIST READS THE LAYER, NOT /events. The design specifies
+// `/events?layer=road_incident`, and that endpoint returns the same records. But
+// an EventList carries no per-source health, while the projected layer carries
+// `metadata.sourceStatus` — the difference between "no incidents reported" and
+// "the CHP feed is down". Trading that away for endpoint fidelity would break the
+// contract this page exists to demonstrate, so the layer wins and the prose says
+// so. Each row still links to the event record itself.
+//
+// State is just the selected place, kept in the URL as a permalink.
 
-import { get, curlFor, ApiError } from '../api.js';
-import { sevChip, sourceDot, timeAgo, timeAbs } from '../format.js';
-
-const DEFAULT_PLACE = 'ebbetts-pass';
+import { get, ApiError, PUBLIC_ORIGIN } from '../api.js';
+import { sourceDot, timeAgo, timeAbs, recordRow } from '../format.js';
+import { activePlace, placeMenuOptions, placeMenuLabel } from '../place.js';
+import { requireEls, copyOnClick } from '../ui.js';
+import '../components/menu.js'; // registers <grid-menu>
 
 const SECTIONS = [
+  { layer: 'road_incident', status: 'rd-inc-status', content: 'rd-inc', render: renderIncidents,
+    count: 'rd-inc-h', countLabel: 'Incidents',
+    empty: {
+      head: 'No active road incidents in this place.',
+      sub: 'Conditions still exist — an open road is baseline state, carried by the road_segment layer, not by /events.',
+    } },
   { layer: 'road_segment', status: 'rd-seg-status', content: 'rd-seg', render: renderSegments,
     empty: { head: 'No monitored roads in this area.', sub: 'This area has no configured road segments.' } },
   { layer: 'chain_control', status: 'rd-chain-status', content: 'rd-chain', render: renderChain,
     empty: { head: 'No chain controls in effect.', sub: 'Caltrans reports no active chain controls right now — a clean report, not a source failure.' } },
-  { layer: 'road_incident', status: 'rd-inc-status', content: 'rd-inc', render: renderIncidents,
-    empty: { head: 'No road incidents reported.', sub: 'No active CHP/Caltrans incidents on these corridors. Not an all-clear — a failed feed shows as UNAVAILABLE above, never as a quiet empty list.' } },
 ];
 
 /* ---------- small DOM helpers ---------- */
@@ -46,19 +62,24 @@ function errorBlock(err) {
   return div;
 }
 
+// The absolute URL, copied on click — the same treatment as the Map's feed
+// metadata table. It was `curl -s '<url>'` in an ink-black code box: three of
+// those stacked down a near-white page were the heaviest thing on it, and it
+// was the last echo variant left after the rest were unified.
 function curlLine(path) {
-  const wrap = el('div', 'rd-curl');
-  wrap.append(el('code', '', curlFor(path)));
-  const btn = el('button', 'rd-copy', 'copy');
-  btn.type = 'button';
-  btn.addEventListener('click', () => {
-    navigator.clipboard.writeText(curlFor(path)).then(
-      () => { btn.textContent = 'copied'; setTimeout(() => (btn.textContent = 'copy'), 1200); },
-      () => { btn.textContent = 'failed'; }
-    );
-  });
-  wrap.append(btn);
-  return wrap;
+  const url = absoluteURL(path);
+  const line = el('div', 'rd-curl geojson-url', url);
+  copyOnClick(line, url, 'URL');
+  return line;
+}
+
+/** The public absolute form of an API path, for a third-party client. */
+function absoluteURL(path) {
+  try {
+    return new URL(path, PUBLIC_ORIGIN).href;
+  } catch {
+    return path;
+  }
 }
 
 /** Enum-ish string → readable ("HEAVY" → "Heavy", "SHELTER_IN_PLACE" → "Shelter in place"). */
@@ -76,7 +97,7 @@ function num(v, suffix) {
 function statusTd(status) {
   const td = el('td');
   if (!status) { td.textContent = '—'; return td; }
-  const cls = { OPEN: 'ok', RESTRICTED: 'warn', CLOSED: 'bad' }[status] || 'unknown';
+  const cls = { OPEN: 'open', RESTRICTED: 'warn', CLOSED: 'bad' }[status] || 'unknown';
   td.append(el('span', 'rd-badge rd-' + cls, pretty(status)));
   return td;
 }
@@ -96,12 +117,22 @@ function chainBadge(level) {
 
 /* ---------- per-layer renderers ---------- */
 
-function scrollTable(headers) {
-  const wrap = el('div', 'rd-scroll');
-  const table = el('table', 'rd');
+// On phones each row reflows into a stacked card (roads.astro ≤640px); caption
+// every cell by its column via data-label so travel/delay/distance stay visible.
+function labelRow(tr, labels) {
+  tr.querySelectorAll(':scope > td').forEach((td, i) => {
+    if (labels[i]) td.dataset.label = labels[i];
+  });
+}
+
+function dataTable(headers) {
+  const wrap = el('div', 'table-wrap');
+  // capped-head: the section cap above lists these columns in order, so the
+  // visible header row is a second copy. Hidden, not removed — see app.css.
+  const table = el('table', 'data-table rd-table capped-head');
   const thead = el('thead');
   const htr = el('tr');
-  for (const h of headers) htr.append(el('th', '', h));
+  for (const h of headers) htr.append(el('th', h === 'Travel' || h === 'Delay' || h === 'Distance' ? 'num' : '', h));
   thead.append(htr);
   const tbody = el('tbody');
   table.append(thead, tbody);
@@ -109,20 +140,65 @@ function scrollTable(headers) {
   return { wrap, tbody };
 }
 
+/**
+ * Incidents as the shared record row. The layer's feature `properties` envelope
+ * is event-shaped (id, layer, severity, headline) — `updatedAt` stands in for
+ * `observedAt`, which the projection does not carry.
+ */
+function renderIncidents(container, feats) {
+  feats.sort((a, b) =>
+    (b.properties.severityRank || 0) - (a.properties.severityRank || 0) ||
+    String(b.properties.updatedAt || '').localeCompare(String(a.properties.updatedAt || ''))
+  );
+  const list = el('div', 'rec-list');
+  for (const f of feats) {
+    const p = f.properties || {};
+    const row = recordRow(
+      {
+        id: p.id,
+        layer: p.layer || 'road_incident',
+        severity: p.severity,
+        headline: p.headline,
+        observedAt: p.observedAt || p.updatedAt,
+      },
+      { href: p.id ? `/event?id=${encodeURIComponent(p.id)}` : undefined }
+    );
+    // The projection carries context a bare record row does not: the AI summary
+    // and the CHP log number are the two things an ops reader actually scans for.
+    const extra = [];
+    const body = p.summary || p.description;
+    if (body) extra.push(body);
+    const bits = [];
+    if (p.incident && p.incident.logNumber) bits.push('log ' + p.incident.logNumber);
+    if (p.source && p.source.name) bits.push(p.source.name);
+    const recBody = row.querySelector('.rec-body');
+    if (recBody && body) {
+      const sub = el('div', 'rec-sub muted small', body);
+      recBody.insertBefore(sub, recBody.querySelector('.rec-id'));
+    }
+    if (recBody && bits.length) {
+      const idEl = recBody.querySelector('.rec-id');
+      if (idEl) idEl.textContent = [p.id, ...bits].filter(Boolean).join(' · ');
+    }
+    list.append(row);
+  }
+  container.append(list);
+}
+
 function renderSegments(container, feats) {
   feats.sort((a, b) =>
     (b.properties.severityRank || 0) - (a.properties.severityRank || 0) ||
     String(a.properties.headline || '').localeCompare(String(b.properties.headline || ''))
   );
-  const { wrap, tbody } = scrollTable(['', 'Road', 'Status', 'Congestion', 'Travel', 'Delay', 'Distance']);
+  const labels = ['Road', 'Status', 'Congestion', 'Travel', 'Delay', 'Distance'];
+  const { wrap, tbody } = dataTable(labels);
   for (const f of feats) {
     const p = f.properties || {};
     const r = p.road || {};
     const tr = el('tr');
-    const sevTd = el('td'); sevTd.append(sevChip(p.severity)); tr.append(sevTd);
 
-    const roadTd = el('td', 'rd-wrap');
-    roadTd.append(el('div', 'rd-road', p.headline || r.roadId || '—'));
+    const roadTd = el('td', 'wrap');
+    roadTd.append(el('div', 'cell-name', p.headline || r.roadId || '—'));
     // The AI status explanation only rides along when a road isn't fully open.
     if (p.description && p.status && p.status !== 'OPEN') {
       roadTd.append(el('div', 'rd-explain muted small', p.description));
@@ -134,6 +210,7 @@ function renderSegments(container, feats) {
     tr.append(el('td', 'num', num(r.durationMinutes, ' min')));
     tr.append(delayTd(r.delayMinutes));
     tr.append(el('td', 'num', num(r.distanceKm, ' km')));
+    labelRow(tr, labels);
     tbody.append(tr);
   }
   container.append(wrap);
@@ -142,7 +219,8 @@ function renderSegments(container, feats) {
 function renderChain(container, feats) {
   const order = { R3: 3, R2: 2, R1: 1 };
   feats.sort((a, b) => (order[b.properties.chainControl?.level] || 0) - (order[a.properties.chainControl?.level] || 0));
-  const { wrap, tbody } = scrollTable(['Level', 'Highway', 'Direction', 'Note']);
+  const labels = ['Level', 'Highway', 'Direction', 'Note'];
+  const { wrap, tbody } = dataTable(labels);
   for (const f of feats) {
     const p = f.properties || {};
     const c = p.chainControl || {};
@@ -150,38 +228,11 @@ function renderChain(container, feats) {
     const lvlTd = el('td'); lvlTd.append(chainBadge(c.level)); tr.append(lvlTd);
     tr.append(el('td', '', c.highway || '—'));
     tr.append(el('td', '', c.direction || '—'));
-    tr.append(el('td', 'rd-wrap muted', p.headline || '—'));
+    tr.append(el('td', 'wrap muted', p.headline || '—'));
+    labelRow(tr, labels);
     tbody.append(tr);
   }
   container.append(wrap);
-}
-
-function renderIncidents(container, feats) {
-  feats.sort((a, b) =>
-    (b.properties.severityRank || 0) - (a.properties.severityRank || 0) ||
-    String(b.properties.updatedAt || '').localeCompare(String(a.properties.updatedAt || ''))
-  );
-  const list = el('div', 'rd-incidents');
-  for (const f of feats) {
-    const p = f.properties || {};
-    const card = el('div', 'rd-incident');
-    const head = el('div', 'rd-inc-head');
-    head.append(sevChip(p.severity));
-    head.append(el('span', 'rd-inc-headline', p.headline || p.id || '(incident)'));
-    card.append(head);
-    const body = p.summary || p.description;
-    if (body) card.append(el('div', 'rd-inc-body muted small', body));
-    const meta = el('div', 'rd-inc-meta muted small');
-    const bits = [];
-    if (p.incident && p.incident.logNumber) bits.push('log ' + p.incident.logNumber);
-    if (p.updatedAt) bits.push('updated ' + timeAgo(p.updatedAt));
-    if (p.source && p.source.name) bits.push(p.source.name);
-    meta.textContent = bits.join(' · ') || '—';
-    if (p.updatedAt) meta.title = timeAbs(p.updatedAt);
-    card.append(meta);
-    list.append(card);
-  }
-  container.append(list);
 }
 
 /* ---------- section loading (fail-loud) ---------- */
@@ -205,15 +256,16 @@ function statusHeader(statusEl, path, fc, err) {
 }
 
 function unavailableNotice(md) {
-  const n = el('div', 'notice notice-bad');
-  n.append(el('div', 'mono', 'Source UNAVAILABLE — this is not an all-clear.'));
-  n.append(el('div', 'muted small',
-    'The upstream feed failed, so the Grid returns no features rather than a fabricated clear state (metadata.sourceStatus = UNAVAILABLE). Check the official source directly.'));
+  const n = el('div', 'loud-banner');
+  n.append(el('div', 'loud-title', 'Source unavailable — state unknown, not clear'));
+  n.append(el('p', '', 'The upstream feed failed, so the Grid returns no features rather than a fabricated clear state (metadata.sourceStatus = UNAVAILABLE). Check the official source directly.'));
   const url = md && md.sourceUrl;
   if (url && /^https?:\/\//.test(url)) {
-    const a = el('a', 'small', 'official source ↗');
+    const p = el('p');
+    const a = el('a', '', url);
     a.href = url; a.target = '_blank'; a.rel = 'noopener noreferrer';
-    n.append(a);
+    p.append(a);
+    n.append(p);
   }
   return n;
 }
@@ -226,12 +278,24 @@ function emptyNotice(empty, stale) {
   return n;
 }
 
+/**
+ * Update a section's heading with its live count — "Incidents · 3".
+ * A failed or unavailable section gets no number at all: a count of 0 beside a
+ * broken feed is exactly the false all-clear the contract forbids.
+ */
+function setCount(section, n) {
+  if (!section.count) return;
+  const h = document.getElementById(section.count);
+  if (h) h.textContent = n === null ? section.countLabel : `${section.countLabel} · ${n}`;
+}
+
 async function loadSection(place, section) {
   const statusEl = document.getElementById(section.status);
   const contentEl = document.getElementById(section.content);
   const path = `/api/v1/places/${encodeURIComponent(place)}/map/${section.layer}.geojson`;
   statusEl.textContent = 'loading…';
   contentEl.textContent = '';
+  setCount(section, null);
 
   let fc, err;
   try { fc = await get(path); } catch (e) { err = e; }
@@ -243,10 +307,14 @@ async function loadSection(place, section) {
   const feats = Array.isArray(fc.features) ? fc.features : [];
 
   if (status === 'UNAVAILABLE') { contentEl.append(unavailableNotice(md)); return; }
+
+  // Only now is a count an honest claim: the feed answered, and answered OK or
+  // STALE (a STALE count is last-good, which the line beneath says out loud).
+  setCount(section, feats.length);
+
   if (feats.length === 0) { contentEl.append(emptyNotice(section.empty, status === 'STALE')); return; }
   if (status === 'STALE') {
-    const s = el('div', 'meta-stale small', 'Source STALE — showing last-good cached data.');
-    contentEl.append(s);
+    contentEl.append(el('div', 'meta-stale small', 'Source STALE — showing last-good cached data.'));
   }
   section.render(contentEl, feats);
 }
@@ -254,58 +322,77 @@ async function loadSection(place, section) {
 /* ---------- init ---------- */
 
 export function initRoadsPage() {
-  const placeSel = document.getElementById('rd-place');
-  let place = new URLSearchParams(location.search).get('place') || DEFAULT_PLACE;
-
-  // Seed the select with the current place so a shared ?place= link works even
-  // before /api/v1/places resolves.
-  placeSel.textContent = '';
-  const seed = el('option', '', place);
-  seed.value = place;
-  placeSel.append(seed);
-  placeSel.value = place;
+  const { placeMenu } = requireEls('roads.js', { placeMenu: 'rd-place' });
+  let place = '';
+  let places = [];
 
   function writeURL() {
-    const qs = place && place !== DEFAULT_PLACE ? `?place=${encodeURIComponent(place)}` : '';
-    history.replaceState(null, '', qs || location.pathname);
+    history.replaceState(null, '', place ? `?place=${encodeURIComponent(place)}` : location.pathname);
+  }
+
+  function showPlace() {
+    placeMenu.value = place;
+    placeMenu.triggerLabel = placeMenuLabel(places, place, 'no place');
   }
 
   function loadAll() {
+    if (!place) return;
     for (const s of SECTIONS) loadSection(place, s);
   }
 
-  async function loadPlaces() {
-    try {
-      const data = await get('/api/v1/places', { kind: 'AREA' });
-      const places = (Array.isArray(data.places) ? data.places : [])
-        .slice()
-        .sort((a, b) => String(a.name || a.slug).localeCompare(String(b.name || b.slug)));
-      placeSel.textContent = '';
-      let found = false;
-      for (const p of places) {
-        const opt = el('option', '', p.name ? `${p.name} (${p.slug || p.id})` : (p.slug || p.id));
-        opt.value = p.slug || p.id || '';
-        if (opt.value === place) found = true;
-        placeSel.append(opt);
-      }
-      if (!found) {
-        const opt = el('option', '', place);
-        opt.value = place;
-        placeSel.append(opt);
-      }
-      placeSel.value = place;
-    } catch (err) {
-      document.getElementById('rd-errors').append(errorBlock(err));
-    }
-  }
-
-  placeSel.addEventListener('change', () => { place = placeSel.value; writeURL(); loadAll(); });
-  window.addEventListener('popstate', () => {
-    place = new URLSearchParams(location.search).get('place') || DEFAULT_PLACE;
-    placeSel.value = place;
+  placeMenu.addEventListener('change', (e) => {
+    place = e.detail.value;
+    showPlace();
+    writeURL();
     loadAll();
   });
+  window.addEventListener('popstate', () => {
+    const next = new URLSearchParams(location.search).get('place');
+    if (next && next !== place) { place = next; showPlace(); loadAll(); }
+  });
 
-  loadPlaces();
-  loadAll();
+  // The place resolver owns the ?place= → sessionStorage → first-AREA order, so
+  // this screen never hardcodes a default. A directory failure with no ?place=
+  // leaves `active` null — which is unknown, not "no places", and must say so.
+  activePlace().then((dir) => {
+    const { active } = dir;
+    places = dir.places;
+    if (!active) {
+      placeMenu.options = [];
+      placeMenu.triggerLabel = 'unavailable';
+      document.getElementById('rd-errors').append(
+        (() => {
+          const b = el('div', 'loud-banner');
+          b.append(el('div', 'loud-title', 'Place directory unavailable'));
+          b.append(el('p', '', 'GET /api/v1/places?kind=AREA failed, so no place could be resolved and nothing below was requested. This is an unknown state, not an empty one — reload, or name a place explicitly with ?place=.'));
+          return b;
+        })()
+      );
+      return;
+    }
+
+    // placeMenuOptions keeps `current` even when the directory does not list
+    // it: a ?place= naming a corridor or a town is a valid {place}, and
+    // dropping it would silently re-scope the page to somewhere else.
+    place = active.slug;
+    placeMenu.options = placeMenuOptions(places, { current: place, group: true });
+    showPlace();
+    loadAll();
+
+    // activePlace() resolves the DEFAULT, and to do that it only needs the
+    // areas. The picker wants the whole directory — a corridor is the most
+    // natural thing to scope roads to, and it was not on the menu. Loaded
+    // second so the page is usable before it lands.
+    get('/api/v1/places')
+      .then((data) => {
+        const all = Array.isArray(data.places) ? data.places : [];
+        if (!all.length) return;
+        places = all;
+        placeMenu.options = placeMenuOptions(places, { current: place, group: true });
+        showPlace();
+      })
+      .catch(() => {
+        /* The AREA menu above still works; a fuller one is not worth a banner. */
+      });
+  });
 }

@@ -1,5 +1,15 @@
 # data.sierragridteam.org — Site Spec (Draft v0.1)
 
+> **Visual design (2026-08-06): the "broadsheet" redesign.** The site moved off
+> the dark dev-console look to a paper/ink split — paper (`#fbfbfa` — warm
+> `#f4f1ea` until 2026-08-11) for reading,
+> ink (`#14161a`) for anything that *is* the API (the front-page deck, response
+> panes, code, the sidebar, map frames). Archivo carries display type, IBM Plex
+> Sans prose, IBM Plex Mono every value. The design system, its two severity
+> ramps, and the fail-loud obligations the UI must honour are documented in
+> **`web/CLAUDE.md`** — read that before changing anything under `web/`. The
+> principles and information architecture below are unchanged by the redesign.
+
 A light frontend over the Grid Info Service (`grid-info-api-spec.md`). Dual duty:
 **documentation of the data APIs** and **nerdy investigation of the data itself** —
 and the design premise is that these are the same thing done well once.

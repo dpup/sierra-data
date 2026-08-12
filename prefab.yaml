@@ -3,18 +3,25 @@ server:
   security:
     xFramesOptions: DENY  # X-Frame-Options header (prefab reads xFramesOptions, plural)
 
-    # CORS settings
-    # NOTE: Prefab only emits Access-Control-Allow-Origin when the request's
-    # Origin header exactly matches an entry below (see prefab security.go).
-    # Browser clients must be listed here explicitly to make cross-origin fetch work.
+    # CORS settings — OPEN.
+    # This is a public, read-only, keyless data service, so we serve every
+    # browser origin: the "*" sentinel makes prefab emit a literal
+    # `Access-Control-Allow-Origin: *` for every request (prefab >= v0.6.1; see
+    # its security.go). Confidentiality-wise this grants a cross-origin page
+    # exactly what `curl` already gets — there is nothing privileged to steal.
+    #
+    # Two invariants below keep "open" safe, and MUST stay as they are:
+    #   1. corsAllowMethods: [GET] — the only cross-origin method we grant. This
+    #      is what shields the /mcp JSON-RPC surface: MCP is POST, which triggers
+    #      a preflight, and a GET-only Access-Control-Allow-Methods denies it
+    #      regardless of origin. So opening ORIGINS does not open METHODS.
+    #   2. corsAllowCredentials: false — REQUIRED with a "*" origin. The Fetch
+    #      spec forbids "*" + credentials, and prefab now fails startup
+    #      (ErrCORSWildcardCredentials) if you set this true alongside "*". Never
+    #      combine them: reflecting an origin *with* credentials is the classic
+    #      CORS hole this deliberately avoids.
     corsOrigins:
-      - https://ersn.net
-      - https://www.ersn.net         # ersn.net site (www host is a distinct origin)
-      - https://sierragridteam.org   # S.I.E.R.R.A site consuming /roads, /weather, /weather/alerts (issue #3)
-      - https://www.sierragridteam.org
-      - http://localhost:8181
-      - http://localhost:4321
-      - http://localhost:4322
+      - "*"
     # NOTE: keys must be corsAllowMethods / corsAllowHeaders (no "ed") - those are
     # what Prefab reads (server.security.corsAllowMethods). The misspelled
     # corsAllowedMethods/corsAllowedHeaders were silently ignored, leaving the
@@ -25,9 +32,9 @@ server:
       - content-type
       - x-requested-with
       - x-csrf-protection
-    # This API requires no authentication and uses no cookies, so credentialed
-    # CORS is unnecessary. Keeping it false also leaves the door open to a
-    # wildcard origin later if desired.
+    # Hard invariant, not a preference — see the corsOrigins note above: a "*"
+    # origin is only legal with credentials off, and prefab refuses to start if
+    # this is true while corsOrigins contains "*".
     corsAllowCredentials: false
     corsMaxAge: 72h
 

@@ -137,11 +137,14 @@ func nwsAlertsToProto(alerts []nws.Alert) []*api.WeatherAlert {
 			Severity:    mapNWSSeverity(a.Severity),
 			Zones:       a.Zones,
 		}
-		if !a.Effective.IsZero() {
-			wa.StartTime = timestamppb.New(a.Effective)
+		// Start/end of the HAZARD (CAP onset/ends), not of the product — see
+		// nws.Alert.Begins/EndsAt. NWSAlertID below deliberately still keys its
+		// fallback on a.Effective, so no id moves.
+		if begins := a.Begins(); !begins.IsZero() {
+			wa.StartTime = timestamppb.New(begins)
 		}
-		if !a.Expires.IsZero() {
-			wa.EndTime = timestamppb.New(a.Expires)
+		if ends := a.EndsAt(); !ends.IsZero() {
+			wa.EndTime = timestamppb.New(ends)
 		}
 		out = append(out, wa)
 	}

@@ -8,7 +8,7 @@
 // DOM access at import time so node can import and test this module.
 
 import { get, ApiError, apiURL } from '../api.js';
-import { timeCell, timeAgo, timeAbs, sourceDot } from '../format.js';
+import { timeCell, timeAgo, timeAbs, statusChip, normalizeStatus } from '../format.js';
 
 /* ------------------------------------------------------------------ */
 /* Pure helpers (node-testable)                                       */
@@ -28,10 +28,9 @@ export const FILTERABLE = ['UNAVAILABLE', 'STALE', 'UNKNOWN', 'OK'];
  * @param {string|undefined} s
  * @returns {string}
  */
-export function normStatus(s) {
-  const v = String(s ?? '').toUpperCase();
-  return v === 'OK' || v === 'STALE' || v === 'UNAVAILABLE' ? v : 'UNKNOWN';
-}
+/** @deprecated use normalizeStatus from format.js — kept as the page's local
+ * name so the sort/summary code below reads unchanged. */
+export const normStatus = normalizeStatus;
 
 /**
  * Humanize pollIntervalSeconds: 300 -> "5m", 5400 -> "1h 30m",
@@ -271,6 +270,14 @@ export function initSourcesPage() {
     'Last error',
   ];
 
+  // On phones the row reflows into a stacked card (app.css ≤640px); each cell is
+  // captioned by its column via data-label, so no column scrolls off-screen.
+  function labelCells(tr, labels) {
+    tr.querySelectorAll(':scope > td').forEach((td, i) => {
+      if (labels[i]) td.dataset.label = labels[i];
+    });
+  }
+
   function renderRow(s) {
     const status = normStatus(s.status);
     const tr = el('tr', status === 'OK' ? '' : `row-${status}`);
@@ -289,17 +296,26 @@ export function initSourcesPage() {
     } else {
       nameEl = el('span', 'src', name);
     }
+    nameEl.classList.add('cell-name');
     srcTd.append(nameEl);
     if (s.id && s.id !== name) {
-      const sub = el('div', 'muted small');
-      sub.append(el('code', '', s.id));
-      srcTd.append(sub);
+      srcTd.append(el('div', 'cell-sub', s.id));
+    }
+    // Attribution rides UNDER the name rather than in its own column. The design
+    // gives it a column, but that assumes a five-column table; with thresholds
+    // and last-error kept it becomes the seventh, and two long-text columns push
+    // the error — the thing you came to read — off the right edge. It is a
+    // property of the source, so it reads correctly here.
+    if (s.attribution) {
+      const attr = el('div', 'cell-sub src-attr', s.attribution); // textContent: untrusted
+      attr.title = 'attribution — display this wherever you render the data';
+      srcTd.append(attr);
     }
     tr.append(srcTd);
 
-    // Status — colored dot + text label (color is never the only signal).
+    // Status — a filled chip carrying the word (color is never the only signal).
     const statusTd = el('td');
-    statusTd.append(sourceDot(s.status));
+    statusTd.append(statusChip(s.status));
     tr.append(statusTd);
 
     // Poll interval
@@ -339,6 +355,7 @@ export function initSourcesPage() {
     }
     tr.append(errTd);
 
+    labelCells(tr, COLUMNS);
     return tr;
   }
 

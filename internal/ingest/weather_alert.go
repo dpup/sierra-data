@@ -68,9 +68,13 @@ func (n *WeatherAlertNormalizer) Poll(ctx context.Context, prior Prior) (*PollRe
 
 	events := make([]*gridv1.Event, 0, len(alerts))
 	for _, a := range alerts {
-		// An NWS watch is SCHEDULED until it takes effect (decision 8).
+		// An NWS watch is SCHEDULED until it takes effect (decision 8). The
+		// test is against the HAZARD's start (CAP `onset`), not the product's
+		// `effective` — a Watch issued Tuesday morning for Thursday's storms is
+		// effective on issue, so keying on `effective` made every such watch
+		// ACTIVE the moment it was published and decision 8 never fired.
 		status := gridv1.EventStatus_ACTIVE
-		if !a.Effective.IsZero() && a.Effective.After(now) {
+		if begins := a.Begins(); !begins.IsZero() && begins.After(now) {
 			status = gridv1.EventStatus_SCHEDULED
 		}
 
@@ -85,12 +89,19 @@ func (n *WeatherAlertNormalizer) Poll(ctx context.Context, prior Prior) (*PollRe
 			// improvement over the shipped collapse.
 			SeverityFromLabel(hazards.SeverityFromNWSSeverity(a.Severity)),
 			status,
-			nonEmpty(a.Headline, a.Event), // shipped headline fallback
+			// "<Event> — <reason>", composed deterministically from the
+			// product name and parameters.NWSheadline. CAP's own
+			// properties.headline is issuance boilerplate whose every token is
+			// already category/effective/expires/provenance — see
+			// nws.Alert.ShortHeadline.
+			a.ShortHeadline(),
 		)
 		ev.Category = a.Event
 		ev.Description = a.Description // original NWS text, verbatim
-		ev.Effective = tsProto(a.Effective)
-		ev.Expires = tsProto(a.Expires)
+		// The hazard window, not the product's publication window — see
+		// nws.Alert.Begins/EndsAt.
+		ev.Effective = tsProto(a.Begins())
+		ev.Expires = tsProto(a.EndsAt())
 		// Attach to every configured area whose zones intersect the alert's
 		// (a zoneless alert can't be scoped, so it attaches to all areas).
 		for _, area := range n.cfg.Hazards.Areas {

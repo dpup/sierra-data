@@ -1,5 +1,5 @@
 # Live Data API Server - Build, Test, and Deployment Tasks
-.PHONY: build test proto proto-tools clean server tools site site-install site-dev site-shots check-site run dev lint fmt docker docker-build docker-run docker-run-dev docker-push docker-clean deploy install help test-meshcore
+.PHONY: build test proto proto-tools clean server tools site site-modules site-install site-dev site-shots site-shots-mock check-site check-wiring run dev lint fmt docker docker-build docker-run docker-run-dev docker-push docker-clean deploy install help test-meshcore
 
 # Go parameters
 GOCMD=go
@@ -72,10 +72,38 @@ $(TEST_MESHCORE_BINARY): proto
 # Build the static site with Astro (source in web/) into site/dist. The output
 # is a COMMITTED artifact (like the generated *.pb.go) so the Docker `go build`
 # stays Node-free — run this after editing anything under web/, then commit
-# site/dist. Uses `npm ci` when a lockfile exists (reproducible), else `npm install`.
-site:
+# Uses npm ci into an off-mount dependency store; see SITE_DEPS below.
+# Where the site's npm dependencies actually live.
+#
+# Files written into /workspace — a virtiofs bind mount — bit-corrupt in place
+# (the same fault class as the SQLite corruption in internal/store/CLAUDE.md).
+# npm writes ~188MB of them, and one flipped byte in @astrojs/compiler's
+# astro.wasm or in any dist/*.js kills the build with an error naming an
+# innocent .astro file. So node_modules lives OFF the mount and web/node_modules
+# is a symlink to it.
+#
+# Crucially the INSTALL also has to happen off the mount: `npm ci` deletes and
+# recreates node_modules, which replaces the symlink with a real directory back
+# on the corrupting filesystem. So we keep a copy of package.json +
+# package-lock.json in $(SITE_DEPS) and run npm there, then link. Override
+# SITE_DEPS for a different host.
+SITE_DEPS ?= $(HOME)/.cache/grid-web-deps
+
+site-modules:
+	@mkdir -p "$(SITE_DEPS)"
+	@# Reinstall only when the lockfile actually changed.
+	@if ! cmp -s web/package-lock.json "$(SITE_DEPS)/package-lock.json"; then \
+		echo "Installing site deps off-mount → $(SITE_DEPS)"; \
+		cp web/package.json web/package-lock.json "$(SITE_DEPS)/"; \
+		(cd "$(SITE_DEPS)" && npm ci) || exit 1; \
+	fi
+	@# `rm -rf` on a symlink removes the link, not the target.
+	@rm -rf web/node_modules
+	@ln -sfn "$(SITE_DEPS)/node_modules" web/node_modules
+
+site: site-modules check-wiring
 	@echo "Building site (Astro → site/dist)..."
-	cd web && (test -f package-lock.json && npm ci || npm install) && npm run build
+	cd web && npm run build
 	@# Astro emits build-internal *.mjs at the dist root (content-*.mjs stubs, a
 	@# hash-named manifest_*.mjs) that are never served and whose hashes churn the
 	@# committed output. Prune all root-level *.mjs; real page JS lives in assets/.
@@ -83,12 +111,12 @@ site:
 	@echo "✅ Site built: site/dist"
 
 # Install site build dependencies only (no build).
-site-install:
-	cd web && npm install
+site-install: site-modules
+	@echo "✅ Site deps installed at $(SITE_DEPS) (web/node_modules → symlink)"
 
 # Run the Astro dev server (hot reload) for local site development. Note: /v1 and
 # /api calls still need the Go server running — point the dev site at it or proxy.
-site-dev:
+site-dev: site-modules
 	cd web && npm run dev
 
 # Screenshot + layout-metrics of the running site for spacing/layout diagnosis.
@@ -100,6 +128,25 @@ site-dev:
 site-shots:
 	cd tools/screenshots && NODE_PATH=$$(npm root -g) \
 		BASE_URL=$(or $(BASE_URL),http://localhost:8190) LABEL=$(or $(LABEL),current) node shots.mjs
+
+# Self-contained screenshots with MOCKED /api/v1 data — no server, no API keys,
+# deterministic. Builds the site, serves site/dist, intercepts every /api/v1
+# fetch from web/screenshots/fixtures.mjs so pages render populated state, and
+# captures each page at phone/tablet/desktop into web/screenshots/out/
+# (git-ignored). This is the one to reach for when reviewing the rendered UI —
+# especially mobile — without standing up the Go server + live upstreams.
+# Pass PAGES=events,map or ONLY=mobile to narrow a run. Uses web/'s own
+# Playwright devDependency (not the global one site-shots uses).
+site-shots-mock: site-modules
+	cd web && npm run build
+	cd web && node screenshots/capture.mjs $(if $(PAGES),--pages $(PAGES),) $(if $(ONLY),--only $(ONLY),)
+
+# Islands bind to markup by id string, so a rename on one side only surfaces in
+# a browser as a null-deref halfway through init. This is that check, statically:
+# every getElementById/requireEls id in an island must exist in its page. It runs
+# as part of `site`, so the mismatch cannot reach a build.
+check-wiring:
+	@cd web && node screenshots/wiring-check.mjs
 
 # Guard against deploying a stale site. The Docker image embeds the COMMITTED
 # site/dist (the image build is deliberately Node-free), so a change under web/

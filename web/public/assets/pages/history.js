@@ -11,7 +11,11 @@
 // work happens inside initHistoryPage().
 
 import { get, apiURL, curlFor, ApiError } from '../api.js';
-import { timeCell, sevChip, layerLabel } from '../format.js';
+import { recordRow, timeAgo, layerLabel } from '../format.js';
+import { placeMenuOptions, placeMenuLabel } from '../place.js';
+import { requireEls, copyButton } from '../ui.js';
+import '../components/chip-row.js';
+import '../components/menu.js';
 
 /**
  * Event layers accepted by /api/v1/history's `layer` param, as the lowercase
@@ -207,49 +211,43 @@ function errorBlock(err) {
   return div;
 }
 
-/** Full-width table row spanning all six columns (day separators, the empty
- * notice, and error blocks all live inside the revision table body). */
-function spanRow(node) {
-  const tr = el('tr');
-  const td = el('td');
-  td.colSpan = 6;
-  td.append(node);
-  tr.append(td);
-  return tr;
-}
-
-/** One <tr> for an EventRevision (protojson, camelCase). Columns mirror the
- * table header: Observed · Severity · Layer · Rev · Status · Event. */
+/**
+ * One record row for an EventRevision (protojson, camelCase).
+ *
+ * The archive is a list of records, not a spreadsheet, so it uses the same
+ * `.rec` row as Events, Roads and the front-page feed — the design's spec for
+ * this screen. The revision number leads the meta line; the lifecycle status
+ * follows the layer, because a status change IS why many revisions exist.
+ *
+ * Two timestamps, and the difference matters (it is the caveat this page
+ * carries): `observedAt` is upstream-stamped and orders the archive, but can be
+ * wrong — mesh nodes date their own adverts from an unsynchronized clock.
+ * `ingestedAt` is stamped by us and always monotonic, so it rides on the id line
+ * as the answer to "when did this service learn it".
+ */
 function revisionRow(rev) {
   const ev = rev.event || {};
-  const row = el('tr', 'rev-row');
+  const observed = rev.observedAt || ev.observedAt || '';
+  const ingested = rev.ingestedAt || '';
+  const idLine = [ev.id, ingested ? `ingested ${timeAgo(ingested)}` : '']
+    .filter(Boolean)
+    .join(' · ');
 
-  // observedAt: revision-level stamp, falling back to the event's.
-  const tdTime = el('td');
-  tdTime.append(timeCell(rev.observedAt || ev.observedAt || ''));
-  row.append(tdTime);
-
-  // Default enum values are omitted by protojson: absent severity is INFO.
-  const tdSev = el('td');
-  tdSev.append(sevChip(ev.severity || 'INFO'));
-  row.append(tdSev);
-
-  row.append(el('td', 'mono', layerLabel(ev.layer || '')));
-  // revision is a proto uint32; protojson omits 0.
-  row.append(el('td', 'num rev-num', `r${rev.revision ?? 0}`));
-  row.append(el('td', 'rev-status', ev.status || '—'));
-
-  const head = el('td', 'wrap');
-  if (ev.id) {
-    const link = document.createElement('a');
-    link.href = `/event?id=${encodeURIComponent(ev.id)}`;
-    link.textContent = ev.headline || ev.id; // textContent: upstream text is untrusted
-    head.append(link);
-  } else {
-    head.textContent = ev.headline || '(no headline)';
+  const row = recordRow(
+    // Default enum values are omitted by protojson: an absent severity is INFO.
+    { ...ev, severity: ev.severity || 'INFO', observedAt: observed },
+    {
+      href: ev.id ? `/event?id=${encodeURIComponent(ev.id)}` : undefined,
+      // revision is a proto uint32; protojson omits 0.
+      prefix: `rev ${rev.revision ?? 0}`,
+      tags: [ev.status ? String(ev.status).toLowerCase() : ''],
+      idLine,
+    }
+  );
+  if (ingested) {
+    const idEl = row.querySelector('.rec-id');
+    if (idEl) idEl.title = `ingestedAt ${ingested}`;
   }
-  row.append(head);
-
   return row;
 }
 
@@ -259,17 +257,20 @@ function revisionRow(rev) {
  * hist-apply, hist-query, hist-feed, hist-more, hist-status).
  */
 export function initHistoryPage() {
-  const $ = (id) => document.getElementById(id);
-  const placeSel = $('hist-place');
-  const layersBox = $('hist-layers');
-  const fromInput = $('hist-from');
-  const toInput = $('hist-to');
-  const sizeSel = $('hist-size');
-  const applyBtn = $('hist-apply');
-  const queryEl = $('hist-query');
-  const feed = $('hist-feed');
-  const moreBtn = $('hist-more');
-  const statusEl = $('hist-status');
+  const {
+    placeMenu, layersBox, fromInput, toInput, sizeMenu,
+    queryEl, feed, moreBtn, statusEl,
+  } = requireEls('history.js', {
+    placeMenu: 'hist-place',
+    layersBox: 'hist-layers',
+    fromInput: 'hist-from',
+    toInput: 'hist-to',
+    sizeMenu: 'hist-size',
+    queryEl: 'hist-query',
+    feed: 'hist-feed',
+    moreBtn: 'hist-more',
+    statusEl: 'hist-status',
+  });
 
   let state = readState(new URLSearchParams(location.search));
   let nextToken = '';
@@ -279,93 +280,75 @@ export function initHistoryPage() {
 
   // ---- controls ----------------------------------------------------
 
-  // Layer multi-select as checkboxes (dense, all visible at once).
-  for (const slug of LAYER_OPTIONS) {
-    const label = el('label', 'layer-check');
-    const box = document.createElement('input');
-    box.type = 'checkbox';
-    box.value = slug;
-    box.checked = state.layers.includes(slug);
-    label.append(box, ' ', layerLabel(slug));
-    layersBox.append(label);
-  }
+  // Layer multi-select — the shared <grid-chip-row>. Unlike Events these do not
+  // refetch on click: History has an explicit Apply, because a date-range query
+  // is expensive enough that firing one per chip would be hostile.
+  layersBox.options = LAYER_OPTIONS.map((v) => ({ value: v, label: layerLabel(v) }));
+  layersBox.value = state.layers;
 
-  for (const size of PAGE_SIZES) {
-    const opt = document.createElement('option');
-    opt.value = size;
-    opt.textContent = size === '' ? 'default' : size;
-    sizeSel.append(opt);
+  const sizeLabel = (v) => (v === '' ? 'default' : String(v));
+  sizeMenu.options = PAGE_SIZES.map((v) => ({ value: v, label: sizeLabel(v) }));
+
+  // These only paint the control — `apply()` below is what reads the controls
+  // into `state` and requeries. Keeping the two separate is what lets
+  // "Load more" page the query that is actually on screen.
+  function showSize(value = sizeMenu.value) {
+    const v = PAGE_SIZES.includes(value) ? value : '';
+    sizeMenu.value = v;
+    sizeMenu.triggerLabel = sizeLabel(v);
+    sizeMenu.classList.toggle('is-set', v !== '');
   }
-  sizeSel.value = PAGE_SIZES.includes(state.pageSize) ? state.pageSize : '';
+  showSize(state.pageSize);
 
   fromInput.value = toLocalInput(state.from);
   toInput.value = toLocalInput(state.to);
 
-  // Place select: "(any place)" first; options filled from /api/v1/places.
-  // Until (or if) that load fails, the URL-provided place is kept as a
-  // provisional option so shared links never lose their filter.
-  const anyOpt = document.createElement('option');
-  anyOpt.value = '';
-  anyOpt.textContent = '(any place)';
-  placeSel.append(anyOpt);
-  if (state.place) {
-    const opt = document.createElement('option');
-    opt.value = state.place;
-    opt.textContent = state.place;
-    placeSel.append(opt);
-    placeSel.value = state.place;
+  // Place picker: "any place" first, then the directory grouped by kind. Until
+  // (or if) that load fails, a URL-provided place is kept as a provisional
+  // option so a shared link never silently loses its filter.
+  let placeDir = [];
+
+  function showPlace(value = placeMenu.value) {
+    placeMenu.value = value;
+    placeMenu.triggerLabel = placeMenuLabel(placeDir, value, 'any place');
+    placeMenu.classList.toggle('is-set', Boolean(value));
   }
+
+  // Refilling keeps whatever is selected — the directory arrives after the
+  // reader can already have picked something, and `current` also preserves a
+  // ?place= the directory does not list (a corridor, a town).
+  function fillPlaceMenu(current = placeMenu.value) {
+    placeMenu.options = placeMenuOptions(placeDir, {
+      anyLabel: 'Any place',
+      current,
+      group: true,
+    });
+    showPlace(current);
+  }
+  fillPlaceMenu(state.place);
+
+  placeMenu.addEventListener('change', (e) => showPlace(e.detail.value));
+  sizeMenu.addEventListener('change', (e) => showSize(e.detail.value));
 
   async function loadPlaces() {
     try {
       const data = await get('/api/v1/places');
-      const places = Array.isArray(data.places) ? data.places : [];
-      // Group by kind for scanability; PlaceKind renders as proto enum names.
-      const byKind = new Map();
-      for (const p of places) {
-        const kind = p.kind || 'PLACE_KIND_UNSPECIFIED';
-        if (!byKind.has(kind)) byKind.set(kind, []);
-        byKind.get(kind).push(p);
-      }
-      const current = placeSel.value;
-      placeSel.textContent = '';
-      placeSel.append(anyOpt);
-      let currentFound = current === '';
-      for (const [kind, group] of byKind) {
-        const og = document.createElement('optgroup');
-        og.label = layerLabel(kind);
-        group.sort((a, b) => String(a.name || a.slug).localeCompare(String(b.name || b.slug)));
-        for (const p of group) {
-          const opt = document.createElement('option');
-          opt.value = p.slug || p.id || '';
-          opt.textContent = p.name ? `${p.name} (${opt.value})` : opt.value;
-          if (opt.value === current) currentFound = true;
-          og.append(opt);
-        }
-        placeSel.append(og);
-      }
-      if (!currentFound && current) {
-        // Keep a URL-supplied place the directory doesn't know about.
-        const opt = document.createElement('option');
-        opt.value = current;
-        opt.textContent = current;
-        placeSel.append(opt);
-      }
-      placeSel.value = current;
+      placeDir = Array.isArray(data.places) ? data.places : [];
+      fillPlaceMenu();
     } catch (err) {
-      // The select still works with the URL-provided value; just say why
-      // the directory is empty.
-      placeSel.insertAdjacentElement('afterend', errorBlock(err));
+      // The picker still works with the URL-provided value; just say why the
+      // directory is otherwise empty.
+      placeMenu.insertAdjacentElement('afterend', errorBlock(err));
     }
   }
 
   function readControls() {
     return {
-      place: placeSel.value,
-      layers: [...layersBox.querySelectorAll('input:checked')].map((b) => b.value),
+      place: placeMenu.value,
+      layers: layersBox.value,
       from: fromLocalInput(fromInput.value) || '',
       to: fromLocalInput(toInput.value) || '',
-      pageSize: sizeSel.value,
+      pageSize: sizeMenu.value,
     };
   }
 
@@ -377,12 +360,17 @@ export function initHistoryPage() {
     return `${from} → ${to}`;
   }
 
+  // The same echo as every other screen: GET, the URL, a copy control. It used
+  // to print `curl -s '<url>'` inline after the URL, which said the request
+  // twice and ran the line to ~180 characters.
   function showQuery(params) {
     const url = apiURL('/api/v1/history', params);
     queryEl.textContent = '';
-    const code = el('code', 'inline', `GET ${url}`);
-    const curl = el('span', 'muted small mono', `  ${curlFor(url)}`);
-    queryEl.append(code, ' ', curl);
+    queryEl.append(
+      el('span', 'method', 'GET'),
+      el('span', '', url),
+      copyButton(curlFor(url), 'copy curl')
+    );
   }
 
   function appendRevisions(revisions) {
@@ -390,9 +378,7 @@ export function initHistoryPage() {
       const key = dayKey(rev.observedAt || (rev.event && rev.event.observedAt));
       if (key !== lastDayKey) {
         lastDayKey = key;
-        const sep = spanRow(document.createTextNode(dayLabel(key)));
-        sep.className = 'day-sep';
-        feed.append(sep);
+        feed.append(el('div', 'day-sep', dayLabel(key)));
       }
       feed.append(revisionRow(rev));
       loadedCount++;
@@ -402,7 +388,6 @@ export function initHistoryPage() {
   async function runQuery(pageToken) {
     if (loading) return;
     loading = true;
-    applyBtn.disabled = true;
     moreBtn.disabled = true;
     moreBtn.hidden = !pageToken;
 
@@ -440,7 +425,7 @@ export function initHistoryPage() {
               '. Widen the time range or clear filters.'
           )
         );
-        feed.append(spanRow(empty));
+        feed.append(empty);
         statusEl.textContent = '0 revisions';
       } else {
         statusEl.textContent =
@@ -449,25 +434,46 @@ export function initHistoryPage() {
       statusEl.className = 'muted small mono';
     } catch (err) {
       // API error is never a blank page and never mistaken for "no data".
-      feed.append(spanRow(errorBlock(err)));
+      feed.append(errorBlock(err));
       statusEl.textContent = 'Request failed — see error above.';
       statusEl.className = 'small mono';
       moreBtn.hidden = true;
     } finally {
       loading = false;
-      applyBtn.disabled = false;
     }
   }
 
   // ---- events --------------------------------------------------------
 
-  applyBtn.addEventListener('click', () => {
+  /**
+   * Every control requeries, exactly as on Events — there is no Apply.
+   *
+   * This page used to hold a draft and commit it, on the reasoning that a
+   * date-range query over the whole revision archive is expensive enough that
+   * firing one per keystroke would be hostile. Two filter screens with two
+   * different contracts is the worse cost: a reader who has learned that a chip
+   * click requeries on Events reasonably expects the same here, and an Apply
+   * button that must be found before anything happens reads as broken until you
+   * find it.
+   *
+   * The expense argument survives in the details rather than the model: menus
+   * and chips fire on `change`, and the datetime inputs fire on `change` too —
+   * which browsers emit on commit, not per keypress — so a half-typed date
+   * never reaches the wire.
+   */
+  function apply() {
     state = readControls();
-    // The permalink is the artifact: Apply writes the full query to the URL.
+    // The permalink is the artifact: every change writes the full query to it.
     const qs = stateToSearch(state);
     history.replaceState(null, '', qs ? `?${qs}` : location.pathname);
     runQuery();
-  });
+  }
+
+  layersBox.addEventListener('change', apply);
+  placeMenu.addEventListener('change', apply);
+  sizeMenu.addEventListener('change', apply);
+  fromInput.addEventListener('change', apply);
+  toInput.addEventListener('change', apply);
 
   moreBtn.addEventListener('click', () => {
     if (nextToken) runQuery(nextToken);
@@ -475,13 +481,11 @@ export function initHistoryPage() {
 
   window.addEventListener('popstate', () => {
     state = readState(new URLSearchParams(location.search));
-    placeSel.value = state.place;
-    for (const box of layersBox.querySelectorAll('input[type=checkbox]')) {
-      box.checked = state.layers.includes(box.value);
-    }
+    showPlace(state.place);
+    layersBox.value = state.layers;
     fromInput.value = toLocalInput(state.from);
     toInput.value = toLocalInput(state.to);
-    sizeSel.value = PAGE_SIZES.includes(state.pageSize) ? state.pageSize : '';
+    showSize(state.pageSize);
     runQuery();
   });
 

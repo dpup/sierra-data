@@ -147,6 +147,10 @@ func writeRPC(w http.ResponseWriter, resp rpcResponse) {
 	// CORS is owned by prefab's securityMiddleware (it wraps every mounted
 	// handler and sets Access-Control-* from server.security.corsOrigins, and
 	// handles OPTIONS preflight) — don't set it here (see internal/hazards/CLAUDE.md).
+	// NOTE: corsOrigins is now "*" (open), but this POST JSON-RPC surface is still
+	// not reachable cross-origin from a browser: corsAllowMethods is GET-only, so
+	// the preflight this endpoint triggers is denied regardless of origin. The
+	// open origin applies only to the GET data endpoints.
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
 }

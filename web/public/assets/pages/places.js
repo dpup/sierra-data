@@ -9,28 +9,20 @@
 // All network I/O goes through the shared api.js wrapper (same-origin /api/v1/*
 // GETs only). Upstream-derived text is inserted via textContent — never HTML.
 //
-// Pure helpers (readState, writeState, parseCoord, groupByKind, geomBBox,
+// Pure helpers (readState, writeState, parseCoord, geomBBox,
 // protoBBox, placeRef) have zero DOM access at import time so node can import
 // and test this module directly. All DOM work happens inside initPlacesPage().
 
-import { get, ApiError, apiURL } from '../api.js';
-import { layerLabel, decodeGeometry } from '../format.js';
-import { BASE_STYLE } from '../basemap.js';
+import { get, ApiError, apiURL, curlFor } from '../api.js';
+import { layerLabel, decodeGeometry, SEVERITY_COLORS } from '../format.js';
+import { BASE_STYLE, BASE_ATTRIBUTION_OPTS, ensureBasemap, deferInteraction } from '../basemap.js';
+import { KIND_ORDER } from '../place.js';
+import { copyButton } from '../ui.js';
+import '../components/chip-row.js';
 
 // ------------------------------------------------------------------------
 // Pure helpers (node-testable)
 // ------------------------------------------------------------------------
-
-/** Canonical display order for PlaceKind groups; unknown kinds sort after,
- * alphabetically. Directory renders whatever kinds the API returns. */
-export const KIND_ORDER = [
-  'AREA',
-  'COUNTY',
-  'TOWN',
-  'EVAC_ZONE',
-  'CORRIDOR',
-  'SITE',
-];
 
 /**
  * Read page state from a query string.
@@ -39,8 +31,12 @@ export const KIND_ORDER = [
  */
 export function readState(search) {
   const q = new URLSearchParams(search || '');
+  const kind = (q.get('kind') || '').toUpperCase();
   return {
     place: q.get('place') || '',
+    // Client-side only: the directory is unpaginated, so filtering never costs
+    // a request. It still lives in the URL so a filtered view is shareable.
+    kind: KIND_ORDER.includes(kind) ? kind : '',
     lat: q.get('lat') || '',
     lng: q.get('lng') || '',
     address: q.get('address') || '',
@@ -56,6 +52,7 @@ export function readState(search) {
 export function writeState(state) {
   const q = new URLSearchParams();
   if (state.place) q.set('place', state.place);
+  if (state.kind) q.set('kind', state.kind);
   if (state.lat !== '' && state.lat !== null && state.lat !== undefined) {
     q.set('lat', String(state.lat));
   }
@@ -81,36 +78,6 @@ export function parseCoord(latStr, lngStr) {
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
   if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
   return { lat, lng };
-}
-
-/**
- * Group places by kind for the directory. Kinds in KIND_ORDER first, then
- * unknown kinds alphabetically; places within a kind sorted by name.
- * protojson omits zero-valued enums, so a missing kind groups under
- * PLACE_KIND_UNSPECIFIED.
- * @param {Array<Object>} places
- * @returns {Array<[string, Array<Object>]>}
- */
-export function groupByKind(places) {
-  const groups = new Map();
-  for (const p of places || []) {
-    if (!p || typeof p !== 'object') continue;
-    const kind = String(p.kind || 'PLACE_KIND_UNSPECIFIED').toUpperCase();
-    if (!groups.has(kind)) groups.set(kind, []);
-    groups.get(kind).push(p);
-  }
-  for (const list of groups.values()) {
-    list.sort((a, b) =>
-      String(a.name || a.slug || a.id || '').localeCompare(
-        String(b.name || b.slug || b.id || '')
-      )
-    );
-  }
-  const known = KIND_ORDER.filter((k) => groups.has(k));
-  const rest = [...groups.keys()]
-    .filter((k) => !KIND_ORDER.includes(k))
-    .sort();
-  return [...known, ...rest].map((k) => [k, groups.get(k)]);
 }
 
 /**
@@ -191,14 +158,25 @@ export function placeRef(place) {
 
 const DEFAULT_CENTER = [-120.45, 38.1]; // central Sierra service area
 const DEFAULT_ZOOM = 8;
-const ACCENT = '#5aa6e8'; // --blu: place geometry fill / outline
-const MARKER = '#7fdcab'; // --grn: dropped resolve pin (distinct from geometry)
+// The basemap is LIGHT (Positron), so geometry takes the paper ramp — the same
+// rule map.js and event-detail.js follow. JS cannot inherit the CSS custom
+// properties, which is why format.js exports both ramps explicitly.
+const ACCENT = SEVERITY_COLORS.INFO; // place geometry fill / outline
+const MARKER = '#4d7c0f'; // --sev-MINOR on paper: the resolve pin, distinct from geometry
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
   return node;
+}
+
+// On phones each row reflows into a stacked card (app.css ≤640px); caption every
+// cell by its column via data-label so the id/parent columns don't clip off.
+function labelRow(tr, labels) {
+  tr.querySelectorAll(':scope > td').forEach((td, i) => {
+    if (labels[i]) td.dataset.label = labels[i];
+  });
 }
 
 /** Inline error block naming the failed URL — never a blank page. */
@@ -282,7 +260,7 @@ export function initPlacesPage() {
       container.replaceWith(note);
       return;
     }
-    // Shared OSM raster basemap (basemap.js) for geographic context — the
+    // Shared light OSM vector basemap (basemap.js) for geographic context — the
     // resolve tester needs a recognizable backdrop to click against. API data
     // is still only ever fetched same-origin from /api/v1/* through api.js.
     map = new maplibregl.Map({
@@ -290,10 +268,14 @@ export function initPlacesPage() {
       style: BASE_STYLE,
       center: DEFAULT_CENTER,
       zoom: DEFAULT_ZOOM,
+      // Credit comes from the TileJSON; this only makes it compact.
+      attributionControl: BASE_ATTRIBUTION_OPTS,
     });
+    ensureBasemap(map);
+    deferInteraction(map, container);
     map.addControl(new maplibregl.NavigationControl(), 'top-right');
-    map.on('load', () => map.resize()); // fill the container once the style is ready
-    mapReady = new Promise((resolve) => map.on('load', resolve));
+    map.on('style.load', () => map.resize()); // fill the container once the style is ready
+    mapReady = new Promise((resolve) => map.on('style.load', resolve));
     map.on('click', (e) => {
       const lat = Number(e.lngLat.lat.toFixed(5));
       const lng = Number(e.lngLat.lng.toFixed(5));
@@ -362,81 +344,174 @@ export function initPlacesPage() {
   }
 
   // ---- Directory view: GET /api/v1/places ------------------------------------
+
+  /**
+   * What geometry this place actually carries, per the design's Geometry column.
+   * The distinction is real and worth surfacing: a full GeoJSON body is what a
+   * point-in-polygon resolve needs, whereas a bbox or a bare centroid only
+   * places a pin. Saying "bbox only" is honest where a blank cell would imply
+   * the place has no location at all.
+   */
+  function describeGeometry(place) {
+    const g = (place && place.geometry) || {};
+    if (g.geojson) {
+      // proto `bytes` → base64, so the string length is what crossed the wire.
+      return `geojson · ${g.geojson.length.toLocaleString('en-US')} b64 chars`;
+    }
+    if (g.bbox) return 'bbox only';
+    if (g.centroid) return 'centroid only';
+    return 'none';
+  }
+
+  /** The kind filter chips. Client-side — see the note in readState(). */
+  function renderKindChips() {
+    const box = $('pl-kinds');
+    if (!box) return;
+    box.options = [
+      { value: '', label: 'all kinds' },
+      ...KIND_ORDER.map((k) => ({ value: k, label: k })),
+    ];
+    box.value = state.kind;
+    if (!box._wired) {
+      box._wired = true;
+      box.addEventListener('change', (e) => {
+        state.kind = e.detail.value;
+        syncURL();
+        renderQueryEcho();
+        renderDirectory();
+      });
+    }
+  }
+
+  /**
+   * The echoed request. It deliberately prints the UNFILTERED path even when a
+   * kind chip is lit, because that is the request the page actually made — the
+   * filter happens here. Printing `?kind=TOWN` would be a lie about the wire.
+   */
+  function renderQueryEcho() {
+    const box = $('pl-query');
+    if (!box) return;
+    box.textContent = '';
+    const url = apiURL('/api/v1/places');
+    box.append(el('span', 'method', 'GET'), el('span', '', url));
+    if (state.kind) {
+      box.append(el('span', 'muted', `— ${state.kind} filtered in the browser`));
+    }
+    box.append(copyButton(curlFor(url), 'copy curl'));
+  }
+
+  /** All places from the last successful fetch; null until one succeeds. */
+  let allPlaces = null;
+
+  function renderDirectory() {
+    directoryEl.textContent = '';
+    if (allPlaces === null) return; // pending or failed — the error block speaks
+    if (allPlaces.length === 0) {
+      directoryEl.append(el('p', 'muted', 'No places in the directory yet.'));
+      return;
+    }
+
+    const byId = new Map(allPlaces.filter((p) => p.id).map((p) => [p.id, p]));
+    const rows = state.kind
+      ? allPlaces.filter((p) => String(p.kind || '').toUpperCase() === state.kind)
+      : allPlaces;
+
+    if (rows.length === 0) {
+      const none = el('div', 'notice');
+      none.append(
+        el('span', '', `No ${state.kind} places in the directory. `),
+        (() => {
+          const b = el('button', 'pill', 'clear filter');
+          b.type = 'button';
+          b.addEventListener('click', () => {
+            state.kind = '';
+            syncURL();
+            renderKindChips();
+            renderDirectory();
+          });
+          return b;
+        })()
+      );
+      directoryEl.append(none);
+      return;
+    }
+
+    // Kind order is meaningful — broadest to most specific — so it survives as
+    // the sort even though the grouping headings are gone.
+    const rank = (k) => {
+      const i = KIND_ORDER.indexOf(String(k || '').toUpperCase());
+      return i === -1 ? KIND_ORDER.length : i;
+    };
+    const sorted = rows.slice().sort(
+      (a, b) => rank(a.kind) - rank(b.kind) ||
+        String(a.name || a.slug || '').localeCompare(String(b.name || b.slug || ''))
+    );
+
+    const labels = ['Place', 'Kind', 'Geometry', 'Parent'];
+    const wrap = el('div', 'table-wrap');
+    const table = el('table', 'data-table');
+    const thead = el('thead');
+    const hrow = el('tr');
+    for (const h of labels) hrow.append(el('th', '', h));
+    thead.append(hrow);
+    const tbody = el('tbody');
+
+    for (const p of sorted) {
+      const tr = el('tr');
+
+      // Place — the name links into the detail view; the namespaced id rides
+      // beneath it, because the id is the thing you paste into a {place} slot.
+      const nameTd = el('td');
+      const ref = placeRef(p);
+      if (ref) {
+        const a = el('a', 'cell-name', p.name || ref);
+        a.href = hrefFor(ref);
+        nameTd.append(a);
+      } else {
+        nameTd.append(el('span', 'cell-name', p.name || '—'));
+      }
+      if (p.id) nameTd.append(el('div', 'cell-sub', p.id));
+      tr.append(nameTd);
+
+      tr.append(el('td', '', layerLabel(p.kind === 'PLACE_KIND_UNSPECIFIED' ? 'UNSPECIFIED' : p.kind)));
+      tr.append(el('td', '', describeGeometry(p)));
+
+      const parentTd = el('td');
+      if (p.parentId) {
+        const parent = byId.get(p.parentId);
+        const a = el('a', '', parent ? parent.name || placeRef(parent) : p.parentId);
+        a.href = hrefFor(parent ? placeRef(parent) : p.parentId);
+        a.title = p.parentId;
+        parentTd.append(a);
+      } else {
+        parentTd.append(el('span', 'muted', '—'));
+      }
+      tr.append(parentTd);
+
+      labelRow(tr, labels);
+      tbody.append(tr);
+    }
+    table.append(thead, tbody);
+    wrap.append(table);
+    directoryEl.append(wrap);
+    directoryEl.append(
+      el('p', 'freshness', `${sorted.length} of ${allPlaces.length} place(s) — the directory is unpaginated.`)
+    );
+  }
+
   async function loadDirectory() {
-    let places;
+    renderKindChips();
+    renderQueryEcho();
     try {
       const data = await get('/api/v1/places');
-      places = Array.isArray(data.places) ? data.places : [];
+      allPlaces = Array.isArray(data.places) ? data.places : [];
     } catch (err) {
+      allPlaces = null;
       directoryEl.textContent = '';
       directoryEl.append(errorBlock(err));
       return;
     }
-    directoryEl.textContent = '';
-    if (places.length === 0) {
-      directoryEl.append(el('p', 'muted', 'No places in the directory yet.'));
-      return;
-    }
-    const byId = new Map(places.filter((p) => p.id).map((p) => [p.id, p]));
-
-    for (const [kind, list] of groupByKind(places)) {
-      const heading = el('h3');
-      heading.append(
-        layerLabel(kind === 'PLACE_KIND_UNSPECIFIED' ? 'UNSPECIFIED' : kind),
-        ' ',
-        el('span', 'muted small', `(${list.length})`)
-      );
-      directoryEl.append(heading);
-
-      const wrap = el('div', 'table-wrap');
-      const table = el('table', 'data-table');
-      const thead = el('thead');
-      const hrow = el('tr');
-      for (const h of ['Name', 'Slug', 'Id', 'Parent']) {
-        hrow.append(el('th', '', h));
-      }
-      thead.append(hrow);
-      const tbody = el('tbody');
-
-      for (const p of list) {
-        const tr = el('tr');
-
-        const nameTd = el('td');
-        const ref = placeRef(p);
-        if (ref) {
-          const a = el('a', '', p.name || ref);
-          a.href = hrefFor(ref);
-          nameTd.append(a);
-        } else {
-          nameTd.textContent = p.name || '—';
-        }
-        tr.append(nameTd);
-
-        tr.append(el('td', 'mono', p.slug || '—'));
-        tr.append(el('td', 'mono', p.id || '—'));
-
-        const parentTd = el('td');
-        if (p.parentId) {
-          const parent = byId.get(p.parentId);
-          const a = el(
-            'a',
-            '',
-            parent ? parent.name || placeRef(parent) : p.parentId
-          );
-          a.href = hrefFor(parent ? placeRef(parent) : p.parentId);
-          a.title = p.parentId;
-          parentTd.append(a);
-        } else {
-          parentTd.textContent = '—';
-        }
-        tr.append(parentTd);
-
-        tbody.append(tr);
-      }
-      table.append(thead, tbody);
-      wrap.append(table);
-      directoryEl.append(wrap);
-    }
+    renderDirectory();
   }
 
   // ---- Selected view: GET /api/v1/places/{place} ------------------------------
@@ -575,6 +650,7 @@ export function initPlacesPage() {
       tr.append(nameTd);
       tr.append(el('td', 'mono', p.slug || '—'));
       tr.append(el('td', 'mono', p.id || '—'));
+      labelRow(tr, ['Kind', 'Name', 'Slug', 'Id']);
       tbody.append(tr);
     }
     table.append(thead, tbody);

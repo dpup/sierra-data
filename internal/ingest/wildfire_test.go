@@ -177,8 +177,8 @@ func TestWildfirePoll_JoinAndStandalone(t *testing.T) {
 	// flights collapse to the latest (poly_DateCurrent 5000), whose polygon the
 	// incident adopts.
 	salt := eventByID(t, res.Events, "calfire:abc-123")
-	assert.Equal(t, "Salt Springs Fire — 1200 ac, 35% contained", salt.Headline) // shipped format, exact
-	assert.Equal(t, gridv1.Severity_EXTREME, salt.Severity)                      // 1200 ac (NWCG class F) & <50% contained
+	assert.Equal(t, "Salt Springs Fire — 1,200 ac, 35% contained", salt.Headline) // exact shipped format, separators and all
+	assert.Equal(t, gridv1.Severity_EXTREME, salt.Severity)                       // 1200 ac (NWCG class F) & <50% contained
 	assert.Equal(t, gridv1.EventStatus_ACTIVE, salt.Status)
 	assert.Equal(t, "wildfire", salt.Category)
 	assert.Equal(t, "near Hwy 4", salt.AreaLabel)
@@ -462,7 +462,7 @@ func TestWildfirePoll_FirisDown_CarriesPriorPerimeterForward(t *testing.T) {
 	require.NotNil(t, salt.Geometry)
 	assert.Equal(t, priorGeom.Geojson, salt.Geometry.Geojson, "prior polygon geometry carried forward verbatim")
 	// Scalar fields still come from the current CAL FIRE record.
-	assert.Equal(t, "Salt Springs Fire — 1200 ac, 35% contained", salt.Headline)
+	assert.Equal(t, "Salt Springs Fire — 1,200 ac, 35% contained", salt.Headline)
 	assert.Equal(t, 1200.0, salt.GetWildfire().Acres)
 
 	amb := eventByID(t, res.Events, "calfire:ambiguous")
@@ -998,4 +998,28 @@ func TestWildfireSupersedesOnlyTheAdoptedSibling(t *testing.T) {
 	assert.Equal(t, []string{"firis:ambiguous"}, res.Superseded,
 		"only the adopted id is proven gone; the sibling merely vanished and keeps its grace")
 	assert.NotContains(t, eventIDs(res.Events), "firis:ambiguous-2")
+}
+
+// The most prominent number the service emits, and it was the least readable:
+// "Gann Fire — 10339 ac, 90% contained" on a site whose own screenshot contract
+// asserts no unseparated 4+ digit numbers.
+func TestCommaNum(t *testing.T) {
+	for _, c := range []struct {
+		in   float64
+		want string
+	}{
+		{0, "0"},
+		{15, "15"},
+		{999, "999"},
+		{1000, "1,000"},
+		{2340, "2,340"},
+		{10339, "10,339"},
+		{1234567, "1,234,567"},
+		{15.4, "15"}, // acreage is rendered whole
+		{15.6, "16"}, // ...and rounded, not truncated
+	} {
+		if got := commaNum(c.in); got != c.want {
+			t.Errorf("commaNum(%v) = %q, want %q", c.in, got, c.want)
+		}
+	}
 }

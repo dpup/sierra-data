@@ -1,29 +1,69 @@
 ---
-// PageHead — the shared hero block: optional kicker, an <h1>, a lead paragraph
-// (default slot), and a badges column (defaults to the standard chip pair).
+// PageHead — the one hero. Every page's top block, and there is only this one.
 //
-//   <PageHead kicker="grid.v1 · event explorer" title="Events">
+//   <PageHead kicker="Road conditions" title="Roads">
 //     <p class="lead">…</p>
 //   </PageHead>
 //
-// The lead paragraph is passed as slot content (not a prop) so pages keep their
-// inline markup — <code>, <span class="mono">, links, etc. Override the badges
-// via the `badges` slot; omit it for the default Badges pair.
+// There were three of these. Eight pages used this component; Events grew its
+// own `.ev-scope` (a title with a live meta line and a heavy rule under it);
+// the front page and the reference pages hand-rolled a third. They disagreed on
+// whether a hero ends in a rule, whether a count can sit beside the title, and
+// how much air follows — so moving between pages, the top of the document
+// jumped. This is the union of the three.
+//
+//   [kicker]                                              [badges]
+//   Title  ·  meta
+//   One-line standfirst.
+//   ─────────────────────────────────────────────────────  3px rule
+//
+// THE STANDFIRST IS ONE LINE (17px/500, capped at 44ch). A hero says what the
+// page is; the moment it runs to a paragraph it competes with the page. The
+// four-line version left ~600px of empty paper beside it and read as stranded —
+// and moving it into a second column beside the title fixed the emptiness by
+// making the whole block heavier. Shortening the sentence was the answer.
+//
+// Anything about MECHANICS — how the filters map to query parameters, what the
+// URL means — does not belong here. It goes in a `.rail-caption` directly under
+// the rule, attached to the control rail it describes.
+//
+// Everything but `title` is optional; the rule is not, because it is what makes
+// the hero read as the head of the document rather than as its first paragraph.
+// Every page's hero carries a `kicker`.
+//
+// `meta` is for a LIVE value that belongs to the whole page — a record count, a
+// scope. Pass `metaId` to have an island fill it in.
 import Badges from './Badges.astro';
 
 interface Props {
+  /** The page's name. Required. */
   title: string;
+  /** Small caps line above the title, e.g. "Road conditions". */
   kicker?: string;
+  /** Mono line beside the title, e.g. "7 records loaded". */
+  meta?: string;
+  /** id for the meta element, so an island can keep it current. */
+  metaId?: string;
+  /** Omit the default chip pair without supplying a `badges` slot. */
+  noBadges?: boolean;
 }
-const { title, kicker } = Astro.props;
+const { title, kicker, meta, metaId, noBadges } = Astro.props;
+const hasBadges = !noBadges || Astro.slots.has('badges');
 ---
-<div class="page-head">
-  <div>
+<header class="page-head">
+  <div class="page-head-main">
     {kicker && <div class="hero-kicker">{kicker}</div>}
-    <h1>{title}</h1>
+    <div class="page-head-title">
+      <h1>{title}</h1>
+      {(meta || metaId) && <span class="page-head-meta" id={metaId}>{meta}</span>}
+    </div>
     <slot />
   </div>
-  <div class="badges">
-    <slot name="badges"><Badges /></slot>
-  </div>
-</div>
+  {hasBadges && (
+    <div class="page-head-aside">
+      <div class="badges">
+        <slot name="badges"><Badges /></slot>
+      </div>
+    </div>
+  )}
+</header>

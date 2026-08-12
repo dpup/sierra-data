@@ -47,7 +47,13 @@ const sampleGeoJSON = `{
         "areaDesc": "Calaveras",
         "effective": "2026-06-26T10:00:00-07:00",
         "expires": "2026-06-27T20:00:00-07:00",
-        "geocode": { "UGC": ["CAZ064", "CAZ065"] }
+        "onset": "2026-06-27T05:00:00-07:00",
+        "ends": "2026-06-28T21:00:00-07:00",
+        "geocode": { "UGC": ["CAZ064", "CAZ065"] },
+        "parameters": {
+          "NWSheadline": ["RED FLAG WARNING IN EFFECT UNTIL 8 PM PDT FOR GUSTY WINDS AND LOW HUMIDITY"],
+          "AWIPSidentifier": ["RFWSTO"]
+        }
       }
     },
     {
@@ -88,6 +94,33 @@ func TestGetActiveZoneAlerts(t *testing.T) {
 	}
 	if rf.Effective.IsZero() {
 		t.Error("expected effective time parsed")
+	}
+	// onset/ends are the HAZARD window and both must survive parsing —
+	// `expires` here is a full day before `ends`, which is the norm.
+	if rf.Onset.IsZero() || rf.Ends.IsZero() {
+		t.Errorf("onset/ends not parsed: %v / %v", rf.Onset, rf.Ends)
+	}
+	if !rf.Begins().Equal(rf.Onset) || !rf.EndsAt().Equal(rf.Ends) {
+		t.Errorf("hazard window = %v..%v, want onset..ends", rf.Begins(), rf.EndsAt())
+	}
+	// The second alert publishes neither, and falls back to the product window.
+	if !alerts[1].Begins().Equal(alerts[1].Effective) {
+		t.Errorf("Begins() should fall back to effective, got %v", alerts[1].Begins())
+	}
+	// parameters.NWSheadline is where the alert's REASON lives; the card line
+	// is composed from it (see headline.go), so it has to survive parsing.
+	if rf.NWSHeadline != "RED FLAG WARNING IN EFFECT UNTIL 8 PM PDT FOR GUSTY WINDS AND LOW HUMIDITY" {
+		t.Errorf("NWSHeadline = %q", rf.NWSHeadline)
+	}
+	if got, want := rf.ShortHeadline(), "Red Flag Warning — gusty winds and low humidity"; got != want {
+		t.Errorf("ShortHeadline() = %q, want %q", got, want)
+	}
+	// The second alert publishes no parameters block at all — the common case.
+	if alerts[1].NWSHeadline != "" {
+		t.Errorf("NWSHeadline = %q, want empty", alerts[1].NWSHeadline)
+	}
+	if got, want := alerts[1].ShortHeadline(), "Heat Advisory"; got != want {
+		t.Errorf("ShortHeadline() = %q, want %q", got, want)
 	}
 
 	// Request headers and zone param

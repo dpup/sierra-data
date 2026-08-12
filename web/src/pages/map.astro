@@ -2,6 +2,7 @@
 import Shell from '../layouts/Shell.astro';
 import PageHead from '../components/PageHead.astro';
 import SectionHead from '../components/SectionHead.astro';
+import FilterGroup from '../components/FilterGroup.astro';
 ---
 <Shell
   current="map"
@@ -11,112 +12,146 @@ import SectionHead from '../components/SectionHead.astro';
   <Fragment slot="head">
     <link rel="stylesheet" href="/lib/maplibre-gl.css" />
     <style is:global>
-      /* Page-local layout: honesty sidebar + full map, on the locked tokens. */
-      .map-layout { display: grid; grid-template-columns: 300px 1fr; gap: 16px; align-items: start; }
+      /* The map is full-column now: the chip group replaced the 300px control
+         sidebar, so nothing competes with the geometry for width. */
+      /* Paper backdrop, not ink: the basemap is light now, and a black frame
+         flashing before the tiles resolve was a worse first paint than starting
+         the colour it ends up. Offline it simply stays this colour. */
       #map-canvas {
-        width: 100%; height: 560px; border: 1px solid var(--border); border-radius: var(--radius);
-        background: #0f1417; position: relative; overflow: hidden;
+        width: 100%; height: 560px; border: 1px solid var(--ink);
+        background: var(--paper-sunken); position: relative; overflow: hidden;
       }
-      .layer-checks { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; }
-      .layer-check {
-        display: flex; align-items: center; gap: 9px; text-transform: none; letter-spacing: 0;
-        font-size: 12.5px; color: var(--text); cursor: pointer; white-space: nowrap;
-        padding: 6px 8px; border-radius: var(--radius-sm);
-      }
-      .layer-check:hover { background: var(--bg-hover-2); }
+      /* One GET per selected layer; .req-echo already gives each its own line. */
+      #map-query { line-height: 1.6; }
 
-      /* Feed-metadata ledger entries (map.js builds these into #honesty-panel). */
-      .layer-meta { border-top: 1px solid var(--border-row); padding: 12px 0; font-size: 12.5px; }
-      .layer-meta:first-child { border-top: none; padding-top: 4px; }
-      .layer-meta.ledger-failed { background: var(--bg-failed); border-radius: var(--radius-sm); padding: 12px; margin: 4px 0; }
-      .layer-meta-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 5px; font-family: var(--font-mono); }
-      .meta-row { font-family: var(--font-mono); font-size: 11px; padding: 1px 0; overflow-wrap: anywhere; color: var(--text-2); }
-      .meta-key { color: var(--text-fainter); }
-      .meta-note { font-size: 11px; margin: 3px 0; }
-      .meta-stale { color: var(--st-STALE); }
-      .meta-unavailable { color: var(--st-UNAVAILABLE); font-weight: 600; font-size: 12px; margin: 4px 0; }
-      .error-block.meta-error { margin: 6px 0; padding: 8px 11px; font-size: 11px; }
-      .geojson-url { margin-top: 6px; }
-      .geojson-url-caption { font-size: 11px; }
-      .geojson-url-line { display: flex; align-items: center; gap: 7px; }
-      .geojson-url-line code {
-        font-size: 11px; background: var(--bg-code); border: 1px solid var(--border-soft);
-        border-radius: 2px; padding: 2px 6px; overflow-wrap: anywhere; user-select: all; color: #9db8cf;
+      /* Feed metadata is a .data-table (map.js renderPanel) — the same shape as
+         the Unlocated table below it. What is page-local is only the loud
+         channel: a tinted row for a degraded layer, and the full-width note
+         beneath it that says which failure in words. Fail-loud must never be
+         flattened into a cell that reads like a value. */
+      .meta-table tr.row-STALE { background: color-mix(in srgb, var(--st-STALE) 8%, transparent); }
+      .meta-table tr.row-UNAVAILABLE { background: color-mix(in srgb, var(--st-UNAVAILABLE) 11%, transparent); }
+      .meta-table tr.row-note td {
+        border-top: none; padding-top: 0; font-size: 11.5px; line-height: 1.5;
+        white-space: normal;
       }
+      .meta-table tr.note-fault td { color: var(--st-UNAVAILABLE); font-weight: 600; }
+      .meta-table tr.note-stale td { color: var(--st-STALE); }
+      .meta-table tr.row-note a { color: inherit; }
+      /* The .geojson URL under each layer name: a long value that copies on
+         click, like every other long value on this site. It used to be an
+         ink-black code box — nine of them stacked were the heaviest thing on a
+         near-white page. */
+      .attr-absent { color: var(--text-faint-p); font-style: italic; }
 
-      /* MapLibre popup, dev-console themed */
+      /* MapLibre popup: a PAPER surface now. It used to be ink because it
+         floated over a black basemap; over Positron an ink card is the darkest
+         thing on the page and reads as an error state. It inherits the paper
+         severity ramp, which is also what the geometry underneath now uses, so
+         a popup's chip matches the shape it points at. */
       .maplibregl-popup-content {
-        background: var(--bg-card); color: var(--text); border: 1px solid var(--border);
-        border-radius: var(--radius); font-family: var(--font-mono); font-size: 12.5px;
-        padding: 10px 12px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+        background: var(--paper); color: var(--text-body); border: 1px solid var(--ink);
+        font-family: var(--font-mono); font-size: 12px; padding: 10px 12px; box-shadow: none;
       }
-      .maplibregl-popup-close-button { color: var(--text-faint); font-size: 17px; }
+      .maplibregl-popup-close-button { color: var(--text-muted-p); font-size: 17px; }
       .maplibregl-popup-anchor-bottom .maplibregl-popup-tip,
       .maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip,
-      .maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip { border-top-color: var(--bg-card); }
+      .maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip { border-top-color: var(--paper); }
       .maplibregl-popup-anchor-top .maplibregl-popup-tip,
       .maplibregl-popup-anchor-top-left .maplibregl-popup-tip,
-      .maplibregl-popup-anchor-top-right .maplibregl-popup-tip { border-bottom-color: var(--bg-card); }
-      .maplibregl-popup-anchor-left .maplibregl-popup-tip { border-right-color: var(--bg-card); }
-      .maplibregl-popup-anchor-right .maplibregl-popup-tip { border-left-color: var(--bg-card); }
-      .map-popup .popup-headline { font-weight: 600; color: var(--text-hi); margin-bottom: 5px; }
+      .maplibregl-popup-anchor-top-right .maplibregl-popup-tip { border-bottom-color: var(--paper); }
+      .maplibregl-popup-anchor-left .maplibregl-popup-tip { border-right-color: var(--paper); }
+      .maplibregl-popup-anchor-right .maplibregl-popup-tip { border-left-color: var(--paper); }
+      .map-popup .popup-headline { font-family: var(--font-display); font-weight: 700; font-size: 14px; color: var(--text-primary); margin-bottom: 5px; }
       .map-popup .popup-chips { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
-      .map-popup .popup-details { margin: 6px 0; padding: 6px 0; border-top: 1px solid var(--border-row); border-bottom: 1px solid var(--border-row); }
+      .map-popup .popup-details { margin: 6px 0; padding: 6px 0; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
       .map-popup .popup-details dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 0; }
-      .map-popup .popup-details dt { color: var(--text-fainter); font-size: 11px; }
-      .map-popup .popup-details dd { margin: 0; color: var(--text); font-size: 12px; overflow-wrap: anywhere; }
+      .map-popup .popup-details dt { color: var(--text-tertiary); font-size: 10.5px; }
+      .map-popup .popup-details dd { margin: 0; color: var(--text-body); font-size: 11.5px; overflow-wrap: anywhere; }
       .map-popup .popup-desc { margin-top: 5px; }
 
       @media (max-width: 900px) {
-        .map-layout { grid-template-columns: 1fr; }
         #map-canvas { height: 60vh; }
       }
     </style>
   </Fragment>
 
-  <PageHead kicker="Layer previews" title="Map — layer previews">
-    <p class="lead">
-      Each hazard layer is one RFC&nbsp;7946 FeatureCollection from
-      <code class="inline">GET /api/v1/places/&#123;place&#125;/map/&#123;layer&#125;.geojson</code> — exactly what a
-      MapLibre, Leaflet, or QGIS source points at. Every response carries a
-      <code class="inline">metadata.source_status</code> of OK, STALE, or UNAVAILABLE, and the
-      ledger below renders it verbatim.
-      <strong class="accent-orange">An UNAVAILABLE layer draws nothing — and nothing on the map is not an all-clear.</strong>
-    </p>
+  <PageHead kicker="Layer previews" title="Map">
+    <p class="lead">One RFC&nbsp;7946 FeatureCollection per hazard layer.</p>
   </PageHead>
 
-  <div class="map-layout" style="margin-top:24px;">
-    <div>
-      <section class="card" aria-labelledby="controls-h">
-        <div class="section-head" style="margin-bottom:10px;">
-          <div class="left"><h2 id="controls-h" style="margin:0;">Controls</h2></div>
-        </div>
-        <div class="field" style="margin-bottom:12px;">
-          <label for="place-select">Place — GET /api/v1/places?kind=AREA</label>
-          <select id="place-select"><option value="">loading places…</option></select>
-        </div>
-        <label>Layers</label>
-        <div id="layer-checks" class="layer-checks"></div>
-      </section>
-    </div>
+  <p class="rail-caption">
+    <b>Layers</b>one GET per selected layer, exactly what a MapLibre, Leaflet or QGIS source
+    points at · every response carries <code class="inline">metadata.sourceStatus</code> —
+    <strong class="accent-orange">an UNAVAILABLE layer draws nothing, and nothing on the map is
+    not an all-clear</strong>
+  </p>
 
-    <div>
-      <div id="map-canvas"></div>
+  <!-- The shared filter set (app.css §14), same as every other screen: a facet
+       per query parameter above a 3px rule, with the resulting GET printed
+       beneath. Layers are multi-select — several can be drawn at once — and
+       every toggle refetches, so the chips ARE the query. -->
+  <div class="filter-set">
+    <div class="filter-row">
+      <FilterGroup param="place">
+        <grid-menu id="place-select" trigger-label="loading places…" aria-label="Scope to a place"></grid-menu>
+      </FilterGroup>
     </div>
+    <FilterGroup param="layer" note="any of · toggles redraw"
+                 control="grid-chip-row" id="layer-checks" mode="multi" />
   </div>
 
+  <!-- The exact request(s) behind what is drawn — one per selected layer. -->
+  <div id="map-query" class="req-echo"></div>
+
+  <!-- The map element is NOT here. map.js mounts #map-canvas into this point
+       only once a selected layer has actually returned usable features, and
+       removes it again when none do. §5 of the API contract: a rendered basemap
+       with zero features reads as "all clear", which the contract forbids — so
+       the element is ABSENT, not present-and-empty. Deliberately not a
+       visibility/opacity trick; there is nothing to hide because there is
+       nothing there. -->
+  <div id="map-mount"></div>
+  <div id="map-suppressed"></div>
+
   <!-- feed metadata ledger — the honesty contract, full width -->
-  <SectionHead class="section-gap" heading="Feed metadata" get="…/map/{layer}.geojson" cap="source_status · generated · features · url" />
-  <p class="prose" style="font-size:13px;margin:0 0 12px;">
-    Per-layer <code class="inline">metadata</code>: source status, freshness, attribution, and the exact
-    <code class="inline">.geojson</code> URL. This block is why a consumer can trust — or knows not to
-    trust — what the map shows. A failed layer is shown loud, never swallowed into an empty state.
-  </p>
-  <div class="card"><div id="honesty-panel"></div></div>
+  <SectionHead class="section-gap" heading="Feed metadata" get="…/map/{layer}.geojson" cap="one row per selected layer · a degraded row says why" />
+
+  <!-- The description is ABOUT the table, not a step before reading it, so it
+       sits beside the table rather than above it — and the table gets the width
+       it wants back. Same primitive as History's rail; what differs is only
+       what the right column holds. -->
+  <div class="with-rail">
+    <div class="rail-main">
+      <div id="honesty-panel"></div>
+    </div>
+    <aside class="page-rail" aria-label="About this block">
+      <div class="rail-block">
+        <div class="rail-label">What this is</div>
+        <p>
+          Per-layer <code class="inline">metadata</code>: source status, freshness, attribution,
+          and the absolute <code class="inline">.geojson</code> URL a third-party map client
+          would point at.
+        </p>
+        <p>
+          It is why a consumer can trust — or knows not to trust — what the map shows.
+        </p>
+      </div>
+      <div class="rail-block">
+        <div class="rail-label alert">A failed layer is loud</div>
+        <p>
+          A degraded row is tinted and says which failure in words underneath.
+          <strong>Nothing on the map is never an all-clear</strong> — an UNAVAILABLE layer draws
+          nothing, and that is a different statement from a layer that drew nothing because there
+          was nothing to draw.
+        </p>
+      </div>
+    </aside>
+  </div>
 
   <section aria-labelledby="unlocated-h" class="section-gap">
     <h2 id="unlocated-h">Unlocated features</h2>
-    <p class="prose" style="font-size:13px;">
+    <p class="section-intro">
       Features with <code class="inline">"geometry": null</code> — e.g. a county-wide advisory — are
       valid and can't be drawn on the map, so they are listed here instead (never dropped).
     </p>

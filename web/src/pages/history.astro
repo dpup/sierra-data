@@ -2,6 +2,7 @@
 import Shell from '../layouts/Shell.astro';
 import PageHead from '../components/PageHead.astro';
 import GetChip from '../components/GetChip.astro';
+import FilterGroup from '../components/FilterGroup.astro';
 ---
 <Shell
   current="history"
@@ -9,119 +10,134 @@ import GetChip from '../components/GetChip.astro';
   description="Archive browser over GET /api/v1/history — the chronological, replayable feed of event revisions for after-action review."
 >
   <style is:global slot="head">
-    /* Page-local: the layer checkbox group, the request line, and the
-       day-separator row inside the revision table. All colors/sizes come
-       from app.css tokens — nothing here overrides the design system. */
-    .layer-checks {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 4px 18px;
-      max-width: 34rem;
-    }
-    .layer-check {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      text-transform: none;
-      letter-spacing: 0;
-      font-size: 12.5px;
-      color: var(--text);
-      cursor: pointer;
-      white-space: nowrap;
-    }
-    .query-line {
-      display: flex;
-      align-items: baseline;
-      gap: 12px;
-      font-family: var(--font-mono);
-      font-size: 12px;
-      margin: 2px 0 14px;
-      overflow-x: auto;
-      white-space: nowrap;
-    }
-    /* Day break inside the revision table: a full-width subhead row. */
-    tr.day-sep td {
-      background: var(--bg-header);
-      color: var(--text-fainter);
+    /* Page-local: the day-separator row inside the revision feed, and the
+       results footer. The filters are the shared .filter-set (app.css §14).
+       All colors/sizes come from app.css tokens. */
+    /* Day break in the revision feed: a mono subhead between runs of records.
+       It sits ON the paper rather than in a tinted band — the feed is a list of
+       records, and a filled row would read as one of them. */
+    .day-sep {
       font-family: var(--font-mono);
       font-size: 10px;
       font-weight: 600;
       text-transform: uppercase;
       letter-spacing: 0.11em;
-      padding: 7px 20px;
-      white-space: nowrap;
+      color: var(--text-tertiary);
+      border-bottom: 1px solid var(--rule);
+      padding: 16px 0 5px;
     }
-    .data-table td.rev-num { color: var(--text-faint); }
-    .data-table td.rev-status { color: var(--text-faint); }
+    /* The first separator opens the feed, so it owns the top rule instead of
+       .rec-list's — otherwise the two stack into a double line. */
+    .rec-list > .day-sep:first-child { padding-top: 8px; }
     .results-foot {
       display: flex;
       align-items: center;
       gap: 16px;
-      margin-bottom: 24px;
+      /* The pager is not part of the last row — it needs to read as the foot of
+         the list, not as another entry in it. */
+      margin: var(--space-sub) 0 24px;
     }
   </style>
 
-  <PageHead title="History">
-    <p class="lead">
-      The after-action record. Every state transition an event passes through —
-      a wildfire's acreage revised upward, a warning escalated, and the
-      <strong>all-clear written the moment an event leaves its feed</strong> — is
-      stored as its own immutable revision. This is the chronological, replayable
-      archive over a time range: absence is recorded as deliberately as onset, so
-      "nothing here now" is a fact you can trace back to the revision that made it
-      true — never inferred from an empty screen.
-    </p>
+  <PageHead kicker="Events · revision archive" title="History">
+    <p class="lead">The same events, one row per revision.</p>
     <GetChip slot="badges" path="/api/v1/history" />
   </PageHead>
 
-  <p class="muted small" style="margin-top:12px;max-width:96ch;">
-    <code class="inline">GET /api/v1/history?place=&amp;layer=&amp;from=&amp;to=</code>
-    returns every stored revision of every event in the range, newest first — the
-    camelCase protojson of <code class="inline">grid.v1.EventRevisionList</code>
-    (<code class="inline">revisions[].&#123;revision, observedAt, ingestedAt, event&#125;</code>).
-    Filters map 1:1 to the query parameters and live in this page's URL, so a
-    date-range view of an incident's whole arc is a shareable permalink; paging
-    follows <code class="inline">next_page_token</code>. Timestamps are RFC&nbsp;3339;
-    days are grouped in UTC.
+  <p class="rail-caption">
+    <b>Filters</b>= query params of <code class="inline">/api/v1/history</code>
   </p>
 
-  <!-- Filters: each control is one /api/v1/history query parameter. -->
-  <div class="filters">
-    <label for="hist-place">place</label>
-    <div class="fcell"><select id="hist-place"></select></div>
 
-    <label id="hist-layers-label">layer<span class="lbl-note">any of · empty = all layers</span></label>
-    <div id="hist-layers" class="layer-checks" role="group" aria-labelledby="hist-layers-label"></div>
+  <!-- The shared filter set: one facet per /api/v1/history query parameter.
+       Unlike Events these do NOT refetch on change — a date-range query over the
+       revision archive is expensive enough that firing one per chip would be
+       hostile, so this is the one filter set with an explicit Apply. -->
+  <div class="filter-set">
+    <FilterGroup param="layer" note="any of · empty = all layers"
+                 control="grid-chip-row" id="hist-layers" mode="multi" />
 
-    <label for="hist-from">from<span class="lbl-note">local time</span></label>
-    <div class="fcell"><input type="datetime-local" id="hist-from"></div>
+    <div class="filter-row">
+      <FilterGroup param="place">
+        <grid-menu id="hist-place" trigger-label="any place" aria-label="Scope to a place"></grid-menu>
+      </FilterGroup>
 
-    <label for="hist-to">to<span class="lbl-note">local time · blank = now</span></label>
-    <div class="fcell"><input type="datetime-local" id="hist-to"></div>
+      <FilterGroup param="from">
+        <input type="datetime-local" id="hist-from" class="filter-input" aria-label="from">
+      </FilterGroup>
 
-    <label for="hist-size">page_size</label>
-    <div class="fcell"><select id="hist-size"></select></div>
+      <FilterGroup param="to">
+        <input type="datetime-local" id="hist-to" class="filter-input" aria-label="to">
+      </FilterGroup>
 
-    <label></label>
-    <div class="fcell fcell-actions"><button type="button" id="hist-apply">Apply</button></div>
+      <FilterGroup param="page_size">
+        <grid-menu id="hist-size" trigger-label="default" aria-label="Page size"></grid-menu>
+      </FilterGroup>
+
+    </div>
   </div>
 
-  <div id="hist-query" class="query-line" aria-label="Request behind these results"></div>
+  <!-- THE RAIL. The request, the response shape and the standing caveat are
+       facts about the WHOLE page, not steps in reading it — stacked in the flow
+       they were three blocks of prose between the filters and the archive, each
+       leaving half the column empty beside it. In the rail they are still there
+       400 revisions down, which is exactly when a reader wants the shape and
+       the clock caveat. -->
+  <div class="with-rail">
+    <div class="rail-main">
+      <p class="section-intro intro-full">
+        <strong>These are the events from the <a href="/events">Events browser</a>, unrolled.</strong>
+        That screen shows each event once, as it stands now; this one shows every revision it has
+        passed through — so you read the arc, not the current state. A row is a revision, carries
+        its <code class="inline">rev n</code>, and opens the same record its counterpart on Events
+        opens. Absence is recorded as deliberately as onset: "nothing here now" is a fact you can
+        trace to the revision that made it true, never inferred from an empty screen.
+      </p>
 
-  <div class="table-wrap">
-    <table class="data-table">
-      <thead>
-        <tr>
-          <th style="width:150px">Observed</th>
-          <th style="width:96px">Severity</th>
-          <th style="width:132px">Layer</th>
-          <th class="num" style="width:64px">Rev</th>
-          <th style="width:96px">Status</th>
-          <th>Event</th>
-        </tr>
-      </thead>
-      <tbody id="hist-feed" aria-live="polite"></tbody>
-    </table>
+      <!-- The archive is a list of records, not a spreadsheet: the same .rec row
+           as Events, Roads and the front-page feed, carrying `rev {n}` in its
+           meta line. -->
+      <div id="hist-feed" class="rec-list" aria-live="polite"></div>
+    </div>
+
+    <aside class="page-rail" aria-label="About this query">
+      <div class="rail-block">
+        <div class="rail-label">Request</div>
+        <div id="hist-query" class="req-echo" aria-label="Request behind these results"></div>
+      </div>
+
+      <div class="rail-block">
+        <div class="rail-label">Returns</div>
+        <div class="rail-mono">
+          grid.v1.EventRevisionList<br />
+          revisions[].&#123;<br />
+          <span class="indent">revision,</span>
+          <span class="indent">observedAt,</span>
+          <span class="indent">ingestedAt,</span>
+          <span class="indent">event &#125;</span>
+        </div>
+        <p class="muted small">RFC&nbsp;3339 · newest first · pages by
+          <code class="inline">next_page_token</code> · days grouped in UTC</p>
+        <p class="muted small"><code class="inline">from</code>/<code class="inline">to</code> are
+          entered in your local time and sent as UTC — the echoed request shows exactly what
+          went over the wire.</p>
+      </div>
+
+      <!-- A measured caveat, not a theoretical one: mesh nodes stamp their own
+           adverts and their clocks drift, so the ordering key can be in the
+           future. It is the one place the archive looks wrong, so it stays on
+           screen for as long as the archive does. -->
+      <div class="rail-block">
+        <div class="rail-label alert">Clock caveat</div>
+        <p>
+          Ordering is by <code class="inline">observedAt</code>, which is upstream-stamped. Mesh
+          nodes timestamp their own adverts from an unsynchronized clock, so a
+          <code class="inline">MESH</code> revision can carry a future time and sort above newer
+          records. Reported verbatim — we do not rewrite it. For when <em>this service</em>
+          learned something, read <code class="inline">ingestedAt</code>.
+        </p>
+      </div>
+    </aside>
   </div>
 
   <div class="results-foot">

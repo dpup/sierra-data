@@ -30,6 +30,9 @@ CREATE TABLE event_revisions (       -- full snapshots; storage trivial at this 
   proto       BLOB NOT NULL,
   PRIMARY KEY (event_id, revision)
 );
+-- v4 (store.go migrationV4) adds:
+--   idx_revisions_observed ON event_revisions(observed_at DESC, event_id ASC, revision DESC)
+-- matching QueryHistory's ORDER BY so the cross-event archive walks an index.
 
 CREATE TABLE places (
   id        TEXT PRIMARY KEY,

@@ -39,10 +39,16 @@ location" server.log` (should be one per location per cache refresh; repeat
 requests within the TTL must not add lines).
 
 ## Proto changes (`make proto`)
-Pinned toolchain that reproduces the checked-in generated files byte-for-byte
-(verified by regenerating unchanged protos → no diff):
+Toolchain for regenerating. The plugin versions below were verified to reproduce
+the checked-in files byte-for-byte; **`protoc` itself is not pinned by the
+Makefile** — it comes from PATH, and its version is stamped into a comment at
+the top of every generated file. The files currently on `main` say
+**`protoc v6.33.1`** (generated on the maintainer's machine). Regenerating with
+a different protoc rewrites that one comment line in all seven files, which
+looks like a diff and is not one; match the version or expect it.
 ```bash
-# protoc 29.3 (arm64) — unzip via python (no unzip binary in sandbox)
+# protoc (arm64) — unzip via python (no unzip binary in sandbox). 29.3 is what
+# this doc was written against; the tree is currently on 6.33.1.
 curl -fsSL -o /tmp/protoc.zip https://github.com/protocolbuffers/protobuf/releases/download/v29.3/protoc-29.3-linux-aarch_64.zip
 python3 -c "import zipfile; zipfile.ZipFile('/tmp/protoc.zip').extractall('$HOME/sdk/protoc')" && chmod +x ~/sdk/protoc/bin/protoc
 go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.33.0

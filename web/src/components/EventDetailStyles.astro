@@ -1,0 +1,208 @@
+---
+// EventDetailStyles.astro — everything renderEventDetail() (pages/event-detail.js)
+// needs to render correctly, in ONE place.
+//
+// The renderer is shared by two screens: the /event permalink page and the
+// /events browser's detail column. Its stylesheet and its MapLibre dependency
+// must therefore be shared too — when they lived only in event.astro, the
+// identical markup mounted into /events came out unstyled and silently dropped
+// every geometry map (while printing a reason that was not the real one).
+//
+// Include from a page's `head` slot: <EventDetailStyles slot="head" />
+---
+    <link rel="stylesheet" href="/lib/maplibre-gl.css" />
+    <style is:global>
+      /* Page-local: sections, meta chips, the AI-enhancement panel, revision
+         rows + diff table, request lines. Everything else is the shared design
+         system in app.css. */
+
+      .crumb-back { margin-bottom: 18px; }
+
+      /* ---- Section: the one treatment every block gets -----------------
+         A small all-caps heading over a thick rule, then the rows. No box: the
+         broadsheet takes its structure from rules, so a bordered card here just
+         drew a second, competing edge around every block. Envelope, Detail,
+         Geometry and Provenance are peers and all of them are open — nothing a
+         reader came for sits behind a disclosure. */
+      .ed-section { border: none; background: none; padding: 0; margin: 0 0 var(--space-section); }
+      /* The first section (geometry) follows the headline block directly and
+         needs air between the two — but not a full section gap, which read as a
+         hole. Half of one separates them without detaching the map from the
+         record it belongs to. */
+      .ed-sections > .ed-section:first-child { margin-top: var(--space-block); }
+      .ed-section > h2,
+      .ed-section > summary {
+        font-family: var(--font-mono); font-size: 10px; font-weight: 700;
+        letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-primary);
+        margin: 0; padding: 0 0 7px;
+        border-bottom: 3px solid var(--rule-strong);
+      }
+      .ed-section > .sec-body { padding-top: 16px; }
+
+      /* RAW is the one disclosure left. A full protojson dump open by default
+         would dwarf the record it belongs to. */
+      .ed-raw > summary { cursor: pointer; list-style: none; }
+      .ed-raw > summary::-webkit-details-marker { display: none; }
+      .ed-raw > summary::after { content: "  +"; color: var(--text-tertiary); }
+      .ed-raw[open] > summary::after { content: "  \2014"; }
+      .ed-raw > summary:hover { color: var(--signal); }
+
+      /* The field's spec sentence under its value: the reference and a real
+         value of that field in one place, which is the site's whole thesis
+         applied to a single record. */
+      .kv-doc {
+        font-family: var(--font-sans); font-size: 12.5px; line-height: 1.45;
+        color: var(--text-tertiary); margin-top: 4px; max-width: var(--measure);
+      }
+      /* Rows get a hairline and real air once each carries two lines. */
+      .ed-section .kv { gap: 0; }
+      .ed-section .kv dt,
+      .ed-section .kv dd { padding: 11px 0; border-top: 1px solid var(--rule); }
+      .ed-section .kv > dt:first-of-type,
+      .ed-section .kv > dt:first-of-type + dd { border-top: none; }
+
+      /* Caption under a geometry map: bbox · centroid · provenance of the shape. */
+      .geom-caption {
+        font-family: var(--font-mono); font-size: 11px; color: var(--text-muted-p);
+        margin-top: 8px; overflow-wrap: anywhere;
+      }
+
+      /* The id under the headline shares the line with category and area, so it
+         needs a ceiling of its own or it pushes them off. */
+      .ed-subid { display: inline-block; max-width: min(100%, 34em); vertical-align: bottom; }
+
+      /* Embedded in /events the pane has no URL of its own; this is the record's. */
+      .ed-permalink {
+        display: inline-block; float: right; font-family: var(--font-mono);
+        font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
+        color: var(--text-muted-p);
+      }
+      .ed-permalink:hover { color: var(--signal); }
+
+      /* Composed headline: distinguisher in the display face, headline after. */
+      .ed-lead { font-family: var(--font-display); font-weight: 900; }
+      .ed-rest { font-family: var(--font-display); font-weight: 700; color: var(--text-2nd); }
+
+      /* JSON panes never push the page sideways. */
+      .ed-section pre.code { max-height: 340px; overflow: auto; overflow-wrap: anywhere; white-space: pre-wrap; }
+
+      /* Neutral outlined chip for status / layer beside the severity badge. */
+      .meta-chip {
+        font-size: 10.5px; letter-spacing: 0.04em; text-transform: uppercase;
+        border: 1px solid var(--rule); padding: 2px 7px; line-height: 1.4;
+        color: var(--text-2nd);
+      }
+
+      /* Class-based, not id-based: the same block is rendered by the shared
+         renderer into both this page and the Events browser's detail column. */
+      .ed-head-block { margin-bottom: 8px; }
+      .ed-headline {
+        margin: 10px 0 8px; overflow-wrap: anywhere;
+        font-size: clamp(22px, 2.8vw, 30px); letter-spacing: -0.03em;
+      }
+      .ed-errors:empty { display: none; }
+
+      /* The two GET lines that produced this pane — a footnote at its foot. */
+      .query-line { margin: 10px 0 4px; }
+      .ed-requests {
+        margin-top: var(--space-section); padding-top: 14px;
+        border-top: 1px solid var(--rule);
+      }
+      .query-row {
+        display: flex; align-items: baseline; gap: 10px;
+        padding: 3px 0; white-space: nowrap; overflow-x: auto;
+        font-family: var(--font-mono); font-size: 12.5px;
+      }
+
+      /* AI enhancement — the model's structured output shown beside the verbatim
+         original (fail-loud rule 6: generated text is badged, the original stays
+         reachable). Treated as an ANNOTATION, on the .notice idiom: sunken paper
+         with an ink left edge. Deliberately NOT the signal red — this is a
+         provenance mark, and painting it in the alert accent made a machine
+         paraphrase look like a warning. It is also not a colour of its own: the
+         broadsheet has one accent on paper, and this is not it. */
+      .ai-badge {
+        display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 4px 9px;
+        background: var(--paper-sunken); box-shadow: inset 3px 0 0 var(--ink);
+        padding: 7px 12px; font-size: 12px; margin: 4px 0 2px; color: var(--text-2nd);
+      }
+      .ai-badge-tag {
+        font-family: var(--font-mono); font-weight: 600; letter-spacing: 0.06em;
+        text-transform: uppercase; font-size: 10px; color: var(--text-primary);
+      }
+      /* The verbatim upstream text, in an ink pane: it is data, not prose. */
+      .original-text {
+        white-space: pre-wrap; overflow-wrap: anywhere;
+        font-family: var(--font-mono); font-size: 12.5px; line-height: 1.6;
+        background: var(--ink); box-shadow: inset 3px 0 0 var(--ink-rule);
+        padding: 10px 13px; margin: 0; color: var(--on-ink-code);
+      }
+      /* AI-enhancement section: one consistent vertical rhythm so the badge,
+         note, headings, and pre blocks don't stack with mismatched margins. */
+      .enh-body { display: flex; flex-direction: column; gap: 10px; align-items: stretch; }
+      .enh-body > * { margin: 0; }
+      /* The explanatory note is running text and needs the measure; the code
+         panes beside it are data and keep the full panel width. */
+      .enh-body > p { max-width: var(--measure); }
+      .enh-body .ai-badge { align-self: flex-start; }
+      .enh-body h3 { margin-top: 4px; font-size: 12px; color: var(--text-2nd); }
+      .enh-body pre.code { margin: 0; }
+
+      /* ---- Revision timeline ---------------------------------------------
+         A revision is a heading and a run of changes, not a card and a table.
+         The old form put a three-column table (field / rev n / rev n+1) inside
+         a bordered box per revision; the columns fought each other because the
+         values are a headline, a timestamp and a serialized object, and the box
+         drew a second edge inside a section that already has one. */
+      .timeline { display: flex; flex-direction: column; }
+      .rev-card { padding: 16px 0; border-bottom: 1px solid var(--rule); }
+      .rev-card:last-child { border-bottom: none; }
+      .rev-card-head {
+        display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px;
+      }
+      /* The revision number leads, in the display face and the paper accent —
+         it is the one thing you scan this column for. */
+      .rev-n {
+        font-family: var(--font-display); font-weight: 800; font-size: 20px;
+        letter-spacing: -0.02em; color: var(--signal);
+      }
+      .rev-when { font-family: var(--font-mono); font-size: 12.5px; color: var(--text-2nd); }
+      .rev-note { font-family: var(--font-mono); font-size: 12.5px; color: var(--text-faint-p); }
+      /* Where this record's arc sits in the whole archive. */
+      .ed-archive-link { margin: 0 0 12px; }
+
+      /* The changes, indented behind a hairline so they read as belonging to
+         the revision above rather than as a sibling of it. */
+      .rev-diff {
+        margin: 12px 0 0 2px; padding-left: 22px;
+        border-left: 1px solid var(--rule);
+        display: flex; flex-direction: column; gap: 10px;
+      }
+      .diff-row {
+        display: grid; grid-template-columns: minmax(0, 180px) minmax(0, 1fr);
+        gap: 4px 20px; align-items: start;
+      }
+      /* break-word, not `anywhere`: a dotted path like `wildfire.containment`
+         fits the column, and `anywhere` was hyphenating it mid-word. */
+      .diff-field {
+        font-family: var(--font-mono); font-size: 13px; color: var(--text-primary);
+        overflow-wrap: break-word;
+      }
+      /* old → new as one flowing line: the values wrap together instead of
+         being cut to fit a column. */
+      .diff-vals {
+        font-family: var(--font-mono); font-size: 13px; line-height: 1.55;
+        color: var(--text-primary); overflow-wrap: anywhere;
+      }
+      .diff-before { color: var(--text-faint-p); text-decoration: line-through; }
+      .diff-arrow { color: var(--signal); }
+      .diff-after { color: var(--text-primary); }
+      .diff-removed-note { color: var(--text-faint-p); font-style: italic; }
+
+      @media (max-width: 560px) {
+        .diff-row { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+        .rev-diff { padding-left: 14px; }
+      }
+
+      .timeline-foot { margin-top: 12px; }
+    </style>

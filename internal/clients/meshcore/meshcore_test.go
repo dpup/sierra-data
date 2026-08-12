@@ -163,6 +163,55 @@ func TestRegistryIngestsAdvert(t *testing.T) {
 	assert.Equal(t, []string{"broker-a"}, n.Brokers)
 }
 
+// A later advert that OMITS the signal fields must not erase what we already
+// measured. Community bridges are inconsistent about which keys they send, and
+// an omitted SNR arrived as a Go zero value that overwrote a real reading — so
+// a node that had been heard at 4.5 dB started reporting 0 dB the moment one
+// bridge left the field out. Absent and zero are different facts.
+func TestRegistryKeepsTelemetryWhenAdvertOmitsIt(t *testing.T) {
+	_, priv, err := ed25519.GenerateKey(nil)
+	require.NoError(t, err)
+	loc := [2]float64{38.1374, -120.4579}
+	payload := buildAdvert(t, priv, 2, &loc, "Murphys Ridge", 1_700_000_000)
+
+	r := NewRegistry(Config{})
+	r.ingestRaw(envelopeJSON(t, 4, payload, 4.5, -93, "gw", 0xc2, 0xe2), "broker-a")
+
+	// A second advert for the same node with no SNR/RSSI keys at all.
+	bare := map[string]any{
+		"origin": "gw", "origin_id": "gw",
+		"timestamp":   "2026-07-15T10:05:00.000000",
+		"packet_type": "4", "route": "F",
+		"raw":  hex.EncodeToString(advertFrame(payload, 0xc2, 0xe2)),
+		"hash": "AC9D2DDDD8395713",
+	}
+	b, err := json.Marshal(bare)
+	require.NoError(t, err)
+	r.ingestRaw(b, "broker-a")
+
+	nodes := r.Snapshot()
+	require.Len(t, nodes, 1)
+	assert.InDelta(t, 4.5, nodes[0].SNR, 1e-9, "an omitted SNR must not erase the last reading")
+	assert.EqualValues(t, -93, nodes[0].RSSI, "an omitted RSSI must not erase the last reading")
+}
+
+// An explicit RSSI of 0 is not a reading — received strength is negative dBm —
+// so a bridge sending it means "unknown" and the last real value stands.
+func TestRegistryRejectsZeroRSSI(t *testing.T) {
+	_, priv, err := ed25519.GenerateKey(nil)
+	require.NoError(t, err)
+	loc := [2]float64{38.1374, -120.4579}
+	payload := buildAdvert(t, priv, 2, &loc, "Murphys Ridge", 1_700_000_000)
+
+	r := NewRegistry(Config{})
+	r.ingestRaw(envelopeJSON(t, 4, payload, 4.5, -93, "gw", 0xc2, 0xe2), "broker-a")
+	r.ingestRaw(envelopeJSON(t, 4, payload, 4.5, 0, "gw", 0xc2, 0xe2), "broker-a")
+
+	nodes := r.Snapshot()
+	require.Len(t, nodes, 1)
+	assert.EqualValues(t, -93, nodes[0].RSSI)
+}
+
 func TestRegistryDrainObservations(t *testing.T) {
 	_, priv, err := ed25519.GenerateKey(nil)
 	require.NoError(t, err)

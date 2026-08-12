@@ -99,7 +99,16 @@ func (n *NetworkNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult,
 			meshHeadline(nd),
 		)
 		ev.Category = nd.Role
-		ev.AreaLabel = nd.Name
+		// NO AreaLabel. It is the human description of WHERE something is — "Hwy 4
+		// at Avery", "10km NE of Murphys" — and this was setting it to the node's
+		// own NAME, which is neither a place nor new information: the name is
+		// already the headline and `mesh.name`. It made a mesh event claim a
+		// location it does not have.
+		//
+		// A mesh node has coordinates and nothing else; the Grid does not reverse
+		// geocode, and inventing a description from lat/lng would be worse than
+		// leaving it empty. Empty is the honest answer, and the geometry carries
+		// the position for anyone who needs it.
 		ev.CanonicalUrl = meshMapURL
 		ev.Geometry = GeometryFromPoint(lat, lng)
 		// observed_at is when this node's content was observed; it's zeroed in the

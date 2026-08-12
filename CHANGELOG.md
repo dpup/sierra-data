@@ -14,6 +14,353 @@ throughout; errors are gRPC-standard `{code, codeName, message, details}`). The
 by a snake_case `/v1` surface on 2026-07-05, which was in turn folded back onto the
 proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 
+## 2026-08-11
+
+### Map layers: `metadata.attribution` is now populated on every layer
+
+**Affects `GET /api/v1/places/{place}/map/{layer}.geojson`.** The field was
+hardcoded and returned `""` for every layer except `evacuation`, so eight of the
+nine served an empty attribution — while every feature inside them carried a
+populated `properties.source.attribution`. It now comes from the source
+registry, which has always had a line for each feed, and a layer aggregating two
+feeds credits both (`road_incident` → `California Highway Patrol ·
+quickmap.dot.ca.gov`).
+
+If you render the envelope's attribution — which is the documented place to read
+it — you were displaying nothing for eight layers. No shape change; the field
+was always present, just empty. A registry row with no attribution still yields
+`""` rather than a fabricated line.
+
+### Wildfire `headline`: acreage carries thousands separators
+
+`Gann Fire — 10339 ac, 90% contained` is now `Gann Fire — 10,339 ac, 90%
+contained`. The format is otherwise unchanged (`{name} — {acres} ac, {pct}%
+contained`), and only the acreage number is affected — a big fire is the one
+that most needs reading at a glance and was rendering least readably. **If you
+parse acreage out of `headline`, stop** — `wildfire.acres` is a typed float and
+always has been.
+
+### Weather alerts: `headline` is now the reason, not the issuance boilerplate
+
+**Affects `layer=weather_alert` events and `conditions.fireWeather.headline`.**
+No field is added, removed or retyped. The `headline` string changes shape:
+
+```
+before   Fire Weather Watch issued August 11 at 9:57AM PDT until August 13
+         at 9:00PM PDT by NWS Sacramento CA                        (100 chars)
+after    Fire Weather Watch — thunderstorms and strong outflow winds  (61)
+```
+
+The old value was CAP `properties.headline` passed through verbatim, and every
+token in it is already a structured field on the same record — the product name
+is `category`, the two stamps are `effective` and `expires`, the office is
+`provenance.sourceName`. It said nothing new, in four places at once (the event,
+`conditions.fireWeather.headline`, and both the `weather` and `fire` domain
+lists on a place summary).
+
+The new value is composed deterministically from the product name plus the
+reason clause NWS publishes in `parameters.NWSheadline`, which we were not
+parsing. It is **not** AI-generated, deliberately: `headline` participates in the
+content hash, so a model-written one would differ on every poll and mint a
+revision each time. Where a product publishes no `NWSheadline` — most do not —
+the headline is the bare product name (`Winter Storm Watch`).
+
+**If you display `headline`, you get a shorter and more useful line and need do
+nothing. If you parsed it for the issuance time or the office, stop** — read
+`effective` / `expires` / `provenance.sourceName`, which have always carried
+those and are typed. `description` is unchanged and still verbatim.
+
+### Weather alerts: `effective` / `expires` are the hazard's window, not the product's — **behaviour change**
+
+CAP publishes four timestamps in two pairs, and we were reading the wrong pair.
+`effective`/`expires` describe the **product**: when the office issued it, and
+by when the office must re-issue it. `onset`/`ends` describe the **hazard**. They
+routinely disagree, because a watch is issued the moment it is written:
+
+```
+                    effective  2026-08-11T09:57  ← issued Tuesday morning
+                    expires    2026-08-12T16:00  ← office's re-issue deadline
+                    onset      2026-08-13T05:00  ← the storms
+                    ends       2026-08-13T21:00
+```
+
+We shipped `effective`/`expires` verbatim and never parsed `onset`/`ends` at
+all. Two visible consequences, both now fixed:
+
+- **`expires` was often before the hazard.** The Fire Weather Watch above
+  advertised `expires: 2026-08-12T23:00Z` for storms running through the 13th —
+  the record said the alert was over a day and a half before the weather it
+  warns about. **If you hide or grey out alerts past `expires`, you were hiding
+  live warnings early.**
+- **`status` was never `SCHEDULED` for an advance watch.** The status test
+  compared `effective` to now, and `effective` is issuance, so a watch for
+  Thursday's storms went straight to `ACTIVE` on Tuesday. It is now `SCHEDULED`
+  until `onset`, which is what the field was specified to mean.
+
+`effective` and `expires` now carry `onset` and `ends` when the product
+publishes them, falling back to the old values when it does not (most products
+publish neither, and are unaffected). No field is added, removed or retyped.
+
+**Event ids do not move.** `NWSAlertID`'s synthesized fallback still keys on the
+product's own `effective`, deliberately — an id is an identity, not a schedule.
+
+Same correction applies to `conditions.fireWeather.effective`/`expires`, which
+took the same pair from the governing product.
+
+### Weather alerts: `summary` is a regional summary, not a transcription
+
+The AI `summary` on weather alerts was averaging three to four times its useful
+length — one live Fire Weather Watch ran to 865 characters, of which ~350 was a
+transcription of seven NWS fire zones with their elevation bands (mostly outside
+this service's area) plus a restatement of the issuance and expiry times. The
+prompt asked it to unwrap the alert's `* WHAT/WHERE/WHEN` blocks into prose with
+no length ceiling, so it did.
+
+It is now capped at two sentences / 320 characters and told to lead with the
+hazard and what it means locally: no zone identifiers or elevation bands, no
+issuing office, no timestamps (all of which the record already carries as typed
+fields), and no restating the headline it sits under. Where a place name is
+attached to the event it is named, rather than the region described generically.
+
+```
+after   Thunderstorms with gusty, erratic outflow winds expected in Ebbetts Pass
+        Corridor late Wednesday night through Thursday evening; isolated to
+        scattered wet and dry storms with lightning possible even away from main
+        rain cores. Lightning may start new fires and could combine with strong
+        outflow winds to make fires grow rapidly.
+```
+
+Unchanged: `summary` is still absent when enhancement is disabled or over
+budget, `enhancement` still badges it with the model and the captured I/O, and
+directive text is still never paraphrased — `weatherAlert.instruction` and
+`description` remain verbatim.
+
+### Event data: three fields change value (no shape change)
+
+No field is added, removed or retyped, and no URL or status code moves. Three
+fields now carry **different values** than they did, and each was wrong before.
+
+**`headline` on `evacuation` events now names the zone.** The format is
+unchanged — `Evacuation {Level} — {what}` — but `{what}` was the zone name
+falling back to the **county**, and Cal OES frequently sends no zone name. A
+county-wide activation therefore produced a dozen simultaneous records all
+reading `Evacuation Order — CALAVERAS`, distinguishable only by `id`:
+
+```
+before   Evacuation Order — CALAVERAS      (x12, identical)
+after    Evacuation Order — CAL-E-109-C
+         Evacuation Order — CAL-E-139-D    …
+```
+
+A zone that *does* have a name now carries both: `Evacuation Warning — Zone A
+(CAL-E-046)`. **If you match on this string, stop** — `evacuation.zoneId` is the
+stable identifier and always has been. The zone id is also what an evacuee is
+told over the radio, which is why it beats the county as the fallback.
+
+**`areaLabel` on `mesh` events is now empty.** It was being set to the node's
+own name, which is not a location: `areaLabel` is the human description of
+*where* something is (`Hwy 4 at Avery`, `10km NE of Murphys`), and a mesh node
+has coordinates and nothing else. The name was never lost — it is
+`mesh.name`, and it is the `headline` — so this removes a duplicate that was
+also a false claim. The Grid does not reverse geocode; an empty string is the
+honest answer and `geometry` carries the position.
+
+**`mesh.telemetry.snr` / `.rssi` stop being clobbered by absent readings.**
+Community MQTT bridges are inconsistent about which keys they send. An advert
+that omitted `SNR` was decoding to `0` and overwriting the last real
+measurement, so a node heard at 4.5 dB began reporting `0` the moment one
+bridge left the field out. Absent and zero are now distinguished, and the last
+known reading survives an advert that does not carry one. An explicit `RSSI` of
+`0` is also treated as unknown — received signal strength is negative dBm, so
+`0` is not a value any radio produces.
+
+`hopCount` is deliberately **not** included in that change: `0` is a real
+reading there (a zero-hop beacon heard directly), and it comes from the decoded
+over-the-air frame rather than the bridge envelope.
+
+**Consumer impact.** If you display `mesh.telemetry`, values will look
+*steadier* and fewer will read `0`; a genuine `0` SNR is still reported. If you
+display `areaLabel` for mesh nodes, you now get an empty string — render it as
+absent, not as a blank line, and use `mesh.name` for the node's identity.
+
+### Site: `/assets/*` must revalidate (no API change)
+
+Static assets under `/assets/` are served `Cache-Control: no-cache` instead of
+`max-age=300`, and every site response now carries an `ETag`, so revalidation
+costs a conditional request and a `304` rather than the file again. The page
+HTML and the JavaScript it loads are one unit — the script binds to the markup
+by element id — and a five-minute window in which a browser could hold new HTML
+beside old script produced a hard failure on load after each deploy.
+`_astro/*` keeps its immutable caching (those filenames are content-hashed) and
+`lib/*` still caches for a day.
+
+## 2026-08-10
+
+### `/api/v1/history` is much faster (no API change)
+
+No request or response shape changed — this is purely a latency fix, recorded
+here because consumers were feeling it. The cross-event revision archive was
+measured at **6–40s** (`page_size=50` took 18.7s, 39.0s and once timed out at
+40s); a browser client with any sane request deadline saw it as a hang.
+
+Cause: `event_revisions` had no index on `observed_at`, so the query behind
+`/api/v1/history` scanned the whole revision table and sorted it in a temp
+B-tree on every call. Store migration **v4** adds
+`idx_revisions_observed(observed_at DESC, event_id ASC, revision DESC)`,
+matching the query's `ORDER BY` exactly, so the range filter and the sort are
+both satisfied by an index walk. The migration applies automatically on boot
+(append-only ladder); no operator action.
+
+**If you previously worked around this** by avoiding `/api/v1/history`, capping
+`page_size`, or setting a long client timeout, you can undo that. The per-event
+timeline (`/api/v1/events/{id}/history`) was never affected — it keys on the
+primary key.
+
+Two things worth knowing that did **not** change, because they are sometimes
+misreported as bugs:
+
+- The `from` / `to` bounds **do** filter (verified: `from=2027-01-01` returns 0
+  revisions; `to=2026-08-01` returns only July). The window is half-open,
+  `[from, to)`, over `observedAt`.
+- `observedAt` is **upstream-stamped**, and mesh nodes timestamp their own
+  adverts from unsynchronized on-board clocks. A `MESH` revision can therefore
+  carry a future time and sort above genuinely newer records. That is the
+  upstream value reported verbatim. To ask *when this service learned
+  something*, read `ingestedAt`, which we stamp and which is monotonic.
+
+### Site: the documentation site has been rebuilt (no API change)
+
+`data.sierragridteam.org` has moved from the dark dev-console layout to a
+"broadsheet" design — paper for reading, black for data. The API is untouched;
+this affects only the human-facing site. Three changes worth noting for anyone
+who links to or embeds it:
+
+- **The Map screen no longer draws a basemap when nothing can honestly be
+  drawn.** If every selected layer is `UNAVAILABLE`, errored, or empty, the map
+  element is removed from the page and replaced with a banner naming which case
+  it is. A rendered basemap with zero features reads as an all-clear, which this
+  API's contract forbids. A *partial* failure counts too: one failed layer among
+  eight empty ones is an unknown, not a confirmed-clear region.
+- **Events is now a list + full record**, replacing the table + raw-JSON
+  inspector. The record shown is rendered by the same code as the `/event`
+  permalink page, so the two can no longer disagree. `/event?id=…` is unchanged
+  and remains the permalink.
+- **Docs endpoint examples are runnable.** Each carries a RUN button that
+  fetches that exact URL live and prints the real response, so an example that
+  has gone stale now fails visibly instead of quietly misleading.
+
+The remaining screens have now been rebuilt on the same system, completing the
+redesign. Nothing below changes a request or a response; they are listed because
+they change what a linked-to page looks like or how a control behaves:
+
+- **Roads** leads with the two-idiom split it always should have: road
+  *incidents* are events, road *conditions* (congestion, chain control) are
+  projections that never appear in `/events`. Incidents are now record rows that
+  open the full event; the segment and chain-control tables are unchanged in
+  content.
+- **Map layer controls are chips, not checkboxes**, and the page prints one
+  `GET …/map/{layer}.geojson` per selected layer. Layers are still
+  multi-select — several can be drawn at once, as before.
+- **History is a feed of records** carrying `rev {n}`, replacing the six-column
+  table, and each row now shows its ingest age alongside the id. Filters, the
+  date range and paging are unchanged.
+- **Places** gains client-side `kind` filter chips and a single directory table
+  (place · kind · geometry · parent) in place of the per-kind groups. The
+  geometry column distinguishes a full GeoJSON body from `bbox only` — worth
+  knowing before you rely on a place for point-in-polygon work. The endpoint
+  reference that used to sit at the top of this page now lives only in Docs,
+  which has the runnable version.
+- **Sources** shows each feed's `attribution` string on the board, and states
+  the staleness rule (`STALE` once last success is older than
+  `staleAfterSeconds`, default three poll intervals). **Read those live values
+  rather than hard-coding intervals** — they are per-source tunables.
+- **AI-enhanced text is badged neutrally** rather than in the alert accent. It
+  was rendering in signal red, which made a machine paraphrase look like a
+  warning. The verbatim upstream `description` remains reachable on every
+  record, unchanged.
+- **Events was rebuilt around its filter and data regions.** Place moved out of
+  the filters into a scope header (it is scope, not a facet); the filters are a
+  plain row of chips per facet that requery on click (no apply step); the
+  request echo is a sticky black band carrying the literal page size and the
+  server's full sort rule including the tiebreak. Row titles lead with the
+  record's distinguishing field — `ZONE CAL-E043 — Evacuation Warning` — because
+  a headline is not distinguishing for evacuation records, and each row now
+  shows both its ingest and observed times. **`status` is now two choices** —
+  `open only` (the API default, ACTIVE+SCHEDULED) or `include closed` (all four)
+  — rather than four independent checkboxes. Any other subset is still valid on
+  the endpoint and can be sent by hand; the echoed URL prints whatever is used.
+- **The event detail pane is one flat sequence of open sections** — envelope,
+  detail, geometry, provenance, enhancement, revision timeline — each under a
+  small caps heading and a heavy rule, with a single raw-protojson disclosure at
+  the foot instead of one per card.
+- **Relative times are spelled** (`2 min ago`, not `2m ago`) everywhere. In the
+  uppercase mono meta lines the compact form read as "two months".
+- **Absent values in event data no longer render as a dash.** Absence has three
+  distinct meanings and now three renderings: `not provided by source`,
+  `n/a for {layer}`, and a red `MISSING` with the source URL for a value that
+  should exist and does not. A dash reads as "nothing to report", which is
+  precisely the inference the fail-loud contract exists to prevent.
+
+- **Maps are light, and inert until you use them.** The basemap moved from CARTO
+  dark to OpenFreeMap's Positron, so hazard geometry now paints in the paper
+  severity ramp rather than the dark-adapted one — if you were colour-matching
+  screenshots of the map, the hexes changed. Maps also no longer capture the
+  scroll wheel: gestures are disabled until the map is clicked or focused, and
+  released on Escape. A map whose tile host is unreachable still draws its
+  geometry over a blank backdrop rather than rendering nothing.
+- **The paper family is neutral, not warm** (2026-08-11). Paper moved
+  `#f4f1ea → #fbfbfa` and the four surface tokens beneath it followed
+  (paper-sunken, both rules, the faint text tone). Ink, the accent and both
+  severity ramps are unchanged, so **if you colour-match hazard geometry or
+  chips to this site, nothing you key on moved** — only the page under them.
+- **Long ids truncate and copy.** Event ids run to seventy characters
+  (`meshcore:3811ef…`); they are clipped with an ellipsis and click-to-copy
+  hands over the full value. Copying now marks itself with a tick beside the
+  value rather than replacing the text with the word "copied" — the id stays
+  legible and the line does not reflow.
+- **Every screen that filters now filters the same way.** Map, History, Places
+  and Roads used a label/grid form with native `<select>`s while Events used
+  chips; they are now one component — a facet per query parameter, labelled with
+  the parameter's own name, above the rule that divides the query from its
+  results. Behaviour is unchanged on each page except that place is chosen from
+  a styled menu rather than an OS dropdown, and a `?place=` naming a corridor or
+  a town (rather than an AREA) is now preserved by every picker instead of being
+  silently reset by two of them.
+
+**Not changed, and worth stating because it is often asked for:** `/api/v1/events`
+returns no total record count. `EventList` is `{events, nextPageToken}` — keyset
+pagination over an opaque cursor. Clients cannot render "12 of 47" or a page
+count without a server change, and the site does not fabricate one. Where a real
+count IS available it is used: the Events header reports
+`summary.totalActive` for a scoped place, which is live and exact.
+
+## 2026-08-06
+
+### CORS is now open (`Access-Control-Allow-Origin: *`)
+
+Every `/api/v1/...` response (and the `.geojson` map layers) now returns
+`Access-Control-Allow-Origin: *`, so **any** web origin can fetch The Grid
+directly from the browser. Previously only an explicit allowlist
+(`ersn.net`, `sierragridteam.org`, and localhost dev ports) got a CORS header;
+every other origin's cross-origin fetch was blocked by the browser.
+
+**Impact for consumers**: purely additive — nothing that worked before stops
+working. If you were on the old allowlist, no change is needed. If you were
+building a browser client from any other origin (or a local dev server on a
+non-standard port) and hitting CORS errors, those are gone.
+
+No field names, types, status codes, or URLs change. This is a response-header
+change only.
+
+Notes:
+- The API stays public, read-only, keyless, and **credential-less** — `*` CORS
+  is served with `Access-Control-Allow-Credentials: false` (the two are required
+  to go together). Don't send cookies/credentials on cross-origin requests; they
+  won't be honored.
+- Only `GET` is granted cross-origin (`Access-Control-Allow-Methods: GET`). The
+  `/mcp` JSON-RPC endpoint is POST and remains not callable cross-origin from a
+  browser.
+
 ## 2026-08-04
 
 ### Wildfire detection widened, and fires now attach to a place by perimeter and by proximity

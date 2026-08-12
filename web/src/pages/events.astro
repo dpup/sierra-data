@@ -1,146 +1,269 @@
 ---
 import Shell from '../layouts/Shell.astro';
+// The detail column mounts the SHARED renderer, so it needs the renderer's own
+// stylesheet + MapLibre — exactly what the /event page loads.
+import EventDetailStyles from '../components/EventDetailStyles.astro';
+import FilterGroup from '../components/FilterGroup.astro';
 import PageHead from '../components/PageHead.astro';
-import GetChip from '../components/GetChip.astro';
 ---
 <Shell
   current="events"
   title="Events · The Grid"
   description="Event explorer over GET /api/v1/events — the cross-layer query of every discrete occurrence the Grid tracks, with filters that map 1:1 to the endpoint's parameters and a URL that is the shareable permalink."
 >
+  <EventDetailStyles slot="head" />
+
   <style is:global slot="head">
-    /* Page-local: the query bar, the pill filter rows, and the two-column
-       results + JSON inspector layout. Every color/size resolves to an
-       app.css token — nothing here overrides the design system. */
+    /* ================================================================
+       EVENTS — page skeleton
+       A. scope header   full width
+       B. filter region  full width, always visible
+       C. request echo   full width, sticky
+       D. results grid   the only two-column region
+       A–C span the full column so the echoed request describes the whole
+       result set, not the selected record.
+       ================================================================ */
 
-    /* Query bar — the exact GET behind the table, bg = code surface. */
-    .qbar { background: var(--bg-code); }
-    .qbar-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-    .qbar-chips { display: flex; flex-wrap: wrap; gap: 8px; flex: 1; min-width: 0; }
-    .qbar-hint { font-size: 12px; color: var(--text-dim); }
-    .qbar-copy { margin-left: auto; }
-    .qbar-curl { margin-top: 10px; overflow-x: auto; white-space: nowrap; }
-    .qchip .x { user-select: none; }
+    /* The filter region is entirely shared now — .filter-set / .filter-group /
+       .filter-label / .filter-input in app.css §14, used by every screen that
+       filters. Nothing page-local is left here. */
+    .filter-echo.omitted { color: var(--text-faint-p); }
 
-    /* .fcell / .fcell-actions / .pill-row / .lbl-note are shared components in app.css. */
-    .fspacer { display: block; }
+    /* ---- C. Request echo ---------------------------------------------
+       A plain line on paper, under the rule that closes the filters.
 
-    /* Results + sticky inspector. */
-    .results-grid { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 16px; align-items: start; }
-    .results-col { min-width: 0; }
-    .results-grid .inspector {
-      position: sticky; top: 68px; align-self: start;
-      max-height: calc(100vh - 92px); overflow: auto;
+       This was a black band with the GET in green, the path in a highlight box,
+       and a second line of metadata — a lot of chrome for one URL, and it broke
+       the page's own rule that ink is for surfaces that ARE the API (a response
+       pane, the deck) rather than for anything merely about it. The mock is one
+       muted mono line, and the request reads better for having nothing around
+       it. The absolute URL is shown, because that is the thing you would paste.
+       Sticky is gone with the band: an inline line has nothing to pin. */
+    /* The echoed request uses the shared .req-echo (app.css). Only its
+       colour emphasis is page-local: the URL is the thing you copy. */
+    .ev-echo-url { color: var(--text-2nd); min-width: 0; }
+
+    /* ---- D. Results grid ---------------------------------------------- */
+    /* CONTAINER query, not a viewport media query: this grid is inset by the
+       244px sidebar, so a 920px VIEWPORT leaves ~600px here. Keying on the
+       grid's own width is the only measurement that is true. The container must
+       be an ANCESTOR of what it styles — an element cannot query itself. */
+    #ev-results { container-type: inline-size; container-name: results; }
+    .results-grid { display: grid; gap: 0; grid-template-columns: minmax(0, 1fr); align-items: start; }
+    @container results (min-width: 760px) {
+      .results-grid.has-selection { grid-template-columns: minmax(300px, 380px) minmax(0, 1fr); }
+      /* No divider rule: each row already carries a bottom hairline and a
+         severity spine, and a third vertical line boxed every row in. The gap
+         between the columns is the separation. */
+      .results-grid.has-selection .results-col { padding-right: 28px; }
+      .results-grid.has-selection .detail-col { padding-left: 0; }
     }
-    .ev-insp-body { min-height: 140px; }
-    .insp-placeholder { color: var(--text-dim); }
-
-    /* Two-line event cell + selectable row. */
-    .events-table tbody tr { cursor: pointer; }
-    .events-table tbody tr.ev-selected { background: var(--bg-selected); }
-    .events-table tbody tr.ev-selected td:first-child {
-      box-shadow: inset 3px 0 0 var(--row-sev, var(--grn-line));
+    /* The list scrolls independently only when there is room for it to be
+       useful. Below that it flows, because two independently scrolling columns
+       on a small screen is a trap. */
+    @container results (min-width: 1100px) {
+      .results-grid.has-selection .results-col {
+        position: sticky; top: var(--ev-echo-h, 84px);
+        max-height: calc(100vh - var(--ev-echo-h, 84px)); overflow-y: auto;
+      }
     }
-    .ev-head { color: var(--text); font-size: 13.5px; line-height: 1.4; }
-    .ev-head a { color: var(--text-hi); }
-    .ev-sub { margin-top: 3px; font-size: 12px; color: var(--text-faint); white-space: normal; }
-    .ev-sub .sep { color: var(--text-dimmer); }
+    .results-col, .detail-col { min-width: 0; }
 
-    .results-foot { display: flex; align-items: center; gap: 16px; margin-top: 14px; margin-bottom: 8px; }
-
-    @media (max-width: 900px) {
-      .results-grid { grid-template-columns: 1fr; }
-      .results-grid .inspector { position: static; max-height: none; }
+    /* Under the two-column threshold the detail REPLACES the list. */
+    @container results (max-width: 759.98px) {
+      .results-grid.narrow-detail .results-col { display: none; }
     }
+    .ev-back {
+      display: inline-block; margin-bottom: 12px; font-family: var(--font-mono);
+      font-size: 10px; font-weight: 700; letter-spacing: 0.1em;
+      background: none; border: 1px solid var(--ink); padding: 5px 10px; cursor: pointer;
+      color: var(--text-primary);
+    }
+    .ev-back:hover { background: var(--ink); color: var(--paper); }
+    .ev-back[hidden] { display: none; }
+
+    /* ---- List header + pagination -------------------------------------- */
+    .ev-listhead {
+      display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+      border-bottom: 3px solid var(--rule-strong); padding-bottom: 6px; margin-bottom: 0;
+      font-family: var(--font-mono); font-size: 9px; font-weight: 700; letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+    .ev-listhead .count { color: var(--text-primary); }
+    .ev-sortnote { color: var(--text-faint-p); font-weight: 400; }
+    .ev-page {
+      font-family: var(--font-mono); font-size: 10px; color: var(--text-muted-p);
+      display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+      margin-top: 12px; margin-bottom: 8px;
+    }
+    .ev-next {
+      font-family: var(--font-mono); font-size: 10px; font-weight: 700; letter-spacing: 0.08em;
+      background: none; border: 1px solid var(--ink); color: var(--text-primary);
+      padding: 5px 10px; cursor: pointer;
+    }
+    .ev-next:hover { background: var(--ink); color: var(--paper); }
+    .ev-next[hidden] { display: none; }
+
+    /* ---- Record rows on this page -------------------------------------- */
+    #ev-list { border-top: none; }
+    /* Selected: sunken paper and the severity spine, as the mock has it. An
+       earlier pass added a 2px inset outline on top of this, which on a list of
+       fifty rows read as a box around every selection and was a large part of
+       why the column felt busy. The tint plus the spine is enough. */
+    #ev-list .rec.selected { background: var(--paper-sunken); }
+    #ev-list .rec:hover { background: #f4f4f2; }
+    #ev-list .rec.selected:hover { background: var(--paper-sunken); }
+
+    /* The two-line time block (opts.timeBlock). Tabular so the two lines and
+       the rows above/below line up as a column of times. */
+    /* Just the age, right-aligned — the mock's row carries no label here. */
+    .rec-timeblock {
+      margin-left: auto; text-align: right; flex: none; color: var(--text-faint-p);
+      font-variant-numeric: tabular-nums; text-transform: none; letter-spacing: 0.02em;
+    }
+    .rec-time-fault { color: var(--signal); font-weight: 700; }
+
+    /* Title: the distinguisher leads in the display face, the headline follows
+       in the prose weight so the two are separable at a glance. */
+    .rec-lead { font-family: var(--font-display); font-weight: 800; }
+    .rec-rest { font-family: var(--font-sans); font-weight: 400; color: var(--text-2nd); }
+
+    /* At FULL width (nothing selected) a 1200px row must not be one 15px title
+       in a sea of paper: the body splits and the meta/id move right. */
+    @container results (min-width: 760px) {
+      .results-grid:not(.has-selection) .rec-body {
+        display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 4px 20px;
+        align-items: start;
+      }
+      .results-grid:not(.has-selection) .rec-meta { grid-column: 2; grid-row: 1; display: block; text-align: right; }
+      .results-grid:not(.has-selection) .rec-meta .rec-sev { display: block; }
+      .results-grid:not(.has-selection) .rec-meta .rec-layer { display: block; margin-top: 2px; }
+      .results-grid:not(.has-selection) .rec-timeblock { margin-left: 0; margin-top: 4px; }
+      .results-grid:not(.has-selection) .rec-head { grid-column: 1; grid-row: 1; margin-top: 0; }
+      .results-grid:not(.has-selection) .rec-id { grid-column: 1; grid-row: 2; }
+    }
+
+    /* ---- Loading / empty / error ---------------------------------------- */
+    .ev-skel-row { display: flex; border-bottom: 1px solid var(--rule); }
+    .ev-skel-spine { flex: 0 0 6px; background: var(--paper-sunken); }
+    .ev-skel-body { padding: 10px 12px; flex: 1; min-width: 0; }
+    .ev-skel-bar { background: var(--paper-sunken); height: 9px; margin-bottom: 7px; }
+    .ev-skel-bar.w1 { width: 32%; } .ev-skel-bar.w2 { width: 68%; height: 13px; } .ev-skel-bar.w3 { width: 22%; }
+    .ev-fetching { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted-p); padding: 8px 0; }
+
+    .ev-empty-head { font-family: var(--font-display); font-weight: 800; font-size: 20px; margin: 18px 0 10px; }
+    .ev-remove-chip {
+      font-family: var(--font-mono); font-size: 10.5px; padding: 5px 9px;
+      background: var(--paper-sunken); border: 1px solid var(--ink); color: var(--text-primary);
+      cursor: pointer; margin: 0 6px 6px 0;
+    }
+    .ev-remove-chip::before { content: "\00d7  "; color: var(--signal); font-weight: 700; }
+
+    /* A failure is a full-width band, and the last good data stays on screen
+       underneath it — dimmed and labelled, never silently replaced by nothing. */
+    .ev-errband {
+      background: var(--signal); color: var(--paper); font-family: var(--font-mono);
+      font-size: 11px; padding: 10px 12px; margin: 10px 0;
+      display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline;
+    }
+    .ev-errband a { color: var(--paper); text-decoration: underline; overflow-wrap: anywhere; }
+    .ev-retry {
+      margin-left: auto; font-family: var(--font-mono); font-size: 10px; font-weight: 700;
+      letter-spacing: 0.08em; background: none; border: 1px solid var(--paper);
+      color: var(--paper); padding: 4px 10px; cursor: pointer;
+    }
+    .ev-retry:hover { background: var(--paper); color: var(--signal); }
+    .ev-lastgood {
+      font-family: var(--font-mono); font-size: 9px; font-weight: 700; letter-spacing: 0.12em;
+      text-transform: uppercase; color: var(--text-muted-p); padding: 6px 0;
+    }
+    .ev-stale-body { opacity: 0.55; }
+
+    /* ---- Absence vocabulary (shared with the detail pane) --------------- */
+    .absent { font-family: var(--font-mono); font-size: 10px; }
+    .absent-empty { font-style: italic; color: var(--text-faint-p); }
+    .absent-na { color: var(--text-faint-p); }
+    .absent-fault { font-weight: 700; color: var(--signal); }
+    .absent-src { font-size: 9.5px; }
+
+    /* Numerals are tabular everywhere they are data. */
+    .rec-id, .ev-page { font-variant-numeric: tabular-nums; }
+
   </style>
 
-  <PageHead kicker="grid.v1 · event explorer" title="Events">
-    <p class="lead">
-      Every discrete occurrence the Grid tracks — wildfire,
-      evacuation, weather alert, earthquake, road incident, and the rest — is
-      reachable through <strong>one endpoint</strong>. The filters below map
-      1:1 onto the query parameters of
-      <code class="inline">GET /api/v1/events</code>; results are the camelCase
-      protojson of <code class="inline">grid.v1.EventList</code>, server-sorted
-      <strong>severity-first, then newest-first</strong>. This page's whole
-      filter state lives in its URL, so any view you compose here is a
-      shareable permalink — <strong>you can replay the exact request
-      yourself.</strong>
-    </p>
-    <GetChip slot="badges" path="/api/v1/events" />
+  <!-- ============ A. HERO ============ -->
+  <!-- The shared hero (components/PageHead.astro). `metaId` is filled by the
+       island with the loaded count and, when a place is scoped, its live active
+       count — see renderScope in events.js. -->
+  <PageHead kicker="Cross-layer query" title="Events browser" metaId="ev-scope-meta">
+    <p class="lead">Every occurrence the Grid tracks, all layers, one endpoint.</p>
   </PageHead>
 
-  <!-- The exact request behind the table: endpoint + active filter chips. -->
-  <section class="panel qbar" aria-label="Request behind these results">
-    <div class="qbar-line">
-      <GetChip path="/api/v1/events" />
-      <span id="ev-qchips" class="qbar-chips"></span>
-      <button type="button" id="ev-copyurl" class="copy-btn qbar-copy">copy url</button>
+  <!-- The mechanics, attached to the rail they describe rather than crowding
+       the hero: what these controls ARE, and what clicking one does. -->
+  <p class="rail-caption">
+    <b>Filters</b>= query params of <code class="inline">/api/v1/events</code> · every click
+    refetches and rewrites the URL — the address bar is the permalink · each event appears once,
+    as it stands now; <a href="/history">History</a> has every revision of these same events
+  </p>
+
+  <!-- ============ B. FILTER REGION ============ -->
+  <!-- Always visible. The chips are the query: each click refetches, so there
+       is no apply step and nothing to expand. -->
+  <div class="filter-set">
+    <FilterGroup param="layer" control="grid-chip-row" id="ev-layers" mode="multi" exclusive="" />
+
+    <div class="filter-row">
+      <FilterGroup param="place">
+        <grid-menu id="ev-place" trigger-label="all places" aria-label="Scope to a place"></grid-menu>
+      </FilterGroup>
+      <FilterGroup param="severity_min" control="grid-chip-row" id="ev-sev" mode="single" />
+      <FilterGroup param="status" control="grid-chip-row" id="ev-status" mode="single" />
+
+      <FilterGroup param="since">
+        <input type="datetime-local" id="ev-since" class="filter-input" aria-label="since">
+        <!-- The only local-time input on an otherwise strict-Z page, so it
+             always shows the exact serialized value and the offset applied. -->
+        <div class="filter-echo" id="ev-since-echo"></div>
+      </FilterGroup>
     </div>
-    <div id="ev-curl" class="qbar-curl mono small muted"></div>
-  </section>
+  </div>
 
-  <!-- Filters: each control is one /api/v1/events query parameter. -->
-  <div class="filters">
-    <label for="ev-place">place</label>
-    <div class="fcell"><select id="ev-place"></select></div>
-
-    <label id="ev-layers-label">layer<span class="lbl-note">any of · empty = all layers</span></label>
-    <div id="ev-layers" class="pill-row" role="group" aria-labelledby="ev-layers-label"></div>
-
-    <label id="ev-status-label">status<span class="lbl-note">default ACTIVE + SCHEDULED</span></label>
-    <div id="ev-status" class="pill-row" role="group" aria-labelledby="ev-status-label"></div>
-
-    <label for="ev-sev">severity_min</label>
-    <div class="fcell"><select id="ev-sev"></select></div>
-
-    <label for="ev-since">since<span class="lbl-note">local time</span></label>
-    <div class="fcell"><input type="datetime-local" id="ev-since"></div>
-
-    <label for="ev-size">page_size</label>
-    <div class="fcell"><select id="ev-size"></select></div>
-
-    <span class="fspacer" aria-hidden="true"></span>
-    <div class="fcell fcell-actions">
-      <button type="button" id="ev-apply">Apply filters</button>
-      <button type="button" id="ev-reset">Reset</button>
-    </div>
+  <!-- ============ C. REQUEST ECHO ============ -->
+  <div class="req-echo" id="ev-echo">
+      <span class="method">GET</span>
+      <span class="ev-echo-url" id="ev-url"></span>
+      <button type="button" id="ev-copyurl" class="copy-btn">copy curl</button>
   </div>
 
   <div id="ev-errors"></div>
 
-  <!-- Results table (left) + sticky raw-JSON inspector (right). -->
-  <div class="results-grid">
-    <div class="results-col">
-      <div class="table-wrap">
-        <table class="data-table events-table">
-          <thead>
-            <tr>
-              <th style="width:104px">Severity</th>
-              <th>Event</th>
-              <th style="width:120px">Source</th>
-              <th class="num" style="width:64px">Rev</th>
-            </tr>
-          </thead>
-          <tbody id="ev-tbody" aria-live="polite"></tbody>
-        </table>
+  <!-- ============ D. RESULTS GRID ============ -->
+  <div id="ev-results">
+    <div class="results-grid" id="ev-grid">
+      <div class="results-col" id="ev-list-col">
+        <div class="ev-listhead">
+          <span class="count" id="ev-count">&nbsp;</span>
+          <span class="ev-sortnote">newest first</span>
+        </div>
+        <div id="ev-list" aria-live="polite"></div>
+        <div id="ev-empty"></div>
+        <div class="ev-page" id="ev-page"></div>
       </div>
-      <div id="ev-empty"></div>
-      <div class="results-foot">
-        <button type="button" id="ev-more" hidden>Load more</button>
-        <span id="ev-status-line" class="loading">Loading…</span>
+
+      <!-- The right column is rendered by renderEventDetail() — the SAME
+           renderer as the /event permalink page, so the browser and the
+           permalink can never show a record differently. -->
+      <div class="detail-col" id="ev-detail-col" hidden>
+        <button type="button" id="ev-back" class="ev-back" hidden></button>
+        <div id="ev-detail"></div>
       </div>
     </div>
-
-    <aside class="inspector" id="ev-inspector" aria-label="Selected event JSON">
-      <div class="inspector-head">
-        <span>Response</span>
-        <span class="meta">application/json · grid.v1.Event</span>
-      </div>
-      <pre id="ev-insp-body" class="ev-insp-body"></pre>
-    </aside>
   </div>
 
+  <!-- renderEventDetail draws each record's geometry when MapLibre is present;
+       without it the detail column silently degrades to bbox/centroid text. -->
+  <script is:inline src="/lib/maplibre-gl.js"></script>
   <script is:inline type="module">
     import { initEventsPage } from '/assets/pages/events.js';
     initEventsPage();

@@ -12,51 +12,47 @@ import PageHead from '../components/PageHead.astro';
     <style is:global>
       .mesh-topbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; margin: 20px 0 12px; }
       #mesh-stats { font-size: 13.5px; }
-      #mesh-window { display: inline-flex; gap: 4px; }
-      .mesh-win-btn {
-        font: inherit; font-size: 12px; padding: 3px 9px; cursor: pointer;
-        color: var(--text-2); background: var(--bg-card); border: 1px solid var(--border);
-        border-radius: 999px;
-      }
-      .mesh-win-btn:hover { color: var(--text); border-color: var(--text-faint); }
-      .mesh-win-btn.active { color: var(--text-hi); border-color: var(--accent-cyan, #6aa9c9); background: rgba(106, 169, 201, 0.14); }
-      #mesh-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-left: auto; font-size: 12.5px; color: var(--text-2); }
+      /* The window control is a .pill group (app.css §6) — mesh.js builds it. */
+      #mesh-window { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+      #mesh-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-left: auto; font-size: 12.5px; color: var(--text-2nd); }
       .mesh-leg { display: inline-flex; align-items: center; gap: 6px; }
-      .mesh-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; border: 1px solid #0b0f12; }
+      /* The one place a radius survives, and deliberately: these are the map's
+         node dots repeated as a key, and a node is drawn as a circle. */
+      .mesh-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; border: 1px solid var(--ink); }
       #mesh-canvas {
-        width: 100%; height: 620px; border: 1px solid var(--border); border-radius: var(--radius);
-        background: #0f1417; overflow: hidden;
+        width: 100%; height: 620px; border: 1px solid var(--ink);
+        background: var(--paper-sunken); position: relative; overflow: hidden;
       }
-      /* popup, dev-console themed (mirrors the map page) */
+      /* Popup: a paper surface over the light basemap, mirroring the map page —
+         no radius, no drop shadow, and the paper severity ramp it inherits. */
       .maplibregl-popup-content {
-        background: var(--bg-card); color: var(--text); border: 1px solid var(--border);
-        border-radius: var(--radius); font-family: var(--font-mono); font-size: 12.5px;
-        padding: 10px 12px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+        background: var(--paper); color: var(--text-body); border: 1px solid var(--ink);
+        font-family: var(--font-mono); font-size: 12px; padding: 10px 12px; box-shadow: none;
       }
-      .maplibregl-popup-close-button { color: var(--text-faint); font-size: 17px; }
-      .map-popup .popup-headline { font-weight: 600; color: var(--text-hi); margin-bottom: 5px; }
+      .maplibregl-popup-close-button { color: var(--text-muted-p); font-size: 17px; }
+      .map-popup .popup-headline { font-family: var(--font-display); font-weight: 700; font-size: 14px; color: var(--text-primary); margin-bottom: 5px; }
       .map-popup .popup-chips { margin-bottom: 6px; }
       .mesh-roletag { font-weight: 600; }
       .popup-details-dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 0; }
-      .popup-details-dl dt { color: var(--text-fainter); font-size: 11px; }
-      .popup-details-dl dd { margin: 0; color: var(--text); font-size: 12px; overflow-wrap: anywhere; }
+      .popup-details-dl dt { color: var(--text-tertiary); font-size: 11px; }
+      .popup-details-dl dd { margin: 0; color: var(--text-body); font-size: 12px; overflow-wrap: anywhere; }
       @media (max-width: 720px) { #mesh-canvas { height: 66vh; } #mesh-legend { margin-left: 0; } }
     </style>
   </Fragment>
 
   <PageHead kicker="Relay topology" title="Mesh">
-    <p class="lead">
-      The whole MeshCore mesh as a topology map — every located node from
-      <code class="inline">GET /api/v1/events?layer=mesh</code>, colored by role, with the
-      <strong>relay links</strong> from
-      <code class="inline">GET /api/v1/mesh/links</code>: the server rolls up each advert's relay
-      path over time into a durable, weighted edge list. Links <strong>fade by recency</strong>
-      (a quiet-but-recent link is dim, not gone) and thicken with traffic; the window control trades
-      currency for history, so an intermittent, shaky mesh reads honestly. Coverage is deliberately
-      wide (Bay Area → Sierra). <strong class="accent-orange">A sparse map is not an all-clear — a
-      node is only drawn once we've heard it advertise a location.</strong>
-    </p>
+    <p class="lead">The MeshCore mesh as a topology map.</p>
   </PageHead>
+
+  <p class="rail-caption">
+    <b>Nodes</b><code class="inline">/api/v1/events?layer=mesh</code>, colored by role ·
+    <b>links</b><code class="inline">/api/v1/mesh/links</code>, each advert's relay path rolled up
+    into a durable weighted edge list — links fade by recency (a quiet-but-recent link is dim, not
+    gone) and thicken with traffic, and the window trades currency for history · coverage is
+    deliberately wide, Bay Area → Sierra ·
+    <strong class="accent-orange">a sparse map is not an all-clear — a node is drawn only once we
+    have heard it advertise a location</strong>
+  </p>
 
   <div class="mesh-topbar">
     <div id="mesh-stats" class="muted">Loading the mesh…</div>
@@ -66,6 +62,63 @@ import PageHead from '../components/PageHead.astro';
 
   <div id="mesh-canvas"></div>
   <div id="mesh-errors" class="section-gap"></div>
+
+  <!-- The node roster. The map answers "where is the mesh"; this answers "what
+       exactly did we hear, and how long ago" — including nodes whose telemetry
+       is partial, which a map dot cannot express. -->
+  <div class="section-gap">
+    <div class="section-head">
+      <div class="left"><h2>Nodes heard</h2></div>
+      <span class="cap">node · type · snr / rssi · hops · heard</span>
+    </div>
+    <div class="with-rail">
+      <div class="rail-main">
+        <div class="table-wrap">
+          <table class="data-table capped-head">
+            <thead>
+              <!-- No width hints: with .capped-head the header is taken out of
+                   flow, so th widths no longer size the columns. The cells
+                   carry their own units ("9 dB", "2 hops", "5 min ago") and
+                   size themselves. -->
+              <tr>
+                <th>Node</th><th>Type</th><th>SNR / RSSI</th>
+                <th class="num">Hops</th><th>Heard</th>
+              </tr>
+            </thead>
+            <tbody id="mesh-tbody"><tr><td colspan="5"><span class="loading">Loading nodes…</span></td></tr></tbody>
+          </table>
+        </div>
+      </div>
+      <aside class="page-rail" aria-label="How to read the roster">
+        <div class="rail-block">
+          <div class="rail-label">Ambient state</div>
+          <p>
+            Mesh presence is <code class="inline">INFO</code>: excluded from a place's
+            <code class="inline">totalActive</code>, its severity counts, its top events and its
+            area mode. A busy mesh does not raise an alert level, and a quiet one does not lower
+            it.
+          </p>
+        </div>
+        <div class="rail-block">
+          <div class="rail-label">Telemetry is volatile</div>
+          <p>
+            SNR, RSSI and hop count are deliberately excluded from the content hash, so they never
+            mint a revision — only a node's identity, location or status does.
+          </p>
+          <p>Missing telemetry renders as <span class="mono">—</span>, never <span class="mono">0</span>.</p>
+        </div>
+        <div class="rail-block">
+          <div class="rail-label alert">Which clock</div>
+          <p>
+            To ask when a node last spoke, read the event's
+            <code class="inline">observedAt</code> — not
+            <code class="inline">telemetry.lastAdvertAt</code>, which the node stamps from its own
+            unsynchronized clock.
+          </p>
+        </div>
+      </aside>
+    </div>
+  </div>
 
   <script is:inline src="/lib/maplibre-gl.js"></script>
   <script is:inline type="module">

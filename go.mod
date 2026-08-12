@@ -3,7 +3,8 @@ module github.com/dpup/sierra-data
 go 1.25.8
 
 require (
-	github.com/dpup/prefab v0.6.0
+	github.com/dpup/prefab v0.6.1
+	github.com/eclipse/paho.mqtt.golang v1.5.1
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0
 	github.com/sashabaranov/go-openai v1.41.1
 	github.com/stretchr/testify v1.11.1
@@ -20,7 +21,6 @@ require (
 	github.com/agnivade/levenshtein v1.2.1 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/eclipse/paho.mqtt.golang v1.5.1 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect

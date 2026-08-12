@@ -1,129 +1,25 @@
 ---
 import Shell from '../layouts/Shell.astro';
+import EventDetailStyles from '../components/EventDetailStyles.astro';
 ---
 <Shell
   current="events"
   title="Event · The Grid"
   description="Everything the store holds for one event: the full protojson envelope and typed detail from GET /api/v1/events/{id}, geometry on a map, provenance, the AI enhancement shown beside the verbatim original it was built from, and the complete revision timeline with client-side field diffs from GET /api/v1/events/{id}/history."
 >
-  <Fragment slot="head">
-    <link rel="stylesheet" href="/lib/maplibre-gl.css" />
-    <style is:global>
-      /* Page-local: meta chips, AI-enhancement panel, revision cards + diff
-         table, raw-protojson toggles, request lines. Everything else is the
-         shared design system in app.css. */
-
-      .crumb-back { margin-bottom: 18px; }
-
-      /* Neutral outlined chip for status / layer beside the severity badge. */
-      .meta-chip {
-        font-size: 10.5px; letter-spacing: 0.04em; text-transform: uppercase;
-        border: 1px solid var(--border-input); border-radius: var(--radius-sm);
-        padding: 2px 7px; line-height: 1.4; color: var(--text-2);
-      }
-      .ai-chip { border-color: var(--grn-border-2); color: var(--grn); }
-
-      #ed-head { margin-bottom: 8px; }
-      #ed-head h1 { margin: 10px 0 8px; overflow-wrap: anywhere; }
-      #ed-lead { margin-top: 4px; }
-
-      /* The two GET lines that produced this page. */
-      .query-line { margin: 10px 0 4px; }
-      .query-row {
-        display: flex; align-items: baseline; gap: 10px;
-        padding: 3px 0; white-space: nowrap; overflow-x: auto;
-        font-family: var(--font-mono); font-size: 12.5px;
-      }
-
-      /* Raw-protojson disclosure at the foot of each section. */
-      .raw-toggle { margin-top: 12px; font-family: var(--font-mono); font-size: 11px; }
-      .raw-toggle summary {
-        cursor: pointer; color: var(--text-dim); text-transform: uppercase;
-        letter-spacing: 0.09em; list-style: none;
-      }
-      .raw-toggle summary::-webkit-details-marker { display: none; }
-      .raw-toggle summary::before { content: "\25B8  "; color: var(--text-fainter); }
-      .raw-toggle[open] summary { color: var(--grn); }
-      .raw-toggle[open] summary::before { content: "\25BE  "; color: var(--grn); }
-      .raw-toggle pre.code { margin-top: 8px; max-height: 26rem; overflow: auto; }
-
-      /* AI enhancement — the model's structured output shown beside the verbatim
-         original. Green accent reads as "translation", never as authority. */
-      .ai-badge {
-        display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 4px 9px;
-        border: 1px solid var(--grn-border); border-left: 3px solid var(--grn-line);
-        border-radius: var(--radius-sm);
-        background: color-mix(in srgb, var(--grn-bg) 70%, var(--bg-card));
-        padding: 7px 12px; font-size: 12px; margin: 4px 0 2px; color: var(--text-2);
-      }
-      .ai-badge-tag {
-        font-family: var(--font-mono); font-weight: 600; letter-spacing: 0.06em;
-        text-transform: uppercase; font-size: 10px; color: var(--grn);
-      }
-      .original-text {
-        white-space: pre-wrap; overflow-wrap: anywhere;
-        font-family: var(--font-mono); font-size: 12.5px; line-height: 1.6;
-        background: var(--bg-code); border: 1px solid var(--border);
-        border-left: 3px solid var(--border-input); border-radius: var(--radius-sm);
-        padding: 10px 13px; margin: 0; color: #cfe6da;
-      }
-      /* AI-enhancement section: one consistent vertical rhythm so the badge,
-         note, headings, and pre blocks don't stack with mismatched margins. */
-      .enh-body { display: flex; flex-direction: column; gap: 10px; align-items: stretch; }
-      .enh-body > * { margin: 0; }
-      .enh-body .ai-badge { align-self: flex-start; }
-      .enh-body h3 { margin-top: 4px; font-size: 12px; color: var(--text-2); }
-      .enh-body pre.code { margin: 0; }
-
-      /* Revision timeline. */
-      .timeline { display: flex; flex-direction: column; gap: 12px; }
-      .rev-card {
-        border: 1px solid var(--border); border-radius: var(--radius);
-        background: var(--bg-card); padding: 11px 14px;
-      }
-      .rev-card-head {
-        display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 16px;
-        margin-bottom: 8px;
-      }
-      .diff-wrap { margin: 4px 0; }
-      .diff-table td.diff-val { max-width: 22rem; overflow-wrap: anywhere; }
-      .diff-kind { font-family: var(--font-mono); white-space: nowrap; }
-      .k-added { color: var(--st-OK); }
-      .k-removed { color: var(--st-UNAVAILABLE); }
-      .k-changed { color: var(--st-STALE); }
-      .timeline-foot { margin-top: 12px; }
-    </style>
-  </Fragment>
+  <EventDetailStyles slot="head" />
 
   <p class="crumb-back muted small mono"><a href="/events">&larr; events explorer</a></p>
 
-  <div id="ed-errors"></div>
-  <div id="ed-loading" class="loading">Loading GET /api/v1/events/&#123;id&#125; &hellip;</div>
+  <!-- No standfirst. This is a permalink: a reader arrives having already chosen
+       a record, so the page owes them the record, not a paragraph about the
+       page. What the pane is built from is stated exactly by the two GET lines
+       at its foot, which is a better explanation than prose. -->
 
-  <header id="ed-head" hidden>
-    <div id="ed-chips" class="chip-row"></div>
-    <h1 id="ed-headline"></h1>
-    <div id="ed-sub" class="muted mono small"></div>
-  </header>
-
-  <p class="lead" id="ed-lead">
-    Everything the store holds for one event. Two live requests render the page:
-    <code class="inline">/api/v1/events/&#123;id&#125;</code> for the current revision and
-    <code class="inline">&hellip;/history</code> for every prior one. You get the
-    full protojson envelope, the typed detail block, the geometry on a map,
-    provenance, and — where present — the AI enhancement shown beside the verbatim
-    source text it was built from. The model translates the wording into plain
-    language; it never adds facts, and every revision is kept. Replay either
-    request yourself.
-  </p>
-
-  <div class="section-head" style="margin-top:22px;">
-    <div class="left"><h2>Requests behind this page</h2></div>
-    <span class="cap">two GETs &middot; replay either yourself</span>
-  </div>
-  <div id="ed-query" class="query-line" aria-label="Requests behind this page"></div>
-
-  <div id="ed-sections"></div>
+  <!-- The whole record is built by renderEventDetail() (event-detail.js), the
+       SAME renderer the /events browser mounts in its right-hand column — so the
+       two screens cannot drift. This page supplies only the container. -->
+  <div id="ed-root" style="margin-top:22px;"></div>
 
   <script is:inline src="/lib/maplibre-gl.js"></script>
   <script is:inline type="module">
