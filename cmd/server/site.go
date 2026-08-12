@@ -1,14 +1,40 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"io/fs"
 	"mime"
 	"net/http"
 	"path"
 	"strings"
+	"sync"
 
 	"github.com/dpup/sierra-data/site"
 )
+
+// siteETags memoizes each embedded file's content hash. The embedded FS is
+// immutable at runtime, so a file's ETag is computed once and reused.
+var (
+	siteETagMu sync.RWMutex
+	siteETags  = map[string]string{}
+)
+
+// siteETag returns a strong ETag for an embedded file's bytes.
+func siteETag(name string, body []byte) string {
+	siteETagMu.RLock()
+	tag, ok := siteETags[name]
+	siteETagMu.RUnlock()
+	if ok {
+		return tag
+	}
+	sum := sha256.Sum256(body)
+	tag = `"` + hex.EncodeToString(sum[:16]) + `"`
+	siteETagMu.Lock()
+	siteETags[name] = tag
+	siteETagMu.Unlock()
+	return tag
+}
 
 // siteContentTypes pins Content-Type for every extension the site ships.
 // Checked BEFORE mime.TypeByExtension: the OS mime database
@@ -91,15 +117,53 @@ func siteHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", ctype)
 	w.Header().Set("Cache-Control", siteCacheControl(name, ext))
 
+	// Every file is ETagged, which is what makes `no-cache` cheap: the browser
+	// revalidates and gets a bodiless 304 rather than the file again.
+	tag := siteETag(name, body)
+	w.Header().Set("ETag", tag)
+	if match := r.Header.Get("If-None-Match"); match != "" && etagMatches(match, tag) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+
 	if r.Method == http.MethodHead {
 		return
 	}
 	_, _ = w.Write(body)
 }
 
+// etagMatches reports whether an If-None-Match header selects `tag`.
+// Handles the comma-separated list form and the "*" wildcard; weak comparison
+// is fine here because the site never serves a semantically-equal variant.
+func etagMatches(header, tag string) bool {
+	for _, candidate := range strings.Split(header, ",") {
+		candidate = strings.TrimSpace(candidate)
+		candidate = strings.TrimPrefix(candidate, "W/")
+		if candidate == "*" || candidate == tag {
+			return true
+		}
+	}
+	return false
+}
+
 // siteCacheControl picks the Cache-Control policy for an embedded file by
-// location: HTML never caches, first-party assets revalidate quickly,
-// vendored libs cache long.
+// location.
+//
+// `assets/` MUST REVALIDATE, and this is not a tuning choice. The page HTML and
+// the island JavaScript it loads are one unit: the island binds to the markup by
+// element id. Serving HTML `no-cache` while `assets/*` sat on `max-age=300`
+// meant that for five minutes after a deploy a browser could hold NEW markup and
+// OLD script — which threw
+//
+//	events.js: markup is missing #ev-scope-place, #ev-sort
+//
+// against a correctly-built, self-consistent deploy. The two files are
+// versioned together or not at all. Unlike `_astro/*` these names carry no
+// content hash (they are copied verbatim from `web/public/`), so the URL cannot
+// distinguish versions and revalidation is the only thing that can.
+//
+// Revalidation is cheap because every response is ETagged: an unchanged file
+// costs one conditional request and a bodiless 304.
 func siteCacheControl(name, ext string) string {
 	switch {
 	case ext == ".html":
@@ -111,8 +175,11 @@ func siteCacheControl(name, ext string) string {
 		// immutable is exactly right rather than merely convenient.
 		return "public, max-age=31536000, immutable"
 	case strings.HasPrefix(name, "assets/"):
-		return "public, max-age=300"
+		return "no-cache"
 	case strings.HasPrefix(name, "lib/"):
+		// Vendored third-party libraries. Not coupled to our markup — MapLibre
+		// does not know our element ids — so a stale copy is merely old, not
+		// broken, and these are the biggest files on the site.
 		return "public, max-age=86400"
 	default:
 		return "no-cache"
