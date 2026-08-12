@@ -1,5 +1,5 @@
 # Live Data API Server - Build, Test, and Deployment Tasks
-.PHONY: build test proto proto-tools clean server tools site site-modules site-install site-dev site-shots site-shots-mock check-site check-wiring run dev lint fmt docker docker-build docker-run docker-run-dev docker-push docker-clean deploy install help test-meshcore
+.PHONY: build test proto proto-tools clean server tools site site-modules site-ensure site-install site-dev site-shots site-shots-mock check-wiring run dev lint fmt docker docker-build docker-run docker-run-dev docker-push docker-clean deploy install help test-meshcore
 
 # Go parameters
 GOCMD=go
@@ -51,7 +51,9 @@ build: proto server tools
 # Build main server only
 server: $(SERVER_BINARY)
 
-$(SERVER_BINARY): proto
+# site-ensure: the server embeds site/dist, which is no longer committed — build
+# it (if stale/missing) before compiling, or the binary serves an empty site.
+$(SERVER_BINARY): proto site-ensure
 	$(GOBUILD) -o $(SERVER_BINARY) ./$(CMD_DIR)/server
 
 # Build CLI testing tools only
@@ -70,8 +72,10 @@ $(TEST_MESHCORE_BINARY): proto
 	$(GOBUILD) -o $(TEST_MESHCORE_BINARY) ./$(CMD_DIR)/test-meshcore
 
 # Build the static site with Astro (source in web/) into site/dist. The output
-# is a COMMITTED artifact (like the generated *.pb.go) so the Docker `go build`
-# stays Node-free — run this after editing anything under web/, then commit
+# is NOT committed — it's git-ignored and rebuilt on demand: locally by the
+# site-ensure rule below (a prerequisite of every target that embeds it), and
+# for a deploy by the Dockerfile's site-builder stage. So there is nothing to
+# keep in sync and no way to ship a stale site.
 # Uses npm ci into an off-mount dependency store; see SITE_DEPS below.
 # Where the site's npm dependencies actually live.
 #
@@ -90,6 +94,11 @@ $(TEST_MESHCORE_BINARY): proto
 SITE_DEPS ?= $(HOME)/.cache/grid-web-deps
 
 site-modules:
+	@command -v npm >/dev/null 2>&1 || { \
+		echo "❌ npm not found. Building the site (web/ → site/dist) needs Node 22+."; \
+		echo "   Go-only work still builds: site/dist/.gitkeep keeps the embed compiling,"; \
+		echo "   the site tests skip, and the deploy image builds the site itself."; \
+		exit 1; }
 	@mkdir -p "$(SITE_DEPS)"
 	@# Reinstall only when the lockfile actually changed.
 	@if ! cmp -s web/package-lock.json "$(SITE_DEPS)/package-lock.json"; then \
@@ -101,14 +110,36 @@ site-modules:
 	@rm -rf web/node_modules
 	@ln -sfn "$(SITE_DEPS)/node_modules" web/node_modules
 
-site: site-modules check-wiring
+site: site-modules
 	@echo "Building site (Astro → site/dist)..."
 	cd web && npm run build
 	@# Astro emits build-internal *.mjs at the dist root (content-*.mjs stubs, a
-	@# hash-named manifest_*.mjs) that are never served and whose hashes churn the
-	@# committed output. Prune all root-level *.mjs; real page JS lives in assets/.
+	@# hash-named manifest_*.mjs) that are never served. Prune all root-level
+	@# *.mjs; real page JS lives in assets/.
 	rm -f site/dist/*.mjs
+	@# AFTER the build, not before: half of this check reads the built HTML, so a
+	@# pre-build run examined the previous build (and crashed outright on a fresh
+	@# clone, where site/dist holds only .gitkeep). A failure here still fails the
+	@# target, so nothing downstream — server, test, image — proceeds on drift.
+	@$(MAKE) --no-print-directory check-wiring
 	@echo "✅ Site built: site/dist"
+
+# Rebuild the site only when it's missing or older than its source. This is what
+# every target that embeds site/dist depends on, so `make server|run|test` always
+# compiles against a site matching web/ — no "did I remember to rebuild?" step.
+# A no-op costs nothing; a real rebuild is ~1.5s.
+#
+# The source list is enumerated explicitly rather than `find web/` so the walk
+# never descends into web/node_modules (a symlink to an off-mount store).
+# Directories are listed alongside files because a DELETED page changes no
+# surviving file's mtime — only its parent directory's — and a deleted page that
+# lingers in site/dist is exactly the kind of staleness this rule exists to stop.
+SITE_SRC := $(shell find web/src web/public web/astro.config.mjs web/package.json web/package-lock.json \( -type f -o -type d \) 2>/dev/null)
+
+site/dist/index.html: $(SITE_SRC)
+	@$(MAKE) --no-print-directory site
+
+site-ensure: site/dist/index.html
 
 # Install site build dependencies only (no build).
 site-install: site-modules
@@ -144,23 +175,10 @@ site-shots-mock: site-modules
 # Islands bind to markup by id string, so a rename on one side only surfaces in
 # a browser as a null-deref halfway through init. This is that check, statically:
 # every getElementById/requireEls id in an island must exist in its page. It runs
-# as part of `site`, so the mismatch cannot reach a build.
+# at the end of `site`, so the mismatch cannot reach a build. Standalone against
+# an unbuilt tree it checks source only.
 check-wiring:
 	@cd web && node screenshots/wiring-check.mjs
-
-# Guard against deploying a stale site. The Docker image embeds the COMMITTED
-# site/dist (the image build is deliberately Node-free), so a change under web/
-# that wasn't rebuilt+committed would ship silently stale. This rebuilds the
-# site and fails if the committed site/dist drifted from source — run it before
-# building the deploy image (it's a docker-build prerequisite). Needs Node (the
-# build host has it); the image build itself still never runs Node.
-check-site:
-	@$(MAKE) --no-print-directory site >/dev/null
-	@git diff --quiet -- site/dist || { \
-		echo "❌ site/dist is stale — run 'make site' and commit before deploying:"; \
-		git --no-pager diff --stat -- site/dist; \
-		exit 1; }
-	@echo "✅ site/dist is in sync with web/ source"
 
 # Generate protobuf code
 # Note: googleapis is a proto-only module (no Go code), so we download it explicitly with @latest.
@@ -208,11 +226,16 @@ clean:
 	rm -f $(PROTO_DIR)/*.swagger.json
 	rm -f $(GRID_PROTO_DIR)/*.pb.go
 	rm -rf site/dist web/node_modules web/.astro
+	@# Put the .gitkeep placeholder back: without it site/dist doesn't exist and
+	@# site/embed.go's //go:embed all:dist stops compiling.
+	@mkdir -p site/dist && touch site/dist/.gitkeep
 
 ## Testing Targets
 
-# Run full test suite
-test:
+# Run full test suite. site-ensure so the embed-manifest tests in
+# cmd/server/site_test.go run against a real build — with an unbuilt site/dist
+# they skip (plain `go test ./...` stays Node-free), and a skip proves nothing.
+test: site-ensure
 	$(GOTEST) -v ./...
 
 # Test incident content processing functionality
@@ -392,8 +415,10 @@ docker: docker-build
 # Build Docker container image.
 # Depends on `proto` (regenerate the committed *.pb.go so the image is built
 # from code matching the current .proto) and `test` (never build/deploy a red
-# tree). The image itself only compiles - it does not regenerate or test.
-docker-build: proto test check-site
+# tree). The image itself only compiles — it does not regenerate or test. It
+# DOES build the site (the Dockerfile's site-builder stage) from web/ source, so
+# there's no stale-site guard here: the image can only contain a fresh build.
+docker-build: proto test
 	@echo "Building Docker image: $(DOCKER_IMAGE_NAME):$(DOCKER_TAG)"
 	docker build \
 		--platform linux/amd64 \
@@ -521,10 +546,10 @@ help:
 	@echo "  server      - Build main server only"
 	@echo "  tools       - Build CLI testing tools only"
 	@echo "  proto       - Generate protobuf code"
-	@echo "  site        - Build the static site (Astro, web/ → site/dist; commit the output)"
+	@echo "  site        - Build the static site (Astro, web/ → site/dist; not committed)"
+	@echo "  site-ensure - Build the site only if missing/stale (implied by server, run, test)"
 	@echo "  site-dev    - Run the Astro dev server (hot reload)"
 	@echo "  site-shots [BASE_URL=url] [LABEL=tag] - Screenshot + layout metrics of a running site (Playwright)"
-	@echo "  check-site  - Fail if committed site/dist drifted from web/ source (docker-build prerequisite)"
 	@echo "  clean       - Clean build artifacts"
 	@echo ""
 	@echo "Testing targets:"

@@ -4,6 +4,17 @@ bin/
 *.pid
 server
 
+# The site build. site/dist is produced by the site-builder stage and copied
+# into the Go stage with COPY --from, so a locally-built (possibly stale) copy
+# must never enter the build context. node_modules is excluded for the same
+# reason it's git-ignored — and because web/node_modules is a SYMLINK to an
+# off-mount store on the dev container, which COPY cannot follow.
+site/dist/
+web/node_modules
+web/.astro/
+web/screenshots/out/
+tools/screenshots/out/
+
 # Test data and development files
 tests/testdata/
 memory/

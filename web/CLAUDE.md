@@ -1,9 +1,19 @@
 # The site (`web/` → `site/dist`) — the broadsheet design system
 
-Astro 5 SSG. Source in `web/`, built into `../site/dist`, which is a **committed
-build artifact** embedded by `site/embed.go`. Run `make site` after editing
-anything here and commit the result — `make check-site` (a `docker-build`
-prerequisite) fails the deploy if `site/dist` is stale.
+Astro 5 SSG. Source in `web/`, built into `../site/dist` and embedded by
+`site/embed.go`. **`site/dist` is not committed** — it is git-ignored and built
+on demand: `make site-ensure` (a prerequisite of `make server`, `run`, `test`)
+rebuilds it whenever it is missing or older than the source here, and the
+deploy image builds it itself in the Dockerfile's `site-builder` stage. So there
+is nothing to commit and no stale-artifact guard to run; just edit and build.
+
+Two committed `.gitkeep` files keep that working, and neither is decoration.
+`site/dist/.gitkeep` exists because `//go:embed all:dist` is a *compile error*
+when the directory is missing — without it, a fresh clone would not build Go
+until someone ran Node. `web/public/.gitkeep` exists because `astro build`
+**empties `outDir`**, deleting the first one; Astro copies `public/` in
+verbatim, so every build path — `make site`, a bare `npm run build`, the image
+stage — puts it straight back.
 
 No client framework: pages are `.astro` files rendering static markup, and the
 live parts are plain-JS modules under `public/assets/` loaded with
@@ -479,10 +489,9 @@ sender saw. It is pure resolution — no DOM access.
 ## Verifying a change
 
 ```bash
-make site                    # build (required before commit — dist is committed)
+make site                    # build site/dist (git-ignored; nothing to commit)
 make site-shots-mock         # all pages × mobile/tablet/desktop, mocked data
 make site-shots-mock PAGES=map,home ONLY=desktop
-make check-site              # fails if site/dist is stale
 
 # Layout metrics — characters per line, section gaps, horizontal overflow,
 # at 390/768/1280/1440/1920. Screenshots show that something looks wrong;

@@ -72,16 +72,21 @@ bower_components
 node_modules/
 node_modules
 
-# Astro build cache (web/). NOTE: the build OUTPUT (site/dist) is committed on
-# purpose — like the generated *.pb.go — so the Docker `go build` stays Node-free.
+# Astro build cache (web/).
 web/.astro/
 
-# ...except Astro's content-layer stubs, which the build emits inconsistently
-# (empty `new Map()` modules, unreferenced by the served site) and which
-# otherwise churn site/dist in and out of every commit. go:embed all:dist picks
-# them up when present and is fine without them.
-site/dist/content-assets.mjs
-site/dist/content-modules.mjs
+# The Astro build OUTPUT. Not committed: the Docker image builds it itself (the
+# Dockerfile's site-builder stage), so there is no stale-artifact class of bug
+# and no generated JS in review diffs. Locally, `make site` (or any target that
+# embeds it — `make server`, `make run`, `make test`) rebuilds it on demand.
+#
+# .gitkeep is the exception and must stay committed: site/embed.go does
+# `//go:embed all:dist`, which is a COMPILE ERROR if the directory doesn't
+# exist — so a fresh clone with no Node still has to `go build ./...`.
+# `astro build` EMPTIES outDir, which would delete it — hence the twin file
+# web/public/.gitkeep, which Astro copies back into dist on every build.
+site/dist/*
+!site/dist/.gitkeep
 
 # Screenshot/layout-diagnosis artifacts (tools/screenshots) — regenerated.
 tools/screenshots/out/

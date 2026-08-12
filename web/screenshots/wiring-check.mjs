@@ -89,14 +89,20 @@ for (const file of fs.readdirSync(ISLANDS).filter((f) => f.endsWith('.js'))) {
 
 // The BUILT ARTIFACTS, not just the source.
 //
-// Source can be perfectly consistent while the thing a browser loads is not:
-// `site/dist` is a committed artifact, so a rebuild that was never run — or
-// never committed — ships yesterday's HTML beside today's JS. That pairing is
-// what threw "markup is missing #ev-scope-place" against a repo where both
-// files were correct. Checking dist as well as src makes the deployable unit
-// the thing under test.
-const DIST = '/workspace/site/dist';
-if (fs.existsSync(DIST)) {
+// Source can be perfectly consistent while the thing a browser loads is not: an
+// id can reach the page through a component or a partial, so the pairing that
+// actually ships is HTML-to-JS, not .astro-to-JS. That pairing is what threw
+// "markup is missing #ev-scope-place" against a repo where both source files
+// were correct. Checking dist as well as src makes the deployable unit the thing
+// under test.
+//
+// site/dist is no longer committed, so this half is conditional: `make site`
+// runs the check AFTER the build (so it examines the build it just produced),
+// and a standalone run against an unbuilt tree checks source only rather than
+// crashing. Resolved relative to web/ — never assume the checkout is at
+// /workspace, which the Docker site-builder stage is not.
+const DIST = path.resolve(WEB, '../site/dist');
+if (fs.existsSync(path.join(DIST, 'assets/pages'))) {
   const distShared = ['assets', 'assets/pages'].flatMap(() => []);
   void distShared;
   for (const file of fs.readdirSync(path.join(DIST, 'assets/pages')).filter((f) => f.endsWith('.js'))) {
@@ -127,4 +133,8 @@ if (failures) {
   );
   process.exit(1);
 }
-console.log('✅ islands and markup agree on every id (src and site/dist)');
+console.log(
+  fs.existsSync(path.join(DIST, 'assets/pages'))
+    ? '✅ islands and markup agree on every id (src and site/dist)'
+    : '✅ islands and markup agree on every id (src only — site/dist not built)'
+);

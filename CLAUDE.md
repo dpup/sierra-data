@@ -51,13 +51,24 @@ Last updated: 2026-07-06
 The runtime SQLite database lives under `data/` (`data/grid.db`), which is
 git-ignored; only `data/places/` is checked in.
 
+The embedded site's build output (`site/dist`) is git-ignored too — unlike the
+generated `*.pb.go`, it is **not** committed. `make server`/`run`/`test` rebuild
+it from `web/` when it is stale (via `site-ensure`, ~1.5s), and the Docker image
+builds it in its own `site-builder` stage, so a stale site cannot ship. Only
+`site/dist/.gitkeep` is committed — `//go:embed all:dist` needs the directory to
+exist — and `web/public/.gitkeep` restores it after `astro build` empties the
+output directory. See `web/CLAUDE.md`.
+
 ## Commands
 
 Whenever possible you MUST use a command provided by the makefile. If you need additional functionality
 discuss with the operator improvements to the makefile commands.
 
 **Toolchain note**: The sandbox does not ship Go or protoc preinstalled. To build
-or run tests you need Go 1.25+ on `PATH`. `make proto` additionally requires
+or run tests you need Go 1.25+ on `PATH`. `make build`/`server`/`run`/`test` also
+need **Node 22+**, because they build the embedded site; plain `go build ./...`
+and `go test ./...` stay Node-free (the site tests skip when `site/dist` holds
+only its placeholder). `make proto` additionally requires
 `protoc` plus the plugins `protoc-gen-go`, `protoc-gen-go-grpc`,
 `protoc-gen-grpc-gateway`, and `protoc-gen-openapiv2` — installed at pinned
 versions by `make proto-tools` (a prerequisite of `make proto`; versions are

@@ -1,7 +1,33 @@
 # Multi-stage build for The Grid (S.I.E.R.R.A data service)
 
 ###############################################################################
-# Stage 1: Build the Go application
+# Stage 1: Build the static site (Astro: web/ -> site/dist)
+###############################################################################
+# This stage is why site/dist is NOT committed: the image builds the site from
+# source, so a checkout can never ship a stale one and no `check-site` guard is
+# needed. Runs on the NATIVE build platform - the output is static HTML/CSS/JS,
+# byte-identical for every target arch, so there is nothing to cross-compile and
+# no toolchain to emulate.
+FROM --platform=$BUILDPLATFORM node:22-slim AS site-builder
+
+WORKDIR /web
+
+# Dependencies first, from the lockfile, so this layer (the slow one) stays
+# cached until web/package-lock.json actually changes. Astro is a
+# devDependency, so this must NOT be --omit=dev.
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
+
+COPY web/ ./
+
+# astro.config.mjs sets outDir '../site/dist', so WORKDIR /web puts the build at
+# /site/dist. The pruned root-level *.mjs are Astro build-internal stubs
+# (content-*.mjs, a hash-named manifest) that the served site never references;
+# `make site` prunes them the same way.
+RUN npm run build && rm -f /site/dist/*.mjs && node screenshots/wiring-check.mjs
+
+###############################################################################
+# Stage 2: Build the Go application
 ###############################################################################
 # Run the builder on the NATIVE build platform and cross-compile to the target
 # arch. Running an amd64 Go toolchain under QEMU emulation (e.g. building
@@ -30,12 +56,18 @@ RUN go mod download
 # it just compiles. Regenerate locally with `make proto` after .proto changes.
 COPY . .
 
+# The built site comes from the site-builder stage, never from the build context
+# (site/dist is git-ignored AND .dockerignore'd, so whatever a developer happens
+# to have built locally cannot leak into the image). This is the tree that
+# site/embed.go's `//go:embed all:dist` reads, so it must land before `go build`.
+COPY --from=site-builder /site/dist ./site/dist
+
 # Cross-compile a static binary for the target platform.
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -ldflags="-s -w" -o /sierra-server ./cmd/server
 
 ###############################################################################
-# Stage 2: Final lightweight runtime image
+# Stage 3: Final lightweight runtime image
 ###############################################################################
 FROM alpine:3.19
 

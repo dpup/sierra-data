@@ -12,10 +12,25 @@ import (
 	"github.com/dpup/sierra-data/site"
 )
 
+// requireSiteBuilt skips when site/dist holds only the committed .gitkeep
+// placeholder instead of a real Astro build. site/dist is no longer a committed
+// artifact — `make site` builds it locally and the Dockerfile's site-builder
+// stage builds it for the image — so a plain `go test ./...` on a fresh clone
+// (or on a machine with no Node) would otherwise fail on an absence that isn't
+// a defect. `make test` depends on site-ensure, so on the normal path these
+// tests do run against a real build.
+func requireSiteBuilt(t *testing.T) {
+	t.Helper()
+	if _, err := fs.Stat(site.FS, "index.html"); err != nil {
+		t.Skip("site/dist is not built (only the .gitkeep placeholder) — run `make site` or `make test`")
+	}
+}
+
 // TestSiteEmbedContainsPages pins the embed manifest: every page the nav
 // links to must be in the Astro build output (site/dist, embedded via the
 // all:dist embed directive) — a missing page should fail here, not 404 in production.
 func TestSiteEmbedContainsPages(t *testing.T) {
+	requireSiteBuilt(t)
 	pages := []string{
 		"index.html",
 		"sources.html",
@@ -41,6 +56,7 @@ func TestSiteEmbedContainsPages(t *testing.T) {
 }
 
 func TestSiteHandler(t *testing.T) {
+	requireSiteBuilt(t)
 	get := func(path string) *httptest.ResponseRecorder {
 		t.Helper()
 		rec := httptest.NewRecorder()

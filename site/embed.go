@@ -2,11 +2,18 @@
 // (docs/data-sites-spec.md) so the server binary is self-contained: no runtime
 // file dependencies, and the Docker image needs no separate site COPY.
 //
-// The site is now built by Astro (source in ../web) into dist/, which is a
-// committed build artifact — like the generated *.pb.go and *.swagger.json — so
-// the Docker `go build` stays Node-free. Regenerate with `make site` after
-// editing anything under web/. FS strips the dist/ prefix via fs.Sub, so callers
-// read "index.html", not "dist/index.html".
+// The site is built by Astro (source in ../web) into dist/, which is NOT
+// committed: the Docker image builds it in its own site-builder stage, and
+// locally `make site` (implied by make server/run/test) builds it on demand.
+// Only dist/.gitkeep is committed, so that this package still compiles on a
+// fresh clone — `//go:embed all:dist` is a compile error if the directory is
+// missing, but an empty-but-present dist is fine (the server then 404s the
+// site, and cmd/server's site tests skip). `astro build` empties dist/ on every
+// run, so the placeholder is kept alive by its twin at web/public/.gitkeep,
+// which Astro copies back in.
+//
+// FS strips the dist/ prefix via fs.Sub, so callers read "index.html", not
+// "dist/index.html".
 package site
 
 import (
