@@ -80,6 +80,44 @@ export function errorBlock(err, lead) {
   return div;
 }
 
+/**
+ * errorBand is errorBlock plus the two things a LIVE, self-refreshing screen
+ * needs that a static one does not: how old the data still on screen is, and a
+ * way to try again without losing it.
+ *
+ * It exists because it was being CALLED and never defined — every failure path
+ * on the Events screen threw `ReferenceError: errorBand is not defined` from
+ * inside its own catch block. The visible effect was the worst possible one:
+ * a request that timed out at the 6s deadline left the page silently hung,
+ * because the code meant to say so was itself the thing that crashed.
+ *
+ * @param {Error|{status?:number,url?:string,body?:any,message?:string}} err
+ * @param {string|number|Date=} lastGoodAt  truthy when stale data is still shown
+ * @param {Function=} onRetry  re-runs the failed request
+ * @returns {HTMLElement}
+ */
+export function errorBand(err, lastGoodAt, onRetry) {
+  const aborted = err && (err.name === 'AbortError' || err.timedOut);
+  const div = errorBlock(err, aborted ? 'Request timed out:' : undefined);
+  if (lastGoodAt) {
+    // Say that what is on screen is stale — the fail-loud obligation is that
+    // old data never reads as current. The AGE is rendered by the caller, which
+    // owns the timestamp; ui.js deliberately imports nothing (format.js already
+    // imports copyOnClick from here, so reaching for timeAgo would be a cycle).
+    div.append(el('div', 'muted', 'Showing the last good response — not current.'));
+  }
+  if (typeof onRetry === 'function') {
+    const btn = el('button', 'btn-ghost', 'Retry');
+    btn.type = 'button';
+    btn.addEventListener('click', () => {
+      btn.disabled = true;
+      onRetry();
+    });
+    div.append(btn);
+  }
+  return div;
+}
+
 /* --- Copying -----------------------------------------------------------
  *
  * Two shapes, one behaviour. `copyOnClick` makes a VALUE copyable in place (an

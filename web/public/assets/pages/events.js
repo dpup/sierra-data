@@ -14,7 +14,7 @@
 import { get, apiURL, curlFor, ApiError } from '../api.js';
 import { recordRow, fmtNum, timeAgo } from '../format.js';
 import { placeMenuOptions, placeMenuLabel } from '../place.js';
-import { el, requireEls, errorBlock, wireCopyButton } from '../ui.js';
+import { el, requireEls, errorBlock, errorBand, wireCopyButton } from '../ui.js';
 import { renderEventDetail } from './event-detail.js';
 // Importing these registers <grid-chip-row> and <grid-menu>.
 import '../components/chip-row.js';
