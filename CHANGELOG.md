@@ -153,6 +153,23 @@ headline verbatim: `Dennis Fire  — 16 ac, 40% contained` rendered with a doubl
 space while its siblings rendered correctly. The name, county, location and URL
 are trimmed on ingest.
 
+### `conditions?place={town}` returned no weather for 3 of 7 towns
+
+**Affects `GET /api/v1/conditions?place=`.** A TOWN place is a point, so its
+bbox is the point itself — and stored place geometry is trimmed to 5 decimals
+(the repo-wide GeoJSON convention) while the configured weather coordinates it
+is compared against are not. A town therefore matched its own weather only when
+its configured coordinates happened to have no more than 5 decimals:
+`columbia` (38.034900 vs stored 38.0349) worked, `murphys` (38.139117 vs stored
+38.13912) did not.
+
+Live, `?place=murphys` — a resident asking for their own town's weather —
+returned an empty list, as did `arnold` and `bearvalley`. All seven towns now
+return their location. A zero-width or zero-height box is widened by ~11 m,
+which is a rounding allowance and **not** a "near this town" radius: the nearest
+pair of configured locations is kilometres apart, so no town picks up a
+neighbour. Polygon places are untouched.
+
 ## 2026-08-11
 
 ### Map layers: `metadata.attribution` is now populated on every layer

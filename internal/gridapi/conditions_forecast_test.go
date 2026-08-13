@@ -75,3 +75,34 @@ func TestGetConditions_ForecastJoin(t *testing.T) {
 	assert.Equal(t, int32(40), fc.GetPeakWindGustKmh())
 	assert.Len(t, fc.GetPeriods(), 1)
 }
+
+// TestPlaceBboxPadsDegenerate: a TOWN place is a POINT, so its bbox is the
+// point itself — and stored place geometry is trimmed to 5 decimals while the
+// configured coordinates it is compared against are not. A town therefore
+// matched its own weather only when its configured coordinates happened to have
+// no more than 5 decimals. Live, `?place=murphys` (38.139117 vs stored
+// 38.13912) returned NO weather for Murphys, as did arnold and bearvalley,
+// while columbia (38.034900 vs 38.0349) worked.
+func TestPlaceBboxPadsDegenerate(t *testing.T) {
+	// The real Murphys case, to 5 decimals as the store holds it.
+	stored := bbox{minLat: 38.13912, minLng: -120.45611, maxLat: 38.13912, maxLng: -120.45611}
+	if stored.contains(38.139117, -120.456111) {
+		t.Fatal("precondition: the untrimmed point should NOT sit in the raw degenerate box")
+	}
+	padded := stored.padDegenerate()
+	if !padded.contains(38.139117, -120.456111) {
+		t.Error("a town must match its own weather location across the 5-decimal trim")
+	}
+
+	// The pad is a rounding allowance, not a radius: the nearest other
+	// configured location (Arnold, ~14 km away) must stay out.
+	if padded.contains(38.25501, -120.35023) {
+		t.Error("the epsilon must not pull in a neighbouring town")
+	}
+
+	// A real polygon box is untouched.
+	poly := bbox{minLat: 38.0, minLng: -120.7, maxLat: 38.5, maxLng: -120.0}
+	if got := poly.padDegenerate(); got != poly {
+		t.Errorf("a non-degenerate box must not be widened: %+v -> %+v", poly, got)
+	}
+}

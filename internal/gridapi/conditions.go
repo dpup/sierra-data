@@ -43,7 +43,37 @@ func (s *Service) placeBbox(ctx context.Context, key string) (bbox, bool, error)
 	}
 	var b bbox
 	b.minLat, b.minLng, b.maxLat, b.maxLng = g.Bbox()
-	return b, true, nil
+	return b.padDegenerate(), true, nil
+}
+
+// coordRoundingEpsilon absorbs the repo-wide 5-decimal coordinate trim
+// (~1.1 m) when comparing a stored point against a full-precision configured
+// one. It is deliberately tiny — a rounding allowance, NOT a "near this town"
+// radius. The nearest pair of configured weather locations is kilometres apart,
+// so this cannot pull in a neighbouring town.
+const coordRoundingEpsilon = 1e-4 // ~11 m
+
+// padDegenerate widens a zero-width or zero-height box by the rounding epsilon.
+//
+// A POINT place (every TOWN) yields a box whose corners are the point itself,
+// and stored place geometry is trimmed to 5 decimals while the configured
+// coordinates it is compared against are not. So a town matched its own weather
+// only when its configured coordinates happened to have no more than 5 decimal
+// places: `columbia` (38.034900 vs stored 38.0349) matched, `murphys`
+// (38.139117 vs stored 38.13912) did not. Live, that meant
+// `/api/v1/conditions?place=murphys` — a resident asking for their own town's
+// weather — returned an empty list, as did arnold and bearvalley, while the
+// other four towns worked.
+func (b bbox) padDegenerate() bbox {
+	if b.minLat == b.maxLat {
+		b.minLat -= coordRoundingEpsilon
+		b.maxLat += coordRoundingEpsilon
+	}
+	if b.minLng == b.maxLng {
+		b.minLng -= coordRoundingEpsilon
+		b.maxLng += coordRoundingEpsilon
+	}
+	return b
 }
 
 // filterWeather keeps weather entries whose configured location coordinates
