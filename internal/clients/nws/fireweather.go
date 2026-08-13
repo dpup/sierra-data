@@ -36,12 +36,35 @@ type FireWeather struct {
 // otherwise all alerts are considered. A Red Flag Warning always wins over a
 // Fire Weather Watch.
 func ClassifyFireWeather(alerts []Alert, zones []string) FireWeather {
+	return classifyFireWeatherAt(alerts, zones, time.Now())
+}
+
+// classifyFireWeatherAt is ClassifyFireWeather with an injected clock, so the
+// not-yet-begun branch is testable.
+//
+// THE ONSET SPLIT. NWS lists a product on /alerts/active from the moment it is
+// ISSUED, which is routinely hours before the weather. A Red Flag Warning
+// issued at 06:00 for noon was therefore reported as `red-flag` at 06:00 — the
+// service asserting Red Flag conditions that NWS says do not start for six
+// hours. Observed live: state "red-flag" with the governing product's own
+// effective 6.0 h in the future.
+//
+// That is the same mistake the 2026-08-11 change fixed for the ALERT (which now
+// reads SCHEDULED until onset) and never propagated to the classification
+// derived from it.
+//
+// A not-yet-begun Red Flag drops to `elevated` rather than `normal`: something
+// real is issued and coming, and `normal` would hide it. `elevated` is the rung
+// a Watch already occupies — "prepare, it isn't here yet" — and it escalates a
+// place's mode to WATCH exactly as `red-flag` does, so nothing is under-alerted
+// by this. What changes is only the claim about what is happening NOW.
+func classifyFireWeatherAt(alerts []Alert, zones []string, now time.Time) FireWeather {
 	zoneSet := make(map[string]bool)
 	for _, z := range cleanZones(zones) {
 		zoneSet[z] = true
 	}
 
-	var redFlag, watch *Alert
+	var redFlag, pendingRedFlag, watch *Alert
 	for i := range alerts {
 		a := &alerts[i]
 		if len(zoneSet) > 0 && !alertIntersectsZones(a, zoneSet) {
@@ -49,6 +72,14 @@ func ClassifyFireWeather(alerts []Alert, zones []string) FireWeather {
 		}
 		switch a.Event {
 		case eventRedFlagWarning:
+			// Begins() is the HAZARD's start (CAP onset, falling back to
+			// effective) — not the product's issuance.
+			if begins := a.Begins(); !begins.IsZero() && begins.After(now) {
+				if pendingRedFlag == nil {
+					pendingRedFlag = a
+				}
+				continue
+			}
 			if redFlag == nil {
 				redFlag = a
 			}
@@ -61,6 +92,11 @@ func ClassifyFireWeather(alerts []Alert, zones []string) FireWeather {
 
 	if redFlag != nil {
 		return fireWeatherFromAlert(FireWeatherRedFlag, redFlag)
+	}
+	// An imminent Red Flag outranks a Watch: both read `elevated`, but the
+	// Warning is the more certain product, so it governs the headline.
+	if pendingRedFlag != nil {
+		return fireWeatherFromAlert(FireWeatherElevated, pendingRedFlag)
 	}
 	if watch != nil {
 		return fireWeatherFromAlert(FireWeatherElevated, watch)

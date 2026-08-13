@@ -70,6 +70,46 @@ var layerSourceIDs = map[string][]string{
 	hazards.LayerPower: {"pge", "psps"},
 }
 
+// conditionLayerSourceIDs credits the upstreams behind the layers that are NOT
+// store-backed. It is deliberately SEPARATE from layerSourceIDs: that map also
+// drives LayerSourceStatus, and a condition layer's status comes from its
+// builder, not from source health — merging them would quietly change what
+// those layers report.
+//
+// Without this the 2026-08-11 "attribution is now populated on every layer"
+// change was only true of the event layers: road_segment, chain_control,
+// fire_weather and mesh_link all still served `metadata.attribution: ""`,
+// because they never pass through eventLayerMeta.
+var conditionLayerSourceIDs = map[string][]string{
+	hazards.LayerChainControl: {"caltrans"},
+	hazards.LayerFireWeather:  {"nws"},
+	// road_segment is Google Routes travel times over Caltrans-described roads;
+	// only the Caltrans half is an ingest source with a registry row, so the
+	// Google half is credited by the per-feature source block.
+	hazards.LayerRoadSegment: {"caltrans"},
+	hazards.LayerMeshLink:    {"meshcore"},
+}
+
+// registryAttribution joins the attribution lines of the named sources, in
+// declared order, deduped — the same rule eventLayerMeta applies.
+func registryAttribution(layer string, sources []*gridv1.Source) string {
+	byID := make(map[string]*gridv1.Source, len(sources))
+	for _, src := range sources {
+		byID[src.GetId()] = src
+	}
+	var parts []string
+	seen := map[string]bool{}
+	for _, id := range conditionLayerSourceIDs[layer] {
+		a := strings.TrimSpace(byID[id].GetAttribution())
+		if a == "" || seen[a] {
+			continue
+		}
+		seen[a] = true
+		parts = append(parts, a)
+	}
+	return strings.Join(parts, " · ")
+}
+
 // hazardsBuilder is the slice of *hazards.Service the condition-backed layers
 // consume. A narrow local interface keeps the delegation fakeable in tests
 // (the package convention); *hazards.Service satisfies it via BuildLayer.
@@ -188,6 +228,14 @@ func (s *Service) serveConditionLayer(w http.ResponseWriter, r *http.Request, hb
 		// Unreachable via the router (conditionLayers gates), kept for safety.
 		notFound(w, fmt.Sprintf("unknown map layer: %q", layer))
 		return
+	}
+	// The builder supplies attribution only where it is also a legal caveat
+	// (evacuation). Everything else falls back to the source registry, which has
+	// carried a line per feed all along.
+	if attribution == "" {
+		if sources, err := s.Store.ListSources(r.Context()); err == nil {
+			attribution = registryAttribution(layer, sources)
+		}
 	}
 	s.writeFeatureCollection(w, r, features, &hazards.Metadata{
 		Layer:            layer,

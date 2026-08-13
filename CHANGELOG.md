@@ -116,6 +116,43 @@ from a warning in force*, and told them to read `status`. A map client reading
 `status` is the UPPERCASE lifecycle enum, matching `Event.status` and the other
 layers.
 
+### Fire weather: `red-flag` no longer starts hours before the Red Flag does
+
+**Affects `conditions.fireWeather.state` and the `fire_weather` map layer.** NWS
+lists a product on `/alerts/active` from the moment it is **issued**, which is
+routinely hours before the weather. We took any listed Red Flag Warning as
+current, so the service reported `state: "red-flag"` while the governing
+product's own start time was still six hours away — asserting conditions NWS
+says have not begun. Observed live at 2026-08-13T05:49Z against a warning
+effective 12:00Z.
+
+This is the same mistake the 2026-08-11 change fixed for the alert itself (which
+now reads `SCHEDULED` until onset) and never propagated to the classification
+derived from it.
+
+A Red Flag Warning that has not begun now reports **`elevated`**, not
+`red-flag` — and not `normal`, which would hide a real issued product. The
+warning still supplies `sourceEvent` and the headline, and `elevated` escalates
+a place's `mode` to `WATCH` exactly as `red-flag` does, so **nothing is
+under-alerted by this**; only the claim about what is happening *now* changes. A
+product that publishes no start time is still treated as in force.
+
+### Map layers: `metadata.attribution` really is populated on every layer now
+
+**Follow-up to the 2026-08-11 entry, which was only true of the event layers.**
+`road_segment`, `chain_control`, `fire_weather` and `mesh_link` never pass
+through the registry lookup that change added, so all four were still serving
+`metadata.attribution: ""` in production. They now credit their upstreams from
+the same source registry. Two per-feature blocks that were also blank —
+`fire_weather` (`nws`) and `road_segment` (`google`) — now carry attribution too.
+
+### Wildfire `headline`: upstream whitespace no longer doubles the separator
+
+CAL FIRE ships trailing whitespace on some incident names, which reached the
+headline verbatim: `Dennis Fire  — 16 ac, 40% contained` rendered with a double
+space while its siblings rendered correctly. The name, county, location and URL
+are trimmed on ingest.
+
 ## 2026-08-11
 
 ### Map layers: `metadata.attribution` is now populated on every layer

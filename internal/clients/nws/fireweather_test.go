@@ -1,6 +1,9 @@
 package nws
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestClassifyFireWeather(t *testing.T) {
 	redFlag := Alert{Event: eventRedFlagWarning, Headline: "RFW", Zones: []string{"CAZ064"}}
@@ -32,5 +35,77 @@ func TestClassifyFireWeather(t *testing.T) {
 				t.Errorf("source event = %q, want %q", fw.SourceEvent, tt.event)
 			}
 		})
+	}
+}
+
+// TestClassifyFireWeather_NotYetBegunRedFlag: NWS lists a product from the
+// moment it is ISSUED, routinely hours before the weather. Reporting `red-flag`
+// then asserts conditions NWS says have not started — observed live with the
+// governing product's own effective 6 hours out. It drops to `elevated`:
+// something real is coming (so not `normal`, which would hide it) but it is not
+// here yet.
+func TestClassifyFireWeather_NotYetBegunRedFlag(t *testing.T) {
+	now := time.Date(2026, 8, 13, 6, 0, 0, 0, time.UTC)
+	pending := Alert{
+		Event: eventRedFlagWarning, Zones: []string{"CAZ139"},
+		Onset: now.Add(6 * time.Hour), Ends: now.Add(22 * time.Hour),
+		Headline: "Red Flag Warning — thunderstorms and strong outflow winds",
+	}
+
+	got := classifyFireWeatherAt([]Alert{pending}, []string{"CAZ139"}, now)
+	if got.State != FireWeatherElevated {
+		t.Errorf("state = %q, want %q for a Red Flag that starts in 6h", got.State, FireWeatherElevated)
+	}
+	if got.SourceEvent != eventRedFlagWarning {
+		t.Errorf("the governing product should still be named: %q", got.SourceEvent)
+	}
+
+	// Once it begins, it is a Red Flag.
+	if got := classifyFireWeatherAt([]Alert{pending}, []string{"CAZ139"}, now.Add(7*time.Hour)); got.State != FireWeatherRedFlag {
+		t.Errorf("state = %q, want %q once onset has passed", got.State, FireWeatherRedFlag)
+	}
+}
+
+// An in-force Red Flag still wins over one that has not begun.
+func TestClassifyFireWeather_InForceBeatsPending(t *testing.T) {
+	now := time.Date(2026, 8, 13, 6, 0, 0, 0, time.UTC)
+	inForce := now.Add(-1 * time.Hour)
+	alerts := []Alert{
+		{Event: eventRedFlagWarning, Zones: []string{"CAZ139"}, Onset: now.Add(6 * time.Hour)},
+		{Event: eventRedFlagWarning, Zones: []string{"CAZ139"}, Onset: inForce},
+	}
+	got := classifyFireWeatherAt(alerts, []string{"CAZ139"}, now)
+	if got.State != FireWeatherRedFlag {
+		t.Errorf("state = %q, want %q", got.State, FireWeatherRedFlag)
+	}
+	// The IN-FORCE product must be the one governing, not merely the first seen.
+	if !got.Effective.Equal(inForce) {
+		t.Errorf("governing alert effective = %v, want the in-force one at %v", got.Effective, inForce)
+	}
+}
+
+// A pending WARNING outranks a WATCH — both elevated, but the warning is the
+// more certain product so it supplies the headline.
+func TestClassifyFireWeather_PendingWarningOutranksWatch(t *testing.T) {
+	now := time.Date(2026, 8, 13, 6, 0, 0, 0, time.UTC)
+	alerts := []Alert{
+		{Event: eventFireWeatherWatch, Zones: []string{"CAZ139"}, Onset: now.Add(2 * time.Hour)},
+		{Event: eventRedFlagWarning, Zones: []string{"CAZ139"}, Onset: now.Add(6 * time.Hour)},
+	}
+	got := classifyFireWeatherAt(alerts, []string{"CAZ139"}, now)
+	if got.State != FireWeatherElevated {
+		t.Errorf("state = %q, want %q", got.State, FireWeatherElevated)
+	}
+	if got.SourceEvent != eventRedFlagWarning {
+		t.Errorf("the warning is the more certain product and should govern, got %q", got.SourceEvent)
+	}
+}
+
+// An alert with no onset at all keeps the old behaviour: present means in force.
+func TestClassifyFireWeather_NoOnsetIsInForce(t *testing.T) {
+	now := time.Date(2026, 8, 13, 6, 0, 0, 0, time.UTC)
+	got := classifyFireWeatherAt([]Alert{{Event: eventRedFlagWarning, Zones: []string{"CAZ139"}}}, []string{"CAZ139"}, now)
+	if got.State != FireWeatherRedFlag {
+		t.Errorf("state = %q, want %q when the product publishes no start time", got.State, FireWeatherRedFlag)
 	}
 }

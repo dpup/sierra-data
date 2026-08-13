@@ -62,3 +62,30 @@ func TestGetActiveIncidents(t *testing.T) {
 		t.Errorf("null row: %+v", inc[1])
 	}
 }
+
+// TestNormalizeTrimsFreeText: CAL FIRE ships trailing whitespace on some
+// incident names, and Name goes straight into the event headline — one live
+// fire rendered "Dennis Fire  — 16 ac, 40% contained" with a double space while
+// its siblings rendered correctly, which reads as our formatting bug.
+func TestNormalizeTrimsFreeText(t *testing.T) {
+	in := incidentJSON{
+		UniqueID: "abc",
+		Name:     "Dennis Fire ",
+		County:   " El Dorado",
+		Location: "  Mormon Emigrant Trail  ",
+		URL:      " https://www.fire.ca.gov/incidents/dennis ",
+	}.normalize()
+
+	if in.Name != "Dennis Fire" {
+		t.Errorf("Name = %q, want %q", in.Name, "Dennis Fire")
+	}
+	if in.County != "El Dorado" {
+		t.Errorf("County = %q", in.County)
+	}
+	if in.Location != "Mormon Emigrant Trail" {
+		t.Errorf("Location = %q", in.Location)
+	}
+	if in.URL != "https://www.fire.ca.gov/incidents/dennis" {
+		t.Errorf("URL = %q — an untrimmed URL fails the http(s) prefix check downstream", in.URL)
+	}
+}

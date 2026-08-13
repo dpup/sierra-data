@@ -323,7 +323,7 @@ func (s *Service) roadSegments(ctx context.Context, area config.HazardArea) ([]F
 			Kind:      "Road segment",
 			Headline:  strings.TrimSpace(mr.Name + " — " + mr.Section),
 			AreaLabel: mr.Section,
-			Source:    Source{ID: "google", Name: "Google Routes + Caltrans"},
+			Source:    Source{ID: "google", Name: "Google Routes + Caltrans", Attribution: "Google · quickmap.dot.ca.gov"},
 			Road:      &RoadProps{RoadID: mr.ID},
 		}
 		sev := SevInfo
@@ -363,7 +363,7 @@ func (s *Service) fireWeather(ctx context.Context, area config.HazardArea) ([]Fe
 			Headline:  nonEmpty(fw.GetHeadline(), "Fire weather: "+state),
 			Effective: tsToRFC3339(fw.GetEffective()),
 			Expires:   tsToRFC3339(fw.GetExpires()),
-			Source:    Source{ID: "nws", Name: nonEmpty(fw.GetSenderName(), "National Weather Service")},
+			Source:    Source{ID: "nws", Name: nonEmpty(fw.GetSenderName(), "National Weather Service"), Attribution: "NOAA / National Weather Service"},
 			FireWeather: &FireWeatherProps{
 				State:       state,
 				SourceEvent: fw.GetSourceEvent(),
@@ -411,7 +411,7 @@ func forecastPointFeature(loc config.WeatherLocation, f *nws.Forecast) Feature {
 		Kind:      "Fire-weather forecast",
 		AreaLabel: loc.Name,
 		Headline:  fmt.Sprintf("%s forecast — peak gust %d km/h", loc.Name, gust),
-		Source:    Source{ID: "nws", Name: "National Weather Service"},
+		Source:    Source{ID: "nws", Name: "National Weather Service", Attribution: "NOAA / National Weather Service"},
 		FireWeather: &FireWeatherProps{
 			Forecast: summary,
 		},

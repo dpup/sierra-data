@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -103,12 +104,16 @@ type incidentJSON struct {
 }
 
 func (r incidentJSON) normalize() Incident {
+	// Trim the free-text fields. CAL FIRE ships trailing whitespace on some
+	// incident names, and Name goes straight into the event headline — one live
+	// fire rendered as "Dennis Fire  — 16 ac, 40% contained" with a double space
+	// while its siblings rendered correctly, which reads as our formatting bug.
 	in := Incident{
 		UniqueID: r.UniqueID,
-		Name:     r.Name,
-		County:   r.County,
-		Location: r.Location,
-		URL:      r.URL,
+		Name:     strings.TrimSpace(r.Name),
+		County:   strings.TrimSpace(r.County),
+		Location: strings.TrimSpace(r.Location),
+		URL:      strings.TrimSpace(r.URL),
 		IsActive: r.IsActive,
 		Started:  parseTime(r.Started),
 		Updated:  parseTime(r.Updated),

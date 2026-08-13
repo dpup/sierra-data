@@ -174,12 +174,19 @@ func (s *Service) serveMeshLinkLayer(w http.ResponseWriter, r *http.Request, pla
 	// Same fail-loud degrade as the store-backed layers: a down source with data
 	// still on hand is STALE, never a fabricated OK-empty.
 	status, lastUpdate = hazards.DegradeStoreStatus(status, len(features) > 0, lastUpdate)
+	// Credit the feed at the envelope, not only per-feature — the envelope is
+	// the documented place to read attribution.
+	attribution := ""
+	if sources, err := s.Store.ListSources(r.Context()); err == nil {
+		attribution = registryAttribution(hazards.LayerMeshLink, sources)
+	}
 	s.writeFeatureCollection(w, r, features, &hazards.Metadata{
 		Layer:            hazards.LayerMeshLink,
 		Area:             place.GetSlug(),
 		GeneratedAt:      s.Now().UTC().Format(time.RFC3339),
 		SourceStatus:     status,
 		LastSourceUpdate: timeOrEmpty(lastUpdate),
+		Attribution:      attribution,
 		SchemaVersion:    mapSchemaVersion,
 	})
 }
