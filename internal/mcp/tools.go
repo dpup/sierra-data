@@ -77,7 +77,7 @@ func (s *Server) registerTools() []tool {
 			Name: "grid_situation",
 			Description: "The headline call: what's happening at a place, address, or lat,lng in the " +
 				"central Sierra (Calaveras/Tuolumne). Returns the area mode (QUIET/WATCH/ACTIVE), " +
-				"per-domain status and counts (fire/evacuation/weather/roads/seismic), top headlines, " +
+				"per-domain status and counts (fire/evacuation/weather/roads/seismic/power), top headlines, " +
 				"evacuation status (activeEvacuations is an explicit null when the source is UNAVAILABLE " +
 				"= unknown, 0 when confirmed none, N when active — never treat null/absence as safe), and " +
 				"per-source freshness. Reference only; verify with official sources.",
@@ -87,7 +87,8 @@ func (s *Server) registerTools() []tool {
 		{
 			Name: "grid_events",
 			Description: "List active events (wildfire, evacuation, weather alert, earthquake, road " +
-				"incident, and mesh-node presence) — optionally scoped to a location and filtered by " +
+				"incident, power outage / Public Safety Power Shutoff, and mesh-node presence) — " +
+				"optionally scoped to a location and filtered by " +
 				"layer/severity/status/time. " +
 				"Compact rows; call grid_event for full detail (incl. the verbatim report) on one. " +
 				"Geometry is omitted (a location centroid is included). " +
@@ -105,7 +106,7 @@ func (s *Server) registerTools() []tool {
 				"node here is not proof it's down. Raise limit (max 200) and follow " +
 				"nextPageToken to get the full set. (grid_situation already gives per-domain active counts " +
 				"for a single place.)",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"location":{"type":"string","description":"place slug/id, address, or lat,lng to scope to"},"layer":{"type":"string","description":"wildfire|evacuation|weather_alert|earthquake|road_incident|mesh (mesh = MeshCore node presence; \"network\" is a legacy alias)"},"severity_min":{"type":"string","description":"INFO|MINOR|MODERATE|SEVERE|EXTREME"},"status":{"type":"string","description":"default ACTIVE,SCHEDULED; pass RESOLVED/EXPIRED to see closed"},"since":{"type":"string","description":"RFC3339; only events observed at/after"},"limit":{"type":"integer"},"page_token":{"type":"string"}}}`),
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"location":{"type":"string","description":"place slug/id, address, or lat,lng to scope to"},"layer":{"type":"string","description":"wildfire|evacuation|weather_alert|earthquake|road_incident|power|mesh (power = PG&E outages AND Public Safety Power Shutoffs, separated by each row's category: unplanned|planned|psps. Most outages are tiny — the statewide median affects ONE customer — so pair layer=power with severity_min unless you want every service call. mesh = MeshCore node presence; \"network\" is a legacy alias)"},"severity_min":{"type":"string","description":"INFO|MINOR|MODERATE|SEVERE|EXTREME"},"status":{"type":"string","description":"default ACTIVE,SCHEDULED; pass RESOLVED/EXPIRED to see closed"},"since":{"type":"string","description":"RFC3339; only events observed at/after"},"limit":{"type":"integer"},"page_token":{"type":"string"}}}`),
 			Handler:     s.handleEvents,
 		},
 		{

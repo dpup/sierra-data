@@ -14,6 +14,56 @@ throughout; errors are gRPC-standard `{code, codeName, message, details}`). The
 by a snake_case `/v1` surface on 2026-07-05, which was in turn folded back onto the
 proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 
+## 2026-08-13
+
+### New `power` layer: PG&E outages and Public Safety Power Shutoffs
+
+**Additive — nothing existing changes shape.** A new event layer covering both
+PG&E electric outages and PSPS de-energizations, sourced directly from PG&E's
+public ArcGIS services.
+
+- `GET /api/v1/events?layer=power` — the event feed. `category` separates
+  `unplanned` | `planned` | `psps`.
+- `GET /api/v1/places/{place}/map/power.geojson` — a new map layer (an
+  **eleventh** layer slug; the others are unchanged). Features carry a new
+  `properties.power` block.
+- `GET /api/v1/places/{place}/summary` — **`domains[]` now contains a `power`
+  entry**, always present. If you index `domains` by position rather than by
+  `domain`, re-read it by name.
+- `GET /api/v1/sources` — **two new rows, `pge` and `psps`.** If you assert on
+  the number of sources, that count changed.
+- `Event.detail` gains a `power` variant (`PowerDetail`): `outageId`, `cause`,
+  `customersAffected`, `crewStatus`, `estimatedRestoration`, and for PSPS
+  `eventId`, `eventName`, `timePeriod`, `stage`, `medicalBaselineAffected`,
+  `deEnergizationStart`, `deEnergizationEnd`.
+
+Things worth knowing before you render it:
+
+- **Most outages are tiny.** Statewide, the median PG&E outage affects ONE
+  customer. Severity reflects that (`<10` customers → `INFO`, `≥10` → `MINOR`,
+  `≥100` → `MODERATE`, `≥1000` → `SEVERE`; a *planned* outage is demoted one
+  rank because PG&E notified those customers). An outage PG&E reports with **no
+  customer count** floors at `MINOR`, not `INFO` — unknown is not evidence of
+  small, and its headline says "customer count not reported". Filter with
+  `severity_min=MINOR` rather than expecting the feed to be pre-curated — we
+  ingest every row so that a disappearing row reliably means "restored".
+- **INFO-severity power events are excluded from the place-summary rollup**
+  (`totalActive`, `severityCounts`, `topEvents`, `mode`) — the same carve-out
+  mesh presence gets, so a quiet county isn't reported as "21 active" on the
+  strength of single-premise service calls. They still appear in full in the
+  `power` domain, in `/api/v1/events`, and on the map layer. A `MINOR` outage
+  (10+ customers) counts normally.
+- **`estimatedRestoration` is an estimate, not an expiry.** PG&E routinely
+  overruns it, so it is NOT mapped onto `expires` (which stays null) and must
+  not be used to hide an event. Same for PSPS `deEnergizationEnd`.
+- **A PSPS is `SCHEDULED` until de-energization begins**, then `ACTIVE`. A
+  `Warning` stage is `SEVERE`, a `Watch` is `MODERATE`.
+- **`medicalBaselineAffected`** is customers whose medical equipment depends on
+  grid power. No other feed on this service reports it.
+- **Freshness is enforced, not assumed.** PG&E publishes its own ETL stamp; when
+  it stops advancing, the `pge` source reports degraded and the layer's
+  `sourceStatus` goes `STALE` rather than serving frozen outages as current.
+
 ## 2026-08-11
 
 ### Map layers: `metadata.attribution` is now populated on every layer

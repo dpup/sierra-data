@@ -58,7 +58,7 @@ back from grid_events / grid_situation. If you are building or driving a map UI
 reason over:
 - GET /api/v1/places/{place}/map/{layer}.geojson — one RFC 7946 FeatureCollection
   per layer, coordinates [lng,lat]. {layer} is a slug: wildfire, evacuation,
-  weather_alert, earthquake, road_incident, mesh_node, road_segment,
+  weather_alert, earthquake, road_incident, power, mesh_node, road_segment,
   chain_control, fire_weather. (mesh_node here is the map slug for the same layer
   that grid_events calls "mesh".)
 - Mesh relay topology: GET /api/v1/places/{place}/map/mesh_link.geojson

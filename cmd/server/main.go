@@ -24,6 +24,7 @@ import (
 	"github.com/dpup/sierra-data/internal/clients/google"
 	"github.com/dpup/sierra-data/internal/clients/meshcore"
 	"github.com/dpup/sierra-data/internal/clients/nws"
+	"github.com/dpup/sierra-data/internal/clients/pge"
 	"github.com/dpup/sierra-data/internal/clients/usgs"
 	"github.com/dpup/sierra-data/internal/clients/weather"
 	"github.com/dpup/sierra-data/internal/config"
@@ -140,6 +141,7 @@ func main() {
 		{Normalizer: ingest.NewEvacuationNormalizer(appConfig, caloes.NewClient()), Interval: gridPollInterval(appConfig, "caloes")},
 		{Normalizer: ingest.NewWeatherAlertNormalizer(appConfig, weatherService), Interval: gridPollInterval(appConfig, "nws")},
 		{Normalizer: ingest.NewRoadIncidentNormalizer(appConfig, roadsService), Interval: gridPollInterval(appConfig, "chp", "caltrans")},
+		{Normalizer: ingest.NewPowerNormalizer(appConfig, pge.NewClient()), Interval: gridPollInterval(appConfig, "pge", "psps")},
 	}
 
 	// MeshCore mesh-node presence (optional): a long-lived MQTT subscriber to
@@ -308,6 +310,8 @@ var gridSourceInfo = map[string]struct{ name, attribution string }{
 	"chp":      {"CHP / Caltrans", "quickmap.dot.ca.gov"},
 	"caltrans": {"Caltrans", "quickmap.dot.ca.gov"},
 	"meshcore": {"MeshCore Mesh", "MeshCore community mesh"},
+	"pge":      {"PG&E", "Pacific Gas and Electric"},
+	"psps":     {"PG&E PSPS", "Pacific Gas and Electric"},
 }
 
 // registerAppConfigKeys registers the app's top-level config namespaces with

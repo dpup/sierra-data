@@ -497,3 +497,38 @@ func TestMapLayer_AttributionAbsentWhenRegistrySilent(t *testing.T) {
 	md := getFC(t, s, "/v1/places/calaveras/map/weather_alert.geojson").Metadata
 	assert.Empty(t, md.Attribution)
 }
+
+// TestLayerSourceStatus_Power: the power layer aggregates two independently
+// failing PG&E services. Half a picture must not present as a whole one — if
+// the PSPS service is down while outages are fine, the layer says STALE, so a
+// reader is never told "no shutoffs" on the strength of a feed we could not
+// reach.
+func TestLayerSourceStatus_Power(t *testing.T) {
+	now := time.Date(2026, 8, 13, 1, 0, 0, 0, time.UTC)
+	src := func(id string, st gridv1.SourceStatus) *gridv1.Source {
+		return &gridv1.Source{Id: id, Status: st, LastSuccessAt: timestamppb.New(now)}
+	}
+
+	status, _ := LayerSourceStatus([]*gridv1.Source{
+		src("pge", gridv1.SourceStatus_OK), src("psps", gridv1.SourceStatus_OK),
+	}, hazards.LayerPower)
+	assert.Equal(t, "OK", status)
+
+	status, last := LayerSourceStatus([]*gridv1.Source{
+		src("pge", gridv1.SourceStatus_OK), src("psps", gridv1.SourceStatus_UNAVAILABLE),
+	}, hazards.LayerPower)
+	assert.Equal(t, "STALE", status, "one feed down must degrade the layer, not pass as complete")
+	assert.Equal(t, now, last)
+
+	status, _ = LayerSourceStatus([]*gridv1.Source{
+		src("pge", gridv1.SourceStatus_UNAVAILABLE), src("psps", gridv1.SourceStatus_UNAVAILABLE),
+	}, hazards.LayerPower)
+	assert.Equal(t, "UNAVAILABLE", status)
+
+	// A frozen upstream ETL is recorded as a source failure, so it lands here
+	// as degraded rather than silently serving day-old outages as current.
+	status, _ = LayerSourceStatus([]*gridv1.Source{
+		src("pge", gridv1.SourceStatus_STALE), src("psps", gridv1.SourceStatus_OK),
+	}, hazards.LayerPower)
+	assert.Equal(t, "STALE", status)
+}

@@ -103,7 +103,7 @@ Content-Type: application/json
   <div class="table-wrap"><table class="data-table">
     <thead><tr><th>Field</th><th>Type</th><th>Semantics</th></tr></thead>
     <tbody>
-      <tr><td class="mono">id</td><td class="mono">string</td><td class="wrap">Globally unique, source-namespaced: <code>{namespace}:{native_id}</code>. Namespaces: <code>chp:</code> (road incidents), <code>wx:</code> (weather alerts), <code>usgs:</code> (earthquakes), <code>calfire:</code> (CAL FIRE incidents), <code>firis:</code> (fire perimeters), <code>evac:</code> (evacuation zones), <code>meshcore:</code> (mesh nodes, keyed by Ed25519 public key). FIRIS standalone ids are <code>firis:{normalized-name}</code> with <code>-2</code>, <code>-3</code> disambiguators.</td></tr>
+      <tr><td class="mono">id</td><td class="mono">string</td><td class="wrap">Globally unique, source-namespaced: <code>{namespace}:{native_id}</code>. Namespaces: <code>chp:</code> (road incidents), <code>wx:</code> (weather alerts), <code>usgs:</code> (earthquakes), <code>calfire:</code> (CAL FIRE incidents), <code>firis:</code> (fire perimeters), <code>evac:</code> (evacuation zones), <code>pge:</code> (PG&amp;E outages), <code>psps:</code> (Public Safety Power Shutoffs, <code>psps:{eventId}:{timePeriod}</code>), <code>meshcore:</code> (mesh nodes, keyed by Ed25519 public key). FIRIS standalone ids are <code>firis:{normalized-name}</code> with <code>-2</code>, <code>-3</code> disambiguators.</td></tr>
       <tr><td class="mono">layer</td><td class="mono">Layer</td><td class="wrap">Layer taxonomy (table below)</td></tr>
       <tr><td class="mono">category</td><td class="mono">string</td><td class="wrap">Source sub-type slug (<code>"active"</code>, <code>"order"</code>, …)</td></tr>
       <tr><td class="mono">severity</td><td class="mono">Severity</td><td class="wrap">Unified 5-level scale (table below)</td></tr>
@@ -142,6 +142,7 @@ Content-Type: application/json
       <tr><td class="mono">weatherAlert</td><td class="wrap mono">nwsSeverity, certainty, urgency, instruction, areaDesc (string), zones (repeated string)</td></tr>
       <tr><td class="mono">earthquake</td><td class="wrap mono">magnitude (double), depthKm (double), felt (int32)</td></tr>
       <tr><td class="mono">roadIncident</td><td class="wrap mono">logNumber (string), impact, duration (string), metadata (map&lt;string,string&gt;)</td></tr>
+      <tr><td class="mono">power</td><td class="wrap mono">outageId, cause (string), customersAffected (int32), crewStatus (string), estimatedRestoration (timestamp); PSPS adds eventId, eventName, timePeriod, stage (Watch | Warning, as string), medicalBaselineAffected (int32), deEnergizationStart, deEnergizationEnd, allClear (timestamp). <strong>estimatedRestoration, deEnergizationEnd and allClear are ESTIMATES PG&amp;E routinely overruns</strong> — they are deliberately not mapped onto <code>expires</code>, so never use them to hide an event.</td></tr>
       <tr><td class="mono">mesh</td><td class="wrap mono">publicKey (hex string), nodeType (companion | repeater | room_server | sensor), name (string), telemetry { snr (double), rssi (int32), hopCount (uint32), path (repeated string — relay hops as repeater pubkey-prefix hashes), pathNodes (repeated string — path resolved to full node public keys, parallel to path), gateways (repeated string), lastAdvertAt (timestamp) }</td></tr>
     </tbody>
   </table></div>
@@ -170,8 +171,9 @@ Content-Type: application/json
       <tr><td class="mono">FIRE_WEATHER</td><td class="num">4</td><td class="mono">fire_weather</td><td>conditions (map layer only)</td></tr>
       <tr><td class="mono">EARTHQUAKE</td><td class="num">5</td><td class="mono">earthquake</td><td>events</td></tr>
       <tr><td class="mono">ROAD_INCIDENT</td><td class="num">6</td><td class="mono">road_incident</td><td>events</td></tr>
+      <tr><td class="mono">POWER</td><td class="num">10</td><td class="mono">power</td><td>events (PG&amp;E outages + Public Safety Power Shutoffs; <code class="inline">category</code> is <code class="inline">unplanned</code> | <code class="inline">planned</code> | <code class="inline">psps</code>). The statewide median outage affects ONE customer, so most rows are <code class="inline">INFO</code> — pair with <code class="inline">severity_min</code>. INFO power events are excluded from the place-summary rollup (they still appear here and in the <code class="inline">power</code> domain).</td></tr>
       <tr><td class="mono">MESH</td><td class="num">13</td><td class="mono">mesh_node</td><td>events (MeshCore presence) — <code class="inline">?layer=</code> accepts <code class="inline">mesh</code>, <code class="inline">mesh_node</code>, or the legacy <code class="inline">network</code></td></tr>
-      <tr><td class="mono">POWER, GAUGE, AIR_QUALITY, ANNOUNCEMENT</td><td class="num">10–14</td><td class="mono">—</td><td>reserved for future pollers</td></tr>
+      <tr><td class="mono">GAUGE, AIR_QUALITY, ANNOUNCEMENT</td><td class="num">11, 12, 14</td><td class="mono">—</td><td>reserved for future pollers</td></tr>
     </tbody>
   </table></div>
   <p class="small muted">
@@ -361,7 +363,7 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
   }
 }</pre>
   <ul>
-    <li><strong>Per-kind data</strong> lives under a single namespaced key (<code class="inline">wildfire</code>, <code class="inline">earthquake</code>, <code class="inline">evacuation</code>, <code class="inline">weather</code>, <code class="inline">incident</code>, <code class="inline">mesh</code>) — consumers ignore kinds they don't handle; no field collisions.</li>
+    <li><strong>Per-kind data</strong> lives under a single namespaced key (<code class="inline">wildfire</code>, <code class="inline">earthquake</code>, <code class="inline">evacuation</code>, <code class="inline">weather</code>, <code class="inline">incident</code>, <code class="inline">power</code>, <code class="inline">mesh</code>) — consumers ignore kinds they don't handle; no field collisions.</li>
     <li><strong>Coordinate order is <code class="inline">[longitude, latitude]</code></strong> (GeoJSON axis order), WGS84, trimmed to 5 decimals (~1.1 m). Polygons are simplified to keep features small.</li>
     <li><strong>Null geometry is valid</strong> (e.g. a county-wide advisory): the feature has <code class="inline">"geometry": null</code> with the same properties envelope. Exclude it from the map layer and render it as a full-width banner/list card sorted by <code class="inline">severityRank</code> alongside located features, showing <code class="inline">headline</code>, <code class="inline">source.name</code>, <code class="inline">updatedAt</code>, and <code class="inline">source.url</code>.</li>
     <li><strong>URL fields are scheme-validated upstream</strong>: any upstream-sourced URL that is not <code class="inline">https://</code>/<code class="inline">http://</code> is dropped before it reaches the response. Treat all upstream text (headlines, descriptions) as untrusted anyway.</li>
@@ -484,6 +486,8 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
       <tr><td class="mono">caloes</td><td class="wrap">Cal OES California Evacuation Aggregation Layer (Zonehaven/Genasys zone schema) — <strong>reference only</strong>, see §6</td><td class="mono">evac:</td><td class="mono">2m</td><td class="wrap"><code>resolve</code></td></tr>
       <tr><td class="mono">chp</td><td class="wrap">CHP incidents (AI-enhanced road_incident events)</td><td class="mono">chp:</td><td class="mono">5m</td><td class="wrap"><code>resolve</code></td></tr>
       <tr><td class="mono">caltrans</td><td class="wrap">Caltrans lane closures (road_incident events); also attributed for chain-control conditions</td><td class="mono">chp:</td><td class="mono">5m</td><td class="wrap"><code>resolve</code></td></tr>
+      <tr><td class="mono">pge</td><td class="wrap">PG&amp;E electric outages (planned and unplanned), affected-area polygons joined onto the reported point</td><td class="mono">pge:</td><td class="mono">5m</td><td class="wrap"><code>resolve</code> — active-only feed; missing ⇒ RESOLVED</td></tr>
+      <tr><td class="mono">psps</td><td class="wrap">PG&amp;E Public Safety Power Shutoff coverage; one event per de-energization window, <strong>empty outside an event</strong></td><td class="mono">psps:</td><td class="mono">5m</td><td class="wrap"><code>resolve</code></td></tr>
     </tbody>
   </table></div>
   <p class="small muted">

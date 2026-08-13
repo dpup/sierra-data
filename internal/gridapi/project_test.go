@@ -439,3 +439,129 @@ func TestProjectEvents_ScrubsUnsafeURLs(t *testing.T) {
 	assert.Empty(t, feats[0].Properties.Source.URL, "non-http(s) URLs never reach the envelope")
 	assert.Nil(t, feats[0].Geometry, "missing stored geometry projects as null geometry")
 }
+
+// TestProjectEvents_Power_Outage pins the whole envelope for an unplanned PG&E
+// outage. The polygon coordinates must pass through verbatim (the RawGeom
+// convention), and the ETOR lands in the kind block rather than on `expires` —
+// it is an estimate PG&E routinely overruns.
+func TestProjectEvents_Power_Outage(t *testing.T) {
+	const poly = `{"type":"Polygon","coordinates":[[[-120.075,38.4388],[-120.0766,38.4388],[-120.0766,38.4391],[-120.075,38.4388]]]}`
+
+	ev := &gridv1.Event{
+		Id:           "pge:330217",
+		Layer:        gridv1.Layer_POWER,
+		Category:     "unplanned",
+		Severity:     gridv1.Severity_MODERATE,
+		Status:       gridv1.EventStatus_ACTIVE,
+		Headline:     "Power outage — 180 customers (tree contact)",
+		CanonicalUrl: "https://pgealerts.alerts.pge.com/outage-tools/outage-map/",
+		Geometry:     geom(poly),
+		Effective:    ts("2026-08-12T17:47:16Z"),
+		ObservedAt:   ts("2026-08-12T21:40:17Z"),
+		Provenance:   &gridv1.Provenance{SourceId: "pge", SourceName: "PG&E", FetchedAt: timestamppb.Now()},
+		Detail: &gridv1.Event_Power{Power: &gridv1.PowerDetail{
+			OutageId:             "330217",
+			Cause:                "TREE CONTACT",
+			CustomersAffected:    180,
+			CrewStatus:           "Crew Enroute",
+			EstimatedRestoration: ts("2026-08-12T23:00:00Z"),
+		}},
+	}
+
+	feats := ProjectEvents(hazards.LayerPower, []*gridv1.Event{ev})
+	require.Len(t, feats, 1)
+	assert.JSONEq(t, `{
+		"type": "Feature",
+		"geometry": `+poly+`,
+		"properties": {
+			"id": "pge:330217",
+			"layer": "POWER",
+			"kind": "Power outage",
+			"category": "unplanned",
+			"severity": "MODERATE",
+			"severityRank": 2,
+			"headline": "Power outage — 180 customers (tree contact)",
+			"status": "ACTIVE",
+			"effective": "2026-08-12T17:47:16Z",
+			"updatedAt": "2026-08-12T21:40:17Z",
+			"source": {
+				"id": "pge",
+				"name": "PG&E",
+				"url": "https://pgealerts.alerts.pge.com/outage-tools/outage-map/",
+				"attribution": "Pacific Gas and Electric"
+			},
+			"power": {
+				"outageId": "330217",
+				"cause": "TREE CONTACT",
+				"customersAffected": 180,
+				"crewStatus": "Crew Enroute",
+				"estimatedRestoration": "2026-08-12T23:00:00Z"
+			}
+		}
+	}`, featJSON(t, feats[0]))
+}
+
+// TestProjectEvents_Power_PSPS: a shutoff shares the layer with outages but
+// takes its own kind, source block and detail fields — and an announced-but-not
+// yet started one projects SCHEDULED, which is what stops a client rendering it
+// as a live outage.
+func TestProjectEvents_Power_PSPS(t *testing.T) {
+	const poly = `{"type":"MultiPolygon","coordinates":[[[[-120.5,38.1],[-120.45,38.1],[-120.45,38.15],[-120.5,38.1]]]]}`
+
+	ev := &gridv1.Event{
+		Id:           "psps:20725:TP02_05172026",
+		Layer:        gridv1.Layer_POWER,
+		Category:     "psps",
+		Severity:     gridv1.Severity_SEVERE,
+		Status:       gridv1.EventStatus_SCHEDULED,
+		Headline:     "PSPS Warning — 74786 customers, 5623 medical baseline",
+		CanonicalUrl: "https://pgealerts.alerts.pge.com/psps-updates/",
+		Geometry:     geom(poly),
+		Effective:    ts("2026-05-17T13:00:00Z"),
+		ObservedAt:   ts("2026-05-16T07:43:13Z"),
+		Provenance:   &gridv1.Provenance{SourceId: "psps", SourceName: "PG&E PSPS", FetchedAt: timestamppb.Now()},
+		Detail: &gridv1.Event_Power{Power: &gridv1.PowerDetail{
+			EventId:                 "20725",
+			EventName:               "PSPS_05172026",
+			TimePeriod:              "TP02_05172026",
+			Stage:                   "Warning",
+			CustomersAffected:       74786,
+			MedicalBaselineAffected: 5623,
+			DeEnergizationStart:     ts("2026-05-17T13:00:00Z"),
+			DeEnergizationEnd:       ts("2026-05-19T15:00:00Z"),
+		}},
+	}
+
+	feats := ProjectEvents(hazards.LayerPower, []*gridv1.Event{ev})
+	require.Len(t, feats, 1)
+	assert.JSONEq(t, `{
+		"type": "Feature",
+		"geometry": `+poly+`,
+		"properties": {
+			"id": "psps:20725:TP02_05172026",
+			"layer": "POWER",
+			"kind": "Public Safety Power Shutoff",
+			"category": "psps",
+			"severity": "SEVERE",
+			"severityRank": 3,
+			"headline": "PSPS Warning — 74786 customers, 5623 medical baseline",
+			"status": "SCHEDULED",
+			"effective": "2026-05-17T13:00:00Z",
+			"updatedAt": "2026-05-16T07:43:13Z",
+			"source": {
+				"id": "psps",
+				"name": "PG&E PSPS",
+				"url": "https://pgealerts.alerts.pge.com/psps-updates/",
+				"attribution": "Pacific Gas and Electric"
+			},
+			"power": {
+				"eventName": "PSPS_05172026",
+				"stage": "Warning",
+				"customersAffected": 74786,
+				"medicalBaselineAffected": 5623,
+				"deEnergizationStart": "2026-05-17T13:00:00Z",
+				"deEnergizationEnd": "2026-05-19T15:00:00Z"
+			}
+		}
+	}`, featJSON(t, feats[0]))
+}

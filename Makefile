@@ -1,5 +1,5 @@
 # Live Data API Server - Build, Test, and Deployment Tasks
-.PHONY: build test proto proto-tools clean server tools site site-modules site-ensure site-install site-dev site-shots site-shots-mock check-wiring run dev lint fmt docker docker-build docker-run docker-run-dev docker-push docker-clean deploy install help test-meshcore
+.PHONY: test-pge build test proto proto-tools clean server tools site site-modules site-ensure site-install site-dev site-shots site-shots-mock check-wiring run dev lint fmt docker docker-build docker-run docker-run-dev docker-push docker-clean deploy install help test-meshcore
 
 # Go parameters
 GOCMD=go
@@ -31,6 +31,7 @@ TEST_GOOGLE_BINARY=$(BUILD_DIR)/test-google
 TEST_CALTRANS_BINARY=$(BUILD_DIR)/test-caltrans
 TEST_WEATHER_BINARY=$(BUILD_DIR)/test-weather
 TEST_MESHCORE_BINARY=$(BUILD_DIR)/test-meshcore
+TEST_PGE_BINARY=$(BUILD_DIR)/test-pge
 TEST_GEO_UTILS_BINARY=$(BUILD_DIR)/test-geo-utils
 TEST_ALERT_ENHANCER_BINARY=$(BUILD_DIR)/test-alert-enhancer
 TEST_ROUTE_MATCHER_BINARY=$(BUILD_DIR)/test-route-matcher
@@ -57,7 +58,7 @@ $(SERVER_BINARY): proto site-ensure
 	$(GOBUILD) -o $(SERVER_BINARY) ./$(CMD_DIR)/server
 
 # Build CLI testing tools only
-tools: $(TEST_GOOGLE_BINARY) $(TEST_CALTRANS_BINARY) $(TEST_WEATHER_BINARY) $(TEST_MESHCORE_BINARY)
+tools: $(TEST_GOOGLE_BINARY) $(TEST_CALTRANS_BINARY) $(TEST_WEATHER_BINARY) $(TEST_MESHCORE_BINARY) $(TEST_PGE_BINARY)
 
 $(TEST_GOOGLE_BINARY): proto
 	$(GOBUILD) -o $(TEST_GOOGLE_BINARY) ./$(CMD_DIR)/test-google
@@ -70,6 +71,9 @@ $(TEST_WEATHER_BINARY): proto
 
 $(TEST_MESHCORE_BINARY): proto
 	$(GOBUILD) -o $(TEST_MESHCORE_BINARY) ./$(CMD_DIR)/test-meshcore
+
+$(TEST_PGE_BINARY): proto
+	$(GOBUILD) -o $(TEST_PGE_BINARY) ./$(CMD_DIR)/test-pge
 
 # Build the static site with Astro (source in web/) into site/dist. The output
 # is NOT committed — it's git-ignored and rebuilt on demand: locally by the
@@ -256,6 +260,12 @@ test-weather: $(TEST_WEATHER_BINARY)
 # etc. — see cmd/test-meshcore); nothing sensitive is passed on the command line.
 test-meshcore: $(TEST_MESHCORE_BINARY)
 	./$(TEST_MESHCORE_BINARY)
+
+# PG&E outage + PSPS probe. Prints what the poller would see, including
+# whether PG&E's own ETL stamp says the outage feed has FROZEN — the failure
+# these undocumented endpoints show instead of an error.
+test-pge: $(TEST_PGE_BINARY)
+	./$(TEST_PGE_BINARY) $(if $(BOUNDS),--bounds=$(BOUNDS)) $(if $(JSON),--json)
 
 # Validate configuration without API calls
 test-config:

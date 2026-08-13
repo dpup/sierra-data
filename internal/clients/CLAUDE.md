@@ -11,6 +11,7 @@ enhancement live in `internal/services`, not here.
 | `weather`  | OpenWeatherMap        | `PF__OPENWEATHER__API_KEY`    | Current conditions only. `GetWeatherAlerts` (One Call 3.0, 1,000/day cap) is CLI-diagnostic only — the server sources alerts from `nws`. |
 | `nws`      | api.weather.gov       | none (User-Agent required)    | Authoritative zone alerts + fire-weather products. |
 | `firis`    | ArcGIS (CAL FIRE org) | none (public)                 | CAL FIRE/FIRIS combo fire perimeters. Dedup + `LastEdit` gating live in `internal/ingest` (wildfire). Replaced `wfigs` (retained unused). |
+| `pge`      | ArcGIS (PG&E)         | none (public, undocumented)   | Electric outages (points + affected-area polygons) and PSPS coverage, plus PG&E's own ETL stamp. See below. |
 
 All clients accept an `HTTPDoer` interface and expose a `NewClientWithHTTPDoer`
 constructor so tests can inject canned responses instead of hitting the network.
@@ -68,3 +69,55 @@ even in a minimal container.
 - Zone codes for the service area (verify with `api.weather.gov/points/{lat},{lng}`,
   don't guess): CAZ137 (1000–3000 ft), CAZ138 (3000–5000 ft), CAZ139 (above
   5000 ft) — NWS Sacramento (STO), covering Calaveras & Tuolumne.
+
+## PG&E (`pge`) — undocumented endpoints, so the failure mode is silence
+
+Folder 43 of PG&E's ArcGIS server is the backend behind their public outage map.
+There is no API contract, no version, no published terms, and no `robots.txt`.
+Treat a schema change as a matter of when, not if — the same posture as the
+Caltrans KML feeds, which did exactly that in 2026.
+
+Three feeds, four requests:
+
+- **`outages/MapServer/4`** (points) and **`/8`** (polygons), joined on
+  `OUTAGE_ID`. **Both must succeed or `GetOutages` fails.** Degrading to
+  point-only geometry looks harmless but geometry is in the event content hash,
+  so a polygon-layer blip would flip an outage's geometry there and back and
+  mint a spurious revision pair in the history of an outage that never changed.
+  An outage can have several polygon rows (a multi-part area); they combine into
+  one MultiPolygon so it stays ONE event.
+- **`psps_public/MapServer/1`** — PSPS coverage. **Empty is the normal state**;
+  the layer only fills during an event. A window is published as MANY rows
+  sharing every attribute (12 rows for one real footprint), so the caller groups
+  them — `internal/ingest` does, on `(EventID, TimePeriod)`.
+  **`psps_staging` on the same host holds PG&E's TEST events** (names like
+  `PSPS_05312024_SKN9_TEST52`, future-dated windows). Never consume it; it is
+  useful only for reading the schema when no real event is running.
+- **`lastupdate_time/MapServer/1`** — PG&E's ETL stamp for the outage service.
+  This is the important one. These endpoints do not fail with a 500; they fail
+  by **freezing** — still answering 200, still serving the last set, so a
+  restored outage stays listed forever and a new one never appears. The stamp is
+  the only way to see it. (Not hypothetical: the Cal OES statewide mirror of this
+  same data was measured 26 h stale while reporting every row as `Active`, which
+  is why we read PG&E directly.) `internal/ingest` turns an old stamp into a
+  source failure — see that package's guide.
+
+Field-type traps, all confirmed against live responses:
+
+- The outage layers publish **epoch-millisecond integers** (`OUTAGE_START`,
+  `LAST_UPDATE`, `CURRENT_ETOR`) with `_TEXT` string twins; PSPS publishes
+  **RFC 3339 strings** and **stringified counts** (`TotCustAff: "74786"`).
+- The ETL stamp is a bare `2006-01-02 15:04:05` with **no zone marker**. It is
+  UTC — parse it with `time.ParseInLocation(..., time.UTC)`, never `time.Parse`
+  in local time, or the freshness gate shifts by the offset.
+- `COUNTY` is **null on most outage rows**, so scoping is spatial (envelope
+  intersect), never by county string.
+- `OUTAGE_CAUSE` is null on roughly half of all rows.
+
+Query hygiene: ask for `geometryPrecision=5` (the repo-wide 5-decimal GeoJSON
+convention) and, for PSPS only, `maxAllowableOffset` — a county-scale coverage
+polygon set measured **8.0 MB raw vs 222 KB simplified** with the same feature
+count. Outage polygons are a few hundred metres across and are NOT simplified.
+
+`./bin/test-pge` (`make test-pge`) probes all of this live, including whether
+the freshness gate would call the feed frozen.

@@ -41,6 +41,7 @@ var eventLayers = map[string]gridv1.Layer{
 	hazards.LayerEarthquake:   gridv1.Layer_EARTHQUAKE,
 	hazards.LayerRoadIncident: gridv1.Layer_ROAD_INCIDENT,
 	hazards.LayerMesh:         gridv1.Layer_MESH,
+	hazards.LayerPower:        gridv1.Layer_POWER,
 }
 
 // conditionLayers is the set of layers that remain live projections of the
@@ -63,6 +64,10 @@ var layerSourceIDs = map[string][]string{
 	hazards.LayerRoadIncident: {"chp", "caltrans"},
 	hazards.LayerMesh:         {"meshcore"},
 	hazards.LayerMeshLink:     {"meshcore"},
+	// Two independently-failing PG&E services back one layer: if only the PSPS
+	// service is down the layer degrades to STALE rather than claiming to be a
+	// complete picture.
+	hazards.LayerPower: {"pge", "psps"},
 }
 
 // hazardsBuilder is the slice of *hazards.Service the condition-backed layers

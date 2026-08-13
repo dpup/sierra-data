@@ -16,6 +16,7 @@ import (
 	"github.com/dpup/sierra-data/internal/clients/calfire"
 	"github.com/dpup/sierra-data/internal/clients/caloes"
 	"github.com/dpup/sierra-data/internal/clients/firis"
+	"github.com/dpup/sierra-data/internal/clients/pge"
 	"github.com/dpup/sierra-data/internal/clients/usgs"
 	"github.com/dpup/sierra-data/internal/config"
 )
@@ -148,6 +149,7 @@ func TestPollEmptyScopeIsError(t *testing.T) {
 			calfire.NewClientWithHTTPDoer("https://calfire.test", doer),
 			firis.NewClientWithHTTPDoer("https://firis.test", doer)),
 		"road_incident": NewRoadIncidentNormalizer(cfg, roads),
+		"power":         NewPowerNormalizer(cfg, pge.NewClientWithHTTPDoer("https://pge.test/43", doer)),
 	}
 	for name, n := range norms {
 		t.Run(name, func(t *testing.T) {

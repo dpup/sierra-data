@@ -39,6 +39,8 @@ func ProjectEvents(layer string, events []*gridv1.Event) []hazards.Feature {
 			f = projectRoadIncident(ev)
 		case hazards.LayerMesh:
 			f = projectNetwork(ev)
+		case hazards.LayerPower:
+			f = projectPower(ev)
 		default:
 			continue // not an event-backed layer
 		}
@@ -178,6 +180,54 @@ func projectNetwork(ev *gridv1.Event) hazards.Feature {
 		RSSI:      t.GetRssi(),
 		HopCount:  t.GetHopCount(),
 		Gateways:  t.GetGateways(),
+	}
+	return feature(ev, p)
+}
+
+// Projection constants for the power layer (plan §5 item 5: the envelope's
+// source block is derived from the provenance source id, not stored per event).
+const (
+	powerCategoryPSPS = "psps"
+	powerKindOutage   = "Power outage"
+	powerKindPSPS     = "Public Safety Power Shutoff"
+)
+
+// projectPower projects a PG&E outage or Public Safety Power Shutoff. This is a
+// new layer (no legacy live builder to stay byte-compatible with). Both feeds
+// share the layer because they answer one question — is the power on? — and the
+// envelope `category` (unplanned|planned|psps) separates them; `kind` spells the
+// distinction out for a client rendering a card title.
+//
+// properties.status is the UPPERCASE lifecycle enum, so an announced-but-not-yet
+// started shutoff reads SCHEDULED and a live one reads ACTIVE.
+func projectPower(ev *gridv1.Event) hazards.Feature {
+	d := ev.GetPower()
+	isPSPS := ev.GetCategory() == powerCategoryPSPS
+	kind := powerKindOutage
+	if isPSPS {
+		kind = powerKindPSPS
+	}
+	p := baseProps(ev, hazards.LayerPower, kind)
+	p.Status = lifecycleStatus(ev)
+	p.Effective = rfc3339(ev.GetEffective())
+	p.UpdatedAt = rfc3339(ev.GetObservedAt())
+	if isPSPS {
+		p.Source = hazards.Source{ID: "psps", Name: "PG&E PSPS", URL: safeURL(ev.GetCanonicalUrl()), Attribution: "Pacific Gas and Electric"}
+	} else {
+		p.Source = hazards.Source{ID: "pge", Name: "PG&E", URL: safeURL(ev.GetCanonicalUrl()), Attribution: "Pacific Gas and Electric"}
+	}
+	p.Power = &hazards.PowerProps{
+		OutageID:                d.GetOutageId(),
+		Cause:                   d.GetCause(),
+		CustomersAffected:       d.GetCustomersAffected(),
+		CrewStatus:              d.GetCrewStatus(),
+		EstimatedRestoration:    rfc3339(d.GetEstimatedRestoration()),
+		EventName:               d.GetEventName(),
+		Stage:                   d.GetStage(),
+		MedicalBaselineAffected: d.GetMedicalBaselineAffected(),
+		DeEnergizationStart:     rfc3339(d.GetDeEnergizationStart()),
+		DeEnergizationEnd:       rfc3339(d.GetDeEnergizationEnd()),
+		AllClear:                rfc3339(d.GetAllClear()),
 	}
 	return feature(ev, p)
 }

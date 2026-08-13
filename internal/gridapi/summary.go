@@ -163,17 +163,34 @@ func (s *Service) buildPlaceSummary(ctx context.Context, hb hazardsBuilder, plac
 		GeneratedAt: timestamppb.New(s.Now().UTC()),
 	}
 
-	// Mesh-node presence (NETWORK) is ambient INFO infrastructure state, surfaced
-	// in its own `comms` domain below. It must NOT inflate the top-level hazard
-	// rollup (total_active, severity counts, top events, mode) — the same
-	// "ambient state is monitoring, not an active hazard" rule that excludes
-	// baseline conditions (commit d278e43). hazardEvents is the set that drives
-	// those; byLayer (built from the full set) still feeds the comms domain.
+	// Two carve-outs from the top-level hazard rollup (total_active, severity
+	// counts, top events, mode). Both are the same rule — ambient state is
+	// monitoring, not an active hazard (the rule that already excludes baseline
+	// conditions, commit d278e43) — and both still appear in their own domain
+	// below, because byLayer is built from the FULL set.
+	//
+	//  1. Mesh-node presence (MESH): ambient INFO infrastructure state.
+	//  2. INFO-severity POWER: PG&E publishes every outage it has, and the
+	//     STATEWIDE MEDIAN OUTAGE AFFECTS ONE CUSTOMER — half of every fetch is
+	//     single-premise service calls. Counting those would report a quiet
+	//     county as `totalActive: 21` and pad `topEvents` — the "top headlines"
+	//     grid_situation leads with — with somebody's individual service drop.
+	//     We ingest them regardless (dropping rows would make the `resolve`
+	//     sweep fabricate restorations) and the severity scale already floors
+	//     them at INFO; this is where that floor gets its meaning.
+	//
+	// The cut is at INFO only. A MINOR power event (10+ customers) is a real
+	// neighbourhood outage and counts, and mode is untouched either way — INFO
+	// never escalates it.
 	hazardEvents := make([]*gridv1.Event, 0, len(events))
 	for _, ev := range events {
-		if ev.GetLayer() != gridv1.Layer_MESH {
-			hazardEvents = append(hazardEvents, ev)
+		if ev.GetLayer() == gridv1.Layer_MESH {
+			continue
 		}
+		if ev.GetLayer() == gridv1.Layer_POWER && ev.GetSeverity() == gridv1.Severity_INFO {
+			continue
+		}
+		hazardEvents = append(hazardEvents, ev)
 	}
 
 	// --- summary block (store events only; conditions live in domains) ---
@@ -242,6 +259,12 @@ func (s *Service) buildPlaceSummary(ctx context.Context, hb hazardsBuilder, plac
 		buildDomain("seismic",
 			[]string{eventLayerStatus(hazards.LayerEarthquake)},
 			eventItems(byLayer[gridv1.Layer_EARTHQUAKE])),
+		// Power is unconditional, unlike comms: it needs no credentials and no
+		// opt-in, so a missing domain here would mean a real data gap rather
+		// than a deliberately-off source.
+		buildDomain("power",
+			[]string{eventLayerStatus(hazards.LayerPower)},
+			eventItems(byLayer[gridv1.Layer_POWER])),
 	}
 	// comms (MeshCore mesh presence) is only reported when the source is enabled:
 	// a deliberately-off source must not surface as a dark/UNAVAILABLE domain.

@@ -28,7 +28,8 @@ Last updated: 2026-07-06
 │   ├── server/                # Main API server (main.go, site.go, gridadapter.go)
 │   ├── test-google/           # Google Routes API testing tool
 │   ├── test-caltrans/         # Caltrans data testing tool
-│   └── test-weather/          # Weather API testing tool
+│   ├── test-weather/          # Weather API testing tool
+│   └── test-pge/              # PG&E outage/PSPS testing tool (+ freshness probe)
 ├── internal/                  # Private application code
 │   ├── services/              # gRPC service implementations
 │   ├── clients/               # External API clients
@@ -145,6 +146,7 @@ make test-unit
 ./bin/test-google
 ./bin/test-caltrans  
 ./bin/test-weather
+./bin/test-pge
 ```
 
 ### API Testing
@@ -229,7 +231,9 @@ need to remember the rule or register new keys — just read the error.
   the fire layer's own, deliberately **wider** geography: `marginDegrees`
   grows the `hazards.areas` union for fire ingest, `placeBufferMeters` lets an
   approaching fire attach to an area/town it has not reached yet. Fire is the
-  only layer with its own geography; see `internal/ingest/CLAUDE.md`.)
+  only layer with its own geography; see `internal/ingest/CLAUDE.md`.) Also
+  `grid.power.outageStaleAfter` — the PG&E freeze detector, not a fetch timeout;
+  see the PG&E notes below.
 - Environment variables override config file values for secrets
 - Use `.envrc` for local development (already in .gitignore)
 
@@ -304,6 +308,28 @@ need to remember the rule or register new keys — just read the error.
   source wrapped as a poller). Lifecycle is `disappearance: expire` with a
   multi-day `expireAfter` (no goodbye packet); when all brokers are down `Poll`
   hard-errors so the sweep never falsely expires live nodes.
+
+**PG&E ArcGIS** (`ags.pge.esriemcs.com`, the `POWER` layer):
+- Keyless and public, but **entirely undocumented** — no contract, no version,
+  no published terms, no robots.txt. Same risk posture as the Caltrans KML
+  feeds. Two sources, one poller: `pge` (outages) and `psps` (Public Safety
+  Power Shutoffs), which are separate services that fail independently.
+- **These endpoints fail by FREEZING, not by erroring** — the ETL stalls while
+  the layers keep answering 200 with the last set. PG&E's own `lastupdate_time`
+  stamp is the only way to see it, and `grid.power.outageStaleAfter` (1h) turns
+  a stalled stamp into a source failure. Do NOT apply that gate to `psps`: its
+  stamp legitimately idles for weeks between shutoff events.
+- **Never consume `43/psps_staging`** — it holds PG&E's TEST events
+  (`PSPS_05312024_SKN9_TEST52`, future-dated windows). It is only useful for
+  reading the PSPS schema when no real event is running.
+- Severity is customer-count driven and the **statewide median outage affects
+  ONE customer**, so most rows are `INFO` by design; consumers filter with
+  `severity_min`. We ingest every row regardless — dropping small ones would
+  make the `resolve` sweep fabricate restorations.
+- ETOR / de-energization end are **estimates PG&E routinely overruns** and are
+  deliberately never mapped onto `Event.expires`.
+- Diagnose with `./bin/test-pge` (`make test-pge`); see
+  `internal/clients/CLAUDE.md` for field-type traps and query hygiene.
 
 **OpenAI API** (Optional):
 - **AI-Enhanced Road Status Determination**: Intelligently analyzes traffic incidents to determine accurate road status (open/restricted/closed)
@@ -384,16 +410,17 @@ gateway's `EmitUnpopulated` marshaler.
 **Summary + map:**
 - `GET /api/v1/places/{place}/summary` - `GetPlaceSummary` RPC (camelCase): a
   one-fetch place rollup — `mode` (QUIET/WATCH/ACTIVE), a cross-layer `summary`,
-  per-`domains[]` status (`fire`/`evacuation`/`weather`/`roads`/`seismic`, plus
-  `comms` when the MeshCore source is enabled), `topEvents`, and a `sources[]`
+  per-`domains[]` status (`fire`/`evacuation`/`weather`/`roads`/`seismic`/`power`,
+  plus `comms` when the MeshCore source is enabled), `topEvents`, and a `sources[]`
   health sidecar. Mesh-node presence (`NETWORK`) is ambient `INFO` state: it is
   excluded from `totalActive`/`severityCounts`/`topEvents`/`mode` (like baseline
   conditions) and appears only in the `comms` domain.
 - `GET /api/v1/places/{place}/map/{layer}.geojson` - hand-built, one RFC 7946
   `FeatureCollection` per layer for a maps client (MapLibre/Leaflet). Layers:
   `road_incident`, `chain_control`, `road_segment`, `weather_alert`,
-  `fire_weather`, `earthquake`, `wildfire`, `evacuation`, `mesh_node` (these are
-  layer *values*, still snake_case). Every feature shares a camelCase `properties` envelope
+  `fire_weather`, `earthquake`, `wildfire`, `evacuation`, `power`, `mesh_node`
+  (these are layer *values*, still snake_case; `power` matches its enum name so
+  `properties.layer` and `Event.layer` read identically). Every feature shares a camelCase `properties` envelope
   (`id, layer, kind, severity, severityRank, headline, source, …`) on the unified
   severity scale `INFO..EXTREME` (rank 0–4). Coordinates
   are `[lng, lat]`. Event layers project from the store

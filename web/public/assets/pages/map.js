@@ -38,7 +38,7 @@ import '../components/menu.js';
 /* Pure helpers (node-testable)                                       */
 /* ------------------------------------------------------------------ */
 
-/** The eight GeoJSON layers served under /map/{layer}.geojson, in canonical
+/** The GeoJSON layers served under /map/{layer}.geojson, in canonical
  * display order (hazard-aggregation-design §4.4 + conditions projections). */
 export const MAP_LAYERS = [
   'road_incident',
@@ -48,6 +48,7 @@ export const MAP_LAYERS = [
   'fire_weather',
   'earthquake',
   'wildfire',
+  'power',
   'evacuation',
   // The relay topology as a self-contained subgraph (nodes in-region + their
   // 1-hop neighbours, plus the edges). Last so it never drives the auto-fit —
@@ -308,6 +309,23 @@ export function kindDetails(props) {
     if (n.rssi != null) add('RSSI', n.rssi + ' dBm');
     if (n.hopCount != null) add('hops', n.hopCount);
     if (Array.isArray(n.gateways) && n.gateways.length) add('gateways', n.gateways.join(', '));
+  } else if (layer === 'POWER') {
+    // One layer, two shapes: an outage carries crew/cause, a PSPS carries the
+    // stage and the de-energization window. props.category says which.
+    const p = asObj(props.power) || {};
+    if (p.customersAffected != null) add('customers', p.customersAffected);
+    if (p.stage) add('stage', p.stage);
+    // Medical-baseline customers depend on grid power for medical equipment —
+    // the number that decides whether neighbours need checking on.
+    if (p.medicalBaselineAffected) add('medical baseline', p.medicalBaselineAffected);
+    add('cause', p.cause);
+    add('crew', p.crewStatus);
+    // Labelled "estimated" on purpose: PG&E routinely overruns both of these,
+    // which is why neither is the event's expires.
+    if (p.estimatedRestoration) add('est. restoration', p.estimatedRestoration);
+    if (p.deEnergizationStart) add('de-energized from', p.deEnergizationStart);
+    if (p.deEnergizationEnd) add('est. until', p.deEnergizationEnd);
+    if (p.outageId) add('outage #', p.outageId);
   } else if (layer === 'MESH_LINK') {
     const m = asObj(props.meshLink) || {};
     if (m.a) add('a', String(m.a).slice(0, 12) + '…');

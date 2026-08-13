@@ -12,6 +12,12 @@ const (
 	LayerEvacuation   = "evacuation"
 	LayerMesh         = "mesh_node"
 	LayerMeshLink     = "mesh_link"
+	// LayerPower carries BOTH electric outages and Public Safety Power
+	// Shutoffs — they are one question to a reader ("is the power on?") and the
+	// per-feature `category` (unplanned|planned|psps) separates them. The slug
+	// deliberately matches the Layer enum name so properties.layer ("POWER")
+	// reads identically to Event.layer on the /events RPCs.
+	LayerPower = "power"
 )
 
 // Properties is the common envelope shared by every hazard feature, plus a
@@ -43,6 +49,7 @@ type Properties struct {
 	Evacuation   *EvacuationProps   `json:"evacuation,omitempty"`
 	Mesh         *MeshProps         `json:"mesh,omitempty"`
 	MeshLink     *MeshLinkProps     `json:"meshLink,omitempty"`
+	Power        *PowerProps        `json:"power,omitempty"`
 }
 
 // Source identifies the upstream feed a feature came from.
@@ -160,6 +167,34 @@ type MeshLinkProps struct {
 	FirstSeen    string  `json:"firstSeen,omitempty"`
 	LastSeen     string  `json:"lastSeen,omitempty"`
 	BestSnr      float64 `json:"bestSnr,omitempty"`
+}
+
+// PowerProps is the power kind block, covering both PG&E feeds. The outage
+// fields and the PSPS fields are mutually exclusive in practice — the feature's
+// `category` (unplanned|planned|psps) says which set is populated — but they
+// share one block because they answer the same question and a client renders
+// them from one card.
+type PowerProps struct {
+	// Outage (category unplanned|planned).
+	OutageID          string `json:"outageId,omitempty"`
+	Cause             string `json:"cause,omitempty"` // raw PG&E code, often blank upstream
+	CustomersAffected int32  `json:"customersAffected,omitempty"`
+	CrewStatus        string `json:"crewStatus,omitempty"`
+	// EstimatedRestoration is PG&E's ETOR — an ESTIMATE that is routinely
+	// overrun, which is why it is not the feature's `expires`.
+	EstimatedRestoration string `json:"estimatedRestoration,omitempty"`
+
+	// PSPS (category psps).
+	EventName string `json:"eventName,omitempty"`
+	Stage     string `json:"stage,omitempty"` // Watch | Warning
+	// MedicalBaselineAffected is customers whose medical equipment depends on
+	// grid power. No other feed we carry reports this.
+	MedicalBaselineAffected int32  `json:"medicalBaselineAffected,omitempty"`
+	DeEnergizationStart     string `json:"deEnergizationStart,omitempty"`
+	DeEnergizationEnd       string `json:"deEnergizationEnd,omitempty"`
+	// AllClear is PG&E's PLANNED all-clear, not proof the shutoff ended (it is
+	// populated on rows still at stage Watch). Render it as an estimate.
+	AllClear string `json:"allClear,omitempty"`
 }
 
 // setSeverity sets both Severity and the derived SeverityRank.

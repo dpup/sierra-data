@@ -39,7 +39,7 @@ func getPrompt(params json.RawMessage) rpcResponse {
 
 Steps:
 1. grid_situation(%q) — lead with the area mode and any active evacuations.
-2. grid_events(location=%q) — summarize active wildfire/weather/road/earthquake events, most severe first.
+2. grid_events(location=%q) — summarize active wildfire/weather/road/earthquake/power events, most severe first.
 3. grid_conditions(location=%q) — note road and weather conditions if relevant.
 
 Rules:

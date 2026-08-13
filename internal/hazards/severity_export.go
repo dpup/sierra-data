@@ -70,6 +70,21 @@ func EvacStatusInactive(status string) bool {
 	return false
 }
 
+// SeverityFromPowerOutage maps an electric outage onto the unified scale from
+// the customers affected, demoting a planned (pre-notified) shutdown one rank.
+func SeverityFromPowerOutage(customersAffected int32, planned bool) string {
+	return fromPowerOutage(customersAffected, planned)
+}
+
+// SeverityFromPSPSStage maps a PSPS coverage stage (Watch|Warning) onto the
+// unified scale. An unrecognized stage classifies conservatively as SEVERE.
+func SeverityFromPSPSStage(stage string) string { return fromPSPSStage(stage) }
+
+// PSPSStageRecognized reports whether a PSPS stage matched a known value;
+// callers log the ones that fell through to the conservative SEVERE default so
+// the phrasing can be classified explicitly.
+func PSPSStageRecognized(stage string) bool { return pspsStageRecognized(stage) }
+
 // NormFireName normalizes an incident/perimeter name for joining CAL FIRE
 // incidents and FIRIS perimeters (e.g. "Salt Springs Fire" and "Salt Springs" →
 // "saltsprings").

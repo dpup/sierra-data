@@ -65,3 +65,79 @@ func TestSeverityFromNWSSeverity(t *testing.T) {
 	assert.Equal(t, SevInfo, SeverityFromNWSSeverity("Unknown"))
 	assert.Equal(t, SevInfo, SeverityFromNWSSeverity(""))
 }
+
+// TestSeverityFromPowerOutage pins the boundaries. The thresholds exist because
+// the statewide MEDIAN PG&E outage affects ONE customer — half of every fetch is
+// single-premise service calls — so the bottom of the scale has to absorb them
+// or a real community-scale outage is buried under noise.
+func TestSeverityFromPowerOutage(t *testing.T) {
+	cases := []struct {
+		customers int32
+		planned   bool
+		want      string
+	}{
+		{1, false, SevInfo},
+		{9, false, SevInfo},
+		{10, false, SevMinor},
+		{99, false, SevMinor},
+		{100, false, SevModerate},
+		{999, false, SevModerate},
+		{1000, false, SevSevere},
+		{50000, false, SevSevere},
+		// A pre-notified shutdown is one rank less urgent than the same
+		// unplanned outage, floored at INFO — never demoted out of existence,
+		// and a large planned de-energization still outranks a small unplanned one.
+		{1000, true, SevModerate},
+		{100, true, SevMinor},
+		{10, true, SevInfo},
+		{1, true, SevInfo},
+	}
+	for _, tc := range cases {
+		got := SeverityFromPowerOutage(tc.customers, tc.planned)
+		assert.Equal(t, tc.want, got, "customers=%d planned=%v", tc.customers, tc.planned)
+	}
+	// A demoted large outage must still outrank an undemoted small one.
+	assert.Greater(t,
+		severityRank(SeverityFromPowerOutage(1000, true)),
+		severityRank(SeverityFromPowerOutage(50, false)))
+
+	// An UNKNOWN count (PG&E reporting no EST_CUSTOMERS; JSON null unmarshals
+	// to 0) must not land at the bottom of the scale. INFO is no longer merely
+	// "low priority" — the place summary drops INFO-severity power events from
+	// its rollup — so rating an unsized outage INFO would make a possibly
+	// community-scale one vanish from the summary while its own headline says
+	// the count is unknown. Unknown is not evidence of small.
+	for _, planned := range []bool{false, true} {
+		for _, n := range []int32{0, -1} {
+			assert.Equal(t, SevMinor, SeverityFromPowerOutage(n, planned),
+				"unknown count (n=%d, planned=%v) must floor at MINOR, not INFO", n, planned)
+		}
+	}
+}
+
+// TestSeverityFromPSPSStage: the PSPS layer is ACTIVE-ONLY — a shutoff that is
+// over leaves the feed — so any row present is live, and an unrecognized stage
+// must classify conservatively rather than dropping to INFO. Same life-safety
+// bias as the evacuation WARNING default.
+func TestSeverityFromPSPSStage(t *testing.T) {
+	assert.Equal(t, SevSevere, SeverityFromPSPSStage("Warning"))
+	assert.Equal(t, SevSevere, SeverityFromPSPSStage("  warning "))
+	assert.Equal(t, SevModerate, SeverityFromPSPSStage("Watch"))
+	assert.Equal(t, SevModerate, SeverityFromPSPSStage("WATCH"))
+
+	assert.True(t, PSPSStageRecognized("Warning"))
+	assert.True(t, PSPSStageRecognized("watch"))
+	for _, unknown := range []string{"", "Imminent De-energization", "Stage 3"} {
+		assert.False(t, PSPSStageRecognized(unknown), unknown)
+		assert.Equal(t, SevSevere, SeverityFromPSPSStage(unknown),
+			"an unrecognized stage on an active-only layer must not read as INFO: %q", unknown)
+	}
+}
+
+func TestDemoteSeverity(t *testing.T) {
+	assert.Equal(t, SevSevere, demoteSeverity(SevExtreme))
+	assert.Equal(t, SevModerate, demoteSeverity(SevSevere))
+	assert.Equal(t, SevMinor, demoteSeverity(SevModerate))
+	assert.Equal(t, SevInfo, demoteSeverity(SevMinor))
+	assert.Equal(t, SevInfo, demoteSeverity(SevInfo), "INFO is the floor")
+}

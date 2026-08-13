@@ -4,7 +4,7 @@ import Shell from '../layouts/Shell.astro';
 <Shell
   current="home"
   title="The Grid — hazard, road & weather data for the central Sierra"
-  description="Public, keyless, real-time hazard, road, and weather data for the central Sierra — wildfire, evacuation, weather, earthquake, and road incidents unified into one honest API. Run by S.I.E.R.R.A, a volunteer emergency-response alliance."
+  description="Public, keyless, real-time hazard, road, and weather data for the central Sierra — wildfire, evacuation, weather, earthquake, road incidents and power outages unified into one honest API. Run by S.I.E.R.R.A, a volunteer emergency-response alliance."
 >
   <style is:global slot="head">
     /* Page-local: the deck's static skeleton and the front-page feed. Every
@@ -63,8 +63,8 @@ import Shell from '../layouts/Shell.astro';
       <div class="deck-body">
       <p class="deck-lede">
         The Grid is the public data service of S.I.E.R.R.A — a volunteer 501(c)(3)
-        serving the central Sierra. Wildfire, evacuation, weather, earthquake and
-        road incidents from a dozen upstream feeds, normalized into one queryable
+        serving the central Sierra. Wildfire, evacuation, weather, earthquake,
+        road incidents and power outages from a dozen upstream feeds, normalized into one queryable
         event model with full revision history. Read-only, keyless, CORS-open.
       </p>
       <div class="ledger" id="deck-ledger">
@@ -113,8 +113,8 @@ import Shell from '../layouts/Shell.astro';
         <div class="cap-eyebrow">One model</div>
         <div class="cap-h">Every hazard, one query</div>
         <div class="cap-p">
-          Wildfire, evacuation, weather alert, fire weather, earthquake and road
-          incidents are normalized from a dozen upstream feeds into one event
+          Wildfire, evacuation, weather alert, fire weather, earthquake, road
+          incidents and power outages are normalized from a dozen upstream feeds into one event
           model with full revision history. Ask once; get the whole region.
         </div>
       </div>

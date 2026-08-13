@@ -47,10 +47,11 @@ message Event {
     EarthquakeDetail earthquake = 24;
     RoadIncidentDetail road_incident = 25;
     MeshDetail mesh = 26;
+    PowerDetail power = 27;
   }
 
-  // Power/Gauge/AirQuality/Announcement details — defined with their pollers.
-  reserved 27 to 30;
+  // Gauge/AirQuality/Announcement details — defined with their pollers.
+  reserved 28 to 30;
 }
 
 enum Layer {
@@ -261,6 +262,46 @@ message MeshTelemetry {
   google.protobuf.Timestamp last_advert_at = 6; // sender-stamped time of the last advert
 }
 
+// PG&E electric outages and Public Safety Power Shutoffs (Layer_POWER). One
+// message covers both, because they are the same thing to a reader — the power
+// is out, or is about to be — and they differ only in which block is populated:
+// an unplanned/planned outage carries outage_id + crew_status, a PSPS carries
+// the event/stage/de-energization window. The envelope `category`
+// (unplanned|planned|psps) says which.
+message PowerDetail {
+  // --- outage (source `pge`) ---
+  string outage_id = 1;             // PG&E OUTAGE_ID, the native id half of "pge:{id}"
+  string cause = 2;                 // raw PG&E code: "PLNND SHUTDOWN", "TREE CONTACT", "FIRE"
+  int32 customers_affected = 3;     // EST_CUSTOMERS (statewide median is 1 — see the severity mapping)
+  string crew_status = 4;           // "Awaiting T-Man" | "Crew On Site" | "No Access" | …
+
+  // Estimated time of restoration. This is an ESTIMATE and is routinely wrong
+  // (observed: an ETOR of 19:00Z on an outage still active at 22:00Z), so it is
+  // deliberately NOT mapped onto the envelope `expires`: `expires` is what
+  // shouldExpire terminates an event on, and a missed estimate must never
+  // retire a live outage.
+  google.protobuf.Timestamp estimated_restoration = 5;
+
+  // --- PSPS (source `psps`) ---
+  string event_id = 6;              // PG&E PSPS EventID
+  string event_name = 7;            // "PSPS_05172026"
+  string time_period = 8;           // "TP02_05172026" — the de-energization window slice
+  string stage = 9;                 // Watch | Warning
+  // Medical-baseline customers in the footprint — people whose medical
+  // equipment depends on grid power. No other feed we carry reports this.
+  int32 medical_baseline_affected = 10;
+  google.protobuf.Timestamp de_energization_start = 11;
+  google.protobuf.Timestamp de_energization_end = 12;
+
+  // PG&E's all-clear time for the window. This is a PLANNED time, not proof the
+  // shutoff ended: it is populated on rows still at stage `Watch`, where it
+  // simply mirrors de_energization_end. It therefore MUST NOT drive lifecycle —
+  // resolving an event on it would clear a shutoff that is still on, which is
+  // the worst thing this layer could do. It is carried so a client can show the
+  // expected all-clear alongside the other estimates.
+  google.protobuf.Timestamp all_clear = 13;
+}
+
 // List / response wrappers for the hand-built /v1 handlers.
 
 message EventList {
@@ -394,7 +435,7 @@ message SummaryTopEvent {
 }
 
 message SummaryDomain {
-  string domain = 1; // fire | evacuation | weather | roads | seismic
+  string domain = 1; // fire | evacuation | weather | roads | seismic | power (| comms when enabled)
   string status = 2; // worst source_status across the domain's layers
   string highest_severity = 3;
   int32 active_count = 4;

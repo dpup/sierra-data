@@ -11,6 +11,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -317,8 +318,8 @@ func TestSummary_Shape(t *testing.T) {
 
 	// Domains in the fixed order, condition-dependent ones UNAVAILABLE (the
 	// hazards service is unwired — fail loud, no fabricated OK).
-	require.Len(t, out.Domains, 5)
-	for i, name := range []string{"fire", "evacuation", "weather", "roads", "seismic"} {
+	require.Len(t, out.Domains, 6)
+	for i, name := range []string{"fire", "evacuation", "weather", "roads", "seismic", "power"} {
 		assert.Equal(t, name, out.Domains[i].Domain)
 	}
 	fire := out.domain(t, "fire")
@@ -426,7 +427,7 @@ func allSourcesOK(t *testing.T, st *store.Store) {
 	for _, id := range []string{"usgs", "calfire", "nws", "chp"} { // seeded by seedEvents
 		recordOK(t, st, id)
 	}
-	for _, id := range []string{"firis", "caltrans", "caloes"} {
+	for _, id := range []string{"firis", "caltrans", "caloes", "pge", "psps"} {
 		seedSource(t, st, id)
 		recordOK(t, st, id)
 	}
@@ -501,7 +502,7 @@ func TestSummary_DomainRollups(t *testing.T) {
 	assert.Equal(t, "INFO", evac.HighestSeverity)
 
 	// Healthy sources sidecar carries last_success_at.
-	require.Len(t, out.Sources, 7)
+	require.Len(t, out.Sources, 9)
 	for _, src := range out.Sources {
 		assert.Equal(t, "OK", src.Status, src.ID)
 		assert.NotEmpty(t, src.LastSuccessAt, src.ID)
@@ -625,4 +626,53 @@ func TestSummary_UnknownPlace(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, codes.NotFound, st.Code())
 	assert.Contains(t, st.Message(), "atlantis")
+}
+
+// TestSummary_InfoPowerExcludedFromRollup: PG&E publishes every outage it has,
+// and the statewide MEDIAN outage affects ONE customer. Counting those in the
+// place rollup would report a quiet county as "21 active" and pad topEvents —
+// the headlines grid_situation leads with — with individual service drops. The
+// cut is at INFO only: a MINOR outage (10+ customers) is a real neighbourhood
+// event and counts. Either way the `power` domain reports the full picture.
+func TestSummary_InfoPowerExcludedFromRollup(t *testing.T) {
+	s := newTestService(t)
+	allSourcesOK(t, s.Store)
+
+	// Three single-premise service calls (INFO) and one real neighbourhood
+	// outage (MINOR).
+	for _, tc := range []struct {
+		id  string
+		sev gridv1.Severity
+	}{
+		{"pge:1", gridv1.Severity_INFO},
+		{"pge:2", gridv1.Severity_INFO},
+		{"pge:3", gridv1.Severity_INFO},
+		{"pge:4", gridv1.Severity_MINOR},
+	} {
+		upsert(t, s.Store, &gridv1.Event{
+			Id: tc.id, Layer: gridv1.Layer_POWER, Category: "unplanned",
+			Severity: tc.sev, Status: gridv1.EventStatus_ACTIVE,
+			Headline:   "Power outage — " + tc.id,
+			Geometry:   pointGeom(38.06, -120.54),
+			Provenance: &gridv1.Provenance{SourceId: "pge"},
+		})
+	}
+
+	out := decodeSummary(t, getSummaryWith(t, s, nil, "calaveras"))
+
+	// The rollup counts only the MINOR one.
+	var powerInTop int
+	for _, te := range out.Summary.TopEvents {
+		if strings.HasPrefix(te.ID, "pge:") {
+			powerInTop++
+			assert.NotEqual(t, "INFO", te.Severity, "an INFO service call must not reach top headlines")
+		}
+	}
+	assert.Equal(t, 1, powerInTop, "only the MINOR outage belongs in topEvents")
+	assert.Equal(t, 0, out.Summary.SeverityCounts["INFO"], "INFO power must not inflate the counts")
+
+	// ...but the power DOMAIN still reports every one of them, the same
+	// asymmetry the comms domain has for mesh presence.
+	power := out.domain(t, "power")
+	assert.Equal(t, 4, power.ActiveCount, "the domain reports the full picture")
 }

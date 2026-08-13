@@ -61,6 +61,57 @@ error must never become an all-clear. Four mechanisms enforce it; keep all four:
 Corollary: `Events` is the whole truth for the scope, or you must fail/suppress.
 Never return a partial `Events` as if complete.
 
+### A fifth case: the source that fails by FREEZING (`power`)
+
+Every mechanism above keys off a fetch that *failed*. The PG&E outage feed can
+fail without failing: its ETL stalls while the endpoint keeps answering 200 with
+the last set, so a restored outage stays listed and a new one never appears.
+Nothing in a successful fetch reveals this. (It is not hypothetical — the Cal
+OES statewide mirror of this same data was measured 26 h stale while reporting
+every row as `Active`.)
+
+PG&E publishes its own ETL stamp, so `PowerNormalizer.freshnessError` compares
+it to now and, past `grid.power.outageStaleAfter`, records the `pge` source as
+**failing for the tick** — a `PerSource` error, not `SweepSuppress`. That choice
+is deliberate and both halves matter: `PerSource` skips the sweep *and* the
+`TouchSeen` refresh *and* degrades health, which is right, because unlike the
+wildfire case the fetch is not honestly healthy — the data behind it is a day
+old and `/api/v1/sources` must say so. The events still upsert: last-known data
+is the best available, and `DegradeStoreStatus` serves them as STALE rather than
+disowning data the response carries.
+
+Two boundaries to preserve:
+
+- **The gate is outage-only.** The PSPS service's stamp legitimately sits idle
+  for weeks between shutoff events (observed a month stale with zero active
+  rows), so gating it would permanently flag a healthy source.
+- **It fails OPEN when the stamp itself is unreadable.** The gate is an EXTRA
+  signal layered on an already-successful fetch; losing it leaves us exactly
+  where every other source here already sits (none publish an ETL stamp at all),
+  whereas failing the source on a flaky metadata table would flap the layer for
+  no gain in truth.
+
+### Corollary: an event id may only be built from IMMUTABLE fields
+
+Under `resolve`, the id IS the lifecycle handle. If a poller derives an id from a
+field the upstream mutates, the next poll emits a different id, the old one is
+"missing from a successful poll", and the sweep RESOLVES it — a fabricated
+all-clear plus a history that restarts from scratch.
+
+`pspsGroupKey` is the worked example. PSPS rows carry `Stage`, which is mutable
+*by design* — Watch escalating to Warning is the single most important thing
+this feed reports — and `DeEngEnd`, which PG&E revises as a shutoff runs long.
+Keying on either meant a shutoff read as CANCELLED at the moment it got more
+serious. The key is `EventID:TimePeriod` (PG&E's own stable identifiers), and
+where those are missing it deliberately **collapses** rather than reaching for a
+mutable field: under-reporting how many windows a shutoff has is recoverable, a
+fabricated all-clear is not. `TestPowerPoll_PSPSIDSurvivesStageEscalation` pins
+this.
+
+The same rule covers geometry, which is hashed: `combineGeometry` sorts its
+members because ArcGIS promises no row ordering, and an order flip would
+otherwise mint a revision on an event that never changed.
+
 ## `Superseded` — the one way to skip the grace, and why it is still fail-loud
 
 `SweepSuppress` says *"I can't prove this is gone."* `Superseded` says the
@@ -197,6 +248,10 @@ Two consequences to preserve when touching `wildfire.go`:
 
 The matching store-side rule (a fire attaching to an area/town place it is
 merely *near*) lives in `store.matchPlaces` — see `internal/store/CLAUDE.md`.
+
+Power is the explicit counter-example: an outage or shutoff outside the
+footprint is *not* a threat to it (the grid does not move), so `power.go` uses
+the bare `unionBounds`. Don't generalize the wildfire margin to new layers.
 
 ## Adding a poller
 

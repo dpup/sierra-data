@@ -311,6 +311,21 @@ grid:
     marginDegrees: 0.5
     placeBufferMeters: 20000
 
+  # PG&E power layer. No geography knobs: unlike fire, an outage outside the
+  # footprint is not a threat to it, so the layer uses the plain hazards union.
+  #
+  # outageStaleAfter is a FREEZE detector, not a fetch timeout. PG&E publishes
+  # its own ETL stamp for the outage service; when that stamp stops advancing
+  # the layers keep serving the last set forever, so a restored outage stays
+  # listed and a new one never appears — a failure that is completely invisible
+  # from the fetch alone. Past this age the `pge` source is recorded as failing
+  # for the tick, which skips its disappearance sweep (absence proves nothing
+  # from a frozen feed) and degrades sourceStatus, while the stored events are
+  # still served as last-known. The stamp normally trails real time by ~3
+  # minutes. Omit for the 1h default; set NEGATIVE to disable the gate.
+  power:
+    outageStaleAfter: "1h"
+
   # NWS weather-alert AI enhancement (condense + localize; spec §3.1 — the
   # enhancer translates, never asserts). budgetPerTick caps OpenAI calls per
   # scheduler tick: enhancement only triggers on content change, so cost
@@ -383,6 +398,21 @@ grid:
       # Lane closures are scheduled operations; the upstream feed refreshes
       # on a 10m cadence, so polling faster just re-reads the same data.
       pollInterval: "10m"
+      disappearance: "resolve"
+    # PG&E electric outages. The outage layers are authoritatively active-only —
+    # a restored outage leaves the feed — so missing IS the restoration. PG&E's
+    # own ETL stamp refreshes every few minutes; 5m keeps us within one refresh
+    # without re-reading the same set.
+    pge:
+      pollInterval: "5m"
+      disappearance: "resolve"
+    # PG&E Public Safety Power Shutoffs. Same active-only contract as Cal OES
+    # evacuations (the layer is EMPTY outside an event), so `resolve` — and, as
+    # there, that is only safe because the client turns a failed fetch into an
+    # error rather than an empty all-clear. Polling a 0-feature layer is cheap;
+    # the cost of a slow cadence is a late shutoff warning.
+    psps:
+      pollInterval: "5m"
       disappearance: "resolve"
     meshcore:
       # Cadence for reconciling the in-memory MeshCore node buffer to the store

@@ -214,7 +214,7 @@ opaque or source-specific grammar. Assessed per source against the actual feeds:
 | USGS earthquakes | Already human-readable ("10km NE of Arnold, CA") | No — template. |
 | USGS gauges | Numeric vs. flood stage | No — arithmetic + template. |
 | Genasys evacuations | Zone IDs + order level | **Prohibited** (see below). Zone ID → place names is geometric, not linguistic. |
-| PG&E PSPS | Cause codes + update bulletins | Probe at poller time; likely bulletins only. |
+| PG&E outages + PSPS | Abbreviated cause codes (`PLNND SHUTDOWN`, `BRKN UG EQUIPMNT`), PSPS stage vocabulary | **No** — resolved by probing the live feeds (2026-08-13): there are no bulletins, only structured fields. Cause codes are a small closed set, so it is a static lookup table (`powerCauses` in `internal/ingest/power.go`), same call as chain-control R1/R2/R3. |
 | NASA FIRMS | Numeric detections (confidence, FRP) | Defer — narrative would be aggregation-level inference about fire behavior, i.e. asserting, not translating. |
 
 **Policy — enhancement translates, never asserts:**
@@ -408,7 +408,8 @@ logs go quiet. Target weeks, not months.
    segments carry over unchanged); counties, towns, zone polygons, corridors
    follow. `/places/resolve` unblocks "What's my zone?" on the SIERRA side.
 4. **Delete `/api/v1`** after N quiet weeks in access logs.
-5. **New pollers** (PSPS first, then FIRMS, gauges, AQI) land on the new surface
+5. **New pollers** (PSPS — shipped 2026-08-13 as the `power` layer, alongside PG&E
+   outages; then FIRMS, gauges, AQI) land on the new surface
    only.
 
 Risk to watch in step 2: GeoJSON layers are currently assembled from live typed

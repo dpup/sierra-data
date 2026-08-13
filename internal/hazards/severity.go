@@ -200,6 +200,94 @@ func sizeSeverity(acres float64, percentContained int32) string {
 	}
 }
 
+// fromPowerOutage maps an electric outage onto the unified scale by how many
+// customers it affects, then demotes a PLANNED (pre-notified) shutdown one rank.
+//
+// The thresholds are set against what the feed actually looks like: statewide,
+// the MEDIAN PG&E outage affects ONE customer, and half of all rows are
+// single-premise. Those are service calls, not situational awareness, so the
+// bottom of the scale has to absorb them — they still ingest (dropping rows
+// would let the resolve sweep fabricate all-clears) and a client filters them
+// out with severity_min. A 1,000-customer outage in a mountain community is a
+// different thing entirely, which is what the top of the scale is for.
+//
+// Planned shutdowns are demoted because PG&E notifies those customers in
+// advance: the same outage is materially less urgent when it was on the
+// calendar. It is a demotion rather than a floor so a genuinely large planned
+// de-energization still outranks a small unplanned one.
+// An UNKNOWN count (PG&E reporting no EST_CUSTOMERS — JSON null unmarshals to
+// 0 with no error) is deliberately NOT the bottom of the scale. INFO is not
+// merely "low priority" any more: the place summary drops INFO-severity power
+// events from its rollup entirely, so rating an unsized outage INFO would make
+// a possibly community-scale one vanish from the summary while its own headline
+// says the count is unknown. Unknown is not evidence of small — it floors at
+// MINOR, and the planned demotion does not apply, because there is no size to
+// demote. Same bias as the unrecognized-evacuation-status and unrecognized-PSPS-
+// stage defaults: when the feed doesn't tell us, don't assume the harmless end.
+func fromPowerOutage(customersAffected int32, planned bool) string {
+	if customersAffected <= 0 {
+		return SevMinor
+	}
+	sev := SevInfo
+	switch {
+	case customersAffected >= 1000:
+		sev = SevSevere
+	case customersAffected >= 100:
+		sev = SevModerate
+	case customersAffected >= 10:
+		sev = SevMinor
+	}
+	if planned {
+		sev = demoteSeverity(sev)
+	}
+	return sev
+}
+
+// pspsStages are the PSPS coverage stages we classify explicitly.
+var pspsStages = map[string]string{
+	// De-energization is committed and scoped — the customers in this footprint
+	// are losing power, for days, including medical-baseline customers.
+	"warning": SevSevere,
+	// Potential shutoff under evaluation: real enough to prepare for, not yet
+	// committed.
+	"watch": SevModerate,
+}
+
+// fromPSPSStage maps a PSPS coverage stage onto the unified scale.
+//
+// Life-safety bias, same as the evacuation default: an UNRECOGNIZED stage
+// classifies as SEVERE, not INFO. This layer is active-only — a shutoff that is
+// over leaves the feed entirely — so any row present is a live shutoff, and
+// under-rating one PG&E is publishing is the failure that matters. Callers log
+// unrecognized stages (see PSPSStageRecognized) so they can be classified
+// explicitly.
+func fromPSPSStage(stage string) string {
+	if sev, ok := pspsStages[strings.ToLower(strings.TrimSpace(stage))]; ok {
+		return sev
+	}
+	return SevSevere
+}
+
+// pspsStageRecognized reports whether a PSPS stage matched a known value.
+func pspsStageRecognized(stage string) bool {
+	_, ok := pspsStages[strings.ToLower(strings.TrimSpace(stage))]
+	return ok
+}
+
+// demoteSeverity drops one rank on the unified scale, floored at INFO.
+func demoteSeverity(s string) string {
+	switch s {
+	case SevExtreme:
+		return SevSevere
+	case SevSevere:
+		return SevModerate
+	case SevModerate:
+		return SevMinor
+	default:
+		return SevInfo
+	}
+}
+
 // fromMagnitude maps an earthquake magnitude onto the unified scale.
 func fromMagnitude(m float64) string {
 	switch {

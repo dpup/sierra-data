@@ -35,6 +35,7 @@ type GridConfig struct {
 	Sources     map[string]SourceTuning `koanf:"sources"`
 	Meshcore    MeshcoreConfig          `koanf:"meshcore"`
 	Wildfire    WildfireConfig          `koanf:"wildfire"`
+	Power       PowerConfig             `koanf:"power"`
 }
 
 // Default wildfire geography. Both are applied when the corresponding
@@ -88,6 +89,43 @@ func (w WildfireConfig) PlaceBuffer() float64 {
 		return w.PlaceBufferMeters
 	}
 	return DefaultWildfirePlaceBufferMeters
+}
+
+// DefaultPowerOutageStaleAfter is how long PG&E's own outage ETL stamp may go
+// without advancing before we treat the feed as FROZEN rather than quiet. It
+// advances every few minutes in normal operation (observed trailing real time
+// by ~3 minutes), so an hour is far outside the noise band while staying short
+// enough to catch a stall within one news cycle.
+const DefaultPowerOutageStaleAfter = time.Hour
+
+// PowerConfig tunes the PG&E power layer. The only knob is the upstream
+// freshness gate, because the layer's geography is the plain hazards union
+// (unlike wildfire, an outage outside the footprint is not a threat to it).
+type PowerConfig struct {
+	// OutageStaleAfter is the maximum age of PG&E's own outage ETL stamp before
+	// the `pge` source is reported as failing for the tick. This exists because
+	// a frozen ETL is INVISIBLE without it: the layers keep serving the last
+	// set, so a restored outage stays listed and a new one never appears, and
+	// "still listed" becomes indistinguishable from "still out". It is not
+	// hypothetical — the Cal OES statewide mirror of this same data was measured
+	// 26 h stale while reporting every row as Active.
+	//
+	// Unset (0) => DefaultPowerOutageStaleAfter. A NEGATIVE value disables the
+	// gate outright and is returned verbatim — an explicit opt-out, deliberately
+	// distinct from an omitted key, which must not silently drop a safety check.
+	// Do NOT "fix" OutageStale to clamp negatives to the default: that would
+	// silently re-enable a gate an operator turned off on purpose.
+	OutageStaleAfter time.Duration `koanf:"outageStaleAfter"`
+}
+
+// OutageStale is OutageStaleAfter with the default applied. A negative
+// configured value disables the gate and is returned as-is (the caller treats
+// <= 0 as off).
+func (p PowerConfig) OutageStale() time.Duration {
+	if p.OutageStaleAfter != 0 {
+		return p.OutageStaleAfter
+	}
+	return DefaultPowerOutageStaleAfter
 }
 
 // MeshcoreConfig configures the MeshCore mesh-node presence source: a set of

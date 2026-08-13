@@ -732,6 +732,9 @@
         },
         "mesh": {
           "$ref": "#/definitions/v1MeshDetail"
+        },
+        "power": {
+          "$ref": "#/definitions/v1PowerDetail"
         }
       }
     },
@@ -1062,6 +1065,70 @@
       },
       "description": "PlaceSummary is the one-call place rollup (the former hand-built summary,\nnow proto so it is camelCase like the rest of the surface). active_evacuations\nis a wrapper so it can serialize as an explicit JSON null: null when the\nevacuation source is UNAVAILABLE (unknown — render \"check Genasys\"), 0 when\nconfirmed-empty (OK/STALE with no active zones), N when active. An error must\nnever become a 0."
     },
+    "v1PowerDetail": {
+      "type": "object",
+      "properties": {
+        "outageId": {
+          "type": "string",
+          "description": "PG\u0026E OUTAGE_ID, the native id half of \"pge:{id}\"",
+          "title": "--- outage (source `pge`) ---"
+        },
+        "cause": {
+          "type": "string",
+          "title": "raw PG\u0026E code: \"PLNND SHUTDOWN\", \"TREE CONTACT\", \"FIRE\""
+        },
+        "customersAffected": {
+          "type": "integer",
+          "format": "int32",
+          "title": "EST_CUSTOMERS (statewide median is 1 — see the severity mapping)"
+        },
+        "crewStatus": {
+          "type": "string",
+          "title": "\"Awaiting T-Man\" | \"Crew On Site\" | \"No Access\" | …"
+        },
+        "estimatedRestoration": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Estimated time of restoration. This is an ESTIMATE and is routinely wrong\n(observed: an ETOR of 19:00Z on an outage still active at 22:00Z), so it is\ndeliberately NOT mapped onto the envelope `expires`: `expires` is what\nshouldExpire terminates an event on, and a missed estimate must never\nretire a live outage."
+        },
+        "eventId": {
+          "type": "string",
+          "description": "PG\u0026E PSPS EventID",
+          "title": "--- PSPS (source `psps`) ---"
+        },
+        "eventName": {
+          "type": "string",
+          "title": "\"PSPS_05172026\""
+        },
+        "timePeriod": {
+          "type": "string",
+          "title": "\"TP02_05172026\" — the de-energization window slice"
+        },
+        "stage": {
+          "type": "string",
+          "title": "Watch | Warning"
+        },
+        "medicalBaselineAffected": {
+          "type": "integer",
+          "format": "int32",
+          "description": "Medical-baseline customers in the footprint — people whose medical\nequipment depends on grid power. No other feed we carry reports this."
+        },
+        "deEnergizationStart": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "deEnergizationEnd": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "allClear": {
+          "type": "string",
+          "format": "date-time",
+          "description": "PG\u0026E's all-clear time for the window. This is a PLANNED time, not proof the\nshutoff ended: it is populated on rows still at stage `Watch`, where it\nsimply mirrors de_energization_end. It therefore MUST NOT drive lifecycle —\nresolving an event on it would clear a shutoff that is still on, which is\nthe worst thing this layer could do. It is carried so a client can show the\nexpected all-clear alongside the other estimates."
+        }
+      },
+      "description": "PG\u0026E electric outages and Public Safety Power Shutoffs (Layer_POWER). One\nmessage covers both, because they are the same thing to a reader — the power\nis out, or is about to be — and they differ only in which block is populated:\nan unplanned/planned outage carries outage_id + crew_status, a PSPS carries\nthe event/stage/de-energization window. The envelope `category`\n(unplanned|planned|psps) says which."
+    },
     "v1Provenance": {
       "type": "object",
       "properties": {
@@ -1254,7 +1321,7 @@
       "properties": {
         "domain": {
           "type": "string",
-          "title": "fire | evacuation | weather | roads | seismic"
+          "title": "fire | evacuation | weather | roads | seismic | power (| comms when enabled)"
         },
         "status": {
           "type": "string",

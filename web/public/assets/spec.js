@@ -63,6 +63,7 @@ export const FIELD_DOCS = {
   weatherAlert: ['detail', 'nwsSeverity, certainty, urgency, instruction, areaDesc, zones[].'],
   earthquake: ['detail', 'magnitude, depthKm, felt.'],
   roadIncident: ['detail', 'logNumber, impact, duration, metadata map.'],
+  power: ['detail', 'Outage: outageId, cause, customersAffected, crewStatus, estimatedRestoration. PSPS: eventId, eventName, timePeriod, stage (Watch | Warning), medicalBaselineAffected, deEnergizationStart, deEnergizationEnd. estimatedRestoration and deEnergizationEnd are ESTIMATES PG&E routinely overruns — they are deliberately not mapped onto expires, so never use them to hide an event.'],
   mesh: ['detail', 'publicKey, nodeType, name, telemetry {snr, rssi, hopCount, gateways, lastAdvertAt} — volatile, never mints a revision. Relay paths are NOT here (proto tag reserved): a path belongs to one reception, not to a node, so topology is served derived at GET /api/v1/mesh/links.'],
 };
 
@@ -135,7 +136,7 @@ export const ENDPOINTS = [
     path: '/api/v1/places/{place}/map/{layer}.geojson',
     blurb: 'One RFC 7946 FeatureCollection per layer, ready for MapLibre or Leaflet.',
     detail:
-      'Ten layer slugs: wildfire, evacuation, weather_alert, earthquake, road_incident, road_segment, chain_control, fire_weather, mesh_node, mesh_link. A foreign top-level metadata member carries sourceStatus (OK | STALE | UNAVAILABLE), generatedAt, lastSourceUpdate, attribution and sourceUrl. UNAVAILABLE arrives with empty features and must render as an unknown-state banner, never an empty map. Coordinates are [lng, lat], trimmed to 5 decimals. Not in the OpenAPI spec — these layers are hand-built. Cache-Control: max-age=60.',
+      'Eleven layer slugs: wildfire, evacuation, weather_alert, earthquake, road_incident, power, road_segment, chain_control, fire_weather, mesh_node, mesh_link. A foreign top-level metadata member carries sourceStatus (OK | STALE | UNAVAILABLE), generatedAt, lastSourceUpdate, attribution and sourceUrl. UNAVAILABLE arrives with empty features and must render as an unknown-state banner, never an empty map. Coordinates are [lng, lat], trimmed to 5 decimals. Not in the OpenAPI spec — these layers are hand-built. Cache-Control: max-age=60.',
     params: [],
     examples: [
       '/api/v1/places/ebbetts-pass/map/wildfire.geojson',
@@ -231,13 +232,14 @@ export const CONVENTIONS = [
   ['Canonical client sort', 'For events: severity descending, then observedAt descending.'],
 ];
 
-/** The nine .geojson map layers, in the order the Map screen lists them. */
+/** The eleven .geojson map layers, in the order the Map screen lists them. */
 export const MAP_LAYERS = [
   'wildfire',
   'evacuation',
   'weather_alert',
   'earthquake',
   'road_incident',
+  'power',
   'road_segment',
   'chain_control',
   'fire_weather',
@@ -252,5 +254,6 @@ export const EVENT_LAYERS = [
   'weather_alert',
   'earthquake',
   'road_incident',
+  'power',
   'mesh',
 ];
