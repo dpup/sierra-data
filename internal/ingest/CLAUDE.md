@@ -112,6 +112,23 @@ The same rule covers geometry, which is hashed: `combineGeometry` sorts its
 members because ArcGIS promises no row ordering, and an order flip would
 otherwise mint a revision on an event that never changed.
 
+### The other direction: upstream staleness is surfaced, never acted on
+
+The freeze gate above degrades a SOURCE. The evacuation layer has the same
+problem one level down — a single ORPHANED ROW, a zone the county lifted that
+Cal OES never retracted — and it is handled deliberately differently.
+
+`warnIfOrphaned` logs it and `observed_at` carries the row's true age, but the
+event stays **ACTIVE**. Cal OES still lists the zone, and `caloes` is a `resolve`
+source: retiring the event would publish an all-clear that no authority issued,
+off nothing but our inference about upstream's bookkeeping. That is the fail-loud
+invariant read in the direction people forget — it forbids fabricating an
+all-clear from OUR failure, and equally from our guess about THEIRS.
+
+The rule of thumb: a freshness signal may degrade a source's health and suppress
+a sweep, and it may make an event's age visible. It may not, on its own, end a
+life-safety event.
+
 ## `Superseded` — the one way to skip the grace, and why it is still fail-loud
 
 `SweepSuppress` says *"I can't prove this is gone."* `Superseded` says the

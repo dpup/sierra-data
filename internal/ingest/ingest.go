@@ -264,6 +264,18 @@ func safeURL(u string) string {
 	return ""
 }
 
+// firstNonZeroTime returns the first time that isn't the zero value — for
+// upstreams that publish the same fact in more than one column and populate
+// whichever one they currently feel like.
+func firstNonZeroTime(times ...time.Time) time.Time {
+	for _, t := range times {
+		if !t.IsZero() {
+			return t
+		}
+	}
+	return time.Time{}
+}
+
 // nonEmpty returns the first value that isn't blank.
 func nonEmpty(vals ...string) string {
 	for _, v := range vals {

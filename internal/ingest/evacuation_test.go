@@ -330,3 +330,72 @@ func TestEvacuationPoll_CollisionContinuityAcrossPolls(t *testing.T) {
 	assert.Equal(t, "evac:Twin Zone-2", res2.Events[0].Id,
 		"survivor must keep its suffixed id, not flip to bare (which fabricates an all-clear)")
 }
+
+// evacCurrentSchemaFeature is a row in the shape Cal OES actually publishes as
+// of 2026-08-13: the documented text/time columns null, the content in NOTES,
+// the only freshness signal in ArcGIS editor tracking.
+func evacCurrentSchemaFeature(zoneID, county, status, notes string, editedAt time.Time, lat, lng float64) string {
+	return fmt.Sprintf(`{
+	  "properties": {"ZONE_ID": %q, "ZONE_NAME": null, "COUNTY": %q, "STATUS": %q,
+	                 "EVENT_TYPE": null, "PUBLIC_INFO": null, "NOTES": %q,
+	                 "STATEWIDE_LAST_UPDATED": null, "EditDate": %d},
+	  "geometry": {"type": "Polygon", "coordinates": [[[%[6]f,%[7]f],[%[8]f,%[7]f],[%[8]f,%[9]f],[%[6]f,%[9]f],[%[6]f,%[7]f]]]}
+	}`, zoneID, county, status, notes, editedAt.UnixMilli(), lng, lat, lng+0.1, lat+0.1)
+}
+
+// TestEvacuationPoll_CurrentSchemaCarriesDirectiveText: the directive text is
+// the one thing this layer exists to deliver, and Cal OES moved it from
+// PUBLIC_INFO to NOTES without any request ever failing. Until this, every
+// evacuation we served had an EMPTY description.
+func TestEvacuationPoll_CurrentSchemaCarriesDirectiveText(t *testing.T) {
+	edited := time.Date(2026, 8, 12, 12, 0, 0, 0, time.UTC)
+	res := pollEvac(t, evacCollection(evacCurrentSchemaFeature(
+		"US-CA-XMY-MRY-F025", "MONTEREY", "Evacuation Order",
+		"Monterey County Sheriff's Office is issuing an immediate EVACUATION ORDER. Leave Now.",
+		edited, 38.1, -120.4)))
+
+	require.Len(t, res.Events, 1)
+	ev := res.Events[0]
+	assert.Equal(t, "Monterey County Sheriff's Office is issuing an immediate EVACUATION ORDER. Leave Now.",
+		ev.GetDescription(), "the county's directive text must be carried verbatim")
+	// observed_at is the "as of" a reader trusts; with the documented column
+	// null, editor tracking is the only honest value available.
+	require.NotNil(t, ev.GetObservedAt())
+	assert.Equal(t, edited, ev.GetObservedAt().AsTime().UTC())
+}
+
+// The documented column still wins when Cal OES populates it.
+func TestEvacuationPoll_PublicInfoStillPreferred(t *testing.T) {
+	res := pollEvac(t, evacCollection(evacFeature(
+		"US-CA-XCA-CCU-153", "Hathaway Pines", "Calaveras", "Evacuation Order", "Leave now.", 38.2, -120.4)))
+	require.Len(t, res.Events, 1)
+	assert.Equal(t, "Leave now.", res.Events[0].GetDescription())
+}
+
+// TestEvacuationPoll_OrphanedZoneStaysActive: a zone the county lifted but
+// Cal OES never retracted is still IN the feed, and this source is `resolve`.
+// Expiring it on our own guess about upstream bookkeeping would publish an
+// all-clear no authority issued — the exact inversion the fail-loud rules
+// forbid. It stays ACTIVE; the staleness shows up as observed_at.
+func TestEvacuationPoll_OrphanedZoneStaysActive(t *testing.T) {
+	now := time.Date(2026, 8, 13, 5, 0, 0, 0, time.UTC)
+	stale := now.Add(-6*24*time.Hour - 8*time.Hour) // the real Tuolumne case: 6.3 days
+
+	n := NewEvacuationNormalizer(testConfig(), caloes.NewClientWithHTTPDoer("https://caloes.test",
+		&fakeDoer{resp: evacCollection(evacCurrentSchemaFeature(
+			"US-CA-Toulumne117", "TUOLUMNE", "Evacuation Warning", "Southgate Dr", stale, 38.1, -120.4))}))
+	n.now = func() time.Time { return now }
+
+	res, err := n.Poll(testCtx(), nil)
+	require.NoError(t, err)
+	require.Len(t, res.Events, 1)
+	ev := res.Events[0]
+	assert.Equal(t, gridv1.EventStatus_ACTIVE, ev.GetStatus(),
+		"Cal OES still lists it — we do not retire a life-safety event on our own inference")
+	assert.Equal(t, stale, ev.GetObservedAt().AsTime().UTC(),
+		"the age must be visible to a reader rather than hidden")
+	// Tuolumne is not a Genasys county; the link must be its own viewer.
+	assert.Equal(t,
+		"https://experience.arcgis.com/experience/701c7fd899574b6ea6c1596cbbd1dcc6/page/Page?org=Tuolumne",
+		ev.GetProvenance().GetSourceUrl())
+}

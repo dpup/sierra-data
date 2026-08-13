@@ -92,25 +92,117 @@ func TestArcGISErrorEnvelopeAttacker(t *testing.T) {
 	}
 }
 
+const tuolumneViewer = "https://experience.arcgis.com/experience/701c7fd899574b6ea6c1596cbbd1dcc6/page/Page?org=Tuolumne"
+
 func TestZoneURL(t *testing.T) {
 	cases := []struct {
-		name, zoneID, want string
+		name, zoneID, county, want string
 	}{
 		// Genasys/Zonehaven-scheme ids deep-link into the zone (confirmed live:
 		// US-CA-XTU-PVL-E032 resolves on protect.genasys.com).
-		{"calaveras genasys", "US-CA-XCA-CCU-153", "https://protect.genasys.com/zones/US-CA-XCA-CCU-153"},
-		{"tulare genasys", "US-CA-XTU-PVL-E032", "https://protect.genasys.com/zones/US-CA-XTU-PVL-E032"},
-		// Non-Genasys counties (Tuolumne's own vendor) fall back to the viewer.
-		{"tuolumne non-genasys", "US-CA-Toulumne101", SourceURL},
+		{"calaveras genasys", "US-CA-XCA-CCU-153", "CALAVERAS", "https://protect.genasys.com/zones/US-CA-XCA-CCU-153"},
+		{"tulare genasys", "US-CA-XTU-PVL-E032", "TULARE", "https://protect.genasys.com/zones/US-CA-XTU-PVL-E032"},
+		// Tuolumne runs its own vendor, so it gets its OWN county viewer — NOT
+		// the generic Genasys one, which does not contain Tuolumne's zones at
+		// all and so was a dead end dressed up as an authoritative link.
+		// (Upstream misspells the county in the id; match on COUNTY, not the id.)
+		{"tuolumne uses its own viewer", "US-CA-Toulumne101", "TUOLUMNE", tuolumneViewer},
+		{"tuolumne case/space insensitive", "US-CA-Toulumne117", " tuolumne ", tuolumneViewer},
+		// An unmapped non-Genasys county still falls back to the generic viewer;
+		// every such county is outside this service's footprint.
+		{"unmapped county", "SOMEWHERE-1", "MODOC", SourceURL},
 		// Legacy / other aggregation id shapes and blanks fall back too.
-		{"legacy short id", "CAL-E-046", SourceURL},
-		{"empty", "", SourceURL},
+		{"legacy short id", "CAL-E-046", "", SourceURL},
+		{"empty", "", "", SourceURL},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := ZoneURL(tc.zoneID); got != tc.want {
-				t.Errorf("ZoneURL(%q) = %q, want %q", tc.zoneID, got, tc.want)
+			if got := ZoneURL(tc.zoneID, tc.county); got != tc.want {
+				t.Errorf("ZoneURL(%q, %q) = %q, want %q", tc.zoneID, tc.county, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestGetActiveEvacuationsReadsCurrentSchema pins the columns Cal OES actually
+// populates TODAY. This is the shape measured across all 37 live rows statewide
+// on 2026-08-13: the documented text/time fields empty, the real content in
+// NOTES and EditDate. Before this, the client asked for neither, so every
+// evacuation we served carried an empty description and no observed_at — and
+// nothing failed, because null parses fine.
+func TestGetActiveEvacuationsReadsCurrentSchema(t *testing.T) {
+	const currentShape = `{
+	  "type": "FeatureCollection",
+	  "features": [{
+	    "type": "Feature",
+	    "properties": {
+	      "ZONE_ID": "US-CA-Toulumne117",
+	      "ZONE_NAME": null,
+	      "COUNTY": "TUOLUMNE",
+	      "STATUS": "Evacuation Warning",
+	      "EVENT_TYPE": null,
+	      "PUBLIC_INFO": null,
+	      "NOTES": "Southgate Dr",
+	      "STATEWIDE_LAST_UPDATED": null,
+	      "EditDate": 1786052055575
+	    },
+	    "geometry": { "type": "Polygon", "coordinates": [[[-120.4,38.0],[-120.3,38.0],[-120.3,38.1],[-120.4,38.0]]] }
+	  }]
+	}`
+	doer := &fakeDoer{resp: currentShape}
+	c := NewClientWithHTTPDoer("https://caloes.test/query", doer)
+
+	zones, err := c.GetActiveEvacuations(context.Background(), Bounds{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(zones) != 1 {
+		t.Fatalf("got %d zones, want 1", len(zones))
+	}
+	z := zones[0]
+	if z.Notes != "Southgate Dr" {
+		t.Errorf("NOTES not carried: %q", z.Notes)
+	}
+	if z.EditedAt.IsZero() {
+		t.Error("EditDate not parsed — the only freshness signal this layer populates")
+	}
+	if !z.LastUpdated.IsZero() {
+		t.Errorf("a null STATEWIDE_LAST_UPDATED must stay zero, got %v", z.LastUpdated)
+	}
+	// Both columns must be requested, or they come back absent regardless of
+	// what the server holds.
+	for _, field := range []string{"NOTES", "EditDate"} {
+		if !strings.Contains(doer.lastURL, field) {
+			t.Errorf("query does not request %s: %s", field, doer.lastURL)
+		}
+	}
+}
+
+// The legacy fields still win when Cal OES populates them, so this survives
+// them moving the text back.
+func TestGetActiveEvacuationsPrefersDocumentedFields(t *testing.T) {
+	const legacyShape = `{
+	  "type": "FeatureCollection",
+	  "features": [{
+	    "type": "Feature",
+	    "properties": {
+	      "ZONE_ID": "US-CA-XCA-CCU-153", "ZONE_NAME": "Hathaway Pines", "COUNTY": "Calaveras",
+	      "STATUS": "Evacuation Order", "PUBLIC_INFO": "Leave now.", "NOTES": "internal note",
+	      "STATEWIDE_LAST_UPDATED": 1782400000000, "EditDate": 1786052055575
+	    },
+	    "geometry": { "type": "Polygon", "coordinates": [[[-120.4,38.2],[-120.3,38.2],[-120.3,38.3],[-120.4,38.2]]] }
+	  }]
+	}`
+	c := NewClientWithHTTPDoer("https://caloes.test/query", &fakeDoer{resp: legacyShape})
+	zones, err := c.GetActiveEvacuations(context.Background(), Bounds{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	z := zones[0]
+	if z.PublicInfo != "Leave now." || z.Notes != "internal note" {
+		t.Errorf("both columns should be carried: %+v", z)
+	}
+	if z.LastUpdated.IsZero() {
+		t.Error("STATEWIDE_LAST_UPDATED should parse when populated")
 	}
 }

@@ -88,7 +88,7 @@ func projectEvacuation(ev *gridv1.Event) hazards.Feature {
 	p.Description = ev.GetDescription()
 	p.Status = d.GetLevel()
 	p.UpdatedAt = rfc3339(ev.GetObservedAt())
-	p.Source = hazards.Source{ID: "caloes", Name: "Cal OES", URL: caloes.ZoneURL(d.GetZoneId()), Attribution: "Cal OES — reference only"}
+	p.Source = hazards.Source{ID: "caloes", Name: "Cal OES", URL: caloes.ZoneURL(d.GetZoneId(), d.GetCounty()), Attribution: "Cal OES — reference only"}
 	p.Evacuation = &hazards.EvacuationProps{
 		ZoneID:    d.GetZoneId(),
 		Level:     d.GetLevel(),
@@ -100,12 +100,22 @@ func projectEvacuation(ev *gridv1.Event) hazards.Feature {
 
 // projectWeatherAlert mirrors the shipped weatherAlerts builder: null-geometry
 // banner features (NWS zone alerts carry zones, not polygons — an event
-// without geometry projects a null geometry), no lifecycle status on the
-// envelope, source name = the NWS sender from provenance.
+// without geometry projects a null geometry), source name = the NWS sender from
+// provenance.
+//
+// properties.status carries the lifecycle enum, same as every other layer. It
+// was omitted here only to stay byte-compatible with the pre-2026-07 live
+// builder, and that builder — and its compat gate — are gone. Omitting it had
+// become actively harmful: the 2026-08-11 change made an advance watch report
+// SCHEDULED until its onset precisely so consumers could tell a watch for
+// Thursday from a warning in force now, and told them to read `status` to do
+// it. A map client reading this layer had no such field, so every alert looked
+// equally live.
 func projectWeatherAlert(ev *gridv1.Event) hazards.Feature {
 	d := ev.GetWeatherAlert()
 	p := baseProps(ev, hazards.LayerWeatherAlert, "Weather alert")
 	p.Description = ev.GetDescription()
+	p.Status = lifecycleStatus(ev)
 	p.Effective = rfc3339(ev.GetEffective())
 	p.Expires = rfc3339(ev.GetExpires())
 	p.Source = hazards.Source{ID: "nws", Name: ev.GetProvenance().GetSourceName()}
@@ -128,6 +138,12 @@ func projectWeatherAlert(ev *gridv1.Event) hazards.Feature {
 func projectEarthquake(ev *gridv1.Event) hazards.Feature {
 	d := ev.GetEarthquake()
 	p := baseProps(ev, hazards.LayerEarthquake, "Earthquake")
+	// Carried for the same reason as every other layer: `status` is the field
+	// consumers are told to read, and a layer that omits it forces a client to
+	// special-case which layers have it. A quake is always ACTIVE until it ages
+	// out of the query window, so this is uniform rather than informative — but
+	// uniform is the point.
+	p.Status = lifecycleStatus(ev)
 	p.Effective = rfc3339(ev.GetEffective())
 	if obs, eff := ev.GetObservedAt(), ev.GetEffective(); obs != nil && !(eff != nil && obs.AsTime().Equal(eff.AsTime())) {
 		p.UpdatedAt = rfc3339(obs)

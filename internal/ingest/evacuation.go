@@ -9,6 +9,7 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/dpup/prefab/logging"
 
@@ -28,12 +29,13 @@ import (
 type EvacuationNormalizer struct {
 	cfg    *config.Config
 	caloes *caloes.Client
+	now    func() time.Time // injectable so the orphan-age check is testable
 }
 
 // NewEvacuationNormalizer wires the normalizer to a Cal OES client (tests
 // inject one built with caloes.NewClientWithHTTPDoer).
 func NewEvacuationNormalizer(cfg *config.Config, client *caloes.Client) *EvacuationNormalizer {
-	return &EvacuationNormalizer{cfg: cfg, caloes: client}
+	return &EvacuationNormalizer{cfg: cfg, caloes: client, now: time.Now}
 }
 
 // SourceIDs implements Normalizer.
@@ -92,6 +94,8 @@ func (n *EvacuationNormalizer) Poll(ctx context.Context, prior Prior) (*PollResu
 				"status", z.Status, "zone", nonEmpty(z.ZoneID, z.ZoneName), "county", z.County)
 		}
 
+		n.warnIfOrphaned(ctx, z)
+
 		ev := n.buildEvent(ctx, z, level)
 		if _, seen := groups[ev.Id]; !seen {
 			idOrder = append(idOrder, ev.Id)
@@ -104,6 +108,31 @@ func (n *EvacuationNormalizer) Poll(ctx context.Context, prior Prior) (*PollResu
 		events = append(events, resolveEvacIDCollisions(ctx, prior, id, groups[id])...)
 	}
 	return &PollResult{Events: events}, nil
+}
+
+// evacOrphanAfter is how long a Cal OES row may go untouched before we call it
+// out. The aggregation script rewrites live rows continually — every county's
+// rows were within 1.8 days when this was measured — so a row frozen for days
+// is a zone the county lifted that Cal OES never retracted.
+const evacOrphanAfter = 72 * time.Hour
+
+// warnIfOrphaned logs a zone whose upstream row has gone stale.
+//
+// It deliberately does NOT change the event's lifecycle. Cal OES still lists
+// the zone, and this source is `resolve` — expiring a life-safety event on our
+// own guess about upstream's bookkeeping is exactly the inversion the fail-loud
+// rules forbid: we would be publishing an all-clear no authority issued. The
+// staleness is surfaced honestly instead, as the event's observed_at, and
+// flagged here so an operator can chase it with the county.
+func (n *EvacuationNormalizer) warnIfOrphaned(ctx context.Context, z caloes.EvacZone) {
+	if z.EditedAt.IsZero() {
+		return
+	}
+	if age := n.now().Sub(z.EditedAt); age > evacOrphanAfter {
+		logging.Warnw(ctx, "Cal OES zone has not been updated upstream for days; it may be an orphaned row the county already lifted",
+			"zone", nonEmpty(z.ZoneID, z.ZoneName), "county", z.County, "status", z.Status,
+			"lastEditedAt", z.EditedAt.UTC().Format(time.RFC3339), "ageHours", int(age.Hours()))
+	}
 }
 
 // evacHeadline names the zone the order applies to.
@@ -143,16 +172,29 @@ func (n *EvacuationNormalizer) buildEvent(ctx context.Context, z caloes.EvacZone
 		evacHeadline(z, level),
 	)
 	ev.Category = strings.ToLower(level)
-	// Life-safety: PublicInfo is directive text and is carried VERBATIM.
-	// Enhancement may add context around it, never a paraphrase of it
-	// (spec §3.1 policy 4 — we don't paraphrase orders).
-	ev.Description = z.PublicInfo
+	// Life-safety: the county's directive text is carried VERBATIM. Enhancement
+	// may add context around it, never a paraphrase of it (spec §3.1 policy 4 —
+	// we don't paraphrase orders).
+	//
+	// It arrives in one of two columns and Cal OES has MOVED it: PUBLIC_INFO was
+	// empty on all 37 live rows statewide on 2026-08-13, with the sheriff's
+	// instruction ("...issuing an immediate EVACUATION ORDER... Leave Now.") now
+	// in NOTES. Read both, preferring the documented field, so this survives
+	// Cal OES moving it back. Before this, every evacuation we served carried an
+	// EMPTY description — the one field this layer exists to deliver.
+	ev.Description = nonEmpty(z.PublicInfo, z.Notes)
 	ev.AreaLabel = nonEmpty(z.ZoneName, z.County)
-	ev.ObservedAt = tsProto(z.LastUpdated)
+	// observed_at is the "as of" a reader trusts. STATEWIDE_LAST_UPDATED is the
+	// documented source but is null on every live row, so fall back to ArcGIS
+	// editor tracking — when Cal OES's own script last touched this row. That
+	// fallback is what makes an ORPHANED zone visible: a row the county lifted
+	// but the aggregation never retracted simply stops being updated, and
+	// without this every evacuation had NO observed_at at all.
+	ev.ObservedAt = tsProto(firstNonZeroTime(z.LastUpdated, z.EditedAt))
 	// Deep-link the per-event source_url into the specific zone when it's a
-	// Genasys-hosted county (else the generic viewer). The layer-level
-	// metadata.source_url stays generic for the fail-loud contract.
-	ev.Provenance = NewProvenance("caloes", "Cal OES", "Cal OES — reference only", caloes.ZoneURL(z.ZoneID))
+	// Genasys-hosted county, else the county's own viewer where we know it. The
+	// layer-level metadata.source_url stays generic for the fail-loud contract.
+	ev.Provenance = NewProvenance("caloes", "Cal OES", "Cal OES — reference only", caloes.ZoneURL(z.ZoneID, z.County))
 	ev.Detail = &gridv1.Event_Evacuation{Evacuation: &gridv1.EvacuationDetail{
 		ZoneId:    z.ZoneID,
 		Level:     level,

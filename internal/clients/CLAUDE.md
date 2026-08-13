@@ -121,3 +121,39 @@ count. Outage polygons are a few hundred metres across and are NOT simplified.
 
 `./bin/test-pge` (`make test-pge`) probes all of this live, including whether
 the freshness gate would call the feed frozen.
+
+## Cal OES evacuations (`caloes`) — the columns move without warning
+
+This layer changed shape under us and nothing failed. Measured across all 37
+active rows statewide on 2026-08-13:
+
+| column | populated | note |
+|---|---|---|
+| `ZONE_ID`, `COUNTY`, `STATUS` | 37/37 | the identity + level we key on |
+| `NOTES` | **37/37** | where the public directive text lives NOW |
+| `EditDate` | **37/37** | ArcGIS editor tracking — the only freshness signal |
+| `PUBLIC_INFO` | **0/37** | the documented directive field |
+| `ZONE_NAME`, `EVENT_TYPE`, `CITY`, `CRITICAL_INFO`, `STATEWIDE_LAST_UPDATED` | **0/37** | all empty |
+
+Consequences to keep in mind:
+
+- **Read both text columns, prefer the documented one.** `PUBLIC_INFO` first,
+  then `NOTES`. Until 2026-08-13 the client asked only for `PUBLIC_INFO`, so
+  every evacuation we served carried an EMPTY `description` — the one field this
+  layer exists to deliver — while Monterey's *"...issuing an immediate
+  EVACUATION ORDER... Leave Now."* sat unread in `NOTES`.
+- **`NOTES` is free text, not a label.** Its meaning varies by county: a street
+  ("Southgate Dr", Tuolumne), the full sheriff's instruction (Monterey,
+  Humboldt), or the event type ("Flooding", Tulare). Carry it; do not parse it,
+  and do not put it in a headline.
+- **`EditDate` (case-sensitive, distinct from the always-null `EDIT_DATE`) is
+  how you spot an ORPHANED row** — a zone a county lifted that the aggregation
+  never retracted. The script rewrites live rows continually, so a row frozen for
+  days is a stale one. Observed: every county within 1.8 days except a Tuolumne
+  row at 6.3. `internal/ingest` uses it for `observed_at` and logs the outliers —
+  it deliberately does NOT expire them (see that package's guide).
+- **`ZoneURL` needs the COUNTY, not just the zone id.** Non-Genasys counties have
+  no parseable id scheme (Tuolumne's is `US-CA-Toulumne117`, including upstream's
+  misspelling), and sending them to `protect.genasys.com` links a resident to a
+  viewer their zone will never appear in. County viewers show **live zones only**,
+  so never construct a per-zone deep link into one.

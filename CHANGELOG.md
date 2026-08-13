@@ -64,6 +64,58 @@ Things worth knowing before you render it:
   it stops advancing, the `pge` source reports degraded and the layer's
   `sourceStatus` goes `STALE` rather than serving frozen outages as current.
 
+### Evacuations: the directive text was empty, and the "as of" was missing
+
+**Affects every evacuation event and the `evacuation` map layer.** Cal OES moved
+the public directive text out of `PUBLIC_INFO` and into `NOTES`, and stopped
+populating `ZONE_NAME`, `EVENT_TYPE` and `STATEWIDE_LAST_UPDATED` — measured
+empty on **all 37 active rows statewide** on 2026-08-13. Nothing failed, because
+a null column parses fine. The visible result was that **`description` was empty
+on every evacuation we served** — on the one layer whose whole job is carrying a
+county's instruction verbatim — while text like *"...issuing an immediate
+EVACUATION ORDER... Leave Now."* sat unread in `NOTES`.
+
+- `description` now falls back to `NOTES` when `PUBLIC_INFO` is empty. Still
+  verbatim, still never paraphrased. The documented field wins when present, so
+  this survives Cal OES moving it back.
+- `observedAt` now falls back to the row's ArcGIS edit timestamp. It was
+  **null on every evacuation** before this. It is the only freshness signal the
+  layer populates, and it is what makes an ORPHANED zone visible — one a county
+  lifted that the aggregation never retracted. If you show an "as of", it will
+  now have a value, and that value can be days old.
+- `headline` is unchanged and still falls back to the zone id when the zone has
+  no name. `NOTES` is deliberately **not** used as a label: its content varies by
+  county — a street in Tuolumne, the full sheriff's instruction in Monterey, the
+  event type ("Flooding") in Tulare — so it is reliable as text and unreliable as
+  a title.
+
+An orphaned zone stays `ACTIVE`. Cal OES still lists it, and retiring a
+life-safety event on our own inference would publish an all-clear no authority
+issued. The age is surfaced instead, and logged for an operator to chase.
+
+### Evacuations: non-Genasys counties link to their own viewer
+
+**Affects `properties.source.url` on the `evacuation` map layer and
+`provenance.sourceUrl` on evacuation events.** A zone in a county that is not on
+Genasys used to get the generic `protect.genasys.com` viewer — which does not
+contain that county's zones at all. Tuolumne (`US-CA-Toulumne117`) now links to
+Tuolumne County's own evacuation-zone viewer.
+
+Note those county viewers show **currently live zones only**, so a zone we still
+report can be absent there — that absence is evidence the order was lifted. The
+layer-level `metadata.sourceUrl` still points at Cal OES in every state.
+
+### `weather_alert` and `earthquake` map layers now carry `properties.status`
+
+**Additive.** Both omitted `status` while `/api/v1/events` carried it. That was
+left over from byte-compatibility with the pre-2026-07 builder, which no longer
+exists — and it had become harmful: the 2026-08-11 change made an advance watch
+report `SCHEDULED` until its onset *precisely so consumers could distinguish it
+from a warning in force*, and told them to read `status`. A map client reading
+`weather_alert.geojson` had no such field, so every alert looked equally live.
+`status` is the UPPERCASE lifecycle enum, matching `Event.status` and the other
+layers.
+
 ## 2026-08-11
 
 ### Map layers: `metadata.attribution` is now populated on every layer
