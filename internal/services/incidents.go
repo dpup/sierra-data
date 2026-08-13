@@ -2,6 +2,8 @@ package services
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"regexp"
@@ -218,7 +220,7 @@ func (s *RoadsService) normalizeIncidents(ctx context.Context, area config.Incid
 	}
 	var incidents []*api.Incident
 	var pending []pendingEnhancement
-	seen := make(map[string]bool)
+	seen := make(map[string]int) // id -> index in `incidents`, for the endpoint merge
 	for _, list := range lists {
 		for _, in := range list {
 			inc := s.buildIncident(in, area)
@@ -226,10 +228,21 @@ func (s *RoadsService) normalizeIncidents(ctx context.Context, area config.Incid
 				continue // outside bounds, no coordinates, or a geometry-only placemark
 			}
 			if inc.Id != "" {
-				if seen[inc.Id] {
+				if prevIdx, dup := seen[inc.Id]; dup {
+					// A Caltrans closure is published TWICE — once per endpoint
+					// ("2way"), same id, ~2.5 km apart. Collapsing them to one
+					// incident is right, but "first wins" made WHICH endpoint
+					// survive depend on feed order, so the stored location (and
+					// therefore the event's geometry, which is in the content
+					// hash) flip-flopped between the two every time the order
+					// changed. Keep the southernmost/westernmost deterministically.
+					if southWestOf(inc.Location, incidents[prevIdx].Location) {
+						incidents[prevIdx] = inc
+						pending[prevIdx] = pendingEnhancement{inc: inc, in: in}
+					}
 					continue
 				}
-				seen[inc.Id] = true
+				seen[inc.Id] = len(incidents)
 			}
 			incidents = append(incidents, inc)
 			pending = append(pending, pendingEnhancement{inc: inc, in: in})
@@ -359,7 +372,7 @@ func (s *RoadsService) buildIncident(in caltrans.CaltransIncident, area config.I
 	}
 
 	inc := &api.Incident{
-		Id:                  incidentID(in, d.logNumber),
+		Id:                  incidentID(in, d),
 		Type:                incidentType(in),
 		Severity:            incidentSeverity(in, d.title),
 		Location:            &api.Coordinates{Latitude: in.Coordinates.Latitude, Longitude: in.Coordinates.Longitude},
@@ -385,15 +398,79 @@ func (s *RoadsService) buildIncident(in caltrans.CaltransIncident, area config.I
 	return inc
 }
 
-// incidentID builds a stable identifier, preferring the CHP log number.
-func incidentID(in caltrans.CaltransIncident, logNumber string) string {
-	if logNumber != "" {
-		return logNumber
+// southWestOf orders two endpoint coordinates deterministically, so the
+// endpoint an incident keeps does not depend on the order Caltrans happened to
+// list them in. Nil sorts last.
+func southWestOf(a, b *api.Coordinates) bool {
+	if a == nil {
+		return false
 	}
-	// Fall back to a slug of the name for lane closures without a log number.
+	if b == nil {
+		return true
+	}
+	if a.Latitude != b.Latitude {
+		return a.Latitude < b.Latitude
+	}
+	return a.Longitude < b.Longitude
+}
+
+// incidentID builds a NAMESPACED, stable identifier. The namespace is part of
+// the value so the two feeds cannot be confused: a CHP incident is `chp:`, a
+// Caltrans lane closure is `caltrans:`. (They were both `chp:` before, which
+// contradicted the event's own provenance.sourceId.)
+//
+// CHP is easy — its log number is genuinely unique (245/245 distinct in a live
+// capture; the format is date + dispatch centre + sequence, e.g. 260813SA0270).
+//
+// CALTRANS IS NOT. `Closure ID` is a route-level PROJECT id, not a closure id,
+// and using it alone was the bug this replaces. Measured on a live feed of 593
+// closure rows:
+//
+//	Closure ID alone            271 distinct — 77 of them cover >1 closure
+//	Log Number alone             58 distinct — a small per-project counter
+//	Closure ID + Log Number     419 distinct — still merges unrelated closures
+//	+ location text             425 distinct — every group is 1 or 2 rows
+//
+// C99CB alone covered 16 unrelated Route 99 ramp closures; C128AA covered 18
+// spanning ~130 km. Because the id is also the dedup key, 15 of those 16 were
+// silently dropped each poll and WHICH one survived depended on feed order — so
+// a single stored event's history walked 30 km across the map.
+//
+// The location text is the discriminator that closes it. The remaining 1-or-2
+// row groups are one closure's begin and end markers (that is the "2way" in
+// lcs2way.kml): they share the text exactly, 161 groups out of 167.
+//
+// Stability, the other half of an identifier: two captures 9.7 h apart shared
+// 424 of 425 keys, with zero coordinate drift and zero text rewrites — the
+// churn was one closure finishing and six starting.
+func incidentID(in caltrans.CaltransIncident, d incidentDetail) string {
+	if d.closureID != "" {
+		return "caltrans:" + closureKey(d)
+	}
+	if d.logNumber != "" {
+		return "chp:" + d.logNumber
+	}
+	// Fall back to a slug of the name for a placemark carrying neither.
 	slug := strings.ToLower(strings.TrimSpace(in.Name))
 	slug = regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(slug, "-")
-	return strings.Trim(slug, "-")
+	if slug = strings.Trim(slug, "-"); slug == "" {
+		return ""
+	}
+	return "chp:" + slug
+}
+
+// closureKey renders the Caltrans composite as `{closureID}-{logNumber}-{hash}`.
+// The first two stay readable so an id can be cross-referenced against
+// quickmap; the location text is hashed because it is a long free-text sentence
+// ("From 2.2 mi south of Lake Almanor Resort Rd to ...") that cannot go in an
+// id verbatim.
+func closureKey(d incidentDetail) string {
+	sum := sha256.Sum256([]byte(strings.Join(strings.Fields(d.location), " ")))
+	key := d.closureID
+	if d.closureLogNumber != "" {
+		key += "-" + d.closureLogNumber
+	}
+	return key + "-" + hex.EncodeToString(sum[:3])
 }
 
 // chpCodePrefixRe matches a leading CHP dispatch code (numeric like "1182" or
@@ -474,11 +551,16 @@ func incidentSeverity(in caltrans.CaltransIncident, typeText string) api.AlertSe
 // incidentDetail holds the structured fields extracted from an incident's
 // description markup.
 type incidentDetail struct {
-	logNumber   string
-	title       string // incident type / headline text
-	location    string // human-readable location
-	started     time.Time
-	lastUpdated time.Time
+	logNumber string
+	// closureID / closureLogNumber are the Caltrans lane-closure pair, kept
+	// SEPARATE from logNumber because neither identifies a closure on its own —
+	// see incidentID.
+	closureID        string
+	closureLogNumber string
+	title            string // incident type / headline text
+	location         string // human-readable location
+	started          time.Time
+	lastUpdated      time.Time
 }
 
 var (
@@ -519,6 +601,12 @@ func parseIncidentDetail(in caltrans.CaltransIncident) incidentDetail {
 
 	// Log number: CHP label, then explicit "Log Number" / "Closure ID".
 	d.logNumber = extractLogNumber(in, html)
+	if m := closureIDRe.FindStringSubmatch(html); len(m) > 1 {
+		d.closureID = m[1]
+	}
+	if m := logNumberRe.FindStringSubmatch(html); len(m) > 1 {
+		d.closureLogNumber = m[1]
+	}
 
 	// Title from iw-title (new) if present.
 	if m := iwTitleRe.FindStringSubmatch(html); len(m) > 1 {

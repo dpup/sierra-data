@@ -162,7 +162,10 @@ func (n *RoadIncidentNormalizer) buildEvent(in *api.Incident) *gridv1.Event {
 	}
 
 	ev := NewEvent(
-		"chp:"+in.GetId(),
+		// The id arrives already namespaced (chp: or caltrans:) — the service
+		// derives it, because only it can tell a CHP incident from a Caltrans
+		// lane closure. Do NOT re-prefix here.
+		in.GetId(),
 		gridv1.Layer_ROAD_INCIDENT,
 		SeverityFromLabel(hazards.SeverityFromAlertSeverity(in.GetSeverity())),
 		gridv1.EventStatus_ACTIVE, // the feeds only list active incidents

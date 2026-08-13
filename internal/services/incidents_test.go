@@ -96,8 +96,10 @@ func TestBuildIncident_CHPParsing(t *testing.T) {
 	if inc.LogNumber != "250916ST0066" {
 		t.Errorf("log number = %q, want 250916ST0066", inc.LogNumber)
 	}
-	if inc.Id != "250916ST0066" {
-		t.Errorf("id = %q, want 250916ST0066", inc.Id)
+	// Ids are namespaced by FEED, not by whichever feed happened to be first:
+	// a CHP incident is chp:, a Caltrans closure is caltrans:.
+	if inc.Id != "chp:250916ST0066" {
+		t.Errorf("id = %q, want chp:250916ST0066", inc.Id)
 	}
 	if inc.Type != api.AlertType_INCIDENT {
 		t.Errorf("type = %v, want INCIDENT", inc.Type)
@@ -409,7 +411,7 @@ func TestListIncidents_PartialFeedFailure_ServesSurvivorAndReportsHealth(t *test
 		if err != nil {
 			t.Fatalf("expected surviving CHP feed to be served, got error: %v", err)
 		}
-		if len(resp.Incidents) != 1 || resp.Incidents[0].Id != "260705SA0001" {
+		if len(resp.Incidents) != 1 || resp.Incidents[0].Id != "chp:260705SA0001" {
 			t.Fatalf("expected the CHP incident, got %v", resp.Incidents)
 		}
 
@@ -432,7 +434,7 @@ func TestListIncidents_PartialFeedFailure_ServesSurvivorAndReportsHealth(t *test
 		if err != nil {
 			t.Fatalf("expected surviving lane feed to be served, got error: %v", err)
 		}
-		if len(resp.Incidents) != 1 || resp.Incidents[0].Id != "C4TA" {
+		if len(resp.Incidents) != 1 || !strings.HasPrefix(resp.Incidents[0].Id, "caltrans:C4TA-") {
 			t.Fatalf("expected the lane closure, got %v", resp.Incidents)
 		}
 
@@ -600,7 +602,7 @@ func TestNormalizeIncidents_NeverEnhancedGetBudgetFirst(t *testing.T) {
 		// First 5 were enhanced on the previous refresh (their content has since
 		// changed, so they'd re-consume budget); last 2 never were.
 		if n < 5 {
-			previouslyEnhanced[id] = true
+			previouslyEnhanced["chp:"+id] = true
 		}
 	}
 
@@ -615,14 +617,14 @@ func TestNormalizeIncidents_NeverEnhancedGetBudgetFirst(t *testing.T) {
 
 	// The two never-enhanced incidents must have gotten budget.
 	for _, id := range ids[5:] {
-		if byID[id].CondensedSummary == "" {
+		if byID["chp:"+id].CondensedSummary == "" {
 			t.Errorf("never-enhanced incident %s should have priority for the budget", id)
 		}
 	}
 	// Budget is 5: exactly 3 of the previously-enhanced five get re-enhanced.
 	reEnhanced := 0
 	for _, id := range ids[:5] {
-		if byID[id].CondensedSummary != "" {
+		if byID["chp:"+id].CondensedSummary != "" {
 			reEnhanced++
 		}
 	}
@@ -631,8 +633,8 @@ func TestNormalizeIncidents_NeverEnhancedGetBudgetFirst(t *testing.T) {
 	}
 	// List order is unchanged by the budget priority (feed order preserved).
 	for n, inc := range got {
-		if inc.Id != ids[n] {
-			t.Fatalf("output order changed: position %d = %s, want %s", n, inc.Id, ids[n])
+		if inc.Id != "chp:"+ids[n] {
+			t.Fatalf("output order changed: position %d = %s, want chp:%s", n, inc.Id, ids[n])
 		}
 	}
 }
@@ -713,5 +715,83 @@ func TestStripVolatileStamp(t *testing.T) {
 	b := stripVolatileStamp("Lane Closure. Last updated: 07/08/2026 4:25pm")
 	if a != b {
 		t.Fatalf("re-stamp still churns: %q != %q", a, b)
+	}
+}
+
+// TestIncidentID_CaltransClosuresAreDistinct is the regression for the bug this
+// key replaces. `Closure ID` is a route-level PROJECT id: on a live feed of 593
+// closures it took only 271 distinct values, and C99CB alone covered 16
+// unrelated Route 99 ramp closures. Because the id is also the dedup key, 15 of
+// those 16 were dropped every poll and which one survived depended on feed
+// order — so one stored event's history walked 30 km across the map.
+func TestIncidentID_CaltransClosuresAreDistinct(t *testing.T) {
+	// Three real C99CB rows, verbatim shape from the live feed.
+	mk := func(log, from string) incidentDetail {
+		return incidentDetail{closureID: "C99CB", closureLogNumber: log, location: from}
+	}
+	rows := []incidentDetail{
+		mk("66", "From Northbound Route 59/Martin Luther King Jr. Way"),
+		mk("14", "From Southbound 16th Street under-crossing"),
+		mk("34", "From Winton Parkway overcrossing"),
+	}
+	ids := map[string]bool{}
+	for _, d := range rows {
+		id := incidentID(caltrans.CaltransIncident{}, d)
+		if !strings.HasPrefix(id, "caltrans:C99CB-") {
+			t.Errorf("id %q should stay readable and namespaced to the feed", id)
+		}
+		if ids[id] {
+			t.Fatalf("two different closures collided on %q — the whole point of this key", id)
+		}
+		ids[id] = true
+	}
+}
+
+// Two closures sharing BOTH Closure ID and Log Number are separated by their
+// location text — the live case was C89HA/14, four rows 167 km apart that split
+// cleanly into "Lake Almanor Resort Rd" and "Eagle Point Campground".
+func TestIncidentID_LocationTextSeparatesSharedLogNumbers(t *testing.T) {
+	a := incidentID(caltrans.CaltransIncident{}, incidentDetail{
+		closureID: "C89HA", closureLogNumber: "14",
+		location: "From  2.2 mi south of Lake Almanor Resort Rd to 3.2 mi south"})
+	b := incidentID(caltrans.CaltransIncident{}, incidentDetail{
+		closureID: "C89HA", closureLogNumber: "14",
+		location: "From  Eagle Point Campground to Eagle Falls Trailhead"})
+	if a == b {
+		t.Fatalf("closures 167 km apart share the id %q", a)
+	}
+}
+
+// The two endpoint markers of ONE closure share all three components, so they
+// map to one id and collapse to one incident — that is the "2way" in
+// lcs2way.kml, and 161 of 167 multi-row groups had byte-identical text.
+func TestIncidentID_EndpointsOfOneClosureShareAnID(t *testing.T) {
+	d := incidentDetail{closureID: "C89HA", closureLogNumber: "5",
+		location: "From  Sequoia Ave (Middle) to Mackinaw Rd"}
+	if incidentID(caltrans.CaltransIncident{}, d) != incidentID(caltrans.CaltransIncident{}, d) {
+		t.Fatal("the id must be a pure function of the closure's identity")
+	}
+}
+
+// CHP is untouched and stays chp:-namespaced — its log number is genuinely
+// unique (245/245 distinct in a live capture).
+func TestIncidentID_CHPKeepsItsLogNumber(t *testing.T) {
+	got := incidentID(caltrans.CaltransIncident{}, incidentDetail{logNumber: "260813SA0270"})
+	if got != "chp:260813SA0270" {
+		t.Errorf("id = %q, want chp:260813SA0270", got)
+	}
+}
+
+// TestSouthWestOf pins the endpoint tie-break. Without it, which of a closure's
+// two endpoints survives depends on Caltrans's row order, and the stored
+// geometry (part of the event content hash) flips between them.
+func TestSouthWestOf(t *testing.T) {
+	south := &api.Coordinates{Latitude: 39.14579, Longitude: -120.152136}
+	north := &api.Coordinates{Latitude: 39.167189, Longitude: -120.144684}
+	if !southWestOf(south, north) || southWestOf(north, south) {
+		t.Error("the southern endpoint must win regardless of argument order")
+	}
+	if southWestOf(nil, south) || !southWestOf(south, nil) {
+		t.Error("nil sorts last")
 	}
 }

@@ -170,6 +170,54 @@ which is a rounding allowance and **not** a "near this town" radius: the nearest
 pair of configured locations is kilometres apart, so no town picks up a
 neighbour. Polygon places are untouched.
 
+### BREAKING: road-incident event ids change, and Caltrans closures stop merging
+
+**Affects every `road_incident` event id.** `Closure ID` is a route-level
+PROJECT id, not a closure id, and using it alone merged unrelated closures into
+one event. Measured on a live feed of 593 closure rows:
+
+```
+Closure ID alone            271 distinct — 77 of them covered >1 closure
+Log Number alone             58 distinct — a small per-project counter
+Closure ID + Log Number     419 distinct — still merged unrelated closures
++ location text             425 distinct — every group is 1 or 2 rows
+```
+
+`C99CB` alone covered **16 unrelated Route 99 ramp closures**; `C128AA` covered
+18 spanning ~130 km. Because the id was also the dedup key, 15 of those 16 were
+**silently dropped every poll**, and which one survived depended on feed order —
+so one stored event's history walked 30 km across the map (33 distinct centroids
+under `chp:C99CB`).
+
+New ids, namespaced by feed:
+
+| feed | before | after |
+|---|---|---|
+| CHP incident | `chp:260813SA0270` | `chp:260813SA0270` (unchanged) |
+| Caltrans closure | `chp:C99CB` | `caltrans:C99CB-14-d65d75` |
+
+The Caltrans form is `{ClosureID}-{LogNumber}-{hash of the location text}`. The
+location text is what separates closures sharing the first two (the live case:
+`C89HA`/`14`, four rows 167 km apart, split by "Lake Almanor Resort Rd" vs
+"Eagle Point Campground"). Two captures 9.7 h apart shared 424 of 425 keys with
+zero coordinate drift.
+
+**The `chp:` prefix on a Caltrans record is also gone.** Those ids contradicted
+the event's own `provenance.sourceId: "caltrans"` — 21 of 27 active incidents in
+production. Prefix and source now agree on every row.
+
+**You will see more road incidents.** In the service area the count went 27 → 46
+on the same feed: the extra 19 are closures the colliding id was discarding.
+
+**Migration: none needed, and none is possible.** The old ids are absent from the
+first successful poll, and `caltrans` is a `resolve` source, so the disappearance
+sweep retires them with a recorded closing revision — their history stays
+queryable at `/api/v1/history`, it just ends. A rename was considered and
+rejected: the mapping is 1:N (one stored row conflated 16 closures, with their
+revisions interleaved), so there is no correct way to split it, and attaching the
+mashup to whichever closure "won" would give one real ramp closure a fabricated
+multi-week history. **If you cache or link road-incident ids, re-fetch them.**
+
 ## 2026-08-11
 
 ### Map layers: `metadata.attribution` is now populated on every layer

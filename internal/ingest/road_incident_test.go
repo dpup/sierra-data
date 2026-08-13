@@ -39,7 +39,7 @@ func testIncidents() (*api.Incident, *api.Incident, *api.Incident) {
 	started := timestamppb.New(time.Date(2026, 7, 4, 6, 24, 0, 0, time.UTC))
 	updated := timestamppb.New(time.Date(2026, 7, 4, 7, 0, 0, 0, time.UTC))
 	enhanced := &api.Incident{
-		Id:                  "250916ST0066",
+		Id:                  "chp:250916ST0066",
 		Type:                api.AlertType_INCIDENT,
 		Severity:            api.AlertSeverity_CRITICAL,
 		Location:            &api.Coordinates{Latitude: 38.2, Longitude: -120.35},
@@ -62,7 +62,7 @@ func testIncidents() (*api.Incident, *api.Incident, *api.Incident) {
 		},
 	}
 	closure := &api.Incident{
-		Id:                  "closure-hwy-4-avery",
+		Id:                  "caltrans:C4TA-7-abc123",
 		Type:                api.AlertType_CLOSURE,
 		Severity:            api.AlertSeverity_WARNING,
 		Location:            &api.Coordinates{Latitude: 38.25, Longitude: -120.3},
@@ -71,7 +71,7 @@ func testIncidents() (*api.Incident, *api.Incident, *api.Incident) {
 		OriginalText:        "1WAY TC SR4 EB UTIL WK",
 	}
 	locationless := &api.Incident{
-		Id:          "no-location",
+		Id:          "chp:no-location",
 		Type:        api.AlertType_INCIDENT,
 		Description: "Geometry-only placemark",
 	}
@@ -92,7 +92,7 @@ func TestRoadIncidentPoll(t *testing.T) {
 	assert.Nil(t, res.PerSource)
 	assert.Equal(t, []string{"mother-lode", "high-country"}, roads.calls)
 	// Locationless skipped; the duplicate across areas collapses.
-	assert.ElementsMatch(t, []string{"chp:250916ST0066", "chp:closure-hwy-4-avery"}, eventIDs(res.Events))
+	assert.ElementsMatch(t, []string{"chp:250916ST0066", "caltrans:C4TA-7-abc123"}, eventIDs(res.Events))
 
 	ev := eventByID(t, res.Events, "chp:250916ST0066")
 	assert.Equal(t, gridv1.Layer_ROAD_INCIDENT, ev.Layer)
@@ -144,7 +144,7 @@ func TestRoadIncidentPoll(t *testing.T) {
 	assert.Equal(t, time.Date(2026, 7, 4, 6, 30, 0, 0, time.UTC), ev.Enhancement.EnhancedAt.AsTime())
 
 	// Lane closures attribute to "caltrans"; not enhanced => no Enhancement.
-	cl := eventByID(t, res.Events, "chp:closure-hwy-4-avery")
+	cl := eventByID(t, res.Events, "caltrans:C4TA-7-abc123")
 	// Unenhanced incident (no condensed_summary): the readable text is the
 	// headline, summary stays empty, and description preserves the verbatim
 	// original feed text so it is still available raw.
@@ -218,7 +218,7 @@ func TestRoadIncidentPoll_SingleFeedDown(t *testing.T) {
 	assert.Error(t, res.PerSource["chp"], "the dead feed's source row must carry the error (sweep suppressed)")
 	assert.NotContains(t, res.PerSource, "caltrans", "the healthy feed still sweeps")
 	// The surviving feed's closures still process.
-	assert.ElementsMatch(t, []string{"chp:closure-hwy-4-avery"}, eventIDs(res.Events))
+	assert.ElementsMatch(t, []string{"caltrans:C4TA-7-abc123"}, eventIDs(res.Events))
 
 	// Symmetric: lane-closure feed down, CHP healthy.
 	enhanced, _, _ := testIncidents()
@@ -271,7 +271,7 @@ func priorRoadIncidentEvent(id string) *gridv1.Event {
 // => no spurious raw revision + re-enhancement revision pair).
 func TestRoadIncidentPoll_UnenhancedIncomingKeepsPriorEnhanced(t *testing.T) {
 	raw := &api.Incident{
-		Id:                  "250916ST0066",
+		Id:                  "chp:250916ST0066",
 		Type:                api.AlertType_INCIDENT,
 		Severity:            api.AlertSeverity_CRITICAL,
 		Location:            &api.Coordinates{Latitude: 38.2, Longitude: -120.35},
@@ -302,7 +302,7 @@ func TestRoadIncidentPoll_UnenhancedIncomingKeepsPriorEnhanced(t *testing.T) {
 func TestRoadIncidentPoll_CarryForwardControls(t *testing.T) {
 	t.Run("genuinely new incident emits raw immediately", func(t *testing.T) {
 		raw := &api.Incident{
-			Id:          "NEW123",
+			Id:          "chp:NEW123",
 			Type:        api.AlertType_INCIDENT,
 			Location:    &api.Coordinates{Latitude: 38.2, Longitude: -120.35},
 			Description: "TRFC COLLISION",
@@ -334,7 +334,7 @@ func TestRoadIncidentPoll_CarryForwardControls(t *testing.T) {
 
 	t.Run("unenhanced prior does not suppress raw updates", func(t *testing.T) {
 		raw := &api.Incident{
-			Id:          "250916ST0066",
+			Id:          "chp:250916ST0066",
 			Type:        api.AlertType_INCIDENT,
 			Location:    &api.Coordinates{Latitude: 38.2, Longitude: -120.35},
 			Description: "VEH FIRE RHS [UPDATED]",

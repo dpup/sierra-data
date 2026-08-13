@@ -605,3 +605,49 @@ func TestTickSupersededSkippedWhenSourceFailed(t *testing.T) {
 	assert.Equal(t, gridv1.EventStatus_ACTIVE, eventStatus(t, st, "wx:old"),
 		"a failed fetch must never transition events, supersession included")
 }
+
+// TestTickIDRenameNeedsNoMigration answers "can a programmatic migration be
+// applied?" for the Caltrans id change — by showing none is needed.
+//
+// The old ids (chp:<ClosureID>, provenance caltrans) are simply absent from the
+// first successful poll under the new scheme. `caltrans` is a `resolve` source,
+// so the disappearance sweep retires them with a RECORDED revision — a proper
+// closing entry, not a silent delete or a rename. New closures start clean at
+// revision 1.
+//
+// A rename migration would be strictly worse, and not merely unnecessary. The
+// mapping is 1:N, not 1:1: one stored chp:C99CB row conflated 16 real closures,
+// and its history interleaves them (33 distinct centroids, 30 km apart). There
+// is no SQL that splits that into 16 correct histories, and attaching the whole
+// mashup to whichever closure "won" the rename would give one real ramp closure
+// a fabricated multi-week history.
+func TestTickIDRenameNeedsNoMigration(t *testing.T) {
+	st := newSchedStore(t)
+	seedSchedSources(t, st, "caltrans")
+
+	// A pre-existing event under the OLD scheme.
+	_, err := st.UpsertEvent(testCtx(), schedEvent("chp:C99CB", "caltrans", gridv1.Layer_ROAD_INCIDENT))
+	require.NoError(t, err)
+
+	// The first poll after deploy emits the NEW ids for the same closures.
+	n := &fakeNormalizer{ids: []string{"caltrans"}, result: &PollResult{Events: []*gridv1.Event{
+		schedEvent("caltrans:C99CB-14-d65d75", "caltrans", gridv1.Layer_ROAD_INCIDENT),
+		schedEvent("caltrans:C99CB-19-d47db1", "caltrans", gridv1.Layer_ROAD_INCIDENT),
+	}}}
+	s := NewScheduler(st, SchedulerConfig{
+		Tuning: map[string]config.SourceTuning{"caltrans": {Disappearance: store.DisappearanceResolve}},
+	})
+	s.tick(testCtx(), PollerSpec{Normalizer: n, Interval: time.Minute})
+
+	old, err := st.GetEvent(testCtx(), "chp:C99CB")
+	require.NoError(t, err, "the old id is retired, not deleted — its history stays queryable")
+	assert.Equal(t, gridv1.EventStatus_RESOLVED, old.GetStatus(),
+		"the sweep closes the old id on its own; no migration required")
+
+	for _, id := range []string{"caltrans:C99CB-14-d65d75", "caltrans:C99CB-19-d47db1"} {
+		got, err := st.GetEvent(testCtx(), id)
+		require.NoError(t, err)
+		assert.Equal(t, gridv1.EventStatus_ACTIVE, got.GetStatus())
+		assert.Equal(t, uint32(1), got.GetRevision(), "a new closure starts a clean history")
+	}
+}

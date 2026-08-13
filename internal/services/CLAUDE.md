@@ -76,8 +76,23 @@ Each incident normalizes to the same primitives the other APIs use (shared
 - **Drops geometry-only placemarks.** The lane-closure feed emits a separate
   LineString "path" placemark per closure with no description — skipped by the
   empty-description check.
-- **Dedupes by `id`.** Closures are repeated across directions in `lcs2way`;
-  only the first is kept.
+- **Dedupes by `id`.** A closure is published twice in `lcs2way` — once per
+  endpoint — so the pair collapses to one incident. The survivor is chosen
+  deterministically (southernmost/westernmost, `southWestOf`), NOT "first
+  wins": the endpoints are ~2.5 km apart and the stored location is part of the
+  grid event's content hash, so feed-order-dependent selection made geometry
+  flip-flop and mint a revision every time Caltrans reordered its rows.
+
+**The id is `incidentID`, and getting it wrong is expensive.** `Closure ID` is a
+route-level PROJECT id — on a live feed 593 rows carried only 271 of them, and
+`C99CB` alone covered 16 unrelated Route 99 ramps. Since the id is also the dedup
+key above, 15 of those 16 were dropped every poll and the survivor varied with
+feed order, so a single grid event's history walked 30 km. The key is
+`(Closure ID, Log Number, location text)`; the text is the discriminator that
+separates closures sharing the first two, and the endpoint pair shares all three
+by design. CHP is unaffected — its log number is genuinely unique. Ids are
+namespaced per feed (`chp:` / `caltrans:`) so they agree with
+`provenance.sourceId`.
 
 CHP incidents carry a `started` time; lane closures are scheduled operations with
 no dispatch time, so their `started` is null (expected, not a bug).
