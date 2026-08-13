@@ -94,6 +94,29 @@ by design. CHP is unaffected — its log number is genuinely unique. Ids are
 namespaced per feed (`chp:` / `caltrans:`) so they agree with
 `provenance.sourceId`.
 
+**Enhancement is GROUNDED — the model may not invent geography.** `RawAlert`
+carries a `PlaceNames` list (`nearbyPlaceNames`, `nearby_places.go`), built from
+config alone — no store, no network, because this service runs upstream of the
+grid store and the place directory is unreachable here. It offers configured
+towns, monitored corridors and the settlements along them **within 15 km**,
+closest first, with coordinate-known places ranked above corridor keywords
+(a keyword has no coordinates of its own). The system prompt then forbids naming
+any locality outside that list.
+
+**The distance cap is the load-bearing part, and an empty list is a finding.**
+Without a cap, grounding just trades a wrong place for a less-wrong one: a
+collision at Sonora Pass was labelled "(near Merced)" — 134 km away, from a CHP
+dispatch-centre token — and the nearest configured town is still 52.8 km off.
+An empty list is serialized explicitly as `[]` (never omitted) and means "we
+looked and nothing is near", at which point the model must name nothing and the
+feed's own route-and-cross-street text survives.
+
+`PlaceNames` is deliberately NOT in the content hash — it is a deterministic
+function of coordinates already inside the hashed `location`, so including it
+would dump the cache on any config edit. The PROMPT version is in the hash, so
+a prompt fix invalidates cached enhancements instead of serving pre-fix text for
+the 24h TTL.
+
 CHP incidents carry a `started` time; lane closures are scheduled operations with
 no dispatch time, so their `started` is null (expected, not a bug).
 

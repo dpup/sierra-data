@@ -17,6 +17,11 @@ func NewContentHasher() *ContentHasher {
 
 // HashRawAlert creates a content hash for deduplication
 // Much simpler than the complex incident hashing system
+// promptVersion is bumped whenever SystemPrompt changes in a way that should
+// invalidate cached enhancements. v2 added the Place Names grounding rule and
+// the Impact Rating rubric.
+const promptVersion = "2"
+
 func (h *ContentHasher) HashRawAlert(raw RawAlert) string {
 	// Normalize the description text for consistent hashing
 	normalizedDesc := h.normalizeText(raw.Description)
@@ -24,11 +29,23 @@ func (h *ContentHasher) HashRawAlert(raw RawAlert) string {
 
 	// Create a content signature including title, description and location
 	// This catches the same incident reported with minor text variations
-	contentSignature := fmt.Sprintf("%s|%s|%s|%s",
+	//
+	// promptVersion joins the signature so that changing the PROMPT invalidates
+	// cached enhancements. Without it a prompt fix is invisible for the 24h TTL:
+	// every already-cached incident keeps serving text produced under the old
+	// rules — which for the grounding fix meant continuing to serve a
+	// hallucinated "(near Merced)" long after the rule forbidding it shipped.
+	//
+	// RawAlert.PlaceNames is deliberately NOT in the signature: it is a
+	// deterministic function of coordinates already inside Location, so it adds
+	// no discriminating power, and including it would dump the whole cache on
+	// any config edit.
+	contentSignature := fmt.Sprintf("%s|%s|%s|%s|%s",
 		normalizedTitle,
 		normalizedDesc,
 		h.normalizeText(raw.Location),
 		raw.StyleUrl, // Include StyleUrl as it indicates incident type
+		promptVersion,
 	)
 
 	// Generate SHA-256 hash

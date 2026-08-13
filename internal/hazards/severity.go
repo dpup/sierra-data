@@ -65,6 +65,40 @@ func fromNWSSeverity(s string) string {
 	}
 }
 
+// fromRoadImpact maps the AI-assessed traffic impact straight onto the unified
+// scale, DELIBERATELY BYPASSING api.AlertSeverity.
+//
+// That round-trip destroys the distinction twice over. `severityFromImpact`
+// collapses "light" and "moderate" into one WARNING, and api.AlertSeverity has
+// only INFO|WARNING|CRITICAL — no fourth level — so four impact values are
+// squeezed through three. Measured live: every road incident was MODERATE or
+// SEVERE, never MINOR, and "Vehicle struck a dog; no injuries reported" ranked
+// identically to a lane closure. Across the archive: MODERATE 6,254, SEVERE
+// 436, MINOR 11.
+//
+// This is the same escape hatch SeverityFromNWSSeverity takes, and for the same
+// reason — see its comment. The api.AlertSeverity path stays in place for the
+// roads API; only the grid event severity comes through here.
+//
+// Returns "" for an unknown or absent impact so the caller can fall back to the
+// enum path. It must NOT default to INFO: an incident whose enhancement was
+// deferred by the per-refresh budget has no impact yet, and rating it INFO
+// would under-report a real closure.
+func fromRoadImpact(impact string) string {
+	switch strings.ToLower(strings.TrimSpace(impact)) {
+	case "severe":
+		return SevSevere
+	case "moderate":
+		return SevModerate
+	case "light":
+		return SevMinor
+	case "none":
+		return SevInfo
+	default:
+		return ""
+	}
+}
+
 // fromFireWeatherState maps a fire-weather state string ("normal"|"elevated"|
 // "red-flag" or their UPPER enum names) onto the unified scale.
 func fromFireWeatherState(state string) string {

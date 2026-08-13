@@ -59,16 +59,49 @@ func TestListIncidents_EnhancementIOOptIn(t *testing.T) {
 	}
 }
 
+// motherLode mirrors the prefab.yaml incident box: the hazards ebbetts-pass
+// area grown by ~0.25 deg for the approach routes.
 func motherLode() config.IncidentArea {
 	return config.IncidentArea{
 		ID:   "mother-lode",
 		Name: "Mother Lode",
 		Bounds: config.GeoBounds{
-			MinLatitude:  37.3,
-			MaxLatitude:  39.0,
-			MinLongitude: -121.15,
-			MaxLongitude: -119.5,
+			MinLatitude:  37.62,
+			MaxLatitude:  38.84,
+			MinLongitude: -120.97,
+			MaxLongitude: -119.64,
 		},
+	}
+}
+
+// TestIncidentAreaExcludesCentralValley pins what the box is FOR. The previous
+// bounds claimed in a comment to exclude the Central Valley floor while
+// actually reaching Merced, Modesto and Turlock — 41 of 60 live rows were
+// out-of-area, and the box is the only gate before an AI enhancement call.
+func TestIncidentAreaExcludesCentralValley(t *testing.T) {
+	b := motherLode().Bounds
+	for name, c := range map[string][2]float64{
+		"Angels Camp":  {38.0678, -120.5402},
+		"Sonora":       {37.9841, -120.3827},
+		"Copperopolis": {37.9799, -120.6396},
+		"Jackson":      {38.3488, -120.7741},
+		"Groveland":    {37.8399, -120.2260},
+	} {
+		if !b.Contains(c[0], c[1]) {
+			t.Errorf("%s is an approach into the service area and must be covered", name)
+		}
+	}
+	for name, c := range map[string][2]float64{
+		"Modesto":    {37.6391, -120.9969},
+		"Merced":     {37.3022, -120.4830},
+		"Turlock":    {37.4947, -120.8466},
+		"Stockton":   {37.9577, -121.2908},
+		"Sacramento": {38.5816, -121.4944},
+		"Auburn":     {38.8966, -121.0769},
+	} {
+		if b.Contains(c[0], c[1]) {
+			t.Errorf("%s is Central Valley / out of region and must not be ingested", name)
+		}
 	}
 }
 

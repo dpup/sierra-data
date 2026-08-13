@@ -362,3 +362,38 @@ func TestImpactSlug(t *testing.T) {
 	assert.Equal(t, "moderate", impactSlug(api.AlertImpact_IMPACT_MODERATE))
 	assert.Equal(t, "severe", impactSlug(api.AlertImpact_IMPACT_SEVERE))
 }
+
+// TestRoadIncidentSeverityUsesImpact: the grid event now grades from the
+// AI-assessed impact rather than the already-collapsed api.AlertSeverity enum,
+// which merges "light" with "moderate" and has no fourth level. Before this a
+// shoulder closure and a multi-lane closure were both MODERATE.
+func TestRoadIncidentSeverityUsesImpact(t *testing.T) {
+	cases := []struct {
+		impact api.AlertImpact
+		want   gridv1.Severity
+	}{
+		{api.AlertImpact_IMPACT_SEVERE, gridv1.Severity_SEVERE},
+		{api.AlertImpact_IMPACT_MODERATE, gridv1.Severity_MODERATE},
+		{api.AlertImpact_IMPACT_LIGHT, gridv1.Severity_MINOR},
+		{api.AlertImpact_IMPACT_NONE, gridv1.Severity_INFO},
+	}
+	for _, tc := range cases {
+		in := &api.Incident{
+			Id:       "chp:x",
+			Impact:   tc.impact,
+			Severity: api.AlertSeverity_WARNING, // the lossy enum says MODERATE for all of these
+		}
+		if got := roadIncidentSeverity(in); SeverityFromLabel(got) != tc.want {
+			t.Errorf("impact %v -> %q, want %v", tc.impact, got, tc.want)
+		}
+	}
+}
+
+// An incident whose enhancement was deferred by the per-refresh budget carries
+// no impact. It must keep the heuristic severity rather than drop to INFO.
+func TestRoadIncidentSeverityFallsBackWhenUnenhanced(t *testing.T) {
+	in := &api.Incident{Id: "chp:x", Severity: api.AlertSeverity_CRITICAL} // impact UNSPECIFIED
+	if got := SeverityFromLabel(roadIncidentSeverity(in)); got != gridv1.Severity_SEVERE {
+		t.Errorf("unenhanced incident = %v, want SEVERE from the enum fallback", got)
+	}
+}

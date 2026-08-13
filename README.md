@@ -207,6 +207,12 @@ a following refresh.
 GET /api/v1/incidents/{area}
 ```
 
+> **Not currently served.** The roads gRPC-Gateway is not mounted, so this
+> endpoint returns 404 in production. `roads.incidentAreas` still configures the
+> scope of the road-incident ingest; read the data at
+> `GET /api/v1/events?layer=road_incident`. Documented here for when the
+> surface is restored.
+
 The `area` is a path param (an area id like `mother-lode`); an unknown area
 returns 404. Areas are defined in `prefab.yaml` under `roads.incidentAreas`.
 
@@ -234,8 +240,9 @@ returns 404. Areas are defined in `prefab.yaml` under `roads.incidentAreas`.
 ```
 
 Areas are bounding boxes defined in `prefab.yaml` under `roads.incidentAreas`.
-The `mother-lode` area covers the Gold Country foothills while excluding the
-Central Valley floor.
+The `mother-lode` area is the service area grown by ~27 km, so it covers the
+approach routes (Angels Camp, Sonora, Copperopolis, Jackson, Groveland) while
+excluding the Central Valley floor (Modesto, Merced, Turlock, Stockton).
 
 ### Weather API
 

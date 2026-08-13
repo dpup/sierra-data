@@ -43,9 +43,13 @@ type GridConfig struct {
 // of this section still gets the wide fire scope — the narrow, footprint-only
 // behaviour is not something anyone should fall back into by omission.
 const (
-	// DefaultWildfireMarginDegrees ~ 55 km on a side. It puts the fire box a
-	// little outside the CHP/Caltrans incident box (roads.incidentAreas), which
-	// is the intent: fire should be the widest thing we watch.
+	// DefaultWildfireMarginDegrees ~ 55 km on a side, which keeps the fire box
+	// comfortably outside the CHP/Caltrans incident box (roads.incidentAreas,
+	// ~27 km) — the intent being that fire is the widest thing we watch. The
+	// two margins exist for DIFFERENT reasons and should not be collapsed: a
+	// fire outside the footprint is a threat because it MOVES, whereas a road
+	// incident outside it matters only because of where it sits, on an approach
+	// route in.
 	DefaultWildfireMarginDegrees = 0.5
 	// DefaultWildfirePlaceBufferMeters ~ 20 km: far enough that a fire gets on
 	// the board while there is still time to act on it, close enough that a fire

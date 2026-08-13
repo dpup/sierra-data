@@ -38,6 +38,14 @@ func (a *alertEnhancer) EnhanceAlert(ctx context.Context, raw RawAlert) (Enhance
 		return EnhancedAlert{}, errors.New("OpenAI client not initialized - invalid API key")
 	}
 
+	// Normalize nil to an empty slice BEFORE marshalling, so the model always
+	// receives the key: an absent place_names is indistinguishable from a caller
+	// that forgot to ground the alert, whereas an explicit [] says "we looked
+	// and nothing is near" — which is what the prompt's Place Names rule keys
+	// off. raw is a value copy, so the caller's struct is untouched.
+	if raw.PlaceNames == nil {
+		raw.PlaceNames = []string{}
+	}
 	// Create user prompt with raw alert data as JSON
 	rawAlertJSON, _ := json.Marshal(raw)
 	userPrompt := fmt.Sprintf(`Parse this traffic incident report and return structured JSON:

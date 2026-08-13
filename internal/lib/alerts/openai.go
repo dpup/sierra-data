@@ -14,7 +14,7 @@ Instructions:
 - Remove jargon and abbreviations (e.g., "1183-Trfc Collision-Unkn Inj" → "Traffic collision, injuries unknown").
 - Provide concise, human-readable text for travelers.
 - Do NOT add source attribution (e.g. "Information courtesy of CHP", "provided by Caltrans"). The data source is displayed separately — describe only the incident itself.
-- Infer impact from the details (use judgment).
+- Infer impact from the details, using the rubric below (not free judgment).
 - Populate all fields exactly as specified in the schema.
 
 CRITICAL - Date/Time Extraction:
@@ -46,6 +46,22 @@ StyleUrl Definitions (KML styles from Caltrans data):
 
 IMPORTANT: These style categories are INTERNAL classification hints. Use them to set road_status and to phrase the description naturally — NEVER surface the style name or append a meta note like "(Style: ...)" to details, condensed_summary, or any other field. The reader wants the situation, not its category.
 
+Impact Rating:
+- Rate impact by HOW MUCH OF THE ROADWAY IS UNAVAILABLE, not by how dramatic the incident sounds:
+  - "none": nothing is blocked — an advisory, a report, activity clear of the travelled way
+  - "light": a shoulder, a turn lane, or a ramp is blocked; every through lane is open
+  - "moderate": one or more through lanes are blocked, but the road is passable
+  - "severe": all lanes are blocked, or the road is closed in at least one direction
+- A collision with no lanes blocked is "none" or "light". A full closure is "severe" however minor its cause.
+- Do not use "moderate" as a default. If the text does not say a through lane is blocked, it is not "moderate".
+
+Place Names — you may not invent geography:
+- Name no city, town, community or landmark that does not appear either in the incident text or in the supplied place_names list.
+- The place_names list is the ONLY external geography you may use. It contains places near this incident's coordinates. Prefer the first entry; it is the closest.
+- If place_names is empty or absent, name NO locality at all. Describe the location using only the route, direction and cross-streets given in the text.
+- Coordinates are for reference only. NEVER convert latitude/longitude into a place name from your own knowledge.
+- Beware: CHP text contains dispatch-centre and agency tokens (often after a numeric code, e.g. "1039 MERCED", "1039 CT"). These name a radio centre, not the incident's location. Never treat them as a place.
+
 Road Status Determination:
 - Analyze the incident title and description to determine road_status:
   - "open": Road is fully passable with normal traffic flow
@@ -75,7 +91,10 @@ Return valid JSON object with these exact fields:
 - details (string) – Plain-language description of what happened
 - condensed_summary (string) – 1-line summary (max 120 chars, no location, no times)
 - location (object) – structured location with:
-  - description (string) – human-friendly location description, e.g. "near treasure island"
+  - description (string) – human-friendly location, built ONLY from the route, direction and
+    cross-streets in the input, optionally naming a place from place_names (see "Place Names" above).
+    If the input already reads clearly, return it essentially unchanged — expanding abbreviations is
+    welcome, inventing a locality is not.
   - latitude (number) – decimal degrees latitude from input coordinates
   - longitude (number) – decimal degrees longitude from input coordinates
 - time_reported (string | null) – ISO timestamp of when first reported

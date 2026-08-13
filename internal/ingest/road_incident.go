@@ -167,7 +167,7 @@ func (n *RoadIncidentNormalizer) buildEvent(in *api.Incident) *gridv1.Event {
 		// lane closure. Do NOT re-prefix here.
 		in.GetId(),
 		gridv1.Layer_ROAD_INCIDENT,
-		SeverityFromLabel(hazards.SeverityFromAlertSeverity(in.GetSeverity())),
+		SeverityFromLabel(roadIncidentSeverity(in)),
 		gridv1.EventStatus_ACTIVE, // the feeds only list active incidents
 		headline,
 	)
@@ -244,6 +244,24 @@ func publicMetadata(m map[string]string) map[string]string {
 // misfire the carry-forward on a genuinely-enhanced incident.
 func incidentEnhanced(in *api.Incident) bool {
 	return in.GetAiResponse() != ""
+}
+
+// roadIncidentSeverity grades an incident from the AI-assessed impact when one
+// exists, falling back to the api.AlertSeverity enum otherwise.
+//
+// The impact is the finer signal and it is right here: the enum arrives already
+// collapsed (api.AlertSeverity has no fourth level, and "light" and "moderate"
+// share one value), which is why every road incident read MODERATE or SEVERE
+// and never MINOR. The full-fidelity string is on the same message.
+//
+// The fallback matters as much as the mapping: an incident whose enhancement
+// was deferred by the per-refresh budget carries no impact, and it must keep
+// the heuristic severity rather than drop to INFO.
+func roadIncidentSeverity(in *api.Incident) string {
+	if sev := hazards.SeverityFromRoadImpact(impactSlug(in.GetImpact())); sev != "" {
+		return sev
+	}
+	return hazards.SeverityFromAlertSeverity(in.GetSeverity())
 }
 
 // impactSlug renders the AI-assessed impact enum as its wire slug

@@ -218,6 +218,40 @@ revisions interleaved), so there is no correct way to split it, and attaching th
 mashup to whichever closure "won" would give one real ramp closure a fabricated
 multi-week history. **If you cache or link road-incident ids, re-fetch them.**
 
+### Road incidents: scope, severity range, and no more invented place names
+
+Three fixes to the road-incident path, all visible in the data.
+
+**Severity spans the scale again.** `light` and `moderate` impact both mapped to
+one value, and `api.AlertSeverity` (`INFO|WARNING|CRITICAL`) has no fourth level
+— so four impact values squeezed through three and a shoulder closure ranked
+with a multi-lane closure. Live before: `{SEVERE 1, MODERATE 26}`. After:
+`{SEVERE 1, MODERATE 12, MINOR 3, INFO 2}`. The grid event now grades from the
+AI-assessed impact directly (`severe→SEVERE, moderate→MODERATE, light→MINOR,
+none→INFO`), bypassing the enum the way weather alerts already do; an incident
+whose enhancement was deferred keeps its previous severity. **If you bucket on
+`severity`, expect MINOR and INFO road incidents for the first time.**
+
+**`areaLabel` no longer invents geography.** A collision at Sonora Pass was
+labelled `"... (near Merced)"` — 134 km away, taken from a CHP *dispatch-centre*
+token (`1039 MERCED`). The enhancer now receives a list of places within 15 km
+of the incident, built from configured towns, corridors and the settlements
+along them, and is told it may name no locality outside that list. Where nothing
+is near, the list is empty and the model must name nothing — so remote incidents
+keep the feed's own route-and-cross-street text. The impact enum also gained a
+rubric anchored to lanes, and the prompt's `"near treasure island"` example —
+which demonstrated the exact pattern that produced the bug — is gone.
+
+**The incident scope no longer reaches the Central Valley.** `mother-lode` was
+4.7× the service area, taking in Merced, Modesto and Turlock despite a comment
+claiming otherwise; 41 of 60 rows were out-of-area and each paid for an AI
+enhancement. It is now the service area plus ~27 km for the approach routes.
+Live: 27 → 18 incidents in the area, **0 now attach to no place** (was 3).
+
+Cached enhancements are invalidated once by a prompt version in the content-hash
+key — without it every already-cached incident would keep serving pre-fix text,
+including the hallucinated label, for up to 24h.
+
 ## 2026-08-11
 
 ### Map layers: `metadata.attribution` is now populated on every layer

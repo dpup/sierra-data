@@ -77,19 +77,34 @@ roads:
       refreshInterval: "10m"  # Caltrans road conditions page (closures, chain controls)
       url: "https://roads.dot.ca.gov/roadscell.php?roadnumber=%s"
 
-  # Named regions for the region-wide incidents feed (issue #7):
-  #   GET /api/v1/incidents/mother-lode
-  # The CHP/Caltrans KML feeds are statewide; bounds keep this scoped to the
-  # Gold Country foothills (Amador/Calaveras/Tuolumne/Mariposa/El Dorado),
-  # excluding the Central Valley floor (Stockton/Sacramento/Modesto).
+  # Scope for the region-wide incidents feed. The CHP/Caltrans KML feeds are
+  # STATEWIDE, and this box is the ONLY geographic gate before an incident is
+  # AI-enhanced — so its size is a cost as well as a coverage decision.
+  #
+  # It is the hazards.areas ebbetts-pass box grown by ~0.25 deg (~27 km). The
+  # margin is deliberate and is NOT the wildfire margin's reasoning: a fire
+  # outside the footprint is a threat because it moves, whereas a road incident
+  # outside it matters because of where it sits — a collision on Hwy 4 west of
+  # Angels Camp closes the way IN. So the margin only needs to cover the
+  # approach routes, not a spreading hazard, which is why it is half of
+  # grid.wildfire.marginDegrees (fire stays the widest thing we watch).
+  #
+  # The previous box (37.3/39.0/-121.15/-119.5) was 4.7x this area and reached
+  # the Central Valley floor: Merced, Modesto and Turlock all sat inside it,
+  # despite the comment claiming they were excluded. 41 of 60 live rows were
+  # out-of-area, each paying for an enhancement call. These bounds keep Angels
+  # Camp, Sonora, Copperopolis, Jackson and Groveland and exclude Modesto,
+  # Merced, Turlock, Stockton, Sacramento and Auburn.
+  #
+  # Keep the id: it is the ListIncidents path param and the cache key.
   incidentAreas:
     - id: "mother-lode"
       name: "Mother Lode"
       bounds:
-        minLatitude: 37.3
-        maxLatitude: 39.0
-        minLongitude: -121.15
-        maxLongitude: -119.5
+        minLatitude: 37.62
+        maxLatitude: 38.84
+        minLongitude: -120.97
+        maxLongitude: -119.64
 
   monitoredRoads:
     - name: "Hwy 4"
@@ -295,7 +310,8 @@ grid:
   # marginDegrees grows the hazards.areas union bbox on every side to form the
   # INGEST scope (the FIRIS perimeter query envelope + the in-scope test applied
   # to CAL FIRE's statewide incident list). 0.5° ≈ 55 km puts the fire box just
-  # outside the CHP/Caltrans incident box (roads.incidentAreas mother-lode),
+  # outside the CHP/Caltrans incident box (roads.incidentAreas mother-lode, which
+  # carries its own, smaller ~27 km margin for approach routes),
   # which is the intent — fire should be the widest thing we watch. That in-scope
   # test also checks the fire's PERIMETER, not only CAL FIRE's single origin
   # point: a large fire's polygon reaches tens of km from that point.

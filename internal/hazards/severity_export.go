@@ -33,6 +33,13 @@ func SeverityFromAlertSeverity(s api.AlertSeverity) string { return fromAlertSev
 // top of the NWS scale.
 func SeverityFromNWSSeverity(s string) string { return fromNWSSeverity(s) }
 
+// SeverityFromRoadImpact maps the AI-assessed traffic impact
+// (none|light|moderate|severe) onto the unified scale, bypassing the
+// api.AlertSeverity round-trip that collapses light and moderate together and
+// caps the scale at SEVERE. Returns "" for an unknown or absent impact so the
+// caller falls back to the enum path rather than under-rating the incident.
+func SeverityFromRoadImpact(impact string) string { return fromRoadImpact(impact) }
+
 // NormalizeEvacLevel maps Cal OES free-text STATUS to a coded level ("" only
 // for explicitly-inactive statuses; unrecognized active statuses default to a
 // conservative WARNING — see normalizeEvacLevel).

@@ -13,13 +13,35 @@ type RawAlert struct {
 	Location    string    `json:"location"`
 	StyleUrl    string    `json:"style_url,omitempty"` // KML style indicating closure type
 	Timestamp   time.Time `json:"timestamp"`
+	// PlaceNames grounds the model's geography: the ONLY localities it may name
+	// beyond those in the text, closest first. The user prompt marshals this
+	// struct, so the list reaches the model as `place_names` with no extra
+	// plumbing, and the system prompt's "Place Names" rule binds it.
+	//
+	// EMPTY IS MEANINGFUL — it means we looked and nothing is near enough to
+	// name, and the rule then forbids naming any locality at all. It is
+	// therefore serialized EXPLICITLY as [] rather than omitted: an absent key
+	// is indistinguishable from a caller that forgot to populate it, and the
+	// explicit empty array is the stronger instruction. That is the case this
+	// exists for: an incident at Sonora Pass, 52.8 km from the nearest
+	// configured town, previously acquired "(near Merced)" — 134 km away, taken
+	// from a CHP dispatch-centre token in the raw text.
+	//
+	// Deliberately NOT part of the content hash (HashRawAlert), because the list
+	// is a deterministic function of coordinates already inside Location. One
+	// consequence: adding a town to config does not invalidate cached
+	// enhancements, so a stale list can be served for up to the 24h TTL.
+	PlaceNames []string `json:"place_names"`
 }
 
 // StructuredLocation represents both descriptive and coordinate location data
 type StructuredLocation struct {
-	Description string  `json:"description"` // Human-readable location (e.g., "Highway 4 eastbound near Angels Camp")
-	Latitude    float64 `json:"latitude"`    // Decimal degrees
-	Longitude   float64 `json:"longitude"`   // Decimal degrees
+	// Description is the human-readable location. It may name a locality ONLY
+	// from RawAlert.PlaceNames or the incident text — see the "Place Names" rule
+	// in SystemPrompt.
+	Description string  `json:"description"`
+	Latitude    float64 `json:"latitude"`  // Decimal degrees
+	Longitude   float64 `json:"longitude"` // Decimal degrees
 }
 
 // StructuredDescription represents AI-processed alert information in standardized format

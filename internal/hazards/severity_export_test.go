@@ -141,3 +141,28 @@ func TestDemoteSeverity(t *testing.T) {
 	assert.Equal(t, SevInfo, demoteSeverity(SevMinor))
 	assert.Equal(t, SevInfo, demoteSeverity(SevInfo), "INFO is the floor")
 }
+
+// TestSeverityFromRoadImpact: road incidents used only two of the five levels
+// because the api.AlertSeverity round-trip loses information twice —
+// severityFromImpact merges "light" with "moderate", and the enum itself has no
+// fourth level. Live, every incident was MODERATE or SEVERE; across the archive
+// MODERATE 6,254 / SEVERE 436 / MINOR 11.
+func TestSeverityFromRoadImpact(t *testing.T) {
+	assert.Equal(t, SevSevere, SeverityFromRoadImpact("severe"))
+	assert.Equal(t, SevModerate, SeverityFromRoadImpact("moderate"))
+	assert.Equal(t, SevMinor, SeverityFromRoadImpact("light"))
+	assert.Equal(t, SevInfo, SeverityFromRoadImpact("none"))
+	assert.Equal(t, SevModerate, SeverityFromRoadImpact(" Moderate "), "case and space tolerant")
+
+	// A shoulder closure must not rank with a multi-lane closure — the whole
+	// point of the change.
+	assert.NotEqual(t, SeverityFromRoadImpact("light"), SeverityFromRoadImpact("moderate"))
+
+	// Unknown/absent returns "" so the caller falls back to the enum path. It
+	// must NOT be INFO: an incident whose enhancement was deferred by the
+	// per-refresh budget carries no impact yet, and rating it INFO would
+	// under-report a real closure.
+	for _, unknown := range []string{"", "unknown", "Severe!", "critical"} {
+		assert.Equal(t, "", SeverityFromRoadImpact(unknown), unknown)
+	}
+}

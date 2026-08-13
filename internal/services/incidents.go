@@ -283,6 +283,10 @@ func (s *RoadsService) enhanceIncident(ctx context.Context, inc *api.Incident, i
 		Location:    fmt.Sprintf("%s (%.4f, %.4f)", inc.LocationDescription, inc.Location.Latitude, inc.Location.Longitude),
 		StyleUrl:    in.StyleUrl,
 		Timestamp:   time.Now(),
+		// The only geography the model is allowed to name beyond the text
+		// itself. Empty when nothing is near enough, which the prompt reads as
+		// "name no locality" — see nearbyPlaceNames.
+		PlaceNames: s.nearbyPlaceNames(inc.Location.Latitude, inc.Location.Longitude),
 	}
 
 	enhanced, calledAPI, err := s.enhanceRawAlert(ctx, raw, *apiCalls < maxIncidentEnhancementsPerRefresh)

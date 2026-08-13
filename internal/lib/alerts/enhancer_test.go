@@ -2,6 +2,7 @@ package alerts
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -254,4 +255,81 @@ func TestCleanDetails_StripsBoth(t *testing.T) {
 	in := "An animal was reported in the roadway at Phoenix Lake Road and Longeway Road. CHP responded and was on scene. No lanes reported blocked; traffic is flowing but motorists should use caution while the animal is removed or contained. Information courtesy of CHP. (Style: general traffic alert - no lane closures or one-way control indicated.)"
 	want := "An animal was reported in the roadway at Phoenix Lake Road and Longeway Road. CHP responded and was on scene. No lanes reported blocked; traffic is flowing but motorists should use caution while the animal is removed or contained."
 	assert.Equal(t, want, cleanDetails(in))
+}
+
+// TestRawAlertCarriesGroundingToTheWire: the user prompt is json.Marshal of
+// RawAlert, so PlaceNames reaches the model as `place_names` with no extra
+// plumbing — that is the whole reason grounding was added as a field rather
+// than a new EnhanceAlert parameter. If this marshalling ever changes, the
+// system prompt's Place Names rule silently binds nothing.
+func TestRawAlertCarriesGroundingToTheWire(t *testing.T) {
+	body, err := json.Marshal(RawAlert{
+		ID:         "chp:260812IN0965",
+		Title:      "Traffic Collision",
+		Location:   "SR 108 (38.3208, -119.6717)",
+		PlaceNames: []string{"Avery", "Hwy 4"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(body)
+	if !strings.Contains(got, `"place_names":["Avery","Hwy 4"]`) {
+		t.Errorf("grounding list missing from the prompt body: %s", got)
+	}
+
+	// An EMPTY list must be sent EXPLICITLY as [], not omitted. "We looked and
+	// nothing is near" is a finding the prompt acts on; an absent key is
+	// indistinguishable from a caller that forgot to ground the alert.
+	body, err = json.Marshal(RawAlert{ID: "chp:x", PlaceNames: []string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), `"place_names":[]`) {
+		t.Errorf("an empty grounding list must serialize explicitly: %s", body)
+	}
+}
+
+// The prompt must actually carry the rules those fields rely on.
+func TestSystemPromptCarriesGroundingAndImpactRules(t *testing.T) {
+	for _, want := range []string{
+		"Place Names",
+		"place_names",
+		"name NO locality at all",
+		"NEVER convert latitude/longitude into a place name",
+		"1039 MERCED", // the dispatch-centre trap that produced the bug
+		"Impact Rating",
+		"every through lane is open",
+	} {
+		if !strings.Contains(SystemPrompt, want) {
+			t.Errorf("SystemPrompt is missing %q", want)
+		}
+	}
+	// The example that taught the model the "near <place>" pattern must be gone.
+	if strings.Contains(SystemPrompt, "treasure island") {
+		t.Error("the 'near treasure island' example demonstrates the hallucination pattern and must not return")
+	}
+}
+
+// TestHashRawAlertIgnoresPlaceNames pins the cache-key contract in both
+// directions. The grounding list is a deterministic function of coordinates
+// already inside Location, so it must not join the key — otherwise adding a
+// town to config dumps every cached enhancement. The PROMPT version must,
+// because without it a prompt fix is invisible for the 24h TTL and the service
+// keeps serving text produced under the old rules.
+func TestHashRawAlertIgnoresPlaceNames(t *testing.T) {
+	h := NewContentHasher()
+	base := RawAlert{ID: "chp:x", Title: "Collision", Description: "two vehicles", Location: "SR 108 (38.3208, -119.6717)"}
+	grounded := base
+	grounded.PlaceNames = []string{"Bear Valley", "Hwy 4"}
+
+	if h.HashRawAlert(base) != h.HashRawAlert(grounded) {
+		t.Error("grounding must not change the cache key — a config edit would dump the cache")
+	}
+
+	// Sanity: the key still discriminates on the things it should.
+	moved := base
+	moved.Location = "SR 4 (38.1391, -120.4561)"
+	if h.HashRawAlert(base) == h.HashRawAlert(moved) {
+		t.Error("a different location must produce a different key")
+	}
 }

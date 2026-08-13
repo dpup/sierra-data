@@ -742,7 +742,12 @@ func (s *RoadsService) buildEnhancedRoadAlert(ctx context.Context, classifiedAle
 			// Update alert with enhanced data at top level
 			alert.Description = enhanced.StructuredDescription.Details
 			alert.CondensedSummary = enhanced.CondensedSummary
-			alert.LocationDescription = enhanced.StructuredDescription.Location.Description
+			// Guarded, unlike before: an empty model location must not erase the
+			// structural text parsed from the feed (the incidents path has always
+			// had this check).
+			if loc := strings.TrimSpace(enhanced.StructuredDescription.Location.Description); loc != "" {
+				alert.LocationDescription = loc
+			}
 			alert.Impact = mapAlertImpact(enhanced.StructuredDescription.Impact)
 
 			// Parse time_reported if provided - use for StartTime
@@ -788,6 +793,9 @@ func (s *RoadsService) EnhanceAlertWithAI(ctx context.Context, classifiedAlert r
 		Location:    fmt.Sprintf("%s (%.4f, %.4f)", classifiedAlert.Title, classifiedAlert.Location.Latitude, classifiedAlert.Location.Longitude),
 		StyleUrl:    classifiedAlert.StyleUrl,
 		Timestamp:   time.Now(),
+		// Road alerts take the same unguarded LocationDescription overwrite
+		// below, so they need the same grounding.
+		PlaceNames: s.nearbyPlaceNames(classifiedAlert.Location.Latitude, classifiedAlert.Location.Longitude),
 	}
 	enhanced, _, err := s.enhanceRawAlert(ctx, rawAlert, true)
 	return enhanced, err
