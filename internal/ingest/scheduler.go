@@ -91,8 +91,46 @@ func (s *Scheduler) Start(ctx context.Context) {
 	if s.meshMaint.Interval > 0 {
 		go s.runMeshMaintenance(ctx)
 	}
+	go s.runStatsRefresh(ctx)
 	logging.Infow(ctx, "Ingest scheduler started", "pollers", len(s.pollers),
 		"meshMaintenance", s.meshMaint.Interval > 0)
+}
+
+// statsRefreshInterval is how often index statistics are recomputed. Not a
+// tuning knob, so deliberately not in config: it exists only so the query
+// planner's picture of the ACTIVE-vs-dead skew keeps up as the store grows.
+// The boot ANALYZE (cmd/server) does the initial pass; this keeps it current on
+// a long-lived process.
+const statsRefreshInterval = 6 * time.Hour
+
+// runStatsRefresh periodically recomputes SQLite index statistics. Without
+// them the place-scoped event query degrades without bound as dead place
+// attachments accumulate — see store.Analyze for the measurements. It shares
+// the store's single writer (Analyze takes the mutex), so it serializes with
+// the pollers rather than being a second writer, and it is best-effort: a
+// failed ANALYZE makes queries slow, never wrong.
+func (s *Scheduler) runStatsRefresh(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			logging.Errorw(ctx, "Stats refresh: recovered from panic", "error", r)
+		}
+	}()
+	ticker := time.NewTicker(statsRefreshInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			start := s.now()
+			if err := s.store.Analyze(ctx); err != nil {
+				logging.Errorw(ctx, "Stats refresh: ANALYZE failed", "error", err)
+				continue
+			}
+			logging.Infow(ctx, "Stats refresh: recomputed index statistics",
+				"duration", s.now().Sub(start))
+		}
+	}
 }
 
 // runMeshMaintenance ticks the relay-observation compaction + prune on its own

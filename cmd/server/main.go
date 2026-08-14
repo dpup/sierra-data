@@ -120,6 +120,18 @@ func main() {
 		logging.Errorw(ctx, "Failed to seed grid places", "error", err)
 		log.Fatalf("Failed to seed grid places: %v", err)
 	}
+	// Refresh index statistics after seeding. Without them the place-scoped
+	// event query walks every attachment a place has ever had (see
+	// store.Analyze). Fail-soft and timed: stale stats make queries slow, but a
+	// failure here must never keep the service from starting, and the duration
+	// is worth watching because this runs before the listener opens.
+	analyzeStart := time.Now()
+	if err := gridStore.Analyze(ctx); err != nil {
+		logging.Warnw(ctx, "Failed to refresh grid store statistics; place-scoped queries may be slow",
+			"error", err)
+	} else {
+		logging.Infow(ctx, "Refreshed grid store statistics", "duration", time.Since(analyzeStart))
+	}
 
 	// Hazard condition-layer projector: gridapi calls BuildLayer for the live
 	// condition layers (road_segment, chain_control, fire_weather). The event

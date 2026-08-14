@@ -34,7 +34,7 @@ explicit; tasks at the same tier run in parallel on disjoint files.
 
 1. **SQLite driver: `modernc.org/sqlite`** (pure Go). WAL mode, single writer
    (the ingest scheduler), `busy_timeout=5000`. DB path from config
-   `grid.dbPath` (default `./data/grid.db`; prod points at the EBS mount via
+   `grid.dbPath` (default `./data/grid.db`; prod points at the EFS mount via
    `PF__GRID__DB_PATH`). `data/` is git-ignored.
 2. **`grid.v1` protos are messages-only** (`api/grid/v1/grid.proto`, go package
    `.../api/grid/v1;gridv1`). No gRPC service: every `/v1` endpoint is a
@@ -416,7 +416,7 @@ apply); this is the one real-API cost and it is cents.
 site, id-stability deviation, deprecation plan for /api/v1 per spec §6),
 README.md, CLAUDE.md (commands/env/config), ARCHITECTURE.md refresh,
 `internal/store/CLAUDE.md` + `internal/ingest/CLAUDE.md` (conventions for the
-next agent), site deploy notes (Docker: EBS volume at `/data`,
+next agent), site deploy notes (Docker: EFS volume at `/data`,
 `PF__GRID__DB_PATH=/data/grid.db`).
 
 ## 4. Sequencing & checkpoints

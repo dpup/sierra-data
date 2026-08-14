@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -328,4 +329,91 @@ func TestQueryHistoryUsesObservedIndex(t *testing.T) {
 	plan = planFor(t, s, scoped, "area:test", 51)
 	assert.Contains(t, plan, "idx_event_places_place",
 		"place-scoped history should drive from event_places; plan was:\n%s", plan)
+}
+
+// placeScopedEventsSQL is the shape QueryEvents builds for the commonest call
+// on the service — /api/v1/events?place=X with the default ACTIVE,SCHEDULED
+// statuses and no layer filter.
+const placeScopedEventsSQL = `SELECT e.proto, e.severity, e.observed_at, e.id FROM events e
+	JOIN event_places ep ON ep.event_id = e.id AND ep.place_id = ?
+	WHERE e.status IN (?, ?)
+	ORDER BY e.severity DESC, e.observed_at DESC, e.id ASC LIMIT ?`
+
+// TestPlaceScopedEventsDoesNotWalkDeadAttachments pins the plan for the
+// place-scoped event query to driving from `events`, not from `event_places`.
+//
+// event_places attachments are deliberately NEVER removed when an event
+// transitions to RESOLVED/EXPIRED — place-scoped history needs them. So the
+// attachments for a place grow without bound while its live set stays small
+// (measured 62-96% dead after five days in the dev DB). With no index
+// statistics SQLite assumes `ep.place_id = ?` is highly selective, drives from
+// event_places, and fetches EVERY event that place ever had out of the wide
+// events table just to discard the dead ones on `e.status`. There is no index
+// carrying status on event_places, so the discard cannot happen any earlier.
+//
+// That is what made /api/v1/events?place=… take 1.1-3.7s in production while
+// returning 14 events, and cost 0.9s to return 200 — latency ANTI-correlated
+// with the answer's size. It is unbounded in the store's age, and on EFS every
+// discarded row fetch is an extra network round trip.
+//
+// ANALYZE is the fix (store.Analyze, run at boot and every statsRefreshInterval).
+// This test fails if that stops working — a regression here is invisible in
+// behavior and shows up only as latency, so assert the plan.
+func TestPlaceScopedEventsDoesNotWalkDeadAttachments(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	seedSource(t, s, "usgs")
+	require.NoError(t, s.UpsertPlace(ctx, testPlace(
+		"county:calaveras", "calaveras", "Calaveras County",
+		gridv1.PlaceKind_COUNTY, polyGeometry(38.0, -120.9, 38.5, -120.0))))
+
+	// The production skew: a small live set, a large dead one, all attached to
+	// the same place. The planner only picks the good plan once it can see this.
+	const live, dead = 20, 400
+	var deadIDs []string
+	for i := 0; i < live+dead; i++ {
+		ev := testEvent(fmt.Sprintf("usgs:e%04d", i), gridv1.Severity_MINOR,
+			gridv1.EventStatus_ACTIVE, "quake")
+		ev.Geometry = pointGeometry(38.2, -120.45) // inside the county
+		_, err := s.UpsertEvent(ctx, ev)
+		require.NoError(t, err)
+		if i >= live {
+			deadIDs = append(deadIDs, ev.GetId())
+		}
+	}
+	// Retire most of them. Their event_places rows deliberately survive.
+	require.NoError(t, s.TransitionEvents(ctx, deadIDs, gridv1.EventStatus_RESOLVED, baseTime))
+
+	var attached int
+	require.NoError(t, s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM event_places WHERE place_id = ?`, "county:calaveras").Scan(&attached))
+	require.Equal(t, live+dead, attached, "dead attachments must survive a transition")
+
+	require.NoError(t, s.Analyze(ctx))
+
+	plan := planFor(t, s, placeScopedEventsSQL, "county:calaveras",
+		int32(gridv1.EventStatus_ACTIVE), int32(gridv1.EventStatus_SCHEDULED), 51)
+
+	// What matters is the JOIN ORDER, not which index names appear. The bad plan
+	// drives from event_places and reaches events through its primary key, one
+	// row fetch per dead attachment:
+	//     SEARCH ep USING COVERING INDEX idx_event_places_place (place_id=?)
+	//     SEARCH e USING INDEX sqlite_autoindex_events_1 (id=?)
+	// The good plan drives from the bounded ACTIVE set and probes event_places
+	// through a COVERING index, so it never fetches an event_places row at all:
+	//     SEARCH e USING INDEX idx_events_active (status=?)
+	//     SEARCH ep USING COVERING INDEX idx_event_places_place (place_id=? AND event_id=?)
+	first, _, _ := strings.Cut(plan, "\n")
+	assert.Contains(t, first, "SEARCH e ",
+		"the outer loop must be the events table, not event_places; plan was:\n%s", plan)
+	assert.Contains(t, first, "idx_events_active",
+		"the outer loop must narrow on status via idx_events_active; plan was:\n%s", plan)
+	assert.NotContains(t, plan, "sqlite_autoindex_events_1",
+		"reaching events by primary key means one wide-row fetch per attachment,\n"+
+			"including every dead one. Plan was:\n%s", plan)
+
+	// And the query must still be correct: only the live ones come back.
+	got, _, err := s.QueryEvents(ctx, EventQuery{PlaceID: "county:calaveras", PageSize: 500})
+	require.NoError(t, err)
+	assert.Len(t, got, live, "only ACTIVE/SCHEDULED events belong in a default place query")
 }

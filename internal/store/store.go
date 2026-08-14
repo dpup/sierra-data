@@ -281,6 +281,43 @@ func (s *Store) Close() error {
 	return err
 }
 
+// Analyze refreshes SQLite's index statistics (sqlite_stat1). It must be run
+// periodically, and it is NOT optional tuning — without stats the place-scoped
+// event query degrades without bound.
+//
+// The query is `FROM events e JOIN event_places ep ON ... ep.place_id = ?
+// WHERE e.status IN (ACTIVE, SCHEDULED)`. With no stats SQLite assumes an
+// equality on an indexed column is highly selective, so it drives from
+// event_places and fetches EVERY event that place has ever been attached to
+// out of the wide events table, only to discard the dead ones. Attachments are
+// deliberately never deleted on a lifecycle transition (place-scoped history
+// needs them), so that dead set grows forever: measured 62-96% dead after five
+// days, 99% at a year's projection. With stats SQLite sees that the ACTIVE set
+// is small and bounded and drives from idx_events_active instead, discarding
+// the dead rows inside the index.
+//
+// Measured on a synthetic reproducing production's exact query plan (local
+// disk, warm cache — production is on EFS, where every discarded row fetch is
+// an extra network round trip, so the real spread is far wider):
+//
+//	attachments   no stats    with stats
+//	        500     2.2 ms       2.0 ms
+//	      6,400    10.9 ms       4.0 ms
+//	     50,400    69.1 ms       3.9 ms
+//
+// Do NOT use `PRAGMA analysis_limit` here: at the documented 400-row sample the
+// plan does not change at all (68.8 ms at the largest size), because the sample
+// is far too small to see the skew. A full ANALYZE cost 119 ms at that size.
+// `PRAGMA optimize` is likewise a no-op on a freshly pooled connection.
+func (s *Store) Analyze(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, err := s.db.ExecContext(ctx, `ANALYZE`); err != nil {
+		return fmt.Errorf("store: analyze: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) migrate() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

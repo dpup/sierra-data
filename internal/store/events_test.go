@@ -765,3 +765,51 @@ func TestWildfireProximityKeepsExactOverlapRules(t *testing.T) {
 	assert.Contains(t, got.GetPlaceIds(), "county:calaveras", "exact overlap still attaches a county")
 	assert.Contains(t, got.GetPlaceIds(), "area:ebbetts")
 }
+
+// TestCorridorAttachSurvivesBboxPrefilter pins the boundary case that the
+// point-event bbox prefilter in eventGeo.matches could silently break.
+//
+// The prefilter exists because ~93% of events are mesh nodes that sit outside
+// every place, and without it each ingest tick ran the exact geometry test —
+// haversine per corridor segment — for all of them. But a corridor is a
+// zero-WIDTH LineString: a point can be legitimately attached (within
+// corridorBufferMeters of the line) while lying OUTSIDE the line's raw bbox.
+// A prefilter that used the raw bbox would drop exactly those, and the loss
+// would be invisible — the event simply stops appearing for that corridor.
+// So the prefilter is widened by corridorBufferDeg, and this test is what
+// proves the widening is real rather than assumed.
+func TestCorridorAttachSurvivesBboxPrefilter(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	seedSource(t, s, "usgs")
+	// LineString from (38.05,-120.5) to (38.25,-120.4): raw bbox starts at
+	// lat 38.05.
+	require.NoError(t, s.UpsertPlace(ctx, testPlace(
+		"corridor:hwy4", "hwy4", "Hwy 4",
+		gridv1.PlaceKind_CORRIDOR,
+		geomFromGeoJSON(`{"type":"LineString","coordinates":[[-120.5,38.05],[-120.4,38.25]]}`))))
+
+	// 0.01deg (~1.11 km) south of the line's southern endpoint: OUTSIDE the raw
+	// bbox, INSIDE the 1500 m corridor buffer. Must still attach.
+	justOutside := testEvent("usgs:near", gridv1.Severity_MINOR, gridv1.EventStatus_ACTIVE, "near the road")
+	justOutside.Geometry = pointGeometry(38.04, -120.5)
+	_, err := s.UpsertEvent(ctx, justOutside)
+	require.NoError(t, err)
+
+	got, err := s.GetEvent(ctx, "usgs:near")
+	require.NoError(t, err)
+	assert.Contains(t, got.GetPlaceIds(), "corridor:hwy4",
+		"a point outside the LineString's raw bbox but within corridorBufferMeters "+
+			"must still attach — the prefilter has to be widened by corridorBufferDeg")
+
+	// Control: far enough out that it genuinely does not belong.
+	farAway := testEvent("usgs:far", gridv1.Severity_MINOR, gridv1.EventStatus_ACTIVE, "not near the road")
+	farAway.Geometry = pointGeometry(37.80, -120.5) // ~28 km south
+	_, err = s.UpsertEvent(ctx, farAway)
+	require.NoError(t, err)
+
+	got, err = s.GetEvent(ctx, "usgs:far")
+	require.NoError(t, err)
+	assert.NotContains(t, got.GetPlaceIds(), "corridor:hwy4",
+		"the prefilter must still reject points that are genuinely far away")
+}

@@ -639,9 +639,22 @@ type eventGeo struct {
 // wildfire proximity rule is separate and layered on by the caller.
 func (e eventGeo) matches(pl parsedPlace) bool {
 	if e.pointLike {
+		// Cheap bbox reject before the exact test — the same prefilter the
+		// request path already applies in PlacesContaining, widened by the
+		// corridor buffer so a point near (but outside) a zero-width corridor
+		// line still reaches the exact test. This runs for every event on every
+		// tick, and the mesh layer (~93% of events, re-adverting constantly) is
+		// overwhelmingly outside every place bbox, so without it each tick walks
+		// every corridor polyline doing haversine per segment for points that
+		// cannot possibly match. The exact test below stays authoritative.
+		lat, lng := e.centroid.GetLat(), e.centroid.GetLng()
+		if lat < pl.minLat-corridorBufferDeg || lat > pl.maxLat+corridorBufferDeg ||
+			lng < pl.minLng-corridorBufferDeg || lng > pl.maxLng+corridorBufferDeg {
+			return false
+		}
 		// Polygon places: exact point-in-polygon. Corridor (LineString) places:
 		// within corridorBufferMeters of the road line. Same test resolve uses.
-		return geojson.PointInOrNearGeometry(e.centroid.GetLat(), e.centroid.GetLng(), pl.geom, corridorBufferMeters)
+		return geojson.PointInOrNearGeometry(lat, lng, pl.geom, corridorBufferMeters)
 	}
 	if !geojson.BboxIntersects(e.minLat, e.minLng, e.maxLat, e.maxLng,
 		pl.minLat, pl.minLng, pl.maxLat, pl.maxLng) {

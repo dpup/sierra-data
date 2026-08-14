@@ -188,6 +188,70 @@ rollback journal — and the volume deserves real backups, not "it'll just
 rebuild." Match the journal mode to the filesystem, and treat DB loss as data
 loss of history, not a cache miss.
 
+## Index statistics are REQUIRED, not tuning (`Analyze`)
+
+`Store.Analyze` runs `ANALYZE`. It is called at boot (`cmd/server`) and every
+`statsRefreshInterval` (6 h) by the ingest scheduler, and it is **load-bearing**:
+without stats the place-scoped event query degrades without bound as the store
+ages.
+
+The query is `FROM events e JOIN event_places ep ON … ep.place_id = ? WHERE
+e.status IN (ACTIVE, SCHEDULED)`. **`event_places` attachments are deliberately
+never deleted on a lifecycle transition** — `TransitionEvents` updates `events`
+and writes a revision but leaves `event_places` alone, because place-scoped
+history (`QueryHistory`, and `place=X&status=RESOLVED`) needs them. So a place's
+attachment count grows forever while its live set stays small: measured **62-96%
+dead after five days** on the dev DB.
+
+There is **no index carrying `status` on `event_places`**
+(`idx_event_places_place` is `(place_id, event_id)`), so the dead rows cannot be
+discarded until each candidate has been fetched out of the wide `events` table.
+With no statistics SQLite assumes `ep.place_id = ?` is highly selective and picks
+exactly that plan:
+
+```
+SEARCH ep USING COVERING INDEX idx_event_places_place (place_id=?)
+SEARCH e USING INDEX sqlite_autoindex_events_1 (id=?)      <- one wide-row fetch per dead attachment
+```
+
+With statistics it drives from the bounded ACTIVE set instead, and probes
+`event_places` through a covering index — never fetching an `event_places` row:
+
+```
+SEARCH e USING INDEX idx_events_active (status=?)
+SEARCH ep USING COVERING INDEX idx_event_places_place (place_id=? AND event_id=?)
+```
+
+Measured on a synthetic reproducing production's plan (local disk, warm cache;
+**prod is EFS, where every discarded fetch is an extra network round trip**, so
+the real spread is far wider):
+
+| attachments | no stats | with stats |
+| ----------- | -------- | ---------- |
+| 500         | 2.2 ms   | 2.0 ms     |
+| 6,400       | 10.9 ms  | 4.0 ms     |
+| 50,400      | 69.1 ms  | 3.9 ms     |
+
+This shipped as `/api/v1/events?place=…` taking 1.1-3.7 s while returning 14
+events, and 0.9 s to return 200 — latency **anti-correlated** with the size of
+the answer, which is the signature to recognize.
+
+Two traps:
+
+- **`PRAGMA analysis_limit` does not work here.** At the documented 400-row
+  sample the plan does not change at all (68.8 ms at the largest size) — the
+  sample is far too small to see a 99% skew. Use a full `ANALYZE`; it cost
+  119 ms at 50,400 attachments.
+- **`PRAGMA optimize` is a no-op** on a freshly pooled connection, which is what
+  `database/sql` hands you.
+
+`TestPlaceScopedEventsDoesNotWalkDeadAttachments` pins the join order. It
+reproduces the production plan exactly when `Analyze` is omitted, so it is not
+vacuous. Denormalizing `status` onto `event_places` would be marginally faster
+(2.8 vs 3.9 ms) but needs a migration plus an invariant maintained across two
+tables — and a drift there would silently hide an ACTIVE event from a
+place-scoped query, which is the one failure this service must not have.
+
 ## Migration ladder
 
 `migrations[]` is an ordered slice; index `i` is schema version `i+1`. `Open`

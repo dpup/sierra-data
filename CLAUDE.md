@@ -211,8 +211,13 @@ export PF__OPENAI__API_KEY="your-openai-api-key"  # For AI-enhanced alerts
 export PORT=8181
 
 # Grid event store database path (default ./data/grid.db via prefab.yaml).
-# Production points this at the EBS mount; the Dockerfile sets it and declares
+# Production points this at the EFS mount; the Dockerfile sets it and declares
 # a /data volume so events/revisions/source-health survive container replacement.
+# EFS, not EBS — this file said EBS until 2026-08-14 while the Dockerfile and
+# internal/store/CLAUDE.md said EFS, and the difference decides whether WAL is
+# safe (it is NOT on EFS: the -shm is memory-mapped). Keep grid.journalMode on
+# TRUNCATE. It also means every random row read is a network round trip, which
+# is why the store's index statistics matter so much — see store.Analyze.
 export PF__GRID__DB_PATH=/data/grid.db
 ```
 
