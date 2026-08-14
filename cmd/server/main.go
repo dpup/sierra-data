@@ -104,12 +104,22 @@ func main() {
 	}
 	gridStore, err := store.Open(appConfig.Grid.DBPath,
 		store.WithJournalMode(appConfig.Grid.JournalMode),
+		store.WithCacheSizeMB(appConfig.Grid.CacheSizeMB),
 		store.WithWildfireProximity(appConfig.Grid.Wildfire.PlaceBuffer()))
 	if err != nil {
 		logging.Errorw(ctx, "Failed to open grid store", "path", appConfig.Grid.DBPath, "error", err)
 		log.Fatalf("Failed to open grid store: %v", err)
 	}
 	defer gridStore.Close()
+
+	// Pragmas are per-connection, so this log line is the only place the store's
+	// effective configuration is observable from outside the process.
+	if st, err := gridStore.Settings(); err == nil {
+		logging.Infow(ctx, "Grid store opened",
+			"path", appConfig.Grid.DBPath, "journalMode", st.JournalMode,
+			"synchronous", st.Synchronous, "cacheSizeKB", st.CacheSizeKB,
+			"maxOpenConns", st.MaxOpenConns)
+	}
 
 	if err := gridStore.SeedSources(ctx, gridSourceSeeds(appConfig)); err != nil {
 		logging.Errorw(ctx, "Failed to seed grid sources", "error", err)

@@ -44,6 +44,7 @@ const migrationV2 = `ALTER TABLE events ADD COLUMN last_seen_at INTEGER NOT NULL
 //     one row per advert we heard, our-clock timestamp, signal + relay path.
 //   - mesh_link_rollup: the derived per-link-per-day topology history (Tier 1).
 //   - mesh_meta: KV for the compaction watermark.
+//
 // These are pure DERIVED telemetry, NOT proto-blob-canonical system-of-record
 // data — plain columns are correct, and they re-accumulate from the live feed if
 // lost (unlike event history). Compaction rolls Tier 0 into Tier 1 and prunes.
@@ -135,6 +136,7 @@ type Option func(*openConfig)
 type openConfig struct {
 	journalMode    string
 	wildfireBuffer float64
+	cacheSizeMB    int
 }
 
 // journalModeSynchronous maps a journal mode to the synchronous level that
@@ -180,12 +182,48 @@ func WithWildfireProximity(meters float64) Option {
 	}
 }
 
+// WithCacheSizeMB sets SQLite's page cache PER POOLED CONNECTION. Worst-case
+// resident cache is this times MaxOpenConns, so size it against the task's
+// memory limit. Zero or negative keeps DefaultCacheSizeMB.
+func WithCacheSizeMB(mb int) Option {
+	return func(c *openConfig) {
+		if mb > 0 {
+			c.cacheSizeMB = mb
+		}
+	}
+}
+
+// Connection-pool shape. These exist because of how SQLite caches pages: the
+// page cache is PER CONNECTION, so a connection that database/sql closes takes
+// its warm cache with it.
+//
+// Go's default is MaxIdleConns=2 with unlimited open connections, which is the
+// pathological combination here — under any concurrency most queries run on a
+// freshly created connection with a COLD cache, and on EFS every page it then
+// misses is a network round trip rather than a disk read. Keeping idle equal to
+// open means connections are never closed for being surplus, so their caches
+// stay warm for the life of the process.
+//
+// MaxOpenConns also bounds how many readers can pile onto the rollback journal
+// at once (TRUNCATE has no WAL MVCC, so readers serialize against the writer's
+// commit via busy_timeout).
+const (
+	// MaxOpenConns bounds concurrent connections; also the multiplier on
+	// per-connection cache when budgeting memory.
+	MaxOpenConns = 8
+	// DefaultCacheSizeMB is the per-connection page cache. 8 MB x 8 conns =
+	// 64 MB worst case, a deliberately conservative default for a small task.
+	// Raise it via grid.cacheSizeMB where memory allows — the whole working set
+	// is small, so caching it outright is the cheapest possible win on EFS.
+	DefaultCacheSizeMB = 8
+)
+
 // Open opens (creating if needed) the database at path, applies pragmas via
 // the DSN, and runs any pending migrations. The parent directory is created.
 // The default journal mode is TRUNCATE (works on local disk AND NFS/EFS);
 // override with WithJournalMode.
 func Open(path string, opts ...Option) (*Store, error) {
-	cfg := openConfig{journalMode: "TRUNCATE"}
+	cfg := openConfig{journalMode: "TRUNCATE", cacheSizeMB: DefaultCacheSizeMB}
 	for _, o := range opts {
 		o(&cfg)
 	}
@@ -215,13 +253,46 @@ func Open(path string, opts ...Option) (*Store, error) {
 	// reader/writer serialization of a rollback journal (no WAL MVCC): a reader
 	// waits up to this long for the single writer's brief commit rather than
 	// erroring SQLITE_BUSY.
+	// cache_size is negative to mean KiB rather than pages (a page-count cache
+	// silently changes size with page_size). mmap_size is deliberately NOT set:
+	// memory-mapped I/O over NFS is the same class of hazard that makes WAL
+	// unusable on EFS, and the page cache above already covers the read path.
 	dsn := fmt.Sprintf(
-		"file:%s?_pragma=busy_timeout(5000)&_pragma=journal_mode(%s)&_pragma=foreign_keys(1)&_pragma=synchronous(%s)",
-		path, cfg.journalMode, sync)
+		"file:%s?_pragma=busy_timeout(5000)&_pragma=journal_mode(%s)&_pragma=foreign_keys(1)"+
+			"&_pragma=synchronous(%s)&_pragma=cache_size(-%d)",
+		path, cfg.journalMode, sync, cfg.cacheSizeMB*1024)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		lockFile.Close()
 		return nil, fmt.Errorf("store: open %s: %w", path, err)
+	}
+	// Idle == open so a pooled connection is never closed merely for being
+	// surplus, and its warm page cache survives. ConnMaxLifetime stays 0 (no
+	// expiry) for the same reason — recycling a connection here buys nothing
+	// and throws away the cache it accumulated.
+	db.SetMaxOpenConns(MaxOpenConns)
+	db.SetMaxIdleConns(MaxOpenConns)
+
+	// Read the pragmas back off a pooled connection. Pragmas are PER CONNECTION,
+	// so nothing outside this process can confirm what actually applied — and a
+	// journal mode can silently not apply (WAL degrades to a rollback journal on
+	// a filesystem that cannot support it, which is precisely the EFS case). A
+	// mismatch is a hard error rather than a warning: the difference decides
+	// whether readers block on the writer and whether the durability reasoning in
+	// journalModeSynchronous still holds, and both are worth refusing to start on.
+	applied, err := readSettings(db)
+	if err != nil {
+		db.Close()
+		lockFile.Close()
+		return nil, err
+	}
+	if !strings.EqualFold(applied.JournalMode, cfg.journalMode) {
+		db.Close()
+		lockFile.Close()
+		return nil, fmt.Errorf(
+			"store: requested journal_mode %q but SQLite applied %q — the filesystem at %s "+
+				"probably cannot support it (WAL needs a real local disk; use TRUNCATE on NFS/EFS)",
+			cfg.journalMode, applied.JournalMode, path)
 	}
 	s := &Store{db: db, lockFile: lockFile, wildfireBuffer: cfg.wildfireBuffer}
 	if err := s.migrate(); err != nil {
@@ -279,6 +350,39 @@ func (s *Store) Close() error {
 		s.lockFile.Close() // releases the flock
 	}
 	return err
+}
+
+// Settings are the pragmas SQLite actually applied, read back off a pooled
+// connection. Worth logging at startup: pragmas are per-connection, so this is
+// the only place the effective configuration is observable.
+type Settings struct {
+	JournalMode  string
+	CacheSizeKB  int // negative pragma value normalized to KiB; 0 if page-based
+	Synchronous  int
+	MaxOpenConns int
+}
+
+// Settings reports the pragmas in force. See the Settings type.
+func (s *Store) Settings() (Settings, error) { return readSettings(s.db) }
+
+func readSettings(db *sql.DB) (Settings, error) {
+	var st Settings
+	st.MaxOpenConns = MaxOpenConns
+	if err := db.QueryRow(`PRAGMA journal_mode`).Scan(&st.JournalMode); err != nil {
+		return st, fmt.Errorf("store: reading journal_mode: %w", err)
+	}
+	var cache int
+	if err := db.QueryRow(`PRAGMA cache_size`).Scan(&cache); err != nil {
+		return st, fmt.Errorf("store: reading cache_size: %w", err)
+	}
+	// SQLite reports a negative cache_size in KiB and a positive one in pages.
+	if cache < 0 {
+		st.CacheSizeKB = -cache
+	}
+	if err := db.QueryRow(`PRAGMA synchronous`).Scan(&st.Synchronous); err != nil {
+		return st, fmt.Errorf("store: reading synchronous: %w", err)
+	}
+	return st, nil
 }
 
 // Analyze refreshes SQLite's index statistics (sqlite_stat1). It must be run

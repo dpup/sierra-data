@@ -30,7 +30,15 @@ type GridConfig struct {
 	// JournalMode is the SQLite journal mode. Default TRUNCATE (safe on both
 	// local disk and a network filesystem). Use WAL only on a real local disk —
 	// its memory-mapped -shm file does NOT work over NFS/EFS. Empty => TRUNCATE.
-	JournalMode string                  `koanf:"journalMode"`
+	JournalMode string `koanf:"journalMode"`
+	// CacheSizeMB is SQLite's page cache PER POOLED CONNECTION. It is config
+	// rather than a constant because the right value depends on the task's
+	// memory limit, which is not knowable from the code. Worst-case resident
+	// cache is CacheSizeMB * store.MaxOpenConns. 0 => DefaultCacheSizeMB.
+	//
+	// It matters most on a network filesystem: on EFS a page the cache does not
+	// hold is a network round trip, not a disk read.
+	CacheSizeMB int                     `koanf:"cacheSizeMb"`
 	Enhancement GridEnhancement         `koanf:"enhancement"`
 	Sources     map[string]SourceTuning `koanf:"sources"`
 	Meshcore    MeshcoreConfig          `koanf:"meshcore"`

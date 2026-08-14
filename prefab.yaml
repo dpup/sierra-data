@@ -302,6 +302,19 @@ grid:
   # Override per environment via PF__GRID__JOURNAL_MODE.
   journalMode: "TRUNCATE"
 
+  # SQLite page cache PER POOLED CONNECTION, in MB. Worst-case resident cache is
+  # this x store.MaxOpenConns (8), so 8 MB here means up to 64 MB.
+  #
+  # This is the cheapest lever available on EFS: a page the cache does not hold
+  # costs a network round trip, not a disk read. The whole working set is small
+  # (hundreds of active events, 20 places), so caching it outright is realistic.
+  # Raise it wherever the task's memory limit allows; the default is deliberately
+  # conservative because that limit is not knowable from the code.
+  # Override per environment via PF__GRID__CACHE_SIZE_MB.
+  # (Key is cacheSizeMb, not cacheSizeMB: prefab maps PF__A__B_C -> a.bC, so a
+  # capital-B spelling would need the unusable PF__GRID__CACHE_SIZE_M_B.)
+  cacheSizeMb: 8
+
   # Wildfire geography. Fire is the ONLY layer with its own, wider geography:
   # every other source matters where it happens, but a fire outside the coverage
   # footprint is a threat TO it — it moves, it closes the roads out, and an hour
