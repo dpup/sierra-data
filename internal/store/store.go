@@ -118,6 +118,9 @@ type Store struct {
 	// wildfireBuffer is how close (metres) a WILDFIRE event may come to an AREA
 	// or TOWN place and still attach to it. See WithWildfireProximity.
 	wildfireBuffer float64
+
+	// maxOpenConns is the pool bound actually applied, kept for Settings.
+	maxOpenConns int
 }
 
 // parsedPlace is a place's geometry pre-parsed for point-in-place / bbox tests.
@@ -137,6 +140,7 @@ type openConfig struct {
 	journalMode    string
 	wildfireBuffer float64
 	cacheSizeMB    int
+	maxOpenConns   int
 }
 
 // journalModeSynchronous maps a journal mode to the synchronous level that
@@ -193,6 +197,17 @@ func WithCacheSizeMB(mb int) Option {
 	}
 }
 
+// WithMaxOpenConns bounds concurrent connections (and so multiplies the
+// per-connection page cache when budgeting memory). Zero or negative keeps
+// DefaultMaxOpenConns.
+func WithMaxOpenConns(n int) Option {
+	return func(c *openConfig) {
+		if n > 0 {
+			c.maxOpenConns = n
+		}
+	}
+}
+
 // Connection-pool shape. These exist because of how SQLite caches pages: the
 // page cache is PER CONNECTION, so a connection that database/sql closes takes
 // its warm cache with it.
@@ -208,13 +223,23 @@ func WithCacheSizeMB(mb int) Option {
 // at once (TRUNCATE has no WAL MVCC, so readers serialize against the writer's
 // commit via busy_timeout).
 const (
-	// MaxOpenConns bounds concurrent connections; also the multiplier on
-	// per-connection cache when budgeting memory.
-	MaxOpenConns = 8
-	// DefaultCacheSizeMB is the per-connection page cache. 8 MB x 8 conns =
-	// 64 MB worst case, a deliberately conservative default for a small task.
-	// Raise it via grid.cacheSizeMB where memory allows — the whole working set
-	// is small, so caching it outright is the cheapest possible win on EFS.
+	// DefaultMaxOpenConns bounds concurrent connections. It is also the
+	// MULTIPLIER on per-connection cache when budgeting memory, which is the
+	// reason to think about the two together: resident cache is
+	// cacheSizeMb x maxOpenConns.
+	//
+	// Fewer, fatter connections generally beat more, thinner ones here. This is
+	// a low-traffic read-mostly API, so concurrency past a handful buys nothing,
+	// while a bigger per-connection cache directly cuts EFS round trips. It also
+	// reduces how many readers pile onto the rollback journal at once (TRUNCATE
+	// has no WAL MVCC, so readers serialize against the writer's commit via
+	// busy_timeout).
+	DefaultMaxOpenConns = 8
+	// DefaultCacheSizeMB is the per-connection page cache: 8 MB x 8 conns =
+	// 64 MB worst case, deliberately conservative because the task's memory
+	// limit is not knowable from the code. Size it against the HOT set, not the
+	// file: event_revisions and mesh_observations dominate the file but are cold
+	// for /events. See internal/store/CLAUDE.md.
 	DefaultCacheSizeMB = 8
 )
 
@@ -223,7 +248,7 @@ const (
 // The default journal mode is TRUNCATE (works on local disk AND NFS/EFS);
 // override with WithJournalMode.
 func Open(path string, opts ...Option) (*Store, error) {
-	cfg := openConfig{journalMode: "TRUNCATE", cacheSizeMB: DefaultCacheSizeMB}
+	cfg := openConfig{journalMode: "TRUNCATE", cacheSizeMB: DefaultCacheSizeMB, maxOpenConns: DefaultMaxOpenConns}
 	for _, o := range opts {
 		o(&cfg)
 	}
@@ -270,8 +295,8 @@ func Open(path string, opts ...Option) (*Store, error) {
 	// surplus, and its warm page cache survives. ConnMaxLifetime stays 0 (no
 	// expiry) for the same reason — recycling a connection here buys nothing
 	// and throws away the cache it accumulated.
-	db.SetMaxOpenConns(MaxOpenConns)
-	db.SetMaxIdleConns(MaxOpenConns)
+	db.SetMaxOpenConns(cfg.maxOpenConns)
+	db.SetMaxIdleConns(cfg.maxOpenConns)
 
 	// Read the pragmas back off a pooled connection. Pragmas are PER CONNECTION,
 	// so nothing outside this process can confirm what actually applied — and a
@@ -280,7 +305,7 @@ func Open(path string, opts ...Option) (*Store, error) {
 	// mismatch is a hard error rather than a warning: the difference decides
 	// whether readers block on the writer and whether the durability reasoning in
 	// journalModeSynchronous still holds, and both are worth refusing to start on.
-	applied, err := readSettings(db)
+	applied, err := readSettings(db, cfg.maxOpenConns)
 	if err != nil {
 		db.Close()
 		lockFile.Close()
@@ -294,7 +319,7 @@ func Open(path string, opts ...Option) (*Store, error) {
 				"probably cannot support it (WAL needs a real local disk; use TRUNCATE on NFS/EFS)",
 			cfg.journalMode, applied.JournalMode, path)
 	}
-	s := &Store{db: db, lockFile: lockFile, wildfireBuffer: cfg.wildfireBuffer}
+	s := &Store{db: db, lockFile: lockFile, wildfireBuffer: cfg.wildfireBuffer, maxOpenConns: cfg.maxOpenConns}
 	if err := s.migrate(); err != nil {
 		db.Close()
 		lockFile.Close()
@@ -363,11 +388,11 @@ type Settings struct {
 }
 
 // Settings reports the pragmas in force. See the Settings type.
-func (s *Store) Settings() (Settings, error) { return readSettings(s.db) }
+func (s *Store) Settings() (Settings, error) { return readSettings(s.db, s.maxOpenConns) }
 
-func readSettings(db *sql.DB) (Settings, error) {
+func readSettings(db *sql.DB, maxOpenConns int) (Settings, error) {
 	var st Settings
-	st.MaxOpenConns = MaxOpenConns
+	st.MaxOpenConns = maxOpenConns
 	if err := db.QueryRow(`PRAGMA journal_mode`).Scan(&st.JournalMode); err != nil {
 		return st, fmt.Errorf("store: reading journal_mode: %w", err)
 	}

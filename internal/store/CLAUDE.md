@@ -188,6 +188,46 @@ rollback journal — and the volume deserves real backups, not "it'll just
 rebuild." Match the journal mode to the filesystem, and treat DB loss as data
 loss of history, not a cache miss.
 
+## Connection pool + page cache (`grid.cacheSizeMb`, `grid.maxOpenConns`)
+
+SQLite's page cache is **per connection**, so a connection `database/sql` closes
+takes its warm cache with it. Go's defaults — `MaxIdleConns=2`, unlimited open —
+are the pathological shape here: under concurrency most queries land on a fresh
+connection with a cold 2 MB cache, and **on EFS every page it then misses is a
+network round trip, not a disk read**. That is the amplifier that turned a
+worst-case 69 ms query into seconds in production while measuring in
+milliseconds on local disk.
+
+`Open` therefore sets idle == open (a connection is never closed merely for being
+surplus) and leaves `ConnMaxLifetime` at 0 — recycling buys nothing and discards
+the cache the connection accumulated.
+
+**Size the cache against the HOT set, not the file.** The database is ~150 MiB,
+but `event_revisions` (a full proto blob per revision) and `mesh_observations`
+(the 48 h reception firehose) dominate that and are **cold** for `/events`. The
+hot path is `events` + `event_places` and their indexes.
+
+Resident page cache is `cacheSizeMb × maxOpenConns` — budget them together.
+Defaults are 24 MB × 4 = 96 MB. **Fewer, fatter connections is deliberate**: this
+is a low-traffic read-mostly API, so concurrency past a handful buys nothing,
+while a bigger per-connection cache directly cuts EFS round trips and fewer
+readers pile onto the rollback journal (TRUNCATE has no WAL MVCC, so readers
+serialize against the writer's commit via `busy_timeout`).
+
+`mmap_size` is deliberately **not** set: memory-mapped I/O over NFS is the same
+class of hazard that makes WAL unusable on EFS, and the page cache already covers
+the read path.
+
+**`Open` reads the pragmas back and logs them, and hard-errors if the applied
+`journal_mode` differs from the requested one.** Pragmas are per-connection, so
+that log line is the only way to observe the store's effective configuration from
+outside the process — nothing you run against the file from another connection
+tells you anything. The mismatch is fatal rather than a warning because a journal
+mode can silently *not* apply (WAL degrades to a rollback journal on a filesystem
+that cannot support it — precisely the EFS case), and that difference decides both
+whether readers block on the writer and whether the durability reasoning in
+`journalModeSynchronous` still holds.
+
 ## Index statistics are REQUIRED, not tuning (`Analyze`)
 
 `Store.Analyze` runs `ANALYZE`. It is called at boot (`cmd/server`) and every

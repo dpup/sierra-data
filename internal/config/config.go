@@ -38,12 +38,16 @@ type GridConfig struct {
 	//
 	// It matters most on a network filesystem: on EFS a page the cache does not
 	// hold is a network round trip, not a disk read.
-	CacheSizeMB int                     `koanf:"cacheSizeMb"`
-	Enhancement GridEnhancement         `koanf:"enhancement"`
-	Sources     map[string]SourceTuning `koanf:"sources"`
-	Meshcore    MeshcoreConfig          `koanf:"meshcore"`
-	Wildfire    WildfireConfig          `koanf:"wildfire"`
-	Power       PowerConfig             `koanf:"power"`
+	CacheSizeMB int `koanf:"cacheSizeMb"`
+	// MaxOpenConns bounds concurrent SQLite connections, and so multiplies
+	// CacheSizeMB when budgeting memory. Fewer, fatter connections beat more,
+	// thinner ones on a network filesystem. 0 => store.DefaultMaxOpenConns.
+	MaxOpenConns int                     `koanf:"maxOpenConns"`
+	Enhancement  GridEnhancement         `koanf:"enhancement"`
+	Sources      map[string]SourceTuning `koanf:"sources"`
+	Meshcore     MeshcoreConfig          `koanf:"meshcore"`
+	Wildfire     WildfireConfig          `koanf:"wildfire"`
+	Power        PowerConfig             `koanf:"power"`
 }
 
 // Default wildfire geography. Both are applied when the corresponding
