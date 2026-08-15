@@ -42,12 +42,20 @@ type GridConfig struct {
 	// MaxOpenConns bounds concurrent SQLite connections, and so multiplies
 	// CacheSizeMB when budgeting memory. Fewer, fatter connections beat more,
 	// thinner ones on a network filesystem. 0 => store.DefaultMaxOpenConns.
-	MaxOpenConns int                     `koanf:"maxOpenConns"`
-	Enhancement  GridEnhancement         `koanf:"enhancement"`
-	Sources      map[string]SourceTuning `koanf:"sources"`
-	Meshcore     MeshcoreConfig          `koanf:"meshcore"`
-	Wildfire     WildfireConfig          `koanf:"wildfire"`
-	Power        PowerConfig             `koanf:"power"`
+	MaxOpenConns int `koanf:"maxOpenConns"`
+	// LockTimeout is how long Open waits for the exclusive database lock before
+	// failing. The common contention case is a rolling deploy whose previous task
+	// has not exited yet, so waiting beats dying — a task that gives up just gets
+	// restarted to wait again, which is a crash loop, not a failure. Raise it if
+	// deploys drain slowly. 0 => store.DefaultLockTimeout. Keep the Dockerfile
+	// HEALTHCHECK start-period above this: the listener does not open until the
+	// lock is acquired.
+	LockTimeout time.Duration           `koanf:"lockTimeout"`
+	Enhancement GridEnhancement         `koanf:"enhancement"`
+	Sources     map[string]SourceTuning `koanf:"sources"`
+	Meshcore    MeshcoreConfig          `koanf:"meshcore"`
+	Wildfire    WildfireConfig          `koanf:"wildfire"`
+	Power       PowerConfig             `koanf:"power"`
 }
 
 // Default wildfire geography. Both are applied when the corresponding

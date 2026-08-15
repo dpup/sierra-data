@@ -90,7 +90,11 @@ func TestOpenRejectsConcurrentOpener(t *testing.T) {
 	// writers corrupt SQLite on shared filesystems), not open and race.
 	_, err = Open(path)
 	require.Error(t, err, "second concurrent open must be rejected")
-	assert.Contains(t, err.Error(), "already open")
+	assert.Contains(t, err.Error(), "still locked by another process")
+	// The message must name the deploy-time causes: this error's most common
+	// context by far is a rolling deploy whose previous task has not exited, and
+	// an operator reading it at 3am should not have to infer that.
+	assert.Contains(t, err.Error(), "deregistration delay")
 
 	// Closing the first releases the flock, so a fresh open then succeeds.
 	require.NoError(t, s1.Close())

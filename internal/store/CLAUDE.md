@@ -163,10 +163,30 @@ malformed`). The classic footgun: the container's dev server *and* a host proces
 that mounts the workspace both open `./data/grid.db`. `Open` takes an exclusive
 advisory `flock` on `<path>.lock` and returns a clear "already open by another
 process" error instead of racing; the flock is bound to the fd, so the kernel
-releases it on `Close` or process death (no stale lock). It waits up to
-`lockAcquireTimeout` (~15s) for a contended lock first, so a rolling deploy's new
-task acquires once the old one drains and exits (releasing its flock on the
-shared EFS volume) rather than failing on the brief overlap. It coordinates within
+releases it on `Close` or process death (no stale lock) — even under SIGKILL,
+so a hard-killed task never leaves the lock held.
+
+**It WAITS for a contended lock — `grid.lockTimeout`, default 90s — and waiting
+is the point.** The common contention case is a rolling deploy whose previous
+task has not exited yet. A task that gives up is simply restarted to wait again,
+so a short timeout does not produce one clean failure, it produces a **crash
+loop**: the original 15s was shorter than a real ECS drain, and the observed
+result was minutes of 503s with the logs saying only "already open by another
+process". The wait is announced once up front and again on acquisition with the
+duration, so "the deploy was slow because the old task was draining" is
+distinguishable from a genuinely hung lock.
+
+Two constraints that must move together:
+
+- **The Dockerfile `HEALTHCHECK --start-period` must exceed `lockTimeout`**
+  (120s vs 90s today). The listener does not open until the lock is acquired, so
+  a health check firing during the wait kills the task mid-wait — reintroducing
+  the crash loop the wait exists to prevent.
+- **This survives a slow drain; it does not fix one.** prefab shuts down
+  gracefully in ~2s on SIGTERM, so a multi-minute drain is upstream: the load
+  balancer's deregistration delay (AWS default **300s**) and the ECS service's
+  `minimumHealthyPercent` (at 100 the old task is not stopped until the new one
+  is healthy, which it cannot become — a deadlock). It coordinates within
 one kernel only — a writer reaching the file from a separate host via the mount
 can still slip past — so **for dev, keep the DB off the bind mount**: point
 `PF__GRID__DB_PATH` at a container-local path outside `/workspace` (e.g.

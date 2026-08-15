@@ -124,7 +124,11 @@ ENV PF__SERVER__HOST=0.0.0.0
 ENV PF__SERVER__PORT=8080
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+# start-period must exceed grid.lockTimeout (90s): the listener does not open
+# until the database lock is acquired, and on a rolling deploy that wait is
+# normal while the previous task drains. A 5s grace killed the task mid-wait and
+# turned a survivable overlap into a crash loop.
+HEALTHCHECK --interval=30s --timeout=3s --start-period=120s --retries=3 \
     CMD wget --no-verbose --tries=1 --spider http://localhost:8080/ || exit 1
 
 # Run the application

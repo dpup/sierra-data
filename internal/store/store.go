@@ -16,6 +16,7 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -141,6 +142,7 @@ type openConfig struct {
 	wildfireBuffer float64
 	cacheSizeMB    int
 	maxOpenConns   int
+	lockTimeout    time.Duration
 }
 
 // journalModeSynchronous maps a journal mode to the synchronous level that
@@ -197,6 +199,17 @@ func WithCacheSizeMB(mb int) Option {
 	}
 }
 
+// WithLockTimeout bounds how long Open waits for the database lock before
+// failing. See DefaultLockTimeout for why waiting beats dying. Zero or negative
+// keeps the default.
+func WithLockTimeout(d time.Duration) Option {
+	return func(c *openConfig) {
+		if d > 0 {
+			c.lockTimeout = d
+		}
+	}
+}
+
 // WithMaxOpenConns bounds concurrent connections (and so multiplies the
 // per-connection page cache when budgeting memory). Zero or negative keeps
 // DefaultMaxOpenConns.
@@ -248,7 +261,8 @@ const (
 // The default journal mode is TRUNCATE (works on local disk AND NFS/EFS);
 // override with WithJournalMode.
 func Open(path string, opts ...Option) (*Store, error) {
-	cfg := openConfig{journalMode: "TRUNCATE", cacheSizeMB: DefaultCacheSizeMB, maxOpenConns: DefaultMaxOpenConns}
+	cfg := openConfig{journalMode: "TRUNCATE", cacheSizeMB: DefaultCacheSizeMB,
+		maxOpenConns: DefaultMaxOpenConns, lockTimeout: lockAcquireTimeout}
 	for _, o := range opts {
 		o(&cfg)
 	}
@@ -270,7 +284,7 @@ func Open(path string, opts ...Option) (*Store, error) {
 	// process death — no stale lock. (This coordinates within one kernel; a writer
 	// on a separate host reaching the file via the mount can still slip past — for
 	// that, don't share the db path.)
-	lockFile, err := acquireDBLock(path)
+	lockFile, err := acquireDBLock(path, cfg.lockTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -328,12 +342,32 @@ func Open(path string, opts ...Option) (*Store, error) {
 	return s, nil
 }
 
-// lockAcquireTimeout bounds how long Open waits for the db lock. A brief wait
-// lets a rolling deploy's new task acquire once the previous writer drains and
-// exits (releasing its flock), instead of failing on a few-second overlap on the
-// shared volume. A genuinely stuck second writer still fails loud after this.
-// Overridable in tests.
-var lockAcquireTimeout = 15 * time.Second
+// DefaultLockTimeout bounds how long Open waits for the db lock, letting a
+// rolling deploy's new task acquire once the previous writer drains and exits
+// (releasing its flock). A genuinely stuck second writer still fails loud after
+// this.
+//
+// It is 90s, not the original 15s, because 15s was shorter than a real ECS task
+// drain. What that produced was not one clean failure but a CRASH LOOP: the new
+// task gave up after 15s, main.go log.Fatalf'd, ECS restarted it, and it failed
+// again — for as long as the old task took to go away. The service was 503 that
+// whole time, and the logs said "already open by another process" rather than
+// anything about draining. WAITING is strictly better than dying here: the task
+// has nothing useful to do until the lock is free either way.
+//
+// The ceiling on this value is the container health check, not patience: the
+// listener does not open until Open returns, so a wait longer than the health
+// check's grace gets the container killed mid-wait. The Dockerfile HEALTHCHECK
+// start-period is set to accommodate this — raise them together.
+//
+// The other half of the fix is NOT here: the old task must actually die
+// promptly. prefab drains in ~2s on SIGTERM, so a multi-minute drain is the load
+// balancer's deregistration delay (default 300s), not this process.
+const DefaultLockTimeout = 90 * time.Second
+
+// lockAcquireTimeout is the effective value; overridden per-Open via
+// WithLockTimeout, and by tests.
+var lockAcquireTimeout = DefaultLockTimeout
 
 // acquireDBLock takes an exclusive advisory lock on <path>.lock so a second
 // process opening the same database fails loudly instead of silently corrupting
@@ -341,23 +375,43 @@ var lockAcquireTimeout = 15 * time.Second
 // kernel on Close or if the process dies, so there is no stale lock to clean up.
 // It waits up to lockAcquireTimeout for a contended lock (deploy drain window)
 // before giving up.
-func acquireDBLock(dbPath string) (*os.File, error) {
+func acquireDBLock(dbPath string, timeout time.Duration) (*os.File, error) {
 	lockPath := dbPath + ".lock"
 	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return nil, fmt.Errorf("store: opening lock file %s: %w", lockPath, err)
 	}
-	deadline := time.Now().Add(lockAcquireTimeout)
+	start := time.Now()
+	deadline := start.Add(timeout)
+	announced := false
 	for {
 		lockErr := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
 		if lockErr == nil {
+			if announced {
+				// Say so explicitly: this is the line that distinguishes "the
+				// deploy was slow because the old task was draining" from every
+				// other cause of a slow start.
+				log.Printf("store: acquired database lock after waiting %s for the previous writer to exit",
+					time.Since(start).Round(100*time.Millisecond))
+			}
 			break
 		}
 		if !errors.Is(lockErr, syscall.EWOULDBLOCK) || !time.Now().Before(deadline) {
 			f.Close()
-			return nil, fmt.Errorf("store: database %q is already open by another process "+
-				"(concurrent writers corrupt SQLite); stop the other server or point "+
-				"PF__GRID__DB_PATH at a different file: %w", dbPath, lockErr)
+			return nil, fmt.Errorf("store: database %q is still locked by another process after %s "+
+				"(concurrent writers corrupt SQLite). On a deploy this means the previous task has "+
+				"not exited yet — check the load balancer's deregistration delay and the service's "+
+				"minimumHealthyPercent. Otherwise stop the other server or point PF__GRID__DB_PATH "+
+				"at a different file: %w", dbPath, timeout, lockErr)
+		}
+		if !announced {
+			// Announced ONCE, up front, so a task that is merely waiting out a
+			// drain is distinguishable from one that is hung — previously this
+			// loop was completely silent and a crash-looping deploy gave the
+			// operator nothing to go on.
+			log.Printf("store: database %q is locked by another process; waiting up to %s for it to exit "+
+				"(normal during a deploy while the previous task drains)", dbPath, timeout)
+			announced = true
 		}
 		time.Sleep(250 * time.Millisecond)
 	}

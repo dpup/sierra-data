@@ -106,6 +106,7 @@ func main() {
 		store.WithJournalMode(appConfig.Grid.JournalMode),
 		store.WithCacheSizeMB(appConfig.Grid.CacheSizeMB),
 		store.WithMaxOpenConns(appConfig.Grid.MaxOpenConns),
+		store.WithLockTimeout(appConfig.Grid.LockTimeout),
 		store.WithWildfireProximity(appConfig.Grid.Wildfire.PlaceBuffer()))
 	if err != nil {
 		logging.Errorw(ctx, "Failed to open grid store", "path", appConfig.Grid.DBPath, "error", err)

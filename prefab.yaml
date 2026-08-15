@@ -325,6 +325,22 @@ grid:
   cacheSizeMb: 24
   maxOpenConns: 4
 
+  # How long startup waits for the exclusive SQLite lock before giving up.
+  #
+  # The common contention case is a rolling deploy whose previous task has not
+  # exited yet — and WAITING beats dying, because a task that gives up is simply
+  # restarted to wait again. That is a crash loop, not a failure, and it is what
+  # turned a should-be-brief deploy 503 into minutes of downtime.
+  #
+  # Keep the Dockerfile HEALTHCHECK --start-period comfortably ABOVE this: the
+  # listener does not open until the lock is acquired, so a health check that
+  # fires during the wait kills the task mid-wait.
+  #
+  # This does not fix a slow drain, it survives one. If deploys routinely wait
+  # here, the real levers are the load balancer's deregistration delay (AWS
+  # default is 300s) and the service's minimumHealthyPercent.
+  lockTimeout: "90s"
+
   # Wildfire geography. Fire is the ONLY layer with its own, wider geography:
   # every other source matters where it happens, but a fire outside the coverage
   # footprint is a threat TO it — it moves, it closes the roads out, and an hour
