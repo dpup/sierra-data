@@ -116,16 +116,17 @@ func TestTickFailedPollNeverTransitions(t *testing.T) {
 	sched := NewScheduler(st, SchedulerConfig{
 		Tuning: map[string]config.SourceTuning{"s1": {Disappearance: store.DisappearanceResolve}},
 	})
+	ps := &pollerState{} // shared across this test's ticks, like a real poller goroutine
 	spec := PollerSpec{Normalizer: fn, Interval: time.Minute}
 
-	sched.tick(ctx, spec)
+	sched.tick(ctx, spec, ps)
 	require.Equal(t, gridv1.EventStatus_ACTIVE, eventStatus(t, st, "s1:a"))
 	assert.Equal(t, gridv1.SourceStatus_OK, sourceByID(t, st, "s1").GetStatus())
 
 	// Now the fetch fails: the stored event must stay ACTIVE at revision 1
 	// (no lifecycle transition, no new revision), and health must degrade.
 	fn.err = assert.AnError
-	sched.tick(ctx, spec)
+	sched.tick(ctx, spec, ps)
 
 	ev, err := st.GetEvent(ctx, "s1:a")
 	require.NoError(t, err)
@@ -154,14 +155,15 @@ func TestTickResolvesDisappeared(t *testing.T) {
 	sched := NewScheduler(st, SchedulerConfig{
 		Tuning: map[string]config.SourceTuning{"s1": {Disappearance: store.DisappearanceResolve}},
 	})
+	ps := &pollerState{} // shared across this test's ticks, like a real poller goroutine
 	spec := PollerSpec{Normalizer: fn, Interval: time.Minute}
 
-	sched.tick(ctx, spec)
+	sched.tick(ctx, spec, ps)
 	require.Equal(t, gridv1.EventStatus_ACTIVE, eventStatus(t, st, "s1:keep"))
 	require.Equal(t, gridv1.EventStatus_ACTIVE, eventStatus(t, st, "s1:gone"))
 
 	fn.result = &PollResult{Events: []*gridv1.Event{schedEvent("s1:keep", "s1", gridv1.Layer_ROAD_INCIDENT)}}
-	sched.tick(ctx, spec)
+	sched.tick(ctx, spec, ps)
 
 	assert.Equal(t, gridv1.EventStatus_ACTIVE, eventStatus(t, st, "s1:keep"))
 	gone, err := st.GetEvent(ctx, "s1:gone")
@@ -200,14 +202,15 @@ func TestTickExpirePolicy(t *testing.T) {
 			ExpireAfter:   24 * time.Hour,
 		}},
 	})
+	ps := &pollerState{} // shared across this test's ticks, like a real poller goroutine
 	sched.now = func() time.Time { return now }
 	spec := PollerSpec{Normalizer: fn, Interval: time.Minute}
 
-	sched.tick(ctx, spec) // all present: last seen = t0
+	sched.tick(ctx, spec, ps) // all present: last seen = t0
 
 	// Everything disappears from the feed.
 	fn.result = &PollResult{}
-	sched.tick(ctx, spec)
+	sched.tick(ctx, spec, ps)
 
 	assert.Equal(t, gridv1.EventStatus_EXPIRED, eventStatus(t, st, "wx:past"),
 		"missing and past its own expires: expired")
@@ -218,12 +221,12 @@ func TestTickExpirePolicy(t *testing.T) {
 
 	// Missing continuously: expired once the grace since last seen elapses.
 	now = t0.Add(23 * time.Hour)
-	sched.tick(ctx, spec)
+	sched.tick(ctx, spec, ps)
 	assert.Equal(t, gridv1.EventStatus_ACTIVE, eventStatus(t, st, "wx:stale"),
 		"still within the grace since last seen")
 
 	now = t0.Add(25 * time.Hour)
-	sched.tick(ctx, spec)
+	sched.tick(ctx, spec, ps)
 	assert.Equal(t, gridv1.EventStatus_EXPIRED, eventStatus(t, st, "wx:stale"),
 		"missing continuously past the grace since last seen: expired")
 }
@@ -248,6 +251,7 @@ func TestTickExpireAnchorsToLastSeen(t *testing.T) {
 			ExpireAfter:   24 * time.Hour,
 		}},
 	})
+	ps := &pollerState{} // shared across this test's ticks, like a real poller goroutine
 	sched.now = func() time.Time { return now }
 	spec := PollerSpec{Normalizer: fn, Interval: time.Minute}
 
@@ -255,7 +259,7 @@ func TestTickExpireAnchorsToLastSeen(t *testing.T) {
 	// the first is a hash-equal no-op upsert; only TouchSeen moves.
 	for _, offset := range []time.Duration{0, 10 * time.Hour, 20 * time.Hour, 30 * time.Hour} {
 		now = t0.Add(offset)
-		sched.tick(ctx, spec)
+		sched.tick(ctx, spec, ps)
 		require.Equal(t, gridv1.EventStatus_ACTIVE, eventStatus(t, st, "wx:stable"))
 	}
 	got, err := st.GetEvent(ctx, "wx:stable")
@@ -266,18 +270,18 @@ func TestTickExpireAnchorsToLastSeen(t *testing.T) {
 	// is 31h stale, but the grace runs from last seen — stays active.
 	fn.result = &PollResult{}
 	now = t0.Add(31 * time.Hour)
-	sched.tick(ctx, spec)
+	sched.tick(ctx, spec, ps)
 	assert.Equal(t, gridv1.EventStatus_ACTIVE, eventStatus(t, st, "wx:stable"),
 		"one missed poll must not expire a stable event")
 
 	// Still missing just inside the grace since last seen: still active.
 	now = t0.Add(53 * time.Hour)
-	sched.tick(ctx, spec)
+	sched.tick(ctx, spec, ps)
 	assert.Equal(t, gridv1.EventStatus_ACTIVE, eventStatus(t, st, "wx:stable"))
 
 	// Missing continuously past the grace since last seen (t0+30h+24h): expired.
 	now = t0.Add(55 * time.Hour)
-	sched.tick(ctx, spec)
+	sched.tick(ctx, spec, ps)
 	assert.Equal(t, gridv1.EventStatus_EXPIRED, eventStatus(t, st, "wx:stable"))
 }
 
@@ -318,9 +322,10 @@ func TestTickEnhancementBudget(t *testing.T) {
 		EnhancerModel: "gpt-5-mini",
 		BudgetPerTick: 1,
 	})
+	ps := &pollerState{} // shared across this test's ticks, like a real poller goroutine
 	spec := PollerSpec{Normalizer: fn, Interval: time.Minute}
 
-	sched.tick(ctx, spec)
+	sched.tick(ctx, spec, ps)
 	assert.Equal(t, 1, fe.calls, "budget of 1 caps enhancement to one call")
 
 	enhanced, err := st.GetEvent(ctx, "wx:a")
@@ -342,7 +347,7 @@ func TestTickEnhancementBudget(t *testing.T) {
 	// Unchanged content on the next tick: budget resets but nothing is
 	// spent (NeedsUpdate gates the spend), and the stored summary survives
 	// the no-op upsert.
-	sched.tick(ctx, spec)
+	sched.tick(ctx, spec, ps)
 	assert.Equal(t, 1, fe.calls)
 	enhanced, err = st.GetEvent(ctx, "wx:a")
 	require.NoError(t, err)
@@ -365,8 +370,9 @@ func TestTickEnhancementFailureStillUpserts(t *testing.T) {
 		Enhancer:      fe,
 		BudgetPerTick: 5,
 	})
+	ps := &pollerState{} // shared across this test's ticks, like a real poller goroutine
 
-	sched.tick(ctx, PollerSpec{Normalizer: fn, Interval: time.Minute})
+	sched.tick(ctx, PollerSpec{Normalizer: fn, Interval: time.Minute}, ps)
 	assert.Equal(t, 1, fe.calls)
 
 	ev, err := st.GetEvent(ctx, "wx:a")
@@ -399,8 +405,9 @@ func TestTickEnhancementPlaceNamesAndLayerGate(t *testing.T) {
 		Enhancer:      fe,
 		BudgetPerTick: 5,
 	})
+	ps := &pollerState{} // shared across this test's ticks, like a real poller goroutine
 
-	sched.tick(ctx, PollerSpec{Normalizer: fn, Interval: time.Minute})
+	sched.tick(ctx, PollerSpec{Normalizer: fn, Interval: time.Minute}, ps)
 	assert.Equal(t, 1, fe.calls, "earthquake layer must not be enhanced")
 	assert.Equal(t, []string{"Calaveras County"}, fe.lastPlaces, "unknown place ids are skipped")
 }
@@ -425,13 +432,14 @@ func TestTickPerSourcePartialFailure(t *testing.T) {
 			"caltrans": {Disappearance: store.DisappearanceResolve},
 		},
 	})
+	ps := &pollerState{} // shared across this test's ticks, like a real poller goroutine
 	spec := PollerSpec{Normalizer: fn, Interval: time.Minute}
-	sched.tick(ctx, spec)
+	sched.tick(ctx, spec, ps)
 
 	// Next poll: both events disappear, but caltrans failed — only chp's
 	// disappearance is meaningful.
 	fn.result = &PollResult{PerSource: map[string]error{"caltrans": assert.AnError}}
-	sched.tick(ctx, spec)
+	sched.tick(ctx, spec, ps)
 
 	assert.Equal(t, gridv1.EventStatus_RESOLVED, eventStatus(t, st, "chp:gone"))
 	assert.Equal(t, gridv1.EventStatus_ACTIVE, eventStatus(t, st, "caltrans:gone"),
@@ -459,14 +467,15 @@ func TestTickSweepSuppression(t *testing.T) {
 	sched := NewScheduler(st, SchedulerConfig{
 		Tuning: map[string]config.SourceTuning{"firis": {Disappearance: store.DisappearanceResolve}},
 	})
+	ps := &pollerState{} // shared across this test's ticks, like a real poller goroutine
 	spec := PollerSpec{Normalizer: fn, Interval: time.Minute}
-	sched.tick(ctx, spec)
+	sched.tick(ctx, spec, ps)
 	require.Equal(t, gridv1.EventStatus_ACTIVE, eventStatus(t, st, "firis:fire"))
 
 	// The event disappears but the poller suppresses the sweep: fetch OK,
 	// disappearance evidence incomplete.
 	fn.result = &PollResult{SweepSuppress: []string{"firis"}}
-	sched.tick(ctx, spec)
+	sched.tick(ctx, spec, ps)
 
 	ev, err := st.GetEvent(ctx, "firis:fire")
 	require.NoError(t, err)
@@ -479,7 +488,7 @@ func TestTickSweepSuppression(t *testing.T) {
 
 	// Suppression lifted, still missing: the disappearance now resolves.
 	fn.result = &PollResult{}
-	sched.tick(ctx, spec)
+	sched.tick(ctx, spec, ps)
 	assert.Equal(t, gridv1.EventStatus_RESOLVED, eventStatus(t, st, "firis:fire"))
 }
 
@@ -503,14 +512,15 @@ func TestTickPriorPopulatedFromStore(t *testing.T) {
 			"firis":   {Disappearance: store.DisappearanceResolve},
 		},
 	})
+	ps := &pollerState{} // shared across this test's ticks, like a real poller goroutine
 	spec := PollerSpec{Normalizer: fn, Interval: time.Minute}
 
-	sched.tick(ctx, spec)
+	sched.tick(ctx, spec, ps)
 	require.NotNil(t, fn.lastPrior, "Poll always receives a non-nil Prior")
 	assert.Nil(t, fn.lastPrior.ByID("calfire:one"), "first tick: store is empty")
 	assert.Empty(t, fn.lastPrior.ForSource("calfire"))
 
-	sched.tick(ctx, spec)
+	sched.tick(ctx, spec, ps)
 	prior := fn.lastPrior
 	require.NotNil(t, prior.ByID("calfire:one"))
 	assert.Equal(t, "headline calfire:one", prior.ByID("calfire:one").GetHeadline())
@@ -550,15 +560,16 @@ func TestTickSupersededResolvesImmediatelyDespiteExpireGrace(t *testing.T) {
 			ExpireAfter:   24 * time.Hour,
 		}},
 	})
+	ps := &pollerState{} // shared across this test's ticks, like a real poller goroutine
 	sched.now = func() time.Time { return now }
 	spec := PollerSpec{Normalizer: fn, Interval: time.Minute}
-	sched.tick(ctx, spec)
+	sched.tick(ctx, spec, ps)
 
 	// Next tick: both drop out of Events, but only wx:old has a named successor.
 	successor := schedEvent("wx:new", "nws", gridv1.Layer_WEATHER_ALERT)
 	fn.result = &PollResult{Events: []*gridv1.Event{successor}, Superseded: []string{"wx:old"}}
 	now = t0.Add(time.Minute)
-	sched.tick(ctx, spec)
+	sched.tick(ctx, spec, ps)
 
 	assert.Equal(t, gridv1.EventStatus_RESOLVED, eventStatus(t, st, "wx:old"),
 		"a named successor makes absence unambiguous: resolve now, don't wait out the 24h grace")
@@ -573,7 +584,7 @@ func TestTickSupersededResolvesImmediatelyDespiteExpireGrace(t *testing.T) {
 
 	// Idempotent: re-superseding an already-resolved id is a no-op.
 	now = t0.Add(2 * time.Minute)
-	sched.tick(ctx, spec)
+	sched.tick(ctx, spec, ps)
 	assert.Equal(t, gridv1.EventStatus_RESOLVED, eventStatus(t, st, "wx:old"))
 }
 
@@ -592,16 +603,17 @@ func TestTickSupersededSkippedWhenSourceFailed(t *testing.T) {
 			Disappearance: store.DisappearanceExpire, ExpireAfter: 24 * time.Hour,
 		}},
 	})
+	ps := &pollerState{} // shared across this test's ticks, like a real poller goroutine
 	sched.now = func() time.Time { return now }
 	spec := PollerSpec{Normalizer: fn, Interval: time.Minute}
-	sched.tick(ctx, spec)
+	sched.tick(ctx, spec, ps)
 
 	fn.result = &PollResult{
 		PerSource:  map[string]error{"nws": assert.AnError},
 		Superseded: []string{"wx:old"},
 	}
 	now = now.Add(time.Minute)
-	sched.tick(ctx, spec)
+	sched.tick(ctx, spec, ps)
 	assert.Equal(t, gridv1.EventStatus_ACTIVE, eventStatus(t, st, "wx:old"),
 		"a failed fetch must never transition events, supersession included")
 }
@@ -637,7 +649,7 @@ func TestTickIDRenameNeedsNoMigration(t *testing.T) {
 	s := NewScheduler(st, SchedulerConfig{
 		Tuning: map[string]config.SourceTuning{"caltrans": {Disappearance: store.DisappearanceResolve}},
 	})
-	s.tick(testCtx(), PollerSpec{Normalizer: n, Interval: time.Minute})
+	s.tick(testCtx(), PollerSpec{Normalizer: n, Interval: time.Minute}, &pollerState{})
 
 	old, err := st.GetEvent(testCtx(), "chp:C99CB")
 	require.NoError(t, err, "the old id is retired, not deleted — its history stays queryable")
@@ -650,4 +662,99 @@ func TestTickIDRenameNeedsNoMigration(t *testing.T) {
 		assert.Equal(t, gridv1.EventStatus_ACTIVE, got.GetStatus())
 		assert.Equal(t, uint32(1), got.GetRevision(), "a new closure starts a clean history")
 	}
+}
+
+// TestTickSkipsNoopUpserts pins the write-skip gate. Mesh telemetry is zeroed
+// out of the content hash by design, so a node merely re-advertising is
+// hash-equal — and before this gate every such event still opened a transaction
+// (BEGIN + 3 SELECTs + COMMIT). On EFS each of those is a network round trip,
+// which is what stretched the mesh tick's write phase to 7-9s and gave readers
+// that many more chances to block on a commit.
+func TestTickSkipsNoopUpserts(t *testing.T) {
+	ctx := testCtx()
+	st := newSchedStore(t)
+	seedSchedSources(t, st, "s1")
+	sched := NewScheduler(st, SchedulerConfig{
+		Tuning: map[string]config.SourceTuning{"s1": {Disappearance: store.DisappearanceResolve}},
+	})
+	ev := schedEvent("s1:a", "s1", gridv1.Layer_EARTHQUAKE)
+
+	// The first tick of a poller's life always reconciles fully.
+	assert.True(t, sched.shouldUpsert(ctx, ev, true), "full reconcile always writes")
+
+	fn := &fakeNormalizer{ids: []string{"s1"}, result: &PollResult{Events: []*gridv1.Event{ev}}}
+	ps := &pollerState{}
+	sched.tick(ctx, PollerSpec{Normalizer: fn, Interval: time.Minute}, ps)
+	require.Equal(t, gridv1.EventStatus_ACTIVE, eventStatus(t, st, "s1:a"))
+	assert.True(t, ps.reconciled, "the first tick records that it reconciled")
+
+	// Unchanged content, no enhancement, places unchanged => no write needed.
+	assert.False(t, sched.shouldUpsert(ctx, ev, false),
+		"an unchanged event must not open a transaction")
+
+	// Changed content still writes.
+	changed := schedEvent("s1:a", "s1", gridv1.Layer_EARTHQUAKE)
+	changed.Headline = "something new"
+	assert.True(t, sched.shouldUpsert(ctx, changed, false), "changed content must write")
+
+	// An event CARRYING an enhancement must always write, even hash-equal.
+	// Enhancement and summary are excluded from the content hash, so the
+	// hash-equal upsert path is the ONLY thing that persists them — road
+	// incidents arrive already enhanced and are routinely hash-equal, so
+	// skipping them would silently drop AI text that was just regenerated.
+	enhanced := schedEvent("s1:a", "s1", gridv1.Layer_EARTHQUAKE)
+	enhanced.Enhancement = &gridv1.Enhancement{Model: "m", Fields: []string{"summary"}}
+	assert.True(t, sched.shouldUpsert(ctx, enhanced, false),
+		"a carried enhancement must be persisted even when the content hash is equal")
+}
+
+// TestTickReconcilesWhenPlacesChange is the correctness guard on the skip gate.
+//
+// Place attachments are DERIVED state, recomputed by the hash-equal upsert path
+// (refreshEventPlaces). Skipping that path for unchanged events is safe only
+// because a change to the place set forces one full pass — otherwise an event
+// that arrived BEFORE a place was seeded would never attach to it, and would
+// silently vanish from that place's map and summary forever.
+func TestTickReconcilesWhenPlacesChange(t *testing.T) {
+	ctx := testCtx()
+	st := newSchedStore(t)
+	seedSchedSources(t, st, "s1")
+	sched := NewScheduler(st, SchedulerConfig{
+		Tuning: map[string]config.SourceTuning{"s1": {Disappearance: store.DisappearanceResolve}},
+	})
+
+	ev := schedEvent("s1:a", "s1", gridv1.Layer_EARTHQUAKE)
+	ev.Geometry = &gridv1.Geometry{Geojson: []byte(`{"type":"Point","coordinates":[-120.45,38.2]}`)}
+	fn := &fakeNormalizer{ids: []string{"s1"}, result: &PollResult{Events: []*gridv1.Event{ev}}}
+	spec := PollerSpec{Normalizer: fn, Interval: time.Minute}
+	ps := &pollerState{}
+
+	// Tick 1: no places exist yet, so nothing to attach to.
+	sched.tick(ctx, spec, ps)
+	got, err := st.GetEvent(ctx, "s1:a")
+	require.NoError(t, err)
+	require.Empty(t, got.GetPlaceIds(), "no places seeded yet")
+	v1 := ps.placesVersion
+
+	// Tick 2 with the place set unchanged: the event is hash-equal, so it is
+	// skipped entirely. Still no attachments, and the version has not moved.
+	sched.tick(ctx, spec, ps)
+	assert.Equal(t, v1, ps.placesVersion, "an unchanged place set must not force a reconcile")
+
+	// A place is seeded that CONTAINS the event — after the event first arrived.
+	require.NoError(t, st.UpsertPlace(ctx, &gridv1.Place{
+		Id: "county:calaveras", Slug: "calaveras", Name: "Calaveras County",
+		Kind: gridv1.PlaceKind_COUNTY,
+		Geometry: &gridv1.Geometry{Geojson: []byte(
+			`{"type":"Polygon","coordinates":[[[-120.9,38.0],[-120.0,38.0],[-120.0,38.5],[-120.9,38.5],[-120.9,38.0]]]}`)},
+	}))
+
+	// Tick 3: the place version changed, so this tick reconciles in full and the
+	// pre-existing event attaches retroactively.
+	sched.tick(ctx, spec, ps)
+	got, err = st.GetEvent(ctx, "s1:a")
+	require.NoError(t, err)
+	assert.Contains(t, got.GetPlaceIds(), "county:calaveras",
+		"an event that predates a place must still attach once that place is seeded")
+	assert.NotEqual(t, v1, ps.placesVersion, "the reconcile records the new place version")
 }

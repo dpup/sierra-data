@@ -52,6 +52,11 @@ func (s *Store) UpsertPlace(ctx context.Context, p *gridv1.Place) error {
 		// Invalidate the parsed-geometry cache (held under mu, which inTx owns).
 		// Conservative on rollback: a stray invalidation only forces a rebuild.
 		s.placesGeoValid = false
+		// Same mutex, same conservatism: bumping this makes the next ingest tick
+		// do a FULL reconcile, so an event that arrived before this place existed
+		// still attaches to it. A spurious bump costs one thorough tick; a missed
+		// one would leave attachments permanently stale.
+		s.placesVersion++
 		return nil
 	})
 }

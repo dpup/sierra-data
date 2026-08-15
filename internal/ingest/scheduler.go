@@ -177,12 +177,14 @@ func (s *Scheduler) safeMeshMaintenance(ctx context.Context) {
 }
 
 func (s *Scheduler) run(ctx context.Context, spec PollerSpec) {
+	// Goroutine-local across this poller's whole life; see pollerState.
+	st := &pollerState{}
 	select {
 	case <-ctx.Done():
 		return
 	case <-time.After(rand.N(maxStartJitter)):
 	}
-	s.safeTick(ctx, spec)
+	s.safeTick(ctx, spec, st)
 
 	ticker := time.NewTicker(spec.Interval)
 	defer ticker.Stop()
@@ -192,14 +194,14 @@ func (s *Scheduler) run(ctx context.Context, spec PollerSpec) {
 			logging.Infow(ctx, "Ingest poller stopping", "sources", spec.Normalizer.SourceIDs())
 			return
 		case <-ticker.C:
-			s.safeTick(ctx, spec)
+			s.safeTick(ctx, spec, st)
 		}
 	}
 }
 
 // safeTick isolates a panicking tick so one bad poll can't kill the poller
 // goroutine (mirrors periodic_refresh.go's recovery).
-func (s *Scheduler) safeTick(ctx context.Context, spec PollerSpec) {
+func (s *Scheduler) safeTick(ctx context.Context, spec PollerSpec, st *pollerState) {
 	defer func() {
 		if r := recover(); r != nil {
 			err, _ := errors.ParseStack(debug.Stack())
@@ -210,7 +212,7 @@ func (s *Scheduler) safeTick(ctx context.Context, spec PollerSpec) {
 				"error.stack_trace", err.MinimalStack(skipFrames, numFrames))
 		}
 	}()
-	s.tick(ctx, spec)
+	s.tick(ctx, spec, st)
 }
 
 // tick is one poll cycle. The critical lifecycle invariant lives here:
@@ -221,7 +223,51 @@ func (s *Scheduler) safeTick(ctx context.Context, spec PollerSpec) {
 // successful poll of that source; on error we record the failure for every
 // source the poller covers and stop — an error never becomes an all-clear
 // (the same fail-loud contract as the evacuation layer).
-func (s *Scheduler) tick(ctx context.Context, spec PollerSpec) {
+// pollerState is one poller goroutine's private, cross-tick memory. Created in
+// run and never shared, so it is goroutine-local by construction and needs no
+// locking — do not hoist it onto Scheduler, which every poller shares.
+type pollerState struct {
+	placesVersion uint64 // store place-set version at the last full reconcile
+	reconciled    bool   // false until the first tick completes
+}
+
+// shouldUpsert decides whether an event needs the write path at all.
+//
+// The default was to upsert unconditionally, which on the mesh poller meant
+// ~194 transactions every 60s where the great majority wrote nothing: mesh
+// telemetry (SNR/RSSI/hops/path) is zeroed out of the content hash by design, so
+// a node merely re-advertising is hash-equal. Those no-op transactions still pay
+// BEGIN + 3 SELECTs + COMMIT, and on EFS each of those is a network round trip —
+// which is what stretched the tick's write phase to 7-9 seconds and gave readers
+// that many more chances to land on a commit.
+//
+// Three cases must still take the write path:
+//
+//   - fullReconcile — the place set changed, and the hash-equal path is what
+//     recomputes event->place attachments (refreshEventPlaces).
+//   - a carried Enhancement — enhancement and summary are EXCLUDED from the
+//     content hash, so the hash-equal upsert is the ONLY thing that persists a
+//     refreshed one. Road incidents arrive already enhanced from the RoadsService
+//     pipeline and are routinely hash-equal, so skipping them would silently drop
+//     AI text that had just been regenerated. (Weather alerts are safe either
+//     way: maybeEnhance only sets Enhancement when the content changed.)
+//   - a failed NeedsUpdate check — fail TOWARD doing the work. A check that
+//     errors must never silently skip a write; the cost of being wrong is one
+//     transaction we would have paid anyway.
+func (s *Scheduler) shouldUpsert(ctx context.Context, ev *gridv1.Event, fullReconcile bool) bool {
+	if fullReconcile || ev.GetEnhancement() != nil {
+		return true
+	}
+	changed, err := s.store.NeedsUpdate(ctx, ev)
+	if err != nil {
+		logging.Warnw(ctx, "Ingest tick: needs-update check failed; upserting anyway",
+			"event", ev.GetId(), "error", err)
+		return true
+	}
+	return changed
+}
+
+func (s *Scheduler) tick(ctx context.Context, spec PollerSpec, st *pollerState) {
 	n := spec.Normalizer
 	sourceIDs := n.SourceIDs()
 
@@ -246,6 +292,18 @@ func (s *Scheduler) tick(ctx context.Context, spec PollerSpec) {
 		polled[src] = make(map[string]bool)
 	}
 	var polledIDs []string
+
+	// A tick normally upserts only events whose content actually changed (see
+	// shouldUpsert). But place ATTACHMENTS are derived state that a hash-equal
+	// upsert is what recomputes, so when the place set changes every event must
+	// go through the full path once — otherwise an event that arrived before a
+	// place was seeded would never attach to it. The first tick of a poller's
+	// life also reconciles, so a restart re-derives attachments once.
+	placesVersion := s.store.PlacesVersion()
+	fullReconcile := !st.reconciled || placesVersion != st.placesVersion
+
+	var upserted, skipped int
+	writeStart := time.Now()
 	for _, ev := range result.Events {
 		src := ev.GetProvenance().GetSourceId()
 		if ids, ok := polled[src]; ok {
@@ -260,30 +318,55 @@ func (s *Scheduler) tick(ctx context.Context, spec PollerSpec) {
 			polledIDs = append(polledIDs, ev.GetId())
 		}
 		s.maybeEnhance(ctx, ev, &budget)
+		if !s.shouldUpsert(ctx, ev, fullReconcile) {
+			skipped++
+			continue
+		}
+		upserted++
 		if _, err := s.store.UpsertEvent(ctx, ev); err != nil {
 			logging.Errorw(ctx, "Ingest tick: upsert failed", "event", ev.GetId(), "error", err)
 		}
 	}
+	upsertDur := time.Since(writeStart)
 
 	// Every id a clean poll returned was just confirmed by its source —
 	// including hash-equal no-op upserts, which write nothing. TouchSeen anchors
 	// the expire grace to this confirmation, so a stable event that later drops
 	// out of one poll is not expired instantly.
+	touchStart := time.Now()
 	if err := s.store.TouchSeen(ctx, polledIDs, now); err != nil {
 		logging.Errorw(ctx, "Ingest tick: touch seen failed", "sources", sourceIDs, "error", err)
 	}
+	touchDur := time.Since(touchStart)
 
 	// Flush the mesh reception firehose (nil for every non-mesh poller). These are
 	// measurements written to the append-only observation store, outside the
 	// revisioned event path; a failure logs and continues — losing a tick of raw
 	// telemetry never blocks presence ingest. Reached only on a successful poll
 	// (a hard Poll error returned above), so our outage never writes stale rows.
+	obsStart := time.Now()
 	if len(result.MeshObservations) > 0 {
 		if err := s.store.InsertMeshObservations(ctx, result.MeshObservations); err != nil {
 			logging.Errorw(ctx, "Ingest tick: mesh observation insert failed",
 				"count", len(result.MeshObservations), "error", err)
 		}
 	}
+	obsDur := time.Since(obsStart)
+
+	// The write phase, broken down. This exists because the cost was previously
+	// only observable from OUTSIDE the process, as latency on unrelated reads:
+	// under a rollback journal (no WAL MVCC on EFS) a reader blocks on the
+	// writer's EXCLUSIVE commit, so a slow tick shows up as p99 latency on
+	// /api/v1/events with nothing in the logs to connect it to. `skipped` is the
+	// headline number — those are transactions NOT opened, each of which cost a
+	// BEGIN + 3 SELECTs + COMMIT of network round trips on EFS.
+	st.placesVersion = placesVersion
+	st.reconciled = true
+	logging.Infow(ctx, "Ingest tick: write phase",
+		"sources", sourceIDs, "events", len(result.Events),
+		"upserted", upserted, "skipped", skipped, "fullReconcile", fullReconcile,
+		"upsertMs", upsertDur.Milliseconds(), "touchSeenMs", touchDur.Milliseconds(),
+		"observationsMs", obsDur.Milliseconds(), "observations", len(result.MeshObservations))
 
 	// (c) Disappearance sweep — ONLY for sources whose fetch succeeded this
 	// tick (PerSource errors mean that source's absence proves nothing) AND

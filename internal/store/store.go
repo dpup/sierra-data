@@ -122,6 +122,22 @@ type Store struct {
 
 	// maxOpenConns is the pool bound actually applied, kept for Settings.
 	maxOpenConns int
+
+	// placesVersion increments whenever the place set changes. Callers that
+	// cache work DERIVED from place geometry use it to know when that derived
+	// state is stale — specifically the ingest scheduler, which skips hash-equal
+	// upserts and so would otherwise never recompute event->place attachments
+	// for a place seeded after an event first arrived. Guarded by mu.
+	placesVersion uint64
+}
+
+// PlacesVersion returns a counter that changes whenever the place set changes.
+// It is the signal that derived event->place attachments need recomputing; see
+// the ingest scheduler's full-reconcile pass.
+func (s *Store) PlacesVersion() uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.placesVersion
 }
 
 // parsedPlace is a place's geometry pre-parsed for point-in-place / bbox tests.

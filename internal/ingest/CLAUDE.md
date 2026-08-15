@@ -161,6 +161,60 @@ Without this, every standalone→adopted transition (CAL FIRE adding a fire to i
 curated list, or a scope change bringing the incident in) shows the fire twice
 for the full 24h `firis` grace.
 
+## A tick only writes what changed (`shouldUpsert`)
+
+The tick does **not** call `UpsertEvent` for every polled event. It calls
+`NeedsUpdate` (a lock-free, transaction-free `SELECT content_hash`) and skips
+events whose content is unchanged.
+
+**Why.** `UpsertEvent` always opens a transaction, even when it writes nothing.
+On the mesh poller that meant ~194 transactions every 60s where the great
+majority were no-ops — mesh telemetry (SNR/RSSI/hops/path) is zeroed out of the
+content hash by design, so a node merely re-advertising is hash-equal. Each
+no-op still paid `BEGIN` + 3 `SELECT`s + `COMMIT`, and on EFS every one of those
+is a network round trip. Measured in production: the tick's write phase spanned
+7-9 seconds, and because a rollback journal has no WAL MVCC, readers blocking on
+the writer's EXCLUSIVE commit saw 1.7-3.5s spikes on ~7% of `/api/v1/events`
+requests, plus the occasional 503.
+
+**Three cases still take the write path, and all three are load-bearing:**
+
+- **`fullReconcile`** — see below.
+- **A carried `Enhancement`.** `enhancement` and `summary` are EXCLUDED from the
+  content hash, so the hash-equal upsert (`refreshEventPlaces`' `enhChanged`
+  branch) is the ONLY thing that persists them. Road incidents arrive already
+  enhanced from the `RoadsService` pipeline and are routinely hash-equal —
+  skipping those would silently drop AI text that had just been regenerated.
+  (Weather alerts are safe either way: `maybeEnhance` only sets `Enhancement`
+  when the content changed.)
+- **A failed `NeedsUpdate`.** Fail TOWARD doing the work. A check that errors
+  must never silently skip a write; being wrong costs one transaction we would
+  have paid anyway.
+
+### `fullReconcile` — why place attachments still work
+
+Place attachments are DERIVED state, recomputed by the hash-equal upsert path.
+Skipping that path would mean an event which arrived BEFORE a place was seeded
+never attaches to it — vanishing from that place's map and summary permanently,
+with nothing in the logs. So `Store.PlacesVersion()` increments whenever the
+place set changes (same mutex, same place as the `placesGeoValid` invalidation),
+and a tick that sees a new version upserts **every** event once. A poller's first
+tick also reconciles, so a restart re-derives attachments.
+
+Cross-tick state lives in `pollerState`, created in `run` and never shared, so it
+is goroutine-local by construction — **do not hoist it onto `Scheduler`**, which
+every poller shares. `TestTickReconcilesWhenPlacesChange` pins this and fails if
+the version check is removed.
+
+### The write-phase log line
+
+Every tick logs `Ingest tick: write phase` with `events / upserted / skipped /
+fullReconcile / upsertMs / touchSeenMs / observationsMs / observations`. This
+exists because the cost was previously observable only from OUTSIDE the process,
+as latency on unrelated reads — a slow tick showed up as p99 on `/api/v1/events`
+with nothing in the logs connecting the two. `skipped` is the headline: those are
+transactions not opened.
+
 ## Per-source disappearance policies (prefab.yaml `grid.sources`)
 
 - **`resolve`** — the feed is authoritatively active-only (Cal OES, CAL FIRE, CHP,
