@@ -7,6 +7,8 @@ import (
 
 	"github.com/dpup/prefab/errors"
 	"github.com/dpup/prefab/logging"
+
+	api "github.com/dpup/sierra-data/api/v1"
 	"github.com/dpup/sierra-data/internal/config"
 )
 
@@ -100,19 +102,50 @@ func (p *PeriodicRefreshService) refreshCacheData(ctx context.Context) {
 	refreshCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
-	// Call the road service refresh method directly
-	roads, err := p.roadsService.refreshRoadData(refreshCtx)
-	if err != nil {
+	// Call the road service refresh method directly. A roads failure must NOT
+	// abandon the rest of the tick: these are independent upstreams (Google/
+	// Caltrans vs OpenWeather/NWS), and letting one bad Caltrans fetch skip the
+	// weather warming would put weather back on the request path for a further
+	// 15 minutes — the exact cliff the warming below exists to remove.
+	if roads, err := p.roadsService.refreshRoadData(refreshCtx); err != nil {
 		logging.Errorw(ctx, "Periodic refresh: failed to refresh road data", "error", err)
-		return
+	} else {
+		cacheKey := "roads:all"
+		if err := p.roadsService.cache.Set(cacheKey, roads, p.config.Roads.RefreshInterval, "roads"); err != nil {
+			logging.Errorw(ctx, "Periodic refresh: failed to cache roads", "error", err)
+		} else {
+			logging.Infow(ctx, "Periodic refresh: successfully cached roads", "road_count", len(roads))
+		}
 	}
 
-	// Cache the refreshed data
-	cacheKey := "roads:all"
-	if err := p.roadsService.cache.Set(cacheKey, roads, p.config.Roads.RefreshInterval, "roads"); err != nil {
-		logging.Errorw(ctx, "Periodic refresh: failed to cache roads", "error", err)
-	} else {
-		logging.Infow(ctx, "Periodic refresh: successfully cached roads", "road_count", len(roads))
+	// Warm the CURRENT-CONDITIONS cache the same way. ListWeather serves a fresh
+	// cache hit as a no-op and, on a miss, does the OpenWeather fan-out and caches
+	// under "weather:all" itself — so calling the public method warms it without
+	// duplicating cache-key or TTL logic that could drift.
+	//
+	// Why it needs warming at all: this cache has the same 15m TTL as this
+	// refresher, and it was the only major cache left refreshing lazily. Whenever
+	// it expired, the next USER REQUEST paid the full 7-location fan-out plus the
+	// NWS fire-weather computation — a multi-second cliff landing on whoever
+	// happened to ask first, on a 15-minute cadence. Warming moves that cost off
+	// the request path onto this goroutine.
+	//
+	// Budget: this makes the documented worst case the actual case — 7 locations
+	// x 96 ticks/day = 672 calls/day to /data/2.5/weather, every day, rather than
+	// only on days with steady traffic. That is well inside the free tier's
+	// 60 calls/minute, and it buys predictable latency. Adding weather.locations
+	// raises it linearly. (Do NOT reach for One Call 3.0 here — separate 1,000/day
+	// cap; see the root CLAUDE.md.)
+	if p.weatherService != nil {
+		wxCtx, wxCancel := context.WithTimeout(ctx, 2*time.Minute)
+		if _, err := p.weatherService.ListWeather(wxCtx, &api.ListWeatherRequest{}); err != nil {
+			// Log and continue: warming is best-effort, and ListWeather already
+			// falls back to servable-stale data on the request path.
+			logging.Errorw(ctx, "Periodic refresh: failed to warm weather conditions", "error", err)
+		} else {
+			logging.Info(ctx, "Periodic refresh: warmed weather conditions")
+		}
+		wxCancel()
 	}
 
 	// Warm the fire-weather forecast cache so /api/v1/conditions + the fire_weather

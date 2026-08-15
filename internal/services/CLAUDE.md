@@ -31,9 +31,24 @@ The cache is in-memory JSON (TTL-based), so any value must be JSON-serializable
 (this is why `nws.Alert` uses exported fields). TTLs: API data ~5–15m,
 AI-enhanced alerts 24h (keyed by content hash to dedupe OpenAI calls).
 
-Roads are kept warm by `periodic_refresh.go`; weather/incidents refresh lazily on
-request. Google Routes has a separate 20-minute cache (`google_routes_<id>`) to
-stay within the monthly API budget — adding monitored roads increases that load.
+Roads AND current weather conditions are kept warm by `periodic_refresh.go`;
+incidents still refresh lazily on request.
+
+`weather:all` was the last major cache refreshing lazily, and its TTL equals the
+refresher's interval — so every time it expired, the next USER REQUEST paid the
+full 7-location OpenWeather fan-out plus the NWS fire-weather computation. That
+is a multi-second cliff landing on whoever asked first, on a 15-minute cadence.
+`refreshCacheData` now calls `ListWeather` (the public method, so cache key and
+TTL cannot drift; a fresh hit is a no-op). It makes the documented worst case the
+actual case: 7 locations x 96 ticks/day = 672 calls/day, every day. Adding
+`weather.locations` raises that linearly.
+
+A failure in one upstream must not abandon the rest of the tick — roads and
+weather are independent, so `refreshCacheData` logs and continues rather than
+returning early.
+
+Google Routes has a separate 20-minute cache (`google_routes_<id>`) to stay
+within the monthly API budget — adding monitored roads increases that load.
 
 ## Adding a new endpoint
 
