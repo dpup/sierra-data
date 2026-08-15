@@ -136,7 +136,7 @@ func partialData(err error) error         { return &partialDataError{err} }
 // to the last good fetch (STALE) instead of going UNAVAILABLE.
 func layerTTL(layer string) time.Duration {
 	switch layer {
-	case LayerEarthquake, LayerWildfire, LayerChainControl:
+	case LayerEarthquake, LayerWildfire, LayerChainControl, LayerFireWeather:
 		return 5 * time.Minute
 	case LayerEvacuation:
 		return 2 * time.Minute // life-safety: short, so STALE fallback stays recent
@@ -144,6 +144,25 @@ func layerTTL(layer string) time.Duration {
 		return 0
 	}
 }
+
+// cacheEmptyResults reports whether a layer's CLEAN EMPTY successes may be
+// cached. Non-empty successes are always cached; this governs only the "source
+// is healthy and currently reports nothing" case.
+//
+// Caching an empty is a straight latency win for a layer that is empty most of
+// the time — chain_control outside snow season re-parsed the Caltrans KML on
+// every request for a 212-byte answer that never changed (36-49 ms each,
+// measured). It is safe for the fail-loud contract because an upstream ERROR
+// still refuses to serve a cached empty (see the len(stale) > 0 guard above).
+//
+// EVACUATION is deliberately excluded, and this is not an oversight to tidy up.
+// The cost of caching an empty is that the FIRST evacuation order takes up to
+// the TTL to appear, and that is the one transition on the whole service where
+// delay is least acceptable. The layer accepts up to 2 minutes of staleness once
+// zones exist, but keeps "nothing -> something" instant. It is also not a
+// performance problem — Cal OES answers in ~1 ms here, so there is nothing to
+// buy and something real to lose.
+func cacheEmptyResults(layer string) bool { return layer != LayerEvacuation }
 
 // buildLayer runs one layer's builder and applies the fail-loud rules uniformly.
 //
@@ -181,6 +200,13 @@ func (s *Service) buildLayer(ctx context.Context, area config.HazardArea, layer 
 		}
 		logging.Errorw(ctx, "Hazard layer build failed", "layer", layer, "area", area.ID, "error", err)
 		// Stale-on-error: serve the last good fetch if we have one.
+		//
+		// `len(stale) > 0` is LOAD-BEARING, not a tidy-up. It is the single place
+		// the "an error never becomes a 0" invariant is enforced now that clean
+		// empties ARE cached (see the success path below). Drop it and an upstream
+		// failure would replay a cached empty as though the source had reported
+		// nothing — turning "status unknown" into a fabricated all-clear on a
+		// life-safety layer. An error must fall through to UNAVAILABLE.
 		if ttl > 0 && s.cache != nil {
 			var stale []Feature
 			if entry, ok, derr := s.cache.GetWithMetadata(key, &stale); ok && derr == nil && len(stale) > 0 {
@@ -192,10 +218,28 @@ func (s *Service) buildLayer(ctx context.Context, area config.HazardArea, layer 
 		return finalize(meta, nil, "UNAVAILABLE", time.Time{})
 	}
 
-	// Success. Cache non-empty results so stale-on-error has something to serve;
-	// never cache an empty result — that keeps the safety property that a later
-	// fetch error falls through to UNAVAILABLE, never replaying a stale "0".
-	if ttl > 0 && s.cache != nil && len(features) > 0 {
+	// Success. Cache it, INCLUDING a clean empty.
+	//
+	// Caching empties used to be forbidden here, to keep the safety property that
+	// a later fetch error falls through to UNAVAILABLE rather than replaying a
+	// stale "0". That property is real and still holds — but it is enforced on
+	// the ERROR path above, which requires len(stale) > 0 before serving a cached
+	// value, so an error can never be answered with a cached empty no matter what
+	// is stored here. Refusing to WRITE the empty was belt-and-braces, and it cost
+	// a full upstream fetch on every single request for any layer that is
+	// legitimately empty most of the time.
+	//
+	// chain_control is exactly that layer: outside snow season it is empty by
+	// definition, so it re-fetched the Caltrans KML on every /summary and every
+	// chain_control.geojson — measured 36-49 ms per request, indefinitely, for a
+	// 212-byte answer that never changes.
+	//
+	// The two states stay distinguishable, which is the whole contract: a fresh
+	// cached empty is served as OK + 0 features ("source healthy, reports
+	// nothing"), and it can only have been written by a SUCCESSFUL build. An
+	// error still yields UNAVAILABLE + empty ("status unknown"). What is cached
+	// is a success, not an absence of information.
+	if ttl > 0 && s.cache != nil && (len(features) > 0 || cacheEmptyResults(layer)) {
 		_ = s.cache.Set(key, features, ttl, "hazard:"+layer)
 	}
 	return finalize(meta, features, "OK", time.Time{})

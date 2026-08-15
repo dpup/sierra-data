@@ -54,10 +54,33 @@ healthy, currently reports nothing). Status resolution:
 - builder hard error **with** a cached value → `STALE`, last-good features served
 - builder hard error, nothing cached → `UNAVAILABLE`, empty
 
-Empty results are **never** cached — a later fetch error then falls through to
-`UNAVAILABLE` instead of replaying a stale "0". Caching uses the shared
-`internal/cache`; `layerTTL` returns 0 for layers already cached by their
-underlying service (no double-caching).
+Caching uses the shared `internal/cache`; `layerTTL` returns 0 for layers already
+cached by their underlying service (no double-caching — `road_segment` is the
+example: `ListRoads` is cached by the roads service, so a layer TTL here would be
+a second copy of the same data).
+
+**Clean empties ARE cached, except for `evacuation`.** Non-empty successes are
+always cached; `cacheEmptyResults` governs the "source healthy, reports nothing"
+case:
+
+- The invariant "an error never becomes a 0" is enforced on the **error** path,
+  by the `len(stale) > 0` guard in `buildLayer` — an upstream failure can never
+  be answered from a cached empty, whatever is stored. **That guard is
+  load-bearing; do not simplify it away.** What gets cached is a *success*, not
+  an absence of information, and a fresh cached empty is served as `OK` + 0
+  ("healthy, currently reports nothing"), never as `STALE` or `OK` after an error.
+- Not caching empties cost a full upstream fetch on **every request** for any
+  layer that is legitimately empty most of the time. `chain_control` outside snow
+  season re-parsed the Caltrans KML on every `/summary` and every
+  `chain_control.geojson` — 36-49 ms each, indefinitely, for a 212-byte answer
+  that never changed. Caching empties took `chain_control` to ~0.7 ms and
+  `/summary` from ~26-40 ms to ~2-4 ms.
+- **`evacuation` is deliberately excluded.** Caching an empty means the FIRST
+  evacuation order takes up to the TTL to appear, and that is the one transition
+  on the service where delay is least acceptable — the layer tolerates 2 minutes
+  of staleness once zones exist but keeps "nothing → something" instant. It is
+  also not a performance problem (Cal OES answers in ~1 ms), so there is nothing
+  to buy and something real to lose. `TestBuildLayer_EvacEmptyIsOK` pins it.
 
 ## Served through prefab's HTTP security wrapper
 

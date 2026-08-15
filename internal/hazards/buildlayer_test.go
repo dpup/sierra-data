@@ -101,6 +101,10 @@ func TestBuildLayer_EvacEmptyIsOK(t *testing.T) {
 	if r.meta.sourceURL == "" {
 		t.Error("evac must carry the Genasys source URL even when empty")
 	}
+	// Evacuation is deliberately excluded from empty-caching (cacheEmptyResults):
+	// caching an empty would delay the FIRST evacuation order by up to the TTL,
+	// which is the one transition where delay is least acceptable. Other layers
+	// DO cache empties — see TestBuildLayer_EmptySuccessIsCached.
 	var anything []Feature
 	if ok, _ := s.cache.Get("hazard:x:"+LayerEvacuation, &anything); ok {
 		t.Error("empty evac result must not be cached")
@@ -115,5 +119,62 @@ func TestBuildLayer_EvacErrorUnavailable(t *testing.T) {
 	r := s.buildLayer(testCtx(), config.HazardArea{ID: "x"}, LayerEvacuation, errBuild(errors.New("cal oes down")))
 	if r.status != "UNAVAILABLE" {
 		t.Fatalf("evac error status = %q, want UNAVAILABLE", r.status)
+	}
+}
+
+// TestBuildLayer_EmptySuccessIsCached: a clean empty result is now cached, so a
+// layer that is legitimately empty most of the time stops re-fetching its
+// upstream on every single request.
+//
+// chain_control is the motivating case: outside snow season it is empty by
+// definition, and because empties were never cached it re-parsed the Caltrans
+// KML on every /summary and every chain_control.geojson — measured 36-49 ms per
+// request, indefinitely, for a 212-byte answer that never changed.
+func TestBuildLayer_EmptySuccessIsCached(t *testing.T) {
+	s := &Service{cache: cache.NewCache()}
+	area := config.HazardArea{ID: "x"}
+
+	r1 := s.buildLayer(testCtx(), area, LayerChainControl, okBuild())
+	if r1.status != "OK" || len(r1.features) != 0 {
+		t.Fatalf("clean empty must be OK+0, got %q/%d", r1.status, len(r1.features))
+	}
+
+	poison := func(context.Context, config.HazardArea) ([]Feature, error) {
+		t.Error("builder must not be called again: the empty success should be cached")
+		return nil, nil
+	}
+	r2 := s.buildLayer(testCtx(), area, LayerChainControl, poison)
+	if r2.status != "OK" || len(r2.features) != 0 {
+		t.Fatalf("cached empty must still read OK+0, got %q/%d", r2.status, len(r2.features))
+	}
+}
+
+// TestBuildLayer_CachedEmptyNeverSurvivesAnError is the fail-loud counterpart,
+// and the reason caching empties is safe at all.
+//
+// The invariant is "an error never becomes a 0". Now that a clean empty IS
+// cached, the ONLY thing standing between an upstream failure and a fabricated
+// all-clear is the len(stale) > 0 guard on buildLayer's error path. If that guard
+// is ever dropped, this fails: the layer would answer a hard error with the
+// cached empty and report OK/STALE + 0 features — "nothing to worry about" —
+// when the true answer is "we do not know".
+func TestBuildLayer_CachedEmptyNeverSurvivesAnError(t *testing.T) {
+	s := &Service{cache: cache.NewCache()}
+	area := config.HazardArea{ID: "x"}
+
+	// Prime the cache with a clean empty success.
+	if r := s.buildLayer(testCtx(), area, LayerChainControl, okBuild()); r.status != "OK" {
+		t.Fatalf("priming build = %q", r.status)
+	}
+	// Expire it so the error path's stale-fallback is the branch under test.
+	s.cache.Set("hazard:x:"+LayerChainControl, []Feature{}, 0, "hazard:"+LayerChainControl)
+
+	r := s.buildLayer(testCtx(), area, LayerChainControl, errBuild(errors.New("upstream down")))
+	if r.status != "UNAVAILABLE" {
+		t.Fatalf("an upstream error over a cached EMPTY must be UNAVAILABLE, got %q — "+
+			"a cached empty replayed after an error is a fabricated all-clear", r.status)
+	}
+	if len(r.features) != 0 {
+		t.Fatalf("UNAVAILABLE must carry no features, got %d", len(r.features))
 	}
 }
