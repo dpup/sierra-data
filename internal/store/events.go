@@ -267,28 +267,54 @@ func (s *Store) TransitionEvents(ctx context.Context, ids []string, to gridv1.Ev
 	})
 }
 
-// TouchSeen stamps last_seen_at = t for every id, in one UPDATE. It writes
-// no revisions and never touches the content hash — "the source still lists
-// this event" is liveness metadata, not content. The scheduler calls it for
-// every id a successful poll returned, including hash-equal no-op upserts,
+// TouchSeen stamps last_seen_at = t for every id whose current stamp is older
+// than staleBefore, in one UPDATE, and returns how many rows it rewrote. It
+// writes no revisions and never touches the content hash — "the source still
+// lists this event" is liveness metadata, not content. The scheduler calls it
+// for every id a successful poll returned, including hash-equal no-op upserts,
 // so the expire grace is anchored to the last successful appearance.
-func (s *Store) TouchSeen(ctx context.Context, ids []string, t time.Time) error {
+//
+// The staleBefore cutoff is why this takes a cutoff at all, and it is a
+// PERFORMANCE INVARIANT, not a convenience. Without it this rewrote
+// last_seen_at for the ENTIRE polled set every tick — ~400 mesh rows every
+// 60s, each row carrying the full proto blob, so the whole active working set
+// was dirtied, journaled, and fsynced once a minute. Any commit makes every
+// other connection discard its page cache wholesale, and on EFS the changed
+// pages come back over the network — so the first reader after each tick paid
+// hundreds of cold page reads (measured 1.7-3.5s on ~7% of requests, clustered
+// on the tick cadence). last_seen_at feeds expire graces measured in HOURS
+// (smallest configured: 2h), so per-minute precision bought nothing.
+//
+// With the cutoff, a row freshly stamped within the coalescing window is left
+// alone — no dirty page — and a tick where nothing is stale commits nothing
+// (an UPDATE matching zero rows journals nothing and bumps no change counter).
+// The stamp may lag the last confirmed appearance by up to the caller's
+// window; callers must keep that window far below the smallest expireAfter
+// they configure, since the worst case is an event expiring earlier by the
+// lag. Passing staleBefore = t reproduces the old always-rewrite behavior.
+func (s *Store) TouchSeen(ctx context.Context, ids []string, t, staleBefore time.Time) (int64, error) {
 	if len(ids) == 0 {
-		return nil
+		return 0, nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	args := make([]any, 0, len(ids)+1)
+	args := make([]any, 0, len(ids)+2)
 	args = append(args, t.Unix())
 	for _, id := range ids {
 		args = append(args, id)
 	}
-	if _, err := s.db.ExecContext(ctx,
-		`UPDATE events SET last_seen_at = ? WHERE id IN (`+placeholders(len(ids))+`)`,
-		args...); err != nil {
-		return fmt.Errorf("store: touch seen: %w", err)
+	args = append(args, staleBefore.Unix())
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE events SET last_seen_at = ? WHERE id IN (`+placeholders(len(ids))+`) AND last_seen_at < ?`,
+		args...)
+	if err != nil {
+		return 0, fmt.Errorf("store: touch seen: %w", err)
 	}
-	return nil
+	touched, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("store: touch seen rows affected: %w", err)
+	}
+	return touched, nil
 }
 
 // StoredEvent pairs an event with store-side liveness metadata that is not

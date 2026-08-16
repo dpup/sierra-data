@@ -220,7 +220,8 @@ func TestMigrateV1DatabaseToV2(t *testing.T) {
 	assert.Equal(t, "usgs:q1", active[0].Event.GetId())
 	assert.True(t, active[0].LastSeenAt.IsZero(), "pre-migration rows have zero last-seen")
 
-	require.NoError(t, s.TouchSeen(ctx, []string{"usgs:q1"}, baseTime.Add(time.Hour)))
+	_, err = s.TouchSeen(ctx, []string{"usgs:q1"}, baseTime.Add(time.Hour), baseTime.Add(time.Hour))
+	require.NoError(t, err)
 	active, err = s.ActiveEventsBySource(ctx, "usgs")
 	require.NoError(t, err)
 	require.Len(t, active, 1)

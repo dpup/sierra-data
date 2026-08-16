@@ -206,10 +206,40 @@ is goroutine-local by construction — **do not hoist it onto `Scheduler`**, whi
 every poller shares. `TestTickReconcilesWhenPlacesChange` pins this and fails if
 the version check is removed.
 
+### `TouchSeen` is coalesced — and the cache-invalidation model behind it
+
+The read-latency work of 2026-08 converged on one mechanism wearing different
+costumes: **cold reads over EFS**. Warm SQLite page caches serve a place query
+in ~60 ms; any commit makes every other connection discard its cache wholesale,
+and the changed pages come back over the network. The per-tick `TouchSeen` —
+rewriting `last_seen_at` for the entire polled set, ~400 blob-carrying rows
+every 60 s — was the standing invalidator: the first read after each tick paid
+1.7-3.5 s (~7% of requests, clustered on the tick cadence). Shortening the tick
+16x (the skip gate + batched pre-check) did not move that rate, because
+invalidations-per-tick was unchanged — the tell that it was never lock
+contention (commits measured 0.3-1.4 s, too short to explain 3 s waits).
+
+So the scheduler passes `TouchSeen` a staleness cutoff (`touchSeenCoalesce`,
+10 min): only rows whose stamp is older get rewritten, and a tick where nothing
+is stale commits nothing at all. One ~400-row burst per window replaces sixty
+per hour. The stamp may lag the last confirmed appearance by up to the window —
+bounded, and safe because it feeds graces measured in hours (smallest: 2 h
+meshcore; keep the window far below the smallest `expireAfter`). The write-phase
+log's `touched` field shows it working: most ticks log `touched=0`.
+
+If per-tick spikes survive this, the remaining every-tick committer is the
+mesh-observations insert; the escape hatch is moving `mesh_observations` (pure
+derived telemetry) into a separate/ATTACHed database file with its own change
+counter, so its writes stop invalidating the events cache.
+
 ### The write-phase log line
 
 Every tick logs `Ingest tick: write phase` with `events / upserted / skipped /
-fullReconcile / upsertMs / touchSeenMs / observationsMs / observations`. This
+fullReconcile / priorMs / pollMs / upsertMs / touchSeenMs / touched /
+observationsMs / observations / sweepMs / healthMs / totalMs` — the whole tick,
+loadPrior through recordAttempt. (The first version timed only the middle and
+reported ~600 ms while the tick owned multi-second windows; measure everything
+or the next hypothesis is a guess.) This
 exists because the cost was previously observable only from OUTSIDE the process,
 as latency on unrelated reads — a slow tick showed up as p99 on `/api/v1/events`
 with nothing in the logs connecting the two. `skipped` is the headline: those are

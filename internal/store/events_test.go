@@ -316,7 +316,9 @@ func TestTouchSeenAndLastSeenAt(t *testing.T) {
 
 	// Touch (unknown ids are simply not matched by the UPDATE).
 	seenAt := baseTime.Add(30 * time.Hour)
-	require.NoError(t, s.TouchSeen(ctx, []string{"usgs:q1", "usgs:unknown"}, seenAt))
+	touched, err := s.TouchSeen(ctx, []string{"usgs:q1", "usgs:unknown"}, seenAt, time.Now().Add(time.Hour))
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), touched, "one known id rewritten; the unknown id matches nothing")
 
 	active, err = s.ActiveEventsBySource(ctx, "usgs")
 	require.NoError(t, err)
@@ -331,7 +333,9 @@ func TestTouchSeenAndLastSeenAt(t *testing.T) {
 	assert.False(t, res.Changed)
 
 	// Empty id list is a no-op.
-	require.NoError(t, s.TouchSeen(ctx, nil, seenAt))
+	touched, err = s.TouchSeen(ctx, nil, seenAt, time.Now().Add(time.Hour))
+	require.NoError(t, err)
+	assert.Zero(t, touched)
 
 	// A content change (the DO UPDATE path) re-stamps last_seen_at.
 	changed := proto.Clone(ev).(*gridv1.Event)
@@ -886,4 +890,48 @@ func TestContentHashesChunking(t *testing.T) {
 	got, err := s.ContentHashes(ctx, ids)
 	require.NoError(t, err)
 	assert.Len(t, got, total, "every id must survive the chunk boundary")
+}
+
+// TestTouchSeenCoalesces pins the staleBefore cutoff. Without it TouchSeen
+// rewrote last_seen_at for the entire polled set every tick — ~400 blob-carrying
+// rows every 60s — and every one of those commits invalidated the reader
+// connections' page caches, making the first post-tick read re-fetch hundreds of
+// pages cold over EFS (the measured 1.7-3.5s spikes). A row stamped within the
+// window must NOT be rewritten: no dirty page, and a tick where nothing is stale
+// commits nothing at all.
+func TestTouchSeenCoalesces(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	seedSource(t, s, "usgs")
+
+	ev := testEvent("usgs:q1", gridv1.Severity_MINOR, gridv1.EventStatus_ACTIVE, "quake")
+	_, err := s.UpsertEvent(ctx, ev)
+	require.NoError(t, err)
+
+	// Anchor AFTER the upsert's wall-clock stamp so the first touch matches.
+	t0 := time.Now().Add(time.Hour)
+	touched, err := s.TouchSeen(ctx, []string{"usgs:q1"}, t0, t0)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), touched)
+
+	// One minute later, with a 10m window: the stamp is fresh, so nothing is
+	// rewritten — and the stamp DELIBERATELY stays at t0 (it may lag truth by up
+	// to the window; that lag is the price of not dirtying the page).
+	t1 := t0.Add(time.Minute)
+	touched, err = s.TouchSeen(ctx, []string{"usgs:q1"}, t1, t1.Add(-10*time.Minute))
+	require.NoError(t, err)
+	assert.Zero(t, touched, "a fresh stamp inside the window must not be rewritten")
+	active, err := s.ActiveEventsBySource(ctx, "usgs")
+	require.NoError(t, err)
+	require.Len(t, active, 1)
+	assert.Equal(t, t0.Unix(), active[0].LastSeenAt.Unix(), "stamp unchanged inside the window")
+
+	// Past the window, the stamp moves again.
+	t2 := t0.Add(11 * time.Minute)
+	touched, err = s.TouchSeen(ctx, []string{"usgs:q1"}, t2, t2.Add(-10*time.Minute))
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), touched, "a stale stamp must be rewritten")
+	active, err = s.ActiveEventsBySource(ctx, "usgs")
+	require.NoError(t, err)
+	assert.Equal(t, t2.Unix(), active[0].LastSeenAt.Unix())
 }

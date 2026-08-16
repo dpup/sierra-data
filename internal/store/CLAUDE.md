@@ -77,9 +77,22 @@ Two different questions, do not conflate:
 - `observed_at` (blob + index column, caller-owned) — *when the content was
   observed*. Moves only on a content change or a transition.
 - `last_seen_at` (column only, `TouchSeen`) — *when a successful poll last
-  included this event*. Written for **every** id a good poll returned, including
-  hash-equal no-op upserts that write nothing else. No revision, never touches the
-  content hash — liveness is not content.
+  included this event*, **coalesced**: the scheduler passes a staleness cutoff
+  and only rows whose stamp is older than the coalescing window
+  (`ingest.touchSeenCoalesce`, 10 min) are rewritten. The stamp may therefore
+  lag the true last appearance by up to the window — fine, because it only
+  feeds expire graces measured in hours (smallest configured: 2 h). No
+  revision, never touches the content hash — liveness is not content.
+
+  **The cutoff is a performance invariant, not a tidy-up.** Unconditional
+  stamping rewrote ~400 blob-carrying rows every 60 s mesh tick; each commit
+  made every reader connection discard its page cache, and on EFS the first
+  post-tick read re-fetched hundreds of pages cold — the measured 1.7-3.5 s
+  spikes on ~7% of requests, clustered on the tick cadence. With the cutoff,
+  a tick where nothing is stale matches zero rows and **commits nothing** (no
+  journal, no change-counter bump, caches stay warm). Keep the window far
+  below the smallest `expireAfter`; the worst case is an event expiring
+  earlier by the lag.
 
 The lifecycle expire grace (`ingest.shouldExpire`) is anchored to `last_seen_at`
 so a stable long-lived event that drops out of a single poll is not expired

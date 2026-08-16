@@ -96,6 +96,16 @@ func (s *Scheduler) Start(ctx context.Context) {
 		"meshMaintenance", s.meshMaint.Interval > 0)
 }
 
+// touchSeenCoalesce is how stale a row's last_seen_at must be before TouchSeen
+// rewrites it. The stamp only feeds expire graces (smallest configured: 2h for
+// meshcore; 24h elsewhere), so per-minute precision bought nothing — while the
+// per-tick rewrite of ~400 blob-carrying rows was the cache invalidator behind
+// the 1.7-3.5s post-tick read spikes. 10m is grace/12 at the tightest; the
+// worst case is an event expiring up to 10m early after already being missing
+// for the full multi-hour grace. If a source is ever configured with an
+// expireAfter anywhere near this window, shrink the window first.
+const touchSeenCoalesce = 10 * time.Minute
+
 // statsRefreshInterval is how often index statistics are recomputed. Not a
 // tuning knob, so deliberately not in config: it exists only so the query
 // planner's picture of the ACTIVE-vs-dead skew keeps up as the store grows.
@@ -375,8 +385,17 @@ func (s *Scheduler) tick(ctx context.Context, spec PollerSpec, st *pollerState) 
 	// including hash-equal no-op upserts, which write nothing. TouchSeen anchors
 	// the expire grace to this confirmation, so a stable event that later drops
 	// out of one poll is not expired instantly.
+	// Coalesced: only rows whose stamp is older than the window are rewritten,
+	// so most ticks this UPDATE matches nothing and commits nothing. Without the
+	// cutoff it rewrote all ~400 polled rows every 60s, and each of those
+	// commits invalidated every reader connection's page cache — the first
+	// place-scoped read after each tick then re-read hundreds of pages cold over
+	// EFS (1.7-3.5s, ~7% of requests). One 400-row burst per window replaces
+	// sixty per hour. The stamp may lag truth by up to the window, which is why
+	// the window must stay far below the smallest expireAfter (see the const).
 	touchStart := time.Now()
-	if err := s.store.TouchSeen(ctx, polledIDs, now); err != nil {
+	touched, err := s.store.TouchSeen(ctx, polledIDs, now, now.Add(-touchSeenCoalesce))
+	if err != nil {
 		logging.Errorw(ctx, "Ingest tick: touch seen failed", "sources", sourceIDs, "error", err)
 	}
 	touchDur := time.Since(touchStart)
@@ -451,7 +470,7 @@ func (s *Scheduler) tick(ctx context.Context, spec PollerSpec, st *pollerState) 
 		"sources", sourceIDs, "events", len(result.Events),
 		"upserted", upserted, "skipped", skipped, "fullReconcile", fullReconcile,
 		"priorMs", priorDur.Milliseconds(), "pollMs", pollDur.Milliseconds(),
-		"upsertMs", upsertDur.Milliseconds(), "touchSeenMs", touchDur.Milliseconds(),
+		"upsertMs", upsertDur.Milliseconds(), "touchSeenMs", touchDur.Milliseconds(), "touched", touched,
 		"observationsMs", obsDur.Milliseconds(), "observations", len(result.MeshObservations),
 		"sweepMs", sweepDur.Milliseconds(), "healthMs", healthDur.Milliseconds(),
 		"totalMs", time.Since(priorStart).Milliseconds())

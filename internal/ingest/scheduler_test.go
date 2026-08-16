@@ -182,7 +182,7 @@ func TestTickExpirePolicy(t *testing.T) {
 	ctx := testCtx()
 	st := newSchedStore(t)
 	seedSchedSources(t, st, "nws")
-	t0 := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
+	t0 := time.Now().UTC().Truncate(time.Second) // wall-anchored: UpsertEvent stamps last_seen_at with the store's wall clock, and TouchSeen's staleness cutoff compares against it — a mocked clock far from wall time would make the cutoff misbehave in ways production (one clock) never sees
 	now := t0
 
 	past := schedEvent("wx:past", "nws", gridv1.Layer_WEATHER_ALERT)
@@ -239,7 +239,7 @@ func TestTickExpireAnchorsToLastSeen(t *testing.T) {
 	st := newSchedStore(t)
 	seedSchedSources(t, st, "nws")
 
-	t0 := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	t0 := time.Now().UTC().Truncate(time.Second) // wall-anchored: UpsertEvent stamps last_seen_at with the store's wall clock, and TouchSeen's staleness cutoff compares against it — a mocked clock far from wall time would make the cutoff misbehave in ways production (one clock) never sees
 	now := t0
 	ev := schedEvent("wx:stable", "nws", gridv1.Layer_WEATHER_ALERT)
 	ev.ObservedAt = timestamppb.New(t0) // content never changes after this
@@ -770,4 +770,51 @@ func TestTickReconcilesWhenPlacesChange(t *testing.T) {
 	assert.Contains(t, got.GetPlaceIds(), "county:calaveras",
 		"an event that predates a place must still attach once that place is seeded")
 	assert.NotEqual(t, v1, ps.placesVersion, "the reconcile records the new place version")
+}
+
+// TestTickCoalescesTouchSeen pins the WIRING: the scheduler must pass a real
+// coalescing window to TouchSeen, so ticks inside the window rewrite nothing.
+// The mechanism lives in the store (TestTouchSeenCoalesces); this proves the
+// scheduler actually uses it — the write-amplification bug this fixes was ~400
+// dirtied rows per 60s tick, every tick, from this exact call site.
+func TestTickCoalescesTouchSeen(t *testing.T) {
+	ctx := testCtx()
+	st := newSchedStore(t)
+	seedSchedSources(t, st, "s1")
+
+	t0 := time.Now().UTC().Truncate(time.Second) // wall-anchored: UpsertEvent stamps last_seen_at with the store's wall clock, and TouchSeen's staleness cutoff compares against it — a mocked clock far from wall time would make the cutoff misbehave in ways production (one clock) never sees
+	now := t0
+	ev := schedEvent("s1:a", "s1", gridv1.Layer_EARTHQUAKE)
+	fn := &fakeNormalizer{ids: []string{"s1"}, result: &PollResult{Events: []*gridv1.Event{ev}}}
+	sched := NewScheduler(st, SchedulerConfig{
+		Tuning: map[string]config.SourceTuning{"s1": {
+			Disappearance: store.DisappearanceExpire, ExpireAfter: 24 * time.Hour,
+		}},
+	})
+	sched.now = func() time.Time { return now }
+	ps := &pollerState{}
+	spec := PollerSpec{Normalizer: fn, Interval: time.Minute}
+
+	sched.tick(ctx, spec, ps) // upsert stamps last_seen_at = t0
+	lastSeen := func() int64 {
+		t.Helper()
+		active, err := st.ActiveEventsBySource(context.Background(), "s1")
+		require.NoError(t, err)
+		require.Len(t, active, 1)
+		return active[0].LastSeenAt.Unix()
+	}
+	require.Equal(t, t0.Unix(), lastSeen())
+
+	// Ticks inside the coalescing window: the stamp must NOT move — that is the
+	// whole point (no dirty pages, no cache invalidation on quiet ticks).
+	now = t0.Add(time.Minute)
+	sched.tick(ctx, spec, ps)
+	assert.Equal(t, t0.Unix(), lastSeen(), "a tick inside the window must not rewrite the stamp")
+
+	// A tick past the window rewrites it, so the stamp lags truth by at most
+	// touchSeenCoalesce — which is why the window must stay far below every
+	// configured expireAfter.
+	now = t0.Add(touchSeenCoalesce + time.Minute)
+	sched.tick(ctx, spec, ps)
+	assert.Equal(t, now.Unix(), lastSeen(), "a tick past the window must refresh the stamp")
 }
