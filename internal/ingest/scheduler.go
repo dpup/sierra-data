@@ -254,17 +254,43 @@ type pollerState struct {
 //   - a failed NeedsUpdate check — fail TOWARD doing the work. A check that
 //     errors must never silently skip a write; the cost of being wrong is one
 //     transaction we would have paid anyway.
-func (s *Scheduler) shouldUpsert(ctx context.Context, ev *gridv1.Event, fullReconcile bool) bool {
-	if fullReconcile || ev.GetEnhancement() != nil {
-		return true
+//
+// The pre-check is BATCHED, and that is the whole point. Doing it per event
+// issued one SELECT per event — on EFS, one network round trip each. Measured in
+// production on the mesh poller: 399 events, zero of them written, 9.2 SECONDS
+// spent in the pre-check alone on alternating ticks (~23 ms per query). That
+// 9-second window is what user reads contended with, and it is why the first
+// version of this gate removed the transactions but did not move the spike rate
+// at all. One query for the whole poll instead.
+//
+// A nil map (the lookup failed) makes every event take the write path — fail
+// TOWARD doing the work; see shouldUpsert.
+func (s *Scheduler) storedHashes(ctx context.Context, events []*gridv1.Event) map[string]string {
+	if len(events) == 0 {
+		return map[string]string{}
 	}
-	changed, err := s.store.NeedsUpdate(ctx, ev)
+	ids := make([]string, 0, len(events))
+	for _, ev := range events {
+		ids = append(ids, ev.GetId())
+	}
+	hashes, err := s.store.ContentHashes(ctx, ids)
 	if err != nil {
-		logging.Warnw(ctx, "Ingest tick: needs-update check failed; upserting anyway",
-			"event", ev.GetId(), "error", err)
+		logging.Warnw(ctx, "Ingest tick: batched hash pre-check failed; upserting everything",
+			"count", len(ids), "error", err)
+		return nil
+	}
+	return hashes
+}
+
+func (s *Scheduler) shouldUpsert(ev *gridv1.Event, fullReconcile bool, stored map[string]string) bool {
+	if fullReconcile || ev.GetEnhancement() != nil || stored == nil {
 		return true
 	}
-	return changed
+	h, ok := stored[ev.GetId()]
+	if !ok {
+		return true // unknown event: always a write
+	}
+	return h != store.ContentHash(ev)
 }
 
 func (s *Scheduler) tick(ctx context.Context, spec PollerSpec, st *pollerState) {
@@ -302,6 +328,9 @@ func (s *Scheduler) tick(ctx context.Context, spec PollerSpec, st *pollerState) 
 	placesVersion := s.store.PlacesVersion()
 	fullReconcile := !st.reconciled || placesVersion != st.placesVersion
 
+	// ONE round trip for the whole poll's hash pre-check (see storedHashes).
+	storedHashes := s.storedHashes(ctx, result.Events)
+
 	var upserted, skipped int
 	writeStart := time.Now()
 	for _, ev := range result.Events {
@@ -318,7 +347,7 @@ func (s *Scheduler) tick(ctx context.Context, spec PollerSpec, st *pollerState) 
 			polledIDs = append(polledIDs, ev.GetId())
 		}
 		s.maybeEnhance(ctx, ev, &budget)
-		if !s.shouldUpsert(ctx, ev, fullReconcile) {
+		if !s.shouldUpsert(ev, fullReconcile, storedHashes) {
 			skipped++
 			continue
 		}

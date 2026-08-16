@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -812,4 +813,77 @@ func TestCorridorAttachSurvivesBboxPrefilter(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotContains(t, got.GetPlaceIds(), "corridor:hwy4",
 		"the prefilter must still reject points that are genuinely far away")
+}
+
+// TestContentHashesBatched pins the batched hash pre-check the ingest scheduler
+// relies on. The per-event alternative issued one SELECT per event, which on a
+// network filesystem is one round trip each: measured 9.2 SECONDS per mesh tick
+// in production for 399 events, none of which were written. Correctness here is
+// simple, but the SHAPE is the point — one query per batch, not one per id.
+func TestContentHashesBatched(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	seedSource(t, s, "usgs")
+
+	const n = 5
+	want := make(map[string]string, n)
+	for i := 0; i < n; i++ {
+		ev := testEvent(fmt.Sprintf("usgs:e%d", i), gridv1.Severity_MINOR,
+			gridv1.EventStatus_ACTIVE, fmt.Sprintf("quake %d", i))
+		_, err := s.UpsertEvent(ctx, ev)
+		require.NoError(t, err)
+		want[ev.GetId()] = ContentHash(ev)
+	}
+
+	ids := make([]string, 0, n+1)
+	for id := range want {
+		ids = append(ids, id)
+	}
+	ids = append(ids, "usgs:never-seen")
+
+	got, err := s.ContentHashes(ctx, ids)
+	require.NoError(t, err)
+	assert.Len(t, got, n, "an absent id must be MISSING from the map, not present-and-empty")
+	assert.NotContains(t, got, "usgs:never-seen",
+		"the caller distinguishes absent (new event, must write) from a stored hash")
+	for id, h := range want {
+		assert.Equal(t, h, got[id], "stored hash must match ContentHash for %s", id)
+	}
+
+	// The batched result must agree with the per-event method it replaces.
+	for id := range want {
+		ev, err := s.GetEvent(ctx, id)
+		require.NoError(t, err)
+		changed, err := s.NeedsUpdate(ctx, ev)
+		require.NoError(t, err)
+		assert.False(t, changed, "%s is unchanged", id)
+		assert.Equal(t, got[id], ContentHash(ev), "batched and per-event agree for %s", id)
+	}
+
+	// Empty input is a no-op, not an error or a malformed `IN ()`.
+	empty, err := s.ContentHashes(ctx, nil)
+	require.NoError(t, err)
+	assert.Empty(t, empty)
+}
+
+// TestContentHashesChunking exercises the multi-batch path: more ids than
+// maxHashBatch must still return every stored hash exactly once.
+func TestContentHashesChunking(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	seedSource(t, s, "usgs")
+
+	total := maxHashBatch + 25 // forces two round trips
+	ids := make([]string, 0, total)
+	for i := 0; i < total; i++ {
+		ev := testEvent(fmt.Sprintf("usgs:c%05d", i), gridv1.Severity_INFO,
+			gridv1.EventStatus_ACTIVE, "c")
+		_, err := s.UpsertEvent(ctx, ev)
+		require.NoError(t, err)
+		ids = append(ids, ev.GetId())
+	}
+
+	got, err := s.ContentHashes(ctx, ids)
+	require.NoError(t, err)
+	assert.Len(t, got, total, "every id must survive the chunk boundary")
 }

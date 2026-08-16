@@ -56,9 +56,56 @@ func ContentHash(ev *gridv1.Event) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// maxHashBatch bounds one ContentHashes round trip. Well under SQLite's
+// variable limit, and large enough that a whole poll is one or two queries.
+const maxHashBatch = 900
+
+// ContentHashes returns the stored content hash for each of ids that exists, in
+// ONE query per batch. Absent ids are simply missing from the map (the caller
+// treats that as "new, must write").
+//
+// This exists because the per-event alternative is catastrophic on a network
+// filesystem. The ingest scheduler pre-checks every polled event before deciding
+// whether to open a write transaction; doing that one id at a time made the mesh
+// tick issue ~399 separate `SELECT content_hash` statements, each a separate EFS
+// round trip. Measured in production: 9.2 SECONDS per tick with zero events
+// actually written, on alternating ticks (~23 ms per query — one round trip
+// each). That 9-second window is what user reads were contending with.
+// Batched, the same check is one round trip.
+func (s *Store) ContentHashes(ctx context.Context, ids []string) (map[string]string, error) {
+	out := make(map[string]string, len(ids))
+	for start := 0; start < len(ids); start += maxHashBatch {
+		end := min(start+maxHashBatch, len(ids))
+		chunk := ids[start:end]
+		args := make([]any, len(chunk))
+		for i, id := range chunk {
+			args[i] = id
+		}
+		rows, err := s.db.QueryContext(ctx,
+			`SELECT id, content_hash FROM events WHERE id IN (`+placeholders(len(chunk))+`)`, args...)
+		if err != nil {
+			return nil, fmt.Errorf("store: content hashes: %w", err)
+		}
+		for rows.Next() {
+			var id, hash string
+			if err := rows.Scan(&id, &hash); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("store: scan content hash: %w", err)
+			}
+			out[id] = hash
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("store: iterate content hashes: %w", err)
+		}
+	}
+	return out, nil
+}
+
 // NeedsUpdate reports whether UpsertEvent(ev) would write: true when the
 // event is unknown or its normalized content hash differs from the stored
-// one. The scheduler pre-checks this before spending AI-enhancement budget.
+// one. Single-event form — prefer ContentHashes when checking a whole poll,
+// which is one round trip instead of one per event.
 func (s *Store) NeedsUpdate(ctx context.Context, ev *gridv1.Event) (bool, error) {
 	var stored string
 	err := s.db.QueryRowContext(ctx, `SELECT content_hash FROM events WHERE id = ?`, ev.GetId()).Scan(&stored)

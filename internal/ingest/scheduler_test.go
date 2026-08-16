@@ -680,7 +680,7 @@ func TestTickSkipsNoopUpserts(t *testing.T) {
 	ev := schedEvent("s1:a", "s1", gridv1.Layer_EARTHQUAKE)
 
 	// The first tick of a poller's life always reconciles fully.
-	assert.True(t, sched.shouldUpsert(ctx, ev, true), "full reconcile always writes")
+	assert.True(t, sched.shouldUpsert(ev, true, map[string]string{}), "full reconcile always writes")
 
 	fn := &fakeNormalizer{ids: []string{"s1"}, result: &PollResult{Events: []*gridv1.Event{ev}}}
 	ps := &pollerState{}
@@ -688,14 +688,27 @@ func TestTickSkipsNoopUpserts(t *testing.T) {
 	require.Equal(t, gridv1.EventStatus_ACTIVE, eventStatus(t, st, "s1:a"))
 	assert.True(t, ps.reconciled, "the first tick records that it reconciled")
 
+	// The pre-check is BATCHED — one query for the whole poll, not one per event.
+	// Doing it per event cost 9.2s per mesh tick on EFS (one round trip each).
+	stored := sched.storedHashes(ctx, []*gridv1.Event{ev})
+	require.Contains(t, stored, "s1:a", "the batched lookup must find the stored event")
+
 	// Unchanged content, no enhancement, places unchanged => no write needed.
-	assert.False(t, sched.shouldUpsert(ctx, ev, false),
+	assert.False(t, sched.shouldUpsert(ev, false, stored),
 		"an unchanged event must not open a transaction")
 
 	// Changed content still writes.
 	changed := schedEvent("s1:a", "s1", gridv1.Layer_EARTHQUAKE)
 	changed.Headline = "something new"
-	assert.True(t, sched.shouldUpsert(ctx, changed, false), "changed content must write")
+	assert.True(t, sched.shouldUpsert(changed, false, stored), "changed content must write")
+
+	// An event absent from the store is unknown, so it must write.
+	assert.True(t, sched.shouldUpsert(schedEvent("s1:new", "s1", gridv1.Layer_EARTHQUAKE), false, stored),
+		"an event the store has never seen must write")
+
+	// A nil map means the batched lookup FAILED — fail toward doing the work.
+	assert.True(t, sched.shouldUpsert(ev, false, nil),
+		"a failed hash lookup must upsert rather than silently skip")
 
 	// An event CARRYING an enhancement must always write, even hash-equal.
 	// Enhancement and summary are excluded from the content hash, so the
@@ -704,7 +717,7 @@ func TestTickSkipsNoopUpserts(t *testing.T) {
 	// skipping them would silently drop AI text that was just regenerated.
 	enhanced := schedEvent("s1:a", "s1", gridv1.Layer_EARTHQUAKE)
 	enhanced.Enhancement = &gridv1.Enhancement{Model: "m", Fields: []string{"summary"}}
-	assert.True(t, sched.shouldUpsert(ctx, enhanced, false),
+	assert.True(t, sched.shouldUpsert(enhanced, false, stored),
 		"a carried enhancement must be persisted even when the content hash is equal")
 }
 
