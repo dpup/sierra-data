@@ -300,7 +300,20 @@ func (s *Scheduler) tick(ctx context.Context, spec PollerSpec, st *pollerState) 
 	// (a) Poll, handing the normalizer the store's current active set so it
 	// can keep identity/state stable across ticks. A hard error fails every
 	// covered source and ends the tick.
-	result, err := n.Poll(ctx, s.loadPrior(ctx, sourceIDs))
+	//
+	// loadPrior is timed SEPARATELY from the fetch, and that separation is the
+	// point: it calls ActiveEventsBySource, which reads and proto-unmarshals
+	// every active event for the source. The sweep below calls it again. Those
+	// were outside the original write-phase timing entirely, which is how a
+	// tick could report ~600ms of "write phase" while still owning a multi-second
+	// window of contention.
+	priorStart := time.Now()
+	prior := s.loadPrior(ctx, sourceIDs)
+	priorDur := time.Since(priorStart)
+
+	pollStart := time.Now()
+	result, err := n.Poll(ctx, prior)
+	pollDur := time.Since(pollStart)
 	if err != nil {
 		logging.Errorw(ctx, "Ingest tick: poll failed", "sources", sourceIDs, "error", err)
 		for _, src := range sourceIDs {
@@ -391,11 +404,6 @@ func (s *Scheduler) tick(ctx context.Context, spec PollerSpec, st *pollerState) 
 	// BEGIN + 3 SELECTs + COMMIT of network round trips on EFS.
 	st.placesVersion = placesVersion
 	st.reconciled = true
-	logging.Infow(ctx, "Ingest tick: write phase",
-		"sources", sourceIDs, "events", len(result.Events),
-		"upserted", upserted, "skipped", skipped, "fullReconcile", fullReconcile,
-		"upsertMs", upsertDur.Milliseconds(), "touchSeenMs", touchDur.Milliseconds(),
-		"observationsMs", obsDur.Milliseconds(), "observations", len(result.MeshObservations))
 
 	// (c) Disappearance sweep — ONLY for sources whose fetch succeeded this
 	// tick (PerSource errors mean that source's absence proves nothing) AND
@@ -412,6 +420,7 @@ func (s *Scheduler) tick(ctx context.Context, spec PollerSpec, st *pollerState) 
 	for _, id := range result.Superseded {
 		superseded[id] = true
 	}
+	sweepStart := time.Now()
 	for _, src := range sourceIDs {
 		if result.PerSource[src] != nil || suppressed[src] {
 			continue
@@ -422,13 +431,30 @@ func (s *Scheduler) tick(ctx context.Context, spec PollerSpec, st *pollerState) 
 		s.supersede(ctx, src, superseded, now)
 		s.sweepDisappeared(ctx, src, polled[src], now)
 	}
+	sweepDur := time.Since(sweepStart)
 
 	// (d) Per-source health: nil for success, the partial error otherwise.
 	// Sweep-suppressed sources still record success — their fetch worked;
 	// only their lifecycle evidence was incomplete.
+	healthStart := time.Now()
 	for _, src := range sourceIDs {
 		s.recordAttempt(ctx, src, result.PerSource[src])
 	}
+	healthDur := time.Since(healthStart)
+
+	// One line covering the WHOLE tick. The earlier version timed only the
+	// upsert/touch/observation phases, which reported ~600ms while the tick was
+	// still contending for seconds — because loadPrior and the sweep sit outside
+	// that window and each proto-unmarshals every active event for the source.
+	// Measure the whole thing or the next hypothesis is another guess.
+	logging.Infow(ctx, "Ingest tick: write phase",
+		"sources", sourceIDs, "events", len(result.Events),
+		"upserted", upserted, "skipped", skipped, "fullReconcile", fullReconcile,
+		"priorMs", priorDur.Milliseconds(), "pollMs", pollDur.Milliseconds(),
+		"upsertMs", upsertDur.Milliseconds(), "touchSeenMs", touchDur.Milliseconds(),
+		"observationsMs", obsDur.Milliseconds(), "observations", len(result.MeshObservations),
+		"sweepMs", sweepDur.Milliseconds(), "healthMs", healthDur.Milliseconds(),
+		"totalMs", time.Since(priorStart).Milliseconds())
 }
 
 // loadPrior snapshots the store's active/scheduled events for the poller's
