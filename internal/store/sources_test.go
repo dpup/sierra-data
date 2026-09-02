@@ -150,3 +150,42 @@ func TestDeleteSource(t *testing.T) {
 	// Idempotent: deleting an absent id is a no-op, not an error.
 	require.NoError(t, s.DeleteSource(ctx, "gone"))
 }
+
+// The Source proto has carried homepage_url since the /api/v1 migration, but
+// nothing populated it until migrationV5 added the column — so every row served
+// an empty link and the site's source-name anchor was dead code. Pin the whole
+// round trip, including the re-seed path, since a config-owned field that does
+// not update on re-seed is the same bug in slower motion.
+func TestSeedSourcesRoundTripsHomepageURL(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+
+	require.NoError(t, s.SeedSources(ctx, []SourceSeed{{
+		ID:           "pge",
+		Name:         "PG&E (electric outages)",
+		Attribution:  "Pacific Gas and Electric",
+		HomepageURL:  "https://pgealerts.alerts.pge.com/outage-tools/outage-map/",
+		PollInterval: 5 * time.Minute,
+	}, {
+		ID:           "psps",
+		Name:         "PG&E (public safety power shutoffs)",
+		Attribution:  "Pacific Gas and Electric",
+		PollInterval: 5 * time.Minute,
+	}}))
+
+	assert.Equal(t, "https://pgealerts.alerts.pge.com/outage-tools/outage-map/",
+		getSource(t, s, "pge").GetHomepageUrl())
+	assert.Empty(t, getSource(t, s, "psps").GetHomepageUrl(),
+		"an unset homepage stays empty rather than borrowing a sibling's")
+
+	// Re-seed with a changed homepage: it is config-owned, so it must update.
+	require.NoError(t, s.SeedSources(ctx, []SourceSeed{{
+		ID:           "psps",
+		Name:         "PG&E (public safety power shutoffs)",
+		Attribution:  "Pacific Gas and Electric",
+		HomepageURL:  "https://pgealerts.alerts.pge.com/psps-updates/",
+		PollInterval: 5 * time.Minute,
+	}}))
+	assert.Equal(t, "https://pgealerts.alerts.pge.com/psps-updates/",
+		getSource(t, s, "psps").GetHomepageUrl())
+}

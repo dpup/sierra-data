@@ -14,6 +14,74 @@ throughout; errors are gRPC-standard `{code, codeName, message, details}`). The
 by a snake_case `/v1` surface on 2026-07-05, which was in turn folded back onto the
 proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 
+## 2026-09-02
+
+### `GET /api/v1/sources`: `homepageUrl` populated, source `name`s disambiguated
+
+**Additive plus display-value changes — no field is added, removed or retyped.**
+The sources board listed pairs that looked like duplicates of each other. They
+were never duplicates: `calfire`/`firis`, `pge`/`psps` and `chp`/`caltrans` are
+each two distinct feeds covered by one poller, so every health cell in a pair —
+poll interval, thresholds, last success to the second — is identical, and the
+name was the only thing distinguishing them.
+
+- **`homepageUrl` is no longer always `""`.** The field has been in the `Source`
+  proto since the gateway migration but nothing ever wrote it — there was no
+  column behind it. Every source now carries its upstream's human-facing page.
+  If you skipped rendering it because it was always empty, it is live now.
+- **`name` changed on nine of the ten sources** (only `meshcore` is unchanged).
+  Every one now reads `ORG (subject)`, so a row says which feed it is and not
+  merely who publishes it — the three shared-poller pairs need it, the rest
+  follow the same shape for consistency:
+
+  | id | was | now |
+  | --- | --- | --- |
+  | `calfire` | `CAL FIRE` | `CAL FIRE (active incidents)` |
+  | `firis` | `CAL FIRE / FIRIS` | `FIRIS (fire perimeters)` |
+  | `pge` | `PG&E` | `PG&E (electric outages)` |
+  | `psps` | `PG&E PSPS` | `PG&E (public safety power shutoffs)` |
+  | `chp` | `CHP / Caltrans` | `CHP (traffic incidents)` |
+  | `caltrans` | `Caltrans` | `Caltrans (chain control + lane closures)` |
+  | `caloes` | `Cal OES` | `Cal OES (evacuation zones)` |
+  | `usgs` | `USGS` | `USGS Earthquakes` |
+  | `nws` | `National Weather Service` | `National Weather Service (Sacramento)` |
+
+- **`calfire`'s `attribution` was wrong and is corrected**, `CAL FIRE / FIRIS` →
+  `CAL FIRE`. That string is an event-level provenance value — a `calfire:`
+  incident enriched with an adopted FIRIS perimeter genuinely credits both — and
+  it had been copied into the registry row, which describes only the CAL FIRE
+  active-incidents feed. FIRIS has its own row. **If you display attribution (you
+  should), this is the one whose text you were showing incorrectly.**
+
+`id` is unchanged for every source and remains the stable key — key on `id`, not
+on `name`. This entry changes only the source REGISTRY: a row describes the feed,
+an event's `provenance` describes that event's contributors, and the two are
+allowed to differ. (The next entry does change event provenance.)
+
+### NWS events now carry `provenance.attribution` (it was empty)
+
+**A value fills in where consumers previously got `""`.** Every event on
+`layer=weather_alert` — and any event sourced from `nws` — shipped
+`provenance.attribution: ""`. NWS was the only source whose events credited
+nobody, against the standing rule that attribution renders wherever data does.
+It is now `NOAA / National Weather Service`, matching the `nws` source row and
+the `fire_weather` / `weather_alert` geojson `metadata.attribution`.
+
+- If you rendered attribution conditionally and NWS alerts showed none, they
+  will now show it. **You should display it.**
+- `provenance.sourceName` is unchanged in the normal case — it remains the
+  **issuing office** (`NWS Sacramento CA`), which is deliberately more specific
+  than the source row's name. A product arriving with no `senderName` now falls
+  back to `National Weather Service` instead of an empty string.
+- **`provenance.sourceUrl` stays empty, deliberately.** NWS publishes no public
+  per-alert HTML page — only `api.weather.gov/alerts/{id}`, which is JSON — so
+  there is nothing honest to link. This is not an oversight; do not expect one.
+- **One-time effect:** `attribution` is part of the event content hash, so the
+  first poll after this deploys writes a **single new revision** for each active
+  NWS alert, whose diff shows only this field. Expect a small bump in
+  `/api/v1/history` around the deploy; it does not repeat.
+
+
 ## 2026-08-13
 
 ### New `power` layer: PG&E outages and Public Safety Power Shutoffs

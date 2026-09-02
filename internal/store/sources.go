@@ -23,6 +23,7 @@ type SourceSeed struct {
 	ID            string
 	Name          string
 	Attribution   string
+	HomepageURL   string // upstream's human-facing page, surfaced as Source.homepage_url
 	PollInterval  time.Duration
 	StaleAfter    time.Duration // 0 => default 3x PollInterval
 	ExpireAfter   time.Duration // 0 => never auto-expire
@@ -49,16 +50,18 @@ func (s *Store) SeedSources(ctx context.Context, seeds []SourceSeed) error {
 				expireAfter = int64(seed.ExpireAfter.Seconds())
 			}
 			if _, err := tx.Exec(`
-				INSERT INTO sources (id, name, attribution, poll_interval_seconds,
+				INSERT INTO sources (id, name, attribution, homepage_url, poll_interval_seconds,
 				                     stale_after_seconds, expire_after_seconds, disappearance)
-				VALUES (?, ?, ?, ?, ?, ?, ?)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 				ON CONFLICT(id) DO UPDATE SET
 				  name = excluded.name, attribution = excluded.attribution,
+				  homepage_url = excluded.homepage_url,
 				  poll_interval_seconds = excluded.poll_interval_seconds,
 				  stale_after_seconds = excluded.stale_after_seconds,
 				  expire_after_seconds = excluded.expire_after_seconds,
 				  disappearance = excluded.disappearance`,
-				seed.ID, seed.Name, seed.Attribution, int64(seed.PollInterval.Seconds()),
+				seed.ID, seed.Name, seed.Attribution, seed.HomepageURL,
+				int64(seed.PollInterval.Seconds()),
 				staleAfter, expireAfter, disappearance,
 			); err != nil {
 				return fmt.Errorf("store: seed source %s: %w", seed.ID, err)
@@ -135,7 +138,7 @@ func (s *Store) RecordAttempt(ctx context.Context, id string, attemptErr error) 
 // when unset); expire_after_seconds stays 0 for "never auto-expire".
 func (s *Store) ListSources(ctx context.Context) ([]*gridv1.Source, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, attribution, poll_interval_seconds, stale_after_seconds,
+		SELECT id, name, attribution, homepage_url, poll_interval_seconds, stale_after_seconds,
 		       expire_after_seconds, last_success_at, last_attempt_at, last_error, status
 		FROM sources ORDER BY id`)
 	if err != nil {
@@ -149,7 +152,7 @@ func (s *Store) ListSources(ctx context.Context) ([]*gridv1.Source, error) {
 		var pollInterval int64
 		var staleAfter, expireAfter, lastSuccess, lastAttempt sql.NullInt64
 		var status int32
-		if err := rows.Scan(&src.Id, &src.Name, &src.Attribution, &pollInterval,
+		if err := rows.Scan(&src.Id, &src.Name, &src.Attribution, &src.HomepageUrl, &pollInterval,
 			&staleAfter, &expireAfter, &lastSuccess, &lastAttempt, &src.LastError, &status); err != nil {
 			return nil, fmt.Errorf("store: scan source: %w", err)
 		}

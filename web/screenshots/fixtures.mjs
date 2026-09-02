@@ -104,7 +104,7 @@ const EVENTS = [
     id: 'evt-wildfire-mudflat', layer: 'wildfire', severity: 'EXTREME', status: 'ACTIVE',
     wildfire: { acres: 2340, containment: 15, county: 'Calaveras', cause: 'under investigation', hasPerimeter: true },
     headline: 'Mudflat Fire — 2,340 ac, 15% contained', areaLabel: 'Ebbetts Pass', category: 'wildfire',
-    observedAt: ago(11), ingestedAt: ingested(ago(11)), revision: 7, provenance: { sourceId: 'firis', sourceName: 'CAL FIRE', attribution: 'CAL FIRE FIRIS', sourceUrl: 'https://www.fire.ca.gov/incidents', fetchedAt: ago(3) },
+    observedAt: ago(11), ingestedAt: ingested(ago(11)), revision: 7, provenance: { sourceId: 'calfire', sourceName: 'CAL FIRE', attribution: 'CAL FIRE / FIRIS', sourceUrl: 'https://www.fire.ca.gov/incidents/2026/8/28/mudflat-fire/', fetchedAt: ago(3) },
     description: 'Fast-moving wildfire east of Arnold along the Hwy 4 corridor. Forward spread driven by afternoon winds; spot fires reported north of the highway.',
     summary: 'Extreme fire behavior near Arnold; evacuation warning in effect for zones along Hwy 4.',
     enhancement: { model: 'claude-haiku-4-5', enhancedAt: ago(6), fields: ['summary'] },
@@ -119,7 +119,7 @@ const EVENTS = [
     // against live data. Kept empty so that path stays covered.
     evacuation: { zoneId: 'CAL-E043', level: 'WARNING', eventType: '', county: 'Calaveras' },
     headline: 'Evacuation WARNING — Zone CAL-E043 (Avery / Hathaway Pines)', areaLabel: 'Calaveras County',
-    category: 'evacuation', observedAt: ago(24), ingestedAt: ingested(ago(24)), revision: 2, provenance: { sourceId: 'genasys', sourceName: 'Genasys Protect', attribution: 'Genasys Protect (reference only — verify at protect.genasys.com)', sourceUrl: 'https://protect.genasys.com/search', fetchedAt: ago(210) },
+    category: 'evacuation', observedAt: ago(24), ingestedAt: ingested(ago(24)), revision: 2, provenance: { sourceId: 'caloes', sourceName: 'Cal OES', attribution: 'Cal OES — reference only', sourceUrl: 'https://protect.genasys.com/search', fetchedAt: ago(210) },
     description: 'Cal OES / Genasys evacuation warning issued for zone CAL-E043 due to the Mudflat Fire. Be ready to leave.',
     summary: 'Warning (not order) — prepare to evacuate.',
     enhancement: { model: 'claude-haiku-4-5', enhancedAt: ago(6), fields: ['summary'] },
@@ -130,7 +130,7 @@ const EVENTS = [
     id: 'evt-redflag', layer: 'fire_weather', severity: 'SEVERE', status: 'ACTIVE',
     weatherAlert: { nwsSeverity: 'Severe', certainty: 'Likely', urgency: 'Expected', areaDesc: 'Calaveras and Tuolumne Counties below 5000 ft', zones: ['CAZ138'], instruction: 'Outdoor burning is not recommended. Report new fires immediately.' },
     headline: 'Red Flag Warning — gusts to 40 mph, RH 8%', areaLabel: 'CAZ138 (3000–5000 ft)',
-    category: 'fire_weather', observedAt: ago(95), ingestedAt: ingested(ago(95)), revision: 1, provenance: { sourceId: 'nws-sto', sourceName: 'NWS Sacramento', attribution: 'NOAA / National Weather Service Sacramento', sourceUrl: 'https://api.weather.gov/alerts', fetchedAt: ago(3) },
+    category: 'fire_weather', observedAt: ago(95), ingestedAt: ingested(ago(95)), revision: 1, provenance: { sourceId: 'nws', sourceName: 'NWS Sacramento CA', attribution: 'NOAA / National Weather Service', sourceUrl: '', fetchedAt: ago(3) },
     description: 'National Weather Service Red Flag Warning in effect through this evening for gusty winds and critically low humidity.',
     summary: 'Critical fire weather; new ignitions may spread rapidly.',
     enhancement: { model: 'claude-haiku-4-5', enhancedAt: ago(6), fields: ['summary'] },
@@ -141,7 +141,7 @@ const EVENTS = [
     id: 'evt-chp-hwy4', layer: 'road_incident', severity: 'MODERATE', status: 'ACTIVE',
     roadIncident: { logNumber: '250814-0631', impact: 'moderate', duration: '< 1 hour', metadata: { lanesAffected: '1', emergencyServices: 'CHP, Cal Fire' } },
     headline: 'Traffic collision — Hwy 4 near Avery, right lane blocked', areaLabel: 'Hwy 4 · Murphys → Arnold',
-    category: 'road_incident', observedAt: ago(6), ingestedAt: ingested(ago(6)), revision: 3, provenance: { sourceId: 'chp-caltrans', sourceName: 'CHP Stockton', attribution: 'Caltrans / California Highway Patrol', sourceUrl: 'https://quickmap.dot.ca.gov/', fetchedAt: ago(1) },
+    category: 'road_incident', observedAt: ago(6), ingestedAt: ingested(ago(6)), revision: 3, provenance: { sourceId: 'chp', sourceName: 'CHP / Caltrans', attribution: 'quickmap.dot.ca.gov', sourceUrl: '', fetchedAt: ago(1) },
     description: 'Two-vehicle collision blocking the eastbound right lane. Emergency crews on scene; expect delays.',
     summary: 'Right lane blocked near Avery; one-lane traffic control.',
     enhancement: { model: 'claude-haiku-4-5', enhancedAt: ago(6), fields: ['summary'] },
@@ -152,7 +152,11 @@ const EVENTS = [
     id: 'evt-wx-winter', layer: 'weather_alert', severity: 'MODERATE', status: 'ACTIVE',
     weatherAlert: { nwsSeverity: 'Moderate', certainty: 'Likely', urgency: 'Expected', areaDesc: 'Ebbetts Pass above 5000 ft', zones: ['CAZ139'], instruction: 'Carry chains. Travel over the pass may be difficult.' },
     headline: 'Winter Weather Advisory — 3–6" snow above 5000 ft', areaLabel: 'CAZ139 (above 5000 ft)',
-    category: 'weather_alert', observedAt: ago(140), ingestedAt: ingested(ago(140)), revision: 1, provenance: { sourceId: 'nws-sto', sourceName: 'NWS Sacramento', attribution: 'NOAA / National Weather Service Sacramento', sourceUrl: 'https://api.weather.gov/alerts', fetchedAt: ago(3) },
+    // sourceName is the ISSUING OFFICE, not the registry row's name, and the
+    // empty sourceUrl is deliberate — NWS publishes no per-alert HTML page, only
+    // JSON. (Attribution was genuinely empty here until 2026-09-02; the
+    // normalizer now sets it. See ingest/weather_alert.go.)
+    category: 'weather_alert', observedAt: ago(140), ingestedAt: ingested(ago(140)), revision: 1, provenance: { sourceId: 'nws', sourceName: 'NWS Sacramento CA', attribution: 'NOAA / National Weather Service', sourceUrl: '', fetchedAt: ago(3) },
     description: 'Snow accumulations of 3 to 6 inches above 5000 feet. Chain controls likely on Hwy 4 over Ebbetts Pass.',
     summary: 'Travel over the pass may be difficult; carry chains.',
     enhancement: { model: 'claude-haiku-4-5', enhancedAt: ago(6), fields: ['summary'] },
@@ -174,7 +178,7 @@ const EVENTS = [
     id: 'evt-scheduled-closure', layer: 'road_incident', severity: 'MINOR', status: 'SCHEDULED',
     roadIncident: { logNumber: 'CT-4-PAVE-08', impact: 'moderate', duration: 'ongoing', metadata: { lanesAffected: 'all', permitted: 'true' } },
     headline: 'Planned overnight closure — Hwy 4 paving, Mon 22:00–05:00', areaLabel: 'Hwy 4 · Murphys → Arnold',
-    category: 'road_incident', observedAt: ahead(600), ingestedAt: ingested(ahead(600)), revision: 1, provenance: { sourceId: 'chp-caltrans', sourceName: 'CHP Stockton', attribution: 'Caltrans / California Highway Patrol', sourceUrl: 'https://quickmap.dot.ca.gov/', fetchedAt: ago(1) },
+    category: 'road_incident', observedAt: ahead(600), ingestedAt: ingested(ahead(600)), revision: 1, provenance: { sourceId: 'chp', sourceName: 'CHP / Caltrans', attribution: 'quickmap.dot.ca.gov', sourceUrl: '', fetchedAt: ago(1) },
     description: 'Scheduled full closure for repaving between Murphys and Avery. Detour via Sheep Ranch Rd.',
     summary: 'Overnight full closure for paving; plan an alternate route.',
     enhancement: { model: 'claude-haiku-4-5', enhancedAt: ago(6), fields: ['summary'] },
@@ -196,7 +200,7 @@ const MESH_EVENTS = MESH_NODES.map((n, i) => ({
   id: `mesh-${n.pk.slice(0, 8)}`, layer: 'mesh', severity: 'INFO', status: 'ACTIVE',
   headline: n.name, areaLabel: 'Ebbetts Pass', category: 'mesh', observedAt: ago(5 + i * 7),
   ingestedAt: ingested(ago(5 + i * 7)),
-  revision: 1, provenance: { sourceId: 'meshcore', sourceName: 'MeshCore MQTT bridge', attribution: 'MeshCore community MQTT bridge (gomesh.dev)', sourceUrl: 'https://gomesh.dev/', fetchedAt: ago(1) },
+  revision: 1, provenance: { sourceId: 'meshcore', sourceName: 'MeshCore Mesh', attribution: 'MeshCore community mesh via gomesh.dev', sourceUrl: 'https://map.meshcore.io', fetchedAt: ago(1) },
   mesh: {
     publicKey: n.pk, name: n.name, nodeType: n.role,
     telemetry: { snr: n.snr, hopCount: n.hop, gateways: n.gw ? ['gomesh.dev'] : [] },
@@ -214,34 +218,51 @@ const MESH_LINKS = [
 
 // ---- sources -------------------------------------------------------------
 
+// The registry as the server actually seeds it (cmd/server gridSourceInfo) —
+// ten sources, in the id order ListSources returns. It drifted badly once:
+// these were `nifc`, `nws-sto`, `chp-caltrans`, `genasys`, plus `google-routes`
+// and `openweather`, which are the roads/weather SERVICES and have never been
+// grid sources at all. Every sources screenshot was therefore asserting a
+// registry that did not exist. Three pairs here share one poller each
+// (calfire/firis, chp/caltrans, pge/psps), which is why their timestamps match
+// to the second — that is the real shape of the board, and the reason the names
+// carry their feed's subject.
 const SOURCES = [
-  { id: 'firis', name: 'FIRIS (CAL FIRE fire perimeters)', attribution: 'CAL FIRE FIRIS', status: 'OK', homepageUrl: 'https://www.fire.ca.gov/',
-    pollIntervalSeconds: 300, lastSuccessAt: ago(4), lastAttemptAt: ago(4), staleAfterSeconds: 900, expireAfterSeconds: 3600 },
-  { id: 'nws-sto', name: 'NWS Sacramento (alerts + fire weather)', attribution: 'NOAA / National Weather Service Sacramento', status: 'OK', homepageUrl: 'https://api.weather.gov/',
-    pollIntervalSeconds: 300, lastSuccessAt: ago(3), lastAttemptAt: ago(3), staleAfterSeconds: 900, expireAfterSeconds: 3600 },
-  { id: 'usgs', name: 'USGS Earthquakes', attribution: 'U.S. Geological Survey', status: 'OK', homepageUrl: 'https://earthquake.usgs.gov/',
-    pollIntervalSeconds: 300, lastSuccessAt: ago(2), lastAttemptAt: ago(2), staleAfterSeconds: 900, expireAfterSeconds: 3600 },
-  { id: 'chp-caltrans', name: 'Caltrans / CHP incidents', attribution: 'Caltrans / California Highway Patrol', status: 'STALE', homepageUrl: 'https://quickmap.dot.ca.gov/',
-    pollIntervalSeconds: 300, lastSuccessAt: ago(23), lastAttemptAt: ago(1), staleAfterSeconds: 900, expireAfterSeconds: 3600,
-    lastError: 'upstream timeout after 10s (attempt is retrying)' },
-  { id: 'google-routes', name: 'Google Routes (travel times)', attribution: 'Google Routes API', status: 'OK', homepageUrl: 'https://developers.google.com/maps/documentation/routes',
-    pollIntervalSeconds: 2700, lastSuccessAt: ago(18), lastAttemptAt: ago(18), staleAfterSeconds: 5400, expireAfterSeconds: 10800 },
-  { id: 'genasys', name: 'Genasys Protect (evacuation zones)', attribution: 'Genasys Protect (reference only — verify at protect.genasys.com)', status: 'UNAVAILABLE', homepageUrl: 'https://protect.genasys.com/',
-    pollIntervalSeconds: 300, lastSuccessAt: ago(210), lastAttemptAt: ago(1), staleAfterSeconds: 900, expireAfterSeconds: 3600,
+  { id: 'calfire', name: 'CAL FIRE (active incidents)', attribution: 'CAL FIRE', status: 'OK', homepageUrl: 'https://incidents.fire.ca.gov',
+    pollIntervalSeconds: 300, lastSuccessAt: ago(2), lastAttemptAt: ago(2), staleAfterSeconds: 900, expireAfterSeconds: 0 },
+  // Life-safety, and the reason the UNAVAILABLE row exists at all: a Cal OES
+  // failure must render as "unknown — check Genasys", never as zero evacuations.
+  { id: 'caloes', name: 'Cal OES (evacuation zones)', attribution: 'Cal OES — reference only', status: 'UNAVAILABLE', homepageUrl: 'https://protect.genasys.com/',
+    pollIntervalSeconds: 120, lastSuccessAt: ago(210), lastAttemptAt: ago(1), staleAfterSeconds: 360, expireAfterSeconds: 0,
     lastError: 'HTTP 503 from protect.genasys.com — evacuation status is UNAVAILABLE, not an all-clear' },
-  { id: 'openweather', name: 'OpenWeatherMap (current conditions)', attribution: 'OpenWeatherMap', status: 'OK', homepageUrl: 'https://openweathermap.org/',
-    pollIntervalSeconds: 900, lastSuccessAt: ago(7), lastAttemptAt: ago(7), staleAfterSeconds: 1800, expireAfterSeconds: 3600 },
-  { id: 'meshcore', name: 'MeshCore MQTT bridge (gomesh.dev)', attribution: 'MeshCore community MQTT bridge', status: 'OK', homepageUrl: 'https://gomesh.dev/',
-    pollIntervalSeconds: 60, lastSuccessAt: ago(1), lastAttemptAt: ago(1), staleAfterSeconds: 259200, expireAfterSeconds: 604800 },
+  { id: 'caltrans', name: 'Caltrans (chain control + lane closures)', attribution: 'quickmap.dot.ca.gov', status: 'OK', homepageUrl: 'https://quickmap.dot.ca.gov/',
+    pollIntervalSeconds: 600, lastSuccessAt: ago(4), lastAttemptAt: ago(4), staleAfterSeconds: 1800, expireAfterSeconds: 0 },
+  { id: 'chp', name: 'CHP (traffic incidents)', attribution: 'quickmap.dot.ca.gov', status: 'STALE', homepageUrl: 'https://quickmap.dot.ca.gov/',
+    pollIntervalSeconds: 300, lastSuccessAt: ago(23), lastAttemptAt: ago(1), staleAfterSeconds: 900, expireAfterSeconds: 0,
+    lastError: 'upstream timeout after 10s (attempt is retrying)' },
+  { id: 'firis', name: 'FIRIS (fire perimeters)', attribution: 'CAL FIRE / FIRIS / NIFC', status: 'OK', homepageUrl: 'https://www.caloes.ca.gov/office-of-the-director/operations/response-operations/fire-rescue/firis/',
+    pollIntervalSeconds: 300, lastSuccessAt: ago(2), lastAttemptAt: ago(2), staleAfterSeconds: 900, expireAfterSeconds: 86400 },
+  { id: 'meshcore', name: 'MeshCore Mesh', attribution: 'MeshCore community mesh', status: 'OK', homepageUrl: 'https://map.meshcore.io',
+    pollIntervalSeconds: 60, lastSuccessAt: ago(1), lastAttemptAt: ago(1), staleAfterSeconds: 180, expireAfterSeconds: 7200 },
+  { id: 'nws', name: 'National Weather Service (Sacramento)', attribution: 'NOAA / National Weather Service', status: 'OK', homepageUrl: 'https://www.weather.gov/sto',
+    pollIntervalSeconds: 300, lastSuccessAt: ago(3), lastAttemptAt: ago(3), staleAfterSeconds: 900, expireAfterSeconds: 86400 },
+  { id: 'pge', name: 'PG&E (electric outages)', attribution: 'Pacific Gas and Electric', status: 'OK', homepageUrl: 'https://pgealerts.alerts.pge.com/outage-tools/outage-map/',
+    pollIntervalSeconds: 300, lastSuccessAt: ago(3), lastAttemptAt: ago(3), staleAfterSeconds: 900, expireAfterSeconds: 0 },
   // A source that has not completed a poll cycle yet. protojson emits an enum's
   // ZERO value BY NAME, so this arrives as the literal
-  // `SOURCE_STATUS_UNSPECIFIED` — observed against a live server, where three
+  // `SOURCE_STATUS_UNSPECIFIED` — observed against a live server, where several
   // feeds sat in this state for the first ~30 seconds after boot. It must render
   // as UNKNOWN: never as OK, and never as the raw proto identifier (which is
   // both a leak and 25 characters wide in a narrow column). Also the only
-  // fixture with no lastSuccessAt ("never") and no thresholds.
-  { id: 'nifc', name: 'NIFC (national incident feed)', attribution: 'NIFC', status: 'SOURCE_STATUS_UNSPECIFIED',
-    homepageUrl: 'https://www.nifc.gov/', pollIntervalSeconds: 600, lastAttemptAt: ago(1) },
+  // fixture with no lastSuccessAt, so it exercises the "never" cell. Its
+  // thresholds ARE populated, because they are config-owned and seeded before
+  // the first poll — the "—" threshold rendering is exercised instead by the
+  // expireAfterSeconds: 0 ("never auto-expire") rows above, which is where the
+  // real API actually produces it.
+  { id: 'psps', name: 'PG&E (public safety power shutoffs)', attribution: 'Pacific Gas and Electric', status: 'SOURCE_STATUS_UNSPECIFIED', homepageUrl: 'https://pgealerts.alerts.pge.com/psps-updates/',
+    pollIntervalSeconds: 300, lastAttemptAt: ago(1), staleAfterSeconds: 900, expireAfterSeconds: 0 },
+  { id: 'usgs', name: 'USGS Earthquakes', attribution: 'U.S. Geological Survey', status: 'OK', homepageUrl: 'https://earthquake.usgs.gov/earthquakes/map/',
+    pollIntervalSeconds: 300, lastSuccessAt: ago(2), lastAttemptAt: ago(2), staleAfterSeconds: 900, expireAfterSeconds: 0 },
 ];
 
 // ---- geojson map layers --------------------------------------------------

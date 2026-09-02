@@ -11,6 +11,27 @@ import (
 	"github.com/dpup/sierra-data/internal/services"
 )
 
+// Provenance constants — the attribution must match cmd/server's gridSourceInfo
+// row for `nws` and the hazards Source blocks, so /api/v1/sources, the geojson
+// layer metadata and event provenance all credit NOAA identically.
+//
+// This shipped EMPTY until 2026-09-02: NewProvenance was called with "" and NWS
+// was the only source whose events carried no attribution at all, against the
+// standing obligation that attribution renders wherever data does.
+//
+// source_url stays empty deliberately, and that is NOT the same oversight. The
+// only per-alert link NWS offers is https://api.weather.gov/alerts/{id}, which
+// is JSON rather than a public page (the product's own `web` field is just the
+// NWS homepage), so there is nothing honest to deep-link. Surveyed and declined
+// — do not add one.
+const (
+	nwsAttribution = "NOAA / National Weather Service"
+	// Fallback when a product carries no senderName; source_name is otherwise
+	// the ISSUING OFFICE ("NWS Sacramento CA"), which is more specific than the
+	// registry row's name and is meant to be.
+	nwsSourceName = "National Weather Service"
+)
+
 // weatherAlertsAPI is the slice of WeatherService this normalizer consumes
 // (decision 6: ingest reuses the cached NWS fetch, no duplicate parsing).
 // RawNWSAlerts returns the full nws.Alert records — certainty, urgency,
@@ -109,7 +130,7 @@ func (n *WeatherAlertNormalizer) Poll(ctx context.Context, prior Prior) (*PollRe
 				ev.PlaceIds = append(ev.PlaceIds, "area:"+area.ID)
 			}
 		}
-		ev.Provenance = NewProvenance("nws", a.SenderName, "", "")
+		ev.Provenance = NewProvenance("nws", nonEmpty(a.SenderName, nwsSourceName), nwsAttribution, "")
 		// event name is the envelope category; sender is provenance.source_name —
 		// neither is repeated in the detail.
 		ev.Detail = &gridv1.Event_WeatherAlert{WeatherAlert: &gridv1.WeatherAlertDetail{

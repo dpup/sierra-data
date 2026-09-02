@@ -95,6 +95,12 @@ func TestWeatherAlertPoll(t *testing.T) {
 	require.NotNil(t, active.Provenance)
 	assert.Equal(t, "nws", active.Provenance.SourceId)
 	assert.Equal(t, "NWS Sacramento CA", active.Provenance.SourceName)
+	// Attribution shipped EMPTY here until 2026-09-02 — NWS was the only source
+	// whose events credited nobody. It must match the `nws` registry row.
+	assert.Equal(t, "NOAA / National Weather Service", active.Provenance.Attribution)
+	// source_url stays empty ON PURPOSE: NWS offers no public per-alert HTML
+	// page, only the JSON api.weather.gov/alerts/{id}. Do not "fix" this.
+	assert.Empty(t, active.Provenance.SourceUrl)
 
 	// Envelope carries the event name (category) and sender (provenance); the
 	// detail carries only the kind-specific NWS fields.
@@ -185,4 +191,32 @@ func TestWeatherAlertPoll_EmptyScopeHardError(t *testing.T) {
 	n := NewWeatherAlertNormalizer(cfg, &fakeWeatherAPI{})
 	_, err := n.Poll(testCtx(), nil)
 	require.Error(t, err, "no configured NWS zones must be a hard error")
+}
+
+// source_name is the ISSUING OFFICE, taken straight from the product, so an
+// alert that carries no senderName would otherwise leave it empty — an event
+// naming nobody as its source. Fall back to the generic org name.
+func TestWeatherAlertPoll_SenderNameFallback(t *testing.T) {
+	now := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
+	alerts := []nws.Alert{{
+		ID:        "urn:oid:2.49.0.1.840.0.nosender",
+		Event:     "Red Flag Warning",
+		Severity:  "Severe",
+		Zones:     []string{"CAZ064"},
+		Effective: now.Add(-time.Hour),
+		Expires:   now.Add(time.Hour),
+		// SenderName deliberately absent.
+	}}
+	n := NewWeatherAlertNormalizer(testConfig(), &fakeWeatherAPI{alerts: alerts, fetchedAt: now})
+	n.now = func() time.Time { return now }
+
+	res, err := n.Poll(testCtx(), nil)
+	require.NoError(t, err)
+	require.Len(t, res.Events, 1)
+
+	p := res.Events[0].GetProvenance()
+	require.NotNil(t, p)
+	assert.Equal(t, "National Weather Service", p.GetSourceName())
+	assert.Equal(t, "NOAA / National Weather Service", p.GetAttribution(),
+		"attribution is a constant, never derived from the product")
 }

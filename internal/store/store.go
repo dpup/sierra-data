@@ -91,11 +91,18 @@ const migrationV4 = `
 CREATE INDEX idx_revisions_observed
   ON event_revisions(observed_at DESC, event_id ASC, revision DESC);`
 
+// migrationV5 adds the source's upstream homepage. The Source proto has carried
+// homepage_url since the /api/v1 migration and the site renders the source name
+// as a link when it is set, but nothing ever populated it — so every row was
+// unlinked, which is precisely what made same-upstream pairs (calfire/firis,
+// pge/psps) read as duplicates of each other on the sources board.
+const migrationV5 = `ALTER TABLE sources ADD COLUMN homepage_url TEXT NOT NULL DEFAULT ''`
+
 // migrations[i] is the DDL for schema version i+1. Applied versions are
 // recorded in schema_migrations; already-applied versions are skipped, so
 // Open is idempotent across restarts and an existing dev DB at an older
 // version picks up only the missing migrations.
-var migrations = []string{schemaV1, migrationV2, migrationV3, migrationV4}
+var migrations = []string{schemaV1, migrationV2, migrationV3, migrationV4, migrationV5}
 
 // ErrNotFound is returned by point lookups (GetEvent, GetPlace) when no row
 // matches. Callers map it to a 404.

@@ -66,6 +66,7 @@ CREATE TABLE sources (
   status                INTEGER NOT NULL DEFAULT 0,
   disappearance         TEXT NOT NULL DEFAULT 'resolve'  -- 'resolve' | 'expire'
 );
+-- v5 (store.go migrationV5) adds: homepage_url TEXT NOT NULL DEFAULT ''
 
 CREATE TABLE subscriptions (         -- phase 2, anticipated
   id           TEXT PRIMARY KEY,

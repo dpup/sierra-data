@@ -753,9 +753,16 @@ export async function renderEventDetail(root, id, opts = {}) {
       const prov = ev.provenance || {};
       const provSec = section('Provenance');
       const pdl = el('dl', 'kv');
-      kvRow(pdl, 'sourceId', prov.sourceId || '—');
-      kvRow(pdl, 'sourceName', prov.sourceName || '—');
-      kvRow(pdl, 'attribution', prov.attribution || '—');
+      // Every fallback here is `not provided by source`, never a bare dash. Two
+      // of these are genuinely empty on live data — road incidents ship no
+      // sourceUrl, and NWS weather alerts ship neither sourceUrl NOR attribution
+      // — so this is the common path, not a defensive one. A dash in event data
+      // reads as "nothing to report" (see ABSENT in format.js), and an empty
+      // attribution reading that way is the exact opposite of the obligation.
+      const provOr = (v) => v || absentValue(ABSENT.notProvided());
+      kvRow(pdl, 'sourceId', provOr(prov.sourceId));
+      kvRow(pdl, 'sourceName', provOr(prov.sourceName));
+      kvRow(pdl, 'attribution', provOr(prov.attribution));
       if (typeof prov.sourceUrl === 'string' && /^https?:\/\//i.test(prov.sourceUrl)) {
         const a = el('a', '', prov.sourceUrl);
         a.href = prov.sourceUrl;
@@ -763,9 +770,9 @@ export async function renderEventDetail(root, id, opts = {}) {
         a.target = '_blank';
         kvRow(pdl, 'sourceUrl', a);
       } else {
-        kvRow(pdl, 'sourceUrl', prov.sourceUrl || '—');
+        kvRow(pdl, 'sourceUrl', provOr(prov.sourceUrl));
       }
-      kvRow(pdl, 'fetchedAt', prov.fetchedAt ? timeCell(prov.fetchedAt) : '—');
+      kvRow(pdl, 'fetchedAt', prov.fetchedAt ? timeCell(prov.fetchedAt) : absentValue(ABSENT.notProvided()));
       provSec.body.append(pdl);
       sectionsEl.append(provSec.panel);
 

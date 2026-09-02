@@ -321,22 +321,45 @@ func retireOrphanedSources(ctx context.Context, st *store.Store) {
 	}
 }
 
-// gridSourceInfo is the static registry of source display names and
-// attributions. It must match the normalizers' provenance constants (which
-// in turn match the shipped hazards Source blocks) so /api/v1/sources and event
-// provenance agree.
-var gridSourceInfo = map[string]struct{ name, attribution string }{
-	"usgs":     {"USGS", "U.S. Geological Survey"},
-	"calfire":  {"CAL FIRE", "CAL FIRE / FIRIS"},
-	"firis":    {"CAL FIRE / FIRIS", "CAL FIRE / FIRIS / NIFC"},
-	"caloes":   {"Cal OES", "Cal OES — reference only"},
-	"nws":      {"National Weather Service", "NOAA / National Weather Service"},
-	"chp":      {"CHP / Caltrans", "quickmap.dot.ca.gov"},
-	"caltrans": {"Caltrans", "quickmap.dot.ca.gov"},
-	"meshcore": {"MeshCore Mesh", "MeshCore community mesh"},
-	"pge":      {"PG&E", "Pacific Gas and Electric"},
-	"psps":     {"PG&E PSPS", "Pacific Gas and Electric"},
+// gridSourceInfo is the static registry of source display names, attributions
+// and upstream homepages.
+//
+// These describe THE FEED, which is a different question from an event's
+// provenance, and conflating the two is what made the sources board read as
+// duplicated. An event's Provenance credits every source that contributed to
+// THAT event — a `calfire:` incident carrying an adopted FIRIS perimeter is
+// legitimately attributed "CAL FIRE / FIRIS" — whereas the row below describes
+// only the CAL FIRE active-incidents feed, which is not FIRIS (that has its own
+// row). The two must agree on WHO a source is; they need not carry the same
+// string, and where they differ the divergence is deliberate.
+//
+// Names disambiguate feeds that share an upstream. calfire/firis, pge/psps and
+// chp/caltrans are each one poller covering two source rows, so every other cell
+// on the board — poll interval, thresholds, last success to the second — is
+// identical within a pair; the name is the only thing that can tell them apart.
+// Keep the organization recognizable and put the feed's subject in parentheses.
+var gridSourceInfo = map[string]struct{ name, attribution, homepage string }{
+	"usgs":     {"USGS Earthquakes", "U.S. Geological Survey", "https://earthquake.usgs.gov/earthquakes/map/"},
+	"calfire":  {"CAL FIRE (active incidents)", "CAL FIRE", "https://incidents.fire.ca.gov"},
+	"firis":    {"FIRIS (fire perimeters)", "CAL FIRE / FIRIS / NIFC", firisProgramURL},
+	"caloes":   {"Cal OES (evacuation zones)", "Cal OES — reference only", caloes.SourceURL},
+	"nws":      {"National Weather Service (Sacramento)", "NOAA / National Weather Service", "https://www.weather.gov/sto"},
+	"chp":      {"CHP (traffic incidents)", "quickmap.dot.ca.gov", quickMapURL},
+	"caltrans": {"Caltrans (chain control + lane closures)", "quickmap.dot.ca.gov", quickMapURL},
+	"meshcore": {"MeshCore Mesh", "MeshCore community mesh", "https://map.meshcore.io"},
+	"pge":      {"PG&E (electric outages)", "Pacific Gas and Electric", pge.OutageMapURL},
+	"psps":     {"PG&E (public safety power shutoffs)", "Pacific Gas and Electric", pge.PSPSUpdatesURL},
 }
+
+// Homepages used by more than one source row, or that have no constant of their
+// own in a client package. Human-facing pages — the site links the source name
+// at them — not the machine endpoints the clients fetch.
+const (
+	quickMapURL = "https://quickmap.dot.ca.gov/"
+	// FIRIS data reaches us through an ArcGIS feature service with no landing
+	// page; Cal OES runs the program, so its page is the honest upstream.
+	firisProgramURL = "https://www.caloes.ca.gov/office-of-the-director/operations/response-operations/fire-rescue/firis/"
+)
 
 // registerAppConfigKeys registers the app's top-level config namespaces with
 // prefab's key validator. They live in prefab.yaml but aren't prefab's own keys,
@@ -507,6 +530,7 @@ func gridSourceSeeds(cfg *config.Config) []store.SourceSeed {
 			ID:            id,
 			Name:          info.name,
 			Attribution:   info.attribution,
+			HomepageURL:   info.homepage,
 			PollInterval:  tuning.PollInterval,
 			StaleAfter:    tuning.StaleAfter,
 			ExpireAfter:   tuning.ExpireAfter,
