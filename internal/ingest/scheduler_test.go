@@ -680,7 +680,7 @@ func TestTickSkipsNoopUpserts(t *testing.T) {
 	ev := schedEvent("s1:a", "s1", gridv1.Layer_EARTHQUAKE)
 
 	// The first tick of a poller's life always reconciles fully.
-	assert.True(t, sched.shouldUpsert(ev, true, map[string]string{}), "full reconcile always writes")
+	assert.True(t, sched.shouldUpsert(ev, true, map[string]string{}, nil), "full reconcile always writes")
 
 	fn := &fakeNormalizer{ids: []string{"s1"}, result: &PollResult{Events: []*gridv1.Event{ev}}}
 	ps := &pollerState{}
@@ -694,20 +694,20 @@ func TestTickSkipsNoopUpserts(t *testing.T) {
 	require.Contains(t, stored, "s1:a", "the batched lookup must find the stored event")
 
 	// Unchanged content, no enhancement, places unchanged => no write needed.
-	assert.False(t, sched.shouldUpsert(ev, false, stored),
+	assert.False(t, sched.shouldUpsert(ev, false, stored, nil),
 		"an unchanged event must not open a transaction")
 
 	// Changed content still writes.
 	changed := schedEvent("s1:a", "s1", gridv1.Layer_EARTHQUAKE)
 	changed.Headline = "something new"
-	assert.True(t, sched.shouldUpsert(changed, false, stored), "changed content must write")
+	assert.True(t, sched.shouldUpsert(changed, false, stored, nil), "changed content must write")
 
 	// An event absent from the store is unknown, so it must write.
-	assert.True(t, sched.shouldUpsert(schedEvent("s1:new", "s1", gridv1.Layer_EARTHQUAKE), false, stored),
+	assert.True(t, sched.shouldUpsert(schedEvent("s1:new", "s1", gridv1.Layer_EARTHQUAKE), false, stored, nil),
 		"an event the store has never seen must write")
 
 	// A nil map means the batched lookup FAILED — fail toward doing the work.
-	assert.True(t, sched.shouldUpsert(ev, false, nil),
+	assert.True(t, sched.shouldUpsert(ev, false, nil, nil),
 		"a failed hash lookup must upsert rather than silently skip")
 
 	// An event CARRYING an enhancement must always write, even hash-equal.
@@ -717,7 +717,7 @@ func TestTickSkipsNoopUpserts(t *testing.T) {
 	// skipping them would silently drop AI text that was just regenerated.
 	enhanced := schedEvent("s1:a", "s1", gridv1.Layer_EARTHQUAKE)
 	enhanced.Enhancement = &gridv1.Enhancement{Model: "m", Fields: []string{"summary"}}
-	assert.True(t, sched.shouldUpsert(enhanced, false, stored),
+	assert.True(t, sched.shouldUpsert(enhanced, false, stored, nil),
 		"a carried enhancement must be persisted even when the content hash is equal")
 }
 

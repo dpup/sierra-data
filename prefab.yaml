@@ -482,6 +482,20 @@ grid:
       disappearance: "expire"
       expireAfter: "2h"
 
+  # Authenticated push ingest — POST /api/v1/ingest/{stream}, the one write
+  # surface on this API. Not mounted unless a reporter is configured. Only the
+  # SHA-256 of a reporter's bearer token is stored here, never the token itself,
+  # which is what makes it safe in a public repo. Add one with
+  # `make ingest-token REPORTER=<id> NAME="..."`; see docs/mesh-reporter-guide.md.
+  ingest:
+    maxBodyBytes: 1048576
+    maxItems: 1000
+    # Reachability is hashed, so this must span several reporting cycles.
+    unreachableAfter: "45m"
+    # Coalesces hash-excluded telemetry writes; each one is a commit.
+    telemetryPersistInterval: "10m"
+    reporters: []
+
   # MeshCore mesh-node presence source. Subscribes to community MQTT bridges,
   # several for resilience; a node heard on more than one collapses to a single
   # event. Disabled by default: MeshCore has no official broker, and read/

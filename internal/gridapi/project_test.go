@@ -2,6 +2,7 @@ package gridapi
 
 import (
 	"encoding/json"
+	"google.golang.org/protobuf/encoding/protojson"
 	"testing"
 	"time"
 
@@ -566,4 +567,43 @@ func TestProjectEvents_Power_PSPS(t *testing.T) {
 			}
 		}
 	}`, featJSON(t, feats[0]))
+}
+
+// The reachability enum is rendered by NAME on the wire, and the three states
+// are documented to external reporters (docs/mesh-reporter-guide.md) as
+// the contract their monitor's output produces. Pin the exact strings.
+//
+// The third state is the one worth pinning: a node NO monitor watches is not
+// "unreachable", and the two surfaces spell that differently by their own
+// conventions — the gateway emits unpopulated fields, so the event carries
+// MESH_REACHABILITY_UNSPECIFIED, while the map layer omits the property. An
+// earlier revision of this enum was named MESH_REACHABLE/MESH_UNREACHABLE,
+// which made the event surface disagree with both the map layer and the docs.
+func TestMeshReachabilityWireNames(t *testing.T) {
+	gatewayJSON := protojson.MarshalOptions{UseProtoNames: false, EmitUnpopulated: true}
+
+	cases := []struct {
+		state   gridv1.MeshReachability
+		event   string // what /api/v1/events renders
+		geojson string // what properties.mesh.reachability renders ("" = omitted)
+	}{
+		{gridv1.MeshReachability_REACHABLE, `"REACHABLE"`, "REACHABLE"},
+		{gridv1.MeshReachability_UNREACHABLE, `"UNREACHABLE"`, "UNREACHABLE"},
+		{gridv1.MeshReachability_MESH_REACHABILITY_UNSPECIFIED, `"MESH_REACHABILITY_UNSPECIFIED"`, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.state.String(), func(t *testing.T) {
+			ev := &gridv1.Event{
+				Id: "meshcore:abc123", Layer: gridv1.Layer_MESH,
+				Detail: &gridv1.Event_Mesh{Mesh: &gridv1.MeshDetail{
+					PublicKey: "abc123", Reachability: tc.state,
+				}},
+			}
+			body, err := gatewayJSON.Marshal(ev)
+			require.NoError(t, err)
+			assert.Contains(t, string(body), `"reachability":`+tc.event)
+
+			assert.Equal(t, tc.geojson, meshReachability(tc.state))
+		})
+	}
 }

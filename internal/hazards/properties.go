@@ -153,6 +153,35 @@ type MeshProps struct {
 	// the queried place, false for a 1-hop neighbour pulled in because it links to
 	// one. Nil (omitted) on the plain mesh_node layer, where every node is in-place.
 	InRegion *bool `json:"inRegion,omitempty"`
+	// Reachability is an operator monitor's verdict on the node's admin interface:
+	// "REACHABLE" | "UNREACHABLE", omitted when no monitor watches it. Unlike the
+	// signal metrics above it is part of the event's content hash, so a transition
+	// is a real revision in the node's history.
+	Reachability string `json:"reachability,omitempty"`
+	// Admin is the last sample an operator monitor read off the node itself
+	// (battery, airtime, counters). Omitted for a node no monitor has reached.
+	Admin *MeshAdminProps `json:"admin,omitempty"`
+}
+
+// MeshAdminProps is the operator-reported telemetry block. Gauges are pointers
+// so a metric the device did not report stays absent rather than rendering as a
+// plausible zero — a 0% battery and an unknown battery must not look alike.
+type MeshAdminProps struct {
+	ReporterID           string   `json:"reporterId"`
+	ReportedAt           string   `json:"reportedAt,omitempty"`
+	LastSuccessAt        string   `json:"lastSuccessAt,omitempty"`
+	BatteryVolts         *float64 `json:"batteryVolts,omitempty"`
+	BatteryPercent       *float64 `json:"batteryPercent,omitempty"`
+	BatteryPercentSource string   `json:"batteryPercentSource,omitempty"`
+	TemperatureC         *float64 `json:"temperatureC,omitempty"`
+	NoiseFloorDBm        *int32   `json:"noiseFloorDbm,omitempty"`
+	TxQueueLen           *int32   `json:"txQueueLen,omitempty"`
+	UptimeSeconds        int64    `json:"uptimeSeconds,omitempty"`
+	AirtimeMs            int64    `json:"airtimeMs,omitempty"`
+	RxAirtimeMs          int64    `json:"rxAirtimeMs,omitempty"`
+	PacketsSent          int64    `json:"packetsSent,omitempty"`
+	PacketsReceived      int64    `json:"packetsReceived,omitempty"`
+	RecvErrors           int64    `json:"recvErrors,omitempty"`
 }
 
 // MeshLinkProps is the mesh_link kind block — one relay link (LineString) on the

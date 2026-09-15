@@ -251,7 +251,7 @@ type pollerState struct {
 // which is what stretched the tick's write phase to 7-9 seconds and gave readers
 // that many more chances to land on a commit.
 //
-// Three cases must still take the write path:
+// Four cases must still take the write path:
 //
 //   - fullReconcile — the place set changed, and the hash-equal path is what
 //     recomputes event->place attachments (refreshEventPlaces).
@@ -264,6 +264,12 @@ type pollerState struct {
 //   - a failed NeedsUpdate check — fail TOWARD doing the work. A check that
 //     errors must never silently skip a write; the cost of being wrong is one
 //     transaction we would have paid anyway.
+//   - an id in PollResult.ForceWrite — the poller changed content that is
+//     deliberately OUTSIDE the hash (mesh telemetry), which by definition
+//     produces a hash-equal event. Without this case that content would be
+//     persisted only on the ticks where something else about the event changed;
+//     for a fixed repeater reporting battery every five minutes, that is never.
+//     Pollers are expected to coalesce these, since each one is a transaction.
 //
 // The pre-check is BATCHED, and that is the whole point. Doing it per event
 // issued one SELECT per event — on EFS, one network round trip each. Measured in
@@ -292,8 +298,8 @@ func (s *Scheduler) storedHashes(ctx context.Context, events []*gridv1.Event) ma
 	return hashes
 }
 
-func (s *Scheduler) shouldUpsert(ev *gridv1.Event, fullReconcile bool, stored map[string]string) bool {
-	if fullReconcile || ev.GetEnhancement() != nil || stored == nil {
+func (s *Scheduler) shouldUpsert(ev *gridv1.Event, fullReconcile bool, stored map[string]string, forceWrite map[string]bool) bool {
+	if fullReconcile || ev.GetEnhancement() != nil || stored == nil || forceWrite[ev.GetId()] {
 		return true
 	}
 	h, ok := stored[ev.GetId()]
@@ -354,6 +360,19 @@ func (s *Scheduler) tick(ctx context.Context, spec PollerSpec, st *pollerState) 
 	// ONE round trip for the whole poll's hash pre-check (see storedHashes).
 	storedHashes := s.storedHashes(ctx, result.Events)
 
+	// Ids the poller says carry changed HASH-EXCLUDED content (mesh telemetry
+	// today). They are hash-equal by construction, so without this they would be
+	// skipped and the new value would never reach the store — see
+	// PollResult.ForceWrite. The write persists the blob without minting a
+	// revision (store.UpsertEvent's hash-equal refresh path).
+	var forceWrite map[string]bool
+	if len(result.ForceWrite) > 0 {
+		forceWrite = make(map[string]bool, len(result.ForceWrite))
+		for _, id := range result.ForceWrite {
+			forceWrite[id] = true
+		}
+	}
+
 	var upserted, skipped int
 	writeStart := time.Now()
 	for _, ev := range result.Events {
@@ -370,7 +389,7 @@ func (s *Scheduler) tick(ctx context.Context, spec PollerSpec, st *pollerState) 
 			polledIDs = append(polledIDs, ev.GetId())
 		}
 		s.maybeEnhance(ctx, ev, &budget)
-		if !s.shouldUpsert(ev, fullReconcile, storedHashes) {
+		if !s.shouldUpsert(ev, fullReconcile, storedHashes, forceWrite) {
 			skipped++
 			continue
 		}

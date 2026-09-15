@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
 )
@@ -934,4 +935,69 @@ func TestTouchSeenCoalesces(t *testing.T) {
 	active, err = s.ActiveEventsBySource(ctx, "usgs")
 	require.NoError(t, err)
 	assert.Equal(t, t2.Unix(), active[0].LastSeenAt.Unix())
+}
+
+// Mesh telemetry is excluded from the content hash so it never mints a revision
+// — which means this hash-equal path is the ONLY thing that can ever persist it.
+// Without it an operator-reported battery reading would reach the store only on
+// the ticks where something else about the node changed; for a fixed repeater
+// that is essentially never, and the served value would sit frozen at whatever
+// was current the last time anyone renamed it.
+func TestUpsertPersistsMeshTelemetryOnHashEqual(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	seedSource(t, s, "meshcore")
+
+	node := &gridv1.Event{
+		Id:         "meshcore:abc123",
+		Layer:      gridv1.Layer_MESH,
+		Severity:   gridv1.Severity_INFO,
+		Status:     gridv1.EventStatus_ACTIVE,
+		Headline:   "SIERRA Arnold Summit (repeater)",
+		Provenance: &gridv1.Provenance{SourceId: "meshcore", SourceName: "MeshCore Mesh"},
+		ObservedAt: timestamppb.New(baseTime),
+		Detail: &gridv1.Event_Mesh{Mesh: &gridv1.MeshDetail{
+			PublicKey: "abc123", NodeType: "repeater", Name: "SIERRA Arnold Summit",
+			Telemetry: &gridv1.MeshTelemetry{Admin: &gridv1.MeshAdminTelemetry{
+				ReporterId:   "alan-pi",
+				ReportedAt:   timestamppb.New(baseTime),
+				BatteryVolts: wrapperspb.Double(4.14),
+				PacketsSent:  150305,
+			}},
+		}},
+	}
+	_, err := s.UpsertEvent(ctx, node)
+	require.NoError(t, err)
+
+	// Five minutes later: the battery has drifted and the counters have moved.
+	// Identity is untouched, so this is hash-equal.
+	later := proto.Clone(node).(*gridv1.Event)
+	later.GetMesh().GetTelemetry().Admin = &gridv1.MeshAdminTelemetry{
+		ReporterId:   "alan-pi",
+		ReportedAt:   timestamppb.New(baseTime.Add(5 * time.Minute)),
+		BatteryVolts: wrapperspb.Double(3.97),
+		PacketsSent:  150999,
+	}
+	res, err := s.UpsertEvent(ctx, later)
+	require.NoError(t, err)
+	assert.Equal(t, UpsertResult{Changed: false, Revision: 1}, res, "telemetry must not mint a revision")
+	assert.Equal(t, 1, revisionCount(t, s, "meshcore:abc123"))
+
+	got, err := s.GetEvent(ctx, "meshcore:abc123")
+	require.NoError(t, err)
+	admin := got.GetMesh().GetTelemetry().GetAdmin()
+	require.NotNil(t, admin)
+	assert.InDelta(t, 3.97, admin.GetBatteryVolts().GetValue(), 0.001, "fresh battery persisted")
+	assert.Equal(t, int64(150999), admin.GetPacketsSent(), "fresh counters persisted")
+
+	// A poll carrying NO telemetry must not erase the stored sample — the same
+	// rule the enhancement path follows.
+	bare := proto.Clone(node).(*gridv1.Event)
+	bare.GetMesh().Telemetry = nil
+	_, err = s.UpsertEvent(ctx, bare)
+	require.NoError(t, err)
+	got, err = s.GetEvent(ctx, "meshcore:abc123")
+	require.NoError(t, err)
+	assert.InDelta(t, 3.97, got.GetMesh().GetTelemetry().GetAdmin().GetBatteryVolts().GetValue(), 0.001,
+		"a telemetry-less poll must not wipe the last known sample")
 }

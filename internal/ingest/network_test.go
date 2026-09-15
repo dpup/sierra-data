@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -23,6 +24,21 @@ func (f *fakeMeshRegistry) Snapshot() []meshcore.NodeState            { return f
 func (f *fakeMeshRegistry) Health() (int, time.Time)                  { return f.connected, time.Time{} }
 func (f *fakeMeshRegistry) DrainObservations() []meshcore.Observation { return f.obs }
 
+// ResolvePrefix matches the production rule: a unique prefix match, or nothing.
+func (f *fakeMeshRegistry) ResolvePrefix(prefix string) (string, bool) {
+	var match string
+	for _, n := range f.nodes {
+		if !strings.HasPrefix(n.PubKey, prefix) {
+			continue
+		}
+		if match != "" {
+			return "", false
+		}
+		match = n.PubKey
+	}
+	return match, match != ""
+}
+
 func TestNetworkPollBuildsEvents(t *testing.T) {
 	reg := &fakeMeshRegistry{
 		connected: 1,
@@ -43,7 +59,7 @@ func TestNetworkPollBuildsEvents(t *testing.T) {
 			},
 		},
 	}
-	n := NewNetworkNormalizer(testConfig(), reg)
+	n := NewNetworkNormalizer(testConfig(), reg, nil)
 	assert.Equal(t, []string{"meshcore"}, n.SourceIDs())
 
 	res, err := n.Poll(testCtx(), nil)
@@ -100,7 +116,7 @@ func TestNetworkPollWiderBoundsOverrideHazardAreas(t *testing.T) {
 		{PubKey: "far01", Role: meshcore.RoleRepeater, Name: "Reno",
 			HasLocation: true, Lat: 39.5, Lng: -119.0}, // outside even the wider box
 	}}
-	n := NewNetworkNormalizer(cfg, reg)
+	n := NewNetworkNormalizer(cfg, reg, nil)
 
 	res, err := n.Poll(testCtx(), nil)
 	require.NoError(t, err)
@@ -119,7 +135,7 @@ func TestNetworkProvenanceAttributesBrokerOperator(t *testing.T) {
 		HasLocation: true, Lat: 38.14, Lng: -120.45,
 		Brokers: []string{"wss://mqtt.gomesh.dev:443/mqtt"},
 	}}}
-	n := NewNetworkNormalizer(cfg, reg)
+	n := NewNetworkNormalizer(cfg, reg, nil)
 
 	res, err := n.Poll(testCtx(), nil)
 	require.NoError(t, err)
@@ -140,7 +156,7 @@ func TestNetworkProvenanceFallsBackWithoutOperator(t *testing.T) {
 		PubKey: "cc33", Role: meshcore.RoleRepeater, HasLocation: true, Lat: 38.14, Lng: -120.45,
 		Brokers: []string{"wss://unknown-broker"},
 	}}}
-	n := NewNetworkNormalizer(testConfig(), reg)
+	n := NewNetworkNormalizer(testConfig(), reg, nil)
 	res, err := n.Poll(testCtx(), nil)
 	require.NoError(t, err)
 	require.Len(t, res.Events, 1)
@@ -152,7 +168,7 @@ func TestNetworkPollHardErrorsWhenNoBrokers(t *testing.T) {
 	reg := &fakeMeshRegistry{connected: 0, nodes: []meshcore.NodeState{
 		{PubKey: "aa", Role: meshcore.RoleRepeater, HasLocation: true, Lat: 38.1, Lng: -120.4},
 	}}
-	n := NewNetworkNormalizer(testConfig(), reg)
+	n := NewNetworkNormalizer(testConfig(), reg, nil)
 
 	_, err := n.Poll(testCtx(), nil)
 	require.Error(t, err, "an all-brokers-down poll must fail so the sweep is skipped")
@@ -161,12 +177,12 @@ func TestNetworkPollHardErrorsWhenNoBrokers(t *testing.T) {
 func TestNetworkPollEmptyScope(t *testing.T) {
 	cfg := testConfig()
 	cfg.Hazards.Areas = nil
-	n := NewNetworkNormalizer(cfg, &fakeMeshRegistry{connected: 1})
+	n := NewNetworkNormalizer(cfg, &fakeMeshRegistry{connected: 1}, nil)
 	_, err := n.Poll(testCtx(), nil)
 	require.Error(t, err)
 }
 
 func TestNetworkHeadlineFallback(t *testing.T) {
-	nd := meshcore.NodeState{PubKey: "abcdef1234567890", Role: meshcore.RoleCompanion}
-	assert.Equal(t, "node abcdef12 (companion)", meshHeadline(nd))
+	assert.Equal(t, "node abcdef12 (companion)",
+		meshHeadline("", meshcore.RoleCompanion, "abcdef1234567890"))
 }

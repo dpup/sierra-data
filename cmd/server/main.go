@@ -34,6 +34,7 @@ import (
 	"github.com/dpup/sierra-data/internal/lib/alerts"
 	"github.com/dpup/sierra-data/internal/mcp"
 	"github.com/dpup/sierra-data/internal/places"
+	"github.com/dpup/sierra-data/internal/pushingest"
 	"github.com/dpup/sierra-data/internal/services"
 	"github.com/dpup/sierra-data/internal/store"
 )
@@ -168,25 +169,49 @@ func main() {
 		{Normalizer: ingest.NewPowerNormalizer(appConfig, pge.NewClient()), Interval: gridPollInterval(appConfig, "pge", "psps")},
 	}
 
-	// MeshCore mesh-node presence (optional): a long-lived MQTT subscriber to
-	// community bridges accumulates node state; the NetworkNormalizer serves a
-	// snapshot on the scheduler's tick. Enabled only when configured with brokers.
+	// Authenticated push ingest (optional): operator-run monitors POST to
+	// /api/v1/ingest/{stream}. A bad reporter block is FATAL rather than skipped —
+	// a typo'd token hash would otherwise present as a monitor that silently never
+	// authenticates, which is indistinguishable from a wrong token at the client
+	// and could go unnoticed for weeks.
+	pushRegistry, err := pushingest.NewRegistry(appConfig.Grid.Ingest)
+	if err != nil {
+		logging.Errorw(ctx, "Invalid grid.ingest configuration", "error", err)
+		log.Fatalf("Invalid grid.ingest configuration: %v", err)
+	}
+
+	// Mesh-node presence (optional). TWO possible inputs, and the poller runs if
+	// EITHER is configured: the MeshCore MQTT subscriber (community bridges,
+	// broadcast adverts) and the push-ingest buffer (operator monitors reading
+	// repeater admin interfaces). The NetworkNormalizer merges them into one event
+	// per node on the scheduler's tick.
+	var meshcoreReg ingest.MeshRegistry
 	if appConfig.Grid.Meshcore.Enabled && len(appConfig.Grid.Meshcore.Brokers) > 0 {
-		meshcoreReg := meshcore.NewRegistry(meshcoreClientConfig(appConfig))
+		reg := meshcore.NewRegistry(meshcoreClientConfig(appConfig))
 		// Rehydrate presence from the persisted store BEFORE connecting, so a
 		// deploy doesn't drop the whole mesh to "unknown" (and let the sweep expire
 		// the slow SIERRA repeaters) until every node re-adverts.
-		seedMeshRegistry(ctx, meshcoreReg, gridStore)
-		if err := meshcoreReg.Connect(ctx); err != nil {
+		seedMeshRegistry(ctx, reg, gridStore)
+		if err := reg.Connect(ctx); err != nil {
 			logging.Errorw(ctx, "Failed to start MeshCore subscriber", "error", err)
 		} else {
-			defer meshcoreReg.Close()
+			defer reg.Close()
 			logging.Infow(ctx, "MeshCore subscriber started", "brokers", len(appConfig.Grid.Meshcore.Brokers))
-			pollers = append(pollers, ingest.PollerSpec{
-				Normalizer: ingest.NewNetworkNormalizer(appConfig, meshcoreReg),
-				Interval:   gridPollInterval(appConfig, "meshcore"),
-			})
+			meshcoreReg = reg
 		}
+	}
+	var meshPush ingest.MeshPushSource
+	if pushRegistry.Enabled() {
+		meshPush = pushRegistry
+		logging.Infow(ctx, "Push ingest enabled",
+			"reporters", pushRegistry.ReporterIDs(pushingest.MeshStream))
+	}
+	if meshcoreReg != nil || meshPush != nil {
+		meshSources := append([]string{"meshcore"}, pushRegistry.ReporterIDs(pushingest.MeshStream)...)
+		pollers = append(pollers, ingest.PollerSpec{
+			Normalizer: ingest.NewNetworkNormalizer(appConfig, meshcoreReg, meshPush),
+			Interval:   gridPollInterval(appConfig, meshSources...),
+		})
 	}
 
 	scheduler := ingest.NewScheduler(gridStore, ingest.SchedulerConfig{
@@ -242,6 +267,24 @@ func main() {
 			// now the GetPlaceSummary RPC).
 			if err := gridServer.RegisterGatewayRoutes(mux); err != nil {
 				return err
+			}
+			// The one WRITE route on /api/v1, mounted only when a reporter is
+			// configured so the default build has no write surface at all. It is
+			// hand-mounted rather than proto-defined because it takes a foreign
+			// document verbatim (whatever shape a monitor already produces), and
+			// deliberately bypasses the ETag/Cache-Control interceptors, which
+			// exist for GETs.
+			//
+			// CORS keeps this browser-unreachable cross-origin: corsAllowMethods is
+			// [GET], so the POST preflight is denied — the same property that
+			// protects /mcp. Do not add POST to that list.
+			if pushRegistry.Enabled() {
+				if err := mux.HandlePath("POST", "/api/v1/ingest/{stream}",
+					func(w http.ResponseWriter, r *http.Request, pp map[string]string) {
+						pushRegistry.ServeStream(w, r, pp["stream"])
+					}); err != nil {
+					return err
+				}
 			}
 			// Point MCP at the fully-wired gateway so its tools query /api/v1
 			// in-process (same mux prefab serves at /api/).
@@ -519,7 +562,7 @@ func gridSourceSeeds(cfg *config.Config) []store.SourceSeed {
 	}
 	sort.Strings(ids) // deterministic seeding order
 
-	seeds := make([]store.SourceSeed, 0, len(ids))
+	seeds := make([]store.SourceSeed, 0, len(ids)+len(cfg.Grid.Ingest.Reporters))
 	for _, id := range ids {
 		tuning := cfg.Grid.Sources[id]
 		info, ok := gridSourceInfo[id]
@@ -535,6 +578,32 @@ func gridSourceSeeds(cfg *config.Config) []store.SourceSeed {
 			StaleAfter:    tuning.StaleAfter,
 			ExpireAfter:   tuning.ExpireAfter,
 			Disappearance: tuning.Disappearance,
+		})
+	}
+
+	// One row per push reporter, so /api/v1/sources answers "is Alan's monitor
+	// still reporting?" exactly the way it answers that question for CAL FIRE or
+	// PG&E. These rows carry HEALTH ONLY — no event is ever stored with a reporter
+	// as its source (mesh events all stay on `meshcore`), so their disappearance
+	// sweep has nothing to act on.
+	//
+	// PollInterval is the mesh poller's cadence, which is the honest number: it is
+	// how often this row's health is re-evaluated, not how often the monitor
+	// reports — a push source has no poll interval of ours to state. StaleAfter is
+	// the reporter's own silence threshold rather than the store's 3x default.
+	meshTick := gridPollInterval(cfg, "meshcore")
+	for _, rep := range cfg.Grid.Ingest.Reporters {
+		name := rep.Name
+		if name == "" {
+			name = rep.ID
+		}
+		seeds = append(seeds, store.SourceSeed{
+			ID:            rep.ID,
+			Name:          name,
+			Attribution:   "Operator-reported (" + rep.ID + ")",
+			PollInterval:  meshTick,
+			StaleAfter:    rep.StaleAfterOrDefault(),
+			Disappearance: store.DisappearanceExpire,
 		})
 	}
 	return seeds

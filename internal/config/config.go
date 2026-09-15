@@ -56,6 +56,144 @@ type GridConfig struct {
 	Meshcore    MeshcoreConfig          `koanf:"meshcore"`
 	Wildfire    WildfireConfig          `koanf:"wildfire"`
 	Power       PowerConfig             `koanf:"power"`
+	Ingest      IngestConfig            `koanf:"ingest"`
+}
+
+// Ingest defaults. Each is applied when the corresponding grid.ingest key is
+// unset or non-positive, so a deployment that never heard of this section still
+// gets safe bounds rather than an unbounded write endpoint.
+const (
+	// DefaultIngestMaxBodyBytes caps a pushed report. Alan's nine-repeater
+	// document is ~5 KB, so 1 MB leaves room for two orders of magnitude of
+	// growth while keeping a malicious body from ever reaching the JSON decoder.
+	DefaultIngestMaxBodyBytes = 1 << 20
+	// DefaultIngestMaxItems caps the entities in one report, bounding both the
+	// decode and the in-memory buffer independently of the byte cap.
+	DefaultIngestMaxItems = 1000
+	// DefaultIngestUnreachableAfter is how long a monitor must be failing to
+	// reach a node before we call it UNREACHABLE. Deliberately several reporting
+	// cycles: reachability is HASHED, so a threshold short enough to flap would
+	// mint a revision in each direction on every marginal node.
+	DefaultIngestUnreachableAfter = 45 * time.Minute
+	// DefaultIngestReporterStaleAfter is how long a reporter may go silent before
+	// its source row degrades — and, more importantly, before its nodes' absence
+	// stops being something we are willing to act on (see SweepSuppress in
+	// internal/ingest). 0 in config means this.
+	DefaultIngestReporterStaleAfter = 30 * time.Minute
+	// DefaultIngestMinInterval rate-limits one reporter. A monitor polling a mesh
+	// over LoRa cannot meaningfully report faster than this, so a burst is either
+	// a bug or abuse.
+	DefaultIngestMinInterval = 15 * time.Second
+	// DefaultIngestTelemetryPersistInterval coalesces telemetry writes. Telemetry
+	// is hash-excluded, so persisting it costs a transaction that mints no
+	// revision; this is the same bounded-staleness trade the scheduler's
+	// touchSeenCoalesce makes, for the same reason (on EFS every commit
+	// invalidates every other connection's page cache).
+	DefaultIngestTelemetryPersistInterval = 10 * time.Minute
+)
+
+// IngestConfig configures the authenticated push-ingest endpoint
+// (POST /api/v1/ingest/{stream}, internal/pushingest) — the one WRITE surface on
+// an otherwise public, read-only, keyless API.
+//
+// Reporters are operator-run monitors that observe things no upstream feed
+// publishes: today, a Raspberry Pi that logs into MeshCore repeaters and reads
+// their admin interface. The endpoint does not exist unless Reporters is
+// non-empty, so the default build has no write surface at all.
+type IngestConfig struct {
+	// MaxBodyBytes / MaxItems bound one request. 0 => the defaults above.
+	MaxBodyBytes int64 `koanf:"maxBodyBytes"`
+	MaxItems     int   `koanf:"maxItems"`
+	// UnreachableAfter is the hysteresis window behind MeshReachability. 0 =>
+	// DefaultIngestUnreachableAfter.
+	UnreachableAfter time.Duration `koanf:"unreachableAfter"`
+	// TelemetryPersistInterval coalesces hash-excluded telemetry writes. 0 =>
+	// DefaultIngestTelemetryPersistInterval.
+	TelemetryPersistInterval time.Duration `koanf:"telemetryPersistInterval"`
+	Reporters                []Reporter    `koanf:"reporters"`
+}
+
+// Reporter is one authorized push client.
+//
+// TokenSha256 is the SHA-256 (lowercase hex) of the bearer token, and the token
+// itself is NEVER stored here or anywhere else in the repo. That asymmetry is
+// the whole point: this repository is public, and a SHA-256 of a 256-bit random
+// token is not a credential — it cannot be replayed and cannot be reversed — so
+// the committed file can carry it safely and adding a reporter stays an ordinary
+// pull request. The token exists only on the reporter's own machine. Generate a
+// pair with `make ingest-token`.
+type Reporter struct {
+	ID          string `koanf:"id"`
+	Name        string `koanf:"name"`
+	TokenSha256 string `koanf:"tokenSha256"`
+	// Streams this reporter may post to (e.g. "mesh.repeater"). Empty means none:
+	// authorization is granted, never defaulted.
+	Streams []string `koanf:"streams"`
+	// StaleAfter is how long this reporter may be silent before its source row
+	// degrades and its nodes' disappearance stops being actionable. 0 =>
+	// DefaultIngestReporterStaleAfter.
+	StaleAfter time.Duration `koanf:"staleAfter"`
+	// MinInterval rate-limits this reporter (429 below it). 0 =>
+	// DefaultIngestMinInterval.
+	MinInterval time.Duration `koanf:"minInterval"`
+	// Priority breaks ties when two reporters disagree about a node's identity —
+	// higher wins, then reporter id ascending. It is deliberately a CONFIGURED
+	// precedence rather than "most recent wins": recency would let two
+	// disagreeing reporters flip the winner every tick, and identity fields are
+	// hashed, so each flip would mint a revision.
+	Priority int `koanf:"priority"`
+	// PlaceIDs optionally attaches this reporter's entities to places outright.
+	// Place attachment is otherwise geometric (store.matchPlaces), so a node with
+	// no known coordinates attaches to nothing and is missing from every
+	// place-scoped view. UpsertEvent unions caller-preset place_ids with
+	// geometric matches, so this is a floor, never a ceiling. Empty by default —
+	// asserting a location we do not have is worse than admitting we lack one.
+	PlaceIDs []string `koanf:"placeIds"`
+}
+
+// Resolved accessors. Config carries zero values for unset keys; these apply the
+// documented defaults in one place so callers never re-implement the fallback.
+
+func (r Reporter) StaleAfterOrDefault() time.Duration {
+	if r.StaleAfter <= 0 {
+		return DefaultIngestReporterStaleAfter
+	}
+	return r.StaleAfter
+}
+
+func (r Reporter) MinIntervalOrDefault() time.Duration {
+	if r.MinInterval <= 0 {
+		return DefaultIngestMinInterval
+	}
+	return r.MinInterval
+}
+
+func (c IngestConfig) MaxBodyBytesOrDefault() int64 {
+	if c.MaxBodyBytes <= 0 {
+		return DefaultIngestMaxBodyBytes
+	}
+	return c.MaxBodyBytes
+}
+
+func (c IngestConfig) MaxItemsOrDefault() int {
+	if c.MaxItems <= 0 {
+		return DefaultIngestMaxItems
+	}
+	return c.MaxItems
+}
+
+func (c IngestConfig) UnreachableAfterOrDefault() time.Duration {
+	if c.UnreachableAfter <= 0 {
+		return DefaultIngestUnreachableAfter
+	}
+	return c.UnreachableAfter
+}
+
+func (c IngestConfig) TelemetryPersistIntervalOrDefault() time.Duration {
+	if c.TelemetryPersistInterval <= 0 {
+		return DefaultIngestTelemetryPersistInterval
+	}
+	return c.TelemetryPersistInterval
 }
 
 // Default wildfire geography. Both are applied when the corresponding

@@ -241,6 +241,23 @@ message MeshDetail {
   string name = 3;         // advertised node name
 
   MeshTelemetry telemetry = 4;   // VOLATILE — excluded from the content hash
+
+  // Whether an operator-run monitor could reach this node's admin interface.
+  // HASHED, unlike everything else an operator reports: a repeater going
+  // unreachable is a real lifecycle change worth a revision and a history entry
+  // ("how often is Lilac Park down?"), which is exactly what the telemetry block
+  // below can never answer. Derived with hysteresis in internal/ingest (never the
+  // raw per-poll `online` bool, which flaps on a marginal node and would mint a
+  // revision each way). UNSPECIFIED for a node no monitor watches — the MQTT
+  // advert firehose cannot express "I tried and could not reach it".
+  MeshReachability reachability = 5;
+}
+
+// MeshReachability is an operator monitor's verdict on a node's admin interface.
+enum MeshReachability {
+  MESH_REACHABILITY_UNSPECIFIED = 0; // no monitor watches this node
+  REACHABLE = 1;                     // a monitor reached it within the window
+  UNREACHABLE = 2;                   // a monitor has been failing past the window
 }
 
 // MeshTelemetry is the volatile, per-advert signal state. It is deliberately
@@ -260,6 +277,58 @@ message MeshTelemetry {
   uint32 hop_count = 3;                        // path length of the last-heard advert
   repeated string gateways = 5;                // origin ids of the gateways/brokers that heard it
   google.protobuf.Timestamp last_advert_at = 6; // sender-stamped time of the last advert
+
+  // The last sample pushed by an operator-run monitor that logs into the node's
+  // admin interface (internal/pushingest). Nested HERE, inside the block
+  // ContentHash zeroes, because every field of it is a counter or a gauge that
+  // moves on every report: hashed, a 5-minute reporting cadence would mint ~288
+  // revisions per node per day and say nothing.
+  MeshAdminTelemetry admin = 8;
+}
+
+// MeshAdminTelemetry is one sample read off a node's own admin interface by an
+// operator-run monitor and pushed to POST /api/v1/ingest/mesh.repeater. It is
+// the node's self-reported view, which is why it duplicates rather than
+// overwrites the gateway-reported snr/rssi above: those are what a distant
+// listener heard, these are what the node itself measured.
+//
+// Gauges are wrapper types, not bare scalars, so "the monitor could not read
+// this" (null) stays distinguishable from a real zero — a 0% battery and an
+// unknown battery must never render alike. Same reasoning as the place summary's
+// activeEvacuations. Counters are lifetime-since-boot and plain: a node that has
+// sent nothing genuinely has sent zero.
+message MeshAdminTelemetry {
+  string reporter_id = 1;                        // which monitor reported it (config id)
+  google.protobuf.Timestamp reported_at = 2;     // when the monitor generated the report
+  google.protobuf.Timestamp last_success_at = 3; // monitor's last successful read of THIS node
+  google.protobuf.Timestamp last_attempt_at = 4; // monitor's last attempt, successful or not
+
+  google.protobuf.DoubleValue battery_volts = 10;
+  google.protobuf.DoubleValue battery_percent = 11;
+  // "measured" | "estimated" — an estimate derived from voltage is not a reading,
+  // and a UI that shows 97% should be able to say which it is.
+  string battery_percent_source = 12;
+  google.protobuf.DoubleValue temperature_c = 13;
+  google.protobuf.DoubleValue humidity = 14;
+  google.protobuf.DoubleValue pressure = 15;
+  google.protobuf.Int32Value noise_floor_dbm = 16;
+  google.protobuf.DoubleValue last_snr_db = 17;   // node-measured, cf. telemetry.snr
+  google.protobuf.Int32Value last_rssi_dbm = 18;  // node-measured, cf. telemetry.rssi
+  google.protobuf.Int32Value tx_queue_len = 19;
+
+  int64 uptime_seconds = 30;
+  int64 airtime_ms = 31;
+  int64 rx_airtime_ms = 32;
+  int64 packets_sent = 33;      // nb_sent
+  int64 packets_received = 34;  // nb_recv
+  int64 sent_flood = 35;
+  int64 sent_direct = 36;
+  int64 recv_flood = 37;
+  int64 recv_direct = 38;
+  int64 direct_dups = 39;
+  int64 flood_dups = 40;
+  int64 full_events = 41;       // full_evts — queue-overflow events
+  int64 recv_errors = 42;
 }
 
 // PG&E electric outages and Public Safety Power Shutoffs (Layer_POWER). One

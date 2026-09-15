@@ -919,6 +919,128 @@
       "default": "LAYER_UNSPECIFIED",
       "title": "- POWER: condition-backed layers (ROAD_SEGMENT, CHAIN_CONTROL) are projections, not events"
     },
+    "v1MeshAdminTelemetry": {
+      "type": "object",
+      "properties": {
+        "reporterId": {
+          "type": "string",
+          "title": "which monitor reported it (config id)"
+        },
+        "reportedAt": {
+          "type": "string",
+          "format": "date-time",
+          "title": "when the monitor generated the report"
+        },
+        "lastSuccessAt": {
+          "type": "string",
+          "format": "date-time",
+          "title": "monitor's last successful read of THIS node"
+        },
+        "lastAttemptAt": {
+          "type": "string",
+          "format": "date-time",
+          "title": "monitor's last attempt, successful or not"
+        },
+        "batteryVolts": {
+          "type": "number",
+          "format": "double"
+        },
+        "batteryPercent": {
+          "type": "number",
+          "format": "double"
+        },
+        "batteryPercentSource": {
+          "type": "string",
+          "description": "\"measured\" | \"estimated\" — an estimate derived from voltage is not a reading,\nand a UI that shows 97% should be able to say which it is."
+        },
+        "temperatureC": {
+          "type": "number",
+          "format": "double"
+        },
+        "humidity": {
+          "type": "number",
+          "format": "double"
+        },
+        "pressure": {
+          "type": "number",
+          "format": "double"
+        },
+        "noiseFloorDbm": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "lastSnrDb": {
+          "type": "number",
+          "format": "double",
+          "title": "node-measured, cf. telemetry.snr"
+        },
+        "lastRssiDbm": {
+          "type": "integer",
+          "format": "int32",
+          "title": "node-measured, cf. telemetry.rssi"
+        },
+        "txQueueLen": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "uptimeSeconds": {
+          "type": "string",
+          "format": "int64"
+        },
+        "airtimeMs": {
+          "type": "string",
+          "format": "int64"
+        },
+        "rxAirtimeMs": {
+          "type": "string",
+          "format": "int64"
+        },
+        "packetsSent": {
+          "type": "string",
+          "format": "int64",
+          "title": "nb_sent"
+        },
+        "packetsReceived": {
+          "type": "string",
+          "format": "int64",
+          "title": "nb_recv"
+        },
+        "sentFlood": {
+          "type": "string",
+          "format": "int64"
+        },
+        "sentDirect": {
+          "type": "string",
+          "format": "int64"
+        },
+        "recvFlood": {
+          "type": "string",
+          "format": "int64"
+        },
+        "recvDirect": {
+          "type": "string",
+          "format": "int64"
+        },
+        "directDups": {
+          "type": "string",
+          "format": "int64"
+        },
+        "floodDups": {
+          "type": "string",
+          "format": "int64"
+        },
+        "fullEvents": {
+          "type": "string",
+          "format": "int64",
+          "title": "full_evts — queue-overflow events"
+        },
+        "recvErrors": {
+          "type": "string",
+          "format": "int64"
+        }
+      },
+      "description": "MeshAdminTelemetry is one sample read off a node's own admin interface by an\noperator-run monitor and pushed to POST /api/v1/ingest/mesh.repeater. It is\nthe node's self-reported view, which is why it duplicates rather than\noverwrites the gateway-reported snr/rssi above: those are what a distant\nlistener heard, these are what the node itself measured.\n\nGauges are wrapper types, not bare scalars, so \"the monitor could not read\nthis\" (null) stays distinguishable from a real zero — a 0% battery and an\nunknown battery must never render alike. Same reasoning as the place summary's\nactiveEvacuations. Counters are lifetime-since-boot and plain: a node that has\nsent nothing genuinely has sent zero."
+    },
     "v1MeshDetail": {
       "type": "object",
       "properties": {
@@ -937,9 +1059,23 @@
         "telemetry": {
           "$ref": "#/definitions/v1MeshTelemetry",
           "title": "VOLATILE — excluded from the content hash"
+        },
+        "reachability": {
+          "$ref": "#/definitions/v1MeshReachability",
+          "description": "Whether an operator-run monitor could reach this node's admin interface.\nHASHED, unlike everything else an operator reports: a repeater going\nunreachable is a real lifecycle change worth a revision and a history entry\n(\"how often is Lilac Park down?\"), which is exactly what the telemetry block\nbelow can never answer. Derived with hysteresis in internal/ingest (never the\nraw per-poll `online` bool, which flaps on a marginal node and would mint a\nrevision each way). UNSPECIFIED for a node no monitor watches — the MQTT\nadvert firehose cannot express \"I tried and could not reach it\"."
         }
       },
       "description": "MeshCore mesh-node presence (Layer_MESH). One event per node, keyed by\nits Ed25519 public key. Stable identity + advertised location live here (and\nmint a revision on change); the per-packet signal metrics live in the nested\nMeshTelemetry, which the store's ContentHash zeroes — so the firehose of\nadverts refreshes liveness (last_seen_at) without ever writing a revision."
+    },
+    "v1MeshReachability": {
+      "type": "string",
+      "enum": [
+        "MESH_REACHABILITY_UNSPECIFIED",
+        "REACHABLE",
+        "UNREACHABLE"
+      ],
+      "default": "MESH_REACHABILITY_UNSPECIFIED",
+      "description": "MeshReachability is an operator monitor's verdict on a node's admin interface.\n\n - MESH_REACHABILITY_UNSPECIFIED: no monitor watches this node\n - REACHABLE: a monitor reached it within the window\n - UNREACHABLE: a monitor has been failing past the window"
     },
     "v1MeshTelemetry": {
       "type": "object",
@@ -970,6 +1106,10 @@
           "type": "string",
           "format": "date-time",
           "title": "sender-stamped time of the last advert"
+        },
+        "admin": {
+          "$ref": "#/definitions/v1MeshAdminTelemetry",
+          "description": "The last sample pushed by an operator-run monitor that logs into the node's\nadmin interface (internal/pushingest). Nested HERE, inside the block\nContentHash zeroes, because every field of it is a counter or a gauge that\nmoves on every report: hashed, a 5-minute reporting cadence would mint ~288\nrevisions per node per day and say nothing."
         }
       },
       "description": "MeshTelemetry is the volatile, per-advert signal state. It is deliberately\ngrouped into one sub-message so store.ContentHash can zero the whole field:\nnone of it mints a revision."

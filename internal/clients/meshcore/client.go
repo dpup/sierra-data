@@ -537,6 +537,40 @@ func (r *Registry) prefixIndexLocked() map[string][]string {
 	return idx
 }
 
+// ResolvePrefix maps a pubkey PREFIX (lowercase hex, any even length) to the
+// full public key of the node it identifies, on the same UNIQUE-match rule
+// resolvePath uses for relay hops: a prefix carried by two known nodes resolves
+// to neither.
+//
+// Operator monitors identify a node by a prefix — Alan's reports use 8 bytes of
+// the key — while our event ids are built from the full key. Resolution is what
+// makes a pushed report and an MQTT advert converge on ONE event instead of two,
+// so the rule has to be strict in the same direction as everything else here:
+// guessing wrong would attach a repeater's battery reading to a different
+// repeater, which is worse than leaving it unresolved.
+//
+// A full-length prefix still goes through the catalog, so an id for a node we
+// have never heard of stays unresolved rather than being minted as fact.
+func (r *Registry) ResolvePrefix(prefix string) (string, bool) {
+	if len(prefix) == 0 {
+		return "", false
+	}
+	prefix = strings.ToLower(prefix)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var match string
+	for pk := range r.nodes {
+		if !strings.HasPrefix(pk, prefix) {
+			continue
+		}
+		if match != "" {
+			return "", false // ambiguous — two known nodes share this prefix
+		}
+		match = pk
+	}
+	return match, match != ""
+}
+
 // resolvePath maps each relay-path hop (a pubkey-prefix hash, hex) to the full
 // public key of the node it identifies, using a prefix→pubkeys index. A hop
 // resolves only when EXACTLY ONE known node carries that prefix; ambiguous

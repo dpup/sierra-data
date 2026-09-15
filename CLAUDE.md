@@ -38,6 +38,7 @@ Last updated: 2026-07-06
 │   ├── hazards/               # /api/v1 unified GeoJSON hazard layers
 │   ├── store/                 # SQLite grid event store (events, revisions, places, sources)
 │   ├── ingest/                # Poller scheduler + per-source normalizers → the store
+│   ├── pushingest/            # Authenticated push ingest (POST /api/v1/ingest/{stream})
 │   ├── gridapi/               # /api/v1 GridService impl (gRPC) + hand-built GeoJSON
 │   ├── places/                # Grid place directory seeder (areas/counties/towns/corridors)
 │   └── lib/                   # Shared libraries (incl. lib/geojson: geometry + PIP)
@@ -229,6 +230,18 @@ reflects over `Config` and refuses to start on a `PF__` override in our
 namespaces that resolves to no real key, naming the variable you meant. You don't
 need to remember the rule or register new keys — just read the error.
 
+**Push-ingest credentials (a public repo holds only hashes)**: a reporter
+authenticates with a bearer token whose **SHA-256 hash alone** lives in
+`prefab.yaml` (`grid.ingest.reporters[].tokenSha256`). A hash of a 256-bit random
+token cannot be replayed or reversed, so committing it is safe and adding a
+reporter stays an ordinary PR — while the token itself exists only on the
+operator's machine. `make ingest-token REPORTER=<id> NAME="..."` mints one and
+writes the config entry (re-run with an existing id to ROTATE that reporter's
+token in place, keeping its other settings); bare `make ingest-token` just prints
+a pair. Never put the token in config, env, or a commit; a bad/typo'd hash is
+FATAL at startup by design (a skipped reporter would silently never
+authenticate).
+
 **Configuration Files**:
 - `prefab.yaml` - Application configuration (API refresh intervals, route
   definitions, and the `grid` section: `dbPath`, per-source poll intervals +
@@ -410,7 +423,17 @@ gateway's `EmitUnpopulated` marshaler.
 - `GET /api/v1/scanners?place=` - Broadcastify feed config.
 - `GET /api/v1/sources` - the source registry + per-source health (a source's own
   health is `status`: `OK|STALE|UNAVAILABLE`, last success/attempt, poll interval,
-  last error).
+  last error). Includes one **health-only** row per configured push reporter.
+- `POST /api/v1/ingest/{stream}` - **the one WRITE endpoint**, and the only one
+  requiring a credential (`Authorization: Bearer`). Operator-run monitors push
+  data no upstream feed publishes; today the `mesh.repeater` stream carries
+  MeshCore repeater admin telemetry + explicit reachability. Not mounted unless
+  `grid.ingest.reporters` is non-empty. It does NOT write the store — it buffers,
+  and the mesh poller merges on its next tick, so single-writer discipline holds.
+  `corsAllowMethods: [GET]` is what keeps it browser-unreachable cross-origin;
+  never add POST there. See `internal/pushingest` and `internal/ingest/CLAUDE.md`;
+  **`docs/mesh-reporter-guide.md` is the shareable setup guide** to hand an
+  operator who is wiring up a monitor (payload, headers, rules, error handling).
 
 **Summary + map:**
 - `GET /api/v1/places/{place}/summary` - `GetPlaceSummary` RPC (camelCase): a
