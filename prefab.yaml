@@ -496,7 +496,7 @@ grid:
     telemetryPersistInterval: "10m"
     reporters:
       - id: alanpi
-        name: "alanpi"
+        name: "SIERRA Dorington MeshCore Gateway"
         tokenSha256: "a98b7eeb3909f89723fce0290b92d6773aa1bb0d64ab18cf5ae2e2824fc0c3de"
         streams: ["mesh.repeater"]
         # Silence past this degrades this row on /api/v1/sources AND suppresses
