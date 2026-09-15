@@ -1,5 +1,36 @@
 # MeshCore mesh-node presence — integration status & next steps
 
+> **ARCHIVED — historical record.** This is a snapshot of the integration as of
+> **2026-07-17**, when the source was built but disabled and waiting on broker
+> access. It is kept for the decoder/framing investigation in "Framing verified",
+> which is still the best account of why `meshcore.DecodeFrame` exists.
+>
+> **The source has since gone live and the body below is out of date.** What
+> changed:
+>
+> - **Not blocked, not disabled.** A subscriber credential was obtained;
+>   `grid.meshcore.enabled: true` against `wss://mqtt.gomesh.dev:443/mqtt`
+>   (operator LetsMesh). All three "Remaining steps to go live" are done.
+> - **The layer was renamed `NETWORK` → `MESH`** (2026-07-25, breaking — see
+>   `CHANGELOG.md`). Read every `NETWORK` / `detail.network` /
+>   `network.telemetry` / `?layer=network` below as `MESH` / `detail.mesh` /
+>   `mesh.telemetry` / `?layer=mesh`. The enum *number* (13) did not change, and
+>   `?layer=network` survives as a legacy alias.
+> - **Presence is cadence-aware now**, so the `activeWindow` / `expireAfter`
+>   question is settled, not open: `activeWindow` is deprecated and ignored, a
+>   node is held for `cadenceK` × its own advert interval clamped to
+>   `[graceFloor, graceCeil]` (3 / 14h / 72h), and `expireAfter` is a 2h safety
+>   net rather than the old blunt 120h window. See
+>   `docs/design/mesh-topology-design.md` §9.
+> - **A whole relay-topology tier landed afterwards** — `GET /api/v1/mesh/links`,
+>   the `mesh_link.geojson` layer, and the Tier 0/Tier 1 observation store — none
+>   of which this doc knows about.
+>
+> **The two questions that are still genuinely open** — companion-node privacy,
+> and how far to narrow the subscribe topic and geofence — were lifted out to
+> [`docs/meshcore-open-questions.md`](../meshcore-open-questions.md). Do not work
+> from the "Open design questions" section at the bottom of this page.
+
 _Last updated: 2026-07-17. Status: **implemented, disabled, blocked on broker access.**_
 
 MeshCore LoRa mesh-node presence is ingested as `NETWORK`-layer events (one event

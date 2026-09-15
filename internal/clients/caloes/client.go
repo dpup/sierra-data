@@ -6,7 +6,7 @@
 // UNAVAILABLE/"unknown"), while a clean fetch with no zones returns an empty
 // slice and nil error (the caller surfaces a caveated "no active zones"). The
 // safety invariant upstream is that an error never becomes a "0" — see
-// docs/hazard-aggregation-design.md §6.4.
+// docs/design/hazard-aggregation-design.md §6.4.
 package caloes
 
 import (

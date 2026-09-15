@@ -24,11 +24,11 @@ type UpsertResult struct {
 
 // ContentHash returns the SHA-256 hex of a deterministic marshal of ev with
 // volatile fields zeroed: revision, ingested_at, observed_at,
-// provenance.fetched_at, enhancement, summary, place_ids, and (for NETWORK
-// events) network.telemetry. Upstream re-stamps without content change produce
+// provenance.fetched_at, enhancement, summary, place_ids, and (for MESH
+// events) mesh.telemetry. Upstream re-stamps without content change produce
 // the same hash (no revision), and enhancement output never causes hash churn
 // — the scheduler decides whether to spend enhancement budget via NeedsUpdate
-// BEFORE enhancing. The NETWORK exclusion is what keeps the MeshCore advert
+// BEFORE enhancing. The MESH exclusion is what keeps the MeshCore advert
 // firehose from minting a revision per packet: SNR/RSSI/hops/gateways change
 // constantly but ride in telemetry, so only a node's stable identity, role,
 // name, location, or status flips the hash. See internal/store/CLAUDE.md.

@@ -1,6 +1,6 @@
 package hazards
 
-// Layer identifiers (docs/hazard-aggregation-design.md §4.4).
+// Layer identifiers (docs/design/hazard-aggregation-design.md §4.4).
 const (
 	LayerRoadIncident = "road_incident"
 	LayerRoadSegment  = "road_segment"

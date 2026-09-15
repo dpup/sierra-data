@@ -89,7 +89,7 @@ func (g *GridServer) resolvePlaceID(ctx context.Context, key string) (string, er
 // query surface exposed over gRPC-Gateway. It wraps the existing *Service, which
 // already holds the store, geocoder, config, hazards builder, and clock plus the
 // shared helpers, so the RPCs reuse that logic rather than duplicating it.
-// Endpoints are ported one at a time; see docs/grpc-gateway-migration-plan.md.
+// Endpoints are ported one at a time; see docs/design/grpc-gateway-migration-plan.md.
 type GridServer struct {
 	gridv1.UnimplementedGridServiceServer
 	svc *Service

@@ -14,7 +14,7 @@ import (
 )
 
 // ProjectEvents projects stored grid events onto the shipped GeoJSON envelope
-// (docs/v2-implementation-plan.md T13). The output must stay byte-compatible
+// (docs/design/v2-implementation-plan.md T13). The output must stay byte-compatible
 // with the live internal/hazards builders — internal/hazards/
 // project_compat_test.go is the gate — modulo exactly the plan §5 exclusion
 // list. Read the builders before changing any field here.

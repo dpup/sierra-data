@@ -171,7 +171,7 @@ weather:
   # Per-location fire-weather FORECAST (wind/gust/RH out 48h) from the NWS
   # gridpoint API (keyless, reuses nws.userAgent). Surfaced on /api/v1/conditions
   # (forecast[]) and as per-location points on the fire_weather map layer —
-  # informational, never an issued Red Flag. See docs/fire-weather-forecast-design.md.
+  # informational, never an issued Red Flag. See docs/design/fire-weather-forecast-design.md.
   # The static /points->grid mapping is resolved once per location; the grid
   # refreshes on refreshInterval (~168 keyless calls/day for 7 locations).
   forecast:
@@ -249,7 +249,7 @@ weather:
         latitude: 38.333800
         longitude: -120.271300
 
-# Unified hazard/situation feed (docs/hazard-aggregation-design.md). Powers
+# Unified hazard/situation feed (docs/design/hazard-aggregation-design.md). Powers
 # GET /api/v1/hazards/{area}/{layer}.geojson — standardized GeoJSON for map clients.
 hazards:
   areas:
@@ -286,7 +286,7 @@ hazards:
         - { feedId: "41042", channelLabel: "CAL FIRE TCU / USFS", agency: "CAL FIRE TCU" }
         - { feedId: "45443", channelLabel: "CHP — Stockton", agency: "CHP" }
 
-# Grid event store + ingest scheduler (docs/v2-implementation-plan.md). The
+# Grid event store + ingest scheduler (docs/design/v2-implementation-plan.md). The
 # scheduler polls each upstream, persists events with revision history in
 # SQLite, and derives per-source health for /v1/sources.
 grid:
@@ -529,7 +529,7 @@ grid:
     # the full over-the-air frame, stripped by meshcore.DecodeFrame, after which
     # real adverts verify. On by default so spoofed/corrupt adverts are dropped.
     requireValidSignature: true
-    # Cadence-aware presence (docs/mesh-topology-design.md §9). A node stays in the
+    # Cadence-aware presence (docs/design/mesh-topology-design.md §9). A node stays in the
     # poll snapshot for cadenceK × its own measured inter-advert interval, clamped
     # to [graceFloor, graceCeil]. A node with no cadence yet — a one-shot transient
     # OR any node right after a deploy (the registry restarts empty, so cadence is
@@ -547,7 +547,7 @@ grid:
     cadenceK: 3
     graceFloor: "14h"
     graceCeil: "72h"
-    # Relay-topology store (docs/mesh-topology-design.md). Every received advert is
+    # Relay-topology store (docs/design/mesh-topology-design.md). Every received advert is
     # kept as an append-only observation (Tier 0); a maintenance tick folds those
     # into a per-link-per-day rollup (Tier 1) and prunes. spamFloor caps the raw
     # rate per (node, gateway) so a fast-adverting node can't flood Tier 0; multi-

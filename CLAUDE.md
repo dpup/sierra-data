@@ -45,6 +45,7 @@ Last updated: 2026-07-06
 ├── data/places/               # Checked-in Census county polygons (counties.geojson)
 ├── site/                      # Embedded data.sierragridteam.org static site (served at /)
 ├── tests/                     # Test files and test data
+├── docs/design/               # design docs & specs for work that has shipped (historical record)
 ├── docs/solutions/            # documented solutions to past problems (bugs, best practices, patterns), by category with YAML frontmatter (module, tags, problem_type)
 ├── CONCEPTS.md                # shared domain vocabulary (entities, named processes, status concepts)
 └── Makefile                   # Build automation
@@ -297,10 +298,14 @@ authenticate).
   zone that leaked out-of-area alerts).
 - Powers `/weather/alerts` zone alerts and the `fire_weather` classification
 
-**MeshCore MQTT bridges** (mesh-node presence, `NETWORK` layer):
+**MeshCore MQTT bridges** (mesh-node presence, `MESH` layer — renamed from
+`NETWORK` 2026-07-25; the enum number 13 is unchanged and `?layer=network`
+survives as a legacy alias):
 - MeshCore has **no native MQTT and no official broker/topic spec** — we
   subscribe to community bridges (`grid.meshcore.brokers`, several for
-  resilience). Disabled by default (`grid.meshcore.enabled: false`).
+  resilience). **Live** (`grid.meshcore.enabled: true`) against
+  `wss://mqtt.gomesh.dev:443/mqtt`; the subscriber credential is injected as
+  `PF__GRID__MESHCORE__USERNAME`/`PASSWORD`, never committed.
 - The map-ecosystem bridges publish a JSON envelope per packet to
   `meshcore/{IATA}/{PUBLIC_KEY}/packets` with `packet_type`, `SNR`, `RSSI`,
   `path`, and a hex `raw` payload. We ingest **only ADVERT packets
@@ -367,7 +372,7 @@ what to update. Flag anything that changes an existing response shape as a
 breaking change with a migration note.
 
 **One surface: `/api/v1`, proto-defined gRPC + gRPC-Gateway** (migrated 2026-07-09;
-see `docs/grpc-gateway-migration-plan.md`, `docs/v2-api-spec.md`). The `GridService`
+see `docs/design/grpc-gateway-migration-plan.md`, `docs/design/v2-api-spec.md`). The `GridService`
 proto (`api/grid/v1/grid.proto`) is served over the gateway that Prefab mounts at
 `/api/`; the impl is `internal/gridapi` (`GridServer` wrapping `Service`), reading
 everything from the grid event store. Field names are **camelCase** (protojson
@@ -440,7 +445,7 @@ gateway's `EmitUnpopulated` marshaler.
   one-fetch place rollup — `mode` (QUIET/WATCH/ACTIVE), a cross-layer `summary`,
   per-`domains[]` status (`fire`/`evacuation`/`weather`/`roads`/`seismic`/`power`,
   plus `comms` when the MeshCore source is enabled), `topEvents`, and a `sources[]`
-  health sidecar. Mesh-node presence (`NETWORK`) is ambient `INFO` state: it is
+  health sidecar. Mesh-node presence (`MESH`) is ambient `INFO` state: it is
   excluded from `totalActive`/`severityCounts`/`topEvents`/`mode` (like baseline
   conditions) and appears only in the `comms` domain.
 - `GET /api/v1/places/{place}/map/{layer}.geojson` - hand-built, one RFC 7946
@@ -454,7 +459,7 @@ gateway's `EmitUnpopulated` marshaler.
   are `[lng, lat]`. Event layers project from the store
   (`internal/gridapi.ProjectEvents`); the three condition layers (`road_segment`,
   `chain_control`, `fire_weather`) are live projections of the roads/weather
-  services. See `docs/hazard-aggregation-design.md` and `internal/hazards/CLAUDE.md`.
+  services. See `docs/design/hazard-aggregation-design.md` and `internal/hazards/CLAUDE.md`.
 
 **Fire-weather** (`conditions.fireWeather`, and the `fire_weather` geojson layer):
 `state` escalates `normal` → `elevated` (Fire Weather Watch) → `red-flag` (Red Flag

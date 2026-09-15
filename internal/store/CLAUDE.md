@@ -3,8 +3,8 @@
 The system of record for the grid service: hazard **events** with full revision
 history, the **place** directory, and the **source** registry. Backs the
 `/api/v1` API (`internal/gridapi`, gRPC-Gateway) and the hazard event layers
-(`internal/hazards`). Design: `docs/v2-api-spec.md` §4 +
-`docs/v2-implementation-plan.md` §2.2. Pure-Go driver (`modernc.org/sqlite`) so
+(`internal/hazards`). Design: `docs/design/v2-api-spec.md` §4 +
+`docs/design/v2-implementation-plan.md` §2.2. Pure-Go driver (`modernc.org/sqlite`) so
 the `CGO_ENABLED=0` cross-compile keeps working — do **not** swap in a cgo driver.
 
 ## Schema philosophy — the proto blob is canonical
@@ -43,7 +43,7 @@ hash differs from the stored one. Zeroed fields and the reason each is excluded:
   to spend AI-enhancement budget **before** enhancing. If enhancement were hashed,
   an enhanced event would differ from the next raw poll and loop forever, and the
   spec §6 "enhancement regenerated per poll" bug would come back.
-- `network.telemetry` (NETWORK events only) — the MeshCore per-advert signal state
+- `mesh.telemetry` (MESH events only) — the MeshCore per-advert signal state
   (SNR/RSSI/hop count/path/gateways/last-advert time). A mesh node re-adverts
   constantly and every packet carries fresh signal metrics; hashing them would mint
   a revision per packet and blow up `event_revisions`. Grouping them into one

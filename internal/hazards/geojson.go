@@ -1,6 +1,6 @@
 // Package hazards aggregates the service's hazard/situation data sources into a
 // single standardized, map-ready GeoJSON interface (see
-// docs/hazard-aggregation-design.md). Every hazard, from every source, is
+// docs/design/hazard-aggregation-design.md). Every hazard, from every source, is
 // normalized into an RFC 7946 Feature with a common properties envelope so an
 // open maps client (MapLibre GL, Leaflet, OpenLayers) can layer it directly.
 package hazards

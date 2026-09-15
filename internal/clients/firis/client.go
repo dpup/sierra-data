@@ -5,7 +5,7 @@
 // WFIGS interagency upload by hours (the Dove Fire had a perimeter here while
 // WFIGS returned none). Keyless, public, on the CAL FIRE-Forestry ArcGIS org — a
 // different (healthier) quota than NIFC's 429-saturated org. See
-// docs/firis-perimeter-source-design.md.
+// docs/design/firis-perimeter-source-design.md.
 //
 // Rate limiting: like WFIGS, feature queries are metered per owning-org request
 // units and can 429, but the metadata endpoint (FeatureServer/0?f=json) is

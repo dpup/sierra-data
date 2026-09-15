@@ -96,7 +96,7 @@ func main() {
 		logging.Errorw(ctx, "Failed to start periodic refresh", "error", err)
 	}
 
-	// Grid event store + ingest scheduler (docs/v2-implementation-plan.md):
+	// Grid event store + ingest scheduler (docs/design/v2-implementation-plan.md):
 	// normalized hazard events persisted with revision history, per-source
 	// health, and the place directory — the /api/v1 foundation.
 	if appConfig.Grid.DBPath == "" {
@@ -230,7 +230,7 @@ func main() {
 	censusClient := census.NewClient()
 	gridapiService := gridapi.NewService(gridStore, weatherService, censusClient, appConfig, hazardsService)
 
-	// MCP endpoint (docs/mcp-design.md): read-only tools for LLM agents over
+	// MCP endpoint (docs/design/mcp-design.md): read-only tools for LLM agents over
 	// Streamable HTTP. The tools call the /api/v1 surface in-process against the
 	// gRPC-Gateway mux, which only exists after prefab.New wires the gateway — so
 	// MCP holds a deferred handler we point at that mux below.
@@ -238,7 +238,7 @@ func main() {
 	mcpHandler := mcp.NewHandler(gatewayMux)
 
 	// GridService: the proto-defined /api/v1 entity/query surface over
-	// gRPC-Gateway (docs/grpc-gateway-migration-plan.md). Gateway annotations
+	// gRPC-Gateway (docs/design/grpc-gateway-migration-plan.md). Gateway annotations
 	// mount under /api/, which Prefab already serves.
 	gridServer := gridapi.NewGridServer(gridapiService)
 
@@ -476,7 +476,7 @@ func meshcoreClientConfig(cfg *config.Config) meshcore.Config {
 // meshMaintenanceConfig maps the grid.meshcore config onto the scheduler's
 // relay-topology maintenance tick (compaction + prune). A disabled meshcore
 // source returns a zero config (Interval 0), which turns the tick off entirely.
-// Cadence/retention default when unset (docs/mesh-topology-design.md §10).
+// Cadence/retention default when unset (docs/design/mesh-topology-design.md §10).
 func meshMaintenanceConfig(cfg *config.Config) ingest.MeshMaintenance {
 	mc := cfg.Grid.Meshcore
 	if !mc.Enabled || len(mc.Brokers) == 0 {

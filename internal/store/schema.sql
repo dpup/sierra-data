@@ -1,4 +1,4 @@
--- Migration v1: full grid schema per docs/v2-api-spec.md §4, plus
+-- Migration v1: full grid schema per docs/design/v2-api-spec.md §4, plus
 -- sources.status and sources.disappearance (implementation plan §2.2).
 -- Proto blob is canonical; scalar columns exist only as indexes and are
 -- always derivable from the blob. All timestamps are unix seconds.
@@ -79,7 +79,7 @@ CREATE TABLE subscriptions (         -- phase 2, anticipated
 );
 
 -- v3 (store.go migrationV3) adds the MeshCore relay-topology tables (derived
--- telemetry, NOT proto-canonical — see docs/mesh-topology-design.md):
+-- telemetry, NOT proto-canonical — see docs/design/mesh-topology-design.md):
 --   mesh_observations  Tier 0 append-only reception firehose (short-lived)
 --   mesh_link_rollup   Tier 1 per-link-per-day topology history
 --   mesh_meta          KV for the compaction watermark

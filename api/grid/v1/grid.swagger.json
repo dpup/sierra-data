@@ -1694,7 +1694,7 @@
           "title": "summary: min over the horizon"
         }
       },
-      "description": "WeatherForecast is a location's short-range fire-weather forecast: the raw NWS\ngridpoint series (wind/gust/RH/temp) plus an at-a-glance summary. Informational\nonly — it never implies a fire-weather WARNING (issued products are in\nFireWeatherConditions). See docs/fire-weather-forecast-design.md."
+      "description": "WeatherForecast is a location's short-range fire-weather forecast: the raw NWS\ngridpoint series (wind/gust/RH/temp) plus an at-a-glance summary. Informational\nonly — it never implies a fire-weather WARNING (issued products are in\nFireWeatherConditions). See docs/design/fire-weather-forecast-design.md."
     },
     "v1WildfireDetail": {
       "type": "object",

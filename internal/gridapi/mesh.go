@@ -191,7 +191,7 @@ func (s *Service) serveMeshLinkLayer(w http.ResponseWriter, r *http.Request, pla
 	})
 }
 
-// queryNetworkEvents returns the ACTIVE/SCHEDULED NETWORK events, optionally
+// queryNetworkEvents returns the ACTIVE/SCHEDULED MESH events, optionally
 // scoped to a place (empty placeID = global). Drains keyset pagination.
 func (s *Service) queryNetworkEvents(ctx context.Context, placeID string) ([]*gridv1.Event, error) {
 	q := store.EventQuery{

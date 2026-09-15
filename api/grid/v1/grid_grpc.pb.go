@@ -38,7 +38,7 @@ const (
 //
 // GridService is the read-only /api/v1 entity + query surface (gRPC-Gateway).
 // Ported endpoint-by-endpoint from the hand-built /v1 handlers; see
-// docs/grpc-gateway-migration-plan.md §7 for the full endpoint map.
+// docs/design/grpc-gateway-migration-plan.md §7 for the full endpoint map.
 type GridServiceClient interface {
 	// ListEvents returns store-backed events filtered by place, layer, status,
 	// severity_min, and since, with keyset pagination.
@@ -197,7 +197,7 @@ func (c *gridServiceClient) ListSources(ctx context.Context, in *ListSourcesRequ
 //
 // GridService is the read-only /api/v1 entity + query surface (gRPC-Gateway).
 // Ported endpoint-by-endpoint from the hand-built /v1 handlers; see
-// docs/grpc-gateway-migration-plan.md §7 for the full endpoint map.
+// docs/design/grpc-gateway-migration-plan.md §7 for the full endpoint map.
 type GridServiceServer interface {
 	// ListEvents returns store-backed events filtered by place, layer, status,
 	// severity_min, and since, with keyset pagination.

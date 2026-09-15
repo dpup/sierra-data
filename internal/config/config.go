@@ -22,7 +22,7 @@ type Config struct {
 }
 
 // GridConfig holds the grid event store + ingest scheduler configuration
-// (docs/v2-implementation-plan.md). DBPath locates the SQLite database
+// (docs/design/v2-implementation-plan.md). DBPath locates the SQLite database
 // (production overrides via PF__GRID__DB_PATH); Sources keys are source
 // registry ids ("usgs", "nws", ...) — a poller may span several.
 type GridConfig struct {
@@ -300,7 +300,7 @@ type MeshcoreConfig struct {
 	// ActiveWindow is DEPRECATED and ignored: presence is now cadence-aware (each
 	// node stays in the snapshot for CadenceK × its own advert interval, clamped
 	// to [GraceFloor, GraceCeil]), so a single global window no longer applies.
-	// See docs/mesh-topology-design.md §9.
+	// See docs/design/mesh-topology-design.md §9.
 	ActiveWindow time.Duration `koanf:"activeWindow"`
 	// CadenceK / GraceFloor / GraceCeil tune cadence-aware presence. A node stays
 	// present for CadenceK × its measured inter-advert interval, clamped to
@@ -332,7 +332,7 @@ type MeshcoreConfig struct {
 	// node on the SAME gateway — a guard so a pathological fast-adverting node
 	// can't flood the relay-observation store (Tier 0). Multi-gateway copies of
 	// one advert are unaffected (different gateways are kept — resilience signal).
-	// Defaults to 30s in cmd/server when unset. See docs/mesh-topology-design.md.
+	// Defaults to 30s in cmd/server when unset. See docs/design/mesh-topology-design.md.
 	SpamFloor time.Duration `koanf:"spamFloor"`
 	// CompactionInterval is the cadence of the relay-topology maintenance tick
 	// (fold Tier 0 receptions into the Tier 1 per-link-per-day rollup, then prune).
@@ -385,7 +385,7 @@ type SourceTuning struct {
 }
 
 // HazardsConfig holds the unified hazard/situation feed configuration
-// (docs/hazard-aggregation-design.md). Each area is a named region the
+// (docs/design/hazard-aggregation-design.md). Each area is a named region the
 // /api/v1/hazards/{area}/{layer}.geojson endpoints serve.
 type HazardsConfig struct {
 	Areas []HazardArea `koanf:"areas"`
@@ -497,7 +497,7 @@ type WeatherConfig struct {
 
 // ForecastConfig gates the per-location NWS fire-weather forecast (wind/gust/RH,
 // on conditions + the fire_weather layer). Keyless, reuses NWS.UserAgent. See
-// docs/fire-weather-forecast-design.md. Zero RefreshInterval/HorizonHours default
+// docs/design/fire-weather-forecast-design.md. Zero RefreshInterval/HorizonHours default
 // to 1h / 48h.
 type ForecastConfig struct {
 	Enabled         bool          `koanf:"enabled"`

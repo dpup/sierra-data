@@ -803,7 +803,7 @@ FIRIS IR-flight + WFIGS perimeters and updates every ~5 min, so mapped perimeter
 now appear **hours sooner** (the Dove Fire had a perimeter here while WFIGS still
 returned none). Fire geometry/adoption semantics are unchanged; the feed carries
 many rows per fire, deduped to one (latest IR flight) before the name-join. See
-`docs/firis-perimeter-source-design.md`.
+`docs/design/firis-perimeter-source-design.md`.
 
 **Breaking (source id + event-id namespace renamed).** Migration: repoint any code
 keyed on the source id `wfigs`, or on stored `wfigs:` event ids, to `firis`. On
@@ -838,7 +838,7 @@ Consumer-visible changes (no field *renames*, but value changes):
 ### Added — per-location fire-weather forecast (`conditions` + `fire_weather` layer)
 
 Adds a short-range NWS fire-weather forecast — keyless, additive, informational
-(never an un-issued Red Flag). See `docs/fire-weather-forecast-design.md`.
+(never an un-issued Red Flag). See `docs/design/fire-weather-forecast-design.md`.
 
 - **`GET /api/v1/conditions` gains `forecast[]`** — a per-location NWS gridpoint
   forecast (48h hourly), joined to `weather[]` by `locationId`. Each
@@ -1197,7 +1197,7 @@ no-op revisions — a new revision now reflects a genuine content change.
 ### Added — MCP endpoint for LLM agents at `/mcp`
 
 A read-only Model Context Protocol server (Streamable HTTP, JSON-RPC 2.0) exposes
-the `/v1` data to LLM agents (`docs/mcp-design.md`). Eight tools —
+the `/v1` data to LLM agents (`docs/design/mcp-design.md`). Eight tools —
 `grid_situation`, `grid_events`, `grid_event`, `grid_conditions`, `grid_resolve`,
 `grid_places`, `grid_sources`, `grid_history` — plus a reference resource and a
 `hazard_briefing` prompt. It's a thin in-process adapter over `/v1`: geometry is
@@ -1378,7 +1378,7 @@ untouched in shape (see the migration note below for behavior changes on the
 hazard layers). All `/v1` JSON is **snake_case** (proto field names on the wire);
 timestamps are RFC 3339; errors are `google.rpc.Status`; ETags/`If-None-Match`
 everywhere. Full reference: the site's `/docs.html` (when deployed) and
-`docs/v2-api-spec.md`; build/design notes in `docs/v2-implementation-plan.md`.
+`docs/design/v2-api-spec.md`; build/design notes in `docs/design/v2-implementation-plan.md`.
 
 **New `/v1` endpoints:**
 
@@ -1494,7 +1494,7 @@ layer). `fire_weather` stays on `/v1/weather`. The legacy `/api/v1/weather*` and
 `/api/v1/weather/alerts` endpoints are **unchanged** — alerts remain there for
 existing consumers.
 
-### Deprecation plan — `/api/v1` (per `docs/v2-api-spec.md` §6)
+### Deprecation plan — `/api/v1` (per `docs/design/v2-api-spec.md` §6)
 
 `/api/v1` and `/v1` run on the same binary over the same store; there is no
 compatibility shim to maintain. Frontends cut over per page: map layers first
@@ -1672,7 +1672,7 @@ New JSON (non-GeoJSON) endpoints:
 ### Added — unified hazard GeoJSON feed (M1)
 
 New map-ready endpoints aggregating hazard data into one standardized RFC 7946
-GeoJSON interface (see `docs/hazard-aggregation-design.md`):
+GeoJSON interface (see `docs/design/hazard-aggregation-design.md`):
 
 ```
 GET /api/v1/hazards/{area}/{layer}.geojson

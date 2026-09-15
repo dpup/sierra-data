@@ -40,7 +40,7 @@ var schemaV1 string
 // rows with a zero LastSeenAt so callers can fall back to observed/ingested.
 const migrationV2 = `ALTER TABLE events ADD COLUMN last_seen_at INTEGER NOT NULL DEFAULT 0`
 
-// migrationV3 adds the MeshCore relay-topology tables (docs/mesh-topology-design.md):
+// migrationV3 adds the MeshCore relay-topology tables (docs/design/mesh-topology-design.md):
 //   - mesh_observations: the append-only reception firehose (Tier 0, short-lived) —
 //     one row per advert we heard, our-clock timestamp, signal + relay path.
 //   - mesh_link_rollup: the derived per-link-per-day topology history (Tier 1).

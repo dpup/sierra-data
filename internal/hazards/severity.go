@@ -6,7 +6,7 @@ import (
 	api "github.com/dpup/sierra-data/api/v1"
 )
 
-// The unified severity scale (docs/hazard-aggregation-design.md §4.2). It
+// The unified severity scale (docs/design/hazard-aggregation-design.md §4.2). It
 // expresses response urgency to the public, not physical magnitude — an
 // editorial prioritization shared across all sources so a client can sort
 // "most urgent first" and color a map without source-specific logic.

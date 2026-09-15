@@ -54,7 +54,7 @@ type Config struct {
 	// gateway) are each kept: hearing a link on N gateways is real resilience
 	// signal. 0 disables the floor (keep every reception).
 	SpamFloor time.Duration
-	// Cadence-aware presence (docs/mesh-topology-design.md §9): a node stays in
+	// Cadence-aware presence (docs/design/mesh-topology-design.md §9): a node stays in
 	// Snapshot for CadenceK × its own measured inter-advert interval, clamped to
 	// [GraceFloor, GraceCeil]. A node with no cadence yet (one-shot / brand-new)
 	// gets GraceFloor, so drive-through transients evaporate while a slow backbone

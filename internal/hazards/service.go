@@ -419,7 +419,7 @@ func (s *Service) fireWeather(ctx context.Context, area config.HazardArea) ([]Fe
 	}
 
 	// Per-location forecast Points: geolocated wind/RH outlook, INFO severity —
-	// informational, never an issued warning (see docs/fire-weather-forecast-design.md).
+	// informational, never an issued warning (see docs/design/fire-weather-forecast-design.md).
 	// Fail-soft: LocationForecasts never errors, so a forecast outage just omits points.
 	if forecasts := s.weather.LocationForecasts(ctx); len(forecasts) > 0 {
 		for _, loc := range s.cfg.Weather.Locations {

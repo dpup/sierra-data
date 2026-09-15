@@ -5,7 +5,7 @@ the existing API. Wire format: protobuf (canonical model) with GeoJSON retained 
 projection. Persistence: SQLite.
 
 **v0.1 → v0.2:** v0.1 was written blind to the current surface. Having read the live
-OpenAPI specs and `docs/hazard-aggregation-design.md` (implemented M0–M5): the unified
+OpenAPI specs and `docs/design/hazard-aggregation-design.md` (implemented M0–M5): the unified
 envelope, 5-level severity with per-source mappings, provenance with fail-loud
 semantics, and the `/situation` rollup **already exist**. This revision reframes the
 work as what's actually missing — persistence, event lifecycle, places, cross-layer
@@ -434,7 +434,7 @@ enhancement can be regenerated per poll cycle instead of per change.
   internal endpoints, no privileged reads. If a page needs data the public API
   can't serve, that's a defect in the API, not a reason for a private path. The
   pressure is the point: the API stays complete because its most demanding
-  consumer lives on it. (Full spec: `data-site-spec.md`.)
+  consumer lives on it. (Full spec: `docs/design/data-sites-spec.md`.)
 
 ---
 

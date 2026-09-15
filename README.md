@@ -336,7 +336,7 @@ A unified, **map-ready** aggregation layer that re-projects every hazard source
 into one standardized interface a maps client (MapLibre GL, Leaflet, OpenLayers)
 can layer directly. Unlike the rest of the API, these endpoints are hand-built
 GeoJSON/JSON, so field names are `snake_case`. Full design:
-[`docs/hazard-aggregation-design.md`](docs/hazard-aggregation-design.md).
+[`docs/design/hazard-aggregation-design.md`](docs/design/hazard-aggregation-design.md).
 
 #### Per-Layer GeoJSON
 
@@ -433,8 +433,8 @@ envelope). A new first-principles API is served at `/v1` (JSON is snake_case,
 timestamps RFC 3339, ETags everywhere), and an embedded data site at `/` provides
 a source-health board, event explorer, place directory + zone resolver, map
 previewer, and the live API reference. Full docs: the site's `/docs.html` (when
-deployed) and [`docs/v2-api-spec.md`](docs/v2-api-spec.md); implementation notes
-in [`docs/v2-implementation-plan.md`](docs/v2-implementation-plan.md).
+deployed) and [`docs/design/v2-api-spec.md`](docs/design/v2-api-spec.md); implementation notes
+in [`docs/design/v2-implementation-plan.md`](docs/design/v2-implementation-plan.md).
 
 | Endpoint | Returns |
 |---|---|
@@ -452,7 +452,7 @@ in [`docs/v2-implementation-plan.md`](docs/v2-implementation-plan.md).
 Weather alerts have moved off `/v1/weather` — they are events
 (`/v1/events?layer=weather_alert`). `/api/v1` is unchanged in shape and runs
 beside `/v1` on the same store; it will be retired after consumers cut over (see
-`docs/v2-api-spec.md` §6).
+`docs/design/v2-api-spec.md` §6).
 
 ## Quick Start
 

@@ -8,9 +8,9 @@ import "google/protobuf/wrappers.proto";
 
 option go_package = "github.com/dpup/sierra-data/api/grid/v1;gridv1";
 
-// Canonical grid event model (docs/v2-api-spec.md §3) plus GridService, the
+// Canonical grid event model (docs/design/v2-api-spec.md §3) plus GridService, the
 // read-only entity/query API exposed as JSON over gRPC-Gateway at /api/v1/...
-// (docs/grpc-gateway-migration-plan.md). The messages are the wire responses.
+// (docs/design/grpc-gateway-migration-plan.md). The messages are the wire responses.
 
 message Event {
   string id = 1;                    // "{source_id}:{native_id}" — matches shipped ids
@@ -268,7 +268,7 @@ message MeshTelemetry {
   // property of a single reception, not of a node, and one frozen sample on the
   // (hash-excluded) telemetry could never update. Per-advert receptions now land
   // in the append-only relay-observation store, and topology is served derived at
-  // GET /api/v1/mesh/links. See docs/mesh-topology-design.md.
+  // GET /api/v1/mesh/links. See docs/design/mesh-topology-design.md.
   reserved 4, 7;
   reserved "path", "path_nodes";
 
@@ -400,7 +400,7 @@ message SourceList {
 
 // GridService is the read-only /api/v1 entity + query surface (gRPC-Gateway).
 // Ported endpoint-by-endpoint from the hand-built /v1 handlers; see
-// docs/grpc-gateway-migration-plan.md §7 for the full endpoint map.
+// docs/design/grpc-gateway-migration-plan.md §7 for the full endpoint map.
 service GridService {
   // ListEvents returns store-backed events filtered by place, layer, status,
   // severity_min, and since, with keyset pagination.
@@ -624,7 +624,7 @@ message ForecastPeriod {
 // WeatherForecast is a location's short-range fire-weather forecast: the raw NWS
 // gridpoint series (wind/gust/RH/temp) plus an at-a-glance summary. Informational
 // only — it never implies a fire-weather WARNING (issued products are in
-// FireWeatherConditions). See docs/fire-weather-forecast-design.md.
+// FireWeatherConditions). See docs/design/fire-weather-forecast-design.md.
 message WeatherForecast {
   string location_id = 1;                  // joins to WeatherConditions.location_id
   string source = 2;                       // e.g. "NWS (STO gridpoint)"

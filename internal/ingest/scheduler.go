@@ -32,7 +32,7 @@ type PollerSpec struct {
 }
 
 // MeshMaintenance configures the periodic compaction + prune of the MeshCore
-// relay-observation store (docs/mesh-topology-design.md): Tier 0 receptions are
+// relay-observation store (docs/design/mesh-topology-design.md): Tier 0 receptions are
 // rolled into the Tier 1 per-link-per-day history, then aged rows are pruned. A
 // zero Interval disables the whole tick (meshcore off / no topology store).
 type MeshMaintenance struct {

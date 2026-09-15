@@ -1,7 +1,7 @@
 # Plan: return the core data API to gRPC + gRPC-Gateway
 
 Status: proposed (2026-07-09). Supersedes the hand-built `/v1` surface described
-in `docs/v2-api-spec.md` §7. GeoJSON map layers are explicitly out of scope and
+in `docs/design/v2-api-spec.md` §7. GeoJSON map layers are explicitly out of scope and
 stay hand-built.
 
 ## 1. Goal & motivation

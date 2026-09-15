@@ -7,7 +7,7 @@ reproduces the **shipped `/api/v1/hazards` envelope semantics** — id namespace
 headline formats, severity mappings (delegated to `internal/hazards`' exported
 helpers) — so the store→GeoJSON projection (`internal/gridapi.ProjectEvents`)
 stays byte-compatible with the live builders. Design:
-`docs/v2-implementation-plan.md` Tier C.
+`docs/design/v2-implementation-plan.md` Tier C.
 
 ## The Normalizer / Prior / PollResult contract
 

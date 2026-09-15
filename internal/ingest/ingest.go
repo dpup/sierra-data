@@ -1,5 +1,5 @@
 // Package ingest normalizes upstream hazard feeds into canonical grid.v1
-// Events for the event store (docs/v2-implementation-plan.md Tier C). Each
+// Events for the event store (docs/design/v2-implementation-plan.md Tier C). Each
 // Normalizer owns one poller scope and reproduces the shipped
 // /api/v1/hazards envelope semantics — id namespaces, headline formats, and
 // severity mappings (delegated to internal/hazards' exported wrappers) — so
@@ -82,7 +82,7 @@ type PollResult struct {
 	// measurements, not events — the scheduler batch-inserts them into the
 	// append-only observation store (Tier 0) in the same writer context as the
 	// presence upserts, never touching the revisioned event path. See
-	// docs/mesh-topology-design.md.
+	// docs/design/mesh-topology-design.md.
 	MeshObservations []store.MeshObservation
 	// ForceWrite lists event ids whose HASH-EXCLUDED content changed this tick
 	// and must be persisted even though the content hash did not move.

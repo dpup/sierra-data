@@ -4128,7 +4128,7 @@ func (x *ForecastPeriod) GetWindGustKmh() int32 {
 // WeatherForecast is a location's short-range fire-weather forecast: the raw NWS
 // gridpoint series (wind/gust/RH/temp) plus an at-a-glance summary. Informational
 // only — it never implies a fire-weather WARNING (issued products are in
-// FireWeatherConditions). See docs/fire-weather-forecast-design.md.
+// FireWeatherConditions). See docs/design/fire-weather-forecast-design.md.
 type WeatherForecast struct {
 	state              protoimpl.MessageState `protogen:"open.v1"`
 	LocationId         string                 `protobuf:"bytes,1,opt,name=location_id,json=locationId,proto3" json:"location_id,omitempty"` // joins to WeatherConditions.location_id

@@ -6,7 +6,7 @@ design of record; the notes below describe what shipped.
 How The Grid would expose its hazard/roads/weather data to LLM agents via the
 Model Context Protocol (MCP). The service is read-only and unauthenticated, so
 the protocol maps almost 1:1 onto the existing `/api/v1` surface
-(`docs/v2-api-spec.md`). The design work is **not** the plumbing — it's shaping
+(`docs/design/v2-api-spec.md`). The design work is **not** the plumbing — it's shaping
 responses for LLMs (compact, geometry-free) and baking the fail-loud honesty
 contract into every tool result so a model cannot turn "unknown" into
 "all-clear."
