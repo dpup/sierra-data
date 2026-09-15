@@ -11,6 +11,8 @@ import (
 	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
 	"github.com/dpup/sierra-data/internal/clients/meshcore"
 	"github.com/dpup/sierra-data/internal/config"
+	"github.com/dpup/sierra-data/internal/pushingest"
+	"github.com/dpup/sierra-data/internal/store"
 )
 
 // fakeMeshRegistry is a canned MeshRegistry for the normalizer tests.
@@ -185,4 +187,66 @@ func TestNetworkPollEmptyScope(t *testing.T) {
 func TestNetworkHeadlineFallback(t *testing.T) {
 	assert.Equal(t, "node abcdef12 (companion)",
 		meshHeadline("", meshcore.RoleCompanion, "abcdef1234567890"))
+}
+
+// GPS noise is not movement.
+//
+// A node's self-reported fix wanders tens of metres between adverts while the
+// node sits still, and geometry is hashed — so before this, every wobble was a
+// revision. One stationary companion reached revision 75 that way, 18 distinct
+// positions inside a 245 m circle, each snapshot recording that it had not moved.
+func TestMeshPositionJitterDoesNotChurn(t *testing.T) {
+	const lat, lng = 38.137412, -120.457934
+
+	stored := func() *gridv1.Event {
+		reg := &fakeMeshRegistry{connected: 1, nodes: []meshcore.NodeState{{
+			PubKey: fullKey, Role: meshcore.RoleRepeater, Name: "Arnold Summit",
+			HasLocation: true, Lat: lat, Lng: lng, LastHeardAt: pollNow.Add(-time.Minute),
+		}}}
+		n := pushNormalizer(t, reg, pushingest.MeshSnapshot{})
+		res, err := n.Poll(testCtx(), &fakePrior{})
+		require.NoError(t, err)
+		require.Len(t, res.Events, 1)
+		return res.Events[0]
+	}()
+	require.NotNil(t, stored.GetGeometry())
+	baseHash := store.ContentHash(stored)
+
+	// A later advert from the same stationary node, ~60 m away — inside the
+	// noise floor. The stored geometry rides forward BYTE FOR BYTE, which is
+	// what keeps the content hash equal.
+	jittered := reheardAt(t, lat+0.0005, lng+0.0002, stored)
+	assert.Equal(t, baseHash, store.ContentHash(jittered),
+		"a wobble inside the epsilon must not mint a revision")
+	assert.Equal(t, stored.GetGeometry().GetGeojson(), jittered.GetGeometry().GetGeojson())
+
+	// A real move — ~700 m — updates, exactly once. A threshold that damped this
+	// would be hiding the one thing a node's geometry is for.
+	moved := reheardAt(t, lat+0.0063, lng, stored)
+	assert.NotEqual(t, baseHash, store.ContentHash(moved), "a real move is a real revision")
+	assert.NotEqual(t, stored.GetGeometry().GetGeojson(), moved.GetGeometry().GetGeojson())
+
+	// A node with nothing stored takes the fix it was given: we damp change,
+	// never the first sighting.
+	fresh := reheardAt(t, lat, lng, nil)
+	require.NotNil(t, fresh.GetGeometry())
+}
+
+// reheardAt polls one node at the given position, with `prev` (or nothing) in
+// the store.
+func reheardAt(t *testing.T, lat, lng float64, prev *gridv1.Event) *gridv1.Event {
+	t.Helper()
+	reg := &fakeMeshRegistry{connected: 1, nodes: []meshcore.NodeState{{
+		PubKey: fullKey, Role: meshcore.RoleRepeater, Name: "Arnold Summit",
+		HasLocation: true, Lat: lat, Lng: lng, LastHeardAt: pollNow,
+	}}}
+	n := pushNormalizer(t, reg, pushingest.MeshSnapshot{})
+	p := &fakePrior{}
+	if prev != nil {
+		p.events = []*gridv1.Event{prev}
+	}
+	res, err := n.Poll(testCtx(), p)
+	require.NoError(t, err)
+	require.Len(t, res.Events, 1)
+	return res.Events[0]
 }

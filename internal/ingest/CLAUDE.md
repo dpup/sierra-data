@@ -112,6 +112,21 @@ The same rule covers geometry, which is hashed: `combineGeometry` sorts its
 members because ArcGIS promises no row ordering, and an order flip would
 otherwise mint a revision on an event that never changed.
 
+**GPS noise is not movement.** A mesh node's geometry is hashed (movement is
+meaningful), and a node's self-reported fix wanders tens of metres between
+adverts while it sits still — so every wobble was a revision, and one stationary
+companion reached revision 75 that way. `stablePosition` keeps the STORED
+geometry, byte for byte, until an advert lands more than
+`meshPositionEpsilonMeters` (150 m) from it.
+
+Quantization was the first attempt and cannot work: the jitter is wider than any
+sane grid (245 m across 18 positions on one still node, against an 11 m grid),
+and rounding has no hysteresis — a node parked on a cell boundary flips forever
+however coarse the cells are. A threshold measured from the last stored position
+does have hysteresis, the same shape as the reachability window's: noise changes
+nothing, a real move registers once. `quantizeCoord` stays, but as an output
+precision convention, not a damping mechanism.
+
 **The event holds the latest reading; the archive holds all of them.** A
 monitor's sample rides on the event (hash-excluded, so it mints no revision) AND
 is appended to `mesh_telemetry` via `PollResult.MeshTelemetry`, batch-inserted by

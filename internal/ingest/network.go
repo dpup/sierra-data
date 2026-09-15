@@ -12,6 +12,7 @@ import (
 	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
 	"github.com/dpup/sierra-data/internal/clients/meshcore"
 	"github.com/dpup/sierra-data/internal/config"
+	"github.com/dpup/sierra-data/internal/lib/geojson"
 	"github.com/dpup/sierra-data/internal/pushingest"
 	"github.com/dpup/sierra-data/internal/store"
 	"google.golang.org/protobuf/types/known/wrapperspb"
@@ -25,9 +26,29 @@ const (
 	meshAttribution = "MeshCore community mesh"
 	meshMapURL      = "https://map.meshcore.io"
 
-	// meshLocationDecimals damps GPS jitter: ~4 dp ≈ 11 m. Location is hashed
-	// content, so un-quantized jitter would mint spurious revisions.
+	// meshLocationDecimals rounds a stored coordinate to ~4 dp ≈ 11 m, matching
+	// the repo-wide GeoJSON precision convention. It does NOT damp GPS jitter,
+	// though it was written hoping to — see meshPositionEpsilonMeters.
 	meshLocationDecimals = 1e4
+
+	// meshPositionEpsilonMeters is how far an advert must fall from a node's
+	// STORED position before we believe the node moved.
+	//
+	// Quantization alone cannot do this job, for two reasons measured on live
+	// data. The jitter is bigger than any sane grid: one companion's adverts
+	// spanned 245 m across 18 distinct positions while the node sat still, so a
+	// 11 m grid rounds noise to a different cell almost every time. And rounding
+	// has no HYSTERESIS — a node parked near a cell boundary flips between two
+	// cells forever no matter how coarse the grid is, because the boundary is
+	// what it is sitting on.
+	//
+	// A threshold measured from the last stored position has hysteresis built
+	// in, the same shape as the reachability window's: noise changes nothing, a
+	// real move registers exactly once. 150 m sits well above the observed noise
+	// (p95 ≈ 70 m from a node's median position) and far below any movement a
+	// coverage map cares about — a genuinely mobile node still tracked 23 km of
+	// travel in the same sample.
+	meshPositionEpsilonMeters = 150.0
 
 	// meshPubKeyHex is the hex length of a full MeshCore Ed25519 public key. An
 	// event id native part shorter than this is a PREFIX — a node an operator
@@ -213,7 +234,7 @@ func (n *NetworkNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult,
 	events := make([]*gridv1.Event, 0, len(merged))
 	var forceWrite []string
 	for _, m := range merged {
-		ev := n.buildEvent(m, now)
+		ev := n.buildEvent(m, now, prior)
 		events = append(events, ev)
 		if n.shouldPersistTelemetry(ev, prior, now) {
 			forceWrite = append(forceWrite, ev.GetId())
@@ -300,7 +321,7 @@ func (n *NetworkNormalizer) reporterHealth(snap pushingest.MeshSnapshot) map[str
 // would let two inputs that disagree flip the winner every tick and mint a
 // revision each time. A signed advert beats a monitor's reading; among monitors,
 // configured priority then reporter id.
-func (n *NetworkNormalizer) buildEvent(m *mergedNode, now time.Time) *gridv1.Event {
+func (n *NetworkNormalizer) buildEvent(m *mergedNode, now time.Time, prior Prior) *gridv1.Event {
 	reports := slices.Clone(m.pushed)
 	sort.Slice(reports, func(i, j int) bool {
 		if reports[i].Priority != reports[j].Priority {
@@ -344,7 +365,7 @@ func (n *NetworkNormalizer) buildEvent(m *mergedNode, now time.Time) *gridv1.Eve
 
 	var brokers []string
 	if m.mqtt != nil {
-		ev.Geometry = GeometryFromPoint(quantizeCoord(m.mqtt.Lat), quantizeCoord(m.mqtt.Lng))
+		ev.Geometry = stablePosition(prior, ev.GetId(), m.mqtt.Lat, m.mqtt.Lng)
 		brokers = m.mqtt.Brokers
 	}
 	// A node known only from a monitor has NO geometry: a report carries no
@@ -763,4 +784,36 @@ func meshHeadline(name, nodeType, key string) string {
 
 func quantizeCoord(v float64) float64 {
 	return math.Round(v*meshLocationDecimals) / meshLocationDecimals
+}
+
+// stablePosition returns the node's geometry for this tick: the fresh advert
+// position, unless the node is still within meshPositionEpsilonMeters of where
+// it is already stored, in which case the STORED geometry rides forward byte for
+// byte.
+//
+// Geometry is hashed — movement is meaningful — so every wobble in a node's
+// self-reported GPS fix was minting a revision. One stationary companion reached
+// revision 75 that way, 18 distinct positions inside a 245 m circle, each one a
+// full-blob snapshot recording that a node had not moved.
+//
+// Returning the PRIOR geometry rather than a re-rounded fresh one is the point:
+// equal bytes are what make the content hash equal. Rounding a new fix to a grid
+// produces a new value whenever the fix crosses a cell line, which for a node
+// parked on a boundary is most of the time.
+//
+// Same shape as the wildfire perimeter and PG&E footprint rules — when this tick
+// says something we have reason not to believe, keep what we had — but a
+// different reason: those are upstream feeds blinking, this is a real
+// measurement that is simply less precise than the thing it measures.
+func stablePosition(prior Prior, id string, lat, lng float64) *gridv1.Geometry {
+	fresh := GeometryFromPoint(quantizeCoord(lat), quantizeCoord(lng))
+	prev := priorByID(prior, id).GetGeometry()
+	c := prev.GetCentroid()
+	if c == nil {
+		return fresh // nothing stored (or no location yet): this fix is the truth
+	}
+	if geojson.MetersBetween(c.GetLat(), c.GetLng(), lat, lng) > meshPositionEpsilonMeters {
+		return fresh
+	}
+	return prev
 }

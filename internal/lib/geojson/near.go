@@ -56,6 +56,20 @@ func WithinDistance(a, b *Geom, meters float64) bool {
 	return separationAtMost(a, b, kx, meters)
 }
 
+// MetersBetween is the distance between two lat/lng points, using the same local
+// equirectangular projection as WithinDistance above (accurate to well under a
+// percent at the scales a buffer spans, and far cheaper than haversine).
+//
+// Exported for the callers that hold bare coordinates rather than geometries —
+// the mesh normalizer's "has this node actually MOVED, or is that GPS noise"
+// test, which runs per node per tick.
+func MetersBetween(aLat, aLng, bLat, bLng float64) float64 {
+	kx := metersPerDegreeLat * math.Cos((aLat+bLat)/2*math.Pi/180)
+	dx := (aLng - bLng) * kx
+	dy := (aLat - bLat) * metersPerDegreeLat
+	return math.Hypot(dx, dy)
+}
+
 // minCos is the smallest cos(latitude) among the given latitudes — i.e. the
 // shortest longitude degree, which gives the widest (safest) degree margin.
 func minCos(lats ...float64) float64 {
