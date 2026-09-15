@@ -14,6 +14,7 @@ import (
 	"github.com/dpup/sierra-data/internal/config"
 	"github.com/dpup/sierra-data/internal/pushingest"
 	"github.com/dpup/sierra-data/internal/store"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 // MeshCore presence source constants. Nodes deep-link to the community map
@@ -431,10 +432,14 @@ func (n *NetworkNormalizer) reachability(reports []pushingest.MeshNodeReport, no
 // persisting it needs PollResult.ForceWrite (see shouldPersistTelemetry).
 func meshTelemetry(mqtt *meshcore.NodeState, reports []pushingest.MeshNodeReport) *gridv1.MeshTelemetry {
 	t := &gridv1.MeshTelemetry{}
+	// The signal block is set ONLY where an MQTT bridge actually heard the node.
+	// These are wrapper types precisely so that this `if` is visible on the wire:
+	// a node an operator monitors but the mesh has never heard reports no SNR,
+	// not 0 dB, and no hop count, not "heard direct".
 	if mqtt != nil {
-		t.Snr = mqtt.SNR
-		t.Rssi = mqtt.RSSI
-		t.HopCount = mqtt.HopCount
+		t.Snr = wrapperspb.Double(mqtt.SNR)
+		t.Rssi = wrapperspb.Int32(mqtt.RSSI)
+		t.HopCount = wrapperspb.UInt32(mqtt.HopCount)
 		t.Gateways = mqtt.Gateways
 		t.LastAdvertAt = tsProto(mqtt.LastAdvertAt)
 	}

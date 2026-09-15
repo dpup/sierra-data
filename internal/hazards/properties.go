@@ -142,13 +142,18 @@ type EvacuationProps struct {
 // relay path is NOT here — a path is per-reception, not per-node; the drawable
 // topology is served derived at GET /api/v1/mesh/links.
 type MeshProps struct {
-	PublicKey string   `json:"publicKey"`
-	NodeType  string   `json:"nodeType,omitempty"` // companion | repeater | room_server | sensor
-	Name      string   `json:"name,omitempty"`
-	SNR       float64  `json:"snr,omitempty"`
-	RSSI      int32    `json:"rssi,omitempty"`
-	HopCount  uint32   `json:"hopCount,omitempty"`
-	Gateways  []string `json:"gateways,omitempty"` // observers that heard the node
+	PublicKey string `json:"publicKey"`
+	NodeType  string `json:"nodeType,omitempty"` // companion | repeater | room_server | sensor
+	Name      string `json:"name,omitempty"`
+	// Pointers, so the layer says the same thing the event does: absent means no
+	// MQTT bridge heard this node, and a present 0 is a reading. `omitempty` on
+	// the bare scalars used to drop a genuine "0 hops" (heard direct) along with
+	// the unset case — the right answer for an unheard node, silently wrong for
+	// a directly-heard one.
+	SNR      *float64 `json:"snr,omitempty"`
+	RSSI     *int32   `json:"rssi,omitempty"`
+	HopCount *uint32  `json:"hopCount,omitempty"`
+	Gateways []string `json:"gateways,omitempty"` // observers that heard the node
 	// InRegion is set ONLY on the mesh_link topology layer: true for a node inside
 	// the queried place, false for a 1-hop neighbour pulled in because it links to
 	// one. Nil (omitted) on the plain mesh_node layer, where every node is in-place.

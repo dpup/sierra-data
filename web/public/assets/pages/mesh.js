@@ -107,7 +107,10 @@ export async function initMeshPage() {
       type: 'Feature',
       geometry: { type: 'Point', coordinates: [c.lng, c.lat] },
       properties: {
-        pubkey: pk, role, name: n.name || '', snr: t.snr, hop: t.hopCount || 0,
+        // `?? null`, not `|| 0`: hop_count is a wrapper on the wire now, and 0
+        // hops (heard direct) is a real reading that must not share a rendering
+        // with "no bridge has heard this node".
+        pubkey: pk, role, name: n.name || '', snr: t.snr ?? null, hop: t.hopCount ?? null,
         gw: (t.gateways || []).length,
         // '' rather than a missing key: a MapLibre `get` on an absent property
         // is null, and the match below would then have to spell both cases.
@@ -268,7 +271,9 @@ export async function initMeshPage() {
       box.append(chips);
       const dl = el('dl', 'popup-details-dl');
       const add = (k, v) => { if (v !== undefined && v !== null && v !== '') { dl.append(el('dt', '', k), el('dd', '', String(v))); } };
-      if (p.snr !== undefined && p.snr !== 0) add('SNR', p.snr + ' dB');
+      // Absent is absent and 0 dB is a reading — the guard used to drop both,
+      // which was right for the unheard node and silently wrong for a marginal one.
+      if (p.snr !== undefined && p.snr !== null) add('SNR', p.snr + ' dB');
       add('hops', p.hop === undefined || p.hop === null ? null : hopCell(p.hop));
       add('gateways', p.gw);
       // Only where a monitor watches this node. An unwatched node says nothing

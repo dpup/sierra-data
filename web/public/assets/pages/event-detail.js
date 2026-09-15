@@ -739,14 +739,41 @@ function renderMeshDetail(body, m) {
   body.append(idl);
 
   /* ---- heard by the mesh ---- */
+  // Heard at all? The signal fields are wrapper types on the wire precisely so
+  // this question has an answer: they are null, not 0, for a node an operator's
+  // monitor reports but no bridge has ever heard. Four cells each saying "not
+  // reported" would be technically true and would still bury the one fact worth
+  // stating, which is that the mesh has never heard this node.
+  const gateways = Array.isArray(t.gateways) ? t.gateways.filter(has).map(String) : [];
+  const heard = has(t.lastAdvertAt) || gateways.length > 0 ||
+    has(t.snr) || has(t.rssi) || has(t.hopCount);
   const sig = subGroup(
     body,
     'Heard by the mesh',
-    'What the community MQTT bridges heard of this node’s last advert. Volatile by design: the ' +
-      'store zeroes this block before hashing, so a firehose of adverts refreshes liveness without ' +
-      'minting a revision. The advert time is stamped by the node’s own unsynchronized clock — ' +
-      '“heard” everywhere else is the event’s observedAt.'
+    // The note describes a block that is there. With nothing heard, the block is
+    // one sentence, and a paragraph about what an advert would have carried is a
+    // second explanation of nothing.
+    heard
+      ? 'What the community MQTT bridges heard of this node’s last advert. Volatile by design: the ' +
+        'store zeroes this block before hashing, so a firehose of adverts refreshes liveness ' +
+        'without minting a revision. The advert time is stamped by the node’s own unsynchronized ' +
+        'clock — “heard” everywhere else is the event’s observedAt.'
+      : ''
   );
+  if (!heard) {
+    sig.append(
+      el(
+        'p',
+        'muted small',
+        'No bridge has reported hearing this node advertise. Everything the Grid holds for it comes ' +
+          'from the monitor below — so there is no SNR, no hop count and no gateway here, rather ' +
+          'than a row of zeros claiming it was heard direct at 0 dB.'
+      )
+    );
+    restRows(sig, t, MESH_TELEMETRY_KNOWN, 'Other telemetry fields');
+    renderMeshAdmin(body, m, t, admin);
+    return;
+  }
   sig.append(
     metricGrid([
       { label: 'SNR', value: withUnit(t.snr, 'dB', 1), sub: 'gateway-reported', absent: 'not reported' },
@@ -762,7 +789,6 @@ function renderMeshDetail(body, m) {
     ])
   );
 
-  const gateways = Array.isArray(t.gateways) ? t.gateways.filter(has).map(String) : [];
   if (gateways.length) {
     sig.append(blockCap(`Gateways (${fmtNum(gateways.length)}) — bridges that relayed this advert to us`));
     sig.append(chipList(gateways, { what: 'gateway key' }));
@@ -773,8 +799,15 @@ function renderMeshDetail(body, m) {
     );
   }
   restRows(sig, t, MESH_TELEMETRY_KNOWN, 'Other telemetry fields');
+  renderMeshAdmin(body, m, t, admin);
+}
 
-  /* ---- self-reported ---- */
+/**
+ * The monitor's half of the record. Split out because the block above it can end
+ * early — a node the mesh has never heard has nothing to say under "heard by the
+ * mesh", but the monitor's sample is exactly why such a node is here at all.
+ */
+function renderMeshAdmin(body, m, t, admin) {
   // The note explains a block that is there; with no sample the block is one
   // sentence, and prefacing it with a paragraph about what a sample would have
   // contained is two explanations of nothing.

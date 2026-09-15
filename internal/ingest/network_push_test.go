@@ -113,6 +113,38 @@ func TestPushOnlyNodeBecomesAnEvent(t *testing.T) {
 	assert.Equal(t, gridv1.MeshReachability_REACHABLE, ev.GetMesh().GetReachability())
 }
 
+// A node only an operator's monitor knows publishes NO signal readings — not
+// zeroed ones.
+//
+// This shipped wrong: the signal fields were bare scalars, so the gateway's
+// EmitUnpopulated marshaler rendered an unheard node as `snr: 0, rssi: 0,
+// hopCount: 0` — 0 dB, heard DIRECT, for a node no bridge has ever heard. Three
+// of nine monitored repeaters were in exactly that state on 2026-09-15. The
+// fields are wrapper types now, and this is the test that keeps them that way:
+// the assertion is on NIL, not on zero.
+func TestMonitorOnlyNodePublishesNoSignalReadings(t *testing.T) {
+	// No MQTT state at all for this node: the registry is live but has not heard it.
+	reg := &fakeMeshRegistry{connected: 1}
+	n := pushNormalizer(t, reg, pushingest.MeshSnapshot{
+		Live:    1,
+		Reports: []pushingest.MeshNodeReport{report(keyPrefix, "SIERRA BigPratherMeadow", pollNow)},
+	})
+
+	res, err := n.Poll(testCtx(), &fakePrior{})
+	require.NoError(t, err)
+	require.Len(t, res.Events, 1)
+
+	tel := res.Events[0].GetMesh().GetTelemetry()
+	require.NotNil(t, tel)
+	assert.Nil(t, tel.Snr, "no bridge heard it: SNR is unknown, not 0 dB")
+	assert.Nil(t, tel.Rssi, "no bridge heard it: RSSI is unknown, not 0 dBm")
+	assert.Nil(t, tel.HopCount, "no bridge heard it: hop count is unknown, not heard-direct")
+	assert.Nil(t, tel.LastAdvertAt)
+	assert.Empty(t, tel.GetGateways())
+	// ...while what the monitor DID read is present and unaffected.
+	assert.InDelta(t, 4.14, tel.GetAdmin().GetBatteryVolts().GetValue(), 0.001)
+}
+
 // TestPushAndMQTTDeduplicateToOneEvent is the headline requirement: the same
 // node seen both ways must be ONE event, not two.
 func TestPushAndMQTTDeduplicateToOneEvent(t *testing.T) {
@@ -137,7 +169,7 @@ func TestPushAndMQTTDeduplicateToOneEvent(t *testing.T) {
 	assert.Equal(t, "Arnold Summit", ev.GetMesh().GetName())
 	assert.NotNil(t, ev.GetGeometry(), "the advert supplies the location the report lacks")
 	// Both inputs' telemetry rides on the one event.
-	assert.InDelta(t, 4.5, ev.GetMesh().GetTelemetry().GetSnr(), 0.001)
+	assert.InDelta(t, 4.5, ev.GetMesh().GetTelemetry().GetSnr().GetValue(), 0.001)
 	assert.InDelta(t, 4.14, ev.GetMesh().GetTelemetry().GetAdmin().GetBatteryVolts().GetValue(), 0.001)
 }
 

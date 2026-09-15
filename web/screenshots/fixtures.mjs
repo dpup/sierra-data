@@ -203,6 +203,11 @@ const MESH_NODES = [
   { pk: 'c3d4e5f6a7b8c9d0', name: 'Bear Valley Room', role: 'room_server', lat: 38.481, lng: -120.043, snr: 4, rssi: -108, hop: 2, gw: 1 },
   { pk: 'd4e5f6a7b8c9d0e1', name: 'Avery Companion', role: 'companion', lat: 38.196, lng: -120.366, snr: 3, rssi: -112, hop: 2, gw: 0 },
   { pk: 'e5f6a7b8c9d0e1f2', name: 'Dorrington Sensor', role: 'sensor', lat: 38.306, lng: -120.281, snr: 2, rssi: -118, hop: 3, gw: 0 },
+  // Monitor-only: no bridge has ever heard it, so every signal field is null on
+  // the wire (they are wrapper types for exactly this case) — never 0. This is
+  // three of the nine live monitored repeaters, and the shape that shipped as
+  // "0 dB, heard direct" before the wrappers landed.
+  { pk: 'f6a7b8c9d0e1f2a3', name: 'Big Prather Meadow', role: 'repeater', lat: 38.222, lng: -120.401, unheard: true, gw: 0, reach: 'REACHABLE' },
 ];
 
 // Gateway/broker public keys, as the bridges report them: full 64-char hex.
@@ -232,6 +237,17 @@ const MESH_ADMIN = {
   // right thing about it: a monitor that tried and failed, not an unwatched node.
 };
 
+MESH_ADMIN.f6a7b8c9d0e1f2a3 = {
+  reporterId: 'alanpi', reportedAt: ago(4), lastSuccessAt: ago(4), lastAttemptAt: ago(4),
+  batteryVolts: 4.09, batteryPercent: 85, batteryPercentSource: 'estimated',
+  temperatureC: 28.7, humidity: null, pressure: null,
+  noiseFloorDbm: -96, lastSnrDb: 11.5, lastRssiDbm: -65, txQueueLen: 0,
+  uptimeSeconds: '941025', airtimeMs: '17847', rxAirtimeMs: '75338',
+  packetsSent: '54585', packetsReceived: '240298',
+  sentFlood: '53146', sentDirect: '1439', recvFlood: '233063', recvDirect: '6722',
+  directDups: '95', floodDups: '47738', fullEvents: '0', recvErrors: '181927',
+};
+
 const MESH_EVENTS = MESH_NODES.map((n, i) => ({
   id: `mesh-${n.pk.slice(0, 8)}`, layer: 'mesh', severity: 'INFO', status: 'ACTIVE',
   headline: n.name, areaLabel: 'Ebbetts Pass', category: 'mesh', observedAt: ago(5 + i * 7),
@@ -244,9 +260,13 @@ const MESH_EVENTS = MESH_NODES.map((n, i) => ({
     // omitted field, or the "no monitor" rendering never gets exercised.
     reachability: n.reach || 'MESH_REACHABILITY_UNSPECIFIED',
     telemetry: {
-      snr: n.snr, rssi: n.rssi, hopCount: n.hop,
+      // null, not 0, where no bridge heard it — grid.v1 carries these as
+      // wrapper types so the distinction survives EmitUnpopulated.
+      snr: n.unheard ? null : n.snr,
+      rssi: n.unheard ? null : n.rssi,
+      hopCount: n.unheard ? null : n.hop,
       gateways: MESH_GATEWAY_KEYS.slice(0, n.gw),
-      lastAdvertAt: ago(5 + i * 7),
+      lastAdvertAt: n.unheard ? null : ago(5 + i * 7),
       admin: MESH_ADMIN[n.pk] || null,
     },
   },

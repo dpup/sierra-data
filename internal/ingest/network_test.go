@@ -90,9 +90,9 @@ func TestNetworkPollBuildsEvents(t *testing.T) {
 	assert.Equal(t, "aa11bb22cc33", det.PublicKey)
 	assert.Equal(t, "repeater", det.NodeType)
 	require.NotNil(t, det.Telemetry)
-	assert.InDelta(t, 4.5, det.Telemetry.Snr, 1e-9)
-	assert.EqualValues(t, -93, det.Telemetry.Rssi)
-	assert.EqualValues(t, 2, det.Telemetry.HopCount)
+	assert.InDelta(t, 4.5, det.Telemetry.GetSnr().GetValue(), 1e-9)
+	assert.EqualValues(t, -93, det.Telemetry.GetRssi().GetValue())
+	assert.EqualValues(t, 2, det.Telemetry.GetHopCount().GetValue())
 
 	// Event's observed time is OUR receive time (LastHeardAt), never the node's
 	// skewed clock — the feed orders/`since`-filters on this.

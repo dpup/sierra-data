@@ -14,6 +14,35 @@ throughout; errors are gRPC-standard `{code, codeName, message, details}`). The
 by a snake_case `/v1` surface on 2026-07-05, which was in turn folded back onto the
 proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 
+## 2026-09-15 (later)
+
+### Breaking: `mesh.telemetry.snr`, `.rssi` and `.hopCount` are now nullable
+
+**Migration: treat `null` as "no bridge has heard this node", and stop reading a
+`0` as a measurement.** A consumer that only displays these values needs no
+change beyond rendering the absent case; one that does arithmetic on them must
+handle `null`.
+
+These three were bare proto scalars, so the gateway's marshaler published an
+unset value as `0`. That is a claim, and on live data it was a false one: on
+2026-09-15 three of nine operator-monitored repeaters had never been heard by any
+MeshCore MQTT bridge, and the API was reporting them as `snr: 0, rssi: 0,
+hopCount: 0` — a reading of 0 dB, heard DIRECT, for a node the mesh has not heard
+at all. `hopCount` is the sharpest case: 0 hops is a real and useful reading
+(heard direct), so it cannot also mean "unknown".
+
+They are wrapper types now, exactly like the admin gauges added earlier today,
+and are `null` unless a bridge actually reported the advert they came from —
+which `lastAdvertAt` being non-null marks too. The `mesh_node` GeoJSON layer
+follows the same rule and had the mirror-image bug: `omitempty` on the scalars
+dropped a genuine `hopCount: 0` along with the unset case, so a directly-heard
+node looked unheard. Both now omit only what is genuinely absent.
+
+One-time effect on stored history: past revision snapshots decode with these
+three fields empty (the old bytes no longer match the field type). They are
+hash-excluded volatile values that were never part of an event's identity, and
+live nodes repopulate within one telemetry-persist interval.
+
 ## 2026-09-15
 
 ### New: `POST /api/v1/ingest/{stream}` — authenticated push ingest, and operator-reported mesh telemetry

@@ -495,7 +495,7 @@ func TestContentHashIgnoresMeshTelemetry(t *testing.T) {
 				PublicKey: "abc123",
 				NodeType:  "repeater",
 				Name:      "Murphys Ridge",
-				Telemetry: &gridv1.MeshTelemetry{Snr: 4.5, Rssi: -93, HopCount: 1},
+				Telemetry: &gridv1.MeshTelemetry{Snr: wrapperspb.Double(4.5), Rssi: wrapperspb.Int32(-93), HopCount: wrapperspb.UInt32(1)},
 			}},
 		}
 	}
@@ -504,7 +504,7 @@ func TestContentHashIgnoresMeshTelemetry(t *testing.T) {
 	// Fresh telemetry only: same hash.
 	telem := node()
 	telem.GetMesh().Telemetry = &gridv1.MeshTelemetry{
-		Snr: -7.25, Rssi: -119, HopCount: 3,
+		Snr: wrapperspb.Double(-7.25), Rssi: wrapperspb.Int32(-119), HopCount: wrapperspb.UInt32(3),
 		Gateways: []string{"ag loft rpt"},
 	}
 	assert.Equal(t, base, ContentHash(telem), "telemetry is excluded from the hash")
@@ -542,7 +542,7 @@ func TestUpsertMeshTelemetryIsNoOp(t *testing.T) {
 		ObservedAt: timestamppb.New(baseTime),
 		Detail: &gridv1.Event_Mesh{Mesh: &gridv1.MeshDetail{
 			PublicKey: "abc123", NodeType: "repeater", Name: "Murphys Ridge",
-			Telemetry: &gridv1.MeshTelemetry{Snr: 4.5, Rssi: -93},
+			Telemetry: &gridv1.MeshTelemetry{Snr: wrapperspb.Double(4.5), Rssi: wrapperspb.Int32(-93)},
 		}},
 	}
 	res, err := s.UpsertEvent(ctx, node)
@@ -553,7 +553,7 @@ func TestUpsertMeshTelemetryIsNoOp(t *testing.T) {
 	// A later advert, new signal metrics only: no revision.
 	reheard := proto.Clone(node).(*gridv1.Event)
 	reheard.ObservedAt = timestamppb.New(baseTime.Add(time.Hour))
-	reheard.GetMesh().Telemetry = &gridv1.MeshTelemetry{Snr: -8, Rssi: -120, HopCount: 2}
+	reheard.GetMesh().Telemetry = &gridv1.MeshTelemetry{Snr: wrapperspb.Double(-8), Rssi: wrapperspb.Int32(-120), HopCount: wrapperspb.UInt32(2)}
 	res, err = s.UpsertEvent(ctx, reheard)
 	require.NoError(t, err)
 	assert.Equal(t, UpsertResult{Changed: false, Revision: 1}, res)

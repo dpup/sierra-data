@@ -193,14 +193,42 @@ func projectNetwork(ev *gridv1.Event) hazards.Feature {
 		PublicKey:    d.GetPublicKey(),
 		NodeType:     d.GetNodeType(),
 		Name:         d.GetName(),
-		SNR:          t.GetSnr(),
-		RSSI:         t.GetRssi(),
-		HopCount:     t.GetHopCount(),
+		SNR:          wrapDouble(t.GetSnr()),
+		RSSI:         wrapInt32(t.GetRssi()),
+		HopCount:     wrapUint32(t.GetHopCount()),
 		Gateways:     t.GetGateways(),
 		Reachability: meshReachability(d.GetReachability()),
 		Admin:        meshAdminProps(t.GetAdmin()),
 	}
 	return feature(ev, p)
+}
+
+// wrapDouble / wrapInt32 / wrapUint32 carry a wrapper's "unset" through to the
+// GeoJSON layer as an omitted property rather than flattening it to zero. The
+// whole point of the wrapper on the wire is lost if the projection unwraps it
+// with GetValue(), which returns 0 for nil.
+func wrapDouble(v *wrapperspb.DoubleValue) *float64 {
+	if v == nil {
+		return nil
+	}
+	f := v.GetValue()
+	return &f
+}
+
+func wrapInt32(v *wrapperspb.Int32Value) *int32 {
+	if v == nil {
+		return nil
+	}
+	n := v.GetValue()
+	return &n
+}
+
+func wrapUint32(v *wrapperspb.UInt32Value) *uint32 {
+	if v == nil {
+		return nil
+	}
+	n := v.GetValue()
+	return &n
 }
 
 // meshReachability renders the reachability enum, omitting the unspecified case

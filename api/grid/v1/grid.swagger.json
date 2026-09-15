@@ -1083,7 +1083,7 @@
         "snr": {
           "type": "number",
           "format": "double",
-          "title": "last SNR (dB), gateway-reported"
+          "description": "Wrapper types, not bare scalars, for the reason the admin gauges below are:\nunder the gateway's EmitUnpopulated marshaler an unset scalar is published\nas 0, and here that 0 is a claim. A node an operator's monitor reports but\nno MQTT bridge has ever heard was going out as `snr: 0, rssi: 0,\nhopCount: 0` — a reading of 0 dB, heard DIRECT, for a node the mesh has not\nheard at all (observed live 2026-09-15 on three of nine monitored\nrepeaters). hop_count makes it sharpest: 0 hops is a real and meaningful\nreading, so it cannot double as \"unknown\".\n\nAbsent now means absent: these are null unless an MQTT bridge reported the\nadvert they came from, which `last_advert_at` also marks.\n\nlast SNR (dB), gateway-reported"
         },
         "rssi": {
           "type": "integer",

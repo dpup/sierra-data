@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/timestamppb"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
 	"github.com/dpup/sierra-data/internal/clients/caloes"
@@ -393,7 +394,8 @@ func TestProjectEvents_Network_MeshNode(t *testing.T) {
 		Detail: &gridv1.Event_Mesh{Mesh: &gridv1.MeshDetail{
 			PublicKey: "aa11bb22", NodeType: "repeater", Name: "Murphys Ridge",
 			Telemetry: &gridv1.MeshTelemetry{
-				Snr: 4.5, Rssi: -93, HopCount: 2, Gateways: []string{"ag loft rpt"},
+				Snr: wrapperspb.Double(4.5), Rssi: wrapperspb.Int32(-93),
+				HopCount: wrapperspb.UInt32(2), Gateways: []string{"ag loft rpt"},
 			},
 		}},
 	}

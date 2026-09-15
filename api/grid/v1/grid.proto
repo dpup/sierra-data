@@ -272,9 +272,20 @@ message MeshTelemetry {
   reserved 4, 7;
   reserved "path", "path_nodes";
 
-  double snr = 1;                              // last SNR (dB), gateway-reported
-  int32 rssi = 2;                              // last RSSI (dBm), gateway-reported
-  uint32 hop_count = 3;                        // path length of the last-heard advert
+  // Wrapper types, not bare scalars, for the reason the admin gauges below are:
+  // under the gateway's EmitUnpopulated marshaler an unset scalar is published
+  // as 0, and here that 0 is a claim. A node an operator's monitor reports but
+  // no MQTT bridge has ever heard was going out as `snr: 0, rssi: 0,
+  // hopCount: 0` — a reading of 0 dB, heard DIRECT, for a node the mesh has not
+  // heard at all (observed live 2026-09-15 on three of nine monitored
+  // repeaters). hop_count makes it sharpest: 0 hops is a real and meaningful
+  // reading, so it cannot double as "unknown".
+  //
+  // Absent now means absent: these are null unless an MQTT bridge reported the
+  // advert they came from, which `last_advert_at` also marks.
+  google.protobuf.DoubleValue snr = 1;         // last SNR (dB), gateway-reported
+  google.protobuf.Int32Value rssi = 2;         // last RSSI (dBm), gateway-reported
+  google.protobuf.UInt32Value hop_count = 3;   // path length of the last-heard advert
   repeated string gateways = 5;                // origin ids of the gateways/brokers that heard it
   google.protobuf.Timestamp last_advert_at = 6; // sender-stamped time of the last advert
 
