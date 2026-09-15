@@ -103,7 +103,14 @@ Three feeds, four requests:
   outages** — the point rows are good, only the footprints are missing. The
   poller treats it like the freshness gate: degrade the `pge` source, skip its
   sweep, keep the events, and carry each outage's last-known footprint rather
-  than redraw it as a point. Run `./bin/test-pge` twice a minute apart to see it.
+  than redraw it as a point.
+
+  **It comes in BURSTS, so `./bin/test-pge` will usually look fine.** Measured:
+  the stored revisions flipped geometry on roughly every other 5-minute poll from
+  19:53 to 21:13, then went quiet — while 33 hand-sampled requests across that
+  quiet tail caught exactly one blank. Do not read a clean run of the CLI as the
+  upstream being fixed; the evidence that matters is an outage's revision history
+  alternating Point and Polygon with nothing else changing.
 - **`psps_public/MapServer/1`** — PSPS coverage. **Empty is the normal state**;
   the layer only fills during an event. A window is published as MANY rows
   sharing every attribute (12 rows for one real footprint), so the caller groups
