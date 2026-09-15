@@ -491,10 +491,20 @@ grid:
     maxBodyBytes: 1048576
     maxItems: 1000
     # Reachability is hashed, so this must span several reporting cycles.
-    unreachableAfter: "45m"
+    unreachableAfter: "180m"
     # Coalesces hash-excluded telemetry writes; each one is a commit.
     telemetryPersistInterval: "10m"
-    reporters: []
+    reporters:
+      - id: alanpi
+        name: "alanpi"
+        tokenSha256: "a98b7eeb3909f89723fce0290b92d6773aa1bb0d64ab18cf5ae2e2824fc0c3de"
+        streams: ["mesh.repeater"]
+        # Silence past this degrades this row on /api/v1/sources AND suppresses
+        # the mesh disappearance sweep (absence must not read as departure).
+        staleAfter: "60m"
+        minInterval: "30s"
+        # Breaks ties when two monitors disagree about a node's identity.
+        priority: 10
 
   # MeshCore mesh-node presence source. Subscribes to community MQTT bridges,
   # several for resilience; a node heard on more than one collapses to a single
