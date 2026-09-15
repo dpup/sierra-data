@@ -445,3 +445,40 @@ func storedMeshEvent(key string, reportedAt *timestamppb.Timestamp) *gridv1.Even
 	ev.Detail = &gridv1.Event_Mesh{Mesh: mesh}
 	return ev
 }
+
+// The archive gets one row per REPORT, keyed to the monitor's own clock — the
+// event keeps only the latest reading, and only the archive can be graphed.
+func TestPollProjectsTelemetrySamples(t *testing.T) {
+	reg := &fakeMeshRegistry{connected: 1, nodes: []meshcore.NodeState{{
+		PubKey: fullKey, Role: meshcore.RoleRepeater, Name: "Arnold Summit",
+		HasLocation: true, Lat: 38.137412, Lng: -120.457934,
+		SNR: 4.5, RSSI: -93, LastHeardAt: pollNow.Add(-time.Minute),
+	}}}
+	n := pushNormalizer(t, reg, pushingest.MeshSnapshot{
+		Live:    1,
+		Reports: []pushingest.MeshNodeReport{report(keyPrefix, "SIERRA Arnold Summit", pollNow)},
+	})
+
+	res, err := n.Poll(testCtx(), &fakePrior{})
+	require.NoError(t, err)
+	require.Len(t, res.MeshTelemetry, 1)
+
+	s := res.MeshTelemetry[0]
+	// Filed under the node's FULL key even though the monitor reported a prefix:
+	// the projection runs after resolution, so one node keeps one history.
+	assert.Equal(t, fullKey, s.PubKey)
+	assert.Equal(t, pollNow.Unix(), s.ReportedAt.Unix(), "the monitor's stamp is the dedupe key")
+	require.NotNil(t, s.BatteryVolts)
+	assert.InDelta(t, 4.14, *s.BatteryVolts, 0.001)
+	assert.Equal(t, int64(150305), s.PacketsSent)
+	// A gauge the monitor did not read stays nil all the way into the archive.
+	assert.Nil(t, s.Humidity)
+
+	// A node with no monitor contributes no row — an archive of nothing is not
+	// a row of zeros.
+	reg2 := &fakeMeshRegistry{connected: 1, nodes: reg.nodes}
+	n2 := pushNormalizer(t, reg2, pushingest.MeshSnapshot{Live: 1})
+	res2, err := n2.Poll(testCtx(), &fakePrior{})
+	require.NoError(t, err)
+	assert.Empty(t, res2.MeshTelemetry)
+}

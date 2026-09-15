@@ -479,7 +479,12 @@ func meshcoreClientConfig(cfg *config.Config) meshcore.Config {
 // Cadence/retention default when unset (docs/design/mesh-topology-design.md §10).
 func meshMaintenanceConfig(cfg *config.Config) ingest.MeshMaintenance {
 	mc := cfg.Grid.Meshcore
-	if !mc.Enabled || len(mc.Brokers) == 0 {
+	// The tick also owns telemetry-archive pruning, and telemetry arrives by
+	// PUSH — which works with MQTT off entirely. Gating the whole tick on the
+	// MQTT subscriber would leave a push-only deployment archiving samples that
+	// nothing ever prunes. Compaction over an empty observation table is a no-op,
+	// so running it for a push-only deployment costs nothing.
+	if (!mc.Enabled || len(mc.Brokers) == 0) && len(cfg.Grid.Ingest.Reporters) == 0 {
 		return ingest.MeshMaintenance{}
 	}
 	interval := mc.CompactionInterval
@@ -494,10 +499,15 @@ func meshMaintenanceConfig(cfg *config.Config) ingest.MeshMaintenance {
 	if rollupRetention <= 0 {
 		rollupRetention = 2 * 365 * 24 * time.Hour
 	}
+	telemetryRetention := mc.TelemetryRetention
+	if telemetryRetention <= 0 {
+		telemetryRetention = 365 * 24 * time.Hour
+	}
 	return ingest.MeshMaintenance{
 		Interval:             interval,
 		ObservationRetention: obsRetention,
 		RollupRetention:      rollupRetention,
+		TelemetryRetention:   telemetryRetention,
 	}
 }
 

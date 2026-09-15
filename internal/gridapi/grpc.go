@@ -42,6 +42,10 @@ func (g *GridServer) RegisterGatewayRoutes(mux *runtime.ServeMux) error {
 	}
 	// The MeshCore relay topology — a global, windowed weighted edge list derived
 	// from the observation rollup (not place-scoped: a mesh spans places).
+	// (The telemetry archive next door is a proto RPC — GetMeshTelemetry. A
+	// series of numbers is exactly what proto3 models well, so it gets the
+	// generated contract, the reflection entry and the OpenAPI row like every
+	// other read. Hand-building is for geometry.)
 	return mux.HandlePath("GET", "/api/v1/mesh/links",
 		func(w http.ResponseWriter, r *http.Request, _ map[string]string) {
 			g.svc.serveMeshLinks(w, r)

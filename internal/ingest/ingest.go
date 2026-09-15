@@ -84,6 +84,19 @@ type PollResult struct {
 	// presence upserts, never touching the revisioned event path. See
 	// docs/design/mesh-topology-design.md.
 	MeshObservations []store.MeshObservation
+	// MeshTelemetry is this tick's monitor samples, appended to the mesh telemetry
+	// archive in the same writer context as MeshObservations above. They are
+	// MEASUREMENTS, not event content: the event carries the latest sample, this
+	// carries every sample, and only the second can be graphed.
+	//
+	// The poller re-offers the same sample on every tick until a new report
+	// arrives, so the insert is keyed on the monitor's own timestamp and ignores
+	// duplicates — see store.InsertMeshTelemetry.
+	MeshTelemetry []store.MeshTelemetrySample
+	// MeshTelemetryRenames moves a node's archived samples from a provisional
+	// prefix-derived key onto its full public key, applied BEFORE the insert.
+	// Paired with Superseded: the same promotion retires the provisional event.
+	MeshTelemetryRenames []MeshKeyRename
 	// ForceWrite lists event ids whose HASH-EXCLUDED content changed this tick
 	// and must be persisted even though the content hash did not move.
 	//
@@ -101,6 +114,13 @@ type PollResult struct {
 	// not every tick: each id is a transaction, and on a network filesystem each
 	// commit invalidates every reader's page cache.
 	ForceWrite []string
+}
+
+// MeshKeyRename names a node whose public key became known in full, so its
+// archived telemetry can follow it.
+type MeshKeyRename struct {
+	From string // provisional prefix-derived key
+	To   string // full public key
 }
 
 // NewEvent builds an event with the envelope fields every normalizer sets.

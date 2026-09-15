@@ -19,17 +19,18 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	GridService_ListEvents_FullMethodName      = "/grid.v1.GridService/ListEvents"
-	GridService_GetEvent_FullMethodName        = "/grid.v1.GridService/GetEvent"
-	GridService_GetEventHistory_FullMethodName = "/grid.v1.GridService/GetEventHistory"
-	GridService_ListHistory_FullMethodName     = "/grid.v1.GridService/ListHistory"
-	GridService_ListPlaces_FullMethodName      = "/grid.v1.GridService/ListPlaces"
-	GridService_ResolvePlace_FullMethodName    = "/grid.v1.GridService/ResolvePlace"
-	GridService_GetPlace_FullMethodName        = "/grid.v1.GridService/GetPlace"
-	GridService_GetPlaceSummary_FullMethodName = "/grid.v1.GridService/GetPlaceSummary"
-	GridService_ListScanners_FullMethodName    = "/grid.v1.GridService/ListScanners"
-	GridService_GetConditions_FullMethodName   = "/grid.v1.GridService/GetConditions"
-	GridService_ListSources_FullMethodName     = "/grid.v1.GridService/ListSources"
+	GridService_ListEvents_FullMethodName       = "/grid.v1.GridService/ListEvents"
+	GridService_GetEvent_FullMethodName         = "/grid.v1.GridService/GetEvent"
+	GridService_GetEventHistory_FullMethodName  = "/grid.v1.GridService/GetEventHistory"
+	GridService_ListHistory_FullMethodName      = "/grid.v1.GridService/ListHistory"
+	GridService_ListPlaces_FullMethodName       = "/grid.v1.GridService/ListPlaces"
+	GridService_ResolvePlace_FullMethodName     = "/grid.v1.GridService/ResolvePlace"
+	GridService_GetPlace_FullMethodName         = "/grid.v1.GridService/GetPlace"
+	GridService_GetPlaceSummary_FullMethodName  = "/grid.v1.GridService/GetPlaceSummary"
+	GridService_ListScanners_FullMethodName     = "/grid.v1.GridService/ListScanners"
+	GridService_GetConditions_FullMethodName    = "/grid.v1.GridService/GetConditions"
+	GridService_ListSources_FullMethodName      = "/grid.v1.GridService/ListSources"
+	GridService_GetMeshTelemetry_FullMethodName = "/grid.v1.GridService/GetMeshTelemetry"
 )
 
 // GridServiceClient is the client API for GridService service.
@@ -71,6 +72,13 @@ type GridServiceClient interface {
 	// ListSources returns the source registry with per-source health — the
 	// honesty mechanism clients key layer trust off.
 	ListSources(ctx context.Context, in *ListSourcesRequest, opts ...grpc.CallOption) (*SourceList, error)
+	// GetMeshTelemetry returns ONE node's archived operator-monitor samples — the
+	// series behind a battery, temperature or airtime chart.
+	//
+	// The event carries a node's LATEST reading; this carries every reading, and
+	// only the second can be graphed. Per node by design: this is one node's
+	// chart, and a cross-node dump would be a different (and far larger) product.
+	GetMeshTelemetry(ctx context.Context, in *GetMeshTelemetryRequest, opts ...grpc.CallOption) (*MeshTelemetryArchive, error)
 }
 
 type gridServiceClient struct {
@@ -191,6 +199,16 @@ func (c *gridServiceClient) ListSources(ctx context.Context, in *ListSourcesRequ
 	return out, nil
 }
 
+func (c *gridServiceClient) GetMeshTelemetry(ctx context.Context, in *GetMeshTelemetryRequest, opts ...grpc.CallOption) (*MeshTelemetryArchive, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MeshTelemetryArchive)
+	err := c.cc.Invoke(ctx, GridService_GetMeshTelemetry_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // GridServiceServer is the server API for GridService service.
 // All implementations must embed UnimplementedGridServiceServer
 // for forward compatibility.
@@ -230,6 +248,13 @@ type GridServiceServer interface {
 	// ListSources returns the source registry with per-source health — the
 	// honesty mechanism clients key layer trust off.
 	ListSources(context.Context, *ListSourcesRequest) (*SourceList, error)
+	// GetMeshTelemetry returns ONE node's archived operator-monitor samples — the
+	// series behind a battery, temperature or airtime chart.
+	//
+	// The event carries a node's LATEST reading; this carries every reading, and
+	// only the second can be graphed. Per node by design: this is one node's
+	// chart, and a cross-node dump would be a different (and far larger) product.
+	GetMeshTelemetry(context.Context, *GetMeshTelemetryRequest) (*MeshTelemetryArchive, error)
 	mustEmbedUnimplementedGridServiceServer()
 }
 
@@ -272,6 +297,9 @@ func (UnimplementedGridServiceServer) GetConditions(context.Context, *GetConditi
 }
 func (UnimplementedGridServiceServer) ListSources(context.Context, *ListSourcesRequest) (*SourceList, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListSources not implemented")
+}
+func (UnimplementedGridServiceServer) GetMeshTelemetry(context.Context, *GetMeshTelemetryRequest) (*MeshTelemetryArchive, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetMeshTelemetry not implemented")
 }
 func (UnimplementedGridServiceServer) mustEmbedUnimplementedGridServiceServer() {}
 func (UnimplementedGridServiceServer) testEmbeddedByValue()                     {}
@@ -492,6 +520,24 @@ func _GridService_ListSources_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _GridService_GetMeshTelemetry_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetMeshTelemetryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GridServiceServer).GetMeshTelemetry(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GridService_GetMeshTelemetry_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GridServiceServer).GetMeshTelemetry(ctx, req.(*GetMeshTelemetryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // GridService_ServiceDesc is the grpc.ServiceDesc for GridService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -542,6 +588,10 @@ var GridService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListSources",
 			Handler:    _GridService_ListSources_Handler,
+		},
+		{
+			MethodName: "GetMeshTelemetry",
+			Handler:    _GridService_GetMeshTelemetry_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

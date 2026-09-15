@@ -345,6 +345,16 @@ type MeshcoreConfig struct {
 	// RollupRetention caps the age of Tier 1 link history — the interesting,
 	// cheap-to-keep topology record. Defaults to 2 years.
 	RollupRetention time.Duration `koanf:"rollupRetention"`
+	// TelemetryRetention caps the age of archived monitor samples (battery,
+	// temperature, airtime, counters). Defaults to 1 year.
+	//
+	// Unlike the two above this is not a cache size. Observations re-accumulate
+	// from the live MQTT feed and the rollup is derived from them; a monitor
+	// report is neither — it reports the present and never replays, so anything
+	// pruned here is a battery curve nobody can reconstruct. At ~864 rows/day
+	// for nine nodes a year costs tens of megabytes, which is why the default is
+	// generous.
+	TelemetryRetention time.Duration `koanf:"telemetryRetention"`
 }
 
 // MeshcoreBroker is one MQTT endpoint. URL scheme selects transport

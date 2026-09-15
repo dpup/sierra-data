@@ -291,6 +291,55 @@
         ]
       }
     },
+    "/api/v1/mesh/telemetry": {
+      "get": {
+        "summary": "GetMeshTelemetry returns ONE node's archived operator-monitor samples — the\nseries behind a battery, temperature or airtime chart.",
+        "description": "The event carries a node's LATEST reading; this carries every reading, and\nonly the second can be graphed. Per node by design: this is one node's\nchart, and a cross-node dump would be a different (and far larger) product.",
+        "operationId": "GridService_GetMeshTelemetry",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1MeshTelemetryArchive"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "node",
+            "description": "the node's full public key, hex",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "from",
+            "description": "default: 24h before `to`",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "date-time"
+          },
+          {
+            "name": "to",
+            "description": "default: now",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "date-time"
+          }
+        ],
+        "tags": [
+          "GridService"
+        ]
+      }
+    },
     "/api/v1/places": {
       "get": {
         "summary": "ListPlaces returns the place directory filtered by kind and a name query.",
@@ -1113,6 +1162,83 @@
         }
       },
       "description": "MeshTelemetry is the volatile, per-advert signal state. It is deliberately\ngrouped into one sub-message so store.ContentHash can zero the whole field:\nnone of it mints a revision."
+    },
+    "v1MeshTelemetryArchive": {
+      "type": "object",
+      "properties": {
+        "node": {
+          "type": "string"
+        },
+        "from": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "to": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "coverage": {
+          "$ref": "#/definitions/v1MeshTelemetryCoverage",
+          "description": "What the ARCHIVE holds for this node, whatever was asked for. A window\noutside it returns no samples because we do not have them — which is not\nthe same statement as the node having been quiet, and a chart cannot tell\nthose apart unless it is told."
+        },
+        "cadenceSeconds": {
+          "type": "string",
+          "format": "int64",
+          "description": "The observed MEDIAN gap between samples, so a client knows which gaps are\nabnormal enough to break a line on. Null with fewer than two samples: one\npoint has no cadence. Median, not mean — one multi-hour outage in a day of\n15-minute reports drags a mean past anything the feed does."
+        },
+        "reboots": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "description": "Sample times where the node's uptime went BACKWARDS. Every lifetime counter\nrestarts there, so a line drawn across one plunges to zero and climbs back —\na graph of our arithmetic rather than of the mesh. Also a fact worth seeing."
+        },
+        "truncated": {
+          "type": "boolean",
+          "description": "The window held more samples than one response carries. Stated, never\nsilent: a chart that ends early because the server stopped talking must not\nlook like a chart of a node that stopped."
+        },
+        "samples": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1MeshTelemetrySample"
+          }
+        }
+      },
+      "description": "MeshTelemetryArchive is one node's samples over a window, with what a chart\nneeds in order not to lie about them."
+    },
+    "v1MeshTelemetryCoverage": {
+      "type": "object",
+      "properties": {
+        "from": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "to": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "samples": {
+          "type": "integer",
+          "format": "int32"
+        }
+      }
+    },
+    "v1MeshTelemetrySample": {
+      "type": "object",
+      "properties": {
+        "reading": {
+          "$ref": "#/definitions/v1MeshAdminTelemetry",
+          "title": "reported_at is the sample's own time"
+        },
+        "receivedAt": {
+          "type": "string",
+          "format": "date-time",
+          "title": "when the Grid first held it"
+        }
+      },
+      "description": "MeshTelemetrySample is one archived report.\n\nThe reading is MeshAdminTelemetry itself — the same message the event carries,\nnot a flattened copy of its 23 fields. One definition means the archive and\nthe live event cannot describe the same reading differently, and the gauges\nkeep their wrapper types, so an unread battery stays null here too."
     },
     "v1Place": {
       "type": "object",

@@ -468,6 +468,70 @@ service GridService {
   rpc ListSources(ListSourcesRequest) returns (SourceList) {
     option (google.api.http) = {get: "/api/v1/sources"};
   }
+  // GetMeshTelemetry returns ONE node's archived operator-monitor samples — the
+  // series behind a battery, temperature or airtime chart.
+  //
+  // The event carries a node's LATEST reading; this carries every reading, and
+  // only the second can be graphed. Per node by design: this is one node's
+  // chart, and a cross-node dump would be a different (and far larger) product.
+  rpc GetMeshTelemetry(GetMeshTelemetryRequest) returns (MeshTelemetryArchive) {
+    option (google.api.http) = {get: "/api/v1/mesh/telemetry"};
+  }
+}
+
+message GetMeshTelemetryRequest {
+  string node = 1;                      // the node's full public key, hex
+  google.protobuf.Timestamp from = 2;   // default: 24h before `to`
+  google.protobuf.Timestamp to = 3;     // default: now
+}
+
+// MeshTelemetryArchive is one node's samples over a window, with what a chart
+// needs in order not to lie about them.
+message MeshTelemetryArchive {
+  string node = 1;
+  google.protobuf.Timestamp from = 2;
+  google.protobuf.Timestamp to = 3;
+
+  // What the ARCHIVE holds for this node, whatever was asked for. A window
+  // outside it returns no samples because we do not have them — which is not
+  // the same statement as the node having been quiet, and a chart cannot tell
+  // those apart unless it is told.
+  MeshTelemetryCoverage coverage = 4;
+
+  // The observed MEDIAN gap between samples, so a client knows which gaps are
+  // abnormal enough to break a line on. Null with fewer than two samples: one
+  // point has no cadence. Median, not mean — one multi-hour outage in a day of
+  // 15-minute reports drags a mean past anything the feed does.
+  google.protobuf.Int64Value cadence_seconds = 5;
+
+  // Sample times where the node's uptime went BACKWARDS. Every lifetime counter
+  // restarts there, so a line drawn across one plunges to zero and climbs back —
+  // a graph of our arithmetic rather than of the mesh. Also a fact worth seeing.
+  repeated google.protobuf.Timestamp reboots = 6;
+
+  // The window held more samples than one response carries. Stated, never
+  // silent: a chart that ends early because the server stopped talking must not
+  // look like a chart of a node that stopped.
+  bool truncated = 7;
+
+  repeated MeshTelemetrySample samples = 8;
+}
+
+message MeshTelemetryCoverage {
+  google.protobuf.Timestamp from = 1;
+  google.protobuf.Timestamp to = 2;
+  int32 samples = 3;
+}
+
+// MeshTelemetrySample is one archived report.
+//
+// The reading is MeshAdminTelemetry itself — the same message the event carries,
+// not a flattened copy of its 23 fields. One definition means the archive and
+// the live event cannot describe the same reading differently, and the gauges
+// keep their wrapper types, so an unread battery stays null here too.
+message MeshTelemetrySample {
+  MeshAdminTelemetry reading = 1;             // reported_at is the sample's own time
+  google.protobuf.Timestamp received_at = 2;  // when the Grid first held it
 }
 
 message GetPlaceSummaryRequest {

@@ -14,6 +14,33 @@ throughout; errors are gRPC-standard `{code, codeName, message, details}`). The
 by a snake_case `/v1` surface on 2026-07-05, which was in turn folded back onto the
 proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 
+## 2026-09-15 (evening)
+
+### New: `GET /api/v1/mesh/telemetry?node=` — one node's telemetry archive
+
+**Additive.** The first endpoint that answers "how did this move", rather than
+"what is it now".
+
+An event carries a mesh node's LATEST monitor reading; nothing kept the earlier
+ones, so a battery or temperature curve could not be drawn at all. Every accepted
+report is now archived, one row per report per node, and this returns them for
+one node over a window.
+
+- `node` (required, full public key), `from` and `to` (RFC 3339; default the last
+  24 hours, clamped to 400 days).
+- Each sample is `{receivedAt, reading}` where `reading` is the same
+  `MeshAdminTelemetry` message the event carries — so the archive cannot describe
+  a reading differently from the live record, and an unread gauge is `null` in
+  both. `reading.reportedAt` is the sample's own time.
+- The response carries what a chart needs in order not to lie: `coverage` (what
+  the archive holds for this node, so an empty window is distinguishable from a
+  quiet node), `cadenceSeconds` (the observed median gap, so a client knows which
+  gaps are abnormal), `reboots` (sample times where uptime went backwards, where
+  every lifetime counter restarts), and `truncated`.
+
+Per node by design — a cross-node dump is a different product. Retention defaults
+to a year (`grid.meshcore.telemetryRetention`).
+
 ## 2026-09-15 (later still)
 
 ### Fixed: PG&E outages no longer churn geometry (and their revision history stops filling with noise)

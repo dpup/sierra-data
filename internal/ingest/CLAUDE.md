@@ -112,6 +112,16 @@ The same rule covers geometry, which is hashed: `combineGeometry` sorts its
 members because ArcGIS promises no row ordering, and an order flip would
 otherwise mint a revision on an event that never changed.
 
+**The event holds the latest reading; the archive holds all of them.** A
+monitor's sample rides on the event (hash-excluded, so it mints no revision) AND
+is appended to `mesh_telemetry` via `PollResult.MeshTelemetry`, batch-inserted by
+the scheduler in the same writer context as `MeshObservations`. The projection
+runs over the tick's EVENTS rather than the raw reports, because that is where a
+key prefix has already been resolved — filing one node's samples under two keys
+is the failure mode, and `PollResult.MeshTelemetryRenames` (paired with
+`Superseded`) is what carries the history across a promotion. Only the archive
+can be graphed; see `internal/store/CLAUDE.md`.
+
 **A missing shape is not a smaller shape.** PG&E's polygon layer periodically
 answers with zero rows (200, no error envelope — see `internal/clients/CLAUDE.md`),
 which left every outage redrawn as its own centre point and redrawn back on the

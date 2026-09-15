@@ -175,6 +175,18 @@ export const ENDPOINTS = [
     examples: ['/api/v1/conditions', '/api/v1/conditions?place=ebbetts-pass'],
   },
   {
+    path: '/api/v1/mesh/telemetry',
+    blurb: 'One mesh node\u2019s telemetry archive \u2014 the series behind a battery or temperature chart.',
+    detail:
+      'Every accepted operator-monitor report for one node, oldest first. Each sample is {receivedAt, reading}, where reading is the same MeshAdminTelemetry block the node\u2019s event carries \u2014 so an unread gauge is null here too, never 0. The envelope carries what a chart needs in order not to lie: coverage (what the archive HOLDS, so an empty window is not a quiet node), cadenceSeconds (the observed median gap, so you know which gaps to break a line on), reboots (where uptime went backwards and every lifetime counter restarted), and truncated.',
+    params: [
+      ['node', 'hex public key', 'The node, in full. Required \u2014 this is one node\u2019s chart.', 'none'],
+      ['from', 'RFC 3339', 'Start of the window.', '24h before `to`'],
+      ['to', 'RFC 3339', 'End of the window.', 'now'],
+    ],
+    examples: [],
+  },
+  {
     path: '/api/v1/sources',
     blurb: 'The provenance and health registry behind every sourceStatus in the system.',
     detail:

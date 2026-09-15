@@ -39,6 +39,7 @@ type MeshMaintenance struct {
 	Interval             time.Duration // compaction + prune cadence (0 disables)
 	ObservationRetention time.Duration // Tier 0 raw age cap
 	RollupRetention      time.Duration // Tier 1 rollup age cap
+	TelemetryRetention   time.Duration // monitor-sample archive age cap
 }
 
 // SchedulerConfig wires a Scheduler. Tuning keys are source ids; missing
@@ -182,8 +183,13 @@ func (s *Scheduler) safeMeshMaintenance(ctx context.Context) {
 	if err != nil {
 		logging.Errorw(ctx, "Mesh maintenance: pruning rollup failed", "error", err)
 	}
+	prunedTelem, err := s.store.PruneMeshTelemetry(ctx, now.Add(-s.meshMaint.TelemetryRetention))
+	if err != nil {
+		logging.Errorw(ctx, "Mesh maintenance: pruning telemetry failed", "error", err)
+	}
 	logging.Infow(ctx, "Mesh maintenance tick", "compacted", compacted,
-		"prunedObservations", prunedObs, "prunedRollup", prunedRollup)
+		"prunedObservations", prunedObs, "prunedRollup", prunedRollup,
+		"prunedTelemetry", prunedTelem)
 }
 
 func (s *Scheduler) run(ctx context.Context, spec PollerSpec) {
@@ -429,6 +435,27 @@ func (s *Scheduler) tick(ctx context.Context, spec PollerSpec, st *pollerState) 
 		if err := s.store.InsertMeshObservations(ctx, result.MeshObservations); err != nil {
 			logging.Errorw(ctx, "Ingest tick: mesh observation insert failed",
 				"count", len(result.MeshObservations), "error", err)
+		}
+	}
+	// Renames run BEFORE the insert: a node promoted from a prefix to its full
+	// public key this tick must find its archived samples already filed under
+	// the new key, or this tick's sample opens a second series for one node.
+	for _, r := range result.MeshTelemetryRenames {
+		moved, err := s.store.RenameMeshTelemetryPubKey(ctx, r.From, r.To)
+		if err != nil {
+			logging.Errorw(ctx, "Ingest tick: mesh telemetry key rename failed",
+				"from", r.From, "to", r.To, "error", err)
+			continue
+		}
+		if moved > 0 {
+			logging.Infow(ctx, "Ingest tick: mesh telemetry followed a promoted key",
+				"from", r.From, "to", r.To, "samples", moved)
+		}
+	}
+	if len(result.MeshTelemetry) > 0 {
+		if err := s.store.InsertMeshTelemetry(ctx, result.MeshTelemetry); err != nil {
+			logging.Errorw(ctx, "Ingest tick: mesh telemetry insert failed",
+				"count", len(result.MeshTelemetry), "error", err)
 		}
 	}
 	obsDur := time.Since(obsStart)

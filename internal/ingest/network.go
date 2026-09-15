@@ -222,12 +222,15 @@ func (n *NetworkNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult,
 	// Deterministic order so a diff of two ticks is readable and tests are stable.
 	sort.Slice(events, func(i, j int) bool { return events[i].GetId() < events[j].GetId() })
 
+	promotions := promotedPrefixKeys(merged, prior)
 	result := &PollResult{
-		Events:           events,
-		ForceWrite:       forceWrite,
-		Superseded:       supersededPrefixIDs(merged, prior),
-		MeshObservations: n.drainObservations(),
-		PerSource:        n.reporterHealth(snap),
+		Events:               events,
+		ForceWrite:           forceWrite,
+		Superseded:           supersededIDs(promotions),
+		MeshObservations:     n.drainObservations(),
+		MeshTelemetry:        meshTelemetrySamples(events, now),
+		MeshTelemetryRenames: promotions,
+		PerSource:            n.reporterHealth(snap),
 	}
 	if snap.SuppressSweep {
 		result.SweepSuppress = append(result.SweepSuppress, meshSourceID)
@@ -512,11 +515,11 @@ func (n *NetworkNormalizer) shouldPersistTelemetry(ev *gridv1.Event, prior Prior
 // saying "here is the full key it was always a prefix OF, and here is the event
 // now carrying it". Same shape as a standalone fire perimeter being adopted by a
 // CAL FIRE incident.
-func supersededPrefixIDs(merged map[string]*mergedNode, prior Prior) []string {
+func promotedPrefixKeys(merged map[string]*mergedNode, prior Prior) []MeshKeyRename {
 	if prior == nil {
 		return nil
 	}
-	var out []string
+	var out []MeshKeyRename
 	for _, ev := range prior.ForSource(meshSourceID) {
 		id := ev.GetId()
 		native, ok := strings.CutPrefix(id, meshSourceID+":")
@@ -525,13 +528,102 @@ func supersededPrefixIDs(merged map[string]*mergedNode, prior Prior) []string {
 		}
 		for key := range merged {
 			if len(key) == meshPubKeyHex && strings.HasPrefix(key, native) {
-				out = append(out, id)
+				// Both halves are in hand HERE and nowhere else, which is why the
+				// telemetry rename is paired with the supersession rather than
+				// inferred later: after this tick the provisional id is retired and
+				// nothing in the store connects the two keys.
+				out = append(out, MeshKeyRename{From: native, To: key})
 				break
 			}
 		}
 	}
-	sort.Strings(out)
+	sort.Slice(out, func(i, j int) bool { return out[i].From < out[j].From })
 	return out
+}
+
+// supersededIDs names the provisional EVENTS a promotion retires.
+func supersededIDs(promotions []MeshKeyRename) []string {
+	if len(promotions) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(promotions))
+	for _, p := range promotions {
+		out = append(out, meshSourceID+":"+p.From)
+	}
+	return out
+}
+
+// meshTelemetrySamples projects this tick's events into archive rows — one per
+// node that carries a monitor sample.
+//
+// Built from the EVENTS rather than from the raw reports because this is where
+// a prefix has already been resolved to the node's full public key: filing a
+// sample under the prefix and the same node's later samples under the full key
+// would split one node's history in two.
+//
+// `now` is our receive time. It is written once — the insert ignores a duplicate
+// — so it records when we FIRST saw this sample, which is the honest meaning
+// against the monitor's own reported_at beside it.
+func meshTelemetrySamples(events []*gridv1.Event, now time.Time) []store.MeshTelemetrySample {
+	var out []store.MeshTelemetrySample
+	for _, ev := range events {
+		d := ev.GetMesh()
+		admin := d.GetTelemetry().GetAdmin()
+		if admin == nil || d.GetPublicKey() == "" || admin.GetReportedAt() == nil {
+			continue
+		}
+		out = append(out, store.MeshTelemetrySample{
+			PubKey:     d.GetPublicKey(),
+			ReportedAt: admin.GetReportedAt().AsTime(),
+			ReceivedAt: now,
+			Reporter:   admin.GetReporterId(),
+
+			BatteryVolts:     wrapperFloat(admin.GetBatteryVolts()),
+			BatteryPct:       wrapperFloat(admin.GetBatteryPercent()),
+			BatteryPctSource: admin.GetBatteryPercentSource(),
+			TemperatureC:     wrapperFloat(admin.GetTemperatureC()),
+			Humidity:         wrapperFloat(admin.GetHumidity()),
+			Pressure:         wrapperFloat(admin.GetPressure()),
+			NoiseFloorDBm:    wrapperInt32(admin.GetNoiseFloorDbm()),
+			LastSNRdB:        wrapperFloat(admin.GetLastSnrDb()),
+			LastRSSIdBm:      wrapperInt32(admin.GetLastRssiDbm()),
+			TxQueueLen:       wrapperInt32(admin.GetTxQueueLen()),
+
+			UptimeS:     admin.GetUptimeSeconds(),
+			AirtimeMs:   admin.GetAirtimeMs(),
+			RxAirtimeMs: admin.GetRxAirtimeMs(),
+			PacketsSent: admin.GetPacketsSent(),
+			PacketsRecv: admin.GetPacketsReceived(),
+			SentFlood:   admin.GetSentFlood(),
+			SentDirect:  admin.GetSentDirect(),
+			RecvFlood:   admin.GetRecvFlood(),
+			RecvDirect:  admin.GetRecvDirect(),
+			DirectDups:  admin.GetDirectDups(),
+			FloodDups:   admin.GetFloodDups(),
+			FullEvts:    admin.GetFullEvents(),
+			RecvErrors:  admin.GetRecvErrors(),
+		})
+	}
+	return out
+}
+
+// wrapperFloat / wrapperInt32 carry a wrapper's "unset" through to the archive
+// as NULL. GetValue() would flatten it to 0 — the one thing the wrappers exist
+// to prevent.
+func wrapperFloat(v *wrapperspb.DoubleValue) *float64 {
+	if v == nil {
+		return nil
+	}
+	f := v.GetValue()
+	return &f
+}
+
+func wrapperInt32(v *wrapperspb.Int32Value) *int64 {
+	if v == nil {
+		return nil
+	}
+	n := int64(v.GetValue())
+	return &n
 }
 
 // fullKeyCatalog collects every full public key we currently know: this tick's
