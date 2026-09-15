@@ -276,6 +276,100 @@ mesh-specific rules:
   advert firehose refreshes `last_seen_at` without minting a revision. Only a
   node's identity, role, name, location, or status change writes history.
 
+## The mesh poller has TWO inputs, and the rules that keeps honest
+
+Since 2026-09 the same normalizer also merges reports pushed by operator-run
+monitors (`internal/pushingest`, `POST /api/v1/ingest/mesh.repeater`) — a
+Raspberry Pi that logs into repeaters and reads their admin interface. The two
+inputs are not symmetrical and the asymmetry drives every rule below:
+
+| | MQTT adverts | Operator monitor |
+|---|---|---|
+| Evidence | positive only — silence is ambiguous | positive AND negative ("I tried and failed") |
+| Identity | signed, self-declared, with location | a name and a pubkey PREFIX, no coordinates |
+| Carries | signal metrics a listener observed | battery/airtime/counters only the node knows |
+
+**One node is one event.** A monitor identifies a node by a prefix of its public
+key (8 bytes in practice; our ids are the full 32). `Poll` resolves that prefix
+against the catalog of full keys — this tick's adverts, plus the store's existing
+mesh events — on a UNIQUE-match rule, the same rule `meshcore.resolvePath` uses
+for relay hops. Attaching a repeater's battery reading to the WRONG repeater is
+worse than leaving it unattached, so an ambiguous prefix resolves to nothing and
+keeps its own `meshcore:<prefix>` id. When an advert later supplies the full key,
+`supersededPrefixIDs` retires the prefix event via `Superseded` — positive
+evidence naming the successor, the same shape as a standalone fire perimeter
+being adopted by a CAL FIRE incident.
+
+**Precedence is by input class, never by recency.** Identity fields are hashed.
+A rule like "most recent wins" would let two inputs that disagree about a node's
+name flip the winner every tick, minting a revision each time. A signed advert
+beats a monitor's reading; among monitors, configured `priority` then reporter id.
+
+**Reachability is the deliberate exception to "telemetry is not hashed."** A
+repeater going down IS history — "how often is Lilac Park down?" is a question
+the hash-excluded telemetry block can never answer. So `MeshDetail.reachability`
+is hashed, and to make that affordable it is derived from the AGE of the
+monitor's last success (`grid.ingest.unreachableAfter`, 45m) rather than from the
+reporter's own per-poll `online` flag, which flaps on any marginal node. One
+missed poll changes nothing; a sustained outage transitions exactly once.
+
+**Everything else a monitor reports is hash-excluded — which means persisting it
+needs `PollResult.ForceWrite`.** Counters move on every report, so hashing them
+would mint ~288 revisions per node per day. But hash-excluded content is skipped
+by `shouldUpsert`, so without an explicit force the sample would only ever be
+written on the ticks where something ELSE about the node changed — for a fixed
+repeater, never, leaving a battery reading frozen at whatever was current the
+last time anyone renamed it. `shouldPersistTelemetry` marks the id, and coalesces
+on `grid.ingest.telemetryPersistInterval` (10m) for the same reason `TouchSeen`
+coalesces: each forced write is a transaction, and on EFS every commit
+invalidates every reader's page cache. The store side is the `telChanged` branch
+of `refreshEventPlaces`, which rewrites the blob WITHOUT bumping the revision.
+
+**Pushed nodes are not geofenced.** The fence scopes an anonymous global
+broadcast feed; a reporter is an authenticated operator asserting facts about its
+own equipment, and the nodes that most need this path — quiet backbone repeaters
+— are exactly the ones that advertise no location to test. The cost is that a
+push-only node has no geometry and therefore no geometric place attachment, until
+an advert supplies one or the operator configures `placeIds` on the reporter.
+
+**A node the monitor has never reached carries NO telemetry block.** Zeroed
+counters would assert that it has sent and received nothing. "Never read" and
+"read as zero" are different facts.
+
+### The fail-loud rule, generalized
+
+The old rule was "all brokers down ⇒ hard `Poll` error". With two inputs it
+splits, and both halves matter:
+
+- **Every input dead** (no broker connected AND no reporter fresh) ⇒ hard error,
+  exactly as before.
+- **Some input degraded** ⇒ emit what we have, plus `SweepSuppress["meshcore"]`.
+  The nodes missing from this snapshot are missing for OUR reason.
+
+A silent reporter contributes NOTHING to the snapshot (replaying its last set
+would refresh `last_seen_at` and fabricate liveness for nodes nobody has checked
+in hours) while suppressing the sweep (its silence must not read as departure).
+Those two are not in tension — they are the same honesty applied to the two
+different questions.
+
+Suppression is **bounded**: `pushingest` ages a reporter OK → STALE (suppress,
+this is probably a blip) → DEAD (stop suppressing, at `4 × staleAfter`). A
+monitor that never comes back must not freeze the layer's lifecycle forever. The
+bound is acceptable only because `meshcore` is an `expire` source — nodes reach
+EXPIRED, the "we lost track of this" terminus, not the fabricated all-clear that
+RESOLVED would be — and because mesh presence is ambient INFO. **Do not copy this
+bound onto a life-safety layer.**
+
+Each reporter also gets its own **health-only source row** (`SourceIDs` returns
+`meshcore` plus every reporter id), so `/api/v1/sources` answers "is that monitor
+still reporting?" the way it answers that for every other feed. No event is ever
+stored with a reporter as its source: mesh events stay on `meshcore` whichever
+input observed them, because a `source_id` that flipped as inputs came and went
+would both mint a revision and confuse the per-source sweep, which diffs
+`polled[src]` against `prior.ForSource(src)`. A reporter that has never reported
+records an ERROR, not a success — `RecordAttempt(nil)` would paint a monitor that
+was never set up as a healthy feed.
+
 ## Weather-alert headline: deterministic, never AI
 
 `nws.Alert.ShortHeadline` composes `<Event> — <reason>` from the product name

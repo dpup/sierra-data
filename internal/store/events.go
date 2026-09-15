@@ -489,7 +489,26 @@ func (s *Store) refreshEventPlaces(tx *sql.Tx, ev *gridv1.Event) error {
 	enhChanged := ev.GetEnhancement() != nil &&
 		(!proto.Equal(stored.GetEnhancement(), ev.GetEnhancement()) || stored.GetSummary() != ev.GetSummary())
 
-	if !placesChanged && !enhChanged {
+	// Mesh telemetry is the other hash-excluded field, and it is excluded for the
+	// opposite reason from enhancement: not because it is expensive to recompute,
+	// but because it changes on EVERY observation. Battery, airtime and packet
+	// counters hashed would mint a revision per report and drown the node's real
+	// history (renames, relocations, going unreachable) in noise.
+	//
+	// The consequence is that this path is the ONLY thing that can ever persist
+	// them: a telemetry-only change is hash-equal, so it lands here. Without this
+	// branch the stored sample would only ever be refreshed on the ticks where
+	// something else about the node changed — for a fixed repeater, essentially
+	// never — leaving a battery reading frozen at whatever was current the last
+	// time anyone renamed it. Reaching the branch at all requires the scheduler
+	// to take the write path, which it does for PollResult.ForceWrite ids.
+	//
+	// Only when the incoming actually carries telemetry: a poll that omits it
+	// must not erase a stored sample (same rule as the enhancement above).
+	telChanged := ev.GetMesh().GetTelemetry() != nil && stored.GetMesh() != nil &&
+		!proto.Equal(stored.GetMesh().GetTelemetry(), ev.GetMesh().GetTelemetry())
+
+	if !placesChanged && !enhChanged && !telChanged {
 		return nil
 	}
 	if placesChanged {
@@ -503,6 +522,9 @@ func (s *Store) refreshEventPlaces(tx *sql.Tx, ev *gridv1.Event) error {
 	if enhChanged {
 		stored.Enhancement = ev.GetEnhancement()
 		stored.Summary = ev.GetSummary()
+	}
+	if telChanged {
+		stored.GetMesh().Telemetry = ev.GetMesh().GetTelemetry()
 	}
 	newBlob, err := proto.Marshal(stored)
 	if err != nil {

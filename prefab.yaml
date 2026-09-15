@@ -482,6 +482,60 @@ grid:
       disappearance: "expire"
       expireAfter: "2h"
 
+  # Authenticated push ingest — POST /api/v1/ingest/{stream}, the ONE write
+  # surface on an otherwise public, read-only, keyless API. It exists for data no
+  # upstream feed publishes: an operator's monitor logs into MeshCore repeaters
+  # and reads their admin interface, which is the only way to get battery,
+  # airtime and packet counters, and the only input that can report a node it
+  # TRIED to reach and could not.
+  #
+  # SECRETS: only the SHA-256 of a reporter's bearer token appears here. That is
+  # safe to commit in a public repo — a hash of a 256-bit random token cannot be
+  # replayed or reversed — while the token itself lives only on the reporter's
+  # machine. `make ingest-token REPORTER=<id> NAME="..."` mints a token and writes
+  # the entry below for you (re-running with an existing id ROTATES its token and
+  # leaves every other setting alone); send the token to the operator over a
+  # private channel, review `git diff prefab.yaml`, and commit the hash.
+  #
+  # The endpoint is not mounted at all unless a reporter is configured.
+  ingest:
+    # Bounds on one request. Alan's nine-repeater document is ~5 KB.
+    maxBodyBytes: 1048576
+    maxItems: 1000
+    # How long a monitor must be FAILING to reach a node before we call it
+    # UNREACHABLE. Reachability is part of the event's content hash (a repeater
+    # going down is real history), so this must be several reporting cycles —
+    # short enough to flap and every marginal node would mint a revision each way.
+    unreachableAfter: "45m"
+    # Telemetry is hash-excluded, so persisting it costs a transaction that mints
+    # no revision. Coalesced for the same reason the scheduler coalesces
+    # TouchSeen: on a network filesystem every commit invalidates every reader's
+    # page cache. One write per node per window, not one per report.
+    telemetryPersistInterval: "10m"
+    reporters: []
+    # Shape of an entry — `make ingest-token REPORTER=alan-pi` writes this for you:
+    # reporters:
+    #   - id: alan-pi
+    #     name: "Alan's repeater monitor"
+    #     tokenSha256: "<64 hex characters; NEVER the token itself>"
+    #     streams: ["mesh.repeater"]
+    #     # Silence past this degrades the reporter's row on /api/v1/sources AND
+    #     # suppresses the mesh disappearance sweep — its nodes are then missing
+    #     # for OUR reason, and absence must not read as departure. Suppression is
+    #     # bounded (4x this) so a monitor that never returns cannot freeze the
+    #     # layer's lifecycle forever.
+    #     staleAfter: "30m"
+    #     minInterval: "30s"
+    #     # Breaks ties when two monitors disagree about a node's identity. A
+    #     # CONFIGURED precedence, deliberately not "most recent wins": identity
+    #     # is hashed, so a rule that could flip per tick would mint revisions.
+    #     priority: 10
+    #     # Optional. Place attachment is otherwise geometric, and a report
+    #     # carries no coordinates, so a node known only to a monitor attaches to
+    #     # nothing until an advert supplies a location. Setting this attaches its
+    #     # nodes outright (unioned with any geometric matches).
+    #     # placeIds: ["area:ebbetts-pass"]
+
   # MeshCore mesh-node presence source. Subscribes to community MQTT bridges,
   # several for resilience; a node heard on more than one collapses to a single
   # event. Disabled by default: MeshCore has no official broker, and read/

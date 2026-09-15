@@ -84,6 +84,23 @@ type PollResult struct {
 	// presence upserts, never touching the revisioned event path. See
 	// docs/mesh-topology-design.md.
 	MeshObservations []store.MeshObservation
+	// ForceWrite lists event ids whose HASH-EXCLUDED content changed this tick
+	// and must be persisted even though the content hash did not move.
+	//
+	// The scheduler skips the write path entirely for hash-equal events
+	// (shouldUpsert) — that skip is what keeps a 400-node mesh tick from opening
+	// 400 pointless transactions. But some content is deliberately outside the
+	// hash precisely BECAUSE it changes constantly and must not mint revisions:
+	// mesh telemetry is the case this was added for. Such a field would otherwise
+	// be written only on the ticks where something else about the event changed,
+	// which for a fixed repeater is close to never — so a battery reading would
+	// sit frozen at whatever was current the last time someone renamed the node.
+	//
+	// Listing an id here writes the blob WITHOUT minting a revision (the store's
+	// hash-equal refresh path). Populate it sparingly and on a coalesced cadence,
+	// not every tick: each id is a transaction, and on a network filesystem each
+	// commit invalidates every reader's page cache.
+	ForceWrite []string
 }
 
 // NewEvent builds an event with the envelope fields every normalizer sets.

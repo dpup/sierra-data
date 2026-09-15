@@ -1,5 +1,5 @@
 # Live Data API Server - Build, Test, and Deployment Tasks
-.PHONY: test-pge build test proto proto-tools clean server tools site site-modules site-ensure site-install site-dev site-shots site-shots-mock check-wiring run dev lint fmt docker docker-build docker-run docker-run-dev docker-push docker-clean deploy install help test-meshcore
+.PHONY: ingest-token test-pge build test proto proto-tools clean server tools site site-modules site-ensure site-install site-dev site-shots site-shots-mock check-wiring run dev lint fmt docker docker-build docker-run docker-run-dev docker-push docker-clean deploy install help test-meshcore
 
 # Go parameters
 GOCMD=go
@@ -266,6 +266,34 @@ test-meshcore: $(TEST_MESHCORE_BINARY)
 # these undocumented endpoints show instead of an error.
 test-pge: $(TEST_PGE_BINARY)
 	./$(TEST_PGE_BINARY) $(if $(BOUNDS),--bounds=$(BOUNDS)) $(if $(JSON),--json)
+
+# Mint a push-ingest credential for a reporter (see internal/pushingest).
+#
+# Prints the TOKEN — give it to the operator over a private channel; it goes on
+# their machine and nowhere else — and writes only its SHA-256 HASH into
+# prefab.yaml. The hash is safe to commit (it cannot be replayed or reversed),
+# which is the whole reason the config stores it rather than the token.
+#
+#   make ingest-token                        # just print a pair, change nothing
+#   make ingest-token REPORTER=alan-pi       # add it to prefab.yaml
+#   make ingest-token REPORTER=alan-pi NAME="Alan's repeater monitor"
+#
+# Re-running with an existing id ROTATES that reporter's token in place, leaving
+# every other setting on the entry alone. Review with `git diff prefab.yaml`.
+#
+# It is a Go program rather than a shell one-liner for two reasons: the YAML
+# edit has to preserve this file's comments (it is half prose), and `openssl` +
+# `shasum` are not portable — shasum is absent on many Linux images, sha256sum
+# on macOS. crypto/rand and crypto/sha256 are neither.
+# Values are double-quoted because NAME routinely contains spaces and an
+# apostrophe ("Alan's repeater monitor"); make substitutes them into the recipe
+# textually, so unquoted they reach /bin/sh as broken syntax.
+ingest-token:
+	@$(GOCMD) run ./$(CMD_DIR)/ingest-token \
+		$(if $(REPORTER),-reporter="$(REPORTER)") \
+		$(if $(NAME),-name="$(NAME)") \
+		$(if $(STREAMS),-streams="$(STREAMS)") \
+		$(if $(CONFIG),-config="$(CONFIG)")
 
 # Validate configuration without API calls
 test-config:
@@ -561,6 +589,10 @@ help:
 	@echo "  site-dev    - Run the Astro dev server (hot reload)"
 	@echo "  site-shots [BASE_URL=url] [LABEL=tag] - Screenshot + layout metrics of a running site (Playwright)"
 	@echo "  clean       - Clean build artifacts"
+	@echo ""
+	@echo "Operations targets:"
+	@echo "  ingest-token [REPORTER=id] [NAME=\"...\"] - Mint a push-ingest credential;"
+	@echo "                with REPORTER it writes the hash into prefab.yaml (rotates if it exists)"
 	@echo ""
 	@echo "Testing targets:"
 	@echo "  test        - Run full test suite (unit tests, works offline)"

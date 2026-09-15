@@ -14,6 +14,73 @@ throughout; errors are gRPC-standard `{code, codeName, message, details}`). The
 by a snake_case `/v1` surface on 2026-07-05, which was in turn folded back onto the
 proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 
+## 2026-09-15
+
+### New: `POST /api/v1/ingest/{stream}` — authenticated push ingest, and operator-reported mesh telemetry
+
+**Additive. No existing field changes shape or type.** The first WRITE endpoint
+on `/api/v1`, plus the data it carries.
+
+Until now the only input for the `MESH` layer was the community MeshCore MQTT
+bridges, which see only what a node broadcasts. An operator-run monitor that logs
+into a repeater's admin interface can report things no broadcast feed contains —
+battery, temperature, uptime, airtime, packet counters — and, uniquely, can
+report a node it TRIED to reach and could not.
+
+- **`POST /api/v1/ingest/{stream}`** accepts a report from a configured reporter.
+  `Authorization: Bearer <token>` is required; the token is issued per reporter by
+  the operator (only its SHA-256 hash is stored in this repository). Returns `202`
+  with `{reporterId, stream, accepted, warnings, receivedAt}` — `202`, not `200`,
+  because the report is validated and buffered, not yet in the store; the next
+  ingest tick merges it. Errors use the same `{code, message}` shape as the rest
+  of the surface: `401` unknown token, `403` stream not granted, `404` unknown
+  stream, `413` body too large, `429` reporting faster than the configured
+  minimum, `400` malformed. The endpoint is not mounted unless a reporter is
+  configured, and the CORS policy (`corsAllowMethods: [GET]`) leaves it
+  unreachable from a cross-origin browser page.
+  - Stream `mesh.repeater` (`schema_version: 1`) carries `{schema_version,
+    generated_at, repeaters[]}`; each repeater has an `id` (hex public key or a
+    prefix of one), `name`, `last_attempt`/`last_success`, and the metrics listed
+    below. **A report is the reporter's COMPLETE current set** — a node omitted
+    from a report is treated as no longer monitored.
+- **`mesh.reachability`** on `MESH` events and `properties.mesh.reachability` on
+  the `mesh_node` layer: `"REACHABLE" | "UNREACHABLE"`. **A node no monitor
+  watches has neither**, and must not be rendered as one that is down — the two
+  surfaces spell that third state differently, following each one's existing
+  convention:
+  - on `/api/v1/events` the field is always present (the gateway emits
+    unpopulated fields) and reads `"MESH_REACHABILITY_UNSPECIFIED"`;
+  - on the `.geojson` layer the property is **omitted**.
+  This field IS part of the event's content hash, so a repeater going unreachable
+  creates a revision and shows up in `/api/v1/events/{id}/history`.
+- **`mesh.telemetry.admin`** on `MESH` events: the last sample an operator monitor
+  read off the node (`reporterId`, `reportedAt`, `lastSuccessAt`,
+  `lastAttemptAt`, `batteryVolts`, `batteryPercent`, `batteryPercentSource`,
+  `temperatureC`, `humidity`, `pressure`, `noiseFloorDbm`, `lastSnrDb`,
+  `lastRssiDbm`, `txQueueLen`, `uptimeSeconds`, `airtimeMs`, `rxAirtimeMs`,
+  `packetsSent`, `packetsReceived`, `sentFlood`, `sentDirect`, `recvFlood`,
+  `recvDirect`, `directDups`, `floodDups`, `fullEvents`, `recvErrors`). The
+  `mesh_node` map layer carries a readable subset as `properties.mesh.admin`.
+  - **Gauges are absent rather than zero when unread.** A monitor that could not
+    read a humidity sensor omits the field; `0` always means a real measurement.
+    A node the monitor has NEVER reached carries no `admin` block at all, rather
+    than a row of zeroed counters.
+  - **Telemetry is excluded from the event's content hash**, so a monitor
+    reporting every few minutes refreshes these values without creating a
+    revision per report. Consumers polling `/api/v1/events/{id}` see fresh values;
+    consumers walking `/history` see only meaningful changes.
+- **A node reported by a monitor and heard over MQTT is ONE event.** Monitors
+  identify a node by a prefix of its public key; the prefix is resolved against
+  the known node catalog, so both inputs converge on the same event id. While a
+  node is known only by prefix its id is `meshcore:<prefix>`; once an advert
+  supplies the full key the event id becomes `meshcore:<full key>` and the
+  prefix-keyed event is retired as superseded. **Do not treat a mesh event id as
+  permanent for a node not yet heard over MQTT.**
+- **`GET /api/v1/sources` gains one row per reporter** (e.g. `alan-pi`), with the
+  same `status`/`lastSuccessAt`/`lastError` health shape as every other feed, so a
+  monitor that goes quiet is visible. Mesh events themselves stay attributed to
+  the `meshcore` source whichever input observed them.
+
 ## 2026-09-02
 
 ### `GET /api/v1/sources`: `homepageUrl` populated, source `name`s disambiguated

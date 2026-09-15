@@ -488,6 +488,8 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
       <tr><td class="mono">caltrans</td><td class="wrap">Caltrans lane closures (road_incident events); also attributed for chain-control conditions</td><td class="mono">chp:</td><td class="mono">5m</td><td class="wrap"><code>resolve</code></td></tr>
       <tr><td class="mono">pge</td><td class="wrap">PG&amp;E electric outages (planned and unplanned), affected-area polygons joined onto the reported point</td><td class="mono">pge:</td><td class="mono">5m</td><td class="wrap"><code>resolve</code> — active-only feed; missing ⇒ RESOLVED</td></tr>
       <tr><td class="mono">psps</td><td class="wrap">PG&amp;E Public Safety Power Shutoff coverage; one event per de-energization window, <strong>empty outside an event</strong></td><td class="mono">psps:</td><td class="mono">5m</td><td class="wrap"><code>resolve</code></td></tr>
+      <tr><td class="mono">meshcore</td><td class="wrap">Mesh-node presence, from community MeshCore MQTT bridges <em>and</em> operator-run monitors (§8). Every mesh event stays on this source whichever input observed it.</td><td class="mono">meshcore:</td><td class="mono">60s</td><td class="wrap"><code>expire</code> — a mesh has no goodbye packet, so silence is not proof of absence</td></tr>
+      <tr><td class="mono"><em>reporter ids</em></td><td class="wrap">One row per configured push reporter (§8), e.g. <code>alan-pi</code>. <strong>Health only</strong> — no event is attributed to a reporter; the row answers "is that monitor still reporting?"</td><td class="mono">—</td><td class="mono">—</td><td class="wrap">—</td></tr>
     </tbody>
   </table></div>
   <p class="small muted">
@@ -507,6 +509,136 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
   </ul>
   <div class="live-examples">
     <a href="/api/v1/sources">/api/v1/sources</a>
+  </div>
+</section>
+
+<!-- ================================================================ -->
+<section id="push-ingest">
+  <h2>8. Push ingest (operator-reported data)</h2>
+  <p>
+    <strong>This is the only write endpoint on the API, and the only one that
+    requires a credential.</strong> Everything else on <code class="inline">/api/v1</code>
+    is public, read-only and keyless; nothing below changes that. It exists for
+    data no upstream feed publishes — an operator's monitor that logs into
+    MeshCore repeaters and reads their admin interface, which is the only way to
+    obtain battery, airtime and packet counters, and the only input that can
+    report a node it <em>tried</em> to reach and could not.
+  </p>
+  <p class="endpoint-head"><span class="chip-get" style="--signal:var(--alert)">POST</span> <code class="mono">/api/v1/ingest/{stream}</code></p>
+  <p>
+    Requires <code class="inline">Authorization: Bearer &lt;token&gt;</code>. Tokens
+    are issued per reporter by the operator; only a SHA-256 hash of the token is
+    stored in configuration, so the credential itself never appears in this
+    project's public repository. The endpoint is not mounted at all unless a
+    reporter is configured, and the CORS policy
+    (<code class="inline">corsAllowMethods: [GET]</code>) leaves it unreachable
+    from a cross-origin browser page.
+  </p>
+  <p>
+    Success is <code class="inline">202 Accepted</code>, not
+    <code class="inline">200</code>: the report has been authenticated and
+    validated, but it is not yet in the store — the next ingest tick merges it.
+    The response is
+    <code class="inline">{reporterId, stream, accepted, warnings, receivedAt}</code>.
+    <strong>A malformed entry is a warning, not a rejection</strong> — one repeater
+    with a typo'd id must not cost the operator the other eight — while a
+    malformed envelope rejects the whole request.
+  </p>
+  <div class="table-wrap"><table class="data-table">
+    <thead><tr><th>Status</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">202</td><td class="wrap">Accepted and buffered. <code>warnings[]</code> lists entries that were skipped.</td></tr>
+      <tr><td class="mono">401</td><td class="wrap">Missing or unknown token. Deliberately carries no detail.</td></tr>
+      <tr><td class="mono">403</td><td class="wrap">Valid token, but this reporter is not granted that stream.</td></tr>
+      <tr><td class="mono">404</td><td class="wrap">Unknown stream.</td></tr>
+      <tr><td class="mono">413</td><td class="wrap">Body over the configured limit.</td></tr>
+      <tr><td class="mono">429</td><td class="wrap">Reporting faster than the reporter's configured minimum interval; see <code>Retry-After</code>.</td></tr>
+      <tr><td class="mono">400</td><td class="wrap">Malformed JSON, unsupported <code>schema_version</code>, or too many entries.</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>Stream <code class="inline">mesh.repeater</code> (schema_version 1)</h3>
+  <pre class="code">POST /api/v1/ingest/mesh.repeater
+Authorization: Bearer &lt;token&gt;
+
+{
+  "schema_version": 1,
+  "generated_at": "2026-09-15T00:23:32+00:00",
+  "repeaters": [
+    {
+      "id": "de0715314cfa9b5e",          // public key, or a prefix of one (≥8 hex)
+      "name": "SIERRA Arnold Summit",
+      "last_attempt": 1789431672,         // unix seconds
+      "last_success": 1789431672,         // null if never reached
+      "battery_voltage": 4.14, "battery_percent": 97.0,
+      "battery_percent_source": "estimated",
+      "temperature_c": 37.0, "humidity": null, "pressure": null,
+      "uptime_s": 2615083, "airtime_ms": 49646, "rx_airtime_ms": 211238,
+      "noise_floor_dbm": -116, "last_rssi_dbm": -88, "last_snr_db": 12.5,
+      "tx_queue_len": 0,
+      "nb_sent": 150305, "nb_recv": 649331,
+      "sent_flood": 149984, "sent_direct": 321,
+      "recv_flood": 642043, "recv_direct": 6702,
+      "direct_dups": 53, "flood_dups": 30331,
+      "full_evts": 0, "recv_errors": 240197,
+      "online": true
+    }
+  ]
+}</pre>
+  <ul>
+    <li><strong>A report is the reporter's COMPLETE current set.</strong> A node
+      omitted from a report is treated as no longer monitored, the same contract a
+      poller's result has with the disappearance sweep. Send every node you watch,
+      every time.</li>
+    <li><strong>Unread values must be <code class="inline">null</code>, never
+      <code class="inline">0</code>.</strong> A null gauge is published as absent; a
+      zero is published as a measurement. A node that has never been reached
+      (<code class="inline">last_success: null</code>) is published with no
+      telemetry block at all rather than a row of zeroed counters.</li>
+    <li><strong>Timestamps are clamped to server time.</strong> A stamp in the
+      future is treated as "now" — a monitor's clock is not ours.</li>
+    <li>Reposting an identical report is harmless: entries are keyed by node, so
+      a retry after a network failure overwrites rather than duplicates.</li>
+  </ul>
+
+  <h3>How it surfaces</h3>
+  <ul>
+    <li><strong>One event per node, not one per input.</strong> A node reported by a
+      monitor and heard over MQTT resolves to the same event id — a reported prefix
+      is matched against the known node catalog. While a node is known only by
+      prefix its id is <code class="inline">meshcore:{prefix}</code>; once an advert
+      supplies the full key, the event id becomes
+      <code class="inline">meshcore:{full key}</code> and the prefix-keyed event is
+      retired as superseded. <strong>Don't treat a mesh event id as permanent for a
+      node not yet heard over MQTT.</strong></li>
+    <li><strong><code class="inline">mesh.reachability</code></strong> —
+      <code class="inline">REACHABLE</code> | <code class="inline">UNREACHABLE</code>.
+      A node <strong>no monitor watches</strong> has neither, and must not render as
+      one that is down: on <code class="inline">/api/v1/events</code> it reads
+      <code class="inline">MESH_REACHABILITY_UNSPECIFIED</code> (the gateway emits
+      unpopulated fields), and on the <code class="inline">.geojson</code> layer the
+      property is omitted. It is
+      derived from the age of the last success, not from the reporter's
+      <code class="inline">online</code> flag, so a single missed poll does not flip
+      it. It is part of the event's content hash, so a transition appears in
+      <code class="inline">/api/v1/events/{id}/history</code>.</li>
+    <li><strong><code class="inline">mesh.telemetry.admin</code></strong> — the last
+      sample, with <code class="inline">reporterId</code> and
+      <code class="inline">lastSuccessAt</code>. It is <em>excluded</em> from the
+      content hash, so frequent reporting refreshes these values without creating a
+      revision per report: poll <code class="inline">events/{id}</code> for current
+      values, and expect <code class="inline">/history</code> to show only
+      meaningful changes.</li>
+    <li>A node known only to a monitor has <strong>no geometry</strong> — a report
+      carries no coordinates and the Grid does not invent them — so it appears in
+      <code class="inline">/api/v1/events?layer=mesh</code> and, where the operator
+      has configured a place attachment, in place-scoped views, but its
+      <code class="inline">mesh_node</code> map feature has
+      <code class="inline">"geometry": null</code> until an advert supplies a
+      position.</li>
+  </ul>
+  <div class="live-examples">
+    <a href="/api/v1/events?layer=mesh">/api/v1/events?layer=mesh</a>
   </div>
 </section>
 
