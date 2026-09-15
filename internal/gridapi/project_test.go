@@ -570,7 +570,7 @@ func TestProjectEvents_Power_PSPS(t *testing.T) {
 }
 
 // The reachability enum is rendered by NAME on the wire, and the three states
-// are documented to external reporters (docs/push-ingest-reporter-guide.md) as
+// are documented to external reporters (docs/mesh-reporter-guide.md) as
 // the contract their monitor's output produces. Pin the exact strings.
 //
 // The third state is the one worth pinning: a node NO monitor watches is not

@@ -176,13 +176,16 @@ func TestAgainstTheRealPrefabYAML(t *testing.T) {
 	assert.Equal(t, actionAdded, act)
 	assert.Contains(t, out, "      - id: "+id)
 
-	// The commented example block must survive verbatim and stay AFTER the entry.
-	// Anchored on the commented placeholder line rather than on the prose above
-	// it: the prose is documentation and gets reworded, while a real entry
-	// landing inside the commented block is the actual failure to catch.
-	placeholder := `    #     tokenSha256: "<64 hex characters; NEVER the token itself>"`
-	assert.Contains(t, out, placeholder)
-	assert.Less(t, strings.Index(out, "      - id: "+id), strings.Index(out, placeholder))
+	// The entry must land inside the reporters list, not spill past the end of
+	// the ingest block into the section that follows it.
+	const nextSection = "  # MeshCore mesh-node presence source."
+	require.Contains(t, out, nextSection)
+	assert.Less(t, strings.Index(out, "      - id: "+id), strings.Index(out, nextSection))
+
+	// Comments around the edit survive. (The stronger case — an entry spliced
+	// into a COMMENTED-OUT example — is covered by TestAddToEmptyList, whose
+	// fixture still carries one.)
+	assert.Contains(t, out, "  # Authenticated push ingest")
 
 	// Nothing outside the reporters list moved: same line count plus the entry,
 	// and the sections on either side are intact.

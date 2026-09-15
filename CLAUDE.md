@@ -432,7 +432,7 @@ gateway's `EmitUnpopulated` marshaler.
   and the mesh poller merges on its next tick, so single-writer discipline holds.
   `corsAllowMethods: [GET]` is what keeps it browser-unreachable cross-origin;
   never add POST there. See `internal/pushingest` and `internal/ingest/CLAUDE.md`;
-  **`docs/push-ingest-reporter-guide.md` is the shareable setup guide** to hand an
+  **`docs/mesh-reporter-guide.md` is the shareable setup guide** to hand an
   operator who is wiring up a monitor (payload, headers, rules, error handling).
 
 **Summary + map:**
