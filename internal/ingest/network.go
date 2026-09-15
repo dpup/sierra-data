@@ -402,6 +402,9 @@ func (n *NetworkNormalizer) buildEvent(m *mergedNode, now time.Time, prior Prior
 	}
 
 	ev.Provenance = n.meshProvenance(brokers)
+	if len(brokers) == 0 {
+		keepPriorAttribution(ev, prior)
+	}
 	ev.Detail = &gridv1.Event_Mesh{Mesh: &gridv1.MeshDetail{
 		PublicKey:    m.key,
 		NodeType:     nodeType,
@@ -732,6 +735,32 @@ func (n *NetworkNormalizer) meshProvenance(brokers []string) *gridv1.Provenance 
 		sourceURL = meshMapURL
 	}
 	return NewProvenance(meshSourceID, meshSourceName, attribution, sourceURL)
+}
+
+// keepPriorAttribution holds on to the bridge credit when this tick did not
+// learn which broker heard the node.
+//
+// meshProvenance derives `attribution` and `source_url` from the brokers in THIS
+// tick's snapshot, and both are hashed. A node rehydrated from the store on boot
+// has no broker until its next advert — Seed carries pubkey, role, name,
+// location and reconstructed cadence, but not the broker set — so after every
+// restart a repeater on a 12-hour cycle sat attributed to nobody for hours and
+// then flipped back when it was next heard. Two revisions per node per deploy,
+// which means the churn scaled with how often we ship: measured across 45 live
+// nodes, 505 attribution flips, 11.2 each, 26 of them inside one minute.
+//
+// Not knowing which bridge heard a node is missing information, not a change of
+// source — the fourth instance of the rule the wildfire perimeter, the PG&E
+// footprint and the mesh position all follow. Only the two fields that name the
+// bridge are carried: `fetched_at` stays FRESH because we did observe the node
+// this tick, we simply cannot say through whom.
+func keepPriorAttribution(ev *gridv1.Event, prior Prior) {
+	prev := priorByID(prior, ev.GetId()).GetProvenance()
+	if prev.GetAttribution() == "" {
+		return
+	}
+	ev.Provenance.Attribution = prev.GetAttribution()
+	ev.Provenance.SourceUrl = prev.GetSourceUrl()
 }
 
 // geofence returns the bboxes an ADVERTISED node's location must fall within.

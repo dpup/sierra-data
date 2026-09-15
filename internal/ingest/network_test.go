@@ -250,3 +250,59 @@ func reheardAt(t *testing.T, lat, lng float64, prev *gridv1.Event) *gridv1.Event
 	require.Len(t, res.Events, 1)
 	return res.Events[0]
 }
+
+// A restart must not re-attribute the whole mesh.
+//
+// The registry is rehydrated from the store on boot with everything about a node
+// EXCEPT which broker heard it, so a seeded node's provenance used to fall back
+// to the generic credit until its next advert — hours, for a 12-hour repeater —
+// and flip back afterwards. Both fields are hashed, so that was two revisions
+// per node per deploy: 505 attribution flips across 45 live nodes, 26 of them in
+// a single minute.
+func TestSeededNodeKeepsItsBrokerAttribution(t *testing.T) {
+	cfg := testConfig()
+	cfg.Grid.Meshcore.Brokers = []config.MeshcoreBroker{{
+		URL: "wss://mqtt.gomesh.dev:443/mqtt", Operator: "LetsMesh",
+		OperatorURL: "https://analyzer.letsmesh.net/about",
+	}}
+	node := meshcore.NodeState{
+		PubKey: "aa11bb22", Role: meshcore.RoleRepeater, Name: "Ridge",
+		HasLocation: true, Lat: 38.14, Lng: -120.45,
+		Brokers: []string{"wss://mqtt.gomesh.dev:443/mqtt"},
+	}
+
+	// Heard live: the bridge operator is credited.
+	heard := &fakeMeshRegistry{connected: 1, nodes: []meshcore.NodeState{node}}
+	res, err := NewNetworkNormalizer(cfg, heard, nil).Poll(testCtx(), nil)
+	require.NoError(t, err)
+	require.Len(t, res.Events, 1)
+	stored := res.Events[0]
+	assert.Contains(t, stored.GetProvenance().GetAttribution(), "LetsMesh")
+	baseHash := store.ContentHash(stored)
+
+	// After a restart the same node is in the snapshot from the seed, with no
+	// broker recorded yet. The credit rides forward, so the hash does not move.
+	seeded := node
+	seeded.Brokers = nil
+	reboot := &fakeMeshRegistry{connected: 1, nodes: []meshcore.NodeState{seeded}}
+	res, err = NewNetworkNormalizer(cfg, reboot, nil).
+		Poll(testCtx(), &fakePrior{events: []*gridv1.Event{stored}})
+	require.NoError(t, err)
+	require.Len(t, res.Events, 1)
+	after := res.Events[0]
+	assert.Equal(t, stored.GetProvenance().GetAttribution(), after.GetProvenance().GetAttribution())
+	assert.Equal(t, stored.GetProvenance().GetSourceUrl(), after.GetProvenance().GetSourceUrl())
+	assert.Equal(t, baseHash, store.ContentHash(after), "a restart is not a change of source")
+	// fetchedAt stays fresh: we DID observe the node, we just cannot say through
+	// which bridge.
+	assert.True(t, after.GetProvenance().GetFetchedAt().AsTime().
+		After(stored.GetProvenance().GetFetchedAt().AsTime().Add(-time.Second)))
+
+	// A node nobody has ever credited gets the generic attribution, not a
+	// borrowed one.
+	fresh := &fakeMeshRegistry{connected: 1, nodes: []meshcore.NodeState{seeded}}
+	res, err = NewNetworkNormalizer(cfg, fresh, nil).Poll(testCtx(), &fakePrior{})
+	require.NoError(t, err)
+	require.Len(t, res.Events, 1)
+	assert.NotContains(t, res.Events[0].GetProvenance().GetAttribution(), "LetsMesh")
+}

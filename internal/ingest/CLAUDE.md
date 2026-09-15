@@ -112,6 +112,15 @@ The same rule covers geometry, which is hashed: `combineGeometry` sorts its
 members because ArcGIS promises no row ordering, and an order flip would
 otherwise mint a revision on an event that never changed.
 
+**A restart is not a change of source.** `meshProvenance` derives the hashed
+`attribution` and `source_url` from the brokers in the current snapshot, and
+`Registry.Seed` rehydrates everything about a node except its broker set — so
+every deploy re-attributed each not-yet-re-heard node to nobody, then back when
+it next adverted. Measured across 45 live nodes: 505 attribution flips, 11.2 per
+node, 26 inside one minute. `keepPriorAttribution` carries the two naming fields
+forward when this tick learned no broker; `fetched_at` stays fresh, because we
+did observe the node, we just cannot say through whom.
+
 **GPS noise is not movement.** A mesh node's geometry is hashed (movement is
 meaningful), and a node's self-reported fix wanders tens of metres between
 adverts while it sits still — so every wobble was a revision, and one stationary
