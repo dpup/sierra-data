@@ -5,6 +5,11 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"google.golang.org/protobuf/types/known/timestamppb"
+	"google.golang.org/protobuf/types/known/wrapperspb"
+
+	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
 )
 
 // MeshStream is the stream name for operator-monitored MeshCore repeaters:
@@ -48,44 +53,16 @@ type MeshNodeReport struct {
 	LastAttempt time.Time // monitor's last attempt on this node
 	LastSuccess time.Time // monitor's last successful read; zero if never
 
-	// HasSample is true when LastSuccess is set and the report carried real
-	// metrics. A node the monitor has never reached carries NO sample at all
-	// rather than a row of zeroes — "never read" and "read as zero" are
-	// different facts and a counter of 0 would assert the second.
-	HasSample bool
-	Telemetry AdminTelemetry
-}
-
-// AdminTelemetry is one sample read off the node's admin interface. Gauges are
-// pointers so a metric the device did not report (a repeater with no humidity
-// sensor) stays absent instead of becoming a plausible-looking zero. Counters
-// are plain: they are only ever populated alongside HasSample, where zero is a
-// real reading.
-type AdminTelemetry struct {
-	BatteryVolts         *float64
-	BatteryPercent       *float64
-	BatteryPercentSource string
-	TemperatureC         *float64
-	Humidity             *float64
-	Pressure             *float64
-	NoiseFloorDBm        *int32
-	LastSNRdB            *float64
-	LastRSSIdBm          *int32
-	TxQueueLen           *int32
-
-	UptimeSeconds   int64
-	AirtimeMs       int64
-	RxAirtimeMs     int64
-	PacketsSent     int64
-	PacketsReceived int64
-	SentFlood       int64
-	SentDirect      int64
-	RecvFlood       int64
-	RecvDirect      int64
-	DirectDups      int64
-	FloodDups       int64
-	FullEvents      int64
-	RecvErrors      int64
+	// Telemetry is the sample read off the node, or NIL when the monitor has
+	// never reached it. Nil rather than a zeroed struct is the point: "never
+	// read" and "read as zero" are different facts, and a row of zero counters
+	// would assert the second.
+	//
+	// It is the proto message itself rather than an intermediate struct. The
+	// wire shape belongs to the reporter and the proto is our normalized one;
+	// a third representation in between bought nothing but two copies of every
+	// field. Treat it as immutable once buffered — the normalizer only reads it.
+	Telemetry *gridv1.MeshAdminTelemetry
 }
 
 // MeshSnapshot is what the normalizer reads each tick.
@@ -207,32 +184,7 @@ func (r *Registry) ingestMesh(rep *reporter, body []byte, maxItems int) (accepte
 		// this gate a never-reached node (every metric null) would be published
 		// with zeroed counters, asserting that it has sent and received nothing.
 		if !nr.LastSuccess.IsZero() && hasAnyMetric(in) {
-			nr.HasSample = true
-			nr.Telemetry = AdminTelemetry{
-				BatteryVolts:         in.BatteryVoltage,
-				BatteryPercent:       in.BatteryPercent,
-				BatteryPercentSource: strings.TrimSpace(in.BatteryPercentSource),
-				TemperatureC:         in.TemperatureC,
-				Humidity:             in.Humidity,
-				Pressure:             in.Pressure,
-				NoiseFloorDBm:        in.NoiseFloorDBm,
-				LastSNRdB:            in.LastSNRdB,
-				LastRSSIdBm:          in.LastRSSIdBm,
-				TxQueueLen:           in.TxQueueLen,
-				UptimeSeconds:        deref(in.UptimeS),
-				AirtimeMs:            deref(in.AirtimeMs),
-				RxAirtimeMs:          deref(in.RxAirtimeMs),
-				PacketsSent:          deref(in.NbSent),
-				PacketsReceived:      deref(in.NbRecv),
-				SentFlood:            deref(in.SentFlood),
-				SentDirect:           deref(in.SentDirect),
-				RecvFlood:            deref(in.RecvFlood),
-				RecvDirect:           deref(in.RecvDirect),
-				DirectDups:           deref(in.DirectDups),
-				FloodDups:            deref(in.FloodDups),
-				FullEvents:           deref(in.FullEvts),
-				RecvErrors:           deref(in.RecvErrors),
-			}
+			nr.Telemetry = adminProto(in, nr)
 		}
 		set[id] = nr
 	}
@@ -282,6 +234,68 @@ func (r *Registry) MeshReports() MeshSnapshot {
 		}
 	}
 	return snap
+}
+
+// adminProto maps one reporter's wire fields onto the canonical telemetry
+// message. This is the ONLY place the two vocabularies meet — the reporter's
+// names ("nb_sent") on one side, ours ("packets_sent") on the other — which is
+// what a per-stream schema_version is for.
+//
+// Gauges become wrapper types so a metric the device did not report (a repeater
+// with no humidity sensor) stays ABSENT rather than becoming a plausible zero.
+// Counters are plain: they are only set alongside a successful read, where zero
+// is a real measurement.
+func adminProto(in meshRepeaterIn, nr MeshNodeReport) *gridv1.MeshAdminTelemetry {
+	a := &gridv1.MeshAdminTelemetry{
+		ReporterId:           nr.ReporterID,
+		BatteryPercentSource: strings.TrimSpace(in.BatteryPercentSource),
+		BatteryVolts:         doubleValue(in.BatteryVoltage),
+		BatteryPercent:       doubleValue(in.BatteryPercent),
+		TemperatureC:         doubleValue(in.TemperatureC),
+		Humidity:             doubleValue(in.Humidity),
+		Pressure:             doubleValue(in.Pressure),
+		NoiseFloorDbm:        int32Value(in.NoiseFloorDBm),
+		LastSnrDb:            doubleValue(in.LastSNRdB),
+		LastRssiDbm:          int32Value(in.LastRSSIdBm),
+		TxQueueLen:           int32Value(in.TxQueueLen),
+		UptimeSeconds:        deref(in.UptimeS),
+		AirtimeMs:            deref(in.AirtimeMs),
+		RxAirtimeMs:          deref(in.RxAirtimeMs),
+		PacketsSent:          deref(in.NbSent),
+		PacketsReceived:      deref(in.NbRecv),
+		SentFlood:            deref(in.SentFlood),
+		SentDirect:           deref(in.SentDirect),
+		RecvFlood:            deref(in.RecvFlood),
+		RecvDirect:           deref(in.RecvDirect),
+		DirectDups:           deref(in.DirectDups),
+		FloodDups:            deref(in.FloodDups),
+		FullEvents:           deref(in.FullEvts),
+		RecvErrors:           deref(in.RecvErrors),
+	}
+	if !nr.ReportedAt.IsZero() {
+		a.ReportedAt = timestamppb.New(nr.ReportedAt)
+	}
+	if !nr.LastSuccess.IsZero() {
+		a.LastSuccessAt = timestamppb.New(nr.LastSuccess)
+	}
+	if !nr.LastAttempt.IsZero() {
+		a.LastAttemptAt = timestamppb.New(nr.LastAttempt)
+	}
+	return a
+}
+
+func doubleValue(v *float64) *wrapperspb.DoubleValue {
+	if v == nil {
+		return nil
+	}
+	return wrapperspb.Double(*v)
+}
+
+func int32Value(v *int32) *wrapperspb.Int32Value {
+	if v == nil {
+		return nil
+	}
+	return wrapperspb.Int32(*v)
 }
 
 // validNodeID accepts an even-length lowercase hex string within the bounds a

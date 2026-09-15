@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/timestamppb"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
 	"github.com/dpup/sierra-data/internal/clients/meshcore"
@@ -60,19 +61,20 @@ func report(nodeID, name string, success time.Time, mutate ...func(*pushingest.M
 		ReportedAt:  pollNow,
 		LastAttempt: pollNow,
 		LastSuccess: success,
-		HasSample:   !success.IsZero(),
-		Telemetry: pushingest.AdminTelemetry{
-			BatteryVolts: ptr(4.14),
+	}
+	if !success.IsZero() {
+		r.Telemetry = &gridv1.MeshAdminTelemetry{
+			ReporterId:   "alan-pi",
+			ReportedAt:   tsProto(pollNow),
+			BatteryVolts: wrapperspb.Double(4.14),
 			PacketsSent:  150305,
-		},
+		}
 	}
 	for _, m := range mutate {
 		m(&r)
 	}
 	return r
 }
-
-func ptr[T any](v T) *T { return &v }
 
 func pushNormalizer(t *testing.T, reg MeshRegistry, snap pushingest.MeshSnapshot) *NetworkNormalizer {
 	t.Helper()
@@ -256,7 +258,7 @@ func TestTelemetryChurnMintsNoRevision(t *testing.T) {
 	second := pushNormalizer(t, nil, pushingest.MeshSnapshot{
 		Live: 1,
 		Reports: []pushingest.MeshNodeReport{report(keyPrefix, "Arnold", pollNow, func(r *pushingest.MeshNodeReport) {
-			r.Telemetry.BatteryVolts = ptr(3.97)
+			r.Telemetry.BatteryVolts = wrapperspb.Double(3.97)
 			r.Telemetry.PacketsSent = 150999
 			r.ReportedAt = pollNow.Add(5 * time.Minute)
 		})},

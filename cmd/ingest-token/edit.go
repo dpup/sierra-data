@@ -57,11 +57,7 @@ func upsertReporter(src string, r reporterSpec) (string, action, error) {
 	// silently discard a hand-tuned staleAfter or placeIds, which is exactly
 	// what someone rotating a credential is not expecting to happen.
 	if !empty {
-		if start, end, ok := findEntry(lines, listStart, listEnd, itemIndent, r.ID); ok {
-			updated, err := replaceTokenHash(lines, start, end, itemIndent, r.TokenSha256)
-			if err != nil {
-				return "", "", err
-			}
+		if updated, rotated := rotateToken(lines, listStart, listEnd, itemIndent, r.ID, r.TokenSha256); rotated {
 			return strings.Join(updated, "\n"), actionRotated, nil
 		}
 	}
@@ -145,70 +141,61 @@ func listExtent(lines []string, start, itemIndent int) int {
 	return end
 }
 
-// findEntry locates an existing `- id: <id>` entry and returns its line range.
-func findEntry(lines []string, start, end, itemIndent int, id string) (int, int, bool) {
-	prefix := strings.Repeat(" ", itemIndent) + "- "
-	entryStart := -1
+// entryRanges splits the list region into one [start, end) range per item.
+// Everything indented at least as far as a field line belongs to the item above
+// it, comments included — which is what lets a rotation preserve an operator's
+// hand-written note on the entry it is rewriting.
+func entryRanges(lines []string, start, end, itemIndent int) [][2]int {
+	itemPrefix := strings.Repeat(" ", itemIndent) + "- "
+	var out [][2]int
 	for i := start; i < end; i++ {
-		if !strings.HasPrefix(lines[i], prefix) {
+		if !strings.HasPrefix(lines[i], itemPrefix) {
 			continue
 		}
-		if entryStart >= 0 {
-			return entryStart, i, true // previous entry ended here
+		if n := len(out); n > 0 {
+			out[n-1][1] = i
 		}
-		if entryID(lines, i, end, itemIndent) == id {
-			entryStart = i
-		}
+		out = append(out, [2]int{i, end})
 	}
-	if entryStart >= 0 {
-		return entryStart, end, true
-	}
-	return 0, 0, false
+	return out
 }
 
-// entryID reads the `id:` of the entry beginning at start.
-func entryID(lines []string, start, end, itemIndent int) string {
-	fieldIndent := strings.Repeat(" ", itemIndent+2)
+// entryField finds a scalar field inside one entry, returning its line index and
+// unquoted value. The `- ` of the first line is stripped so the item's inline
+// field (`- id: alan-pi`) reads the same as an indented one.
+func entryField(lines []string, r [2]int, itemIndent int, name string) (int, string, bool) {
 	itemPrefix := strings.Repeat(" ", itemIndent) + "- "
-	for i := start; i < end; i++ {
-		l := lines[i]
-		if i > start && strings.HasPrefix(l, itemPrefix) {
-			break // next entry
-		}
-		trimmed := strings.TrimSpace(strings.TrimPrefix(l, itemPrefix))
-		if i > start && !strings.HasPrefix(l, fieldIndent) {
-			break
-		}
-		if v, ok := strings.CutPrefix(trimmed, "id:"); ok {
-			return strings.Trim(strings.TrimSpace(v), `"'`)
+	for i := r[0]; i < r[1]; i++ {
+		trimmed := strings.TrimSpace(strings.TrimPrefix(lines[i], itemPrefix))
+		if v, ok := strings.CutPrefix(trimmed, name+":"); ok {
+			return i, strings.Trim(strings.TrimSpace(v), `"'`), true
 		}
 	}
-	return ""
+	return 0, "", false
 }
 
-// replaceTokenHash rewrites the tokenSha256 of an existing entry in place,
-// adding the field if the entry somehow lacks one.
-func replaceTokenHash(lines []string, start, end, itemIndent int, hash string) ([]string, error) {
-	out := append([]string(nil), lines...)
+// rotateToken rewrites an existing reporter's hash in place, leaving every other
+// line of the entry untouched. Rebuilding the entry instead would silently drop
+// a hand-tuned staleAfter or placeIds, which is not what someone rotating a
+// credential is asking for.
+func rotateToken(lines []string, start, end, itemIndent int, id, hash string) ([]string, bool) {
 	fieldIndent := strings.Repeat(" ", itemIndent+2)
-	for i := start; i < end; i++ {
-		trimmed := strings.TrimSpace(strings.TrimPrefix(out[i], strings.Repeat(" ", itemIndent)+"- "))
-		if strings.HasPrefix(trimmed, "tokenSha256:") {
-			out[i] = fieldIndent + `tokenSha256: "` + hash + `"`
-			return out, nil
+	for _, r := range entryRanges(lines, start, end, itemIndent) {
+		if _, got, ok := entryField(lines, r, itemIndent, "id"); !ok || got != id {
+			continue
 		}
-	}
-	// No hash to replace: put one directly after the id line so the entry ends
-	// up valid rather than half-configured.
-	for i := start; i < end; i++ {
-		trimmed := strings.TrimSpace(strings.TrimPrefix(out[i], strings.Repeat(" ", itemIndent)+"- "))
-		if strings.HasPrefix(trimmed, "id:") {
-			ins := fieldIndent + `tokenSha256: "` + hash + `"`
-			out = append(out[:i+1], append([]string{ins}, out[i+1:]...)...)
-			return out, nil
+		out := append([]string(nil), lines...)
+		line := fieldIndent + `tokenSha256: "` + hash + `"`
+		if i, _, ok := entryField(out, r, itemIndent, "tokenSha256"); ok {
+			out[i] = line
+			return out, true
 		}
+		// No hash to replace: put one after the id so the entry ends up valid
+		// rather than half-configured.
+		i, _, _ := entryField(out, r, itemIndent, "id")
+		return append(out[:i+1], append([]string{line}, out[i+1:]...)...), true
 	}
-	return nil, fmt.Errorf("existing reporter entry has no `id:` field")
+	return nil, false
 }
 
 // renderEntry writes a new reporter block. The comments are deliberate: this

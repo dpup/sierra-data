@@ -14,7 +14,6 @@ import (
 	"github.com/dpup/sierra-data/internal/config"
 	"github.com/dpup/sierra-data/internal/pushingest"
 	"github.com/dpup/sierra-data/internal/store"
-	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 // MeshCore presence source constants. Nodes deep-link to the community map
@@ -444,7 +443,7 @@ func meshTelemetry(mqtt *meshcore.NodeState, reports []pushingest.MeshNodeReport
 	var best *pushingest.MeshNodeReport
 	for i := range reports {
 		r := &reports[i]
-		if !r.HasSample {
+		if r.Telemetry == nil {
 			continue
 		}
 		if best == nil || r.LastSuccess.After(best.LastSuccess) {
@@ -452,48 +451,9 @@ func meshTelemetry(mqtt *meshcore.NodeState, reports []pushingest.MeshNodeReport
 		}
 	}
 	if best != nil {
-		t.Admin = adminTelemetryProto(best)
+		t.Admin = best.Telemetry
 	}
 	return t
-}
-
-func adminTelemetryProto(r *pushingest.MeshNodeReport) *gridv1.MeshAdminTelemetry {
-	a := &gridv1.MeshAdminTelemetry{
-		ReporterId:           r.ReporterID,
-		BatteryPercentSource: r.Telemetry.BatteryPercentSource,
-		BatteryVolts:         doubleValue(r.Telemetry.BatteryVolts),
-		BatteryPercent:       doubleValue(r.Telemetry.BatteryPercent),
-		TemperatureC:         doubleValue(r.Telemetry.TemperatureC),
-		Humidity:             doubleValue(r.Telemetry.Humidity),
-		Pressure:             doubleValue(r.Telemetry.Pressure),
-		NoiseFloorDbm:        int32Value(r.Telemetry.NoiseFloorDBm),
-		LastSnrDb:            doubleValue(r.Telemetry.LastSNRdB),
-		LastRssiDbm:          int32Value(r.Telemetry.LastRSSIdBm),
-		TxQueueLen:           int32Value(r.Telemetry.TxQueueLen),
-		UptimeSeconds:        r.Telemetry.UptimeSeconds,
-		AirtimeMs:            r.Telemetry.AirtimeMs,
-		RxAirtimeMs:          r.Telemetry.RxAirtimeMs,
-		PacketsSent:          r.Telemetry.PacketsSent,
-		PacketsReceived:      r.Telemetry.PacketsReceived,
-		SentFlood:            r.Telemetry.SentFlood,
-		SentDirect:           r.Telemetry.SentDirect,
-		RecvFlood:            r.Telemetry.RecvFlood,
-		RecvDirect:           r.Telemetry.RecvDirect,
-		DirectDups:           r.Telemetry.DirectDups,
-		FloodDups:            r.Telemetry.FloodDups,
-		FullEvents:           r.Telemetry.FullEvents,
-		RecvErrors:           r.Telemetry.RecvErrors,
-	}
-	if !r.ReportedAt.IsZero() {
-		a.ReportedAt = tsProto(r.ReportedAt)
-	}
-	if !r.LastSuccess.IsZero() {
-		a.LastSuccessAt = tsProto(r.LastSuccess)
-	}
-	if !r.LastAttempt.IsZero() {
-		a.LastAttemptAt = tsProto(r.LastAttempt)
-	}
-	return a
 }
 
 // shouldPersistTelemetry decides whether this tick must write an otherwise
@@ -706,22 +666,4 @@ func meshHeadline(name, nodeType, key string) string {
 
 func quantizeCoord(v float64) float64 {
 	return math.Round(v*meshLocationDecimals) / meshLocationDecimals
-}
-
-// doubleValue / int32Value lift an optional gauge into its wrapper type. A nil
-// pointer becomes an absent field rather than a zero: "the monitor could not
-// read this" and "the monitor read zero" are different facts, and a 0% battery
-// must not be indistinguishable from an unknown one.
-func doubleValue(v *float64) *wrapperspb.DoubleValue {
-	if v == nil {
-		return nil
-	}
-	return wrapperspb.Double(*v)
-}
-
-func int32Value(v *int32) *wrapperspb.Int32Value {
-	if v == nil {
-		return nil
-	}
-	return wrapperspb.Int32(*v)
 }

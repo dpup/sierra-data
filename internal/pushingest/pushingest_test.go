@@ -119,20 +119,20 @@ func TestPostAcceptsReport(t *testing.T) {
 	}
 
 	arnold := byID["de0715314cfa9b5e"]
-	require.True(t, arnold.HasSample)
+	require.NotNil(t, arnold.Telemetry)
 	assert.Equal(t, "SIERRA Arnold Summit", arnold.Name)
 	assert.Equal(t, "alan-pi", arnold.ReporterID)
-	require.NotNil(t, arnold.Telemetry.BatteryVolts)
-	assert.InDelta(t, 4.14, *arnold.Telemetry.BatteryVolts, 0.001)
-	assert.Equal(t, "estimated", arnold.Telemetry.BatteryPercentSource)
-	assert.Equal(t, int64(150305), arnold.Telemetry.PacketsSent)
+	assert.Equal(t, "alan-pi", arnold.Telemetry.GetReporterId())
+	assert.InDelta(t, 4.14, arnold.Telemetry.GetBatteryVolts().GetValue(), 0.001)
+	assert.Equal(t, "estimated", arnold.Telemetry.GetBatteryPercentSource())
+	assert.Equal(t, int64(150305), arnold.Telemetry.GetPacketsSent())
 	assert.Nil(t, arnold.Telemetry.Humidity, "a sensor the node lacks stays absent, not zero")
 
 	// The never-reached node carries NO sample. Publishing zeroed counters for it
 	// would assert that it has sent and received nothing, which is a measurement
 	// we never made.
 	lilac := byID["6781a18b2b47cb4e"]
-	assert.False(t, lilac.HasSample)
+	assert.Nil(t, lilac.Telemetry, "never reached: no sample at all, not zeroed counters")
 	assert.True(t, lilac.LastSuccess.IsZero())
 	assert.False(t, lilac.LastAttempt.IsZero(), "the failed attempt is itself information")
 }
