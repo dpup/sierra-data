@@ -26,6 +26,7 @@ const PAGES = [
   ['home', '/index.html'],
   ['events', '/events.html'],
   ['event-detail', '/event.html?id=evt-wildfire-mudflat'],
+  ['event-detail-mesh', '/event.html?id=mesh-a1b2c3d4'],
   ['map', '/map.html?place=ebbetts-pass&layer=wildfire'],
   ['roads', '/roads.html?place=ebbetts-pass'],
   ['mesh', '/mesh.html'],

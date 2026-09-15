@@ -9,7 +9,7 @@
 // currency for history. Everything is fetched same-origin through api.js.
 
 import { get, ApiError } from '../api.js';
-import { timeCell } from '../format.js';
+import { timeCell, absentValue } from '../format.js';
 import { BASE_STYLE, BASE_ATTRIBUTION_OPTS, ensureBasemap, deferInteraction } from '../basemap.js';
 
 const ROLE = {
@@ -19,6 +19,11 @@ const ROLE = {
   sensor: { color: '#c76ad0', label: 'Sensor', r: 4 },
 };
 const UNKNOWN = { color: '#8a8f94', label: 'Other', r: 3.5 };
+// The ring a node gets when an operator's monitor cannot reach it. Canvas paint
+// cannot read a custom property, so this is --st-UNAVAILABLE from the PAPER
+// ramp, written out — the basemap is light (see basemap.js). Fill stays the
+// node's role colour: the two encodings are independent and must read that way.
+const UNREACHABLE_RING = '#b3261e';
 const DEFAULT_CENTER = [-121.7, 37.9]; // Bay Area → Sierra
 const DEFAULT_ZOOM = 6.5;
 
@@ -81,6 +86,7 @@ export async function initMeshPage() {
   const nodes = new Map();
   const roleCounts = {};
   const nodeFeatures = [];
+  let unreachableCount = 0;
   for (const ev of events) {
     const n = ev.mesh || {};
     const pk = (n.publicKey || '').toLowerCase();
@@ -88,14 +94,26 @@ export async function initMeshPage() {
     if (!pk || !c || c.lng == null || c.lat == null) continue;
     const t = n.telemetry || {};
     const role = n.nodeType || 'other';
+    // Three states, not two: REACHABLE, UNREACHABLE, and "nobody is watching",
+    // which is the default and must never be painted as either of the others.
+    const reach = String(n.reachability || '').toUpperCase();
+    const monitored = reach === 'REACHABLE' || reach === 'UNREACHABLE';
+    if (reach === 'UNREACHABLE') unreachableCount++;
     // hopCount is NOT defaulted to 0 here: absent telemetry must stay absent so
     // the roster can render "—". (The map's own paint still treats it as 0.)
-    nodes.set(pk, { lng: c.lng, lat: c.lat, role, name: n.name || '', snr: t.snr, hop: t.hopCount, gw: (t.gateways || []).length, ev, telemetry: t });
+    nodes.set(pk, { lng: c.lng, lat: c.lat, role, name: n.name || '', snr: t.snr, hop: t.hopCount, gw: (t.gateways || []).length, reach, admin: t.admin || null, ev, telemetry: t });
     roleCounts[role] = (roleCounts[role] || 0) + 1;
     nodeFeatures.push({
       type: 'Feature',
       geometry: { type: 'Point', coordinates: [c.lng, c.lat] },
-      properties: { pubkey: pk, role, name: n.name || '', snr: t.snr, hop: t.hopCount || 0, gw: (t.gateways || []).length },
+      properties: {
+        pubkey: pk, role, name: n.name || '', snr: t.snr, hop: t.hopCount || 0,
+        gw: (t.gateways || []).length,
+        // '' rather than a missing key: a MapLibre `get` on an absent property
+        // is null, and the match below would then have to spell both cases.
+        reach: monitored ? reach : '',
+        gauges: gaugeSummary(t.admin),
+      },
     });
   }
 
@@ -107,6 +125,19 @@ export async function initMeshPage() {
     const dot = el('span', 'mesh-dot');
     dot.style.background = ROLE[key].color;
     row.append(dot, document.createTextNode(`${ROLE[key].label} (${roleCounts[key]})`));
+    legend.append(row);
+  }
+
+  // The ring is a second encoding on the same dot, so it needs its own key —
+  // and only when something on the map actually wears it. A legend entry for a
+  // state no node is in reads as a state we are failing to detect.
+  if (unreachableCount) {
+    const row = el('span', 'mesh-leg');
+    const ring = el('span', 'mesh-dot');
+    ring.style.background = 'transparent';
+    ring.style.borderColor = UNREACHABLE_RING;
+    ring.style.borderWidth = '2px';
+    row.append(ring, document.createTextNode(`Monitor can’t reach (${unreachableCount})`));
     legend.append(row);
   }
 
@@ -203,7 +234,13 @@ export async function initMeshPage() {
         'circle-color': ['match', ['get', 'role'],
           'repeater', ROLE.repeater.color, 'room_server', ROLE.room_server.color,
           'companion', ROLE.companion.color, 'sensor', ROLE.sensor.color, UNKNOWN.color],
-        'circle-stroke-color': '#0b0f12', 'circle-stroke-width': 1, 'circle-opacity': 0.95,
+        // Fill is role, ring is reachability. An unwatched node keeps the plain
+        // ink ring: "nobody is watching" is not a failing node, and painting it
+        // as one would make the mesh look broken wherever we simply have no
+        // monitor. Never colour alone — the popup says the word too.
+        'circle-stroke-color': ['case', ['==', ['get', 'reach'], 'UNREACHABLE'], UNREACHABLE_RING, '#0b0f12'],
+        'circle-stroke-width': ['case', ['==', ['get', 'reach'], 'UNREACHABLE'], 2, 1],
+        'circle-opacity': 0.95,
       },
     });
 
@@ -234,6 +271,11 @@ export async function initMeshPage() {
       if (p.snr !== undefined && p.snr !== 0) add('SNR', p.snr + ' dB');
       add('hops', p.hop === undefined || p.hop === null ? null : hopCell(p.hop));
       add('gateways', p.gw);
+      // Only where a monitor watches this node. An unwatched node says nothing
+      // here rather than "unknown" — the roster's Monitor column is where the
+      // absence is named, and a popup that names every absence is a wall.
+      add('monitor', p.reach || null);
+      add('readings', p.gauges || null);
       add('pubkey', (p.pubkey || '').slice(0, 16) + '…');
       box.append(dl);
       new maplibregl.Popup({ maxWidth: '260px' }).setLngLat(e.lngLat).setDOMContent(box).addTo(map);
@@ -280,6 +322,63 @@ export async function initMeshPage() {
  * @param {number|undefined|null} hop
  * @returns {string}
  */
+/**
+ * The monitor's headline readings on one line: "4.14 V · 97% · 37 °C".
+ *
+ * Only what it actually read. The gauges are wrapper types on the wire, so an
+ * unread one arrives as null and is simply left out — the one thing this must
+ * never do is turn a battery nobody could read into a 0 V battery. Returns ''
+ * when there is nothing to say, which every caller renders as nothing.
+ *
+ * @param {Object|null|undefined} admin MeshTelemetry.admin (protojson)
+ * @returns {string}
+ */
+export function gaugeSummary(admin) {
+  if (!admin) return '';
+  const num = (v) => (v === null || v === undefined || v === '' ? NaN : Number(v));
+  const volts = num(admin.batteryVolts);
+  const pct = num(admin.batteryPercent);
+  const temp = num(admin.temperatureC);
+  const bits = [];
+  if (Number.isFinite(volts)) bits.push(`${volts.toFixed(2)} V`);
+  if (Number.isFinite(pct)) bits.push(`${Math.round(pct)}%`);
+  if (Number.isFinite(temp)) bits.push(`${Math.round(temp * 10) / 10} °C`);
+  return bits.join(' · ');
+}
+
+/**
+ * The Monitor column: what an operator-run monitor says about this node.
+ *
+ * Three states, and the third is the point. A mesh has no goodbye packet, so a
+ * node going quiet is ambiguous and everything downstream has to treat it that
+ * way — but a monitor that logged in and FAILED is not ambiguous, and that is
+ * the one fact this column exists to carry. Which means "nobody is watching
+ * this node" can never render like "we tried and could not": most of the mesh
+ * is unwatched, and a column that blurred the two would make the honest state
+ * (unknown) look like the alarming one, or the reverse.
+ *
+ * The battery and temperature ride underneath as the sub-line rather than in
+ * columns of their own: they exist for a handful of repeaters, and four mostly
+ * empty columns is not a table.
+ */
+function monitorCell(n) {
+  const td = el('td');
+  if (n.reach !== 'REACHABLE' && n.reach !== 'UNREACHABLE') {
+    td.append(absentValue({ text: 'not monitored', cls: 'absent-empty' }));
+    return td;
+  }
+  const ok = n.reach === 'REACHABLE';
+  const wrap = el('span', `dot-status ${ok ? 'st-OK' : 'st-UNAVAILABLE'}`);
+  const dot = el('span', 'dot');
+  dot.setAttribute('aria-hidden', 'true');
+  wrap.append(dot, el('span', '', n.reach));
+  td.append(wrap);
+  // A reachable node whose sample carried no gauge is a real case (a repeater
+  // with no sensors), and it is not the same as an unread one.
+  td.append(el('div', 'cell-sub', ok ? gaugeSummary(n.admin) || 'reached, no readings' : 'monitor cannot reach it'));
+  return td;
+}
+
 export function hopCell(hop) {
   if (hop === undefined || hop === null || hop === '' || Number.isNaN(Number(hop))) return '—';
   const n = Number(hop);
@@ -300,7 +399,7 @@ function renderNodeTable(nodes) {
   if (!rows.length) {
     const tr = el('tr');
     const td = el('td');
-    td.colSpan = 5;
+    td.colSpan = 6;
     td.append(
       el('div', 'mono', 'No located nodes in this window.'),
       el('div', 'muted small',
@@ -321,10 +420,12 @@ function renderNodeTable(nodes) {
     const tr = el('tr');
 
     const nameCell = el('td');
-    nameCell.append(
-      el('div', 'cell-name', n.name || '(unnamed node)'),
-      el('div', 'cell-sub', pk.length > 16 ? `${pk.slice(0, 16)}…` : pk)
-    );
+    // The roster is a summary; the record is the whole thing — every gauge,
+    // every counter, the gateway list, the revision history. Until this link
+    // existed there was no path from one to the other.
+    const name = el(n.ev && n.ev.id ? 'a' : 'div', 'cell-name', n.name || '(unnamed node)');
+    if (n.ev && n.ev.id) name.href = `/event?id=${encodeURIComponent(n.ev.id)}`;
+    nameCell.append(name, el('div', 'cell-sub', pk.length > 16 ? `${pk.slice(0, 16)}…` : pk));
     tr.append(nameCell);
 
     const roleDef = ROLE[n.role];
@@ -334,6 +435,8 @@ function renderNodeTable(nodes) {
     dot.style.marginRight = '7px';
     typeCell.append(dot, document.createTextNode(roleDef ? roleDef.label : n.role || 'unknown'));
     tr.append(typeCell);
+
+    tr.append(monitorCell(n));
 
     const t = n.telemetry || {};
     tr.append(el('td', undefined, `${num(t.snr, ' dB')} / ${num(t.rssi, ' dBm')}`));
@@ -347,7 +450,7 @@ function renderNodeTable(nodes) {
     heardCell.append(timeCell(heard));
     tr.append(heardCell);
 
-    ['Node', 'Type', 'SNR / RSSI', 'Hops', 'Heard'].forEach((lbl, i) => {
+    ['Node', 'Type', 'Monitor', 'SNR / RSSI', 'Hops', 'Heard'].forEach((lbl, i) => {
       if (tr.children[i]) tr.children[i].dataset.label = lbl;
     });
     tbody.append(tr);

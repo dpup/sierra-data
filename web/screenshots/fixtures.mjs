@@ -188,13 +188,49 @@ const EVENTS = [
 ];
 
 // A small MeshCore relay network (layer=mesh events + /mesh/links topology).
+//
+// Two of these carry an operator monitor's admin sample, because that is the
+// shape the event detail's mesh layout exists for and it cannot be reviewed
+// against a node that has none: `murphys` is a fully-read repeater (the busy
+// case — every gauge, every counter, a long gateway list), `arnold` is one the
+// monitor has been failing to reach (UNREACHABLE, and gauges that are null
+// rather than zero — the distinction the whole fail-loud contract turns on).
+// The other three have no monitor at all, which is the common case and must
+// render as "no monitor watches this node", never as a row of zeros.
 const MESH_NODES = [
-  { pk: 'a1b2c3d4e5f6a7b8', name: 'Murphys Repeater', role: 'repeater', lat: 38.138, lng: -120.461, snr: 9, hop: 0, gw: 1 },
-  { pk: 'b2c3d4e5f6a7b8c9', name: 'Arnold Hilltop', role: 'repeater', lat: 38.255, lng: -120.352, snr: 6, hop: 1, gw: 0 },
-  { pk: 'c3d4e5f6a7b8c9d0', name: 'Bear Valley Room', role: 'room_server', lat: 38.481, lng: -120.043, snr: 4, hop: 2, gw: 0 },
-  { pk: 'd4e5f6a7b8c9d0e1', name: 'Avery Companion', role: 'companion', lat: 38.196, lng: -120.366, snr: 3, hop: 2, gw: 0 },
-  { pk: 'e5f6a7b8c9d0e1f2', name: 'Dorrington Sensor', role: 'sensor', lat: 38.306, lng: -120.281, snr: 2, hop: 3, gw: 0 },
+  { pk: 'a1b2c3d4e5f6a7b8', name: 'Murphys Repeater', role: 'repeater', lat: 38.138, lng: -120.461, snr: 9, rssi: -94, hop: 0, gw: 20, reach: 'REACHABLE' },
+  { pk: 'b2c3d4e5f6a7b8c9', name: 'Arnold Hilltop', role: 'repeater', lat: 38.255, lng: -120.352, snr: 6, rssi: -101, hop: 1, gw: 2, reach: 'UNREACHABLE' },
+  { pk: 'c3d4e5f6a7b8c9d0', name: 'Bear Valley Room', role: 'room_server', lat: 38.481, lng: -120.043, snr: 4, rssi: -108, hop: 2, gw: 1 },
+  { pk: 'd4e5f6a7b8c9d0e1', name: 'Avery Companion', role: 'companion', lat: 38.196, lng: -120.366, snr: 3, rssi: -112, hop: 2, gw: 0 },
+  { pk: 'e5f6a7b8c9d0e1f2', name: 'Dorrington Sensor', role: 'sensor', lat: 38.306, lng: -120.281, snr: 2, rssi: -118, hop: 3, gw: 0 },
 ];
+
+// Gateway/broker public keys, as the bridges report them: full 64-char hex.
+const MESH_GATEWAY_KEYS = Array.from({ length: 20 }, (_, i) =>
+  (i.toString(16).padStart(2, '0').repeat(2) + 'a3f19c6b52d84e07').repeat(4).slice(0, 64).toUpperCase()
+);
+
+// protojson carries int64/uint64 as STRINGS — the counters below are quoted for
+// that reason, not by accident. A fixture that sent numbers would let a
+// renderer that assumes `typeof v === 'number'` pass here and break on live data.
+const MESH_ADMIN = {
+  a1b2c3d4e5f6a7b8: {
+    reporterId: 'alanpi', reportedAt: ago(4), lastSuccessAt: ago(4), lastAttemptAt: ago(4),
+    batteryVolts: 4.14, batteryPercent: 97, batteryPercentSource: 'estimated',
+    temperatureC: 37, humidity: null, pressure: null,
+    noiseFloorDbm: -116, lastSnrDb: 12.5, lastRssiDbm: -88, txQueueLen: 0,
+    uptimeSeconds: '2615083', airtimeMs: '49646', rxAirtimeMs: '211238',
+    packetsSent: '150305', packetsReceived: '649331',
+    sentFlood: '149984', sentDirect: '321', recvFlood: '642043', recvDirect: '6702',
+    directDups: '53', floodDups: '30331', fullEvents: '0', recvErrors: '240197',
+  },
+  // Arnold Hilltop has no entry AT ALL, deliberately: its monitor has been
+  // failing since Tuesday, and pushingest attaches a sample only when a read
+  // actually succeeded (`!LastSuccess.IsZero() && hasAnyMetric`). So the wire
+  // shape for a watched-but-unreachable node is admin: null plus reachability
+  // UNREACHABLE — not a block of zeroed counters — and the pane has to say the
+  // right thing about it: a monitor that tried and failed, not an unwatched node.
+};
 
 const MESH_EVENTS = MESH_NODES.map((n, i) => ({
   id: `mesh-${n.pk.slice(0, 8)}`, layer: 'mesh', severity: 'INFO', status: 'ACTIVE',
@@ -203,7 +239,16 @@ const MESH_EVENTS = MESH_NODES.map((n, i) => ({
   revision: 1, provenance: { sourceId: 'meshcore', sourceName: 'MeshCore Mesh', attribution: 'MeshCore community mesh via gomesh.dev', sourceUrl: 'https://map.meshcore.io', fetchedAt: ago(1) },
   mesh: {
     publicKey: n.pk, name: n.name, nodeType: n.role,
-    telemetry: { snr: n.snr, hopCount: n.hop, gateways: n.gw ? ['gomesh.dev'] : [] },
+    // MESH_REACHABILITY_UNSPECIFIED is what the API actually emits under
+    // EmitUnpopulated when no monitor watches the node — send that, not an
+    // omitted field, or the "no monitor" rendering never gets exercised.
+    reachability: n.reach || 'MESH_REACHABILITY_UNSPECIFIED',
+    telemetry: {
+      snr: n.snr, rssi: n.rssi, hopCount: n.hop,
+      gateways: MESH_GATEWAY_KEYS.slice(0, n.gw),
+      lastAdvertAt: ago(5 + i * 7),
+      admin: MESH_ADMIN[n.pk] || null,
+    },
   },
   geometry: { centroid: { lat: n.lat, lng: n.lng },
     geojson: geo({ type: 'Point', coordinates: [n.lng, n.lat] }) },

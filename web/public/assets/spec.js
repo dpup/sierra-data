@@ -64,7 +64,7 @@ export const FIELD_DOCS = {
   earthquake: ['detail', 'magnitude, depthKm, felt.'],
   roadIncident: ['detail', 'logNumber, impact, duration, metadata map.'],
   power: ['detail', 'Outage: outageId, cause, customersAffected, crewStatus, estimatedRestoration. PSPS: eventId, eventName, timePeriod, stage (Watch | Warning), medicalBaselineAffected, deEnergizationStart, deEnergizationEnd. estimatedRestoration and deEnergizationEnd are ESTIMATES PG&E routinely overruns — they are deliberately not mapped onto expires, so never use them to hide an event.'],
-  mesh: ['detail', 'publicKey, nodeType, name, telemetry {snr, rssi, hopCount, gateways, lastAdvertAt} — volatile, never mints a revision. Relay paths are NOT here (proto tag reserved): a path belongs to one reception, not to a node, so topology is served derived at GET /api/v1/mesh/links.'],
+  mesh: ['detail', 'publicKey, nodeType, name, reachability, and telemetry {snr, rssi, hopCount, gateways, lastAdvertAt, admin} — volatile, never mints a revision. telemetry.admin is one sample an operator-run monitor read off the node itself (battery, temperature, airtime, packet counters) and pushed to /api/v1/ingest/mesh.repeater; its gauges are wrapper types, so an unread value is null and never a zero. reachability is the exception that IS hashed — a node going unreachable is a lifecycle change worth a history entry. Relay paths are NOT here (proto tag reserved): a path belongs to one reception, not to a node, so topology is served derived at GET /api/v1/mesh/links.'],
 };
 
 /**

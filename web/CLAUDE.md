@@ -414,6 +414,54 @@ Used by five or more screens — reach for these before writing page CSS:
 - **`.loud-banner`** / **`.error-block`** — the fail-loud surfaces.
 - **`.resp-pane`** — a live request and its actual response, in black.
 - **`.numbered-head`**, **`.def-row`**, **`.env-row`**.
+- **`.absent`** + `.absent-empty` / `.absent-na` / `.absent-fault` — the absence
+  vocabulary `format.js`'s `absentValue()` emits, beside `.time-absent`. A KIND
+  of absence is a token like a severity is: "not provided" is quiet and italic,
+  a fault is in the alert accent. Never replace one with a dash.
+
+## The record pane's own primitives (EventDetailStyles.astro)
+
+`renderEventDetail()` is mounted by two screens (the `/event` permalink and the
+`/events` browser's detail column), so **everything it emits is styled in
+`EventDetailStyles.astro` and nowhere else.** If the renderer can emit it, its
+CSS belongs in that component — not in whichever page you were looking at.
+
+The absence vocabulary is the cautionary tale and is **not** there: `.absent-*`
+is emitted by `format.js`'s `absentValue()`, a shared helper, and it lived in
+`events.astro`'s style block — so the `/event` permalink printed "not provided
+by source" as 15px body prose from the same markup and the same function. It now
+sits in `app.css` beside `.time-absent`, which comes from the same file, and the
+mesh roster is its third caller.
+
+Three primitives carry a typed detail, and **which one a field gets is the
+decision, not a matter of taste**:
+
+| | Use it for | Shape |
+| --- | --- | --- |
+| `.kv` + `kvRow()` | values you stop on — identity, lifecycle | field name, value, spec sentence under it |
+| `.mx` (`metricGrid`) | a run of readings you SCAN | 4 fixed tracks, mono label over value, optional caption |
+| `.chiplist` (`chipList`) | a long list of opaque ids | clipped heads, a cap with `+N more`, one copy-all |
+
+`.mx` takes **four fixed tracks**, two under 700px, for the `.ledger` reason:
+an `auto-fit` row reflows to a different count per block and the page stops
+having a grid. An absent reading is named in the cell — "not read", "not
+reported" — never dashed and never zeroed. That grid is exactly where an unread
+battery would otherwise become a 0% battery.
+
+`.ed-group` is one rule down from the section's 3px: sub-blocks of one record,
+not peers of Envelope and Provenance.
+
+**A nested message is rows, not JSON.** `valueNode()` recurses into objects and
+arrays (`.kv-nest`, `.kv-list`); it does not emit `<pre class="code">` any more.
+The one that forced this was `mesh.telemetry` — a nested admin sample plus
+twenty 64-character gateway keys came out as forty lines of ink taller than the
+rest of the record.
+
+**A hand-laid-out detail must never be a filter.** `restRows()` renders every
+field the layout does not name, under a caption, so a field added to
+`grid.proto` shows up the day it ships instead of silently not existing. Keep
+the `*_KNOWN` lists in `pages/event-detail.js` in step with the proto when you
+give a new field a place.
 
 ## There are no legacy aliases left
 

@@ -47,7 +47,10 @@ Output: `web/screenshots/out/<viewport>/<page>.png` (git-ignored). Viewports are
 The fixtures model one busy-but-plausible Ebbetts Pass day (active wildfire +
 evacuation warning, Red Flag fire weather, Hwy 4 chain controls and a CHP
 incident, a winter-weather alert, a quake, a small MeshCore relay net) so every
-layout is exercised with real-shaped data. Shapes mirror what the page render
+layout is exercised with real-shaped data. Two mesh nodes carry an operator
+monitor's admin sample — one fully read, one watched-but-unreachable (`admin:
+null`, which is what the API actually emits for it) — because the event detail's
+mesh layout cannot be reviewed against a node that has neither. Shapes mirror what the page render
 code in `public/assets/pages/*.js` consumes (protojson camelCase). To add a page
 or an endpoint, extend `PAGES` in `capture.mjs` and `routeFor()` in
 `fixtures.mjs`.

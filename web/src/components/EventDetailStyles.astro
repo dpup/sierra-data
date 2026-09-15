@@ -61,6 +61,102 @@
       .ed-section .kv > dt:first-of-type,
       .ed-section .kv > dt:first-of-type + dd { border-top: none; }
 
+      /* ---- Sub-groups inside a section ----------------------------------
+         One rule DOWN from the section's 3px. A mesh detail is three blocks —
+         what the node says it is, what the mesh heard of it, what a monitor
+         read off it — and they are parts of one record, not peers of Envelope
+         and Provenance. Given the section treatment they read as a stack of
+         unrelated things; given a lighter head they read as one record with
+         three provenances, which is what they are. */
+      .ed-group { margin-top: var(--space-sub); }
+      .ed-group-head {
+        font-family: var(--font-mono); font-size: 10px; font-weight: 700;
+        letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-2nd);
+        margin: 0; padding: 0 0 6px; border-bottom: 1px solid var(--rule);
+      }
+      /* Where the block came from and what it does NOT mean. Prose, so it takes
+         the reading measure rather than the full data width. */
+      .ed-group-note {
+        font-family: var(--font-sans); font-size: 12.5px; line-height: 1.45;
+        color: var(--text-tertiary); margin: 8px 0 0; max-width: var(--measure);
+      }
+      .ed-group-body { margin-top: var(--space-block); }
+      /* A sentence inside a group is still running text and still owes the
+         reader the measure — app.css only hands it to direct children of main
+         and of its sections, and this is neither. */
+      .ed-group-body > p { max-width: var(--measure); }
+
+      /* ---- Metric grid: readings that are scanned, not read --------------
+         Four tracks, hairline per row, no boxes and no vertical rules — the
+         label/value pairs are already two columns each, and a third set of
+         lines between them turned a calm block into graph paper. Fixed tracks
+         rather than auto-fit for the .ledger reason: an auto-fit row reflows to
+         a different count per block and the page stops having a grid at all. */
+      .mx {
+        display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+        column-gap: 24px; margin: 0 0 6px;
+      }
+      .mx-cell { min-width: 0; padding: 9px 0 11px; border-top: 1px solid var(--rule-light); }
+      .mx-l {
+        font-family: var(--font-mono); font-size: 9.5px; font-weight: 600;
+        letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-muted-p);
+      }
+      .mx-v {
+        font-family: var(--font-mono); font-size: 14px; color: var(--text-primary);
+        font-variant-numeric: tabular-nums; margin-top: 3px; overflow-wrap: anywhere;
+      }
+      /* The caption is the unit's provenance ("gateway-reported", "node-measured")
+         or the breakdown behind a total — never part of the number. */
+      .mx-s {
+        font-family: var(--font-mono); font-size: 10.5px; line-height: 1.35;
+        color: var(--text-tertiary); margin-top: 2px; overflow-wrap: anywhere;
+      }
+      /* What a run of readings is. Sits directly on the first row's hairline. */
+      .mx-cap {
+        font-family: var(--font-mono); font-size: 9.5px; font-weight: 600;
+        letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-faint-p);
+        margin: var(--space-block) 0 2px;
+      }
+      .ed-group-body > .mx-cap:first-child { margin-top: 0; }
+
+      /* ---- Chip list: a long run of opaque ids --------------------------- */
+      .chiplist { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 6px; margin: 4px 0 6px; }
+      .idchip {
+        font-family: var(--font-mono); font-size: 10.5px; color: var(--text-2nd);
+        background: var(--paper-sunken); padding: 3px 7px;
+      }
+      .chiplist-tail { display: inline-flex; align-items: center; gap: 8px; margin-left: 4px; }
+      .chip-more {
+        font-family: var(--font-mono); font-size: 10px; padding: 4px 10px;
+        background: transparent; border: 1px solid var(--rule); color: var(--text-muted-p);
+        cursor: pointer; letter-spacing: 0.06em;
+      }
+      .chip-more:hover { border-color: var(--ink); color: var(--ink); }
+
+      /* ---- Nested values ------------------------------------------------
+         A nested message renders as the rows it is, indented behind a hairline.
+         Tighter than a top-level kv and without the per-row rules: those
+         separate fields a reader stops on, and these are the inside of one. */
+      .ed-section .kv.kv-nest {
+        grid-template-columns: minmax(0, 120px) minmax(0, 1fr);
+        gap: 0 14px; margin: 2px 0 0; padding-left: 12px;
+        border-left: 1px solid var(--rule);
+      }
+      .ed-section .kv.kv-nest dt,
+      .ed-section .kv.kv-nest dd { padding: 4px 0; border-top: none; }
+      .kv-list { padding-left: 12px; border-left: 1px solid var(--rule); }
+      .kv-list-i {
+        font-family: var(--font-mono); font-size: 10px; color: var(--text-faint-p);
+        margin-top: 6px;
+      }
+      /* A clipped id inside a value cell needs a box to clip against. */
+      .ed-section .kv .id-clip { display: inline-block; max-width: 100%; vertical-align: bottom; }
+
+      /* Two tracks on a phone, and the value column gives up its fixed width. */
+      @media (max-width: 700px) {
+        .mx { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 18px; }
+      }
+
       /* Caption under a geometry map: bbox · centroid · provenance of the shape. */
       .geom-caption {
         font-family: var(--font-mono); font-size: 11px; color: var(--text-muted-p);

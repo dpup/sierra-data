@@ -179,12 +179,8 @@ import PageHead from '../components/PageHead.astro';
     }
     .ev-stale-body { opacity: 0.55; }
 
-    /* ---- Absence vocabulary (shared with the detail pane) --------------- */
-    .absent { font-family: var(--font-mono); font-size: 10px; }
-    .absent-empty { font-style: italic; color: var(--text-faint-p); }
-    .absent-na { color: var(--text-faint-p); }
-    .absent-fault { font-weight: 700; color: var(--signal); }
-    .absent-src { font-size: 9.5px; }
+    /* The absence vocabulary (.absent*) moved to EventDetailStyles.astro: the
+       renderer that emits it is shared with /event, and so its CSS must be. */
 
     /* Numerals are tabular everywhere they are data. */
     .rec-id, .ev-page { font-variant-numeric: tabular-nums; }

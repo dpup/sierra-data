@@ -18,6 +18,7 @@
 import { get, apiURL, curlFor, ApiError } from '../api.js';
 import {
   timeAgo,
+  timeAbs,
   timeCell,
   sevChip,
   layerLabel,
@@ -372,17 +373,534 @@ function valueNode(v) {
   }
   if (Array.isArray(v)) {
     if (v.length === 0) return absentValue(ABSENT.notProvided());
-    if (v.every((x) => typeof x !== 'object' || x === null)) return v.map(String).join(', ');
-    const pre = el('pre', 'code');
-    pre.textContent = JSON.stringify(v, null, 2);
-    return pre;
+    if (v.every((x) => typeof x !== 'object' || x === null)) {
+      const vals = v.map(String);
+      // A few short values read as a sentence; a long list of opaque ids does
+      // not, and neither does one 64-character key per line.
+      return vals.length <= 6 && vals.every((x) => x.length <= 24)
+        ? vals.join(' · ')
+        : chipList(vals);
+    }
+    const wrap = el('div', 'kv-list');
+    v.forEach((item, i) => {
+      wrap.append(el('div', 'kv-list-i', `[${i}]`));
+      wrap.append(valueNode(item));
+    });
+    return wrap;
   }
   if (typeof v === 'object') {
-    const pre = el('pre', 'code');
-    pre.textContent = JSON.stringify(v, null, 2);
-    return pre;
+    // A nested message is still a set of fields, so it renders as one — indented
+    // behind a hairline, each value recursing through here. It used to be a JSON
+    // <pre>: an ink slab dropped into a paper record, and the deeper the message
+    // the taller it got. mesh.telemetry (which nests a whole admin sample, and a
+    // list of twenty public keys) was forty lines of it.
+    const dl = el('dl', 'kv kv-nest');
+    for (const [k, val] of Object.entries(v)) kvRow(dl, k, valueNode(val));
+    return dl;
   }
   return String(v);
+}
+
+/* ---------------------------------------------------------------------
+ * The typed detail block
+ *
+ * A detail is the one part of the record whose SHAPE changes per layer, and
+ * for most layers it is a handful of scalars that a definition list renders
+ * perfectly. Mesh is the exception, and the reason the code below exists: its
+ * detail nests a volatile telemetry block, that block nests a whole admin
+ * sample pushed by an operator-run monitor, and one of its fields is a list of
+ * twenty 64-character public keys. Rendered generically that came out as a
+ * JSON `<pre>` — forty lines of hex in the middle of the record, an ink slab
+ * taller than every other section put together, with the two numbers a reader
+ * actually wanted buried inside it.
+ *
+ * So a layer may claim its detail and lay it out. Three primitives do the work,
+ * and the choice between them is the whole design:
+ *
+ *   kv           values READ one at a time, each with its spec sentence beside
+ *                it — identity, lifecycle, anything a reader stops on.
+ *   metricGrid   a run of readings that is SCANNED rather than read: a small
+ *                label over a value. Twenty-two packet counters are a block you
+ *                sweep for the odd one out, not twenty-two sentences.
+ *   chipList     a long list of opaque ids: the count first, each id clipped to
+ *                its recognizable head, the whole lot a click from the
+ *                clipboard. The same two questions .id-clip answers for an id.
+ *
+ * Nothing here is a filter: every field the layout does not name falls through
+ * to the generic rows (restRows), so a new proto field appears the day it ships
+ * instead of silently not existing.
+ * ------------------------------------------------------------------ */
+
+/**
+ * A real value, as opposed to an absence — deliberately NOT falsiness.
+ *
+ * 0 dB is a reading and 0% battery is a reading; `null` is "the monitor could
+ * not read it". protojson's EmitUnpopulated marshals an unset wrapper type as
+ * null precisely so that distinction survives the wire (see the reporter
+ * guide's rule 2), and collapsing the two here would throw it away at the last
+ * possible moment.
+ */
+function has(v) {
+  return v !== null && v !== undefined && v !== '';
+}
+
+/**
+ * Number out of a protojson scalar, or null.
+ *
+ * int64/uint64 fields arrive as STRINGS in protojson — `"uptimeSeconds":
+ * "2615083"` — so every counter goes through this rather than a typeof check.
+ */
+function asNum(v) {
+  if (!has(v)) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** `-94` + 'dBm' → "-94 dBm". An absence stays an absence, for the caller to name. */
+function withUnit(v, unit, digits = 0) {
+  const n = asNum(v);
+  return n === null ? null : `${fmtNum(n, digits)}${unit ? ` ${unit}` : ''}`;
+}
+
+/**
+ * Seconds → "30 d 6 h", "4 h 12 min", "51 s". Two units, largest first: an
+ * uptime is read as an order of magnitude ("up for a month"), never to the
+ * second, and "2615083" is not a duration a person can read at all.
+ * @param {number|string|null|undefined} s
+ * @returns {string|null}
+ */
+export function fmtDurationSeconds(s) {
+  const n = asNum(s);
+  if (n === null || n < 0) return null;
+  const d = Math.floor(n / 86400);
+  const h = Math.floor((n % 86400) / 3600);
+  const m = Math.floor((n % 3600) / 60);
+  const sec = Math.floor(n % 60);
+  if (d) return h ? `${fmtNum(d)} d ${h} h` : `${fmtNum(d)} d`;
+  if (h) return m ? `${h} h ${m} min` : `${h} h`;
+  if (m) return sec ? `${m} min ${sec} s` : `${m} min`;
+  return `${sec} s`;
+}
+
+/**
+ * Milliseconds → "812 ms", "49.6 s", "3 min 31 s". Airtime counters arrive in
+ * ms and run to hours.
+ * @param {number|string|null|undefined} ms
+ * @returns {string|null}
+ */
+export function fmtDurationMs(ms) {
+  const n = asNum(ms);
+  if (n === null || n < 0) return null;
+  if (n < 1000) return `${fmtNum(n)} ms`;
+  if (n < 60000) return `${(n / 1000).toFixed(1)} s`;
+  return fmtDurationSeconds(Math.round(n / 1000));
+}
+
+/**
+ * A run of readings: small mono label, value under it, an optional caption
+ * under that. Hairline-separated cells, no boxes — the broadsheet takes its
+ * structure from rules.
+ *
+ * An absent reading is NAMED in the cell ("not read", "not reported"), never
+ * dashed and never zeroed: this grid is where a battery that could not be read
+ * would otherwise become a 0% battery, which is the one mistake the whole
+ * fail-loud contract exists to prevent.
+ *
+ * @param {Array<{label:string, value:(string|Node|null|undefined), sub?:(string|Node), absent?:string, title?:string}>} cells
+ * @returns {HTMLElement}
+ */
+function metricGrid(cells) {
+  const grid = el('div', 'mx');
+  for (const c of cells) {
+    const cell = el('div', 'mx-cell');
+    cell.append(el('div', 'mx-l', c.label));
+    const val = el('div', 'mx-v');
+    if (c.value instanceof Node) val.append(c.value);
+    else if (has(c.value)) val.textContent = String(c.value);
+    else val.append(absentValue({ text: c.absent || 'unknown', cls: 'absent-empty' }));
+    cell.append(val);
+    if (c.sub instanceof Node) {
+      const sub = el('div', 'mx-s');
+      sub.append(c.sub);
+      cell.append(sub);
+    } else if (has(c.sub)) {
+      cell.append(el('div', 'mx-s', String(c.sub)));
+    }
+    if (c.title) cell.title = c.title;
+    grid.append(cell);
+  }
+  return grid;
+}
+
+/**
+ * One reading whose value is a timestamp. Relative above, absolute under it —
+ * the site rule that a timestamp is always both, in the grid's own shape rather
+ * than as a timeCell crammed onto one line.
+ */
+function timeReading(label, iso, extra = {}) {
+  const ok = has(iso) && !Number.isNaN(Date.parse(iso));
+  return {
+    label,
+    value: ok ? timeAgo(iso) : null,
+    sub: ok ? timeAbs(iso) : undefined,
+    absent: 'no time given',
+    title: ok ? String(iso) : undefined,
+    ...extra,
+  };
+}
+
+/** A caption over a block of readings: what this run of numbers is. */
+function blockCap(text) {
+  return el('div', 'mx-cap', text);
+}
+
+/**
+ * A long list of opaque ids, as chips.
+ *
+ * `telemetry.gateways` is up to twenty 64-character public keys: 1,300
+ * characters of hex, which as a joined line is a wall and as JSON is a wall
+ * with brackets. A reader wants the same two things they want from a long event
+ * id — which ones are these (the head of each key is what identifies it) and
+ * the whole lot in the clipboard — so the answer is the same one .id-clip and
+ * copyOnClick give: clip on screen, copy in full.
+ *
+ * Capped, because the list is upstream-controlled: a bridge storm must not turn
+ * one record into a thousand chips.
+ *
+ * @param {Array<string>} values
+ * @param {{short?:number, cap?:number, what?:string}=} opts
+ * @returns {HTMLElement}
+ */
+function chipList(values, opts = {}) {
+  const { short = 8, cap = 24, what = 'value' } = opts;
+  const all = values.map((v) => String(v));
+  const wrap = el('div', 'chiplist');
+  // The controls are appended first and chips are inserted BEFORE them, so
+  // expanding the list cannot leave the buttons stranded mid-row.
+  const tail = el('span', 'chiplist-tail');
+  wrap.append(tail);
+
+  const add = (v) => {
+    const chip = el('span', 'idchip', v.length > short ? `${v.slice(0, short)}…` : v);
+    if (v.length > short) chip.title = v;
+    wrap.insertBefore(chip, tail);
+  };
+  all.slice(0, cap).forEach(add);
+  if (all.length > cap) {
+    const more = el('button', 'chip-more', `+${fmtNum(all.length - cap)} more`);
+    more.type = 'button';
+    more.addEventListener('click', () => {
+      all.slice(cap).forEach(add);
+      more.remove();
+    });
+    tail.append(more);
+  }
+  tail.append(copyButton(all.join('\n'), `copy all ${fmtNum(all.length)}`, `${what} list`));
+  return wrap;
+}
+
+/**
+ * Every field a hand-laid-out detail does not know about, rendered generically.
+ *
+ * A curated layout's failure mode is that it is also a filter: someone adds a
+ * field to grid.proto, the API serves it, and the one screen whose job is to
+ * show the whole record quietly does not. These rows are the guard against
+ * that — unnamed fields land here, visibly unplaced, until someone gives them a
+ * home above.
+ */
+function restRows(body, obj, known, caption) {
+  const rest = Object.entries(obj || {}).filter(([k]) => !known.includes(k));
+  if (!rest.length) return;
+  body.append(blockCap(caption));
+  const dl = el('dl', 'kv');
+  for (const [k, v] of rest) kvRow(dl, k, valueNode(v));
+  body.append(dl);
+}
+
+/**
+ * A sub-section inside a detail: a hairline head, an optional note saying what
+ * the block is and where it came from, then the body.
+ *
+ * One rule down from the section's 3px: these are parts of one record, not
+ * peers of Envelope and Provenance, and giving them the same weight made the
+ * pane read as a stack of unrelated blocks.
+ */
+function subGroup(body, title, note) {
+  const group = el('div', 'ed-group');
+  group.append(el('h3', 'ed-group-head', title));
+  if (note) group.append(el('p', 'ed-group-note', note));
+  const inner = el('div', 'ed-group-body');
+  group.append(inner);
+  body.append(group);
+  return inner;
+}
+
+/* ---- mesh ---------------------------------------------------------- */
+
+/** Spec sentences for the mesh identity rows — docs beside data, per field. */
+const MESH_DOCS = {
+  name: ['string', 'The name the node advertises. Operator-set and unverified — two nodes may claim the same one.'],
+  nodeType: ['string', 'companion | repeater | room_server | sensor, as the node advertises itself.'],
+  publicKey: ['string', 'The node’s Ed25519 public key, hex. Also the native half of the event id. A monitor that only knows a prefix of it still resolves to this node.'],
+  reachability: [
+    'MeshReachability',
+    'REACHABLE when an operator-run monitor logged into the node within the last 45 minutes; UNREACHABLE when it has been failing for longer. Derived from the age of the monitor’s last success, never from a per-poll flag — a marginal repeater would otherwise mint a revision every few minutes. Unlike the rest of the telemetry, this IS hashed: a node going unreachable is a lifecycle change worth a history entry.',
+  ],
+};
+
+const MESH_KNOWN = ['publicKey', 'nodeType', 'name', 'telemetry', 'reachability'];
+const MESH_TELEMETRY_KNOWN = ['snr', 'rssi', 'hopCount', 'gateways', 'lastAdvertAt', 'admin'];
+const MESH_ADMIN_KNOWN = [
+  'reporterId', 'reportedAt', 'lastSuccessAt', 'lastAttemptAt',
+  'batteryVolts', 'batteryPercent', 'batteryPercentSource', 'temperatureC', 'humidity',
+  'pressure', 'noiseFloorDbm', 'lastSnrDb', 'lastRssiDbm', 'txQueueLen',
+  'uptimeSeconds', 'airtimeMs', 'rxAirtimeMs', 'packetsSent', 'packetsReceived',
+  'sentFlood', 'sentDirect', 'recvFlood', 'recvDirect', 'directDups', 'floodDups',
+  'fullEvents', 'recvErrors',
+];
+
+/**
+ * Reachability as a dot and a word, borrowing the source-health ramp: green is
+ * "we can reach it", red is "we tried and could not". Colour is never the only
+ * signal — the word is always there.
+ *
+ * UNSPECIFIED is not a third state of the node, it is the absence of a watcher,
+ * and saying so is the point: nobody should read "unspecified" as "fine".
+ */
+function reachabilityValue(reachability) {
+  const v = String(reachability || '').toUpperCase();
+  if (v === 'REACHABLE' || v === 'UNREACHABLE') {
+    const wrap = el('span', `dot-status ${v === 'REACHABLE' ? 'st-OK' : 'st-UNAVAILABLE'}`);
+    const dot = el('span', 'dot');
+    dot.setAttribute('aria-hidden', 'true');
+    wrap.append(dot, el('span', '', v));
+    return wrap;
+  }
+  return absentValue({ text: 'no monitor watches this node', cls: 'absent-empty' });
+}
+
+/** A plain count, separated: "649,331". Null stays null for the caller to name. */
+function fmtCount(v) {
+  const n = asNum(v);
+  return n === null ? null : fmtNum(n);
+}
+
+/**
+ * Two counters that belong together and neither of which is a total —
+ * "30,331 · 53" for flood and direct duplicates. The pair is never summed: the
+ * node reports its own totals where it has them, and arithmetic we invented
+ * would be indistinguishable from a reading it sent.
+ */
+function pairValue(a, b) {
+  const x = asNum(a);
+  const y = asNum(b);
+  if (x === null && y === null) return null;
+  return `${x === null ? 'unknown' : fmtNum(x)} · ${y === null ? 'unknown' : fmtNum(y)}`;
+}
+
+/** The same pair as a caption under a total: "149,984 flood · 321 direct". */
+function pairSub(a, b, la, lb) {
+  const x = asNum(a);
+  const y = asNum(b);
+  if (x === null && y === null) return undefined;
+  return `${x === null ? 'unknown' : fmtNum(x)} ${la} · ${y === null ? 'unknown' : fmtNum(y)} ${lb}`;
+}
+
+/**
+ * The mesh detail, in its three natural tiers — and they are three because the
+ * PROVENANCE is three:
+ *
+ *   identity   what the node says it is, off its own advert
+ *   heard      what community MQTT bridges heard of it from a distance
+ *   reported   what an operator's monitor read off the node itself
+ *
+ * The second and third deliberately carry overlapping fields (both have an SNR,
+ * both have an RSSI) and they are NOT the same measurement — one is what a
+ * distant listener heard, the other what the node measured. Flattened into one
+ * list, as the generic renderer had them, that difference disappears and the
+ * two numbers look like a contradiction.
+ */
+function renderMeshDetail(body, m) {
+  const t = (m && m.telemetry) || {};
+  const admin = t.admin || null;
+
+  const idl = el('dl', 'kv');
+  kvRow(idl, 'name', has(m.name) ? String(m.name) : absentValue(ABSENT.notProvided()), MESH_DOCS.name);
+  kvRow(idl, 'nodeType', has(m.nodeType) ? String(m.nodeType) : absentValue(ABSENT.notProvided()), MESH_DOCS.nodeType);
+  if (has(m.publicKey)) {
+    const pk = el('span', 'id-clip', String(m.publicKey));
+    copyOnClick(pk, String(m.publicKey), 'public key');
+    kvRow(idl, 'publicKey', pk, MESH_DOCS.publicKey);
+  } else {
+    // The key IS the identity of a mesh node, so its absence is a fault in us.
+    kvRow(idl, 'publicKey', absentValue(ABSENT.missing()), MESH_DOCS.publicKey);
+  }
+  kvRow(idl, 'reachability', reachabilityValue(m.reachability), MESH_DOCS.reachability);
+  body.append(idl);
+
+  /* ---- heard by the mesh ---- */
+  const sig = subGroup(
+    body,
+    'Heard by the mesh',
+    'What the community MQTT bridges heard of this node’s last advert. Volatile by design: the ' +
+      'store zeroes this block before hashing, so a firehose of adverts refreshes liveness without ' +
+      'minting a revision. The advert time is stamped by the node’s own unsynchronized clock — ' +
+      '“heard” everywhere else is the event’s observedAt.'
+  );
+  sig.append(
+    metricGrid([
+      { label: 'SNR', value: withUnit(t.snr, 'dB', 1), sub: 'gateway-reported', absent: 'not reported' },
+      { label: 'RSSI', value: withUnit(t.rssi, 'dBm'), sub: 'gateway-reported', absent: 'not reported' },
+      {
+        label: 'Hop count',
+        // 0 hops is a real reading — heard direct — and must not read as absent.
+        value: asNum(t.hopCount) === null ? null : `${fmtNum(asNum(t.hopCount))} ${asNum(t.hopCount) === 1 ? 'hop' : 'hops'}`,
+        sub: 'path length of the last advert',
+        absent: 'not reported',
+      },
+      timeReading('Last advert', t.lastAdvertAt),
+    ])
+  );
+
+  const gateways = Array.isArray(t.gateways) ? t.gateways.filter(has).map(String) : [];
+  if (gateways.length) {
+    sig.append(blockCap(`Gateways (${fmtNum(gateways.length)}) — bridges that relayed this advert to us`));
+    sig.append(chipList(gateways, { what: 'gateway key' }));
+  } else {
+    sig.append(blockCap('Gateways'));
+    sig.append(
+      el('p', 'muted small', 'No gateway id came with this advert. That is a gap in what the bridge told us, not evidence the node was heard by nobody.')
+    );
+  }
+  restRows(sig, t, MESH_TELEMETRY_KNOWN, 'Other telemetry fields');
+
+  /* ---- self-reported ---- */
+  // The note explains a block that is there; with no sample the block is one
+  // sentence, and prefacing it with a paragraph about what a sample would have
+  // contained is two explanations of nothing.
+  const adm = subGroup(
+    body,
+    'Self-reported — admin monitor',
+    admin
+      ? 'Read off the node’s own admin interface by an operator-run monitor and pushed to ' +
+        'POST /api/v1/ingest/mesh.repeater. The node’s view of itself — which is why its SNR and ' +
+        'RSSI sit beside the gateway-reported pair above rather than replacing them. Nothing here ' +
+        'mints a revision.'
+      : ''
+  );
+  if (!admin) {
+    // WHY there is no sample matters, and the two reasons are opposites. An
+    // unwatched node is a gap in our coverage; a watched one with no sample is
+    // a monitor that tried and failed, which is the single most useful thing
+    // this whole ingest path reports (a mesh has no goodbye packet, so silence
+    // is ambiguous — a failed login is not). Saying "no monitor reports this
+    // node" over the second case would throw that away.
+    const unreachable = String(m.reachability || '').toUpperCase() === 'UNREACHABLE';
+    adm.append(
+      el(
+        'p',
+        'muted small',
+        unreachable
+          ? 'A monitor is watching this node and cannot reach it, so it reports no readings at all — ' +
+            'rather than the row of zeros that would claim a flat battery and no traffic. The failure ' +
+            'is itself the signal; reachability above is what carries it.'
+          : 'No monitor reports this node. Battery, temperature, airtime and packet counters exist only ' +
+            'where an operator runs a monitor against a node’s admin interface — nothing a node ' +
+            'broadcasts carries them. Their absence here is a gap in monitoring, not a reading of zero.'
+      )
+    );
+    restRows(adm, t.admin, MESH_ADMIN_KNOWN, 'Other monitor fields');
+    restRows(body, m, MESH_KNOWN, 'Other mesh fields');
+    return;
+  }
+
+  adm.append(blockCap('The monitor'));
+  adm.append(
+    metricGrid([
+      { label: 'Reporter', value: has(admin.reporterId) ? String(admin.reporterId) : null, sub: 'ingest credential id', absent: 'unattributed' },
+      timeReading('Reported', admin.reportedAt),
+      timeReading('Last success', admin.lastSuccessAt, { absent: 'never reached' }),
+      timeReading('Last attempt', admin.lastAttemptAt),
+    ])
+  );
+
+  const pct = asNum(admin.batteryPercent);
+  const pctSrc = has(admin.batteryPercentSource) ? String(admin.batteryPercentSource) : '';
+  let batteryValue = null;
+  let batterySub;
+  if (asNum(admin.batteryVolts) !== null) {
+    batteryValue = withUnit(admin.batteryVolts, 'V', 2);
+    // "97% (estimated)" — an estimate derived from voltage is not a reading,
+    // and the proto carries which it is precisely so a UI can say so.
+    if (pct !== null) batterySub = `${fmtNum(pct)}%${pctSrc ? ` (${pctSrc})` : ''}`;
+  } else if (pct !== null) {
+    batteryValue = `${fmtNum(pct)}%`;
+    batterySub = pctSrc || undefined;
+  }
+
+  adm.append(blockCap('Gauges — current readings'));
+  adm.append(
+    metricGrid([
+      { label: 'Battery', value: batteryValue, sub: batterySub, absent: 'not read' },
+      { label: 'Temperature', value: withUnit(admin.temperatureC, '°C', 1), absent: 'not read' },
+      { label: 'Humidity', value: withUnit(admin.humidity, '%'), absent: 'not read' },
+      { label: 'Pressure', value: withUnit(admin.pressure, 'hPa'), absent: 'not read' },
+      { label: 'Noise floor', value: withUnit(admin.noiseFloorDbm, 'dBm'), absent: 'not read' },
+      { label: 'SNR', value: withUnit(admin.lastSnrDb, 'dB', 1), sub: 'node-measured', absent: 'not read' },
+      { label: 'RSSI', value: withUnit(admin.lastRssiDbm, 'dBm'), sub: 'node-measured', absent: 'not read' },
+      { label: 'TX queue', value: asNum(admin.txQueueLen) === null ? null : `${fmtNum(asNum(admin.txQueueLen))} pkt`, sub: 'waiting to send', absent: 'not read' },
+    ])
+  );
+
+  adm.append(blockCap('Counters — lifetime, since the node last booted'));
+  adm.append(
+    metricGrid([
+      {
+        label: 'Uptime',
+        value: fmtDurationSeconds(admin.uptimeSeconds),
+        sub: asNum(admin.uptimeSeconds) === null ? undefined : `${fmtNum(asNum(admin.uptimeSeconds))} s`,
+        absent: 'not read',
+      },
+      { label: 'Airtime tx', value: fmtDurationMs(admin.airtimeMs), sub: 'time spent transmitting', absent: 'not read' },
+      { label: 'Airtime rx', value: fmtDurationMs(admin.rxAirtimeMs), sub: 'time spent receiving', absent: 'not read' },
+      { label: 'Queue overflows', value: fmtCount(admin.fullEvents), sub: 'packets dropped, queue full', absent: 'not read' },
+      {
+        label: 'Packets sent',
+        value: fmtCount(admin.packetsSent),
+        sub: pairSub(admin.sentFlood, admin.sentDirect, 'flood', 'direct'),
+        absent: 'not read',
+      },
+      {
+        label: 'Packets received',
+        value: fmtCount(admin.packetsReceived),
+        sub: pairSub(admin.recvFlood, admin.recvDirect, 'flood', 'direct'),
+        absent: 'not read',
+      },
+      {
+        label: 'Duplicates',
+        value: pairValue(admin.floodDups, admin.directDups),
+        sub: 'flood · direct',
+        absent: 'not read',
+      },
+      { label: 'Receive errors', value: fmtCount(admin.recvErrors), sub: 'malformed or undecodable', absent: 'not read' },
+    ])
+  );
+  restRows(adm, admin, MESH_ADMIN_KNOWN, 'Other monitor fields');
+  restRows(body, m, MESH_KNOWN, 'Other mesh fields');
+}
+
+/**
+ * Render the populated detail oneof into a section body: a layer's own layout
+ * where it has one, generic rows where it does not.
+ */
+function renderDetail(body, detail) {
+  if (detail.field === 'mesh') {
+    renderMeshDetail(body, detail.value);
+    return;
+  }
+  const dl = el('dl', 'kv');
+  for (const [k, v] of Object.entries(detail.value)) kvRow(dl, k, valueNode(v));
+  body.append(dl);
 }
 
 function fmtCoord(n) {
@@ -736,9 +1254,7 @@ export async function renderEventDetail(root, id, opts = {}) {
       const detail = detailOf(ev);
       if (detail) {
         const sec = section(`Detail — ${detail.field}`);
-        const ddl = el('dl', 'kv');
-        for (const [k, v] of Object.entries(detail.value)) kvRow(ddl, k, valueNode(v));
-        sec.body.append(ddl);
+        renderDetail(sec.body, detail);
         sectionsEl.append(sec.panel);
       } else {
         const sec = section('Detail');
