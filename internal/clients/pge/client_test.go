@@ -3,6 +3,7 @@ package pge
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -584,24 +585,51 @@ func TestGetOutagesPolygonLayerSchemaBreakIsAnError(t *testing.T) {
 	}
 }
 
-// A polygon layer that is legitimately EMPTY is not a schema break — the guard
-// keys on "rows returned but none usable", not on emptiness.
-func TestGetOutagesEmptyPolygonLayerIsNotASchemaBreak(t *testing.T) {
+// A blank polygon layer under a populated point layer REPORTS ITSELF — and
+// still hands back the outages it has.
+//
+// This test used to assert the opposite ("an empty polygon layer is normal, not
+// an error"), which was a fair reading of the schema-break guard and wrong about
+// the feed. Sampled live on 2026-09-15: layer 8 returned all three in-window
+// outages with polygons at 21:08 and zero features at 21:12, HTTP 200 and no
+// error envelope either time. Believing the blank answer reverts every outage to
+// its centre point, which moves the content hash, which mints a revision — and
+// another when the layer comes back. One planned outage had 25 revisions in an
+// afternoon that way.
+//
+// It is NOT a schema break (nothing is malformed) and it is NOT a hard failure
+// (the point rows are good), so it is neither of the existing shapes: the
+// outages come back alongside a sentinel the caller can act on.
+func TestGetOutagesBlankPolygonLayerReportsItself(t *testing.T) {
 	doer := outageDoer()
 	doer.routes["/outages/MapServer/8/query"] = `{"type":"FeatureCollection","features":[]}`
 	c := NewClientWithHTTPDoer("https://pge.test/43", doer)
 
 	out, err := c.GetOutages(context.Background(), testBounds())
-	if err != nil {
-		t.Fatalf("an empty polygon layer is normal, not an error: %v", err)
+	if !errors.Is(err, ErrPolygonLayerBlank) {
+		t.Fatalf("a blank polygon layer must report itself, got %v", err)
 	}
 	if len(out) != 2 {
-		t.Fatalf("got %d outages, want the 2 identified point rows", len(out))
+		t.Fatalf("got %d outages, want the 2 identified point rows returned anyway", len(out))
 	}
 	for _, o := range out {
 		if o.HasPolygon {
-			t.Errorf("%s should have fallen back to its point geometry", o.ID)
+			t.Errorf("%s has no polygon this fetch; the caller decides what to do about it", o.ID)
 		}
+	}
+}
+
+// ...and an empty point layer with an empty polygon layer is a genuine "nothing
+// out", not a blank-layer report. Without this the sentinel would fire on every
+// quiet poll — which is most of them.
+func TestGetOutagesBothLayersEmptyIsNotBlankReport(t *testing.T) {
+	doer := &routeDoer{routes: map[string]string{
+		"/outages/MapServer/4/query": `{"type":"FeatureCollection","features":[]}`,
+		"/outages/MapServer/8/query": `{"type":"FeatureCollection","features":[]}`,
+	}}
+	c := NewClientWithHTTPDoer("https://pge.test/43", doer)
+	if _, err := c.GetOutages(context.Background(), testBounds()); err != nil {
+		t.Fatalf("no outages at all is a clean answer: %v", err)
 	}
 }
 
@@ -617,7 +645,11 @@ func TestGetOutagesDeduplicatesPointRows(t *testing.T) {
 		   "geometry":{"type":"Point","coordinates":[-120.3,38.2]}},
 		  {"type":"Feature","properties":{"OUTAGE_ID":"330042","EST_CUSTOMERS":11,"CREW_CURRENT_STATUS":"Crew On Site"},
 		   "geometry":{"type":"Point","coordinates":[-120.31,38.21]}}]}`,
-		"/outages/MapServer/8/query": `{"type":"FeatureCollection","features":[]}`,
+		// A polygon row for the id: this test is about duplicate POINT rows, and a
+		// blank polygon layer is its own (reported) condition now.
+		"/outages/MapServer/8/query": `{"type":"FeatureCollection","features":[
+		  {"type":"Feature","properties":{"OUTAGE_ID":"330042"},
+		   "geometry":{"type":"Polygon","coordinates":[[[-120.3,38.2],[-120.29,38.2],[-120.29,38.21],[-120.3,38.2]]]}}]}`,
 	}}
 	c := NewClientWithHTTPDoer("https://pge.test/43", doer)
 

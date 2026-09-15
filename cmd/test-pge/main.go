@@ -27,6 +27,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -85,6 +86,18 @@ func main() {
 	// --- outages ---
 	fmt.Println("\n== outages ==")
 	outages, err := client.GetOutages(ctx, b)
+	// The blank-polygon-layer case comes back WITH its outages: the point rows are
+	// good and only the footprints are missing. Report it as the partial failure
+	// the poller records rather than as a dead fetch — this tool exists to say
+	// what the poller would do, and running it twice a minute apart is how you
+	// catch layer 8 blinking.
+	if errors.Is(err, pge.ErrPolygonLayerBlank) {
+		failed = true
+		fmt.Printf("  POLYGON LAYER BLANK: %v\n", err)
+		fmt.Println("  -> the poller would degrade `pge`, skip its sweep, and keep each")
+		fmt.Println("     outage's last-known footprint rather than redraw it as a point")
+		err = nil
+	}
 	if err != nil {
 		failed = true
 		fmt.Printf("  FETCH FAILED: %v\n", err)

@@ -30,6 +30,7 @@ package pge
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -170,6 +171,24 @@ type PSPSArea struct {
 	GeometryCoords          json.RawMessage
 }
 
+// ErrPolygonLayerBlank reports that the outage POLYGON layer answered with no
+// rows at all while the point layer had outages.
+//
+// This is a real, recurring PG&E behaviour, not a hypothesis: sampled live on
+// 2026-09-15, layer 8 returned all three in-window outages with polygons at
+// 21:08 and zero features at 21:12, HTTP 200 both times, with no error
+// envelope. Silently believing it costs a revision on every flip — each outage
+// downgrades to its point, the content hash moves, and the next poll moves it
+// back. One 7-customer planned outage had accumulated 25 revisions in an
+// afternoon, all of them geometry flapping, none of them news.
+//
+// The outages are still RETURNED alongside this error: the point layer's
+// attributes (crew status, customer count, ETOR) arrived fine and are worth
+// having. The error exists so the caller can degrade the source's health and
+// decline to treat a blank layer as a change in shape. Callers that cannot tell
+// the difference should treat it as a failure.
+var ErrPolygonLayerBlank = errors.New("PG&E outage polygon layer returned no rows while the point layer had outages")
+
 // GetOutages returns active outages intersecting the bounding box, with the
 // affected-area polygon joined onto each point by OUTAGE_ID.
 //
@@ -284,6 +303,18 @@ func (c *Client) GetOutages(ctx context.Context, b Bounds) ([]Outage, error) {
 	}
 	if len(polys) > 0 && skippedPolys == len(polys) {
 		return nil, fmt.Errorf("PG&E outage polygons: all %d row(s) lack an OUTAGE_ID — the feed schema has probably changed", len(polys))
+	}
+
+	// The same flip, from the case the guard above cannot see: layer 8 answering
+	// with NO ROWS AT ALL. There is nothing to skip and nothing malformed, so
+	// every check up to here passes while each outage quietly reverts to its
+	// point. The payload cannot tell us whether PG&E republished every outage as
+	// a bare point or the layer simply blinked — so we refuse to guess, hand back
+	// what we do have, and say so. See ErrPolygonLayerBlank.
+	//
+	// Last, so a genuine schema break still reports itself as one.
+	if len(polys) == 0 && len(points) > 0 {
+		return out, ErrPolygonLayerBlank
 	}
 	return out, nil
 }

@@ -14,6 +14,30 @@ throughout; errors are gRPC-standard `{code, codeName, message, details}`). The
 by a snake_case `/v1` surface on 2026-07-05, which was in turn folded back onto the
 proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 
+## 2026-09-15 (later still)
+
+### Fixed: PG&E outages no longer churn geometry (and their revision history stops filling with noise)
+
+**No field changes shape.** What changes is how often a `pge:` event mints a
+revision, and what `GET /api/v1/events/{id}/history` contains for one.
+
+PG&E's outage service publishes points on one ArcGIS layer and affected-area
+polygons on another, joined on `OUTAGE_ID`. The polygon layer intermittently
+answers with **zero rows** — HTTP 200, no error envelope (confirmed live: all
+three in-window outages carried polygons at 21:08, none at 21:12, all three again
+16 seconds later). We believed it, so every outage's geometry reverted to its
+centre point, which moved the content hash, which wrote a revision — and another
+when the layer came back. One 7-customer planned outage had accumulated **25
+revisions in an afternoon**, every one of them the same area redrawn as a point
+and back, with its Hwy 4 corridor `placeIds` entry attaching and detaching each
+time.
+
+An outage now keeps the last footprint PG&E published for it while the layer is
+blank, and `GET /api/v1/sources` reports `pge` as degraded for those polls —
+the condition is surfaced rather than absorbed. Consumers polling
+`/api/v1/history` for power events will see far fewer entries; the ones that
+remain are real changes.
+
 ## 2026-09-15 (later)
 
 ### Breaking: `mesh.telemetry.snr`, `.rssi` and `.hopCount` are now nullable

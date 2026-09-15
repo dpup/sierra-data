@@ -112,6 +112,24 @@ The same rule covers geometry, which is hashed: `combineGeometry` sorts its
 members because ArcGIS promises no row ordering, and an order flip would
 otherwise mint a revision on an event that never changed.
 
+**A missing shape is not a smaller shape.** PG&E's polygon layer periodically
+answers with zero rows (200, no error envelope — see `internal/clients/CLAUDE.md`),
+which left every outage redrawn as its own centre point and redrawn back on the
+next poll: 25 revisions on one 7-customer planned outage in an afternoon, none of
+them news, each one also flipping its corridor place attachment. `GetOutages`
+now reports that as `pge.ErrPolygonLayerBlank` — a PARTIAL failure, so the source
+degrades and its sweep is skipped while its events still land — and
+`attachOutageGeometry` carries each outage's last-known footprint forward rather
+than believing the blank.
+
+This is the **wildfire perimeter rule, second instance** (see the FIRIS section
+below): a wholesale-empty response from a feed that should have returned
+something is a glitch, and carrying the prior polygon is how we decline to
+publish a downgrade we do not believe. A NON-empty response that omits one row is
+authoritative in both places — that one genuinely has no shape this poll. If a
+third source needs this, it is a pattern and not a coincidence; give it a name
+before copying it a third time.
+
 ### The other direction: upstream staleness is surfaced, never acted on
 
 The freeze gate above degrades a SOURCE. The evacuation layer has the same

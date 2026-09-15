@@ -86,6 +86,24 @@ Three feeds, four requests:
   mint a spurious revision pair in the history of an outage that never changed.
   An outage can have several polygon rows (a multi-part area); they combine into
   one MultiPolygon so it stays ONE event.
+
+  **Layer 8 also returns ZERO rows sometimes, with a 200 and no error envelope** —
+  which is the same flip arriving through the one door the rule above does not
+  cover, because nothing failed and nothing was malformed. Confirmed live on
+  2026-09-15: all three in-window outages carried polygons at 21:08:00, none at
+  21:12:32, all three again at 21:12:48 — a single request landing wrong, not a
+  time window (a following 20-request sweep saw no blank at all). It looks like
+  one bad backend behind their load balancer, but that is a hypothesis; the
+  behaviour is the fact. In production it was frequent enough to cost a revision
+  pair every few polls: one 7-customer planned outage had **25 revisions in an
+  afternoon**, every one of them its area redrawn as its own centre point and
+  back, with the Hwy 4 corridor place attaching and detaching each time.
+
+  `GetOutages` reports it as `ErrPolygonLayerBlank` **and still returns the
+  outages** — the point rows are good, only the footprints are missing. The
+  poller treats it like the freshness gate: degrade the `pge` source, skip its
+  sweep, keep the events, and carry each outage's last-known footprint rather
+  than redraw it as a point. Run `./bin/test-pge` twice a minute apart to see it.
 - **`psps_public/MapServer/1`** — PSPS coverage. **Empty is the normal state**;
   the layer only fills during an event. A window is published as MANY rows
   sharing every attribute (12 rows for one real footprint), so the caller groups
