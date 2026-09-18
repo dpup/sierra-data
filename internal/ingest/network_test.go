@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -10,6 +11,8 @@ import (
 	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
 	"github.com/dpup/sierra-data/internal/clients/meshcore"
 	"github.com/dpup/sierra-data/internal/config"
+	"github.com/dpup/sierra-data/internal/pushingest"
+	"github.com/dpup/sierra-data/internal/store"
 )
 
 // fakeMeshRegistry is a canned MeshRegistry for the normalizer tests.
@@ -22,6 +25,21 @@ type fakeMeshRegistry struct {
 func (f *fakeMeshRegistry) Snapshot() []meshcore.NodeState            { return f.nodes }
 func (f *fakeMeshRegistry) Health() (int, time.Time)                  { return f.connected, time.Time{} }
 func (f *fakeMeshRegistry) DrainObservations() []meshcore.Observation { return f.obs }
+
+// ResolvePrefix matches the production rule: a unique prefix match, or nothing.
+func (f *fakeMeshRegistry) ResolvePrefix(prefix string) (string, bool) {
+	var match string
+	for _, n := range f.nodes {
+		if !strings.HasPrefix(n.PubKey, prefix) {
+			continue
+		}
+		if match != "" {
+			return "", false
+		}
+		match = n.PubKey
+	}
+	return match, match != ""
+}
 
 func TestNetworkPollBuildsEvents(t *testing.T) {
 	reg := &fakeMeshRegistry{
@@ -43,7 +61,7 @@ func TestNetworkPollBuildsEvents(t *testing.T) {
 			},
 		},
 	}
-	n := NewNetworkNormalizer(testConfig(), reg)
+	n := NewNetworkNormalizer(testConfig(), reg, nil)
 	assert.Equal(t, []string{"meshcore"}, n.SourceIDs())
 
 	res, err := n.Poll(testCtx(), nil)
@@ -74,9 +92,9 @@ func TestNetworkPollBuildsEvents(t *testing.T) {
 	assert.Equal(t, "aa11bb22cc33", det.PublicKey)
 	assert.Equal(t, "repeater", det.NodeType)
 	require.NotNil(t, det.Telemetry)
-	assert.InDelta(t, 4.5, det.Telemetry.Snr, 1e-9)
-	assert.EqualValues(t, -93, det.Telemetry.Rssi)
-	assert.EqualValues(t, 2, det.Telemetry.HopCount)
+	assert.InDelta(t, 4.5, det.Telemetry.GetSnr().GetValue(), 1e-9)
+	assert.EqualValues(t, -93, det.Telemetry.GetRssi().GetValue())
+	assert.EqualValues(t, 2, det.Telemetry.GetHopCount().GetValue())
 
 	// Event's observed time is OUR receive time (LastHeardAt), never the node's
 	// skewed clock — the feed orders/`since`-filters on this.
@@ -100,7 +118,7 @@ func TestNetworkPollWiderBoundsOverrideHazardAreas(t *testing.T) {
 		{PubKey: "far01", Role: meshcore.RoleRepeater, Name: "Reno",
 			HasLocation: true, Lat: 39.5, Lng: -119.0}, // outside even the wider box
 	}}
-	n := NewNetworkNormalizer(cfg, reg)
+	n := NewNetworkNormalizer(cfg, reg, nil)
 
 	res, err := n.Poll(testCtx(), nil)
 	require.NoError(t, err)
@@ -119,7 +137,7 @@ func TestNetworkProvenanceAttributesBrokerOperator(t *testing.T) {
 		HasLocation: true, Lat: 38.14, Lng: -120.45,
 		Brokers: []string{"wss://mqtt.gomesh.dev:443/mqtt"},
 	}}}
-	n := NewNetworkNormalizer(cfg, reg)
+	n := NewNetworkNormalizer(cfg, reg, nil)
 
 	res, err := n.Poll(testCtx(), nil)
 	require.NoError(t, err)
@@ -140,7 +158,7 @@ func TestNetworkProvenanceFallsBackWithoutOperator(t *testing.T) {
 		PubKey: "cc33", Role: meshcore.RoleRepeater, HasLocation: true, Lat: 38.14, Lng: -120.45,
 		Brokers: []string{"wss://unknown-broker"},
 	}}}
-	n := NewNetworkNormalizer(testConfig(), reg)
+	n := NewNetworkNormalizer(testConfig(), reg, nil)
 	res, err := n.Poll(testCtx(), nil)
 	require.NoError(t, err)
 	require.Len(t, res.Events, 1)
@@ -152,7 +170,7 @@ func TestNetworkPollHardErrorsWhenNoBrokers(t *testing.T) {
 	reg := &fakeMeshRegistry{connected: 0, nodes: []meshcore.NodeState{
 		{PubKey: "aa", Role: meshcore.RoleRepeater, HasLocation: true, Lat: 38.1, Lng: -120.4},
 	}}
-	n := NewNetworkNormalizer(testConfig(), reg)
+	n := NewNetworkNormalizer(testConfig(), reg, nil)
 
 	_, err := n.Poll(testCtx(), nil)
 	require.Error(t, err, "an all-brokers-down poll must fail so the sweep is skipped")
@@ -161,12 +179,130 @@ func TestNetworkPollHardErrorsWhenNoBrokers(t *testing.T) {
 func TestNetworkPollEmptyScope(t *testing.T) {
 	cfg := testConfig()
 	cfg.Hazards.Areas = nil
-	n := NewNetworkNormalizer(cfg, &fakeMeshRegistry{connected: 1})
+	n := NewNetworkNormalizer(cfg, &fakeMeshRegistry{connected: 1}, nil)
 	_, err := n.Poll(testCtx(), nil)
 	require.Error(t, err)
 }
 
 func TestNetworkHeadlineFallback(t *testing.T) {
-	nd := meshcore.NodeState{PubKey: "abcdef1234567890", Role: meshcore.RoleCompanion}
-	assert.Equal(t, "node abcdef12 (companion)", meshHeadline(nd))
+	assert.Equal(t, "node abcdef12 (companion)",
+		meshHeadline("", meshcore.RoleCompanion, "abcdef1234567890"))
+}
+
+// GPS noise is not movement.
+//
+// A node's self-reported fix wanders tens of metres between adverts while the
+// node sits still, and geometry is hashed — so before this, every wobble was a
+// revision. One stationary companion reached revision 75 that way, 18 distinct
+// positions inside a 245 m circle, each snapshot recording that it had not moved.
+func TestMeshPositionJitterDoesNotChurn(t *testing.T) {
+	const lat, lng = 38.137412, -120.457934
+
+	stored := func() *gridv1.Event {
+		reg := &fakeMeshRegistry{connected: 1, nodes: []meshcore.NodeState{{
+			PubKey: fullKey, Role: meshcore.RoleRepeater, Name: "Arnold Summit",
+			HasLocation: true, Lat: lat, Lng: lng, LastHeardAt: pollNow.Add(-time.Minute),
+		}}}
+		n := pushNormalizer(t, reg, pushingest.MeshSnapshot{})
+		res, err := n.Poll(testCtx(), &fakePrior{})
+		require.NoError(t, err)
+		require.Len(t, res.Events, 1)
+		return res.Events[0]
+	}()
+	require.NotNil(t, stored.GetGeometry())
+	baseHash := store.ContentHash(stored)
+
+	// A later advert from the same stationary node, ~60 m away — inside the
+	// noise floor. The stored geometry rides forward BYTE FOR BYTE, which is
+	// what keeps the content hash equal.
+	jittered := reheardAt(t, lat+0.0005, lng+0.0002, stored)
+	assert.Equal(t, baseHash, store.ContentHash(jittered),
+		"a wobble inside the epsilon must not mint a revision")
+	assert.Equal(t, stored.GetGeometry().GetGeojson(), jittered.GetGeometry().GetGeojson())
+
+	// A real move — ~700 m — updates, exactly once. A threshold that damped this
+	// would be hiding the one thing a node's geometry is for.
+	moved := reheardAt(t, lat+0.0063, lng, stored)
+	assert.NotEqual(t, baseHash, store.ContentHash(moved), "a real move is a real revision")
+	assert.NotEqual(t, stored.GetGeometry().GetGeojson(), moved.GetGeometry().GetGeojson())
+
+	// A node with nothing stored takes the fix it was given: we damp change,
+	// never the first sighting.
+	fresh := reheardAt(t, lat, lng, nil)
+	require.NotNil(t, fresh.GetGeometry())
+}
+
+// reheardAt polls one node at the given position, with `prev` (or nothing) in
+// the store.
+func reheardAt(t *testing.T, lat, lng float64, prev *gridv1.Event) *gridv1.Event {
+	t.Helper()
+	reg := &fakeMeshRegistry{connected: 1, nodes: []meshcore.NodeState{{
+		PubKey: fullKey, Role: meshcore.RoleRepeater, Name: "Arnold Summit",
+		HasLocation: true, Lat: lat, Lng: lng, LastHeardAt: pollNow,
+	}}}
+	n := pushNormalizer(t, reg, pushingest.MeshSnapshot{})
+	p := &fakePrior{}
+	if prev != nil {
+		p.events = []*gridv1.Event{prev}
+	}
+	res, err := n.Poll(testCtx(), p)
+	require.NoError(t, err)
+	require.Len(t, res.Events, 1)
+	return res.Events[0]
+}
+
+// A restart must not re-attribute the whole mesh.
+//
+// The registry is rehydrated from the store on boot with everything about a node
+// EXCEPT which broker heard it, so a seeded node's provenance used to fall back
+// to the generic credit until its next advert — hours, for a 12-hour repeater —
+// and flip back afterwards. Both fields are hashed, so that was two revisions
+// per node per deploy: 505 attribution flips across 45 live nodes, 26 of them in
+// a single minute.
+func TestSeededNodeKeepsItsBrokerAttribution(t *testing.T) {
+	cfg := testConfig()
+	cfg.Grid.Meshcore.Brokers = []config.MeshcoreBroker{{
+		URL: "wss://mqtt.gomesh.dev:443/mqtt", Operator: "LetsMesh",
+		OperatorURL: "https://analyzer.letsmesh.net/about",
+	}}
+	node := meshcore.NodeState{
+		PubKey: "aa11bb22", Role: meshcore.RoleRepeater, Name: "Ridge",
+		HasLocation: true, Lat: 38.14, Lng: -120.45,
+		Brokers: []string{"wss://mqtt.gomesh.dev:443/mqtt"},
+	}
+
+	// Heard live: the bridge operator is credited.
+	heard := &fakeMeshRegistry{connected: 1, nodes: []meshcore.NodeState{node}}
+	res, err := NewNetworkNormalizer(cfg, heard, nil).Poll(testCtx(), nil)
+	require.NoError(t, err)
+	require.Len(t, res.Events, 1)
+	stored := res.Events[0]
+	assert.Contains(t, stored.GetProvenance().GetAttribution(), "LetsMesh")
+	baseHash := store.ContentHash(stored)
+
+	// After a restart the same node is in the snapshot from the seed, with no
+	// broker recorded yet. The credit rides forward, so the hash does not move.
+	seeded := node
+	seeded.Brokers = nil
+	reboot := &fakeMeshRegistry{connected: 1, nodes: []meshcore.NodeState{seeded}}
+	res, err = NewNetworkNormalizer(cfg, reboot, nil).
+		Poll(testCtx(), &fakePrior{events: []*gridv1.Event{stored}})
+	require.NoError(t, err)
+	require.Len(t, res.Events, 1)
+	after := res.Events[0]
+	assert.Equal(t, stored.GetProvenance().GetAttribution(), after.GetProvenance().GetAttribution())
+	assert.Equal(t, stored.GetProvenance().GetSourceUrl(), after.GetProvenance().GetSourceUrl())
+	assert.Equal(t, baseHash, store.ContentHash(after), "a restart is not a change of source")
+	// fetchedAt stays fresh: we DID observe the node, we just cannot say through
+	// which bridge.
+	assert.True(t, after.GetProvenance().GetFetchedAt().AsTime().
+		After(stored.GetProvenance().GetFetchedAt().AsTime().Add(-time.Second)))
+
+	// A node nobody has ever credited gets the generic attribution, not a
+	// borrowed one.
+	fresh := &fakeMeshRegistry{connected: 1, nodes: []meshcore.NodeState{seeded}}
+	res, err = NewNetworkNormalizer(cfg, fresh, nil).Poll(testCtx(), &fakePrior{})
+	require.NoError(t, err)
+	require.Len(t, res.Events, 1)
+	assert.NotContains(t, res.Events[0].GetProvenance().GetAttribution(), "LetsMesh")
 }

@@ -32,11 +32,11 @@ import (
 	"github.com/dpup/sierra-data/internal/gridapi"
 	"github.com/dpup/sierra-data/internal/hazards"
 	"github.com/dpup/sierra-data/internal/ingest"
-	"github.com/dpup/sierra-data/internal/ingestapi"
 	"github.com/dpup/sierra-data/internal/lib/alerts"
 	"github.com/dpup/sierra-data/internal/lib/geojson"
 	"github.com/dpup/sierra-data/internal/mcp"
 	"github.com/dpup/sierra-data/internal/places"
+	"github.com/dpup/sierra-data/internal/pushingest"
 	"github.com/dpup/sierra-data/internal/services"
 	"github.com/dpup/sierra-data/internal/store"
 )
@@ -98,7 +98,7 @@ func main() {
 		logging.Errorw(ctx, "Failed to start periodic refresh", "error", err)
 	}
 
-	// Grid event store + ingest scheduler (docs/v2-implementation-plan.md):
+	// Grid event store + ingest scheduler (docs/design/v2-implementation-plan.md):
 	// normalized hazard events persisted with revision history, per-source
 	// health, and the place directory — the /api/v1 foundation.
 	if appConfig.Grid.DBPath == "" {
@@ -171,38 +171,69 @@ func main() {
 		{Normalizer: ingest.NewPowerNormalizer(appConfig, pge.NewClient()), Interval: gridPollInterval(appConfig, "pge", "psps")},
 	}
 
+	// Authenticated push ingest (optional): operator-run monitors POST to
+	// /api/v1/ingest/{stream}. A bad reporter block is FATAL rather than skipped —
+	// a typo'd token hash would otherwise present as a monitor that silently never
+	// authenticates, which is indistinguishable from a wrong token at the client
+	// and could go unnoticed for weeks.
+	burnLineIDs := make([]string, 0, len(appConfig.Grid.Burn.Lines))
+	for _, l := range appConfig.Grid.Burn.Lines {
+		burnLineIDs = append(burnLineIDs, l.ID)
+	}
+	pushRegistry, err := pushingest.NewRegistry(appConfig.Grid.Ingest,
+		pushingest.WithBurnLines(gridStore, burnLineIDs))
+	if err != nil {
+		logging.Errorw(ctx, "Invalid grid.ingest configuration", "error", err)
+		log.Fatalf("Invalid grid.ingest configuration: %v", err)
+	}
+
 	// Burn status (optional): per-county residential burning status from two
 	// independent authorities — the county air district's burn line and CAL
 	// FIRE's seasonal suspension. Ambient state, polled a couple of times a day.
 	if len(appConfig.Grid.Burn.Counties) > 0 {
-		// The burn-day facet is PUSHED (see internal/ingestapi): the normalizer
-		// reads the staging table the push endpoint writes, rather than fetching
-		// an upstream. CAL FIRE is still a real fetch.
+		// The burn-day facet is PUSHED (the `burn.line` stream on
+		// /api/v1/ingest): the normalizer reads the staging table the push
+		// handler writes, rather than fetching an upstream. CAL FIRE is still a
+		// real fetch.
 		pollers = append(pollers, ingest.PollerSpec{
-			Normalizer: ingest.NewBurnStatusNormalizer(appConfig, calfireburn.NewClient(), gridStore, storePlaceIndex{gridStore}),
-			Interval:   gridPollInterval(appConfig, "burnline", "calfire-burn"),
+			Normalizer: ingest.NewBurnStatusNormalizer(appConfig, calfireburn.NewClient(), gridStore,
+				storePlaceIndex{gridStore}, burnReporters(pushRegistry)),
+			Interval: gridPollInterval(appConfig, "burnline", "calfire-burn"),
 		})
 	}
 
-	// MeshCore mesh-node presence (optional): a long-lived MQTT subscriber to
-	// community bridges accumulates node state; the NetworkNormalizer serves a
-	// snapshot on the scheduler's tick. Enabled only when configured with brokers.
+	// Mesh-node presence (optional). TWO possible inputs, and the poller runs if
+	// EITHER is configured: the MeshCore MQTT subscriber (community bridges,
+	// broadcast adverts) and the push-ingest buffer (operator monitors reading
+	// repeater admin interfaces). The NetworkNormalizer merges them into one event
+	// per node on the scheduler's tick.
+	var meshcoreReg ingest.MeshRegistry
 	if appConfig.Grid.Meshcore.Enabled && len(appConfig.Grid.Meshcore.Brokers) > 0 {
-		meshcoreReg := meshcore.NewRegistry(meshcoreClientConfig(appConfig))
+		reg := meshcore.NewRegistry(meshcoreClientConfig(appConfig))
 		// Rehydrate presence from the persisted store BEFORE connecting, so a
 		// deploy doesn't drop the whole mesh to "unknown" (and let the sweep expire
 		// the slow SIERRA repeaters) until every node re-adverts.
-		seedMeshRegistry(ctx, meshcoreReg, gridStore)
-		if err := meshcoreReg.Connect(ctx); err != nil {
+		seedMeshRegistry(ctx, reg, gridStore)
+		if err := reg.Connect(ctx); err != nil {
 			logging.Errorw(ctx, "Failed to start MeshCore subscriber", "error", err)
 		} else {
-			defer meshcoreReg.Close()
+			defer reg.Close()
 			logging.Infow(ctx, "MeshCore subscriber started", "brokers", len(appConfig.Grid.Meshcore.Brokers))
-			pollers = append(pollers, ingest.PollerSpec{
-				Normalizer: ingest.NewNetworkNormalizer(appConfig, meshcoreReg),
-				Interval:   gridPollInterval(appConfig, "meshcore"),
-			})
+			meshcoreReg = reg
 		}
+	}
+	var meshPush ingest.MeshPushSource
+	if pushRegistry.Enabled() {
+		meshPush = pushRegistry
+		logging.Infow(ctx, "Push ingest enabled",
+			"reporters", pushRegistry.ReporterIDs(pushingest.MeshStream))
+	}
+	if meshcoreReg != nil || meshPush != nil {
+		meshSources := append([]string{"meshcore"}, pushRegistry.ReporterIDs(pushingest.MeshStream)...)
+		pollers = append(pollers, ingest.PollerSpec{
+			Normalizer: ingest.NewNetworkNormalizer(appConfig, meshcoreReg, meshPush),
+			Interval:   gridPollInterval(appConfig, meshSources...),
+		})
 	}
 
 	scheduler := ingest.NewScheduler(gridStore, ingest.SchedulerConfig{
@@ -221,31 +252,15 @@ func main() {
 	censusClient := census.NewClient()
 	gridapiService := gridapi.NewService(gridStore, weatherService, censusClient, appConfig, hazardsService)
 
-	// MCP endpoint (docs/mcp-design.md): read-only tools for LLM agents over
+	// MCP endpoint (docs/design/mcp-design.md): read-only tools for LLM agents over
 	// Streamable HTTP. The tools call the /api/v1 surface in-process against the
 	// gRPC-Gateway mux, which only exists after prefab.New wires the gateway — so
 	// MCP holds a deferred handler we point at that mux below.
 	gatewayMux := &deferredHandler{}
 	mcpHandler := mcp.NewHandler(gatewayMux)
 
-	// Pushed burn-day readings. Disabled (404) unless a token is configured, so a
-	// deployment without a credential cannot expose an unauthenticated write path
-	// by omission.
-	// The endpoint accepts a reading only for a CONFIGURED line id, so the
-	// staging table can never accumulate rows no poller will read.
-	burnLineIDs := make([]string, 0, len(appConfig.Grid.Burn.Lines))
-	for _, l := range appConfig.Grid.Burn.Lines {
-		burnLineIDs = append(burnLineIDs, l.ID)
-	}
-	burnLineHandler := ingestapi.NewBurnLineHandler(gridStore, appConfig.Grid.Burn.IngestToken, burnLineIDs)
-	if burnLineHandler.Enabled() {
-		logging.Info(ctx, "Burn-line push endpoint enabled at /ingest/burn-line")
-	} else {
-		logging.Info(ctx, "Burn-line push endpoint disabled (no grid.burn.ingestToken configured)")
-	}
-
 	// GridService: the proto-defined /api/v1 entity/query surface over
-	// gRPC-Gateway (docs/grpc-gateway-migration-plan.md). Gateway annotations
+	// gRPC-Gateway (docs/design/grpc-gateway-migration-plan.md). Gateway annotations
 	// mount under /api/, which Prefab already serves.
 	gridServer := gridapi.NewGridServer(gridapiService)
 
@@ -275,16 +290,30 @@ func main() {
 			if err := gridServer.RegisterGatewayRoutes(mux); err != nil {
 				return err
 			}
+			// The one WRITE route on /api/v1, mounted only when a reporter is
+			// configured so the default build has no write surface at all. It is
+			// hand-mounted rather than proto-defined because it takes a foreign
+			// document verbatim (whatever shape a monitor already produces), and
+			// deliberately bypasses the ETag/Cache-Control interceptors, which
+			// exist for GETs.
+			//
+			// CORS keeps this browser-unreachable cross-origin: corsAllowMethods is
+			// [GET], so the POST preflight is denied — the same property that
+			// protects /mcp. Do not add POST to that list.
+			if pushRegistry.Enabled() {
+				if err := mux.HandlePath("POST", "/api/v1/ingest/{stream}",
+					func(w http.ResponseWriter, r *http.Request, pp map[string]string) {
+						pushRegistry.ServeStream(w, r, pp["stream"])
+					}); err != nil {
+					return err
+				}
+			}
 			// Point MCP at the fully-wired gateway so its tools query /api/v1
 			// in-process (same mux prefab serves at /api/).
 			gatewayMux.h = mux
 			return nil
 		}),
 		prefab.WithHTTPHandlerFunc("/mcp", mcpHandler.ServeHTTP),
-		// The service's ONLY write surface: pushed burn-day readings. Bearer-token
-		// authenticated, 404s when no token is configured, and never writes events
-		// (it stages a row the ingest scheduler picks up). See internal/ingestapi.
-		prefab.WithHTTPHandlerFunc("/ingest/burn-line", burnLineHandler.ServeHTTP),
 		// Publish the generated OpenAPI spec for /api/v1 (protoc-gen-openapiv2).
 		// Exact path, so it wins over the gateway's /api/ subtree mount.
 		prefab.WithHTTPHandlerFunc("/api/openapi.json", func(w http.ResponseWriter, _ *http.Request) {
@@ -480,10 +509,15 @@ func meshcoreClientConfig(cfg *config.Config) meshcore.Config {
 // meshMaintenanceConfig maps the grid.meshcore config onto the scheduler's
 // relay-topology maintenance tick (compaction + prune). A disabled meshcore
 // source returns a zero config (Interval 0), which turns the tick off entirely.
-// Cadence/retention default when unset (docs/mesh-topology-design.md §10).
+// Cadence/retention default when unset (docs/design/mesh-topology-design.md §10).
 func meshMaintenanceConfig(cfg *config.Config) ingest.MeshMaintenance {
 	mc := cfg.Grid.Meshcore
-	if !mc.Enabled || len(mc.Brokers) == 0 {
+	// The tick also owns telemetry-archive pruning, and telemetry arrives by
+	// PUSH — which works with MQTT off entirely. Gating the whole tick on the
+	// MQTT subscriber would leave a push-only deployment archiving samples that
+	// nothing ever prunes. Compaction over an empty observation table is a no-op,
+	// so running it for a push-only deployment costs nothing.
+	if (!mc.Enabled || len(mc.Brokers) == 0) && len(cfg.Grid.Ingest.Reporters) == 0 {
 		return ingest.MeshMaintenance{}
 	}
 	interval := mc.CompactionInterval
@@ -498,10 +532,15 @@ func meshMaintenanceConfig(cfg *config.Config) ingest.MeshMaintenance {
 	if rollupRetention <= 0 {
 		rollupRetention = 2 * 365 * 24 * time.Hour
 	}
+	telemetryRetention := mc.TelemetryRetention
+	if telemetryRetention <= 0 {
+		telemetryRetention = 365 * 24 * time.Hour
+	}
 	return ingest.MeshMaintenance{
 		Interval:             interval,
 		ObservationRetention: obsRetention,
 		RollupRetention:      rollupRetention,
+		TelemetryRetention:   telemetryRetention,
 	}
 }
 
@@ -566,7 +605,7 @@ func gridSourceSeeds(cfg *config.Config) []store.SourceSeed {
 	}
 	sort.Strings(ids) // deterministic seeding order
 
-	seeds := make([]store.SourceSeed, 0, len(ids))
+	seeds := make([]store.SourceSeed, 0, len(ids)+len(cfg.Grid.Ingest.Reporters))
 	for _, id := range ids {
 		tuning := cfg.Grid.Sources[id]
 		info, ok := gridSourceInfo[id]
@@ -582,6 +621,32 @@ func gridSourceSeeds(cfg *config.Config) []store.SourceSeed {
 			StaleAfter:    tuning.StaleAfter,
 			ExpireAfter:   tuning.ExpireAfter,
 			Disappearance: tuning.Disappearance,
+		})
+	}
+
+	// One row per push reporter, so /api/v1/sources answers "is Alan's monitor
+	// still reporting?" exactly the way it answers that question for CAL FIRE or
+	// PG&E. These rows carry HEALTH ONLY — no event is ever stored with a reporter
+	// as its source (mesh events all stay on `meshcore`), so their disappearance
+	// sweep has nothing to act on.
+	//
+	// PollInterval is the mesh poller's cadence, which is the honest number: it is
+	// how often this row's health is re-evaluated, not how often the monitor
+	// reports — a push source has no poll interval of ours to state. StaleAfter is
+	// the reporter's own silence threshold rather than the store's 3x default.
+	meshTick := gridPollInterval(cfg, "meshcore")
+	for _, rep := range cfg.Grid.Ingest.Reporters {
+		name := rep.Name
+		if name == "" {
+			name = rep.ID
+		}
+		seeds = append(seeds, store.SourceSeed{
+			ID:            rep.ID,
+			Name:          name,
+			Attribution:   "Operator-reported (" + rep.ID + ")",
+			PollInterval:  meshTick,
+			StaleAfter:    rep.StaleAfterOrDefault(),
+			Disappearance: store.DisappearanceExpire,
 		})
 	}
 	return seeds
@@ -666,4 +731,14 @@ func (s storePlaceIndex) PlaceIDsForCounty(ctx context.Context, countySlug strin
 	}
 	sort.Strings(ids)
 	return ids, nil
+}
+
+// burnReporters passes the push registry to the burn normalizer only when push
+// ingest is actually on. A typed nil would satisfy the interface and then claim
+// reporter source rows that can never report.
+func burnReporters(reg *pushingest.Registry) ingest.BurnReporters {
+	if reg == nil || !reg.Enabled() {
+		return nil
+	}
+	return reg
 }

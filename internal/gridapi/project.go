@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"google.golang.org/protobuf/types/known/timestamppb"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
 	"github.com/dpup/sierra-data/internal/clients/caloes"
@@ -13,7 +14,7 @@ import (
 )
 
 // ProjectEvents projects stored grid events onto the shipped GeoJSON envelope
-// (docs/v2-implementation-plan.md T13). The output must stay byte-compatible
+// (docs/design/v2-implementation-plan.md T13). The output must stay byte-compatible
 // with the live internal/hazards builders — internal/hazards/
 // project_compat_test.go is the gate — modulo exactly the plan §5 exclusion
 // list. Read the builders before changing any field here.
@@ -189,15 +190,104 @@ func projectNetwork(ev *gridv1.Event) hazards.Feature {
 	p.UpdatedAt = rfc3339(ev.GetObservedAt())
 	p.Source = hazards.Source{ID: "meshcore", Name: "MeshCore Mesh", URL: safeURL(ev.GetCanonicalUrl()), Attribution: "MeshCore community mesh"}
 	p.Mesh = &hazards.MeshProps{
-		PublicKey: d.GetPublicKey(),
-		NodeType:  d.GetNodeType(),
-		Name:      d.GetName(),
-		SNR:       t.GetSnr(),
-		RSSI:      t.GetRssi(),
-		HopCount:  t.GetHopCount(),
-		Gateways:  t.GetGateways(),
+		PublicKey:    d.GetPublicKey(),
+		NodeType:     d.GetNodeType(),
+		Name:         d.GetName(),
+		SNR:          wrapDouble(t.GetSnr()),
+		RSSI:         wrapInt32(t.GetRssi()),
+		HopCount:     wrapUint32(t.GetHopCount()),
+		Gateways:     t.GetGateways(),
+		Reachability: meshReachability(d.GetReachability()),
+		Admin:        meshAdminProps(t.GetAdmin()),
 	}
 	return feature(ev, p)
+}
+
+// wrapDouble / wrapInt32 / wrapUint32 carry a wrapper's "unset" through to the
+// GeoJSON layer as an omitted property rather than flattening it to zero. The
+// whole point of the wrapper on the wire is lost if the projection unwraps it
+// with GetValue(), which returns 0 for nil.
+func wrapDouble(v *wrapperspb.DoubleValue) *float64 {
+	if v == nil {
+		return nil
+	}
+	f := v.GetValue()
+	return &f
+}
+
+func wrapInt32(v *wrapperspb.Int32Value) *int32 {
+	if v == nil {
+		return nil
+	}
+	n := v.GetValue()
+	return &n
+}
+
+func wrapUint32(v *wrapperspb.UInt32Value) *uint32 {
+	if v == nil {
+		return nil
+	}
+	n := v.GetValue()
+	return &n
+}
+
+// meshReachability renders the reachability enum, omitting the unspecified case
+// entirely. "no monitor watches this node" is not a reachability verdict, and
+// emitting a placeholder for it would invite a client to render a node nobody
+// checks as one that is fine.
+func meshReachability(r gridv1.MeshReachability) string {
+	switch r {
+	case gridv1.MeshReachability_REACHABLE:
+		return "REACHABLE"
+	case gridv1.MeshReachability_UNREACHABLE:
+		return "UNREACHABLE"
+	default:
+		return ""
+	}
+}
+
+// meshAdminProps renders the operator-reported sample. The map layer carries a
+// readable subset — battery, thermals, airtime and the headline counters; the
+// full set (flood/direct splits, dup counts, queue overflows) stays on the event
+// detail at /api/v1/events, where a diagnostician is looking, rather than
+// inflating every feature in a map response.
+func meshAdminProps(a *gridv1.MeshAdminTelemetry) *hazards.MeshAdminProps {
+	if a == nil {
+		return nil
+	}
+	return &hazards.MeshAdminProps{
+		ReporterID:           a.GetReporterId(),
+		ReportedAt:           rfc3339(a.GetReportedAt()),
+		LastSuccessAt:        rfc3339(a.GetLastSuccessAt()),
+		BatteryVolts:         doublePtr(a.BatteryVolts),
+		BatteryPercent:       doublePtr(a.BatteryPercent),
+		BatteryPercentSource: a.GetBatteryPercentSource(),
+		TemperatureC:         doublePtr(a.TemperatureC),
+		NoiseFloorDBm:        int32Ptr(a.NoiseFloorDbm),
+		TxQueueLen:           int32Ptr(a.TxQueueLen),
+		UptimeSeconds:        a.GetUptimeSeconds(),
+		AirtimeMs:            a.GetAirtimeMs(),
+		RxAirtimeMs:          a.GetRxAirtimeMs(),
+		PacketsSent:          a.GetPacketsSent(),
+		PacketsReceived:      a.GetPacketsReceived(),
+		RecvErrors:           a.GetRecvErrors(),
+	}
+}
+
+func doublePtr(v *wrapperspb.DoubleValue) *float64 {
+	if v == nil {
+		return nil
+	}
+	f := v.GetValue()
+	return &f
+}
+
+func int32Ptr(v *wrapperspb.Int32Value) *int32 {
+	if v == nil {
+		return nil
+	}
+	i := v.GetValue()
+	return &i
 }
 
 // Projection constants for the power layer (plan §5 item 5: the envelope's

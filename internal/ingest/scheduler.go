@@ -32,13 +32,14 @@ type PollerSpec struct {
 }
 
 // MeshMaintenance configures the periodic compaction + prune of the MeshCore
-// relay-observation store (docs/mesh-topology-design.md): Tier 0 receptions are
+// relay-observation store (docs/design/mesh-topology-design.md): Tier 0 receptions are
 // rolled into the Tier 1 per-link-per-day history, then aged rows are pruned. A
 // zero Interval disables the whole tick (meshcore off / no topology store).
 type MeshMaintenance struct {
 	Interval             time.Duration // compaction + prune cadence (0 disables)
 	ObservationRetention time.Duration // Tier 0 raw age cap
 	RollupRetention      time.Duration // Tier 1 rollup age cap
+	TelemetryRetention   time.Duration // monitor-sample archive age cap
 }
 
 // SchedulerConfig wires a Scheduler. Tuning keys are source ids; missing
@@ -182,8 +183,13 @@ func (s *Scheduler) safeMeshMaintenance(ctx context.Context) {
 	if err != nil {
 		logging.Errorw(ctx, "Mesh maintenance: pruning rollup failed", "error", err)
 	}
+	prunedTelem, err := s.store.PruneMeshTelemetry(ctx, now.Add(-s.meshMaint.TelemetryRetention))
+	if err != nil {
+		logging.Errorw(ctx, "Mesh maintenance: pruning telemetry failed", "error", err)
+	}
 	logging.Infow(ctx, "Mesh maintenance tick", "compacted", compacted,
-		"prunedObservations", prunedObs, "prunedRollup", prunedRollup)
+		"prunedObservations", prunedObs, "prunedRollup", prunedRollup,
+		"prunedTelemetry", prunedTelem)
 }
 
 func (s *Scheduler) run(ctx context.Context, spec PollerSpec) {
@@ -251,7 +257,7 @@ type pollerState struct {
 // which is what stretched the tick's write phase to 7-9 seconds and gave readers
 // that many more chances to land on a commit.
 //
-// Three cases must still take the write path:
+// Four cases must still take the write path:
 //
 //   - fullReconcile — the place set changed, and the hash-equal path is what
 //     recomputes event->place attachments (refreshEventPlaces).
@@ -264,6 +270,12 @@ type pollerState struct {
 //   - a failed NeedsUpdate check — fail TOWARD doing the work. A check that
 //     errors must never silently skip a write; the cost of being wrong is one
 //     transaction we would have paid anyway.
+//   - an id in PollResult.ForceWrite — the poller changed content that is
+//     deliberately OUTSIDE the hash (mesh telemetry), which by definition
+//     produces a hash-equal event. Without this case that content would be
+//     persisted only on the ticks where something else about the event changed;
+//     for a fixed repeater reporting battery every five minutes, that is never.
+//     Pollers are expected to coalesce these, since each one is a transaction.
 //
 // The pre-check is BATCHED, and that is the whole point. Doing it per event
 // issued one SELECT per event — on EFS, one network round trip each. Measured in
@@ -292,8 +304,8 @@ func (s *Scheduler) storedHashes(ctx context.Context, events []*gridv1.Event) ma
 	return hashes
 }
 
-func (s *Scheduler) shouldUpsert(ev *gridv1.Event, fullReconcile bool, stored map[string]string) bool {
-	if fullReconcile || ev.GetEnhancement() != nil || stored == nil {
+func (s *Scheduler) shouldUpsert(ev *gridv1.Event, fullReconcile bool, stored map[string]string, forceWrite map[string]bool) bool {
+	if fullReconcile || ev.GetEnhancement() != nil || stored == nil || forceWrite[ev.GetId()] {
 		return true
 	}
 	h, ok := stored[ev.GetId()]
@@ -354,6 +366,19 @@ func (s *Scheduler) tick(ctx context.Context, spec PollerSpec, st *pollerState) 
 	// ONE round trip for the whole poll's hash pre-check (see storedHashes).
 	storedHashes := s.storedHashes(ctx, result.Events)
 
+	// Ids the poller says carry changed HASH-EXCLUDED content (mesh telemetry
+	// today). They are hash-equal by construction, so without this they would be
+	// skipped and the new value would never reach the store — see
+	// PollResult.ForceWrite. The write persists the blob without minting a
+	// revision (store.UpsertEvent's hash-equal refresh path).
+	var forceWrite map[string]bool
+	if len(result.ForceWrite) > 0 {
+		forceWrite = make(map[string]bool, len(result.ForceWrite))
+		for _, id := range result.ForceWrite {
+			forceWrite[id] = true
+		}
+	}
+
 	var upserted, skipped int
 	writeStart := time.Now()
 	for _, ev := range result.Events {
@@ -370,7 +395,7 @@ func (s *Scheduler) tick(ctx context.Context, spec PollerSpec, st *pollerState) 
 			polledIDs = append(polledIDs, ev.GetId())
 		}
 		s.maybeEnhance(ctx, ev, &budget)
-		if !s.shouldUpsert(ev, fullReconcile, storedHashes) {
+		if !s.shouldUpsert(ev, fullReconcile, storedHashes, forceWrite) {
 			skipped++
 			continue
 		}
@@ -410,6 +435,27 @@ func (s *Scheduler) tick(ctx context.Context, spec PollerSpec, st *pollerState) 
 		if err := s.store.InsertMeshObservations(ctx, result.MeshObservations); err != nil {
 			logging.Errorw(ctx, "Ingest tick: mesh observation insert failed",
 				"count", len(result.MeshObservations), "error", err)
+		}
+	}
+	// Renames run BEFORE the insert: a node promoted from a prefix to its full
+	// public key this tick must find its archived samples already filed under
+	// the new key, or this tick's sample opens a second series for one node.
+	for _, r := range result.MeshTelemetryRenames {
+		moved, err := s.store.RenameMeshTelemetryPubKey(ctx, r.From, r.To)
+		if err != nil {
+			logging.Errorw(ctx, "Ingest tick: mesh telemetry key rename failed",
+				"from", r.From, "to", r.To, "error", err)
+			continue
+		}
+		if moved > 0 {
+			logging.Infow(ctx, "Ingest tick: mesh telemetry followed a promoted key",
+				"from", r.From, "to", r.To, "samples", moved)
+		}
+	}
+	if len(result.MeshTelemetry) > 0 {
+		if err := s.store.InsertMeshTelemetry(ctx, result.MeshTelemetry); err != nil {
+			logging.Errorw(ctx, "Ingest tick: mesh telemetry insert failed",
+				"count", len(result.MeshTelemetry), "error", err)
 		}
 	}
 	obsDur := time.Since(obsStart)

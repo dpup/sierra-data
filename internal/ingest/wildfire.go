@@ -28,7 +28,7 @@ import (
 //
 // The combo feed carries MANY rows per fire (successive CAL FIRE Intel / FIRIS IR
 // flights), so Poll first dedups them to one perimeter per fire (dedupePerimeters,
-// see docs/firis-perimeter-source-design.md §4) before the name-join runs.
+// see docs/design/firis-perimeter-source-design.md §4) before the name-join runs.
 type WildfireNormalizer struct {
 	cfg     *config.Config
 	calfire *calfire.Client
@@ -386,7 +386,7 @@ type perimCandidate struct {
 const perimClusterThresholdSq = 0.15 * 0.15
 
 // dedupePerimeters collapses the combo feed's many-rows-per-fire into one
-// perimeter per fire (docs/firis-perimeter-source-design.md §4): derive a name for
+// perimeter per fire (docs/design/firis-perimeter-source-design.md §4): derive a name for
 // every row (incident_name, else parsed from the FIRIS mission id) and drop rows
 // with neither a name nor usable geometry; group by normalized name; within a
 // name spatially cluster (so two distinct same-named fires stay separate); keep

@@ -5,7 +5,7 @@
 // RETAINED, CURRENTLY UNUSED: the wildfire normalizer moved to the CAL FIRE/FIRIS
 // combo feed (internal/clients/firis), a superset of WFIGS with a healthier quota.
 // This client is kept in the tree so re-adding WFIGS as a fallback for a CAL
-// FIRE-org outage is cheap — see docs/firis-perimeter-source-design.md §3. Do not
+// FIRE-org outage is cheap — see docs/design/firis-perimeter-source-design.md §3. Do not
 // delete without revisiting that decision.
 package wfigs
 

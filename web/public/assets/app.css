@@ -1423,6 +1423,19 @@ button:disabled { opacity: 0.45; cursor: default; }
   min-width: 0; max-width: 100%;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+/* --- The absence vocabulary (format.js absentValue / timeCell) ----------
+ * Emitted by SHARED helpers, so it belongs here and not in any one page. It
+ * lived in events.astro's style block, where the /event permalink — the same
+ * markup, from the same renderer — printed "not provided by source" as 15px
+ * body prose; the mesh roster then needed it as a third caller. A kind of
+ * absence is a design token like a severity is: notProvided is quiet and
+ * italic, notApplicable quiet and plain, a FAULT is in the alert accent because
+ * a value that must exist and does not is not a quiet fact. */
+.absent { font-family: var(--font-mono); font-size: 10px; }
+.absent-empty { font-style: italic; color: var(--text-faint-p); }
+.absent-na { color: var(--text-faint-p); }
+.absent-fault { font-weight: 700; color: var(--signal); }
+.absent-src { font-size: 9.5px; }
 /* An absent timestamp: stated, not dashed (format.js timeCell). */
 .time-absent { color: var(--text-faint-p); font-style: italic; }
 

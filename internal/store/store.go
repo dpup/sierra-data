@@ -40,7 +40,7 @@ var schemaV1 string
 // rows with a zero LastSeenAt so callers can fall back to observed/ingested.
 const migrationV2 = `ALTER TABLE events ADD COLUMN last_seen_at INTEGER NOT NULL DEFAULT 0`
 
-// migrationV3 adds the MeshCore relay-topology tables (docs/mesh-topology-design.md):
+// migrationV3 adds the MeshCore relay-topology tables (docs/design/mesh-topology-design.md):
 //   - mesh_observations: the append-only reception firehose (Tier 0, short-lived) —
 //     one row per advert we heard, our-clock timestamp, signal + relay path.
 //   - mesh_link_rollup: the derived per-link-per-day topology history (Tier 1).
@@ -98,7 +98,83 @@ CREATE INDEX idx_revisions_observed
 // pge/psps) read as duplicates of each other on the sources board.
 const migrationV5 = `ALTER TABLE sources ADD COLUMN homepage_url TEXT NOT NULL DEFAULT ''`
 
-// migrationV6 adds the burn-line staging table: the landing spot for readings
+// migrationV6 adds the mesh telemetry archive: one row per accepted monitor
+// report per node (internal/pushingest -> the mesh normalizer -> here).
+//
+// Deliberately NOT the generic time-series table we sketched first. Of
+// everything worth graphing, this is the only data no existing table holds:
+// wildfire acreage, containment and the evacuation/weather status timelines are
+// projections over event_revisions (which nothing prunes), and a node's
+// SNR/RSSI/hop history is already in mesh_observations. One shape needed
+// storage, so it gets a store shaped like it.
+//
+// The columns mirror grid.v1.MeshAdminTelemetry field for field, INCLUDING its
+// split: gauges are NULLABLE because an unread one is not a zero (a 0% battery
+// and an unreadable battery must never render alike), while counters are plain
+// because they are only ever written alongside a successful read, where 0 is a
+// real measurement. Same rule as the wrapper types on the wire.
+//
+// Plain columns rather than a proto blob, unlike events: this is a measurement,
+// the mesh_observations precedent, and a future daily rollup wants to aggregate
+// in SQL rather than decode a month of blobs. The cost is an ALTER TABLE when
+// the reporter schema grows, which is the trade the reporter's own
+// schema_version already makes explicit.
+//
+// No rollup table yet, deliberately. At 9 nodes reporting every 15 minutes this
+// is ~864 rows/day — a year is 315k rows, tens of megabytes. mesh_link_rollup
+// exists because the advert firehose is orders of magnitude larger; here a
+// second tier would be machinery guarding nothing. Adding one later is additive.
+const migrationV6 = `
+CREATE TABLE mesh_telemetry (
+  pubkey      TEXT NOT NULL,
+  reported_at INTEGER NOT NULL,       -- the monitor's generated_at, clamped on arrival
+  received_at INTEGER NOT NULL,       -- our clock: the observed/ingested split, kept
+  reporter    TEXT NOT NULL DEFAULT '',
+  -- The monitor's own attempt/success stamps AT THAT REPORT. Stored so an
+  -- archived row rehydrates grid.v1.MeshAdminTelemetry exactly: the event holds
+  -- the latest reading, this table holds all of them, and they are the same
+  -- message rather than two drifting descriptions of one thing.
+  last_success_at INTEGER,
+  last_attempt_at INTEGER,
+
+  -- GAUGES. NULL = the monitor could not read it. Never 0.
+  battery_volts      REAL,
+  battery_pct        REAL,
+  battery_pct_source TEXT NOT NULL DEFAULT '',  -- "measured" | "estimated"
+  temperature_c      REAL,
+  humidity           REAL,
+  pressure           REAL,
+  noise_floor_dbm    INTEGER,
+  last_snr_db        REAL,
+  last_rssi_dbm      INTEGER,
+  tx_queue_len       INTEGER,
+
+  -- COUNTERS, lifetime since the node booted. Reset detection is uptime_s
+  -- going backwards; the read path segments on it so a reboot breaks the line
+  -- instead of plunging it.
+  uptime_s      INTEGER NOT NULL DEFAULT 0,
+  airtime_ms    INTEGER NOT NULL DEFAULT 0,
+  rx_airtime_ms INTEGER NOT NULL DEFAULT 0,
+  packets_sent  INTEGER NOT NULL DEFAULT 0,
+  packets_recv  INTEGER NOT NULL DEFAULT 0,
+  sent_flood    INTEGER NOT NULL DEFAULT 0,
+  sent_direct   INTEGER NOT NULL DEFAULT 0,
+  recv_flood    INTEGER NOT NULL DEFAULT 0,
+  recv_direct   INTEGER NOT NULL DEFAULT 0,
+  direct_dups   INTEGER NOT NULL DEFAULT 0,
+  flood_dups    INTEGER NOT NULL DEFAULT 0,
+  full_evts     INTEGER NOT NULL DEFAULT 0,
+  recv_errors   INTEGER NOT NULL DEFAULT 0,
+
+  -- (pubkey, reported_at) is what makes the write idempotent: the mesh poller
+  -- ticks every 60s and reports arrive every ~15 minutes, so it re-offers the
+  -- same sample ~15 times. Keying on OUR receive time instead would store 15
+  -- copies of one reading.
+  PRIMARY KEY (pubkey, reported_at)
+) WITHOUT ROWID;
+CREATE INDEX idx_mesh_telem_time ON mesh_telemetry(reported_at);`
+
+// migrationV7 adds the burn-line staging table: the landing spot for readings
 // PUSHED to the service rather than polled from an upstream (the burn-day facet
 // of Layer_BURN_STATUS; see internal/ingest/CLAUDE.md).
 //
@@ -116,7 +192,7 @@ const migrationV5 = `ALTER TABLE sources ADD COLUMN homepage_url TEXT NOT NULL D
 // several counties, and keying by county would dial and store it once per
 // county. Which counties a line answers for is config (grid.burn.lines[].counties),
 // not a property of the reading.
-const migrationV6 = `
+const migrationV7 = `
 CREATE TABLE burn_readings (
   line_id      TEXT PRIMARY KEY,     -- config line id ("calaveras-apcd")
   status       TEXT NOT NULL,        -- upstream vocabulary: green | red | orange
@@ -131,7 +207,7 @@ CREATE TABLE burn_readings (
 // recorded in schema_migrations; already-applied versions are skipped, so
 // Open is idempotent across restarts and an existing dev DB at an older
 // version picks up only the missing migrations.
-var migrations = []string{schemaV1, migrationV2, migrationV3, migrationV4, migrationV5, migrationV6}
+var migrations = []string{schemaV1, migrationV2, migrationV3, migrationV4, migrationV5, migrationV6, migrationV7}
 
 // ErrNotFound is returned by point lookups (GetEvent, GetPlace) when no row
 // matches. Callers map it to a 404.

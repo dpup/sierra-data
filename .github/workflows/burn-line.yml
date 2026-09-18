@@ -4,8 +4,12 @@
 # Why this lives in CI rather than in the server: placing a phone call costs
 # money and must happen exactly once a day. A long-running server would re-dial
 # on every restart or deploy unless carefully guarded; a scheduled workflow has
-# the semantics we want for free. The server only ever receives the result, at
-# /ingest/burn-line.
+# the semantics we want for free. The server only ever receives the result, on
+# the shared push-ingest endpoint as the `burn.line` stream.
+#
+# GRID_INGEST_ENDPOINT is the full stream URL, e.g.
+# https://data.sierragridteam.org/api/v1/ingest/burn.line; GRID_INGEST_TOKEN is a
+# grid.ingest reporter granted that stream (`make ingest-token`).
 #
 # A failure pushes NOTHING — deliberately. The previous reading then ages past
 # the server's freshness gate (grid.burn.burnDayStaleAfter, 36h) and the burn-day

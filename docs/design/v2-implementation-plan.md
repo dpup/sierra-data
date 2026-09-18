@@ -1,6 +1,6 @@
 # Grid Info Service v2 — Implementation Plan
 
-Implements `docs/v2-api-spec.md` (API + persistence) and `docs/data-sites-spec.md`
+Implements `docs/design/v2-api-spec.md` (API + persistence) and `docs/design/data-sites-spec.md`
 (data.sierragridteam.org). This document is both the human-readable plan and the
 **coordination contract for subagent-driven development**: every task lists its
 file ownership, its public contracts (signatures), and its verification. Agents

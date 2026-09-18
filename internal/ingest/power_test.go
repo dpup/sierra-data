@@ -16,6 +16,7 @@ import (
 	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
 	"github.com/dpup/sierra-data/internal/clients/pge"
 	"github.com/dpup/sierra-data/internal/config"
+	"github.com/dpup/sierra-data/internal/store"
 )
 
 // pgeDoer routes by URL path, because one PG&E client fetches four endpoints
@@ -273,6 +274,8 @@ func TestPowerPoll_OneFeedFailingKeepsTheOther(t *testing.T) {
 		d := freshDoer()
 		d.pspsErr = assert.AnError
 		d.points = collection(pgeOutageRow("330042", "FIRE", "No Access", 19, 38.43, -120.07))
+		d.polygons = collection(pgePolygonRow("330042", -120.07, 38.43))
+		d.polygons = collection(pgePolygonRow("330042", -120.07, 38.43))
 
 		res, err := newPowerNormalizer(d, testNow).Poll(testCtx(), nil)
 		require.NoError(t, err)
@@ -304,6 +307,7 @@ func TestPowerPoll_BothFeedsFailingIsHardError(t *testing.T) {
 func TestPowerPoll_FrozenFeedIsRecordedAsFailure(t *testing.T) {
 	d := freshDoer()
 	d.points = collection(pgeOutageRow("330042", "FIRE", "No Access", 19, 38.43, -120.07))
+	d.polygons = collection(pgePolygonRow("330042", -120.07, 38.43))
 	d.stamp = stampAt(testNow.Add(-26 * time.Hour))
 
 	res, err := newPowerNormalizer(d, testNow).Poll(testCtx(), nil)
@@ -321,6 +325,7 @@ func TestPowerPoll_FrozenFeedIsRecordedAsFailure(t *testing.T) {
 func TestPowerPoll_FreshFeedIsHealthy(t *testing.T) {
 	d := freshDoer()
 	d.points = collection(pgeOutageRow("330042", "FIRE", "No Access", 19, 38.43, -120.07))
+	d.polygons = collection(pgePolygonRow("330042", -120.07, 38.43))
 	d.stamp = stampAt(testNow.Add(-3 * time.Minute)) // the observed live lag
 
 	res, err := newPowerNormalizer(d, testNow).Poll(testCtx(), nil)
@@ -335,6 +340,7 @@ func TestPowerPoll_FreshFeedIsHealthy(t *testing.T) {
 func TestPowerPoll_UnreadableStampFailsOpen(t *testing.T) {
 	d := freshDoer()
 	d.points = collection(pgeOutageRow("330042", "FIRE", "No Access", 19, 38.43, -120.07))
+	d.polygons = collection(pgePolygonRow("330042", -120.07, 38.43))
 	d.stamp = "" // 404s
 
 	res, err := newPowerNormalizer(d, testNow).Poll(testCtx(), nil)
@@ -346,6 +352,7 @@ func TestPowerPoll_UnreadableStampFailsOpen(t *testing.T) {
 func TestPowerPoll_FreshnessGateDisabled(t *testing.T) {
 	d := freshDoer()
 	d.points = collection(pgeOutageRow("330042", "FIRE", "No Access", 19, 38.43, -120.07))
+	d.polygons = collection(pgePolygonRow("330042", -120.07, 38.43))
 	d.stamp = stampAt(testNow.Add(-100 * time.Hour))
 
 	cfg := testConfig()
@@ -634,4 +641,50 @@ func TestPowerPoll_UnknownCustomerCountIsNotSuppressed(t *testing.T) {
 		"an unknown count is not evidence of a small outage")
 	// The headline still says plainly that we don't know.
 	assert.Equal(t, "Power outage — customer count not reported (fire)", ev.GetHeadline())
+}
+
+// TestPowerPoll_BlankPolygonLayerDoesNotChurnGeometry is the regression test for
+// the churn this whole path exists to stop, and it asserts the thing that
+// actually cost us: the CONTENT HASH does not move.
+//
+// PG&E's polygon layer blinks (see pge.ErrPolygonLayerBlank). Before this, every
+// blink redrew each outage as its own centre point, and the poll after it drew
+// the area back — two revisions per flip, per outage, forever, on a record whose
+// customer count and crew status had not changed. A 7-customer planned outage
+// had 25 of them in one afternoon.
+func TestPowerPoll_BlankPolygonLayerDoesNotChurnGeometry(t *testing.T) {
+	// Poll 1: a complete fetch. The outage gets its published footprint.
+	d := freshDoer()
+	d.points = collection(pgeOutageRow("330042", "PLNND SHUTDOWN", "Crew On Site", 7, 38.2, -120.3))
+	d.polygons = collection(pgePolygonRow("330042", -120.3, 38.2))
+
+	res, err := newPowerNormalizer(d, testNow).Poll(testCtx(), nil)
+	require.NoError(t, err)
+	assert.Nil(t, res.PerSource["pge"], "a complete fetch is healthy")
+	require.Len(t, res.Events, 1)
+	withPolygon := res.Events[0]
+	require.NotNil(t, withPolygon.GetGeometry())
+	assert.Contains(t, string(withPolygon.GetGeometry().GetGeojson()), "Polygon")
+	firstHash := store.ContentHash(withPolygon)
+
+	// Poll 2: layer 8 blinks. Same outage, same attributes, no polygon rows.
+	d2 := freshDoer()
+	d2.points = d.points
+	d2.polygons = emptyCollection()
+
+	res2, err := newPowerNormalizer(d2, testNow).Poll(testCtx(), &fakePrior{events: []*gridv1.Event{withPolygon}})
+	require.NoError(t, err, "a blank polygon layer is a partial failure, not a dead tick")
+	// Reported: the source's health degrades and its sweep is skipped...
+	assert.ErrorIs(t, res2.PerSource["pge"], pge.ErrPolygonLayerBlank)
+	// ...while the outage keeps the footprint PG&E last published for it.
+	require.Len(t, res2.Events, 1)
+	assert.Equal(t, firstHash, store.ContentHash(res2.Events[0]),
+		"a blank polygon layer must not change the stored event — that is the revision churn")
+
+	// And with no prior (a first sighting during a blink) the point still lands:
+	// we carry a footprint forward, we do not invent one.
+	res3, err := newPowerNormalizer(d2, testNow).Poll(testCtx(), &fakePrior{})
+	require.NoError(t, err)
+	require.Len(t, res3.Events, 1)
+	assert.Contains(t, string(res3.Events[0].GetGeometry().GetGeojson()), "Point")
 }

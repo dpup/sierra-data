@@ -36,6 +36,14 @@ import PageHead from '../components/PageHead.astro';
       .popup-details-dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 0; }
       .popup-details-dl dt { color: var(--text-tertiary); font-size: 11px; }
       .popup-details-dl dd { margin: 0; color: var(--text-body); font-size: 12px; overflow-wrap: anywhere; }
+      /* The roster is six columns wide now that the monitor has a place in it,
+         and `.data-table` is nowrap — so "5 min ago 2026-09-15 04:12Z" on one
+         line was costing the table ~70px and pushing it into a horizontal
+         scroll inside the rail's column. Stack the absolute half under the
+         relative one: both are still there (a timestamp is always both), in the
+         same shape the record detail gives a reading and its caption. */
+      #mesh-tbody .time-cell { display: inline-block; }
+      #mesh-tbody .time-cell .time-abs { display: block; }
       @media (max-width: 720px) { #mesh-canvas { height: 66vh; } #mesh-legend { margin-left: 0; } }
     </style>
   </Fragment>
@@ -69,7 +77,7 @@ import PageHead from '../components/PageHead.astro';
   <div class="section-gap">
     <div class="section-head">
       <div class="left"><h2>Nodes heard</h2></div>
-      <span class="cap">node · type · snr / rssi · hops · heard</span>
+      <span class="cap">node · type · monitor · snr / rssi · hops · heard</span>
     </div>
     <div class="with-rail">
       <div class="rail-main">
@@ -81,11 +89,11 @@ import PageHead from '../components/PageHead.astro';
                    carry their own units ("9 dB", "2 hops", "5 min ago") and
                    size themselves. -->
               <tr>
-                <th>Node</th><th>Type</th><th>SNR / RSSI</th>
+                <th>Node</th><th>Type</th><th>Monitor</th><th>SNR / RSSI</th>
                 <th class="num">Hops</th><th>Heard</th>
               </tr>
             </thead>
-            <tbody id="mesh-tbody"><tr><td colspan="5"><span class="loading">Loading nodes…</span></td></tr></tbody>
+            <tbody id="mesh-tbody"><tr><td colspan="6"><span class="loading">Loading nodes…</span></td></tr></tbody>
           </table>
         </div>
       </div>
@@ -100,10 +108,27 @@ import PageHead from '../components/PageHead.astro';
           </p>
         </div>
         <div class="rail-block">
+          <div class="rail-label">Monitor: a second source</div>
+          <p>
+            Everything else on this page is what a node <em>broadcast</em>. The
+            <span class="mono">Monitor</span> column is what an operator-run monitor read by
+            logging into the node — battery, temperature, and the fact that it could be reached
+            at all — pushed to <code class="inline">/api/v1/ingest/mesh.repeater</code>.
+          </p>
+          <p>
+            <span class="mono">not monitored</span> is the common state and means nobody is
+            watching, <strong class="accent-orange">not that the node is down</strong>. A mesh has
+            no goodbye packet, so silence is ambiguous — a monitor that logged in and failed is
+            not, which is why <span class="mono">UNREACHABLE</span> is worth its own ring on the
+            map. Open a node for its full telemetry.
+          </p>
+        </div>
+        <div class="rail-block">
           <div class="rail-label">Telemetry is volatile</div>
           <p>
-            SNR, RSSI and hop count are deliberately excluded from the content hash, so they never
-            mint a revision — only a node's identity, location or status does.
+            SNR, RSSI, hop count and everything a monitor reports are deliberately excluded from
+            the content hash, so they never mint a revision — only a node's identity, location,
+            status or <span class="mono">reachability</span> does.
           </p>
           <p>Missing telemetry renders as <span class="mono">—</span>, never <span class="mono">0</span>.</p>
         </div>

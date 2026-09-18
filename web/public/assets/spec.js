@@ -64,7 +64,7 @@ export const FIELD_DOCS = {
   earthquake: ['detail', 'magnitude, depthKm, felt.'],
   roadIncident: ['detail', 'logNumber, impact, duration, metadata map.'],
   power: ['detail', 'Outage: outageId, cause, customersAffected, crewStatus, estimatedRestoration. PSPS: eventId, eventName, timePeriod, stage (Watch | Warning), medicalBaselineAffected, deEnergizationStart, deEnergizationEnd. estimatedRestoration and deEnergizationEnd are ESTIMATES PG&E routinely overruns — they are deliberately not mapped onto expires, so never use them to hide an event.'],
-  mesh: ['detail', 'publicKey, nodeType, name, telemetry {snr, rssi, hopCount, gateways, lastAdvertAt} — volatile, never mints a revision. Relay paths are NOT here (proto tag reserved): a path belongs to one reception, not to a node, so topology is served derived at GET /api/v1/mesh/links.'],
+  mesh: ['detail', 'publicKey, nodeType, name, reachability, and telemetry {snr, rssi, hopCount, gateways, lastAdvertAt, admin} — volatile, never mints a revision. snr/rssi/hopCount are NULL, not 0, for a node no MQTT bridge has heard (0 hops means heard direct, so it cannot also mean unknown). telemetry.admin is one sample an operator-run monitor read off the node itself (battery, temperature, airtime, packet counters) and pushed to /api/v1/ingest/mesh.repeater; its gauges are wrapper types, so an unread value is null and never a zero. reachability is the exception that IS hashed — a node going unreachable is a lifecycle change worth a history entry. Relay paths are NOT here (proto tag reserved): a path belongs to one reception, not to a node, so topology is served derived at GET /api/v1/mesh/links.'],
 };
 
 /**
@@ -173,6 +173,18 @@ export const ENDPOINTS = [
       'fireWeather is normal, elevated or red-flag, derived only from authoritative NWS products. Per-location alerts are dropped: weather alerts are events. There is no roads passthrough either — road conditions are the road_segment and chain_control map layers, road incidents are events.',
     params: [['place', 'place slug or id', "Filters locations to a place's bounding box.", 'all locations']],
     examples: ['/api/v1/conditions', '/api/v1/conditions?place=ebbetts-pass'],
+  },
+  {
+    path: '/api/v1/mesh/telemetry',
+    blurb: 'One mesh node\u2019s telemetry archive \u2014 the series behind a battery or temperature chart.',
+    detail:
+      'Every accepted operator-monitor report for one node, oldest first. Each sample is {receivedAt, reading}, where reading is the same MeshAdminTelemetry block the node\u2019s event carries \u2014 so an unread gauge is null here too, never 0. The envelope carries what a chart needs in order not to lie: coverage (what the archive HOLDS, so an empty window is not a quiet node), cadenceSeconds (the observed median gap, so you know which gaps to break a line on), reboots (where uptime went backwards and every lifetime counter restarted), and truncated.',
+    params: [
+      ['node', 'hex public key', 'The node, in full. Required \u2014 this is one node\u2019s chart.', 'none'],
+      ['from', 'RFC 3339', 'Start of the window.', '24h before `to`'],
+      ['to', 'RFC 3339', 'End of the window.', 'now'],
+    ],
+    examples: [],
   },
   {
     path: '/api/v1/sources',

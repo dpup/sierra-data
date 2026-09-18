@@ -24,11 +24,11 @@ type UpsertResult struct {
 
 // ContentHash returns the SHA-256 hex of a deterministic marshal of ev with
 // volatile fields zeroed: revision, ingested_at, observed_at,
-// provenance.fetched_at, enhancement, summary, place_ids, and (for NETWORK
-// events) network.telemetry. Upstream re-stamps without content change produce
+// provenance.fetched_at, enhancement, summary, place_ids, and (for MESH
+// events) mesh.telemetry. Upstream re-stamps without content change produce
 // the same hash (no revision), and enhancement output never causes hash churn
 // — the scheduler decides whether to spend enhancement budget via NeedsUpdate
-// BEFORE enhancing. The NETWORK exclusion is what keeps the MeshCore advert
+// BEFORE enhancing. The MESH exclusion is what keeps the MeshCore advert
 // firehose from minting a revision per packet: SNR/RSSI/hops/gateways change
 // constantly but ride in telemetry, so only a node's stable identity, role,
 // name, location, or status flips the hash. See internal/store/CLAUDE.md.
@@ -502,7 +502,26 @@ func (s *Store) refreshEventPlaces(tx *sql.Tx, ev *gridv1.Event) error {
 	enhChanged := ev.GetEnhancement() != nil &&
 		(!proto.Equal(stored.GetEnhancement(), ev.GetEnhancement()) || stored.GetSummary() != ev.GetSummary())
 
-	if !placesChanged && !enhChanged {
+	// Mesh telemetry is the other hash-excluded field, and it is excluded for the
+	// opposite reason from enhancement: not because it is expensive to recompute,
+	// but because it changes on EVERY observation. Battery, airtime and packet
+	// counters hashed would mint a revision per report and drown the node's real
+	// history (renames, relocations, going unreachable) in noise.
+	//
+	// The consequence is that this path is the ONLY thing that can ever persist
+	// them: a telemetry-only change is hash-equal, so it lands here. Without this
+	// branch the stored sample would only ever be refreshed on the ticks where
+	// something else about the node changed — for a fixed repeater, essentially
+	// never — leaving a battery reading frozen at whatever was current the last
+	// time anyone renamed it. Reaching the branch at all requires the scheduler
+	// to take the write path, which it does for PollResult.ForceWrite ids.
+	//
+	// Only when the incoming actually carries telemetry: a poll that omits it
+	// must not erase a stored sample (same rule as the enhancement above).
+	telChanged := ev.GetMesh().GetTelemetry() != nil && stored.GetMesh() != nil &&
+		!proto.Equal(stored.GetMesh().GetTelemetry(), ev.GetMesh().GetTelemetry())
+
+	if !placesChanged && !enhChanged && !telChanged {
 		return nil
 	}
 	if placesChanged {
@@ -516,6 +535,9 @@ func (s *Store) refreshEventPlaces(tx *sql.Tx, ev *gridv1.Event) error {
 	if enhChanged {
 		stored.Enhancement = ev.GetEnhancement()
 		stored.Summary = ev.GetSummary()
+	}
+	if telChanged {
+		stored.GetMesh().Telemetry = ev.GetMesh().GetTelemetry()
 	}
 	newBlob, err := proto.Marshal(stored)
 	if err != nil {

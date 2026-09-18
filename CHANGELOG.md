@@ -14,7 +14,7 @@ throughout; errors are gRPC-standard `{code, codeName, message, details}`). The
 by a snake_case `/v1` surface on 2026-07-05, which was in turn folded back onto the
 proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 
-## 2026-09-10
+## 2026-09-18
 
 ### New layer `BURN_STATUS`: per-county residential burning status
 
@@ -44,13 +44,21 @@ independently:
   where at least one county is configured.
 - **`GET /api/v1/sources`** gains `burnline` and `calfire-burn`.
 
-**New: `POST /ingest/burn-line`** — the service's first and only write
-endpoint, and the only route that requires a credential (a bearer token). It
-accepts a pushed burn-day reading and 202s; it does **not** write events (the
-reading is staged and the ingest scheduler applies it on its next tick). It is
-not part of the public read surface, is absent from the OpenAPI spec, and stays
-browser-unreachable cross-origin because `corsAllowMethods` remains GET-only.
-Nothing about the existing read endpoints changes.
+**New push stream: `burn.line`** on the existing
+`POST /api/v1/ingest/{stream}` endpoint. No new endpoint and no new auth
+surface — a reporter granted the `burn.line` stream posts a reading and gets the
+same 202 body, rate limiting, size caps and `/api/v1/sources` health row as the
+`mesh.repeater` stream. Mint a credential with
+`make ingest-token REPORTER=<id> STREAMS=burn.line`.
+
+Unlike `mesh.repeater`, an accepted `burn.line` reading is **staged in the
+store** rather than held in memory, and that difference is deliberate: a mesh
+monitor re-reports every few minutes, so losing a buffer to a restart costs
+nothing, whereas a burn line is called **once a day** — an in-memory buffer would
+leave `burnDay` UNKNOWN until the next morning after any deploy. The reading
+keeps its own `observedAt`, so a rehydrated one is re-judged by the freshness
+gate rather than resurrected as current. It still writes no events; the
+scheduler remains the only writer of those.
 
 **`burnStatus` fields**: `burnDay` (`BURN_DAY_UNKNOWN|_YES|_NO|_MARGINAL`),
 `calfireStatus` (`CALFIRE_BURN_STATUS_UNKNOWN|CALFIRE_BURNING_SUSPENDED|CALFIRE_PERMIT_REQUIRED|CALFIRE_NO_PERMIT_REQUIRED`),
@@ -93,9 +101,156 @@ administrative fact about a county, not a footprint — so there is no
 INFO state: it is excluded from `summary.totalActive`, `severityCounts`,
 `topEvents` and `mode`, and appears only in its own `burn` domain.
 
-Tuolumne's line is published but not read, so its `burnDay` reads
-`BURN_DAY_UNKNOWN` while `calfireStatus` is populated; `burnLinePhone` still
-carries the county's real number.
+Tuolumne's line is published but not dialed, so its `burnDay` reads
+`BURN_DAY_UNKNOWN` while `calfireStatus` is populated; its entry in
+`burnLines[]` still carries the county's real number.
+
+## 2026-09-15 (evening)
+
+### New: `GET /api/v1/mesh/telemetry?node=` — one node's telemetry archive
+
+**Additive.** The first endpoint that answers "how did this move", rather than
+"what is it now".
+
+An event carries a mesh node's LATEST monitor reading; nothing kept the earlier
+ones, so a battery or temperature curve could not be drawn at all. Every accepted
+report is now archived, one row per report per node, and this returns them for
+one node over a window.
+
+- `node` (required, full public key), `from` and `to` (RFC 3339; default the last
+  24 hours, clamped to 400 days).
+- Each sample is `{receivedAt, reading}` where `reading` is the same
+  `MeshAdminTelemetry` message the event carries — so the archive cannot describe
+  a reading differently from the live record, and an unread gauge is `null` in
+  both. `reading.reportedAt` is the sample's own time.
+- The response carries what a chart needs in order not to lie: `coverage` (what
+  the archive holds for this node, so an empty window is distinguishable from a
+  quiet node), `cadenceSeconds` (the observed median gap, so a client knows which
+  gaps are abnormal), `reboots` (sample times where uptime went backwards, where
+  every lifetime counter restarts), and `truncated`.
+
+Per node by design — a cross-node dump is a different product. Retention defaults
+to a year (`grid.meshcore.telemetryRetention`).
+
+## 2026-09-15 (later still)
+
+### Fixed: PG&E outages no longer churn geometry (and their revision history stops filling with noise)
+
+**No field changes shape.** What changes is how often a `pge:` event mints a
+revision, and what `GET /api/v1/events/{id}/history` contains for one.
+
+PG&E's outage service publishes points on one ArcGIS layer and affected-area
+polygons on another, joined on `OUTAGE_ID`. The polygon layer intermittently
+answers with **zero rows** — HTTP 200, no error envelope (confirmed live: all
+three in-window outages carried polygons at 21:08, none at 21:12, all three again
+16 seconds later). We believed it, so every outage's geometry reverted to its
+centre point, which moved the content hash, which wrote a revision — and another
+when the layer came back. One 7-customer planned outage had accumulated **25
+revisions in an afternoon**, every one of them the same area redrawn as a point
+and back, with its Hwy 4 corridor `placeIds` entry attaching and detaching each
+time.
+
+An outage now keeps the last footprint PG&E published for it while the layer is
+blank, and `GET /api/v1/sources` reports `pge` as degraded for those polls —
+the condition is surfaced rather than absorbed. Consumers polling
+`/api/v1/history` for power events will see far fewer entries; the ones that
+remain are real changes.
+
+## 2026-09-15 (later)
+
+### Breaking: `mesh.telemetry.snr`, `.rssi` and `.hopCount` are now nullable
+
+**Migration: treat `null` as "no bridge has heard this node", and stop reading a
+`0` as a measurement.** A consumer that only displays these values needs no
+change beyond rendering the absent case; one that does arithmetic on them must
+handle `null`.
+
+These three were bare proto scalars, so the gateway's marshaler published an
+unset value as `0`. That is a claim, and on live data it was a false one: on
+2026-09-15 three of nine operator-monitored repeaters had never been heard by any
+MeshCore MQTT bridge, and the API was reporting them as `snr: 0, rssi: 0,
+hopCount: 0` — a reading of 0 dB, heard DIRECT, for a node the mesh has not heard
+at all. `hopCount` is the sharpest case: 0 hops is a real and useful reading
+(heard direct), so it cannot also mean "unknown".
+
+They are wrapper types now, exactly like the admin gauges added earlier today,
+and are `null` unless a bridge actually reported the advert they came from —
+which `lastAdvertAt` being non-null marks too. The `mesh_node` GeoJSON layer
+follows the same rule and had the mirror-image bug: `omitempty` on the scalars
+dropped a genuine `hopCount: 0` along with the unset case, so a directly-heard
+node looked unheard. Both now omit only what is genuinely absent.
+
+One-time effect on stored history: past revision snapshots decode with these
+three fields empty (the old bytes no longer match the field type). They are
+hash-excluded volatile values that were never part of an event's identity, and
+live nodes repopulate within one telemetry-persist interval.
+
+## 2026-09-15
+
+### New: `POST /api/v1/ingest/{stream}` — authenticated push ingest, and operator-reported mesh telemetry
+
+**Additive. No existing field changes shape or type.** The first WRITE endpoint
+on `/api/v1`, plus the data it carries.
+
+Until now the only input for the `MESH` layer was the community MeshCore MQTT
+bridges, which see only what a node broadcasts. An operator-run monitor that logs
+into a repeater's admin interface can report things no broadcast feed contains —
+battery, temperature, uptime, airtime, packet counters — and, uniquely, can
+report a node it TRIED to reach and could not.
+
+- **`POST /api/v1/ingest/{stream}`** accepts a report from a configured reporter.
+  `Authorization: Bearer <token>` is required; the token is issued per reporter by
+  the operator (only its SHA-256 hash is stored in this repository). Returns `202`
+  with `{reporterId, stream, accepted, warnings, receivedAt}` — `202`, not `200`,
+  because the report is validated and buffered, not yet in the store; the next
+  ingest tick merges it. Errors use the same `{code, message}` shape as the rest
+  of the surface: `401` unknown token, `403` stream not granted, `404` unknown
+  stream, `413` body too large, `429` reporting faster than the configured
+  minimum, `400` malformed. The endpoint is not mounted unless a reporter is
+  configured, and the CORS policy (`corsAllowMethods: [GET]`) leaves it
+  unreachable from a cross-origin browser page.
+  - Stream `mesh.repeater` (`schema_version: 1`) carries `{schema_version,
+    generated_at, repeaters[]}`; each repeater has an `id` (hex public key or a
+    prefix of one), `name`, `last_attempt`/`last_success`, and the metrics listed
+    below. **A report is the reporter's COMPLETE current set** — a node omitted
+    from a report is treated as no longer monitored.
+- **`mesh.reachability`** on `MESH` events and `properties.mesh.reachability` on
+  the `mesh_node` layer: `"REACHABLE" | "UNREACHABLE"`. **A node no monitor
+  watches has neither**, and must not be rendered as one that is down — the two
+  surfaces spell that third state differently, following each one's existing
+  convention:
+  - on `/api/v1/events` the field is always present (the gateway emits
+    unpopulated fields) and reads `"MESH_REACHABILITY_UNSPECIFIED"`;
+  - on the `.geojson` layer the property is **omitted**.
+  This field IS part of the event's content hash, so a repeater going unreachable
+  creates a revision and shows up in `/api/v1/events/{id}/history`.
+- **`mesh.telemetry.admin`** on `MESH` events: the last sample an operator monitor
+  read off the node (`reporterId`, `reportedAt`, `lastSuccessAt`,
+  `lastAttemptAt`, `batteryVolts`, `batteryPercent`, `batteryPercentSource`,
+  `temperatureC`, `humidity`, `pressure`, `noiseFloorDbm`, `lastSnrDb`,
+  `lastRssiDbm`, `txQueueLen`, `uptimeSeconds`, `airtimeMs`, `rxAirtimeMs`,
+  `packetsSent`, `packetsReceived`, `sentFlood`, `sentDirect`, `recvFlood`,
+  `recvDirect`, `directDups`, `floodDups`, `fullEvents`, `recvErrors`). The
+  `mesh_node` map layer carries a readable subset as `properties.mesh.admin`.
+  - **Gauges are absent rather than zero when unread.** A monitor that could not
+    read a humidity sensor omits the field; `0` always means a real measurement.
+    A node the monitor has NEVER reached carries no `admin` block at all, rather
+    than a row of zeroed counters.
+  - **Telemetry is excluded from the event's content hash**, so a monitor
+    reporting every few minutes refreshes these values without creating a
+    revision per report. Consumers polling `/api/v1/events/{id}` see fresh values;
+    consumers walking `/history` see only meaningful changes.
+- **A node reported by a monitor and heard over MQTT is ONE event.** Monitors
+  identify a node by a prefix of its public key; the prefix is resolved against
+  the known node catalog, so both inputs converge on the same event id. While a
+  node is known only by prefix its id is `meshcore:<prefix>`; once an advert
+  supplies the full key the event id becomes `meshcore:<full key>` and the
+  prefix-keyed event is retired as superseded. **Do not treat a mesh event id as
+  permanent for a node not yet heard over MQTT.**
+- **`GET /api/v1/sources` gains one row per reporter** (e.g. `alan-pi`), with the
+  same `status`/`lastSuccessAt`/`lastError` health shape as every other feed, so a
+  monitor that goes quiet is visible. Mesh events themselves stay attributed to
+  the `meshcore` source whichever input observed them.
 
 ## 2026-09-02
 
@@ -819,7 +974,7 @@ FIRIS IR-flight + WFIGS perimeters and updates every ~5 min, so mapped perimeter
 now appear **hours sooner** (the Dove Fire had a perimeter here while WFIGS still
 returned none). Fire geometry/adoption semantics are unchanged; the feed carries
 many rows per fire, deduped to one (latest IR flight) before the name-join. See
-`docs/firis-perimeter-source-design.md`.
+`docs/design/firis-perimeter-source-design.md`.
 
 **Breaking (source id + event-id namespace renamed).** Migration: repoint any code
 keyed on the source id `wfigs`, or on stored `wfigs:` event ids, to `firis`. On
@@ -854,7 +1009,7 @@ Consumer-visible changes (no field *renames*, but value changes):
 ### Added — per-location fire-weather forecast (`conditions` + `fire_weather` layer)
 
 Adds a short-range NWS fire-weather forecast — keyless, additive, informational
-(never an un-issued Red Flag). See `docs/fire-weather-forecast-design.md`.
+(never an un-issued Red Flag). See `docs/design/fire-weather-forecast-design.md`.
 
 - **`GET /api/v1/conditions` gains `forecast[]`** — a per-location NWS gridpoint
   forecast (48h hourly), joined to `weather[]` by `locationId`. Each
@@ -1213,7 +1368,7 @@ no-op revisions — a new revision now reflects a genuine content change.
 ### Added — MCP endpoint for LLM agents at `/mcp`
 
 A read-only Model Context Protocol server (Streamable HTTP, JSON-RPC 2.0) exposes
-the `/v1` data to LLM agents (`docs/mcp-design.md`). Eight tools —
+the `/v1` data to LLM agents (`docs/design/mcp-design.md`). Eight tools —
 `grid_situation`, `grid_events`, `grid_event`, `grid_conditions`, `grid_resolve`,
 `grid_places`, `grid_sources`, `grid_history` — plus a reference resource and a
 `hazard_briefing` prompt. It's a thin in-process adapter over `/v1`: geometry is
@@ -1394,7 +1549,7 @@ untouched in shape (see the migration note below for behavior changes on the
 hazard layers). All `/v1` JSON is **snake_case** (proto field names on the wire);
 timestamps are RFC 3339; errors are `google.rpc.Status`; ETags/`If-None-Match`
 everywhere. Full reference: the site's `/docs.html` (when deployed) and
-`docs/v2-api-spec.md`; build/design notes in `docs/v2-implementation-plan.md`.
+`docs/design/v2-api-spec.md`; build/design notes in `docs/design/v2-implementation-plan.md`.
 
 **New `/v1` endpoints:**
 
@@ -1510,7 +1665,7 @@ layer). `fire_weather` stays on `/v1/weather`. The legacy `/api/v1/weather*` and
 `/api/v1/weather/alerts` endpoints are **unchanged** — alerts remain there for
 existing consumers.
 
-### Deprecation plan — `/api/v1` (per `docs/v2-api-spec.md` §6)
+### Deprecation plan — `/api/v1` (per `docs/design/v2-api-spec.md` §6)
 
 `/api/v1` and `/v1` run on the same binary over the same store; there is no
 compatibility shim to maintain. Frontends cut over per page: map layers first
@@ -1688,7 +1843,7 @@ New JSON (non-GeoJSON) endpoints:
 ### Added — unified hazard GeoJSON feed (M1)
 
 New map-ready endpoints aggregating hazard data into one standardized RFC 7946
-GeoJSON interface (see `docs/hazard-aggregation-design.md`):
+GeoJSON interface (see `docs/design/hazard-aggregation-design.md`):
 
 ```
 GET /api/v1/hazards/{area}/{layer}.geojson

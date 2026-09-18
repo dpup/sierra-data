@@ -7,7 +7,7 @@ reproduces the **shipped `/api/v1/hazards` envelope semantics** — id namespace
 headline formats, severity mappings (delegated to `internal/hazards`' exported
 helpers) — so the store→GeoJSON projection (`internal/gridapi.ProjectEvents`)
 stays byte-compatible with the live builders. Design:
-`docs/v2-implementation-plan.md` Tier C.
+`docs/design/v2-implementation-plan.md` Tier C.
 
 ## The Normalizer / Prior / PollResult contract
 
@@ -111,6 +111,58 @@ this.
 The same rule covers geometry, which is hashed: `combineGeometry` sorts its
 members because ArcGIS promises no row ordering, and an order flip would
 otherwise mint a revision on an event that never changed.
+
+**A restart is not a change of source.** `meshProvenance` derives the hashed
+`attribution` and `source_url` from the brokers in the current snapshot, and
+`Registry.Seed` rehydrates everything about a node except its broker set — so
+every deploy re-attributed each not-yet-re-heard node to nobody, then back when
+it next adverted. Measured across 45 live nodes: 505 attribution flips, 11.2 per
+node, 26 inside one minute. `keepPriorAttribution` carries the two naming fields
+forward when this tick learned no broker; `fetched_at` stays fresh, because we
+did observe the node, we just cannot say through whom.
+
+**GPS noise is not movement.** A mesh node's geometry is hashed (movement is
+meaningful), and a node's self-reported fix wanders tens of metres between
+adverts while it sits still — so every wobble was a revision, and one stationary
+companion reached revision 75 that way. `stablePosition` keeps the STORED
+geometry, byte for byte, until an advert lands more than
+`meshPositionEpsilonMeters` (150 m) from it.
+
+Quantization was the first attempt and cannot work: the jitter is wider than any
+sane grid (245 m across 18 positions on one still node, against an 11 m grid),
+and rounding has no hysteresis — a node parked on a cell boundary flips forever
+however coarse the cells are. A threshold measured from the last stored position
+does have hysteresis, the same shape as the reachability window's: noise changes
+nothing, a real move registers once. `quantizeCoord` stays, but as an output
+precision convention, not a damping mechanism.
+
+**The event holds the latest reading; the archive holds all of them.** A
+monitor's sample rides on the event (hash-excluded, so it mints no revision) AND
+is appended to `mesh_telemetry` via `PollResult.MeshTelemetry`, batch-inserted by
+the scheduler in the same writer context as `MeshObservations`. The projection
+runs over the tick's EVENTS rather than the raw reports, because that is where a
+key prefix has already been resolved — filing one node's samples under two keys
+is the failure mode, and `PollResult.MeshTelemetryRenames` (paired with
+`Superseded`) is what carries the history across a promotion. Only the archive
+can be graphed; see `internal/store/CLAUDE.md`.
+
+**A missing shape is not a smaller shape.** PG&E's polygon layer periodically
+answers with zero rows (200, no error envelope — see `internal/clients/CLAUDE.md`),
+which left every outage redrawn as its own centre point and redrawn back on the
+next poll: 25 revisions on one 7-customer planned outage in an afternoon, none of
+them news, each one also flipping its corridor place attachment. `GetOutages`
+now reports that as `pge.ErrPolygonLayerBlank` — a PARTIAL failure, so the source
+degrades and its sweep is skipped while its events still land — and
+`attachOutageGeometry` carries each outage's last-known footprint forward rather
+than believing the blank.
+
+This is the **wildfire perimeter rule, second instance** (see the FIRIS section
+below): a wholesale-empty response from a feed that should have returned
+something is a glitch, and carrying the prior polygon is how we decline to
+publish a downgrade we do not believe. A NON-empty response that omits one row is
+authoritative in both places — that one genuinely has no shape this poll. If a
+third source needs this, it is a pattern and not a coincidence; give it a name
+before copying it a third time.
 
 ### The other direction: upstream staleness is surfaced, never acted on
 
@@ -276,6 +328,100 @@ mesh-specific rules:
   advert firehose refreshes `last_seen_at` without minting a revision. Only a
   node's identity, role, name, location, or status change writes history.
 
+## The mesh poller has TWO inputs, and the rules that keeps honest
+
+Since 2026-09 the same normalizer also merges reports pushed by operator-run
+monitors (`internal/pushingest`, `POST /api/v1/ingest/mesh.repeater`) — a
+Raspberry Pi that logs into repeaters and reads their admin interface. The two
+inputs are not symmetrical and the asymmetry drives every rule below:
+
+| | MQTT adverts | Operator monitor |
+|---|---|---|
+| Evidence | positive only — silence is ambiguous | positive AND negative ("I tried and failed") |
+| Identity | signed, self-declared, with location | a name and a pubkey PREFIX, no coordinates |
+| Carries | signal metrics a listener observed | battery/airtime/counters only the node knows |
+
+**One node is one event.** A monitor identifies a node by a prefix of its public
+key (8 bytes in practice; our ids are the full 32). `Poll` resolves that prefix
+against the catalog of full keys — this tick's adverts, plus the store's existing
+mesh events — on a UNIQUE-match rule, the same rule `meshcore.resolvePath` uses
+for relay hops. Attaching a repeater's battery reading to the WRONG repeater is
+worse than leaving it unattached, so an ambiguous prefix resolves to nothing and
+keeps its own `meshcore:<prefix>` id. When an advert later supplies the full key,
+`supersededPrefixIDs` retires the prefix event via `Superseded` — positive
+evidence naming the successor, the same shape as a standalone fire perimeter
+being adopted by a CAL FIRE incident.
+
+**Precedence is by input class, never by recency.** Identity fields are hashed.
+A rule like "most recent wins" would let two inputs that disagree about a node's
+name flip the winner every tick, minting a revision each time. A signed advert
+beats a monitor's reading; among monitors, configured `priority` then reporter id.
+
+**Reachability is the deliberate exception to "telemetry is not hashed."** A
+repeater going down IS history — "how often is Lilac Park down?" is a question
+the hash-excluded telemetry block can never answer. So `MeshDetail.reachability`
+is hashed, and to make that affordable it is derived from the AGE of the
+monitor's last success (`grid.ingest.unreachableAfter`, 45m) rather than from the
+reporter's own per-poll `online` flag, which flaps on any marginal node. One
+missed poll changes nothing; a sustained outage transitions exactly once.
+
+**Everything else a monitor reports is hash-excluded — which means persisting it
+needs `PollResult.ForceWrite`.** Counters move on every report, so hashing them
+would mint ~288 revisions per node per day. But hash-excluded content is skipped
+by `shouldUpsert`, so without an explicit force the sample would only ever be
+written on the ticks where something ELSE about the node changed — for a fixed
+repeater, never, leaving a battery reading frozen at whatever was current the
+last time anyone renamed it. `shouldPersistTelemetry` marks the id, and coalesces
+on `grid.ingest.telemetryPersistInterval` (10m) for the same reason `TouchSeen`
+coalesces: each forced write is a transaction, and on EFS every commit
+invalidates every reader's page cache. The store side is the `telChanged` branch
+of `refreshEventPlaces`, which rewrites the blob WITHOUT bumping the revision.
+
+**Pushed nodes are not geofenced.** The fence scopes an anonymous global
+broadcast feed; a reporter is an authenticated operator asserting facts about its
+own equipment, and the nodes that most need this path — quiet backbone repeaters
+— are exactly the ones that advertise no location to test. The cost is that a
+push-only node has no geometry and therefore no geometric place attachment, until
+an advert supplies one or the operator configures `placeIds` on the reporter.
+
+**A node the monitor has never reached carries NO telemetry block.** Zeroed
+counters would assert that it has sent and received nothing. "Never read" and
+"read as zero" are different facts.
+
+### The fail-loud rule, generalized
+
+The old rule was "all brokers down ⇒ hard `Poll` error". With two inputs it
+splits, and both halves matter:
+
+- **Every input dead** (no broker connected AND no reporter fresh) ⇒ hard error,
+  exactly as before.
+- **Some input degraded** ⇒ emit what we have, plus `SweepSuppress["meshcore"]`.
+  The nodes missing from this snapshot are missing for OUR reason.
+
+A silent reporter contributes NOTHING to the snapshot (replaying its last set
+would refresh `last_seen_at` and fabricate liveness for nodes nobody has checked
+in hours) while suppressing the sweep (its silence must not read as departure).
+Those two are not in tension — they are the same honesty applied to the two
+different questions.
+
+Suppression is **bounded**: `pushingest` ages a reporter OK → STALE (suppress,
+this is probably a blip) → DEAD (stop suppressing, at `4 × staleAfter`). A
+monitor that never comes back must not freeze the layer's lifecycle forever. The
+bound is acceptable only because `meshcore` is an `expire` source — nodes reach
+EXPIRED, the "we lost track of this" terminus, not the fabricated all-clear that
+RESOLVED would be — and because mesh presence is ambient INFO. **Do not copy this
+bound onto a life-safety layer.**
+
+Each reporter also gets its own **health-only source row** (`SourceIDs` returns
+`meshcore` plus every reporter id), so `/api/v1/sources` answers "is that monitor
+still reporting?" the way it answers that for every other feed. No event is ever
+stored with a reporter as its source: mesh events stay on `meshcore` whichever
+input observed them, because a `source_id` that flipped as inputs came and went
+would both mint a revision and confuse the per-source sweep, which diffs
+`polled[src]` against `prior.ForSource(src)`. A reporter that has never reported
+records an ERROR, not a success — `RecordAttempt(nil)` would paint a monitor that
+was never set up as a healthy feed.
+
 ## Weather-alert headline: deterministic, never AI
 
 `nws.Alert.ShortHeadline` composes `<Event> — <reason>` from the product name
@@ -355,7 +501,8 @@ they degrade the source.
 
 **One of the two facets is PUSHED, not polled — the only one in the service.**
 `cmd/burn-line` calls the county line from CI and POSTs the reading to
-`/ingest/burn-line` (`internal/ingestapi`), which lands it in the
+`POST /api/v1/ingest/burn.line` — the `burn.line` stream on the shared
+push-ingest endpoint (`internal/pushingest`) — which lands it in the
 `burn_readings` staging table. `Poll` reads the latest row on the tick. The push
 handler deliberately does NOT write events: the scheduler stays the single owner
 of event writes, and this is the same push-source-wrapped-as-a-poller shape
@@ -497,3 +644,25 @@ the bare `unionBounds`. Don't generalize the wildfire margin to new layers.
 
 Per the spec, that's the whole surface — a new poller shows up in summary domains,
 `/api/v1/events`, and the map namespace automatically; no new endpoints.
+
+### Why burn.line stages in the store when mesh.repeater buffers in memory
+
+Both streams live on the same endpoint and both honour the same invariant — the
+scheduler is the only thing that writes EVENTS — but they persist differently,
+and the reason is cadence, not taste.
+
+A mesh monitor re-reports every few minutes, so an in-memory buffer losing a
+restart costs nothing: the next report refills it. **A burn line is called once a
+day.** An in-memory buffer would leave `burn_day` UNKNOWN until the next morning
+after any deploy, on the one layer whose entire job is to answer "can I burn
+today". So `ingestBurn` writes a staging row (through the same store mutex as
+every other writer), the row keeps the reading's own `observed_at`, and the
+freshness gate re-judges a rehydrated one rather than resurrecting it as current.
+
+The same cadence drives two more settings worth not "tidying":
+
+- **The reporter batches every line into ONE report.** The endpoint rate-limits
+  per reporter against the last ACCEPTED report, so a push per line would 429
+  everything after the first.
+- **A bad reading in a report is a WARNING, not a rejection.** The next attempt
+  is tomorrow, so one malformed line must not discard the ones that were read.

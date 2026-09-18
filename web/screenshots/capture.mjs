@@ -37,6 +37,12 @@ const PAGES = [
   { name: 'home-calm', url: '/index.html?place=quiet-meadow' },
   { name: 'events', url: '/events.html' },
   { name: 'event-detail', url: '/event.html?id=evt-wildfire-mudflat' },
+  // The mesh record — the one typed detail with a layout of its own, because it
+  // is the one that nests: telemetry inside the detail, an operator monitor's
+  // admin sample inside that, and a list of twenty 64-character gateway keys.
+  // Generically rendered it came out as a JSON <pre> taller than the rest of the
+  // page put together, which is what this shot is here to catch coming back.
+  { name: 'event-detail-mesh', url: '/event.html?id=mesh-a1b2c3d4' },
   { name: 'map', url: '/map.html?place=ebbetts-pass&layer=wildfire' },
   // The fail-loud path: `evacuation` is the fixture layer whose metadata carries
   // sourceStatus UNAVAILABLE, so selecting it alone must produce NO map element

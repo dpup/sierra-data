@@ -213,7 +213,7 @@ Content Hash → Cache Check → OpenAI API → Status Analysis → Enhancement 
 
 ## v2: Grid event store
 
-Added 2026-07-05 (`docs/v2-implementation-plan.md`). A write path independent of
+Added 2026-07-05 (`docs/design/v2-implementation-plan.md`). A write path independent of
 the request path above: a scheduler polls each upstream on its own cadence,
 normalizes results into canonical `grid.v1.Event` protos, and persists them —
 with full revision history — into SQLite. Both the new `/v1` API and the

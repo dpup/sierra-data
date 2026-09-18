@@ -7,7 +7,7 @@ import (
 )
 
 // Exported wrappers over this package's pure severity/normalization helpers,
-// for internal/ingest (docs/v2-implementation-plan.md Tier C). The ingest
+// for internal/ingest (docs/design/v2-implementation-plan.md Tier C). The ingest
 // normalizers must reproduce the shipped envelope semantics exactly, so they
 // delegate here rather than duplicating the mappings.
 

@@ -22,7 +22,7 @@ const (
 
 // MeshObservation is one received MeshCore advert — an immutable measurement,
 // NOT event content. Stored append-only in mesh_observations (Tier 0 of the
-// relay-topology model, docs/mesh-topology-design.md); compaction later rolls
+// relay-topology model, docs/design/mesh-topology-design.md); compaction later rolls
 // these into mesh_link_rollup and prunes the raw rows.
 //
 // HeardAt is OUR receive time — the trustworthy clock. Node-reported advert

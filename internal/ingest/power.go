@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -78,6 +80,18 @@ func (n *PowerNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult, e
 	res := &PollResult{PerSource: map[string]error{}}
 
 	outages, oerr := n.client.GetOutages(ctx, bounds)
+	// A blank polygon layer is a PARTIAL failure, handled like the freshness gate
+	// below: the outages it came with are real and still upsert, while the
+	// source's health degrades and its disappearance sweep is skipped. Failing
+	// the whole tick instead would throw away good point-layer updates (crew
+	// status, customer count, ETOR) every time layer 8 blinked.
+	polygonLayerBlank := errors.Is(oerr, pge.ErrPolygonLayerBlank)
+	if polygonLayerBlank {
+		res.PerSource[powerSourceOutages] = oerr
+		logging.Warnw(ctx, "PG&E polygon layer blank; keeping each outage's last-known footprint",
+			"outages", len(outages))
+		oerr = nil
+	}
 	if oerr != nil {
 		res.PerSource[powerSourceOutages] = oerr
 		logging.Errorw(ctx, "PG&E outage fetch failed", "error", oerr)
@@ -94,7 +108,7 @@ func (n *PowerNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult, e
 			res.PerSource[powerSourceOutages] = stale
 		}
 		for _, o := range outages {
-			res.Events = append(res.Events, n.buildOutageEvent(ctx, o))
+			res.Events = append(res.Events, n.buildOutageEvent(ctx, o, prior, polygonLayerBlank))
 		}
 	}
 
@@ -147,7 +161,7 @@ func (n *PowerNormalizer) freshnessError(ctx context.Context) error {
 }
 
 // buildOutageEvent converts one PG&E outage into an event.
-func (n *PowerNormalizer) buildOutageEvent(ctx context.Context, o pge.Outage) *gridv1.Event {
+func (n *PowerNormalizer) buildOutageEvent(ctx context.Context, o pge.Outage, prior Prior, polygonLayerBlank bool) *gridv1.Event {
 	planned := o.Planned()
 	category := powerCatUnplanned
 	if planned {
@@ -184,7 +198,7 @@ func (n *PowerNormalizer) buildOutageEvent(ctx context.Context, o pge.Outage) *g
 		// at 22:00Z), and `expires` is what shouldExpire retires an event on.
 		EstimatedRestoration: tsProto(o.EstimatedRestoration),
 	}}
-	n.attachGeometry(ctx, ev, o.GeometryType, o.GeometryCoords, "outage "+o.ID)
+	n.attachOutageGeometry(ctx, ev, o, prior, polygonLayerBlank)
 	return ev
 }
 
@@ -269,6 +283,62 @@ func (n *PowerNormalizer) buildPSPSEvent(ctx context.Context, key string, group 
 	}
 	n.attachGeometry(ctx, ev, geomType, coords, "PSPS "+key)
 	return ev
+}
+
+// attachOutageGeometry attaches this poll's geometry — except when the polygon
+// layer came back BLANK, where the point it leaves behind is an artefact of the
+// fetch rather than a smaller outage.
+//
+// This is the wildfire perimeter rule, second instance. There, an empty FIRIS
+// set carries the prior polygon forward because a working feed with any active
+// fire in the box returns at least one perimeter, so zero means glitch, not
+// "every perimeter vanished at once". Layer 8 behaves the same way and for the
+// same reason (see pge.ErrPolygonLayerBlank), and believing it cost a revision
+// per outage per flip: 25 on one 7-customer planned outage in an afternoon,
+// every one of them the same area redrawn as its own centre point and back,
+// with a Hwy 4 corridor place attaching and detaching each time.
+//
+// The narrower case — a NON-empty polygon layer that simply omits one outage —
+// is left authoritative, again as in wildfire: that outage genuinely has no
+// published footprint this poll, and freezing a stale one would be us refusing
+// to believe a feed that is answering.
+//
+// The carried geometry is not invented. It is the last footprint PG&E published
+// for THIS outage, held only while the outage is still listed, and dropped the
+// moment a real polygon returns. The upgrade direction stays open: an outage
+// first seen during a blank layer keeps its point and takes the polygon later —
+// one revision, and a true one.
+func (n *PowerNormalizer) attachOutageGeometry(ctx context.Context, ev *gridv1.Event, o pge.Outage, prior Prior, polygonLayerBlank bool) {
+	if !o.HasPolygon && polygonLayerBlank {
+		if prev := priorFootprint(prior, ev.GetId()); prev != nil {
+			ev.Geometry = prev
+			return
+		}
+	}
+	n.attachGeometry(ctx, ev, o.GeometryType, o.GeometryCoords, "outage "+o.ID)
+}
+
+// priorFootprint returns the stored event's geometry when it is an AREA — a
+// Polygon or MultiPolygon — and nil otherwise (no prior, no geometry, or a
+// point, none of which is worth carrying over a fresh point).
+//
+// Wildfire can ask `has_perimeter` instead; PowerDetail carries no equivalent
+// flag, so the shape itself is the test.
+func priorFootprint(prior Prior, id string) *gridv1.Geometry {
+	prev := priorByID(prior, id)
+	if prev == nil || len(prev.GetGeometry().GetGeojson()) == 0 {
+		return nil
+	}
+	var shape struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(prev.GetGeometry().GetGeojson(), &shape); err != nil {
+		return nil
+	}
+	if shape.Type != "Polygon" && shape.Type != "MultiPolygon" {
+		return nil
+	}
+	return prev.GetGeometry()
 }
 
 // attachGeometry sets the event geometry, or — when the upstream geometry is

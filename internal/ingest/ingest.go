@@ -1,5 +1,5 @@
 // Package ingest normalizes upstream hazard feeds into canonical grid.v1
-// Events for the event store (docs/v2-implementation-plan.md Tier C). Each
+// Events for the event store (docs/design/v2-implementation-plan.md Tier C). Each
 // Normalizer owns one poller scope and reproduces the shipped
 // /api/v1/hazards envelope semantics — id namespaces, headline formats, and
 // severity mappings (delegated to internal/hazards' exported wrappers) — so
@@ -82,8 +82,45 @@ type PollResult struct {
 	// measurements, not events — the scheduler batch-inserts them into the
 	// append-only observation store (Tier 0) in the same writer context as the
 	// presence upserts, never touching the revisioned event path. See
-	// docs/mesh-topology-design.md.
+	// docs/design/mesh-topology-design.md.
 	MeshObservations []store.MeshObservation
+	// MeshTelemetry is this tick's monitor samples, appended to the mesh telemetry
+	// archive in the same writer context as MeshObservations above. They are
+	// MEASUREMENTS, not event content: the event carries the latest sample, this
+	// carries every sample, and only the second can be graphed.
+	//
+	// The poller re-offers the same sample on every tick until a new report
+	// arrives, so the insert is keyed on the monitor's own timestamp and ignores
+	// duplicates — see store.InsertMeshTelemetry.
+	MeshTelemetry []store.MeshTelemetrySample
+	// MeshTelemetryRenames moves a node's archived samples from a provisional
+	// prefix-derived key onto its full public key, applied BEFORE the insert.
+	// Paired with Superseded: the same promotion retires the provisional event.
+	MeshTelemetryRenames []MeshKeyRename
+	// ForceWrite lists event ids whose HASH-EXCLUDED content changed this tick
+	// and must be persisted even though the content hash did not move.
+	//
+	// The scheduler skips the write path entirely for hash-equal events
+	// (shouldUpsert) — that skip is what keeps a 400-node mesh tick from opening
+	// 400 pointless transactions. But some content is deliberately outside the
+	// hash precisely BECAUSE it changes constantly and must not mint revisions:
+	// mesh telemetry is the case this was added for. Such a field would otherwise
+	// be written only on the ticks where something else about the event changed,
+	// which for a fixed repeater is close to never — so a battery reading would
+	// sit frozen at whatever was current the last time someone renamed the node.
+	//
+	// Listing an id here writes the blob WITHOUT minting a revision (the store's
+	// hash-equal refresh path). Populate it sparingly and on a coalesced cadence,
+	// not every tick: each id is a transaction, and on a network filesystem each
+	// commit invalidates every reader's page cache.
+	ForceWrite []string
+}
+
+// MeshKeyRename names a node whose public key became known in full, so its
+// archived telemetry can follow it.
+type MeshKeyRename struct {
+	From string // provisional prefix-derived key
+	To   string // full public key
 }
 
 // NewEvent builds an event with the envelope fields every normalizer sets.

@@ -1,6 +1,6 @@
 // Package mcp exposes The Grid's read-only /api/v1 data to LLM agents via the
 // Model Context Protocol (MCP) over Streamable HTTP, mounted at /mcp
-// (docs/mcp-design.md). It is a thin adapter: each tool issues an in-process GET
+// (docs/design/mcp-design.md). It is a thin adapter: each tool issues an in-process GET
 // against the /api/v1 gRPC-Gateway mux and reshapes the JSON for LLMs — geometry
 // is stripped (a polygon is a token bomb and useless to a model), and the
 // fail-loud honesty contract (sourceStatus, evacuation null-vs-0, a

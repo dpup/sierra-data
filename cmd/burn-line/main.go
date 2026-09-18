@@ -1,6 +1,6 @@
 // Command burn-line calls the configured county burn-information lines, extracts
 // today's burn-day status from each, and PUSHES the readings to The Grid's
-// /ingest/burn-line endpoint.
+// shared push-ingest endpoint as the `burn.line` stream.
 //
 // It runs on a schedule from CI (.github/workflows/burn-line.yml), not inside
 // the server: placing phone calls costs money and must not be re-triggered by a
@@ -18,7 +18,7 @@
 //
 // Usage:
 //
-//	burn-line -endpoint https://data.sierragridteam.org/ingest/burn-line
+//	burn-line -endpoint https://data.sierragridteam.org/api/v1/ingest/burn.line
 //	burn-line -line calaveras-apcd      # just one line
 //	burn-line -dry-run                  # call and extract, print, do not push
 //
@@ -26,7 +26,9 @@
 //
 //	TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER, TWILIO_TWIML_URL
 //	OPENAI_API_KEY
-//	GRID_INGEST_TOKEN   (matches the server's grid.burn.ingestToken)
+//	GRID_INGEST_TOKEN   a grid.ingest reporter token granted the "burn.line"
+//	                    stream. Mint with:
+//	                      make ingest-token REPORTER=burn-line STREAMS=burn.line
 package main
 
 import (
@@ -49,7 +51,7 @@ import (
 
 func main() {
 	var (
-		endpoint = flag.String("endpoint", "", "Grid ingest endpoint (required unless -dry-run)")
+		endpoint = flag.String("endpoint", "", "Grid burn.line ingest endpoint, e.g. https://host/api/v1/ingest/burn.line (required unless -dry-run)")
 		only     = flag.String("line", "", "dial only this line id (default: every enabled line)")
 		model    = flag.String("model", openai.GPT4o, "chat model for extraction")
 		hangUp   = flag.Duration("hangup-after", 90*time.Second, "how long to stay on each line")
@@ -94,25 +96,49 @@ func main() {
 	// Lines are independent: one being unreachable must not stop the others.
 	// Every failure is reported and the exit code reflects whether ANY failed,
 	// so a single bad line is visible in CI without losing the good ones.
+	// Read every line first, then push ONE report. Reading is independent per
+	// line — one unreachable recording must not cost the others — but the push
+	// is batched, because the endpoint rate-limits per reporter against the last
+	// ACCEPTED report, so a push per line would 429 everything after the first.
 	var failed []string
+	var readings []pushReading
 	for _, l := range lines {
 		fmt.Printf("\n=== %s (%s) — %s\n", l.ID, l.Phone, strings.Join(l.Counties, ", "))
-		opts := runOpts{
+		r, err := read(l, tw, ai, runOpts{
 			from: from, twiml: twiml, model: *model,
 			hangUp: *hangUp, timeout: *timeout,
-			endpoint: *endpoint, ingestToken: ingestToken, dryRun: *dryRun,
-		}
-		if err := readAndPush(l, tw, ai, opts); err != nil {
+		})
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "  FAILED: %v\n", err)
 			failed = append(failed, l.ID)
 			continue
 		}
+		readings = append(readings, pushReading{
+			LineID:               l.ID,
+			Status:               string(r.Status),
+			Message:              r.Message,
+			CleanedTranscription: r.Transcript,
+			Confidence:           r.Confidence,
+			ObservedAt:           r.ObservedAt.Format(time.RFC3339),
+		})
+	}
+
+	if len(readings) > 0 && !*dryRun {
+		ctx, cancel := context.WithTimeout(context.Background(), *timeout)
+		if err := push(ctx, *endpoint, ingestToken, readings); err != nil {
+			cancel()
+			fatal("push failed (%d reading(s) not delivered): %v", len(readings), err)
+		}
+		cancel()
+		fmt.Printf("\nPushed %d reading(s) to %s\n", len(readings), *endpoint)
+	} else if *dryRun {
+		fmt.Printf("\n-dry-run: %d reading(s) not pushed\n", len(readings))
 	}
 
 	if len(failed) > 0 {
-		// A failed line pushes NOTHING. Its previous reading then ages past the
-		// server's freshness gate and the facet reads UNKNOWN — the honest
-		// outcome, and why this exits non-zero rather than publishing a guess.
+		// A failed line contributes NOTHING to the report. Its previous reading
+		// then ages past the server's freshness gate and the facet reads UNKNOWN —
+		// the honest outcome, and why this exits non-zero rather than guessing.
 		fatal("%d of %d line(s) failed: %s", len(failed), len(lines), strings.Join(failed, ", "))
 	}
 	fmt.Printf("\nAll %d line(s) read successfully.\n", len(lines))
@@ -120,13 +146,12 @@ func main() {
 
 // runOpts bundles the per-run settings shared by every line.
 type runOpts struct {
-	from, twiml, model    string
-	hangUp, timeout       time.Duration
-	endpoint, ingestToken string
-	dryRun                bool
+	from, twiml, model string
+	hangUp, timeout    time.Duration
 }
 
-func readAndPush(l config.BurnLine, tw *twilio.Client, ai *openai.Client, o runOpts) error {
+// read dials one line and returns its reading.
+func read(l config.BurnLine, tw *twilio.Client, ai *openai.Client, o runOpts) (*burnline.Reading, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), o.timeout)
 	defer cancel()
 
@@ -137,7 +162,7 @@ func readAndPush(l config.BurnLine, tw *twilio.Client, ai *openai.Client, o runO
 
 	reading, err := reader.Read(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	fmt.Printf("  status:     %s\n", reading.Status)
@@ -145,36 +170,37 @@ func readAndPush(l config.BurnLine, tw *twilio.Client, ai *openai.Client, o runO
 	fmt.Printf("  message:    %s\n", reading.Message)
 	fmt.Printf("  observedAt: %s\n", reading.ObservedAt.Format(time.RFC3339))
 	fmt.Printf("  transcript: %s\n", truncate(reading.Transcript, 240))
-
-	if o.dryRun {
-		fmt.Println("  (-dry-run: not pushing)")
-		return nil
-	}
-	if err := push(ctx, o.endpoint, o.ingestToken, l.ID, reading); err != nil {
-		return fmt.Errorf("push: %w", err)
-	}
-	fmt.Printf("  pushed to %s\n", o.endpoint)
-	return nil
+	return reading, nil
 }
 
-// pushBody mirrors the ingest endpoint's wire shape.
+// pushBody mirrors the burn.line stream contract. Request bodies on
+// /api/v1/ingest are snake_case (responses are camelCase).
 type pushBody struct {
-	LineID               string `json:"lineId"`
+	SchemaVersion int           `json:"schema_version"`
+	GeneratedAt   string        `json:"generated_at"`
+	Readings      []pushReading `json:"readings"`
+}
+
+type pushReading struct {
+	LineID               string `json:"line_id"`
 	Status               string `json:"status"`
 	Message              string `json:"message"`
-	CleanedTranscription string `json:"cleanedTranscription"`
+	CleanedTranscription string `json:"cleaned_transcription"`
 	Confidence           int32  `json:"confidence"`
-	ObservedAt           string `json:"observedAt"`
+	ObservedAt           string `json:"observed_at"`
 }
 
-func push(ctx context.Context, endpoint, token, lineID string, r *burnline.Reading) error {
+// push sends every reading in ONE report.
+//
+// Batched deliberately: the endpoint rate-limits per reporter against the last
+// ACCEPTED report (60s for this one), so pushing each line separately would 429
+// every line after the first. One report is also atomic from the operator's
+// point of view — the 202 body reports accepted counts and per-reading warnings.
+func push(ctx context.Context, endpoint, token string, readings []pushReading) error {
 	body, err := json.Marshal(pushBody{
-		LineID:               lineID,
-		Status:               string(r.Status),
-		Message:              r.Message,
-		CleanedTranscription: r.Transcript,
-		Confidence:           r.Confidence,
-		ObservedAt:           r.ObservedAt.Format(time.RFC3339),
+		SchemaVersion: 1,
+		GeneratedAt:   time.Now().UTC().Format(time.RFC3339),
+		Readings:      readings,
 	})
 	if err != nil {
 		return err
@@ -191,11 +217,14 @@ func push(ctx context.Context, endpoint, token, lineID string, r *burnline.Readi
 		return err
 	}
 	defer resp.Body.Close()
+	buf := new(bytes.Buffer)
+	_, _ = buf.ReadFrom(resp.Body)
 	if resp.StatusCode != http.StatusAccepted {
-		buf := new(bytes.Buffer)
-		_, _ = buf.ReadFrom(resp.Body)
 		return fmt.Errorf("status %d: %s", resp.StatusCode, strings.TrimSpace(buf.String()))
 	}
+	// Warnings mean some readings were skipped; surface them, they are the only
+	// signal that a line silently did not land.
+	fmt.Printf("  server: %s\n", strings.TrimSpace(buf.String()))
 	return nil
 }
 

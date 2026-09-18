@@ -18,18 +18,18 @@ applies_when:
 # Swapping a rate-limited feed for a faster superset, and deduping its many-rows-per-entity shape
 
 Shipped in commit `1fdcdd2` on `main` (`feat(ingest,firis)!: swap wildfire perimeter source WFIGS -> CAL FIRE/FIRIS combo feed`); follow-up place-matching fix in commit `7c2b873`.
-Primary files: `internal/clients/firis/client.go`, `internal/ingest/wildfire.go`, `cmd/server/main.go`, `docs/firis-perimeter-source-design.md`, `internal/ingest/CLAUDE.md`.
+Primary files: `internal/clients/firis/client.go`, `internal/ingest/wildfire.go`, `cmd/server/main.go`, `docs/design/firis-perimeter-source-design.md`, `internal/ingest/CLAUDE.md`.
 
 ## Context
 
 The `wildfire` layer adopts a fire-perimeter polygon onto a CAL FIRE incident by a normalized-name match. The perimeter source used to be **NIFC WFIGS** — the interagency upload the National Interagency Fire Center hosts on ArcGIS. Two things made WFIGS a bad source:
 
-1. **It lags real fires by hours.** WFIGS is a to-date interagency *upload*, not a live sensing feed. The Dove Fire already had a mapped perimeter on CAL FIRE's own public incident map (from a CAL FIRE Intel flight) while WFIGS still returned **zero** features for it (verified 2026-07-27, `docs/firis-perimeter-source-design.md`).
+1. **It lags real fires by hours.** WFIGS is a to-date interagency *upload*, not a live sensing feed. The Dove Fire already had a mapped perimeter on CAL FIRE's own public incident map (from a CAL FIRE Intel flight) while WFIGS still returned **zero** features for it (verified 2026-07-27, `docs/design/firis-perimeter-source-design.md`).
 2. **It lives on NIFC's chronically 429-saturated ArcGIS org.** In fire season that org's per-org request-unit quota is hammered by every consumer of NIFC data, so the expensive feature query throttles exactly when fires are most active.
 
 The replacement is the **CA Perimeters — CAL FIRE / NIFC / FIRIS public view** feature service (`CA_Perimeters_NIFC_FIRIS_public_view`), the same layer CAL FIRE's own public incident map draws from (`internal/clients/firis/client.go:1-16`). It:
 
-- **Combines** CAL FIRE Intel remote-sensing + FIRIS IR-flight perimeters + WFIGS into one CA-wide layer — a strict **superset** of WFIGS, so replacing (not running both) is simplest and strictly more coverage (`docs/firis-perimeter-source-design.md`).
+- **Combines** CAL FIRE Intel remote-sensing + FIRIS IR-flight perimeters + WFIGS into one CA-wide layer — a strict **superset** of WFIGS, so replacing (not running both) is simplest and strictly more coverage (`docs/design/firis-perimeter-source-design.md`).
 - Updates **~every 5 minutes** instead of hours.
 - Lives on the **CAL FIRE-Forestry** org (`services1.arcgis.com/jUJYIo9tSA7EHvfZ`) — a *different, healthier* quota than NIFC's, and its metadata endpoint is CDN-cached `public, max-age=3600` (`internal/clients/firis/client.go:10-15`).
 
@@ -76,7 +76,7 @@ Caveat worth stating honestly: `dataLastEditDate` here is a **statewide** stamp,
 
 ### 2. Dedup a many-rows-per-entity feed by a stable id when present, with DETERMINISTIC fallback clustering
 
-The combo feed has multiple rows per fire and **no single id field that works alone** (measured on the live feed, `docs/firis-perimeter-source-design.md`): `incident_number` is a stable per-fire uuid but is null on FIRIS mission rows (149/254 null); `incident_name` is null on the FIRIS mission rows too (110/254). The only thing linking a fire's CAL FIRE Intel rows to its FIRIS rows is the **name** (`incident_name` when present, else parsed from the mission id).
+The combo feed has multiple rows per fire and **no single id field that works alone** (measured on the live feed, `docs/design/firis-perimeter-source-design.md`): `incident_number` is a stable per-fire uuid but is null on FIRIS mission rows (149/254 null); `incident_name` is null on the FIRIS mission rows too (110/254). The only thing linking a fire's CAL FIRE Intel rows to its FIRIS rows is the **name** (`incident_name` when present, else parsed from the mission id).
 
 The dedup pipeline (`dedupePerimeters`, `wildfire.go:306`):
 
@@ -162,7 +162,7 @@ Reach for these patterns when you are **swapping or adding an upstream feed** an
 
 ## Examples
 
-**The `incident_number`-aware `sameFire` rule** (`wildfire.go:404`). Two `DOVE` CAL FIRE Intel rows share one `incident_number` → merged even though successive flights' centroids drifted apart. A FIRIS `CA-TCU-DOVE-N57B` mission row has a null id → falls back to centroid proximity, co-located, joins the same cluster. Two *different* same-named fires ~10 km apart with distinct non-empty ids → never merge, so neither perimeter is dropped. Worked end-to-end (`docs/firis-perimeter-source-design.md`): three `dove` rows collapse to one cluster, latest `poly_DateCurrent` (CAL FIRE Intel 225 ac) wins, and the single `dove` perimeter adopts cleanly onto the `calfire:` Dove incident.
+**The `incident_number`-aware `sameFire` rule** (`wildfire.go:404`). Two `DOVE` CAL FIRE Intel rows share one `incident_number` → merged even though successive flights' centroids drifted apart. A FIRIS `CA-TCU-DOVE-N57B` mission row has a null id → falls back to centroid proximity, co-located, joins the same cluster. Two *different* same-named fires ~10 km apart with distinct non-empty ids → never merge, so neither perimeter is dropped. Worked end-to-end (`docs/design/firis-perimeter-source-design.md`): three `dove` rows collapse to one cluster, latest `poly_DateCurrent` (CAL FIRE Intel 225 ac) wins, and the single `dove` perimeter adopts cleanly onto the `calfire:` Dove incident.
 
 **The wholesale-empty carry-forward** (`wildfire.go:146`, `183`). `perimsUnusable := perr != nil || len(deduped) == 0`. On a zero-feature success, each incident that had `hasPerimeter` last tick reuses `pe.GetGeometry()` and stays `hasPerimeter=true`, while acres/containment/headline still update from CAL FIRE — no false "perimeter gone" revision, no lost extent. Standalones need no equivalent guard: their `expire` disappearance grace already absorbs a transient empty.
 

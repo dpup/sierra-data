@@ -8,9 +8,9 @@ import "google/protobuf/wrappers.proto";
 
 option go_package = "github.com/dpup/sierra-data/api/grid/v1;gridv1";
 
-// Canonical grid event model (docs/v2-api-spec.md §3) plus GridService, the
+// Canonical grid event model (docs/design/v2-api-spec.md §3) plus GridService, the
 // read-only entity/query API exposed as JSON over gRPC-Gateway at /api/v1/...
-// (docs/grpc-gateway-migration-plan.md). The messages are the wire responses.
+// (docs/design/grpc-gateway-migration-plan.md). The messages are the wire responses.
 
 message Event {
   string id = 1;                    // "{source_id}:{native_id}" — matches shipped ids
@@ -243,6 +243,23 @@ message MeshDetail {
   string name = 3;         // advertised node name
 
   MeshTelemetry telemetry = 4;   // VOLATILE — excluded from the content hash
+
+  // Whether an operator-run monitor could reach this node's admin interface.
+  // HASHED, unlike everything else an operator reports: a repeater going
+  // unreachable is a real lifecycle change worth a revision and a history entry
+  // ("how often is Lilac Park down?"), which is exactly what the telemetry block
+  // below can never answer. Derived with hysteresis in internal/ingest (never the
+  // raw per-poll `online` bool, which flaps on a marginal node and would mint a
+  // revision each way). UNSPECIFIED for a node no monitor watches — the MQTT
+  // advert firehose cannot express "I tried and could not reach it".
+  MeshReachability reachability = 5;
+}
+
+// MeshReachability is an operator monitor's verdict on a node's admin interface.
+enum MeshReachability {
+  MESH_REACHABILITY_UNSPECIFIED = 0; // no monitor watches this node
+  REACHABLE = 1;                     // a monitor reached it within the window
+  UNREACHABLE = 2;                   // a monitor has been failing past the window
 }
 
 // MeshTelemetry is the volatile, per-advert signal state. It is deliberately
@@ -253,15 +270,78 @@ message MeshTelemetry {
   // property of a single reception, not of a node, and one frozen sample on the
   // (hash-excluded) telemetry could never update. Per-advert receptions now land
   // in the append-only relay-observation store, and topology is served derived at
-  // GET /api/v1/mesh/links. See docs/mesh-topology-design.md.
+  // GET /api/v1/mesh/links. See docs/design/mesh-topology-design.md.
   reserved 4, 7;
   reserved "path", "path_nodes";
 
-  double snr = 1;                              // last SNR (dB), gateway-reported
-  int32 rssi = 2;                              // last RSSI (dBm), gateway-reported
-  uint32 hop_count = 3;                        // path length of the last-heard advert
+  // Wrapper types, not bare scalars, for the reason the admin gauges below are:
+  // under the gateway's EmitUnpopulated marshaler an unset scalar is published
+  // as 0, and here that 0 is a claim. A node an operator's monitor reports but
+  // no MQTT bridge has ever heard was going out as `snr: 0, rssi: 0,
+  // hopCount: 0` — a reading of 0 dB, heard DIRECT, for a node the mesh has not
+  // heard at all (observed live 2026-09-15 on three of nine monitored
+  // repeaters). hop_count makes it sharpest: 0 hops is a real and meaningful
+  // reading, so it cannot double as "unknown".
+  //
+  // Absent now means absent: these are null unless an MQTT bridge reported the
+  // advert they came from, which `last_advert_at` also marks.
+  google.protobuf.DoubleValue snr = 1;         // last SNR (dB), gateway-reported
+  google.protobuf.Int32Value rssi = 2;         // last RSSI (dBm), gateway-reported
+  google.protobuf.UInt32Value hop_count = 3;   // path length of the last-heard advert
   repeated string gateways = 5;                // origin ids of the gateways/brokers that heard it
   google.protobuf.Timestamp last_advert_at = 6; // sender-stamped time of the last advert
+
+  // The last sample pushed by an operator-run monitor that logs into the node's
+  // admin interface (internal/pushingest). Nested HERE, inside the block
+  // ContentHash zeroes, because every field of it is a counter or a gauge that
+  // moves on every report: hashed, a 5-minute reporting cadence would mint ~288
+  // revisions per node per day and say nothing.
+  MeshAdminTelemetry admin = 8;
+}
+
+// MeshAdminTelemetry is one sample read off a node's own admin interface by an
+// operator-run monitor and pushed to POST /api/v1/ingest/mesh.repeater. It is
+// the node's self-reported view, which is why it duplicates rather than
+// overwrites the gateway-reported snr/rssi above: those are what a distant
+// listener heard, these are what the node itself measured.
+//
+// Gauges are wrapper types, not bare scalars, so "the monitor could not read
+// this" (null) stays distinguishable from a real zero — a 0% battery and an
+// unknown battery must never render alike. Same reasoning as the place summary's
+// activeEvacuations. Counters are lifetime-since-boot and plain: a node that has
+// sent nothing genuinely has sent zero.
+message MeshAdminTelemetry {
+  string reporter_id = 1;                        // which monitor reported it (config id)
+  google.protobuf.Timestamp reported_at = 2;     // when the monitor generated the report
+  google.protobuf.Timestamp last_success_at = 3; // monitor's last successful read of THIS node
+  google.protobuf.Timestamp last_attempt_at = 4; // monitor's last attempt, successful or not
+
+  google.protobuf.DoubleValue battery_volts = 10;
+  google.protobuf.DoubleValue battery_percent = 11;
+  // "measured" | "estimated" — an estimate derived from voltage is not a reading,
+  // and a UI that shows 97% should be able to say which it is.
+  string battery_percent_source = 12;
+  google.protobuf.DoubleValue temperature_c = 13;
+  google.protobuf.DoubleValue humidity = 14;
+  google.protobuf.DoubleValue pressure = 15;
+  google.protobuf.Int32Value noise_floor_dbm = 16;
+  google.protobuf.DoubleValue last_snr_db = 17;   // node-measured, cf. telemetry.snr
+  google.protobuf.Int32Value last_rssi_dbm = 18;  // node-measured, cf. telemetry.rssi
+  google.protobuf.Int32Value tx_queue_len = 19;
+
+  int64 uptime_seconds = 30;
+  int64 airtime_ms = 31;
+  int64 rx_airtime_ms = 32;
+  int64 packets_sent = 33;      // nb_sent
+  int64 packets_received = 34;  // nb_recv
+  int64 sent_flood = 35;
+  int64 sent_direct = 36;
+  int64 recv_flood = 37;
+  int64 recv_direct = 38;
+  int64 direct_dups = 39;
+  int64 flood_dups = 40;
+  int64 full_events = 41;       // full_evts — queue-overflow events
+  int64 recv_errors = 42;
 }
 
 // PG&E electric outages and Public Safety Power Shutoffs (Layer_POWER). One
@@ -445,7 +525,7 @@ message SourceList {
 
 // GridService is the read-only /api/v1 entity + query surface (gRPC-Gateway).
 // Ported endpoint-by-endpoint from the hand-built /v1 handlers; see
-// docs/grpc-gateway-migration-plan.md §7 for the full endpoint map.
+// docs/design/grpc-gateway-migration-plan.md §7 for the full endpoint map.
 service GridService {
   // ListEvents returns store-backed events filtered by place, layer, status,
   // severity_min, and since, with keyset pagination.
@@ -502,6 +582,70 @@ service GridService {
   rpc ListSources(ListSourcesRequest) returns (SourceList) {
     option (google.api.http) = {get: "/api/v1/sources"};
   }
+  // GetMeshTelemetry returns ONE node's archived operator-monitor samples — the
+  // series behind a battery, temperature or airtime chart.
+  //
+  // The event carries a node's LATEST reading; this carries every reading, and
+  // only the second can be graphed. Per node by design: this is one node's
+  // chart, and a cross-node dump would be a different (and far larger) product.
+  rpc GetMeshTelemetry(GetMeshTelemetryRequest) returns (MeshTelemetryArchive) {
+    option (google.api.http) = {get: "/api/v1/mesh/telemetry"};
+  }
+}
+
+message GetMeshTelemetryRequest {
+  string node = 1;                      // the node's full public key, hex
+  google.protobuf.Timestamp from = 2;   // default: 24h before `to`
+  google.protobuf.Timestamp to = 3;     // default: now
+}
+
+// MeshTelemetryArchive is one node's samples over a window, with what a chart
+// needs in order not to lie about them.
+message MeshTelemetryArchive {
+  string node = 1;
+  google.protobuf.Timestamp from = 2;
+  google.protobuf.Timestamp to = 3;
+
+  // What the ARCHIVE holds for this node, whatever was asked for. A window
+  // outside it returns no samples because we do not have them — which is not
+  // the same statement as the node having been quiet, and a chart cannot tell
+  // those apart unless it is told.
+  MeshTelemetryCoverage coverage = 4;
+
+  // The observed MEDIAN gap between samples, so a client knows which gaps are
+  // abnormal enough to break a line on. Null with fewer than two samples: one
+  // point has no cadence. Median, not mean — one multi-hour outage in a day of
+  // 15-minute reports drags a mean past anything the feed does.
+  google.protobuf.Int64Value cadence_seconds = 5;
+
+  // Sample times where the node's uptime went BACKWARDS. Every lifetime counter
+  // restarts there, so a line drawn across one plunges to zero and climbs back —
+  // a graph of our arithmetic rather than of the mesh. Also a fact worth seeing.
+  repeated google.protobuf.Timestamp reboots = 6;
+
+  // The window held more samples than one response carries. Stated, never
+  // silent: a chart that ends early because the server stopped talking must not
+  // look like a chart of a node that stopped.
+  bool truncated = 7;
+
+  repeated MeshTelemetrySample samples = 8;
+}
+
+message MeshTelemetryCoverage {
+  google.protobuf.Timestamp from = 1;
+  google.protobuf.Timestamp to = 2;
+  int32 samples = 3;
+}
+
+// MeshTelemetrySample is one archived report.
+//
+// The reading is MeshAdminTelemetry itself — the same message the event carries,
+// not a flattened copy of its 23 fields. One definition means the archive and
+// the live event cannot describe the same reading differently, and the gauges
+// keep their wrapper types, so an unread battery stays null here too.
+message MeshTelemetrySample {
+  MeshAdminTelemetry reading = 1;             // reported_at is the sample's own time
+  google.protobuf.Timestamp received_at = 2;  // when the Grid first held it
 }
 
 message GetPlaceSummaryRequest {
@@ -669,7 +813,7 @@ message ForecastPeriod {
 // WeatherForecast is a location's short-range fire-weather forecast: the raw NWS
 // gridpoint series (wind/gust/RH/temp) plus an at-a-glance summary. Informational
 // only — it never implies a fire-weather WARNING (issued products are in
-// FireWeatherConditions). See docs/fire-weather-forecast-design.md.
+// FireWeatherConditions). See docs/design/fire-weather-forecast-design.md.
 message WeatherForecast {
   string location_id = 1;                  // joins to WeatherConditions.location_id
   string source = 2;                       // e.g. "NWS (STO gridpoint)"

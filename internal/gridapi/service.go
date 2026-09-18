@@ -1,5 +1,5 @@
 // Package gridapi holds the shared backing logic for the /api/v1 data API
-// (docs/grpc-gateway-migration-plan.md, docs/v2-api-spec.md). The Service type
+// (docs/design/grpc-gateway-migration-plan.md, docs/design/v2-api-spec.md). The Service type
 // carries the dependencies and helpers that both the gRPC GridServer (grpc.go,
 // the proto RPCs served camelCase over gRPC-Gateway — including GetPlaceSummary
 // and GetConditions) and the one remaining hand-built gateway route (the

@@ -38,12 +38,14 @@ Last updated: 2026-07-06
 │   ├── hazards/               # /api/v1 unified GeoJSON hazard layers
 │   ├── store/                 # SQLite grid event store (events, revisions, places, sources)
 │   ├── ingest/                # Poller scheduler + per-source normalizers → the store
+│   ├── pushingest/            # Authenticated push ingest (POST /api/v1/ingest/{stream})
 │   ├── gridapi/               # /api/v1 GridService impl (gRPC) + hand-built GeoJSON
 │   ├── places/                # Grid place directory seeder (areas/counties/towns/corridors)
 │   └── lib/                   # Shared libraries (incl. lib/geojson: geometry + PIP)
 ├── data/places/               # Checked-in Census county polygons (counties.geojson)
 ├── site/                      # Embedded data.sierragridteam.org static site (served at /)
 ├── tests/                     # Test files and test data
+├── docs/design/               # design docs & specs for work that has shipped (historical record)
 ├── docs/solutions/            # documented solutions to past problems (bugs, best practices, patterns), by category with YAML frontmatter (module, tags, problem_type)
 ├── CONCEPTS.md                # shared domain vocabulary (entities, named processes, status concepts)
 └── Makefile                   # Build automation
@@ -170,13 +172,14 @@ curl -s http://localhost:8181/api/v1/events?layer=road_incident | jq .
 
 **API Design**:
 - REST endpoints via gRPC Gateway
-- **One write endpoint, and only one**: `POST /ingest/burn-line`
-  (`internal/ingestapi`) accepts pushed burn-day readings. It is the sole
-  authenticated route in the service (a bearer token,
-  `PF__GRID__BURN__INGEST_TOKEN`; 404s when unset), and it never writes events —
-  it stages a row the ingest scheduler picks up. It stays browser-unreachable
-  cross-origin for the same reason `/mcp` does: `corsAllowMethods: [GET]` denies
-  the POST preflight. Do not add POST to that list.
+- **One write endpoint, and only one**: `POST /api/v1/ingest/{stream}`
+  (`internal/pushingest`) — the sole authenticated route (bearer token per
+  reporter, hash-only in config). Streams today: `mesh.repeater` (operator
+  repeater telemetry) and `burn.line` (county burn-day readings). Neither writes
+  events: mesh buffers in memory, burn stages a store row, and the ingest
+  scheduler remains the only writer of events. It stays browser-unreachable
+  cross-origin because `corsAllowMethods: [GET]` denies the POST preflight.
+  Do not add POST to that list.
 - **CORS is open**: `corsOrigins: ["*"]` in `prefab.yaml` emits a literal
   `Access-Control-Allow-Origin: *` for every origin (prefab >= v0.6.1's wildcard
   sentinel). Safe here because the API is public, read-only, and keyless — a
@@ -227,11 +230,9 @@ export PORT=8181
 # is why the store's index statistics matter so much — see store.Analyze.
 export PF__GRID__DB_PATH=/data/grid.db
 
-# Bearer token for POST /ingest/burn-line (pushed burn-day readings). UNSET
-# DISABLES the endpoint — a deployment with no credential must not expose an
-# unauthenticated write path. Must match GRID_INGEST_TOKEN in the burn-line
-# workflow's secrets.
-export PF__GRID__BURN__INGEST_TOKEN="..."
+# Push-ingest credentials are NOT env vars: a reporter's token hash lives in
+# prefab.yaml (grid.ingest.reporters[].tokenSha256) and the token itself only on
+# the operator's machine. Mint with `make ingest-token`.
 ```
 
 **Env-var naming — a camelCase config key needs an underscore.** prefab maps
@@ -241,6 +242,18 @@ not just documented**: `config.ValidateEnvOverrides` (called from `LoadConfig`)
 reflects over `Config` and refuses to start on a `PF__` override in our
 namespaces that resolves to no real key, naming the variable you meant. You don't
 need to remember the rule or register new keys — just read the error.
+
+**Push-ingest credentials (a public repo holds only hashes)**: a reporter
+authenticates with a bearer token whose **SHA-256 hash alone** lives in
+`prefab.yaml` (`grid.ingest.reporters[].tokenSha256`). A hash of a 256-bit random
+token cannot be replayed or reversed, so committing it is safe and adding a
+reporter stays an ordinary PR — while the token itself exists only on the
+operator's machine. `make ingest-token REPORTER=<id> NAME="..."` mints one and
+writes the config entry (re-run with an existing id to ROTATE that reporter's
+token in place, keeping its other settings); bare `make ingest-token` just prints
+a pair. Never put the token in config, env, or a commit; a bad/typo'd hash is
+FATAL at startup by design (a skipped reporter would silently never
+authenticate).
 
 **Configuration Files**:
 - `prefab.yaml` - Application configuration (API refresh intervals, route
@@ -300,10 +313,14 @@ need to remember the rule or register new keys — just read the error.
   zone that leaked out-of-area alerts).
 - Powers `/weather/alerts` zone alerts and the `fire_weather` classification
 
-**MeshCore MQTT bridges** (mesh-node presence, `NETWORK` layer):
+**MeshCore MQTT bridges** (mesh-node presence, `MESH` layer — renamed from
+`NETWORK` 2026-07-25; the enum number 13 is unchanged and `?layer=network`
+survives as a legacy alias):
 - MeshCore has **no native MQTT and no official broker/topic spec** — we
   subscribe to community bridges (`grid.meshcore.brokers`, several for
-  resilience). Disabled by default (`grid.meshcore.enabled: false`).
+  resilience). **Live** (`grid.meshcore.enabled: true`) against
+  `wss://mqtt.gomesh.dev:443/mqtt`; the subscriber credential is injected as
+  `PF__GRID__MESHCORE__USERNAME`/`PASSWORD`, never committed.
 - The map-ecosystem bridges publish a JSON envelope per packet to
   `meshcore/{IATA}/{PUBLIC_KEY}/packets` with `packet_type`, `SNR`, `RSSI`,
   `path`, and a hex `raw` payload. We ingest **only ADVERT packets
@@ -369,7 +386,9 @@ need to remember the rule or register new keys — just read the error.
   Twilio, transcribes it with Whisper, and extracts the status with a
   structured-output chat call.
 - **It runs from CI, not the server** (`.github/workflows/burn-line.yml`, daily
-  at 14:00 UTC) and PUSHES the reading to `/ingest/burn-line`. A phone call costs
+  at 14:00 UTC) and PUSHES the readings to `POST /api/v1/ingest/burn.line` in ONE
+  batched report (the endpoint rate-limits per reporter, so a push per line would
+  429 everything after the first). A phone call costs
   money and must happen once a day; a scheduled workflow has those semantics, a
   restarting server does not.
 - The value can therefore be wrong in ways an API cannot (a `confidence` and the
@@ -405,7 +424,7 @@ what to update. Flag anything that changes an existing response shape as a
 breaking change with a migration note.
 
 **One surface: `/api/v1`, proto-defined gRPC + gRPC-Gateway** (migrated 2026-07-09;
-see `docs/grpc-gateway-migration-plan.md`, `docs/v2-api-spec.md`). The `GridService`
+see `docs/design/grpc-gateway-migration-plan.md`, `docs/design/v2-api-spec.md`). The `GridService`
 proto (`api/grid/v1/grid.proto`) is served over the gateway that Prefab mounts at
 `/api/`; the impl is `internal/gridapi` (`GridServer` wrapping `Service`), reading
 everything from the grid event store. Field names are **camelCase** (protojson
@@ -461,14 +480,24 @@ gateway's `EmitUnpopulated` marshaler.
 - `GET /api/v1/scanners?place=` - Broadcastify feed config.
 - `GET /api/v1/sources` - the source registry + per-source health (a source's own
   health is `status`: `OK|STALE|UNAVAILABLE`, last success/attempt, poll interval,
-  last error).
+  last error). Includes one **health-only** row per configured push reporter.
+- `POST /api/v1/ingest/{stream}` - **the one WRITE endpoint**, and the only one
+  requiring a credential (`Authorization: Bearer`). Operator-run monitors push
+  data no upstream feed publishes; today the `mesh.repeater` stream carries
+  MeshCore repeater admin telemetry + explicit reachability. Not mounted unless
+  `grid.ingest.reporters` is non-empty. It does NOT write the store — it buffers,
+  and the mesh poller merges on its next tick, so single-writer discipline holds.
+  `corsAllowMethods: [GET]` is what keeps it browser-unreachable cross-origin;
+  never add POST there. See `internal/pushingest` and `internal/ingest/CLAUDE.md`;
+  **`docs/mesh-reporter-guide.md` is the shareable setup guide** to hand an
+  operator who is wiring up a monitor (payload, headers, rules, error handling).
 
 **Summary + map:**
 - `GET /api/v1/places/{place}/summary` - `GetPlaceSummary` RPC (camelCase): a
   one-fetch place rollup — `mode` (QUIET/WATCH/ACTIVE), a cross-layer `summary`,
   per-`domains[]` status (`fire`/`evacuation`/`weather`/`roads`/`seismic`/`power`,
   plus `comms` when the MeshCore source is enabled), `topEvents`, and a `sources[]`
-  health sidecar. Mesh-node presence (`NETWORK`) is ambient `INFO` state: it is
+  health sidecar. Mesh-node presence (`MESH`) is ambient `INFO` state: it is
   excluded from `totalActive`/`severityCounts`/`topEvents`/`mode` (like baseline
   conditions) and appears only in the `comms` domain.
 - `GET /api/v1/places/{place}/map/{layer}.geojson` - hand-built, one RFC 7946
@@ -482,7 +511,7 @@ gateway's `EmitUnpopulated` marshaler.
   are `[lng, lat]`. Event layers project from the store
   (`internal/gridapi.ProjectEvents`); the three condition layers (`road_segment`,
   `chain_control`, `fire_weather`) are live projections of the roads/weather
-  services. See `docs/hazard-aggregation-design.md` and `internal/hazards/CLAUDE.md`.
+  services. See `docs/design/hazard-aggregation-design.md` and `internal/hazards/CLAUDE.md`.
 
 **Burn status** (`layer=burn_status`, no geojson layer): per-county residential
 burning status from TWO independent authorities that must BOTH permit a burn —

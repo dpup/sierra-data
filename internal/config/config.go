@@ -23,7 +23,7 @@ type Config struct {
 }
 
 // GridConfig holds the grid event store + ingest scheduler configuration
-// (docs/v2-implementation-plan.md). DBPath locates the SQLite database
+// (docs/design/v2-implementation-plan.md). DBPath locates the SQLite database
 // (production overrides via PF__GRID__DB_PATH); Sources keys are source
 // registry ids ("usgs", "nws", ...) — a poller may span several.
 type GridConfig struct {
@@ -58,6 +58,144 @@ type GridConfig struct {
 	Wildfire    WildfireConfig          `koanf:"wildfire"`
 	Power       PowerConfig             `koanf:"power"`
 	Burn        BurnConfig              `koanf:"burn"`
+	Ingest      IngestConfig            `koanf:"ingest"`
+}
+
+// Ingest defaults. Each is applied when the corresponding grid.ingest key is
+// unset or non-positive, so a deployment that never heard of this section still
+// gets safe bounds rather than an unbounded write endpoint.
+const (
+	// DefaultIngestMaxBodyBytes caps a pushed report. Alan's nine-repeater
+	// document is ~5 KB, so 1 MB leaves room for two orders of magnitude of
+	// growth while keeping a malicious body from ever reaching the JSON decoder.
+	DefaultIngestMaxBodyBytes = 1 << 20
+	// DefaultIngestMaxItems caps the entities in one report, bounding both the
+	// decode and the in-memory buffer independently of the byte cap.
+	DefaultIngestMaxItems = 1000
+	// DefaultIngestUnreachableAfter is how long a monitor must be failing to
+	// reach a node before we call it UNREACHABLE. Deliberately several reporting
+	// cycles: reachability is HASHED, so a threshold short enough to flap would
+	// mint a revision in each direction on every marginal node.
+	DefaultIngestUnreachableAfter = 45 * time.Minute
+	// DefaultIngestReporterStaleAfter is how long a reporter may go silent before
+	// its source row degrades — and, more importantly, before its nodes' absence
+	// stops being something we are willing to act on (see SweepSuppress in
+	// internal/ingest). 0 in config means this.
+	DefaultIngestReporterStaleAfter = 30 * time.Minute
+	// DefaultIngestMinInterval rate-limits one reporter. A monitor polling a mesh
+	// over LoRa cannot meaningfully report faster than this, so a burst is either
+	// a bug or abuse.
+	DefaultIngestMinInterval = 15 * time.Second
+	// DefaultIngestTelemetryPersistInterval coalesces telemetry writes. Telemetry
+	// is hash-excluded, so persisting it costs a transaction that mints no
+	// revision; this is the same bounded-staleness trade the scheduler's
+	// touchSeenCoalesce makes, for the same reason (on EFS every commit
+	// invalidates every other connection's page cache).
+	DefaultIngestTelemetryPersistInterval = 10 * time.Minute
+)
+
+// IngestConfig configures the authenticated push-ingest endpoint
+// (POST /api/v1/ingest/{stream}, internal/pushingest) — the one WRITE surface on
+// an otherwise public, read-only, keyless API.
+//
+// Reporters are operator-run monitors that observe things no upstream feed
+// publishes: today, a Raspberry Pi that logs into MeshCore repeaters and reads
+// their admin interface. The endpoint does not exist unless Reporters is
+// non-empty, so the default build has no write surface at all.
+type IngestConfig struct {
+	// MaxBodyBytes / MaxItems bound one request. 0 => the defaults above.
+	MaxBodyBytes int64 `koanf:"maxBodyBytes"`
+	MaxItems     int   `koanf:"maxItems"`
+	// UnreachableAfter is the hysteresis window behind MeshReachability. 0 =>
+	// DefaultIngestUnreachableAfter.
+	UnreachableAfter time.Duration `koanf:"unreachableAfter"`
+	// TelemetryPersistInterval coalesces hash-excluded telemetry writes. 0 =>
+	// DefaultIngestTelemetryPersistInterval.
+	TelemetryPersistInterval time.Duration `koanf:"telemetryPersistInterval"`
+	Reporters                []Reporter    `koanf:"reporters"`
+}
+
+// Reporter is one authorized push client.
+//
+// TokenSha256 is the SHA-256 (lowercase hex) of the bearer token, and the token
+// itself is NEVER stored here or anywhere else in the repo. That asymmetry is
+// the whole point: this repository is public, and a SHA-256 of a 256-bit random
+// token is not a credential — it cannot be replayed and cannot be reversed — so
+// the committed file can carry it safely and adding a reporter stays an ordinary
+// pull request. The token exists only on the reporter's own machine. Generate a
+// pair with `make ingest-token`.
+type Reporter struct {
+	ID          string `koanf:"id"`
+	Name        string `koanf:"name"`
+	TokenSha256 string `koanf:"tokenSha256"`
+	// Streams this reporter may post to (e.g. "mesh.repeater"). Empty means none:
+	// authorization is granted, never defaulted.
+	Streams []string `koanf:"streams"`
+	// StaleAfter is how long this reporter may be silent before its source row
+	// degrades and its nodes' disappearance stops being actionable. 0 =>
+	// DefaultIngestReporterStaleAfter.
+	StaleAfter time.Duration `koanf:"staleAfter"`
+	// MinInterval rate-limits this reporter (429 below it). 0 =>
+	// DefaultIngestMinInterval.
+	MinInterval time.Duration `koanf:"minInterval"`
+	// Priority breaks ties when two reporters disagree about a node's identity —
+	// higher wins, then reporter id ascending. It is deliberately a CONFIGURED
+	// precedence rather than "most recent wins": recency would let two
+	// disagreeing reporters flip the winner every tick, and identity fields are
+	// hashed, so each flip would mint a revision.
+	Priority int `koanf:"priority"`
+	// PlaceIDs optionally attaches this reporter's entities to places outright.
+	// Place attachment is otherwise geometric (store.matchPlaces), so a node with
+	// no known coordinates attaches to nothing and is missing from every
+	// place-scoped view. UpsertEvent unions caller-preset place_ids with
+	// geometric matches, so this is a floor, never a ceiling. Empty by default —
+	// asserting a location we do not have is worse than admitting we lack one.
+	PlaceIDs []string `koanf:"placeIds"`
+}
+
+// Resolved accessors. Config carries zero values for unset keys; these apply the
+// documented defaults in one place so callers never re-implement the fallback.
+
+func (r Reporter) StaleAfterOrDefault() time.Duration {
+	if r.StaleAfter <= 0 {
+		return DefaultIngestReporterStaleAfter
+	}
+	return r.StaleAfter
+}
+
+func (r Reporter) MinIntervalOrDefault() time.Duration {
+	if r.MinInterval <= 0 {
+		return DefaultIngestMinInterval
+	}
+	return r.MinInterval
+}
+
+func (c IngestConfig) MaxBodyBytesOrDefault() int64 {
+	if c.MaxBodyBytes <= 0 {
+		return DefaultIngestMaxBodyBytes
+	}
+	return c.MaxBodyBytes
+}
+
+func (c IngestConfig) MaxItemsOrDefault() int {
+	if c.MaxItems <= 0 {
+		return DefaultIngestMaxItems
+	}
+	return c.MaxItems
+}
+
+func (c IngestConfig) UnreachableAfterOrDefault() time.Duration {
+	if c.UnreachableAfter <= 0 {
+		return DefaultIngestUnreachableAfter
+	}
+	return c.UnreachableAfter
+}
+
+func (c IngestConfig) TelemetryPersistIntervalOrDefault() time.Duration {
+	if c.TelemetryPersistInterval <= 0 {
+		return DefaultIngestTelemetryPersistInterval
+	}
+	return c.TelemetryPersistInterval
 }
 
 // Default wildfire geography. Both are applied when the corresponding
@@ -194,14 +332,10 @@ type BurnConfig struct {
 	// silently turns a safety check back on.
 	BurnDayStaleAfter time.Duration `koanf:"burnDayStaleAfter"`
 
-	// IngestToken authenticates POSTs to /ingest/burn-line. Set it from the
-	// environment (PF__GRID__BURN__INGEST_TOKEN), never in prefab.yaml — it is a
-	// credential, and this file is committed.
-	//
-	// Empty DISABLES the endpoint (it 404s). That default is deliberate: a
-	// deployment that has not configured a credential must not expose an
-	// unauthenticated write path on an otherwise read-only public API.
-	IngestToken string `koanf:"ingestToken"`
+	// NOTE: there is no token here. Burn readings arrive on the shared
+	// push-ingest endpoint (POST /api/v1/ingest/burn.line), so the credential is
+	// a grid.ingest reporter granted the "burn.line" stream — minted by
+	// `make ingest-token`, with only its SHA-256 hash committed.
 }
 
 // BurnCounty is a county that gets a burn status event.
@@ -295,7 +429,7 @@ type MeshcoreConfig struct {
 	// ActiveWindow is DEPRECATED and ignored: presence is now cadence-aware (each
 	// node stays in the snapshot for CadenceK × its own advert interval, clamped
 	// to [GraceFloor, GraceCeil]), so a single global window no longer applies.
-	// See docs/mesh-topology-design.md §9.
+	// See docs/design/mesh-topology-design.md §9.
 	ActiveWindow time.Duration `koanf:"activeWindow"`
 	// CadenceK / GraceFloor / GraceCeil tune cadence-aware presence. A node stays
 	// present for CadenceK × its measured inter-advert interval, clamped to
@@ -327,7 +461,7 @@ type MeshcoreConfig struct {
 	// node on the SAME gateway — a guard so a pathological fast-adverting node
 	// can't flood the relay-observation store (Tier 0). Multi-gateway copies of
 	// one advert are unaffected (different gateways are kept — resilience signal).
-	// Defaults to 30s in cmd/server when unset. See docs/mesh-topology-design.md.
+	// Defaults to 30s in cmd/server when unset. See docs/design/mesh-topology-design.md.
 	SpamFloor time.Duration `koanf:"spamFloor"`
 	// CompactionInterval is the cadence of the relay-topology maintenance tick
 	// (fold Tier 0 receptions into the Tier 1 per-link-per-day rollup, then prune).
@@ -340,6 +474,16 @@ type MeshcoreConfig struct {
 	// RollupRetention caps the age of Tier 1 link history — the interesting,
 	// cheap-to-keep topology record. Defaults to 2 years.
 	RollupRetention time.Duration `koanf:"rollupRetention"`
+	// TelemetryRetention caps the age of archived monitor samples (battery,
+	// temperature, airtime, counters). Defaults to 1 year.
+	//
+	// Unlike the two above this is not a cache size. Observations re-accumulate
+	// from the live MQTT feed and the rollup is derived from them; a monitor
+	// report is neither — it reports the present and never replays, so anything
+	// pruned here is a battery curve nobody can reconstruct. At ~864 rows/day
+	// for nine nodes a year costs tens of megabytes, which is why the default is
+	// generous.
+	TelemetryRetention time.Duration `koanf:"telemetryRetention"`
 }
 
 // MeshcoreBroker is one MQTT endpoint. URL scheme selects transport
@@ -380,7 +524,7 @@ type SourceTuning struct {
 }
 
 // HazardsConfig holds the unified hazard/situation feed configuration
-// (docs/hazard-aggregation-design.md). Each area is a named region the
+// (docs/design/hazard-aggregation-design.md). Each area is a named region the
 // /api/v1/hazards/{area}/{layer}.geojson endpoints serve.
 type HazardsConfig struct {
 	Areas []HazardArea `koanf:"areas"`
@@ -492,7 +636,7 @@ type WeatherConfig struct {
 
 // ForecastConfig gates the per-location NWS fire-weather forecast (wind/gust/RH,
 // on conditions + the fire_weather layer). Keyless, reuses NWS.UserAgent. See
-// docs/fire-weather-forecast-design.md. Zero RefreshInterval/HorizonHours default
+// docs/design/fire-weather-forecast-design.md. Zero RefreshInterval/HorizonHours default
 // to 1h / 48h.
 type ForecastConfig struct {
 	Enabled         bool          `koanf:"enabled"`

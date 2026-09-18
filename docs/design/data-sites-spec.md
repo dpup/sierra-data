@@ -10,7 +10,7 @@
 > **`web/CLAUDE.md`** — read that before changing anything under `web/`. The
 > principles and information architecture below are unchanged by the redesign.
 
-A light frontend over the Grid Info Service (`grid-info-api-spec.md`). Dual duty:
+A light frontend over the Grid Info Service (`docs/design/v2-api-spec.md`). Dual duty:
 **documentation of the data APIs** and **nerdy investigation of the data itself** —
 and the design premise is that these are the same thing done well once.
 

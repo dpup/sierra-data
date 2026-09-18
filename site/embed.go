@@ -1,5 +1,5 @@
 // Package site embeds the data.sierragridteam.org static site
-// (docs/data-sites-spec.md) so the server binary is self-contained: no runtime
+// (docs/design/data-sites-spec.md) so the server binary is self-contained: no runtime
 // file dependencies, and the Docker image needs no separate site COPY.
 //
 // The site is built by Astro (source in ../web) into dist/, which is NOT

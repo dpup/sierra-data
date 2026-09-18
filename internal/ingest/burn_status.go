@@ -10,6 +10,7 @@ import (
 	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
 	"github.com/dpup/sierra-data/internal/clients/calfireburn"
 	"github.com/dpup/sierra-data/internal/config"
+	"github.com/dpup/sierra-data/internal/pushingest"
 	"github.com/dpup/sierra-data/internal/store"
 )
 
@@ -30,7 +31,8 @@ const (
 // by *store.Store; a fake is used in tests).
 //
 // The burn-day facet is the service's only PUSHED source: cmd/burn-line calls
-// the county line on its own schedule and posts the reading to /ingest/burn-line,
+// the county line on its own schedule and posts the reading to the burn.line
+// stream of /api/v1/ingest,
 // which lands it in burn_readings. Poll then reads the latest row on the
 // scheduler's tick — the same push-source-wrapped-as-a-poller shape MeshCore
 // uses, which keeps single-writer discipline and tick-based health unchanged.
@@ -45,6 +47,19 @@ type BurnReadingSource interface {
 // CalfireBurnClient is the read side of the CAL FIRE burn status page.
 type CalfireBurnClient interface {
 	GetBurnStatus(ctx context.Context) (map[string]calfireburn.CountyStatus, error)
+}
+
+// BurnReporters is the read side of push-reporter health for the burn.line
+// stream (satisfied by *pushingest.Registry; nil when push ingest is off).
+//
+// A reporter gets its own source row so /api/v1/sources answers "is the burn
+// line actually being called?" — a question the `burnline` row cannot: that one
+// reports whether the DATA is fresh, which stays healthy right up until the
+// freshness gate trips. These rows are HEALTH ONLY; no event is ever stored with
+// a reporter as its source.
+type BurnReporters interface {
+	ReporterIDs(stream string) []string
+	Health(stream string) []pushingest.ReporterHealth
 }
 
 // PlaceIndex resolves which place ids a county's status attaches to. Burn
@@ -79,13 +94,16 @@ type BurnStatusNormalizer struct {
 	// no row still gets an event, with the burn-day facet UNKNOWN.
 	readings BurnReadingSource
 	places   PlaceIndex
-	now      func() time.Time
+	// push is the push-ingest registry, for burn.line reporter health. Nil when
+	// push ingest is disabled, in which case no reporter rows are claimed.
+	push BurnReporters
+	now  func() time.Time
 }
 
 // NewBurnStatusNormalizer wires the normalizer to the CAL FIRE scrape and the
 // pushed-reading staging table.
-func NewBurnStatusNormalizer(cfg *config.Config, calfire CalfireBurnClient, readings BurnReadingSource, places PlaceIndex) *BurnStatusNormalizer {
-	return &BurnStatusNormalizer{cfg: cfg, calfire: calfire, readings: readings, places: places, now: time.Now}
+func NewBurnStatusNormalizer(cfg *config.Config, calfire CalfireBurnClient, readings BurnReadingSource, places PlaceIndex, push BurnReporters) *BurnStatusNormalizer {
+	return &BurnStatusNormalizer{cfg: cfg, calfire: calfire, readings: readings, places: places, push: push, now: time.Now}
 }
 
 // SourceIDs implements Normalizer. The burn line row is only claimed when at
@@ -95,6 +113,9 @@ func (n *BurnStatusNormalizer) SourceIDs() []string {
 	ids := []string{calfireBurnSourceID}
 	if len(n.cfg.Grid.Burn.EnabledLines()) > 0 {
 		ids = append(ids, burnLineSourceID)
+	}
+	if n.push != nil {
+		ids = append(ids, n.push.ReporterIDs(pushingest.BurnStream)...)
 	}
 	return ids
 }
@@ -191,7 +212,40 @@ func (n *BurnStatusNormalizer) Poll(ctx context.Context, prior Prior) (*PollResu
 		}
 		events = append(events, ev)
 	}
+	for id, err := range n.reporterHealth() {
+		perSource[id] = err
+	}
 	return &PollResult{Events: events, PerSource: perSource}, nil
+}
+
+// reporterHealth maps each burn.line reporter's state onto its source row. A
+// reporter that has never reported is an error, not a success: recording an
+// attempt with no error would paint a monitor that was never set up as healthy.
+func (n *BurnStatusNormalizer) reporterHealth() map[string]error {
+	if n.push == nil {
+		return nil
+	}
+	health := n.push.Health(pushingest.BurnStream)
+	if len(health) == 0 {
+		return nil
+	}
+	out := make(map[string]error, len(health))
+	for _, h := range health {
+		switch h.State {
+		case pushingest.ReporterOK:
+			out[h.ID] = nil
+		case pushingest.ReporterUnknown:
+			out[h.ID] = fmt.Errorf("no report received yet")
+		default:
+			err := fmt.Errorf("no report since %s (%s)",
+				h.LastAcceptedAt.UTC().Format(time.RFC3339), h.State)
+			if h.LastError != "" {
+				err = fmt.Errorf("%w; last error: %s", err, h.LastError)
+			}
+			out[h.ID] = err
+		}
+	}
+	return out
 }
 
 // freshnessError reports a burn-line reading that is too old to trust. See

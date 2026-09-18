@@ -12,6 +12,7 @@ import (
 	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
 	"github.com/dpup/sierra-data/internal/clients/calfireburn"
 	"github.com/dpup/sierra-data/internal/config"
+	"github.com/dpup/sierra-data/internal/pushingest"
 	"github.com/dpup/sierra-data/internal/store"
 )
 
@@ -111,7 +112,7 @@ func suspendedRows() map[string]calfireburn.CountyStatus {
 }
 
 func newBurnNormalizer(cfg *config.Config, cf CalfireBurnClient, readings BurnReadingSource) *BurnStatusNormalizer {
-	n := NewBurnStatusNormalizer(cfg, cf, readings, fakePlaceIndex{})
+	n := NewBurnStatusNormalizer(cfg, cf, readings, fakePlaceIndex{}, nil)
 	n.now = func() time.Time { return burnNow }
 	return n
 }
@@ -618,4 +619,74 @@ func TestBurnPoll_UndialedLineWithNoReadingIsNotAFailure(t *testing.T) {
 	assert.Empty(t, res.PerSource, "only DIALED lines are expected to report")
 	assert.Equal(t, gridv1.BurnDay_BURN_DAY_UNKNOWN,
 		byID(res.Events, "burn:tuolumne-county").GetBurnStatus().GetBurnDay())
+}
+
+// --- push-reporter health ------------------------------------------------------
+
+type fakeReporters struct {
+	ids    []string
+	health []pushingest.ReporterHealth
+}
+
+func (f fakeReporters) ReporterIDs(string) []string { return f.ids }
+func (f fakeReporters) Health(string) []pushingest.ReporterHealth {
+	return f.health
+}
+
+// A burn.line reporter gets its own source row, so /api/v1/sources can answer
+// "is the line actually being called?" — which the `burnline` row cannot, since
+// that one stays healthy right up until the freshness gate trips.
+func TestBurnPoll_ReporterHealthIsReported(t *testing.T) {
+	reporters := fakeReporters{
+		ids: []string{"burn-line"},
+		health: []pushingest.ReporterHealth{
+			{ID: "burn-line", State: pushingest.ReporterOK},
+		},
+	}
+	n := NewBurnStatusNormalizer(calOnly(), &fakeCalfireBurn{rows: suspendedRows()},
+		freshLine("red"), fakePlaceIndex{}, reporters)
+	n.now = func() time.Time { return burnNow }
+
+	assert.Contains(t, n.SourceIDs(), "burn-line", "the reporter must claim a source row")
+
+	res, err := n.Poll(context.Background(), &scriptedPrior{})
+	require.NoError(t, err)
+	// Present with a nil error == recorded as a healthy attempt.
+	require.Contains(t, res.PerSource, "burn-line")
+	assert.NoError(t, res.PerSource["burn-line"])
+}
+
+// A reporter that has NEVER reported is an error, not a success: recording a
+// clean attempt would paint a monitor that was never set up as a healthy feed.
+func TestBurnPoll_SilentReporterIsUnhealthy(t *testing.T) {
+	for name, st := range map[string]pushingest.ReporterState{
+		"never reported": pushingest.ReporterUnknown,
+		"gone stale":     pushingest.ReporterStale,
+		"dead":           pushingest.ReporterDead,
+	} {
+		t.Run(name, func(t *testing.T) {
+			reporters := fakeReporters{
+				ids:    []string{"burn-line"},
+				health: []pushingest.ReporterHealth{{ID: "burn-line", State: st}},
+			}
+			n := NewBurnStatusNormalizer(calOnly(), &fakeCalfireBurn{rows: suspendedRows()},
+				freshLine("red"), fakePlaceIndex{}, reporters)
+			n.now = func() time.Time { return burnNow }
+
+			res, err := n.Poll(context.Background(), &scriptedPrior{})
+			require.NoError(t, err)
+			assert.Error(t, res.PerSource["burn-line"])
+		})
+	}
+}
+
+// With push ingest off, no reporter rows are claimed — a source row nothing can
+// ever report for would sit permanently UNSPECIFIED on the public endpoint.
+func TestBurnPoll_NoReporterRowsWhenPushDisabled(t *testing.T) {
+	n := newBurnNormalizer(calOnly(), &fakeCalfireBurn{rows: suspendedRows()}, freshLine("red"))
+	assert.ElementsMatch(t, []string{calfireBurnSourceID, burnLineSourceID}, n.SourceIDs())
+
+	res, err := n.Poll(context.Background(), &scriptedPrior{})
+	require.NoError(t, err)
+	assert.Empty(t, res.PerSource)
 }

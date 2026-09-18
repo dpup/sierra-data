@@ -3,8 +3,8 @@
 The system of record for the grid service: hazard **events** with full revision
 history, the **place** directory, and the **source** registry. Backs the
 `/api/v1` API (`internal/gridapi`, gRPC-Gateway) and the hazard event layers
-(`internal/hazards`). Design: `docs/v2-api-spec.md` §4 +
-`docs/v2-implementation-plan.md` §2.2. Pure-Go driver (`modernc.org/sqlite`) so
+(`internal/hazards`). Design: `docs/design/v2-api-spec.md` §4 +
+`docs/design/v2-implementation-plan.md` §2.2. Pure-Go driver (`modernc.org/sqlite`) so
 the `CGO_ENABLED=0` cross-compile keeps working — do **not** swap in a cgo driver.
 
 ## Schema philosophy — the proto blob is canonical
@@ -43,7 +43,7 @@ hash differs from the stored one. Zeroed fields and the reason each is excluded:
   to spend AI-enhancement budget **before** enhancing. If enhancement were hashed,
   an enhanced event would differ from the next raw poll and loop forever, and the
   spec §6 "enhancement regenerated per poll" bug would come back.
-- `network.telemetry` (NETWORK events only) — the MeshCore per-advert signal state
+- `mesh.telemetry` (MESH events only) — the MeshCore per-advert signal state
   (SNR/RSSI/hop count/path/gateways/last-advert time). A mesh node re-adverts
   constantly and every packet carries fresh signal metrics; hashing them would mint
   a revision per packet and blow up `event_revisions`. Grouping them into one
@@ -325,6 +325,43 @@ vacuous. Denormalizing `status` onto `event_places` would be marginally faster
 tables — and a drift there would silently hide an ACTIVE event from a
 place-scoped query, which is the one failure this service must not have.
 
+## The mesh tables are measurements, not records
+
+Three tables hang off the mesh subsystem and none of them is proto-blob
+canonical, because none of them holds event content:
+
+| table | holds | if lost |
+| --- | --- | --- |
+| `mesh_observations` | one row per received advert (Tier 0) | re-accumulates from the live MQTT feed |
+| `mesh_link_rollup` | per-link-per-day topology (Tier 1) | recompute from Tier 0 |
+| `mesh_telemetry` | one row per accepted monitor report | **gone forever** |
+
+That last row is why `mesh_telemetry` gets a generous retention default (a year)
+while raw observations get 48 hours. A monitor reports the present and never
+replays: anything pruned there is a battery curve nobody can reconstruct, where
+a pruned observation costs at most some freshness.
+
+Its columns mirror `grid.v1.MeshAdminTelemetry` field for field **including the
+nullable/plain split** — gauges nullable because an unread one is not a zero,
+counters plain because they are only written alongside a successful read. The
+read path rebuilds the proto message itself (`gridapi.adminReading`), so the
+archive and the live event cannot describe one reading two ways.
+
+Two details that look optional and are not:
+
+- **`PRIMARY KEY (pubkey, reported_at)`** — the monitor's clock, not ours. The
+  mesh poller ticks every 60s while reports arrive every ~15 minutes, so it
+  re-offers the same sample ~15 times; keying on our receive time would store
+  fifteen copies of one reading and draw a staircase.
+- **`RenameMeshTelemetryPubKey`** — a node known only by a key prefix is filed
+  under that prefix until an advert supplies the full key. The promotion retires
+  the provisional event, and without the rename the samples are orphaned under a
+  key nothing refers to any more: silently, once per node, with no way to notice.
+
+No Tier 1 rollup here yet, deliberately: ~864 rows/day for nine nodes is 315k
+rows a year. `mesh_link_rollup` exists because the advert firehose is orders of
+magnitude larger. Adding one is additive when node count × cadence earns it.
+
 ## Migration ladder
 
 `migrations[]` is an ordered slice; index `i` is schema version `i+1`. `Open`
@@ -347,8 +384,11 @@ API layer — return it, don't invent a sentinel.
 ## `burn_readings` — the one table an HTTP request writes
 
 Every other table here is written by the ingest scheduler. `burn_readings`
-(migrationV6) is written by the burn-line push endpoint (`internal/ingestapi`),
-and it is the landing spot for the service's only PUSHED source.
+(migrationV7) is written by the `burn.line` stream of the push-ingest endpoint
+(`internal/pushingest`), and it is the landing spot for a pushed burn-day
+reading. It is the only table an HTTP request writes: the sibling `mesh.repeater`
+stream buffers in memory instead, because it reports every few minutes whereas a
+burn line is called once a day and must survive a restart.
 
 It is a staging table on purpose. The push handler validates a reading and lands
 a row; it does **not** write events. `BurnStatusNormalizer.Poll` reads the latest
