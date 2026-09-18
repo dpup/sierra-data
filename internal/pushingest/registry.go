@@ -10,9 +10,9 @@
 //
 // # The shape of the thing
 //
-// A reporter POSTs a report; the handler authenticates it, validates it, and
-// writes it into an in-memory buffer. It does NOT touch the store. The mesh
-// poller drains that buffer on its next scheduler tick, exactly as it already
+// A reporter POSTs a report; the handler authenticates it and validates it, then
+// hands it to the stream. It does NOT write EVENTS — the poller for that layer
+// publishes them on its next scheduler tick, exactly as the mesh poller already
 // drains the MQTT subscriber's buffer, so:
 //
 //   - single-writer discipline holds (the scheduler goroutine is still the only
@@ -26,6 +26,25 @@
 // as a poller" is a pattern this codebase already committed to for MeshCore MQTT
 // (see internal/ingest/CLAUDE.md). This is the second instance of it, not a new
 // idea.
+//
+// # What a stream owns, and what it does not
+//
+// The framework owns TRANSPORT: routing, auth, per-stream grants, rate limiting,
+// size caps, the 202 envelope, and reporter health. Those are stream-agnostic,
+// and Health/MeshReports are each scoped to their own stream so one stream's
+// silent reporter can never affect another's.
+//
+// A stream owns its PAYLOAD and its DURABILITY. mesh.repeater holds accepted
+// reports in the in-memory buffer below because a monitor re-reports every few
+// minutes; burn.line stages them in the store because a burn line is called once
+// a day and an in-memory buffer would lose the day's answer to any deploy. Do
+// not generalize either choice into the framework — it is a property of how
+// often the source speaks.
+//
+// Two more things are mesh's, not the framework's, despite living on shared
+// types: Reporter.Priority and Reporter.PlaceIDs (read only by mesh.go), and the
+// STALE-vs-DEAD split in ReporterState, which exists to decide mesh sweep
+// suppression. A stream that does not suppress sweeps sees both as "unhealthy".
 //
 // # Extensibility
 //

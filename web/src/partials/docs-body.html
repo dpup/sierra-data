@@ -542,7 +542,11 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
   <p>
     Success is <code class="inline">202 Accepted</code>, not
     <code class="inline">200</code>: the report has been authenticated and
-    validated, but it is not yet in the store — the next ingest tick merges it.
+    validated, but it is not yet an <em>event</em> — the next ingest tick
+    publishes it. Where an accepted report is held until then is per-stream
+    (<code class="inline">mesh.repeater</code> buffers in memory;
+    <code class="inline">burn.line</code> stages durably, because it reports once
+    a day and must survive a restart).
     The response is
     <code class="inline">{reporterId, stream, accepted, warnings, receivedAt}</code>.
     <strong>A malformed entry is a warning, not a rejection</strong> — one repeater
@@ -552,13 +556,13 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
   <div class="table-wrap"><table class="data-table">
     <thead><tr><th>Status</th><th>Meaning</th></tr></thead>
     <tbody>
-      <tr><td class="mono">202</td><td class="wrap">Accepted and buffered. <code>warnings[]</code> lists entries that were skipped.</td></tr>
+      <tr><td class="mono">202</td><td class="wrap">Accepted. <code>warnings[]</code> lists entries that were skipped. Not yet published as an event — the next ingest tick does that.</td></tr>
       <tr><td class="mono">401</td><td class="wrap">Missing or unknown token. Deliberately carries no detail.</td></tr>
       <tr><td class="mono">403</td><td class="wrap">Valid token, but this reporter is not granted that stream.</td></tr>
       <tr><td class="mono">404</td><td class="wrap">Unknown stream.</td></tr>
       <tr><td class="mono">413</td><td class="wrap">Body over the configured limit.</td></tr>
       <tr><td class="mono">429</td><td class="wrap">Reporting faster than the reporter's configured minimum interval; see <code>Retry-After</code>.</td></tr>
-      <tr><td class="mono">400</td><td class="wrap">Malformed JSON, unsupported <code>schema_version</code>, or too many entries.</td></tr>
+      <tr><td class="mono">400</td><td class="wrap">Malformed JSON, unsupported <code>schema_version</code>, too many entries, nothing usable in the report, or a stream this deployment has not configured anything for.</td></tr>
     </tbody>
   </table></div>
 
