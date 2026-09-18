@@ -321,6 +321,127 @@ AI-enhanced from the `RoadsService` pipeline — do not re-enhance them).
   be unit-tested; `TestNWSEnhancerLive` (skipped unless `NWS_ENHANCE_LIVE=1`)
   runs the real prompt against a real product and asserts these.
 
+## Burn status: ambient state whose VALUE is the revision history
+
+`burn_status.go` is the first layer that is not about a hazard at all. It reports
+whether residential burning is currently legal in a county, and it is shaped by
+three decisions worth keeping.
+
+**A LINE is the unit, not a county.** `grid.burn.lines` is a list of recorded
+phone lines, each naming the counties it speaks for, because the mapping is not
+1:1 in EITHER direction: a county can have more than one relevant recording, and
+one air-district line routinely covers several counties (listed once, dialed
+once, attached to each). Modelling a phone number as a field on a county forces
+you to either duplicate a shared line per county — and dial it N times, paying
+N calls for one answer — or flatten two real lines into one field.
+
+`mergeBurnDays` collapses a county's lines into `burn_day`, taking the MOST
+RESTRICTIVE: any NO wins outright, else any MARGINAL (an elevation-restricted
+burn day is a restriction and YES is not), and YES requires that every DIALED
+line produced a usable answer. That last clause is the same asymmetry
+`derivePermission` applies across facets — a line we expected to read but could
+not is a gap, and a gap must never render as a green light. Each line's own
+answer stays visible in `burn_lines[]`, so a consumer can show the disagreement
+rather than only the merge.
+
+**`enabled` governs what we DIAL, not what we BELIEVE.** A configured line that
+is not dialed is still published on the event (with its number, and burn_day
+UNKNOWN) so a reader can call it, and it cannot block a YES — we never asked it
+anything. But a fresh reading that *does* arrive for it is used: the push
+endpoint accepts readings for any configured line, so accepting one and then
+silently ignoring it would be the surprising behaviour, and it would make a
+manual one-off push useless. Only DIALED lines are expected to report, so only
+they degrade the source.
+
+**One of the two facets is PUSHED, not polled — the only one in the service.**
+`cmd/burn-line` calls the county line from CI and POSTs the reading to
+`/ingest/burn-line` (`internal/ingestapi`), which lands it in the
+`burn_readings` staging table. `Poll` reads the latest row on the tick. The push
+handler deliberately does NOT write events: the scheduler stays the single owner
+of event writes, and this is the same push-source-wrapped-as-a-poller shape
+`network.go` uses for MeshCore. Reading from the STORE rather than an in-memory
+buffer is what makes a reading survive a restart — it keeps its own
+`observed_at`, so a rehydrated reading is re-judged by the freshness gate rather
+than resurrected as current.
+
+**Two authorities, carried separately, never merged.** A legal burn needs BOTH
+the county air district's permissive-burn-day call (daily; flips weekly in
+winter/spring) and the absence of a CAL FIRE suspension on SRA land (moves about
+twice a year). They are separate facets on one event because they fail
+independently — the county line can be unreachable while CAL FIRE's page is
+fine. `derivePermission` is the only place they combine, and it is deliberately
+asymmetric: **PROHIBITED is conclusive from either facet alone, ALLOWED requires
+both to be known and permissive.** Someone acts on this holding a match, so an
+unreadable authority must never render as a green light.
+
+**The event is ambient and permanently ACTIVE.** One per configured county,
+severity INFO, excluded from the summary hazard rollup exactly like mesh-node
+presence (`totalActive`, `severityCounts`, `topEvents`, `mode`). Its value is
+`/api/v1/events/{id}/history` — "when did it change" is the question the layer
+exists to answer. That is also why:
+
+- **The per-reading fields live in `BurnObservation`, which `store.ContentHash`
+  zeroes.** The county line's message NAMES THE DATE ("Today, September 10th, is
+  not a burn day"), so the text differs every single day even when the answer has
+  not. Hashed, it would mint a revision daily and bury the handful of real
+  transitions in 365 rows of noise a year. Same mechanism as `MeshTelemetry`.
+- **The headline is composed deterministically** (`burnHeadline`). `ContentHash`
+  does NOT zero `Headline`, so a generated or reworded one would differ every
+  tick and mint a revision each time — the same rule, and the same reason, as the
+  NWS alert headline above.
+- **Provenance keys off CONFIGURATION, not on whether the fetch succeeded.**
+  Provenance is hashed (only `fetched_at` is zeroed), so flipping `source_id`
+  when the burn line blips would mint a spurious revision pair on an event that
+  never changed. `TestBurnPoll_ProvenanceIsStableAcrossABurnLineOutage` pins it.
+- **The id is `burn:<county place slug>`** — nothing but an immutable identifier.
+  The id trap above applies with full force here: deriving it from a status field
+  would mint a new id on the very transition this layer records, and the sweep
+  would RESOLVE the old one.
+
+**One facet carries forward, the other must not.** On a CAL FIRE failure the
+stored suspension is carried forward from `Prior`: that page being down is no
+evidence the suspension lifted, and it changes twice a year. The burn-day facet
+is deliberately NOT carried forward — it is a statement about TODAY, and
+yesterday's answer is exactly what the freshness gate exists to reject. Carrying
+it would reintroduce the freeze through the back door.
+
+### A sixth freeze case (`burnline`) — and why a PUSH source needs one MORE
+
+Every other freeze case is about an upstream that keeps answering 200 with stale
+data. A push source has the same problem in a starker form: **there is no fetch
+to fail at all.** A pipeline that silently stops looks exactly like one that has
+not run yet — the staging row simply sits there. Age is the ONLY signal.
+
+`grid.burn.burnDayStaleAfter` (36h — one missed daily run plus slack) turns an
+old `observed_at` into a `PerSource` failure AND blanks the facet to UNKNOWN.
+Both halves matter: a stale "no-burn" is merely over-cautious, but a stale "burn
+day" tells someone today is fine when the district may since have said
+otherwise. A dialed county with NO row at all is the same failure, reported as
+"no reading has been pushed". A negative value disables the gate verbatim, the
+same explicit-opt-out rule as `grid.power.outageStaleAfter`.
+
+This is also why the burn-day facet is never carried forward from `Prior`:
+durability is the staging row's job (which keeps a real timestamp the gate can
+judge), never the last published answer's.
+
+**`BurnLine.Dialed()` is what "we expect a reading" means**, and it is
+deliberately `enabled && phone != "" && id != ""` rather than just the presence
+of a number. Publishing a county's number so readers can call it must not, by
+itself, flip that county's source unhealthy for a reading we never ask for.
+Tuolumne is the live example.
+
+### Not a map layer, and place attachment without geometry
+
+These events carry **no geometry** — burn status is an administrative fact about
+a county, not a footprint — so `burn_status` is absent from `eventLayers` and
+there is no `.geojson` for it. Attachment instead presets `ev.PlaceIds` (the
+mechanism NWS zone alerts already use; `UpsertEvent` unions preset ids with
+geometric matches and never drops the preset ones), resolved through the
+`PlaceIndex` interface: the county, its towns, and any AREA overlapping it, so a
+query for a town sees its county's status. Writing the county polygon instead
+would put 18-32 KB into the event *and every revision of it* to express something
+true of the county by definition.
+
 ## Wildfire has its own, wider geography
 
 Every other spatial poller (earthquake, evacuation) fetches over `unionBounds`

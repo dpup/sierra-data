@@ -143,6 +143,7 @@ Content-Type: application/json
       <tr><td class="mono">earthquake</td><td class="wrap mono">magnitude (double), depthKm (double), felt (int32)</td></tr>
       <tr><td class="mono">roadIncident</td><td class="wrap mono">logNumber (string), impact, duration (string), metadata (map&lt;string,string&gt;)</td></tr>
       <tr><td class="mono">power</td><td class="wrap mono">outageId, cause (string), customersAffected (int32), crewStatus (string), estimatedRestoration (timestamp); PSPS adds eventId, eventName, timePeriod, stage (Watch | Warning, as string), medicalBaselineAffected (int32), deEnergizationStart, deEnergizationEnd, allClear (timestamp). <strong>estimatedRestoration, deEnergizationEnd and allClear are ESTIMATES PG&amp;E routinely overruns</strong> — they are deliberately not mapped onto <code>expires</code>, so never use them to hide an event.</td></tr>
+      <tr><td class="mono">burnStatus</td><td class="wrap mono">burnDay (BURN_DAY_UNKNOWN | _YES | _NO | _MARGINAL), calfireStatus (CALFIRE_BURN_STATUS_UNKNOWN | CALFIRE_BURNING_SUSPENDED | CALFIRE_PERMIT_REQUIRED | CALFIRE_NO_PERMIT_REQUIRED), permission (BURN_PERMISSION_UNKNOWN | _ALLOWED | _PROHIBITED), calfireEffective, calfireObservedAt (timestamp), calfireArea (string), burnLines[] { id, name, phone (string), burnDay, observation { message, transcript (string), confidence (int32), observedAt (timestamp) } }. <strong>burnLines is a LIST</strong> — a county can have more than one recorded line, and one air-district line can speak for several counties. The top-level burnDay is their merge (most restrictive wins); render the per-line answers when they differ. A line we publish but do not read still appears, with burnDay UNKNOWN and its phone populated, so you can always offer the number. <strong>permission is deliberately pessimistic</strong> — PROHIBITED is conclusive from either authority alone, but ALLOWED needs BOTH facets known and permissive; anything else is UNKNOWN. Render UNKNOWN as "call the burn line", never as a green light. <strong>BURN_DAY_MARGINAL means ELEVATION-RESTRICTED</strong> (a burn day only above a stated elevation, typically 3500 ft) — only <code class="inline">observation.message</code> carries the threshold. The burn-day facet is a transcription of a recorded county phone line, not an API, so <code class="inline">observation.confidence</code> is a model's confidence and <code class="inline">burnLinePhone</code> should always be offered next to it.</td></tr>
       <tr><td class="mono">mesh</td><td class="wrap mono">publicKey (hex string), nodeType (companion | repeater | room_server | sensor), name (string), telemetry { snr (double), rssi (int32), hopCount (uint32), path (repeated string — relay hops as repeater pubkey-prefix hashes), pathNodes (repeated string — path resolved to full node public keys, parallel to path), gateways (repeated string), lastAdvertAt (timestamp) }</td></tr>
     </tbody>
   </table></div>
@@ -157,8 +158,11 @@ Content-Type: application/json
     advertise", the trustworthy answer is the event's
     <code class="inline">observedAt</code> (when the Grid last heard it);
     <code class="inline">telemetry.lastAdvertAt</code> is the node's
-    self-reported stamp and is diagnostic only (mesh node clocks skew). Slots are also reserved for future
-    layers: power, gauge, air_quality, announcement.
+    self-reported stamp and is diagnostic only (mesh node clocks skew). The <code class="inline">burnStatus</code> block's
+    <code class="inline">observation</code> is volatile in the same way: the
+    county line's message names the date, so it changes daily even when the
+    answer does not, and it never mints a revision. Slots are also reserved for
+    future layers: gauge, air_quality, announcement.
   </p>
 
   <h3>Enum: Layer</h3>
@@ -173,6 +177,7 @@ Content-Type: application/json
       <tr><td class="mono">ROAD_INCIDENT</td><td class="num">6</td><td class="mono">road_incident</td><td>events</td></tr>
       <tr><td class="mono">POWER</td><td class="num">10</td><td class="mono">power</td><td>events (PG&amp;E outages + Public Safety Power Shutoffs; <code class="inline">category</code> is <code class="inline">unplanned</code> | <code class="inline">planned</code> | <code class="inline">psps</code>). The statewide median outage affects ONE customer, so most rows are <code class="inline">INFO</code> — pair with <code class="inline">severity_min</code>. INFO power events are excluded from the place-summary rollup (they still appear here and in the <code class="inline">power</code> domain).</td></tr>
       <tr><td class="mono">MESH</td><td class="num">13</td><td class="mono">mesh_node</td><td>events (MeshCore presence) — <code class="inline">?layer=</code> accepts <code class="inline">mesh</code>, <code class="inline">mesh_node</code>, or the legacy <code class="inline">network</code></td></tr>
+      <tr><td class="mono">BURN_STATUS</td><td class="num">15</td><td class="mono">burn_status</td><td>events (per-county residential burning status). <strong>Not a map layer</strong> — these events carry no geometry, so there is no <code class="inline">burn_status.geojson</code>. Ambient INFO state: like MESH it is excluded from the place-summary rollup (<code class="inline">totalActive</code>, <code class="inline">severityCounts</code>, <code class="inline">topEvents</code>, <code class="inline">mode</code>) and appears in its own <code class="inline">burn</code> domain. The event is permanently ACTIVE — its <a href="#events-history">revision history</a> is the answer to "when did this change".</td></tr>
       <tr><td class="mono">GAUGE, AIR_QUALITY, ANNOUNCEMENT</td><td class="num">11, 12, 14</td><td class="mono">—</td><td>reserved for future pollers</td></tr>
     </tbody>
   </table></div>

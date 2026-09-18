@@ -14,6 +14,89 @@ throughout; errors are gRPC-standard `{code, codeName, message, details}`). The
 by a snake_case `/v1` surface on 2026-07-05, which was in turn folded back onto the
 proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 
+## 2026-09-10
+
+### New layer `BURN_STATUS`: per-county residential burning status
+
+**Purely additive.** A new event layer, two new sources, and a new
+`GetPlaceSummary` domain. Nothing existing changes shape; a client that ignores
+the layer sees no difference.
+
+Two independent authorities gate a legal burn and **both** must permit it. They
+are carried as separate facets and never merged, because they fail
+independently:
+
+| facet | authority | changes |
+| --- | --- | --- |
+| `burnDay` | the county air district's permissive-burn-day call | daily; flips weekly in winter/spring |
+| `calfireStatus` | CAL FIRE's seasonal suspension of burn permits on State Responsibility Area land | about twice a year |
+
+- **`GET /api/v1/events?layer=burn_status`** returns one event per configured
+  county (`burn:calaveras-county`, `burn:tuolumne-county`), carrying a
+  `burnStatus` detail block. `place` filtering works for the county, its towns
+  and any overlapping area — a query for a town sees its county's status.
+- **`GET /api/v1/events/{id}/history`** is the point of the layer. The event is
+  ambient and permanently ACTIVE, so its **revision timeline is the answer to
+  "when did this change"**. Per-reading fields (the message text, transcript,
+  confidence, observation timestamps) are excluded from the content hash, so
+  only a real transition mints a revision.
+- **`GET /api/v1/places/{place}/summary`** gains a `burn` domain, reported only
+  where at least one county is configured.
+- **`GET /api/v1/sources`** gains `burnline` and `calfire-burn`.
+
+**New: `POST /ingest/burn-line`** — the service's first and only write
+endpoint, and the only route that requires a credential (a bearer token). It
+accepts a pushed burn-day reading and 202s; it does **not** write events (the
+reading is staged and the ingest scheduler applies it on its next tick). It is
+not part of the public read surface, is absent from the OpenAPI spec, and stays
+browser-unreachable cross-origin because `corsAllowMethods` remains GET-only.
+Nothing about the existing read endpoints changes.
+
+**`burnStatus` fields**: `burnDay` (`BURN_DAY_UNKNOWN|_YES|_NO|_MARGINAL`),
+`calfireStatus` (`CALFIRE_BURN_STATUS_UNKNOWN|CALFIRE_BURNING_SUSPENDED|CALFIRE_PERMIT_REQUIRED|CALFIRE_NO_PERMIT_REQUIRED`),
+`permission` (`BURN_PERMISSION_UNKNOWN|_ALLOWED|_PROHIBITED`), `calfireEffective`,
+`calfireArea`, `calfireObservedAt`, and `burnLines[]`.
+
+**`burnLines[]` is a LIST, not one phone number.** Each entry is
+`{id, name, phone, burnDay, observation{message, transcript, confidence, observedAt}}`.
+A county can have more than one recorded line, and one air-district line can
+speak for several counties — so render the per-line answers when they differ,
+and treat the top-level `burnDay` as their merge (most restrictive wins). A line
+we publish but do not read still appears, with `burnDay: BURN_DAY_UNKNOWN` and
+its `phone` populated; that is deliberate, so you can always offer the number.
+
+#### Two things a consumer MUST get right
+
+1. **`permission` is deliberately pessimistic — do not re-derive it optimistically.**
+   It is the *more restrictive* of the two facets. `PROHIBITED` is conclusive on
+   its own (either authority can forbid burning), but `ALLOWED` requires **both**
+   facets to be known and permissive. Anything else is `UNKNOWN`. Render
+   `UNKNOWN` as "check the burn line", never as a green light — someone acts on
+   this holding a match.
+2. **`burnDay` is not a government API.** The authority is the county's recorded
+   phone line, which a scheduled job calls daily, transcribes, and extracts — so
+   `observation.confidence` is a transcription confidence and the value can be
+   wrong in ways an API cannot. Always offer `burnLinePhone` alongside it. A
+   reading older than `grid.burn.burnDayStaleAfter` (36h default) is **not**
+   served as today's answer: the facet reads `BURN_DAY_UNKNOWN` and the
+   `burnline` source goes unhealthy.
+3. **`BURN_DAY_MARGINAL` means elevation-restricted**, not "somewhat". It is a
+   burn day that applies only above a stated elevation (typically 3500 ft); only
+   `observation.message` carries the threshold, and `permission` deliberately
+   reports `UNKNOWN` rather than `ALLOWED` for it.
+
+**Not a map layer.** These events carry no geometry — burn status is an
+administrative fact about a county, not a footprint — so there is no
+`burn_status.geojson`, and the layer is absent from the map namespace.
+
+**Not counted as a hazard.** Like mesh-node presence, burn status is ambient
+INFO state: it is excluded from `summary.totalActive`, `severityCounts`,
+`topEvents` and `mode`, and appears only in its own `burn` domain.
+
+Tuolumne's line is published but not read, so its `burnDay` reads
+`BURN_DAY_UNKNOWN` while `calfireStatus` is populated; `burnLinePhone` still
+carries the county's real number.
+
 ## 2026-09-02
 
 ### `GET /api/v1/sources`: `homepageUrl` populated, source `name`s disambiguated

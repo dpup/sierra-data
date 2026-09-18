@@ -169,7 +169,11 @@ func (s *Service) buildPlaceSummary(ctx context.Context, hb hazardsBuilder, plac
 	// conditions, commit d278e43) — and both still appear in their own domain
 	// below, because byLayer is built from the FULL set.
 	//
-	//  1. Mesh-node presence (MESH): ambient INFO infrastructure state.
+	//  1. Mesh-node presence (MESH) and burn status (BURN_STATUS): ambient INFO
+	//     state. Burn status exists for every configured county at ALL times —
+	//     counting it would report a quiet county as permanently `totalActive: 1`
+	//     and let "no-burn day" occupy a topEvents slot meant for hazards. Its
+	//     value is the revision history, not the active count.
 	//  2. INFO-severity POWER: PG&E publishes every outage it has, and the
 	//     STATEWIDE MEDIAN OUTAGE AFFECTS ONE CUSTOMER — half of every fetch is
 	//     single-premise service calls. Counting those would report a quiet
@@ -184,7 +188,7 @@ func (s *Service) buildPlaceSummary(ctx context.Context, hb hazardsBuilder, plac
 	// never escalates it.
 	hazardEvents := make([]*gridv1.Event, 0, len(events))
 	for _, ev := range events {
-		if ev.GetLayer() == gridv1.Layer_MESH {
+		if ev.GetLayer() == gridv1.Layer_MESH || ev.GetLayer() == gridv1.Layer_BURN_STATUS {
 			continue
 		}
 		if ev.GetLayer() == gridv1.Layer_POWER && ev.GetSeverity() == gridv1.Severity_INFO {
@@ -220,7 +224,11 @@ func (s *Service) buildPlaceSummary(ctx context.Context, hb hazardsBuilder, plac
 	// them as last-good — never UNAVAILABLE disowning data this response carries.
 	eventLayerStatus := func(layer string) string {
 		st, last := LayerSourceStatus(sources, layer)
-		st, _ = hazards.DegradeStoreStatus(st, len(byLayer[eventLayers[layer]]) > 0, last)
+		// storeLayerEnum, not eventLayers[layer]: a store-backed layer that is
+		// not a MAP layer (burn status) is absent from eventLayers, and the
+		// zero value would look up an empty bucket — reporting a down source as
+		// UNAVAILABLE while this response is still serving its stored events.
+		st, _ = hazards.DegradeStoreStatus(st, len(byLayer[storeLayerEnum(layer)]) > 0, last)
 		return st
 	}
 
@@ -265,6 +273,14 @@ func (s *Service) buildPlaceSummary(ctx context.Context, hb hazardsBuilder, plac
 		buildDomain("power",
 			[]string{eventLayerStatus(hazards.LayerPower)},
 			eventItems(byLayer[gridv1.Layer_POWER])),
+	}
+	// burn (county burn day + CAL FIRE suspension) is only reported when at least
+	// one county is configured, for the same reason as comms below: an
+	// unconfigured source must not surface as a dark/UNAVAILABLE domain.
+	if len(s.Cfg.Grid.Burn.Counties) > 0 {
+		out.Domains = append(out.Domains, buildDomain("burn",
+			[]string{eventLayerStatus(hazards.LayerBurnStatus)},
+			eventItems(byLayer[gridv1.Layer_BURN_STATUS])))
 	}
 	// comms (MeshCore mesh presence) is only reported when the source is enabled:
 	// a deliberately-off source must not surface as a dark/UNAVAILABLE domain.
@@ -534,4 +550,18 @@ func sourceRows(sources []*gridv1.Source) []*gridv1.SummarySourceHealth {
 		})
 	}
 	return out
+}
+
+// storeLayerEnum resolves a layer slug onto its store Layer enum for layers
+// served from the store, whether or not they are also map layers. eventLayers
+// alone is not enough: it doubles as the map-layer routing table, so a layer
+// with no geometry (burn status) is deliberately absent from it.
+func storeLayerEnum(layer string) gridv1.Layer {
+	if l, ok := eventLayers[layer]; ok {
+		return l
+	}
+	if layer == hazards.LayerBurnStatus {
+		return gridv1.Layer_BURN_STATUS
+	}
+	return gridv1.Layer_LAYER_UNSPECIFIED
 }

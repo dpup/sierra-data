@@ -98,11 +98,40 @@ CREATE INDEX idx_revisions_observed
 // pge/psps) read as duplicates of each other on the sources board.
 const migrationV5 = `ALTER TABLE sources ADD COLUMN homepage_url TEXT NOT NULL DEFAULT ''`
 
+// migrationV6 adds the burn-line staging table: the landing spot for readings
+// PUSHED to the service rather than polled from an upstream (the burn-day facet
+// of Layer_BURN_STATUS; see internal/ingest/CLAUDE.md).
+//
+// It exists so a push does NOT write events. The ingest scheduler stays the
+// single owner of event writes: the push handler validates a reading and lands
+// it here, and BurnStatusNormalizer.Poll reads the latest row on its own tick —
+// the same push-source-wrapped-as-a-poller shape MeshCore uses, where the MQTT
+// subscriber buffers state and Poll returns a snapshot.
+//
+// It also gives the reading durability across a restart. The row keeps the
+// upstream's own observed_at, so a rehydrated reading is re-judged by the
+// freshness gate rather than silently resurrected as current.
+//
+// Keyed by LINE, not by county: one air-district line routinely speaks for
+// several counties, and keying by county would dial and store it once per
+// county. Which counties a line answers for is config (grid.burn.lines[].counties),
+// not a property of the reading.
+const migrationV6 = `
+CREATE TABLE burn_readings (
+  line_id      TEXT PRIMARY KEY,     -- config line id ("calaveras-apcd")
+  status       TEXT NOT NULL,        -- upstream vocabulary: green | red | orange
+  message      TEXT NOT NULL DEFAULT '',
+  transcript   TEXT NOT NULL DEFAULT '',
+  confidence   INTEGER NOT NULL DEFAULT 0,
+  observed_at  INTEGER NOT NULL,     -- when the line was CALLED (the freshness signal)
+  received_at  INTEGER NOT NULL      -- when we accepted the push (diagnostic only)
+)`
+
 // migrations[i] is the DDL for schema version i+1. Applied versions are
 // recorded in schema_migrations; already-applied versions are skipped, so
 // Open is idempotent across restarts and an existing dev DB at an older
 // version picks up only the missing migrations.
-var migrations = []string{schemaV1, migrationV2, migrationV3, migrationV4, migrationV5}
+var migrations = []string{schemaV1, migrationV2, migrationV3, migrationV4, migrationV5, migrationV6}
 
 // ErrNotFound is returned by point lookups (GetEvent, GetPlace) when no row
 // matches. Callers map it to a 404.

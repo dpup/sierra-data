@@ -68,7 +68,20 @@ var layerSourceIDs = map[string][]string{
 	// service is down the layer degrades to STALE rather than claiming to be a
 	// complete picture.
 	hazards.LayerPower: {"pge", "psps"},
+	// Burn status is not an event-backed MAP layer (no geometry — see
+	// hazards.LayerBurnStatus), but it still needs source health for the summary
+	// domain, which is what this map drives via LayerSourceStatus. Two
+	// independently-failing authorities back it, so losing only the scraped CAL
+	// FIRE page degrades the domain to STALE rather than dark.
+	hazards.LayerBurnStatus: {burnLineSourceID, calfireBurnSourceID},
 }
+
+// Burn status source ids, mirrored from internal/ingest so the registry and the
+// layer's health agree.
+const (
+	burnLineSourceID    = "burnline"
+	calfireBurnSourceID = "calfire-burn"
+)
 
 // conditionLayerSourceIDs credits the upstreams behind the layers that are NOT
 // store-backed. It is deliberately SEPARATE from layerSourceIDs: that map also

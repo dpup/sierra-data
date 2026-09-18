@@ -3,6 +3,7 @@ package config
 import (
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/dpup/prefab"
@@ -56,6 +57,7 @@ type GridConfig struct {
 	Meshcore    MeshcoreConfig          `koanf:"meshcore"`
 	Wildfire    WildfireConfig          `koanf:"wildfire"`
 	Power       PowerConfig             `koanf:"power"`
+	Burn        BurnConfig              `koanf:"burn"`
 }
 
 // Default wildfire geography. Both are applied when the corresponding
@@ -150,6 +152,137 @@ func (p PowerConfig) OutageStale() time.Duration {
 		return p.OutageStaleAfter
 	}
 	return DefaultPowerOutageStaleAfter
+}
+
+// DefaultBurnDayStaleAfter is how old the county burn line's reading may be
+// before the burn-day facet is treated as unusable. The upstream pipeline calls
+// the line once daily, so a healthy reading is always under 24 h old; 36 h
+// allows one missed run plus clock slack before we stop trusting it.
+const DefaultBurnDayStaleAfter = 36 * time.Hour
+
+// BurnConfig configures the burn status layer (county permissive-burn-day plus
+// CAL FIRE's seasonal suspension).
+type BurnConfig struct {
+	// Counties are the places that get a burn status event.
+	Counties []BurnCounty `koanf:"counties"`
+
+	// Lines are the recorded phone lines we know about.
+	//
+	// A line is its own entity rather than a field on a county because the
+	// mapping is not 1:1 in EITHER direction: a county can have more than one
+	// relevant recording, and one air-district line routinely speaks for several
+	// counties. Modelling it the other way forces you to either duplicate a
+	// shared line per county (and dial it N times) or flatten two real lines into
+	// one field.
+	Lines []BurnLine `koanf:"lines"`
+
+	// BurnDayStaleAfter is the maximum age of a burn-line reading before that
+	// line's facet degrades to UNKNOWN and the `burnline` source is reported as
+	// failing for the tick.
+	//
+	// This is the PG&E freeze problem in a starker form: the reading is PUSHED,
+	// so there is no fetch to fail. A pipeline that silently stops looks exactly
+	// like one that has not run yet — the staged row simply sits there. Age is
+	// the only signal. A stale "no-burn" is merely over-cautious; a stale "burn
+	// day" tells someone holding a match that today is fine when the district may
+	// since have said otherwise.
+	//
+	// Unset (0) => DefaultBurnDayStaleAfter. A NEGATIVE value disables the gate
+	// outright and is returned verbatim — an explicit opt-out, deliberately
+	// distinct from an omitted key. Same rule as PowerConfig.OutageStaleAfter:
+	// do not clamp negatives to the default, or an operator's deliberate opt-out
+	// silently turns a safety check back on.
+	BurnDayStaleAfter time.Duration `koanf:"burnDayStaleAfter"`
+
+	// IngestToken authenticates POSTs to /ingest/burn-line. Set it from the
+	// environment (PF__GRID__BURN__INGEST_TOKEN), never in prefab.yaml — it is a
+	// credential, and this file is committed.
+	//
+	// Empty DISABLES the endpoint (it 404s). That default is deliberate: a
+	// deployment that has not configured a credential must not expose an
+	// unauthenticated write path on an otherwise read-only public API.
+	IngestToken string `koanf:"ingestToken"`
+}
+
+// BurnCounty is a county that gets a burn status event.
+type BurnCounty struct {
+	// Place is the county place slug ("calaveras-county") the event attaches to.
+	Place string `koanf:"place"`
+	// Name is the display name used in headlines ("Calaveras County").
+	Name string `koanf:"name"`
+}
+
+// BurnLine is one recorded burn-information phone line.
+type BurnLine struct {
+	// ID is a stable identifier ("calaveras-apcd"). It keys the staged reading,
+	// so changing it orphans that line's history — treat it as immutable.
+	ID string `koanf:"id"`
+	// Name is the display name ("Calaveras County APCD burn line").
+	Name string `koanf:"name"`
+	// Phone is the number a resident can call. It is published on every event
+	// this line speaks for, WHETHER OR NOT we dial it — a number next to an
+	// UNKNOWN answer is the honest thing to show.
+	Phone string `koanf:"phone"`
+	// Counties lists the county place slugs this line speaks for.
+	Counties []string `koanf:"counties"`
+	// Enabled says this deployment DIALS the line: cmd/burn-line calls it on a
+	// schedule and pushes the reading, so the layer EXPECTS readings and degrades
+	// the `burnline` source when none arrives.
+	//
+	// Deliberately separate from Phone. Keying "do we expect readings" off the
+	// presence of a number would make merely publishing a county's phone number
+	// flip its source unhealthy.
+	Enabled bool `koanf:"enabled"`
+}
+
+// LinesForCounty returns the lines that speak for a county place slug, in
+// config order (which is the order they are published in).
+func (b BurnConfig) LinesForCounty(place string) []BurnLine {
+	var out []BurnLine
+	for _, l := range b.Lines {
+		for _, c := range l.Counties {
+			if strings.EqualFold(c, place) {
+				out = append(out, l)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// EnabledLines returns every line this deployment dials.
+func (b BurnConfig) EnabledLines() []BurnLine {
+	var out []BurnLine
+	for _, l := range b.Lines {
+		if l.Dialed() {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// Line returns the configured line with this id.
+func (b BurnConfig) Line(id string) (BurnLine, bool) {
+	for _, l := range b.Lines {
+		if strings.EqualFold(l.ID, id) {
+			return l, true
+		}
+	}
+	return BurnLine{}, false
+}
+
+// Dialed reports whether this deployment calls the line, and so expects pushed
+// readings for it.
+func (l BurnLine) Dialed() bool { return l.Enabled && l.Phone != "" && l.ID != "" }
+
+// BurnDayStale is BurnDayStaleAfter with the default applied. A negative
+// configured value disables the gate and is returned as-is (the caller treats
+// <= 0 as off).
+func (b BurnConfig) BurnDayStale() time.Duration {
+	if b.BurnDayStaleAfter != 0 {
+		return b.BurnDayStaleAfter
+	}
+	return DefaultBurnDayStaleAfter
 }
 
 // MeshcoreConfig configures the MeshCore mesh-node presence source: a set of

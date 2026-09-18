@@ -17,6 +17,7 @@ import (
 	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
 	"github.com/dpup/sierra-data/internal/cache"
 	"github.com/dpup/sierra-data/internal/clients/calfire"
+	"github.com/dpup/sierra-data/internal/clients/calfireburn"
 	"github.com/dpup/sierra-data/internal/clients/caloes"
 	"github.com/dpup/sierra-data/internal/clients/caltrans"
 	"github.com/dpup/sierra-data/internal/clients/census"
@@ -31,7 +32,9 @@ import (
 	"github.com/dpup/sierra-data/internal/gridapi"
 	"github.com/dpup/sierra-data/internal/hazards"
 	"github.com/dpup/sierra-data/internal/ingest"
+	"github.com/dpup/sierra-data/internal/ingestapi"
 	"github.com/dpup/sierra-data/internal/lib/alerts"
+	"github.com/dpup/sierra-data/internal/lib/geojson"
 	"github.com/dpup/sierra-data/internal/mcp"
 	"github.com/dpup/sierra-data/internal/places"
 	"github.com/dpup/sierra-data/internal/services"
@@ -168,6 +171,19 @@ func main() {
 		{Normalizer: ingest.NewPowerNormalizer(appConfig, pge.NewClient()), Interval: gridPollInterval(appConfig, "pge", "psps")},
 	}
 
+	// Burn status (optional): per-county residential burning status from two
+	// independent authorities — the county air district's burn line and CAL
+	// FIRE's seasonal suspension. Ambient state, polled a couple of times a day.
+	if len(appConfig.Grid.Burn.Counties) > 0 {
+		// The burn-day facet is PUSHED (see internal/ingestapi): the normalizer
+		// reads the staging table the push endpoint writes, rather than fetching
+		// an upstream. CAL FIRE is still a real fetch.
+		pollers = append(pollers, ingest.PollerSpec{
+			Normalizer: ingest.NewBurnStatusNormalizer(appConfig, calfireburn.NewClient(), gridStore, storePlaceIndex{gridStore}),
+			Interval:   gridPollInterval(appConfig, "burnline", "calfire-burn"),
+		})
+	}
+
 	// MeshCore mesh-node presence (optional): a long-lived MQTT subscriber to
 	// community bridges accumulates node state; the NetworkNormalizer serves a
 	// snapshot on the scheduler's tick. Enabled only when configured with brokers.
@@ -212,6 +228,22 @@ func main() {
 	gatewayMux := &deferredHandler{}
 	mcpHandler := mcp.NewHandler(gatewayMux)
 
+	// Pushed burn-day readings. Disabled (404) unless a token is configured, so a
+	// deployment without a credential cannot expose an unauthenticated write path
+	// by omission.
+	// The endpoint accepts a reading only for a CONFIGURED line id, so the
+	// staging table can never accumulate rows no poller will read.
+	burnLineIDs := make([]string, 0, len(appConfig.Grid.Burn.Lines))
+	for _, l := range appConfig.Grid.Burn.Lines {
+		burnLineIDs = append(burnLineIDs, l.ID)
+	}
+	burnLineHandler := ingestapi.NewBurnLineHandler(gridStore, appConfig.Grid.Burn.IngestToken, burnLineIDs)
+	if burnLineHandler.Enabled() {
+		logging.Info(ctx, "Burn-line push endpoint enabled at /ingest/burn-line")
+	} else {
+		logging.Info(ctx, "Burn-line push endpoint disabled (no grid.burn.ingestToken configured)")
+	}
+
 	// GridService: the proto-defined /api/v1 entity/query surface over
 	// gRPC-Gateway (docs/grpc-gateway-migration-plan.md). Gateway annotations
 	// mount under /api/, which Prefab already serves.
@@ -249,6 +281,10 @@ func main() {
 			return nil
 		}),
 		prefab.WithHTTPHandlerFunc("/mcp", mcpHandler.ServeHTTP),
+		// The service's ONLY write surface: pushed burn-day readings. Bearer-token
+		// authenticated, 404s when no token is configured, and never writes events
+		// (it stages a row the ingest scheduler picks up). See internal/ingestapi.
+		prefab.WithHTTPHandlerFunc("/ingest/burn-line", burnLineHandler.ServeHTTP),
 		// Publish the generated OpenAPI spec for /api/v1 (protoc-gen-openapiv2).
 		// Exact path, so it wins over the gateway's /api/ subtree mount.
 		prefab.WithHTTPHandlerFunc("/api/openapi.json", func(w http.ResponseWriter, _ *http.Request) {
@@ -349,6 +385,11 @@ var gridSourceInfo = map[string]struct{ name, attribution, homepage string }{
 	"meshcore": {"MeshCore Mesh", "MeshCore community mesh", "https://map.meshcore.io"},
 	"pge":      {"PG&E (electric outages)", "Pacific Gas and Electric", pge.OutageMapURL},
 	"psps":     {"PG&E (public safety power shutoffs)", "Pacific Gas and Electric", pge.PSPSUpdatesURL},
+	// Two authorities gate a legal burn and both are carried; see
+	// internal/ingest/burn_status.go. The burn line row covers every configured
+	// county's line, so its name stays generic.
+	"burnline":     {"County burn line (burn day)", "County air district burn information line", burnDayHomepage},
+	"calfire-burn": {"CAL FIRE (burn permit suspension)", "CAL FIRE", calfireBurnHomepage},
 }
 
 // Homepages used by more than one source row, or that have no constant of their
@@ -359,6 +400,12 @@ const (
 	// FIRIS data reaches us through an ArcGIS feature service with no landing
 	// page; Cal OES runs the program, so its page is the honest upstream.
 	firisProgramURL = "https://www.caloes.ca.gov/office-of-the-director/operations/response-operations/fire-rescue/firis/"
+	// The public page for the burn-day readings we consume. The AUTHORITY is the
+	// county's recorded phone line, which has no URL — each event carries the
+	// number in burn_status.burnLinePhone so a reader can always reach it.
+	burnDayHomepage = "https://burnday.ersn.net"
+	// CAL FIRE's own burn status table.
+	calfireBurnHomepage = "https://burnpermit.fire.ca.gov/current-burn-status"
 )
 
 // registerAppConfigKeys registers the app's top-level config namespaces with
@@ -556,4 +603,67 @@ func gridPollInterval(cfg *config.Config, sourceIDs ...string) time.Duration {
 		return 5 * time.Minute
 	}
 	return best
+}
+
+// storePlaceIndex resolves a county's place ids from the seeded place directory,
+// satisfying ingest.PlaceIndex.
+type storePlaceIndex struct{ st *store.Store }
+
+// PlaceIDsForCounty returns the county place plus every place the county's
+// status is true of: towns (parented to their containing county by the seeder)
+// and any AREA whose coverage overlaps it.
+//
+// This is what makes a burn status attach without geometry. A query for a town
+// ("?place=arnold") must see its county's burn status — the status is true of
+// the whole county by definition, so resolving membership once at ingest is
+// both cheaper and more accurate than writing an 18-32 KB county polygon into
+// every event and every revision of it.
+//
+// AREAs need the geometric test because they are deliberately NOT parented to a
+// county: the coverage footprint spans several (that is why AREA is its own
+// place kind). Without this the deployment's own place — the one
+// /places/ebbetts-pass/summary reports on — would show an empty burn domain
+// while both its counties had a status.
+//
+// CORRIDORs are excluded: a corridor is a road, and burn status is a fact about
+// land, not about the highway crossing it.
+func (s storePlaceIndex) PlaceIDsForCounty(ctx context.Context, countySlug string) ([]string, error) {
+	county, err := s.st.GetPlace(ctx, countySlug)
+	if err != nil {
+		return nil, err
+	}
+	ids := []string{county.GetId()}
+
+	var countyGeom *geojson.Geom
+	if raw := county.GetGeometry().GetGeojson(); len(raw) > 0 {
+		countyGeom, _ = geojson.Parse(raw)
+	}
+
+	all, err := s.st.ListPlaces(ctx, gridv1.PlaceKind_PLACE_KIND_UNSPECIFIED, "")
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range all {
+		if p.GetId() == county.GetId() {
+			continue
+		}
+		switch {
+		case p.GetParentId() == county.GetId():
+			ids = append(ids, p.GetId())
+		case p.GetKind() == gridv1.PlaceKind_AREA && countyGeom != nil:
+			raw := p.GetGeometry().GetGeojson()
+			if len(raw) == 0 {
+				continue
+			}
+			g, err := geojson.Parse(raw)
+			if err != nil {
+				continue
+			}
+			if geojson.Intersects(countyGeom, g) {
+				ids = append(ids, p.GetId())
+			}
+		}
+	}
+	sort.Strings(ids)
+	return ids, nil
 }

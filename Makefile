@@ -1,5 +1,5 @@
 # Live Data API Server - Build, Test, and Deployment Tasks
-.PHONY: test-pge build test proto proto-tools clean server tools site site-modules site-ensure site-install site-dev site-shots site-shots-mock check-wiring run dev lint fmt docker docker-build docker-run docker-run-dev docker-push docker-clean deploy install help test-meshcore
+.PHONY: test-pge burn-line-dry-run build test proto proto-tools clean server tools site site-modules site-ensure site-install site-dev site-shots site-shots-mock check-wiring run dev lint fmt docker docker-build docker-run docker-run-dev docker-push docker-clean deploy install help test-meshcore
 
 # Go parameters
 GOCMD=go
@@ -32,6 +32,7 @@ TEST_CALTRANS_BINARY=$(BUILD_DIR)/test-caltrans
 TEST_WEATHER_BINARY=$(BUILD_DIR)/test-weather
 TEST_MESHCORE_BINARY=$(BUILD_DIR)/test-meshcore
 TEST_PGE_BINARY=$(BUILD_DIR)/test-pge
+BURN_LINE_BINARY=$(BUILD_DIR)/burn-line
 TEST_GEO_UTILS_BINARY=$(BUILD_DIR)/test-geo-utils
 TEST_ALERT_ENHANCER_BINARY=$(BUILD_DIR)/test-alert-enhancer
 TEST_ROUTE_MATCHER_BINARY=$(BUILD_DIR)/test-route-matcher
@@ -58,10 +59,13 @@ $(SERVER_BINARY): proto site-ensure
 	$(GOBUILD) -o $(SERVER_BINARY) ./$(CMD_DIR)/server
 
 # Build CLI testing tools only
-tools: $(TEST_GOOGLE_BINARY) $(TEST_CALTRANS_BINARY) $(TEST_WEATHER_BINARY) $(TEST_MESHCORE_BINARY) $(TEST_PGE_BINARY)
+tools: $(TEST_GOOGLE_BINARY) $(TEST_CALTRANS_BINARY) $(TEST_WEATHER_BINARY) $(TEST_MESHCORE_BINARY) $(TEST_PGE_BINARY) $(BURN_LINE_BINARY)
 
 $(TEST_GOOGLE_BINARY): proto
 	$(GOBUILD) -o $(TEST_GOOGLE_BINARY) ./$(CMD_DIR)/test-google
+
+$(BURN_LINE_BINARY): proto
+	$(GOBUILD) -o $(BURN_LINE_BINARY) ./$(CMD_DIR)/burn-line
 
 $(TEST_CALTRANS_BINARY): proto
 	$(GOBUILD) -o $(TEST_CALTRANS_BINARY) ./$(CMD_DIR)/test-caltrans
@@ -266,6 +270,12 @@ test-meshcore: $(TEST_MESHCORE_BINARY)
 # these undocumented endpoints show instead of an error.
 test-pge: $(TEST_PGE_BINARY)
 	./$(TEST_PGE_BINARY) $(if $(BOUNDS),--bounds=$(BOUNDS)) $(if $(JSON),--json)
+
+# Call a county burn line and print the reading WITHOUT pushing. This places a
+# real phone call and spends Twilio + OpenAI credit, so it is dry-run only here;
+# the pushing path runs from .github/workflows/burn-line.yml.
+burn-line-dry-run: $(BURN_LINE_BINARY)
+	./$(BURN_LINE_BINARY) -dry-run -county=$(if $(COUNTY),$(COUNTY),calaveras-county) -phone=$(if $(PHONE),$(PHONE),+12097546600)
 
 # Validate configuration without API calls
 test-config:

@@ -481,6 +481,91 @@ grid:
       # topology rework, when a single blunt window covered every node.)
       disappearance: "expire"
       expireAfter: "2h"
+    # Burn status. Both sources back ONE poller, which ticks at the FASTER of the
+    # two intervals and does both each tick — so these must move together, and
+    # both are 1h.
+    #
+    # The two are not symmetric. `calfire-burn` is a real fetch of a page that
+    # changes about twice a year; `burnline` is PUSHED, so its "poll" only reads
+    # the staging table and the interval is really the lag between a reading
+    # landing and appearing in /events.
+    #
+    # 1h is set by the burn-day side: "is today a burn day" is a morning
+    # question, and a 12h tick could hold a 6am reading until evening. The cost
+    # is scraping CAL FIRE 24x/day instead of 2x. That is deliberate and cheap —
+    # still the gentlest poller here by an order of magnitude (Caltrans is 10m,
+    # PG&E and NWS 5m), and request RATE is not what the bot wall keys on.
+    #
+    # The alternative — ticking fast and internally skipping the CAL FIRE fetch —
+    # was rejected: RecordAttempt would log a success for a fetch never made, so
+    # /api/v1/sources would vouch for a source we had not checked in hours.
+    #
+    # `disappearance` is effectively inert here and that is deliberate: the
+    # poller emits one event per CONFIGURED county on every successful tick, so
+    # an event can only go missing if a county is removed from config. `resolve`
+    # is the honest reading of that — the county is no longer covered — and the
+    # fail-loud rules still guarantee a FAILED fetch transitions nothing.
+    burnline:
+      pollInterval: "1h"
+      disappearance: "resolve"
+    calfire-burn:
+      pollInterval: "1h"
+      disappearance: "resolve"
+
+  # Per-county residential burning status. TWO INDEPENDENT AUTHORITIES gate a
+  # legal burn and both must permit it: the county air district's permissive
+  # burn-day call (daily; flips weekly in winter/spring) and CAL FIRE's seasonal
+  # suspension of burn permits on State Responsibility Area land (about twice a
+  # year). They are carried as separate facets, never merged, because they fail
+  # independently — see internal/ingest/burn_status.go.
+  burn:
+    # How old a burn-day reading may be before the facet degrades to UNKNOWN and
+    # the `burnline` source is reported as failing. The upstream is a
+    # once-daily job publishing a static document, so a failed run keeps serving
+    # YESTERDAY'S ANSWER with a 200 — this gate is the only thing that sees it.
+    # 36h allows one missed run plus clock slack. A negative value disables the
+    # gate outright (explicit opt-out; an omitted key gets the 36h default).
+    burnDayStaleAfter: "36h"
+    # The counties that get a burn status event.
+    counties:
+      - place: "calaveras-county"
+        name: "Calaveras County"
+      - place: "tuolumne-county"
+        name: "Tuolumne County"
+
+    # The recorded phone lines we know about.
+    #
+    # A line is its own entry, not a field on a county, because the mapping is
+    # not 1:1 in EITHER direction: a county can have more than one relevant
+    # recording, and one air-district line routinely speaks for several counties
+    # (list them all under `counties:` and it is dialed ONCE, not once per
+    # county). A county's several lines are merged taking the MOST RESTRICTIVE
+    # answer — see mergeBurnDays.
+    #
+    # `id` keys the staged reading, so it is effectively immutable: changing it
+    # orphans that line's history.
+    #
+    # `enabled` is what cmd/burn-line dials AND what the layer expects readings
+    # for. It is deliberately separate from `phone`, which is published on every
+    # event this line speaks for whether or not we call it — a number next to an
+    # UNKNOWN answer is the honest thing to show, and merely publishing one must
+    # not flip the source unhealthy for a reading we never ask for.
+    #
+    # This list is the SINGLE SOURCE OF TRUTH: .github/workflows/burn-line.yml
+    # does not enumerate numbers, it just runs the tool, which reads this file.
+    lines:
+      - id: "calaveras-apcd"
+        name: "Calaveras County burn line"
+        phone: "+12097546600"
+        counties: ["calaveras-county"]
+        enabled: true
+      # Tuolumne's line is PUBLISHED but not DIALED. Flip `enabled` to start
+      # reading it — no code change, no CI change.
+      - id: "tuolumne-apcd"
+        name: "Tuolumne County APCD burn line"
+        phone: "+12095335598"
+        counties: ["tuolumne-county"]
+        enabled: false
 
   # MeshCore mesh-node presence source. Subscribes to community MQTT bridges,
   # several for resilience; a node heard on more than one collapses to a single
