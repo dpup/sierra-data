@@ -35,6 +35,11 @@ type HTTPDoer interface {
 type FeedParser struct {
 	HTTPClient HTTPDoer
 	geoUtils   geo.GeoUtils
+
+	// Chain-control levels come from CWWP2 when configured (see
+	// UseCWWP2ChainControls); nil keeps the cc.kml-only behavior.
+	chainSource    ChainControlSource
+	chainDistricts []int
 }
 
 // CaltransIncident represents parsed incident data from KML feeds
@@ -62,8 +67,17 @@ type ChainControlData struct {
 	EffectiveTime string           // ISO 8601 timestamp
 	Description   string           // Human-readable requirements
 	LastUpdated   string           // When data was last updated
-	MessageID     string           // Caltrans message ID
+	MessageID     string           // Caltrans message ID (cc.kml) or CWWP2 checkpoint index
 	District      string           // Caltrans district number
+	// Source is the host the entry came from ("cwwp2.dot.ca.gov" or
+	// "quickmap.dot.ca.gov"), for attribution.
+	Source string
+	// Unrecognized marks a CWWP2 checkpoint whose status is not R-0..R-3 (D7
+	// was observed carrying a longitude there). It is neither a requirement
+	// nor an all-clear: consumers must not act on it, and must not report the
+	// area as fully known either. RawStatus keeps the value for diagnosis.
+	Unrecognized bool
+	RawStatus    string
 }
 
 // KML XML structures for parsing
@@ -150,14 +164,23 @@ func (p *FeedParser) ParseChainControls(ctx context.Context) ([]CaltransIncident
 	return p.parseKMLFeed(ctx, "https://quickmap.dot.ca.gov/data/cc.kml", CHAIN_CONTROL)
 }
 
-// ParseChainControlsDetailed processes chain control KML feed with detailed parsing
-// Returns structured chain control data with level, location, and timing info
+// ParseChainControlsDetailed returns the ACTIVE chain controls (plus cc.kml's
+// road-closed / truck-level entries) as structured data. With a CWWP2 source
+// configured (UseCWWP2ChainControls) levels come from CWWP2; otherwise from
+// cc.kml alone. A *PartialError return carries usable, incomplete data.
 func (p *FeedParser) ParseChainControlsDetailed(ctx context.Context) ([]ChainControlData, error) {
+	if p.chainSource != nil && len(p.chainDistricts) > 0 {
+		return p.chainControlsCWWP2(ctx)
+	}
 	incidents, err := p.ParseChainControls(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return p.parseChainControlDetails(incidents), nil
+	controls := p.parseChainControlDetails(incidents)
+	for i := range controls {
+		controls[i].Source = SourceQuickMap
+	}
+	return controls, nil
 }
 
 // parseChainControlDetails extracts detailed chain control info from incidents

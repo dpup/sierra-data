@@ -7,7 +7,8 @@ enhancement live in `internal/services`, not here.
 | Package    | Source                | Auth                          | Notes |
 |------------|-----------------------|-------------------------------|-------|
 | `google`   | Google Routes API     | `PF__GOOGLE_ROUTES__API_KEY`  | Travel time + polyline. Rate-limited; callers cache aggressively (10k/mo budget). |
-| `caltrans` | quickmap.dot.ca.gov KML | none                        | Lane closures, CHP incidents, chain control. |
+| `caltrans` | quickmap.dot.ca.gov KML | none                        | Lane closures, CHP incidents, chain control (levels from `cwwp2` when configured). |
+| `cwwp2`    | cwwp2.dot.ca.gov JSON (Caltrans data portal) | none (public, undocumented) | Per-checkpoint chain-control status; lane-closure windows incl. scheduled. See below. |
 | `weather`  | OpenWeatherMap        | `PF__OPENWEATHER__API_KEY`    | Current conditions only. `GetWeatherAlerts` (One Call 3.0, 1,000/day cap) is CLI-diagnostic only — the server sources alerts from `nws`. |
 | `nws`      | api.weather.gov       | none (User-Agent required)    | Authoritative zone alerts + fire-weather products. |
 | `firis`    | ArcGIS (CAL FIRE org) | none (public)                 | CAL FIRE/FIRIS combo fire perimeters. Dedup + `LastEdit` gating live in `internal/ingest` (wildfire). Replaced `wfigs` (retained unused). |
@@ -42,6 +43,51 @@ Caltrans/CHP timestamps are **Pacific time** with no zone marker. Parse them wit
 `time.ParseInLocation(..., America/Los_Angeles)`, not `time.Parse` (which would
 mislabel them UTC). `cmd/server` blank-imports `time/tzdata` so the zone resolves
 even in a minimal container.
+
+## Caltrans CWWP2 (`cwwp2`) — the portal QuickMap is built from
+
+QuickMap (quickmap.dot.ca.gov) is a static app: `/config/layers.json` maps each
+layer to a KML under `/data/`, and those KMLs are generated from Caltrans's
+CWWP2 portal, which publishes structured JSON/XML/CSV per district at
+`https://cwwp2.dot.ca.gov/data/d{N}/{feed}/{feed}StatusD{NN}.json`. **The file
+name zero-pads the district, the directory does not** (`/d3/cc/ccStatusD03.json`).
+District 10 covers our whole footprint (Calaveras, Tuolumne, Alpine, Amador,
+Mariposa).
+
+- **Chain controls (`cc`) — in use.** Every checkpoint with an explicit status,
+  so a quiet day is 149 × `R-0`, not an empty file. That is why it replaced
+  cc.kml's levels: an empty cc.kml can't be told from a broken one. The client
+  fails an empty file (`ErrEmptyFeed`) and a frozen one (`ErrStaleFeed`, newest
+  `recordTimestamp` older than `staleAfter`, default 1h). `caltrans.FeedParser`
+  merges it (`UseCWWP2ChainControls`, configured by
+  `roads.caltransFeeds.cwwp2.chainControlDistricts`): R-levels from CWWP2, plus
+  cc.kml's entries that carry **no** R-level — "Road Closed" (the seasonal pass
+  closures) and truck `MAX`/`MIN`/`TS` — because no CWWP2 capture has yet shown
+  how (or whether) it represents those. A CWWP2 failure is a hard error; a
+  cc.kml failure returns the CWWP2 levels with a `caltrans.PartialError`
+  (layer `STALE`).
+- **Lane closures (`lcs`) — parsed, not yet wired.** One row per closure
+  WINDOW, including scheduled ones (4× the rows lcs2way.kml shows for our
+  counties), with epoch times and the radio codes 10-97 (set up), 10-98
+  (picked up), 10-22 (cancelled). `LaneClosure.PhaseAt` derives
+  SCHEDULED/ACTIVE/COMPLETED/CANCELLED — codes win over the clock, so a set-up
+  closure past its window is still ACTIVE (overruns happen).
+- **Also available, unused:** `cms` (message-sign text as plain fields), `cctv`
+  (snapshot JPG + HLS stream URLs per camera), `rwis` (road-weather stations —
+  D10's are all Valley sites, useless to us, and its JSON doesn't parse).
+
+**It is hand-templated JSON; parse strictly and never read garbage as R-0.**
+Observed 2026-09-30: `rwis` drops commas between repeated sensor entries (XML
+variant is fine); D11 `cc` is not valid UTF-8; D4/D5/D12 `cc` answer 500; **D7
+carried a longitude in a checkpoint's `status`**. An unparseable status is
+`cwwp2.LevelUnknown` → `ChainControlData.Unrecognized`: the roads service
+ignores it and the `chain_control` layer drops it and degrades to `STALE` when
+it's in-area. The documentation page answers 403 — there is no contract.
+Date/time strings are Pacific local; `*Epoch` fields are real Unix epochs.
+
+`./bin/test-caltrans -feed=cwwp2 [-district=N]` probes it live (levels,
+unrecognized statuses, freshness, closure phases). Fixtures and the list of
+still-unverified winter behavior: `tests/testdata/cwwp2/README.md`.
 
 ## NWS (`nws`)
 

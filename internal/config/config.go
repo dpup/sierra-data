@@ -477,6 +477,20 @@ type CaltransConfig struct {
 	LaneClosures   CaltransFeedConfig `koanf:"laneClosures"`
 	CHPIncidents   CaltransFeedConfig `koanf:"chpIncidents"`
 	RoadConditions CaltransFeedConfig `koanf:"roadConditions"`
+	CWWP2          CWWP2Config        `koanf:"cwwp2"`
+}
+
+// CWWP2Config configures Caltrans's CWWP2 data portal (internal/clients/cwwp2).
+type CWWP2Config struct {
+	// BaseURL is the portal's data root; empty uses cwwp2.DefaultBaseURL.
+	BaseURL string `koanf:"baseUrl"`
+	// ChainControlDistricts are the Caltrans districts whose per-checkpoint
+	// chain-control status replaces cc.kml's levels. Empty keeps cc.kml alone.
+	ChainControlDistricts []int `koanf:"chainControlDistricts"`
+	// StaleAfter fails a feed whose newest record is older than this (the
+	// portal can keep serving a file it has stopped regenerating). 0 uses
+	// cwwp2.DefaultStaleAfter.
+	StaleAfter time.Duration `koanf:"staleAfter"`
 }
 
 // CaltransFeedConfig holds individual feed configuration

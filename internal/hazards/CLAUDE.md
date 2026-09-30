@@ -90,6 +90,19 @@ prefab's `securityMiddleware` on the mounted handlers from `prefab.yaml`
 (`server.security`) — now open (`corsOrigins: ["*"]`, GET-only; see the CORS note
 in the root `CLAUDE.md`) — do not add manual `SecurityHeaders` calls.
 
+## `chain_control` sources
+
+Levels come from Caltrans CWWP2 (every checkpoint, explicit `R-0`), with cc.kml
+supplying only its road-closed / truck-level entries — see the `cwwp2` section
+of `internal/clients/CLAUDE.md`. So on a quiet day `OK` + 0 features is a
+**confirmed** "no chain controls", not an empty KML taken on faith. Two
+degraded cases keep features and return `partialData` (→ `STALE`): cc.kml down
+(`caltrans.PartialError`), and an in-area checkpoint whose status CWWP2 sent as
+garbage (`ChainControlData.Unrecognized` — dropped from the map, never shown as
+a level). Feature ids are `cc:<checkpoint index>` (e.g.
+`cc:10-ALP-4-0.65-W-14W`, Bear Valley WB); per-feature `source.attribution` names the host the
+entry came from.
+
 ## Changing a condition layer
 
 1. If it needs a new per-kind block, add it in `properties.go` and the severity

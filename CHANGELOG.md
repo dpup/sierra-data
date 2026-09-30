@@ -14,6 +14,40 @@ throughout; errors are gRPC-standard `{code, codeName, message, details}`). The
 by a snake_case `/v1` surface on 2026-07-05, which was in turn folded back onto the
 proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 
+## 2026-09-30
+
+### `chain_control` map layer: levels now come from Caltrans CWWP2
+
+**Not a shape change. Feature ids and attribution values change.** Applies to
+`GET /api/v1/places/{place}/map/chain_control.geojson` and anything built on
+it: the `/summary` roads domain, and a road's `chainControlInfo`.
+
+Chain-control levels now come from Caltrans's CWWP2 data portal
+(`cwwp2.dot.ca.gov`, District 10). Before, they came from QuickMap's `cc.kml`.
+CWWP2 reports every checkpoint, each with an explicit `R-0` when no controls
+are in effect. So `sourceStatus: OK` with zero features is now a **confirmed**
+"no chain controls". Before, it only meant "the KML was empty", which is also
+what a broken feed looked like. An empty or frozen CWWP2 file now makes the
+layer `UNAVAILABLE` (or `STALE` if a last good fetch is cached), not `OK`.
+
+- **Feature `id`s** are now `cc:<checkpoint index>`, e.g.
+  `cc:10-ALP-4-0.65-W-14W` (district, county, route, postmile, direction,
+  sign). Before, they were `cc:<KML message id>`. The layer is a live
+  projection, not stored, so no history is affected. Don't persist the old ids.
+- **One feature per checkpoint.** A storm on Hwy 4 shows every signed
+  checkpoint on the controlled stretch (Arnold, Dorrington, Cottage Springs…),
+  not the handful of points `cc.kml` published.
+- `properties.chainControl.highway` reads `Highway 4` / `US 50` / `I-80`.
+  `areaLabel` is Caltrans's upper-case checkpoint name (`ARNOLD`).
+  `effective` is when the checkpoint entered its current level, with a Pacific
+  offset.
+- `properties.source.attribution` is `cwwp2.dot.ca.gov` for CWWP2 entries.
+  Road-closed and truck-only (`MAX`/`MIN`/`TS`) entries still come from `cc.kml`
+  and still say `quickmap.dot.ca.gov`.
+- **New `STALE` cases, with features still returned:** `cc.kml` is down (road
+  closures unknown), or a checkpoint in the area reported a status Caltrans
+  sent malformed. That checkpoint is left off the map rather than guessed at.
+
 ## 2026-09-15 (evening)
 
 ### New: `GET /api/v1/mesh/telemetry?node=` — one node's telemetry archive

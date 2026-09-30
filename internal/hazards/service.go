@@ -130,8 +130,8 @@ func partialData(err error) error         { return &partialDataError{err} }
 
 // layerTTL is the cache lifetime for a layer's upstream data, or 0 for layers
 // that are already cached by the underlying roads/weather services (no
-// double-caching). The new keyless upstreams + the live Caltrans KML chain-
-// control fetch are cached here so a burst of map clients doesn't fan out to
+// double-caching). The new keyless upstreams + the live Caltrans chain-control
+// fetch (CWWP2 + cc.kml) are cached here so a burst of map clients doesn't fan out to
 // every source on every request, and so a transient upstream blip can fall back
 // to the last good fetch (STALE) instead of going UNAVAILABLE.
 func layerTTL(layer string) time.Duration {
@@ -298,13 +298,25 @@ func (s *Service) BuildLayer(ctx context.Context, area config.HazardArea, layer 
 // --- layer builders (re-project existing feeds) ---
 func (s *Service) chainControls(ctx context.Context, area config.HazardArea) ([]Feature, error) {
 	controls, err := s.caltrans.ParseChainControlsDetailed(ctx)
-	if err != nil {
+	var partial *caltrans.PartialError
+	if err != nil && !errors.As(err, &partial) {
 		return nil, err
 	}
 	var out []Feature
+	var unrecognized []string
 	for _, c := range controls {
 		if c.Coordinates == nil || !area.Bounds.Contains(c.Coordinates.Latitude, c.Coordinates.Longitude) {
 			continue
+		}
+		if c.Unrecognized {
+			// Neither a requirement nor an all-clear: keep it off the map, but
+			// don't let the layer claim OK over a checkpoint we can't read.
+			unrecognized = append(unrecognized, fmt.Sprintf("%s %s (%q)", c.Highway, c.LocationName, c.RawStatus))
+			continue
+		}
+		attribution := c.Source
+		if attribution == "" {
+			attribution = caltrans.SourceQuickMap
 		}
 		p := Properties{
 			ID:           "cc:" + nonEmpty(c.MessageID, c.LocationName),
@@ -315,11 +327,21 @@ func (s *Service) chainControls(ctx context.Context, area config.HazardArea) ([]
 			Description:  c.Description,
 			AreaLabel:    c.LocationName,
 			Effective:    c.EffectiveTime,
-			Source:       Source{ID: "caltrans", Name: "Caltrans", Attribution: "quickmap.dot.ca.gov"},
+			Source:       Source{ID: "caltrans", Name: "Caltrans", Attribution: attribution},
 			ChainControl: &ChainControlProps{Level: c.Level, Highway: c.Highway, Direction: c.Direction},
 		}
 		p.setSeverity(fromChainLevelStr(c.Level))
 		out = append(out, Feature{Type: "Feature", Geometry: PointGeom(c.Coordinates.Latitude, c.Coordinates.Longitude), Properties: p})
+	}
+	var degraded []error
+	if partial != nil {
+		degraded = append(degraded, partial)
+	}
+	if len(unrecognized) > 0 {
+		degraded = append(degraded, fmt.Errorf("unrecognized chain-control status at %s", strings.Join(unrecognized, "; ")))
+	}
+	if len(degraded) > 0 {
+		return out, partialData(errors.Join(degraded...))
 	}
 	return out, nil
 }

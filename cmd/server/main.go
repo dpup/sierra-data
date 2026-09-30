@@ -20,6 +20,7 @@ import (
 	"github.com/dpup/sierra-data/internal/clients/caloes"
 	"github.com/dpup/sierra-data/internal/clients/caltrans"
 	"github.com/dpup/sierra-data/internal/clients/census"
+	"github.com/dpup/sierra-data/internal/clients/cwwp2"
 	"github.com/dpup/sierra-data/internal/clients/firis"
 	"github.com/dpup/sierra-data/internal/clients/google"
 	"github.com/dpup/sierra-data/internal/clients/meshcore"
@@ -64,6 +65,16 @@ func main() {
 	// Initialize external API clients using top-level client configurations
 	googleClient := google.NewClient(appConfig.GoogleRoutes.APIKey)
 	caltransClient := caltrans.NewFeedParser()
+	if cw := appConfig.Roads.CaltransFeeds.CWWP2; len(cw.ChainControlDistricts) > 0 {
+		cwClient := cwwp2.NewClient()
+		if cw.BaseURL != "" {
+			cwClient.BaseURL = cw.BaseURL
+		}
+		if cw.StaleAfter > 0 {
+			cwClient.StaleAfter = cw.StaleAfter
+		}
+		caltransClient.UseCWWP2ChainControls(cwClient, cw.ChainControlDistricts)
+	}
 	weatherClient := weather.NewClient(appConfig.OpenWeather.APIKey)
 	nwsClient := nws.NewClient(appConfig.Weather.NWS.UserAgent)
 

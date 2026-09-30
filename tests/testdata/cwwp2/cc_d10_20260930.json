@@ -1,0 +1,5816 @@
+{
+	"data":
+	[
+		{
+			"cc":
+			{
+				"index": "10-ALP-4-0.65-W-14W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "BEAR VALLEY",
+					"nearbyPlace":    "Arnold",
+					"longitude":      "-120.044800",
+					"latitude":       "38.460500",
+					"elevation":      "7116",
+					"direction":      "West",
+					"county":         "Alpine",
+					"route":          "SR-4",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "0.65",
+					"alignment":      "",
+					"milepost":       "157.37"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-05-05",
+						"statusTime": "13:01:03"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-ALP-4-0.775-E-15E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "BEAR VALLEY",
+					"nearbyPlace":    "Arnold",
+					"longitude":      "-120.042830",
+					"latitude":       "38.460950",
+					"elevation":      "7109",
+					"direction":      "East",
+					"county":         "Alpine",
+					"route":          "SR-4",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "0.78",
+					"alignment":      "",
+					"milepost":       "157.50"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-05-05",
+						"statusTime": "13:01:03"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-ALP-4-2.77-W-15W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "MOUNT REBA ROAD",
+					"nearbyPlace":    "Arnold",
+					"longitude":      "-120.021520",
+					"latitude":       "38.481600",
+					"elevation":      "7500",
+					"direction":      "West",
+					"county":         "Alpine",
+					"route":          "SR-4",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "2.77",
+					"alignment":      "",
+					"milepost":       "159.49"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-05-05",
+						"statusTime": "13:01:03"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-ALP-4-3.2-E-1",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "MOUNT REBA ROAD - EBBETTS PASS",
+					"nearbyPlace":    "Arnold",
+					"longitude":      "-120.014960",
+					"latitude":       "38.480420",
+					"elevation":      "7591",
+					"direction":      "East",
+					"county":         "Alpine",
+					"route":          "SR-4",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "3.20",
+					"alignment":      "",
+					"milepost":       "159.92"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-14",
+						"statusTime": "12:44:11"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-ALP-4-4.5-E-2",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "EAST END OF LAKE ALPINE - EBBETTS PASS",
+					"nearbyPlace":    "Arnold",
+					"longitude":      "-119.994210",
+					"latitude":       "38.481350",
+					"elevation":      "7378",
+					"direction":      "East",
+					"county":         "Alpine",
+					"route":          "SR-4",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "4.50",
+					"alignment":      "",
+					"milepost":       "161.22"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-05-29",
+						"statusTime": "14:33:52"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-ALP-4-24.4-W-3",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "RAYMOND MEADOWS - EBBETTS PASS",
+					"nearbyPlace":    "Silver Mountain (historical)",
+					"longitude":      "-119.785310",
+					"latitude":       "38.589470",
+					"elevation":      "6794",
+					"direction":      "West",
+					"county":         "Alpine",
+					"route":          "SR-4",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "24.40",
+					"alignment":      "",
+					"milepost":       "181.12"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-05-06",
+						"statusTime": "13:08:15"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-ALP-4-29.2-W-4",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "WOLF CREEK - EBBETTS PASS",
+					"nearbyPlace":    "Markleeville",
+					"longitude":      "-119.723560",
+					"latitude":       "38.630190",
+					"elevation":      "5958",
+					"direction":      "West",
+					"county":         "Alpine",
+					"route":          "SR-4",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "29.20",
+					"alignment":      "",
+					"milepost":       "185.92"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-09-23",
+						"statusTime": "14:07:06"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-ALP-4-31.6-W-5",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "JCT HWY 89 - EBBETTS PASS",
+					"nearbyPlace":    "Markleeville",
+					"longitude":      "-119.726060",
+					"latitude":       "38.659430",
+					"elevation":      "5744",
+					"direction":      "West",
+					"county":         "Alpine",
+					"route":          "SR-4",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "31.60",
+					"alignment":      "",
+					"milepost":       "188.32"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-05-29",
+						"statusTime": "14:33:52"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-ALP-88-0.1-E-14E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "KIRKWOOD (ALP)",
+					"nearbyPlace":    "Kirkwood",
+					"longitude":      "-120.071500",
+					"latitude":       "38.702700",
+					"elevation":      "7723",
+					"direction":      "East",
+					"county":         "Alpine",
+					"route":          "SR-88",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "0.10",
+					"alignment":      "",
+					"milepost":       "96.19"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-09-25",
+						"statusTime": "08:10:38"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-ALP-88-1.9-E-1",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "EAST OF CAPLES LAKE - CARSON PASS",
+					"nearbyPlace":    "Markleeville",
+					"longitude":      "-120.043000",
+					"latitude":       "38.706480",
+					"elevation":      "7880",
+					"direction":      "East",
+					"county":         "Alpine",
+					"route":          "SR-88",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "1.90",
+					"alignment":      "",
+					"milepost":       "97.99"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-10",
+						"statusTime": "18:24:11"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-ALP-88-8.1-W-15W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "RED LAKE CREEK",
+					"nearbyPlace":    "Markleeville",
+					"longitude":      "-119.955230",
+					"latitude":       "38.713620",
+					"elevation":      "7457",
+					"direction":      "West",
+					"county":         "Alpine",
+					"route":          "SR-88",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "8.10",
+					"alignment":      "",
+					"milepost":       "104.77"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-09-25",
+						"statusTime": "08:10:38"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-ALP-88-8.11-W-2",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "RED LAKE CREEK - CARSON PASS",
+					"nearbyPlace":    "Markleeville",
+					"longitude":      "-119.955220",
+					"latitude":       "38.713630",
+					"elevation":      "7457",
+					"direction":      "West",
+					"county":         "Alpine",
+					"route":          "SR-88",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "8.11",
+					"alignment":      "",
+					"milepost":       "104.78"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-16",
+						"statusTime": "23:51:28"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-ALP-88-12.9-W-16W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "PICKETT'S JUNCTION",
+					"nearbyPlace":    "Markleeville",
+					"longitude":      "-119.927800",
+					"latitude":       "38.775100",
+					"elevation":      "7096",
+					"direction":      "West",
+					"county":         "Alpine",
+					"route":          "SR-88",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "12.90",
+					"alignment":      "",
+					"milepost":       "109.57"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-22",
+						"statusTime": "08:10:21"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-ALP-88-13.4-E-16E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "PICKETT'S JUNCTION",
+					"nearbyPlace":    "Markleeville",
+					"longitude":      "-119.922700",
+					"latitude":       "38.776700",
+					"elevation":      "7112",
+					"direction":      "East",
+					"county":         "Alpine",
+					"route":          "SR-88",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "13.40",
+					"alignment":      "",
+					"milepost":       "110.07"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-13",
+						"statusTime": "07:54:07"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-ALP-88-17.9-W-17W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "CRYSTAL SPRINGS",
+					"nearbyPlace":    "Markleeville",
+					"longitude":      "-119.845150",
+					"latitude":       "38.767240",
+					"elevation":      "5951",
+					"direction":      "West",
+					"county":         "Alpine",
+					"route":          "SR-88",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "17.90",
+					"alignment":      "",
+					"milepost":       "114.57"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-13",
+						"statusTime": "07:54:07"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-ALP-88-22.9-W-18W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "PAYNESVILLE",
+					"nearbyPlace":    "Markleeville",
+					"longitude":      "-119.779130",
+					"latitude":       "38.812600",
+					"elevation":      "5095",
+					"direction":      "West",
+					"county":         "Alpine",
+					"route":          "SR-88",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "22.90",
+					"alignment":      "",
+					"milepost":       "119.57"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-20",
+						"statusTime": "10:41:32"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-ALP-89-9.95-E-1",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "MONITOR PASS",
+					"nearbyPlace":    "Markleeville",
+					"longitude":      "-119.726350",
+					"latitude":       "38.660550",
+					"elevation":      "5731",
+					"direction":      "East",
+					"county":         "Alpine",
+					"route":          "SR-89",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "9.95",
+					"alignment":      "",
+					"milepost":       "17.55"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-05-29",
+						"statusTime": "10:03:19"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-ALP-89-14.9-N-01N",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "MARKLEEVILLE",
+					"nearbyPlace":    "Markleeville",
+					"longitude":      "-119.780920",
+					"latitude":       "38.695610",
+					"elevation":      "5557",
+					"direction":      "North",
+					"county":         "Alpine",
+					"route":          "SR-89",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "14.90",
+					"alignment":      "",
+					"milepost":       "22.50"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-12",
+						"statusTime": "08:28:25"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-ALP-89-21.6-N-02N",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "PICKETTS JUNCTION",
+					"nearbyPlace":    "Markleeville",
+					"longitude":      "-119.919100",
+					"latitude":       "38.779400",
+					"elevation":      "7083",
+					"direction":      "North",
+					"county":         "Alpine",
+					"route":          "SR-89",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "21.60",
+					"alignment":      "",
+					"milepost":       "29.03"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-05-29",
+						"statusTime": "05:38:53"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-ALP-89-21.12-S-01S",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "WOODFORDS",
+					"nearbyPlace":    "Markleeville",
+					"longitude":      "-119.819980",
+					"latitude":       "38.773570",
+					"elevation":      "5649",
+					"direction":      "South",
+					"county":         "Alpine",
+					"route":          "SR-89",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "21.12",
+					"alignment":      "",
+					"milepost":       "28.56"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-12",
+						"statusTime": "08:28:25"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-ALP-89-23.9-S-002S",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "ALP\/ELD CNTY LINE LUTHER PASS",
+					"nearbyPlace":    "Markleeville",
+					"longitude":      "-119.942800",
+					"latitude":       "38.787100",
+					"elevation":      "7729",
+					"direction":      "South",
+					"county":         "Alpine",
+					"route":          "SR-89",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "23.90",
+					"alignment":      "",
+					"milepost":       "31.33"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-05-29",
+						"statusTime": "05:38:53"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-ALP-207-0.1-N-01N",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "JCT HWY 4",
+					"nearbyPlace":    "Arnold",
+					"longitude":      "-120.019200",
+					"latitude":       "38.484000",
+					"elevation":      "7598",
+					"direction":      "North",
+					"county":         "Alpine",
+					"route":          "SR-207",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "0.10",
+					"alignment":      "",
+					"milepost":       "0.10"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-05-05",
+						"statusTime": "13:12:52"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-ALP-207-1.3-S-01S",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "MT. REBA SUMMIT",
+					"nearbyPlace":    "Arnold",
+					"longitude":      "-120.034500",
+					"latitude":       "38.492100",
+					"elevation":      "7979",
+					"direction":      "South",
+					"county":         "Alpine",
+					"route":          "SR-207",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "1.30",
+					"alignment":      "",
+					"milepost":       "1.30"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-05-05",
+						"statusTime": "13:12:52"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-AMA-26-1.2-E-01E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "DEFENDER GRADE",
+					"nearbyPlace":    "Pioneer",
+					"longitude":      "-120.560800",
+					"latitude":       "38.418400",
+					"elevation":      "2483",
+					"direction":      "East",
+					"county":         "Amador",
+					"route":          "SR-26",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "1.20",
+					"alignment":      "",
+					"milepost":       "58.67"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-19",
+						"statusTime": "16:55:45"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-AMA-26-4.6-W-01W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "RED CORRAL",
+					"nearbyPlace":    "Pioneer",
+					"longitude":      "-120.609800",
+					"latitude":       "38.415500",
+					"elevation":      "2667",
+					"direction":      "West",
+					"county":         "Amador",
+					"route":          "SR-26",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "4.60",
+					"alignment":      "",
+					"milepost":       "62.07"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-19",
+						"statusTime": "16:55:45"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-AMA-88-20-E-01E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "6 MILES EO JACKSON",
+					"nearbyPlace":    "Jackson",
+					"longitude":      "-120.687600",
+					"latitude":       "38.385300",
+					"elevation":      "1784",
+					"direction":      "East",
+					"county":         "Amador",
+					"route":          "SR-88",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "20.00",
+					"alignment":      "",
+					"milepost":       "45.37"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-19",
+						"statusTime": "15:08:52"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-AMA-88-23.85-E-02E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "PINE GROVE",
+					"nearbyPlace":    "Pine Grove",
+					"longitude":      "-120.650300",
+					"latitude":       "38.407900",
+					"elevation":      "2575",
+					"direction":      "East",
+					"county":         "Amador",
+					"route":          "SR-88",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "23.85",
+					"alignment":      "",
+					"milepost":       "49.22"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-19",
+						"statusTime": "15:08:52"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-AMA-88-26.8-W-02W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "RED CORRAL",
+					"nearbyPlace":    "Pine Grove",
+					"longitude":      "-120.611200",
+					"latitude":       "38.415100",
+					"elevation":      "2664",
+					"direction":      "West",
+					"county":         "Amador",
+					"route":          "SR-88",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "26.80",
+					"alignment":      "",
+					"milepost":       "52.17"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-19",
+						"statusTime": "15:08:52"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-AMA-88-27-E-03E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "RED CORRAL",
+					"nearbyPlace":    "Pioneer",
+					"longitude":      "-120.609100",
+					"latitude":       "38.418080",
+					"elevation":      "2687",
+					"direction":      "East",
+					"county":         "Amador",
+					"route":          "SR-88",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "27.00",
+					"alignment":      "",
+					"milepost":       "52.37"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-19",
+						"statusTime": "15:08:52"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-AMA-88-30.1-E-03EA",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "CEDAR MILL",
+					"nearbyPlace":    "Pioneer",
+					"longitude":      "-120.561130",
+					"latitude":       "38.434140",
+					"elevation":      "3064",
+					"direction":      "East",
+					"county":         "Amador",
+					"route":          "SR-88",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "30.10",
+					"alignment":      "",
+					"milepost":       "55.36"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-19",
+						"statusTime": "15:20:17"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-AMA-88-31.8-W-03W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "BUCKHORN",
+					"nearbyPlace":    "Pioneer",
+					"longitude":      "-120.536600",
+					"latitude":       "38.443300",
+					"elevation":      "3405",
+					"direction":      "West",
+					"county":         "Amador",
+					"route":          "SR-88",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "31.80",
+					"alignment":      "",
+					"milepost":       "57.04"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-20",
+						"statusTime": "18:00:10"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-AMA-88-32.1-E-04E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "BUCKHORN",
+					"nearbyPlace":    "Pioneer",
+					"longitude":      "-120.531600",
+					"latitude":       "38.445100",
+					"elevation":      "3438",
+					"direction":      "East",
+					"county":         "Amador",
+					"route":          "SR-88",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "32.10",
+					"alignment":      "",
+					"milepost":       "57.34"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-20",
+						"statusTime": "18:00:10"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-AMA-88-34.7-E-05E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "OK CORRAL",
+					"nearbyPlace":    "Pioneer",
+					"longitude":      "-120.524300",
+					"latitude":       "38.477000",
+					"elevation":      "3818",
+					"direction":      "East",
+					"county":         "Amador",
+					"route":          "SR-88",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "34.70",
+					"alignment":      "",
+					"milepost":       "59.93"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-22",
+						"statusTime": "00:05:24"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-AMA-88-38.3-E-06E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "DEW DROP",
+					"nearbyPlace":    "Pioneer",
+					"longitude":      "-120.482500",
+					"latitude":       "38.514300",
+					"elevation":      "4242",
+					"direction":      "East",
+					"county":         "Amador",
+					"route":          "SR-88",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "38.30",
+					"alignment":      "",
+					"milepost":       "63.53"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-21",
+						"statusTime": "23:41:50"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-AMA-88-41.8-W-06W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "COOK'S STATION",
+					"nearbyPlace":    "Somerset",
+					"longitude":      "-120.432400",
+					"latitude":       "38.527200",
+					"elevation":      "5029",
+					"direction":      "West",
+					"county":         "Amador",
+					"route":          "SR-88",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "41.80",
+					"alignment":      "",
+					"milepost":       "66.95"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-21",
+						"statusTime": "23:41:50"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-AMA-88-42.2-E-07E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "COOK'S STATION",
+					"nearbyPlace":    "Pioneer",
+					"longitude":      "-120.426900",
+					"latitude":       "38.528800",
+					"elevation":      "5026",
+					"direction":      "East",
+					"county":         "Amador",
+					"route":          "SR-88",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "42.20",
+					"alignment":      "",
+					"milepost":       "67.35"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-22",
+						"statusTime": "00:40:57"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-AMA-88-45.4-W-07W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "HAM'S STATION",
+					"nearbyPlace":    "Pioneer",
+					"longitude":      "-120.377260",
+					"latitude":       "38.544630",
+					"elevation":      "5462",
+					"direction":      "West",
+					"county":         "Amador",
+					"route":          "SR-88",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "45.40",
+					"alignment":      "",
+					"milepost":       "70.39"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-22",
+						"statusTime": "00:40:57"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-AMA-88-45.75-E-08E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "HAM'S STATION",
+					"nearbyPlace":    "Pioneer",
+					"longitude":      "-120.371030",
+					"latitude":       "38.544620",
+					"elevation":      "5413",
+					"direction":      "East",
+					"county":         "Amador",
+					"route":          "SR-88",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "45.75",
+					"alignment":      "",
+					"milepost":       "70.73"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-26",
+						"statusTime": "19:02:30"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-AMA-88-49.7-W-08W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "LUMBER YARD",
+					"nearbyPlace":    "Meiss",
+					"longitude":      "-120.306540",
+					"latitude":       "38.547960",
+					"elevation":      "6512",
+					"direction":      "West",
+					"county":         "Amador",
+					"route":          "SR-88",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "49.70",
+					"alignment":      "",
+					"milepost":       "74.69"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-26",
+						"statusTime": "19:02:30"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-AMA-88-50.7-E-09E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "LUMBER YARD",
+					"nearbyPlace":    "Grizzly Flats",
+					"longitude":      "-120.293820",
+					"latitude":       "38.556250",
+					"elevation":      "6545",
+					"direction":      "East",
+					"county":         "Amador",
+					"route":          "SR-88",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "50.70",
+					"alignment":      "",
+					"milepost":       "75.69"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-26",
+						"statusTime": "19:02:30"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-AMA-88-52.8-E-09EA",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "PEDDLER VISTA",
+					"nearbyPlace":    "Kit Carson",
+					"longitude":      "-120.269300",
+					"latitude":       "38.563400",
+					"elevation":      "6830",
+					"direction":      "East",
+					"county":         "Amador",
+					"route":          "SR-88",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "52.80",
+					"alignment":      "",
+					"milepost":       "77.78"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-05-05",
+						"statusTime": "05:19:24"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-AMA-88-59.4-W-09W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "IRON MT RD",
+					"nearbyPlace":    "Kit Carson",
+					"longitude":      "-120.200050",
+					"latitude":       "38.624980",
+					"elevation":      "7604",
+					"direction":      "West",
+					"county":         "Amador",
+					"route":          "SR-88",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "59.40",
+					"alignment":      "",
+					"milepost":       "84.39"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-05-05",
+						"statusTime": "05:19:24"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-AMA-88-59.5-E-10E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "IRON MT RD",
+					"nearbyPlace":    "Kit Carson",
+					"longitude":      "-120.198200",
+					"latitude":       "38.625150",
+					"elevation":      "7595",
+					"direction":      "East",
+					"county":         "Amador",
+					"route":          "SR-88",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "59.50",
+					"alignment":      "",
+					"milepost":       "84.48"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-05-05",
+						"statusTime": "07:15:57"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-AMA-88-65.8-W-10W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "SILVER LAKE",
+					"nearbyPlace":    "Pioneer",
+					"longitude":      "-120.122230",
+					"latitude":       "38.667610",
+					"elevation":      "7319",
+					"direction":      "West",
+					"county":         "Amador",
+					"route":          "SR-88",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "65.80",
+					"alignment":      "",
+					"milepost":       "90.78"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-05-05",
+						"statusTime": "07:15:57"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-AMA-88-65.81-E-11E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "SILVER LAKE",
+					"nearbyPlace":    "Pioneer",
+					"longitude":      "-120.122180",
+					"latitude":       "38.667760",
+					"elevation":      "7319",
+					"direction":      "East",
+					"county":         "Amador",
+					"route":          "SR-88",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "65.81",
+					"alignment":      "",
+					"milepost":       "90.80"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-09-25",
+						"statusTime": "08:03:46"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-AMA-88-68.6-E-12E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "MARTIN MEADOW",
+					"nearbyPlace":    "Pioneer",
+					"longitude":      "-120.120100",
+					"latitude":       "38.696900",
+					"elevation":      "7621",
+					"direction":      "East",
+					"county":         "Amador",
+					"route":          "SR-88",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "68.60",
+					"alignment":      "",
+					"milepost":       "93.06"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-09-25",
+						"statusTime": "08:03:46"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-AMA-88-69.4-E-3",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "2 MILES WO KIRKWOOD - CARSON SPUR",
+					"nearbyPlace":    "Pioneer",
+					"longitude":      "-120.108980",
+					"latitude":       "38.705560",
+					"elevation":      "7972",
+					"direction":      "East",
+					"county":         "Amador",
+					"route":          "SR-88",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "69.40",
+					"alignment":      "",
+					"milepost":       "93.86"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-08-21",
+						"statusTime": "08:02:39"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-AMA-88-71.2-W-12W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "KIRKWOOD",
+					"nearbyPlace":    "Kirkwood",
+					"longitude":      "-120.080170",
+					"latitude":       "38.699970",
+					"elevation":      "7811",
+					"direction":      "West",
+					"county":         "Amador",
+					"route":          "SR-88",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "71.20",
+					"alignment":      "",
+					"milepost":       "95.64"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-09-25",
+						"statusTime": "08:03:46"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-AMA-88-71.3-E-13E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "KIRKWOOD",
+					"nearbyPlace":    "Kirkwood",
+					"longitude":      "-120.078200",
+					"latitude":       "38.700400",
+					"elevation":      "7775",
+					"direction":      "East",
+					"county":         "Amador",
+					"route":          "SR-88",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "71.30",
+					"alignment":      "",
+					"milepost":       "95.74"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-09-25",
+						"statusTime": "08:03:46"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-AMA-88-71.35-W-4",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "KIRKWOOD - CARSON SPUR",
+					"nearbyPlace":    "Pioneer",
+					"longitude":      "-120.078300",
+					"latitude":       "38.700500",
+					"elevation":      "7775",
+					"direction":      "West",
+					"county":         "Amador",
+					"route":          "SR-88",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "71.35",
+					"alignment":      "",
+					"milepost":       "95.79"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-13",
+						"statusTime": "04:12:56"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-CAL-4-27.17-E-01E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "DOUGLAS FLAT",
+					"nearbyPlace":    "Vallecito",
+					"longitude":      "-120.461200",
+					"latitude":       "38.108900",
+					"elevation":      "1961",
+					"direction":      "East",
+					"county":         "Calaveras",
+					"route":          "SR-4",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "27.17",
+					"alignment":      "",
+					"milepost":       "120.26"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2024-04-05",
+						"statusTime": "11:31:38"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-CAL-4-30.05-E-02E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "MURPHY'S",
+					"nearbyPlace":    "Murphys",
+					"longitude":      "-120.451000",
+					"latitude":       "38.143600",
+					"elevation":      "2247",
+					"direction":      "East",
+					"county":         "Calaveras",
+					"route":          "SR-4",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "30.05",
+					"alignment":      "",
+					"milepost":       "123.14"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2025-03-14",
+						"statusTime": "08:01:45"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-CAL-4-32.43-E-03E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "INDIAN SPRINGS",
+					"nearbyPlace":    "Murphys",
+					"longitude":      "-120.425260",
+					"latitude":       "38.165000",
+					"elevation":      "3021",
+					"direction":      "East",
+					"county":         "Calaveras",
+					"route":          "SR-4",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "32.43",
+					"alignment":      "",
+					"milepost":       "125.52"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-18",
+						"statusTime": "11:08:32"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-CAL-4-33.69-E-04E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "HANFORD HILL",
+					"nearbyPlace":    "Murphys",
+					"longitude":      "-120.404400",
+					"latitude":       "38.172000",
+					"elevation":      "3303",
+					"direction":      "East",
+					"county":         "Calaveras",
+					"route":          "SR-4",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "33.69",
+					"alignment":      "",
+					"milepost":       "126.78"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-18",
+						"statusTime": "11:08:32"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-CAL-4-35.48-W-04W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "HATHAWAY PINES",
+					"nearbyPlace":    "Hathaway Pines",
+					"longitude":      "-120.377050",
+					"latitude":       "38.183100",
+					"elevation":      "3343",
+					"direction":      "West",
+					"county":         "Calaveras",
+					"route":          "SR-4",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "35.48",
+					"alignment":      "",
+					"milepost":       "128.57"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-18",
+						"statusTime": "11:08:32"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-CAL-4-36.6-E-05E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "HATHAWAY PINES",
+					"nearbyPlace":    "Hathaway Pines",
+					"longitude":      "-120.364460",
+					"latitude":       "38.192790",
+					"elevation":      "3356",
+					"direction":      "East",
+					"county":         "Calaveras",
+					"route":          "SR-4",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "36.60",
+					"alignment":      "",
+					"milepost":       "129.69"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-21",
+						"statusTime": "15:33:43"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-CAL-4-39.25-E-06E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "TIPTON HOUSE",
+					"nearbyPlace":    "Arnold",
+					"longitude":      "-120.368800",
+					"latitude":       "38.229300",
+					"elevation":      "3782",
+					"direction":      "East",
+					"county":         "Calaveras",
+					"route":          "SR-4",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "39.25",
+					"alignment":      "",
+					"milepost":       "132.34"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-21",
+						"statusTime": "15:33:43"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-CAL-4-41.08-W-06W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "ARNOLD",
+					"nearbyPlace":    "Arnold",
+					"longitude":      "-120.355660",
+					"latitude":       "38.252690",
+					"elevation":      "3979",
+					"direction":      "West",
+					"county":         "Calaveras",
+					"route":          "SR-4",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "41.08",
+					"alignment":      "",
+					"milepost":       "134.17"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-22",
+						"statusTime": "14:55:15"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-CAL-4-41.64-E-07E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "ARNOLD",
+					"nearbyPlace":    "Arnold",
+					"longitude":      "-120.347600",
+					"latitude":       "38.256500",
+					"elevation":      "4071",
+					"direction":      "East",
+					"county":         "Calaveras",
+					"route":          "SR-4",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "41.64",
+					"alignment":      "",
+					"milepost":       "134.73"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-12",
+						"statusTime": "07:22:23"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-CAL-4-42.53-W-07W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "BLUE LAKE SPRINGS",
+					"nearbyPlace":    "Arnold",
+					"longitude":      "-120.335310",
+					"latitude":       "38.264230",
+					"elevation":      "4265",
+					"direction":      "West",
+					"county":         "Calaveras",
+					"route":          "SR-4",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "42.53",
+					"alignment":      "",
+					"milepost":       "135.62"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-22",
+						"statusTime": "14:55:15"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-CAL-4-42.68-E-08E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "BLUE LAKE SPRINGS",
+					"nearbyPlace":    "Arnold",
+					"longitude":      "-120.333400",
+					"latitude":       "38.265100",
+					"elevation":      "4271",
+					"direction":      "East",
+					"county":         "Calaveras",
+					"route":          "SR-4",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "42.68",
+					"alignment":      "",
+					"milepost":       "135.77"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-22",
+						"statusTime": "05:17:00"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-CAL-4-44-E-08EA",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "BIG TREES PARK",
+					"nearbyPlace":    "Arnold",
+					"longitude":      "-120.316020",
+					"latitude":       "38.274100",
+					"elevation":      "4708",
+					"direction":      "East",
+					"county":         "Calaveras",
+					"route":          "SR-4",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "44.00",
+					"alignment":      "",
+					"milepost":       "137.00"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-22",
+						"statusTime": "05:17:00"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-CAL-4-47.08-W-08W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "DORRINGTON",
+					"nearbyPlace":    "Arnold",
+					"longitude":      "-120.277330",
+					"latitude":       "38.300540",
+					"elevation":      "4809",
+					"direction":      "West",
+					"county":         "Calaveras",
+					"route":          "SR-4",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "47.08",
+					"alignment":      "",
+					"milepost":       "140.08"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-22",
+						"statusTime": "05:17:00"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-CAL-4-49.9-E-10E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "MILL CREEK",
+					"nearbyPlace":    "Arnold",
+					"longitude":      "-120.248790",
+					"latitude":       "38.323710",
+					"elevation":      "5265",
+					"direction":      "East",
+					"county":         "Calaveras",
+					"route":          "SR-4",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "49.90",
+					"alignment":      "",
+					"milepost":       "142.93"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-09-25",
+						"statusTime": "08:22:13"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-CAL-4-49.28-E-09E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "CAMP CONNEL VILLA",
+					"nearbyPlace":    "Arnold",
+					"longitude":      "-120.258900",
+					"latitude":       "38.322700",
+					"elevation":      "5183",
+					"direction":      "East",
+					"county":         "Calaveras",
+					"route":          "SR-4",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "49.28",
+					"alignment":      "",
+					"milepost":       "142.31"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-22",
+						"statusTime": "05:17:00"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-CAL-4-53.01-E-11E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "COTTAGE SPRINGS",
+					"nearbyPlace":    "Arnold",
+					"longitude":      "-120.211840",
+					"latitude":       "38.350490",
+					"elevation":      "5777",
+					"direction":      "East",
+					"county":         "Calaveras",
+					"route":          "SR-4",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "53.01",
+					"alignment":      "",
+					"milepost":       "146.04"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-22",
+						"statusTime": "05:17:00"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-CAL-4-53-W-10W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "COTTAGE SPRINGS",
+					"nearbyPlace":    "Arnold",
+					"longitude":      "-120.211900",
+					"latitude":       "38.350350",
+					"elevation":      "5738",
+					"direction":      "West",
+					"county":         "Calaveras",
+					"route":          "SR-4",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "53.00",
+					"alignment":      "",
+					"milepost":       "146.03"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-09-25",
+						"statusTime": "08:22:13"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-CAL-4-56.3-E-12E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "POISON SPRINGS",
+					"nearbyPlace":    "Arnold",
+					"longitude":      "-120.183150",
+					"latitude":       "38.389020",
+					"elevation":      "6614",
+					"direction":      "East",
+					"county":         "Calaveras",
+					"route":          "SR-4",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "56.30",
+					"alignment":      "",
+					"milepost":       "149.33"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-27",
+						"statusTime": "04:37:25"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-CAL-4-56.27-W-11W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "POISON SPRINGS",
+					"nearbyPlace":    "Arnold",
+					"longitude":      "-120.183480",
+					"latitude":       "38.389040",
+					"elevation":      "6614",
+					"direction":      "West",
+					"county":         "Calaveras",
+					"route":          "SR-4",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "56.27",
+					"alignment":      "",
+					"milepost":       "149.30"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-22",
+						"statusTime": "13:33:11"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-CAL-4-61.7-E-13E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "BIG MEADOWS",
+					"nearbyPlace":    "Arnold",
+					"longitude":      "-120.103180",
+					"latitude":       "38.417750",
+					"elevation":      "6564",
+					"direction":      "East",
+					"county":         "Calaveras",
+					"route":          "SR-4",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "61.70",
+					"alignment":      "",
+					"milepost":       "154.73"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-27",
+						"statusTime": "09:01:47"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-CAL-4-63.9-W-13W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "TAMARACK",
+					"nearbyPlace":    "Arnold",
+					"longitude":      "-120.077510",
+					"latitude":       "38.437110",
+					"elevation":      "6932",
+					"direction":      "West",
+					"county":         "Calaveras",
+					"route":          "SR-4",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "63.90",
+					"alignment":      "",
+					"milepost":       "156.93"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-27",
+						"statusTime": "09:01:47"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-CAL-4-63.99-E-14E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "TAMARACK",
+					"nearbyPlace":    "Arnold",
+					"longitude":      "-120.076710",
+					"latitude":       "38.439340",
+					"elevation":      "6932",
+					"direction":      "East",
+					"county":         "Calaveras",
+					"route":          "SR-4",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "63.99",
+					"alignment":      "",
+					"milepost":       "157.02"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-05-05",
+						"statusTime": "13:13:49"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-CAL-26-24.4-E-01E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "ALABAMA HILL",
+					"nearbyPlace":    "Glencoe",
+					"longitude":      "-120.617000",
+					"latitude":       "38.336900",
+					"elevation":      "2129",
+					"direction":      "East",
+					"county":         "Calaveras",
+					"route":          "SR-26",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "24.40",
+					"alignment":      "",
+					"milepost":       "43.57"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-19",
+						"statusTime": "16:56:00"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-CAL-26-26.8-E-02E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "GLENCOE",
+					"nearbyPlace":    "Mokelumne Hill",
+					"longitude":      "-120.581960",
+					"latitude":       "38.346030",
+					"elevation":      "2634",
+					"direction":      "East",
+					"county":         "Calaveras",
+					"route":          "SR-26",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "26.80",
+					"alignment":      "",
+					"milepost":       "45.97"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-19",
+						"statusTime": "16:56:00"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-CAL-26-26.8-W-01W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "GLENCOE",
+					"nearbyPlace":    "Glencoe",
+					"longitude":      "-120.581940",
+					"latitude":       "38.346300",
+					"elevation":      "2637",
+					"direction":      "West",
+					"county":         "Calaveras",
+					"route":          "SR-26",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "26.80",
+					"alignment":      "",
+					"milepost":       "45.98"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-19",
+						"statusTime": "16:56:00"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-CAL-26-31.4-E-03E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "RABBITFOOT ROAD",
+					"nearbyPlace":    "West Point",
+					"longitude":      "-120.555050",
+					"latitude":       "38.377230",
+					"elevation":      "2447",
+					"direction":      "East",
+					"county":         "Calaveras",
+					"route":          "SR-26",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "31.40",
+					"alignment":      "",
+					"milepost":       "50.57"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-19",
+						"statusTime": "16:56:00"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-CAL-26-32.6-W-02W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "BALLPARK",
+					"nearbyPlace":    "West Point",
+					"longitude":      "-120.534110",
+					"latitude":       "38.379820",
+					"elevation":      "2578",
+					"direction":      "West",
+					"county":         "Calaveras",
+					"route":          "SR-26",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "32.60",
+					"alignment":      "",
+					"milepost":       "51.77"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-19",
+						"statusTime": "16:56:00"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-CAL-26-34.3-W-03W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "MAIN STREET",
+					"nearbyPlace":    "West Point",
+					"longitude":      "-120.527200",
+					"latitude":       "38.396300",
+					"elevation":      "2752",
+					"direction":      "West",
+					"county":         "Calaveras",
+					"route":          "SR-26",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "34.30",
+					"alignment":      "",
+					"milepost":       "53.44"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-19",
+						"statusTime": "16:56:00"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-CAL-26-35.3-E-04E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "WEST POINT",
+					"nearbyPlace":    "West Point",
+					"longitude":      "-120.531900",
+					"latitude":       "38.407800",
+					"elevation":      "2847",
+					"direction":      "East",
+					"county":         "Calaveras",
+					"route":          "SR-26",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "35.30",
+					"alignment":      "",
+					"milepost":       "54.44"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-19",
+						"statusTime": "16:56:00"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-CAL-26-38.2-W-04W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "AMA\/CAL COUNTY LINE",
+					"nearbyPlace":    "West Point",
+					"longitude":      "-120.542400",
+					"latitude":       "38.421300",
+					"elevation":      "2103",
+					"direction":      "West",
+					"county":         "Calaveras",
+					"route":          "SR-26",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "38.20",
+					"alignment":      "",
+					"milepost":       "57.34"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-19",
+						"statusTime": "16:56:00"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-MPA-49-0.333-N-01N",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "MARIPOSA\/MADERA COUNTY LINE",
+					"nearbyPlace":    "Ahwahnee",
+					"longitude":      "-119.730380",
+					"latitude":       "37.417050",
+					"elevation":      "3313",
+					"direction":      "North",
+					"county":         "Mariposa",
+					"route":          "SR-49",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "0.33",
+					"alignment":      "",
+					"milepost":       "9.28"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-19",
+						"statusTime": "21:45:39"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-MPA-49-3.1-S-01S",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "SOUTH END CHOWCHILLA RIVER BRIDG",
+					"nearbyPlace":    "Ahwahnee",
+					"longitude":      "-119.748900",
+					"latitude":       "37.446800",
+					"elevation":      "2473",
+					"direction":      "South",
+					"county":         "Mariposa",
+					"route":          "SR-49",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "3.10",
+					"alignment":      "",
+					"milepost":       "12.04"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-19",
+						"statusTime": "21:45:39"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-MPA-49-4.9-S-02S",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "CHOWCHILLA MOUNTAIN",
+					"nearbyPlace":    "Mariposa",
+					"longitude":      "-119.773800",
+					"latitude":       "37.460900",
+					"elevation":      "3024",
+					"direction":      "South",
+					"county":         "Mariposa",
+					"route":          "SR-49",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "4.90",
+					"alignment":      "",
+					"milepost":       "13.84"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-18",
+						"statusTime": "11:18:44"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-MPA-49-6.1-N-02N",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "TRIANGLE ROAD",
+					"nearbyPlace":    "Mariposa",
+					"longitude":      "-119.793920",
+					"latitude":       "37.461730",
+					"elevation":      "2834",
+					"direction":      "North",
+					"county":         "Mariposa",
+					"route":          "SR-49",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "6.10",
+					"alignment":      "",
+					"milepost":       "15.04"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-19",
+						"statusTime": "19:47:28"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-MPA-49-9.67-S-03S",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "HIRSH ROAD",
+					"nearbyPlace":    "Mariposa",
+					"longitude":      "-119.851800",
+					"latitude":       "37.448900",
+					"elevation":      "2280",
+					"direction":      "South",
+					"county":         "Mariposa",
+					"route":          "SR-49",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "9.67",
+					"alignment":      "",
+					"milepost":       "18.61"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-19",
+						"statusTime": "19:47:28"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-MPA-49-10-N-03N",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "BROOKS ROAD",
+					"nearbyPlace":    "Mariposa",
+					"longitude":      "-119.857050",
+					"latitude":       "37.450900",
+					"elevation":      "2240",
+					"direction":      "North",
+					"county":         "Mariposa",
+					"route":          "SR-49",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "10.00",
+					"alignment":      "",
+					"milepost":       "18.94"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-19",
+						"statusTime": "15:57:30"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-MPA-49-12.05-S-04S",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "BOOTJACK",
+					"nearbyPlace":    "Mariposa",
+					"longitude":      "-119.885200",
+					"latitude":       "37.464400",
+					"elevation":      "2250",
+					"direction":      "South",
+					"county":         "Mariposa",
+					"route":          "SR-49",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "12.05",
+					"alignment":      "",
+					"milepost":       "20.99"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-19",
+						"statusTime": "15:57:30"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-MPA-49-13.85-N-04N",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "ALLRED ROAD",
+					"nearbyPlace":    "Mariposa",
+					"longitude":      "-119.916300",
+					"latitude":       "37.459000",
+					"elevation":      "2444",
+					"direction":      "North",
+					"county":         "Mariposa",
+					"route":          "SR-49",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "13.85",
+					"alignment":      "",
+					"milepost":       "22.79"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-17",
+						"statusTime": "23:58:48"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-MPA-49-16.68-S-05S",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "FAIRGROUNDS",
+					"nearbyPlace":    "Mariposa",
+					"longitude":      "-119.946000",
+					"latitude":       "37.462330",
+					"elevation":      "1824",
+					"direction":      "South",
+					"county":         "Mariposa",
+					"route":          "SR-49",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "16.68",
+					"alignment":      "",
+					"milepost":       "24.58"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-17",
+						"statusTime": "23:58:48"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-MPA-49-18.44-S-60S",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "SOUTH LIMITS MARIPOSA",
+					"nearbyPlace":    "Mariposa",
+					"longitude":      "-119.962500",
+					"latitude":       "37.481900",
+					"elevation":      "1916",
+					"direction":      "South",
+					"county":         "Mariposa",
+					"route":          "SR-49",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "18.44",
+					"alignment":      "",
+					"milepost":       "26.34"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-18",
+						"statusTime": "12:37:53"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-MPA-49-19.57-N-06N",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "NORTH LIMITS OF MARIPOSA",
+					"nearbyPlace":    "Mariposa",
+					"longitude":      "-119.988800",
+					"latitude":       "37.502100",
+					"elevation":      "2168",
+					"direction":      "North",
+					"county":         "Mariposa",
+					"route":          "SR-49",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "19.57",
+					"alignment":      "",
+					"milepost":       "27.46"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-19",
+						"statusTime": "15:45:36"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-MPA-49-21.72-S-07S",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "0.8 MILES SOUTH OF AIRPORT",
+					"nearbyPlace":    "Mariposa",
+					"longitude":      "-120.024000",
+					"latitude":       "37.509500",
+					"elevation":      "2234",
+					"direction":      "South",
+					"county":         "Mariposa",
+					"route":          "SR-49",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "21.72",
+					"alignment":      "",
+					"milepost":       "29.61"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-19",
+						"statusTime": "15:45:36"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-MPA-140-11.84-E-01E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "EAST LIMITS OF CATHEYS VALLEY",
+					"nearbyPlace":    "Catheys Valley",
+					"longitude":      "-120.071100",
+					"latitude":       "37.455400",
+					"elevation":      "1830",
+					"direction":      "East",
+					"county":         "Mariposa",
+					"route":          "SR-140",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "11.84",
+					"alignment":      "",
+					"milepost":       "61.91"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-19",
+						"statusTime": "14:08:52"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-MPA-140-15.55-W-01W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "1.5 MILES EO MT. BULLION CUTOFF",
+					"nearbyPlace":    "Mariposa",
+					"longitude":      "-120.037600",
+					"latitude":       "37.475900",
+					"elevation":      "2066",
+					"direction":      "West",
+					"county":         "Mariposa",
+					"route":          "SR-140",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "15.55",
+					"alignment":      "",
+					"milepost":       "65.61"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2025-03-14",
+						"statusTime": "17:27:05"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-MPA-140-17.8-E-02E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "0.6 MILES EO YAQUI GULCH RD",
+					"nearbyPlace":    "Mariposa",
+					"longitude":      "-120.001700",
+					"latitude":       "37.485100",
+					"elevation":      "2148",
+					"direction":      "East",
+					"county":         "Mariposa",
+					"route":          "SR-140",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "17.80",
+					"alignment":      "",
+					"milepost":       "67.86"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-19",
+						"statusTime": "14:08:52"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-MPA-140-21.08-W-02W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "WEST LIMITS OF MARIPOSA",
+					"nearbyPlace":    "Mariposa",
+					"longitude":      "-119.962900",
+					"latitude":       "37.481100",
+					"elevation":      "1925",
+					"direction":      "West",
+					"county":         "Mariposa",
+					"route":          "SR-140",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "21.08",
+					"alignment":      "",
+					"milepost":       "71.14"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-19",
+						"statusTime": "14:08:52"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-MPA-140-22.95-E-03E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "1 MILE EO WEST LIMITS OF MPA",
+					"nearbyPlace":    "Mariposa",
+					"longitude":      "-119.966700",
+					"latitude":       "37.504100",
+					"elevation":      "2427",
+					"direction":      "East",
+					"county":         "Mariposa",
+					"route":          "SR-140",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "22.95",
+					"alignment":      "",
+					"milepost":       "73.02"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-19",
+						"statusTime": "23:23:52"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-MPA-140-25.3-W-03W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "WHITLOCK ROAD",
+					"nearbyPlace":    "Mariposa",
+					"longitude":      "-119.939600",
+					"latitude":       "37.521100",
+					"elevation":      "2933",
+					"direction":      "West",
+					"county":         "Mariposa",
+					"route":          "SR-140",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "25.30",
+					"alignment":      "",
+					"milepost":       "75.36"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2025-03-14",
+						"statusTime": "17:27:05"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-MPA-140-27.84-W-04W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "MIDPINES",
+					"nearbyPlace":    "Mariposa",
+					"longitude":      "-119.919300",
+					"latitude":       "37.543400",
+					"elevation":      "2595",
+					"direction":      "West",
+					"county":         "Mariposa",
+					"route":          "SR-140",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "27.84",
+					"alignment":      "",
+					"milepost":       "77.91"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-19",
+						"statusTime": "23:23:52"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-49-19.1-N-01N",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "SHAWS FLAT ROAD",
+					"nearbyPlace":    "Sonora",
+					"longitude":      "-120.383670",
+					"latitude":       "37.998620",
+					"elevation":      "1935",
+					"direction":      "North",
+					"county":         "Tuolumne",
+					"route":          "SR-49",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "19.10",
+					"alignment":      "",
+					"milepost":       "74.00"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-18",
+						"statusTime": "08:58:54"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-49-22.3-S-02S",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "0.8 MILES S\/O FRAGUERO ROAD",
+					"nearbyPlace":    "Sonora",
+					"longitude":      "-120.425500",
+					"latitude":       "38.004850",
+					"elevation":      "1807",
+					"direction":      "South",
+					"county":         "Tuolumne",
+					"route":          "SR-49",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "22.30",
+					"alignment":      "",
+					"milepost":       "77.20"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-18",
+						"statusTime": "08:58:54"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-108-0.1-E-00E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "JCT HWY 49 R0.10",
+					"nearbyPlace":    "Sonora",
+					"longitude":      "-120.392180",
+					"latitude":       "37.965300",
+					"elevation":      "1601",
+					"direction":      "East",
+					"county":         "Tuolumne",
+					"route":          "SR-108",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "0.10",
+					"alignment":      "",
+					"milepost":       "18.78"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-18",
+						"statusTime": "03:25:32"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-108-2.3-E-01E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "SANGUINETTI RD",
+					"nearbyPlace":    "Sonora",
+					"longitude":      "-120.356190",
+					"latitude":       "37.977140",
+					"elevation":      "2037",
+					"direction":      "East",
+					"county":         "Tuolumne",
+					"route":          "SR-108",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "2.30",
+					"alignment":      "",
+					"milepost":       "20.98"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-19",
+						"statusTime": "20:37:16"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-108-4.4-E-02E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "STANDARD RD",
+					"nearbyPlace":    "Sonora",
+					"longitude":      "-120.313300",
+					"latitude":       "37.978300",
+					"elevation":      "2385",
+					"direction":      "East",
+					"county":         "Tuolumne",
+					"route":          "SR-108",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "4.40",
+					"alignment":      "",
+					"milepost":       "23.46"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-20",
+						"statusTime": "13:20:08"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-108-6.74-W-02W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "CAMP SUNSHINE",
+					"nearbyPlace":    "Sonora",
+					"longitude":      "-120.278900",
+					"latitude":       "37.990700",
+					"elevation":      "2887",
+					"direction":      "West",
+					"county":         "Tuolumne",
+					"route":          "SR-108",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "6.74",
+					"alignment":      "",
+					"milepost":       "25.80"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-20",
+						"statusTime": "13:20:08"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-108-7.7-E-03E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "SOULSBYVILLE RD",
+					"nearbyPlace":    "Soulsbyville",
+					"longitude":      "-120.264400",
+					"latitude":       "37.998300",
+					"elevation":      "2985",
+					"direction":      "East",
+					"county":         "Tuolumne",
+					"route":          "SR-108",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "7.70",
+					"alignment":      "",
+					"milepost":       "26.76"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-20",
+						"statusTime": "13:20:08"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-108-9.5-E-04E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "W. TWAIN HARTE R9.5",
+					"nearbyPlace":    "Soulsbyville",
+					"longitude":      "-120.247400",
+					"latitude":       "38.018700",
+					"elevation":      "3612",
+					"direction":      "East",
+					"county":         "Tuolumne",
+					"route":          "SR-108",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "9.50",
+					"alignment":      "",
+					"milepost":       "28.50"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-20",
+						"statusTime": "13:20:08"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-108-9.51-W-04W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "WEST TWAIN HARTE R9.51",
+					"nearbyPlace":    "Soulsbyville",
+					"longitude":      "-120.247440",
+					"latitude":       "38.018860",
+					"elevation":      "3605",
+					"direction":      "West",
+					"county":         "Tuolumne",
+					"route":          "SR-108",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "9.51",
+					"alignment":      "",
+					"milepost":       "28.51"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-20",
+						"statusTime": "13:20:08"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-108-11.8-E-05E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "E TWAIN HARTE",
+					"nearbyPlace":    "Twain Harte",
+					"longitude":      "-120.217060",
+					"latitude":       "38.039580",
+					"elevation":      "3894",
+					"direction":      "East",
+					"county":         "Tuolumne",
+					"route":          "SR-108",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "11.80",
+					"alignment":      "",
+					"milepost":       "30.80"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-22",
+						"statusTime": "03:24:17"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-108-14.4-W-06W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "SUGAR PINE",
+					"nearbyPlace":    "Mi Wuk Village",
+					"longitude":      "-120.200300",
+					"latitude":       "38.060300",
+					"elevation":      "4511",
+					"direction":      "West",
+					"county":         "Tuolumne",
+					"route":          "SR-108",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "14.40",
+					"alignment":      "",
+					"milepost":       "32.95"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-22",
+						"statusTime": "03:24:17"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-108-14.5-E-06E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "SUGAR PINE",
+					"nearbyPlace":    "Mi Wuk Village",
+					"longitude":      "-120.199300",
+					"latitude":       "38.061600",
+					"elevation":      "4511",
+					"direction":      "East",
+					"county":         "Tuolumne",
+					"route":          "SR-108",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "14.50",
+					"alignment":      "",
+					"milepost":       "33.05"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-22",
+						"statusTime": "03:24:17"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-108-16.5-W-07W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "SIERRA VILLAGE",
+					"nearbyPlace":    "Mi Wuk Village",
+					"longitude":      "-120.175300",
+					"latitude":       "38.074000",
+					"elevation":      "4901",
+					"direction":      "West",
+					"county":         "Tuolumne",
+					"route":          "SR-108",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "16.50",
+					"alignment":      "",
+					"milepost":       "35.05"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-22",
+						"statusTime": "03:24:17"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-108-17-E-07E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "LYONS DAM SCALE",
+					"nearbyPlace":    "Mi Wuk Village",
+					"longitude":      "-120.167700",
+					"latitude":       "38.077800",
+					"elevation":      "4934",
+					"direction":      "East",
+					"county":         "Tuolumne",
+					"route":          "SR-108",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "17.00",
+					"alignment":      "",
+					"milepost":       "35.55"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-22",
+						"statusTime": "03:24:17"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-108-18-W-08W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "LONG BARN RD",
+					"nearbyPlace":    "Long Barn",
+					"longitude":      "-120.138100",
+					"latitude":       "38.092900",
+					"elevation":      "5065",
+					"direction":      "West",
+					"county":         "Tuolumne",
+					"route":          "SR-108",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "18.00",
+					"alignment":      "",
+					"milepost":       "37.70"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-22",
+						"statusTime": "04:23:01"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-108-19.01-W-09W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "E LONG BARN",
+					"nearbyPlace":    "Long Barn",
+					"longitude":      "-120.123350",
+					"latitude":       "38.100740",
+					"elevation":      "5045",
+					"direction":      "West",
+					"county":         "Tuolumne",
+					"route":          "SR-108",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "19.01",
+					"alignment":      "",
+					"milepost":       "38.71"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-22",
+						"statusTime": "04:23:01"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-108-19-E-09E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "E LONG BARN",
+					"nearbyPlace":    "Long Barn",
+					"longitude":      "-120.123700",
+					"latitude":       "38.100100",
+					"elevation":      "5039",
+					"direction":      "East",
+					"county":         "Tuolumne",
+					"route":          "SR-108",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "19.00",
+					"alignment":      "",
+					"milepost":       "38.70"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-22",
+						"statusTime": "04:23:01"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-108-21.9-E-10E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "LITTLE SWEDEN R21.969",
+					"nearbyPlace":    "Long Barn",
+					"longitude":      "-120.095726",
+					"latitude":       "38.134759",
+					"elevation":      "5459",
+					"direction":      "East",
+					"county":         "Tuolumne",
+					"route":          "SR-108",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "21.90",
+					"alignment":      "",
+					"milepost":       "41.67"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-22",
+						"statusTime": "04:23:01"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-108-22.044-W-10W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "LITTLE SWEDEN",
+					"nearbyPlace":    "Long Barn",
+					"longitude":      "-120.094867",
+					"latitude":       "38.135569",
+					"elevation":      "5498",
+					"direction":      "West",
+					"county":         "Tuolumne",
+					"route":          "SR-108",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "22.04",
+					"alignment":      "",
+					"milepost":       "41.74"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-22",
+						"statusTime": "04:23:01"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-108-26.1-W-11W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "SPRING GAP RD",
+					"nearbyPlace":    "Long Barn",
+					"longitude":      "-120.065260",
+					"latitude":       "38.153140",
+					"elevation":      "5639",
+					"direction":      "West",
+					"county":         "Tuolumne",
+					"route":          "SR-108",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "26.10",
+					"alignment":      "",
+					"milepost":       "43.91"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-22",
+						"statusTime": "04:23:01"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-108-26-E-11E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "SPRING GAP RD",
+					"nearbyPlace":    "Long Barn",
+					"longitude":      "-120.066680",
+					"latitude":       "38.152220",
+					"elevation":      "5646",
+					"direction":      "East",
+					"county":         "Tuolumne",
+					"route":          "SR-108",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "26.00",
+					"alignment":      "",
+					"milepost":       "43.81"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-22",
+						"statusTime": "08:08:28"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-108-30.2-E-13E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "PINECREST",
+					"nearbyPlace":    "Strawberry",
+					"longitude":      "-120.008200",
+					"latitude":       "38.187600",
+					"elevation":      "5633",
+					"direction":      "East",
+					"county":         "Tuolumne",
+					"route":          "SR-108",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "30.20",
+					"alignment":      "",
+					"milepost":       "48.01"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-22",
+						"statusTime": "08:08:28"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-108-30.21-W-13W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "PINECREST",
+					"nearbyPlace":    "Strawberry",
+					"longitude":      "-120.008100",
+					"latitude":       "38.188100",
+					"elevation":      "5593",
+					"direction":      "West",
+					"county":         "Tuolumne",
+					"route":          "SR-108",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "30.21",
+					"alignment":      "",
+					"milepost":       "48.02"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-22",
+						"statusTime": "08:08:28"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-108-31.2-E-14W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "STRAWBERRY",
+					"nearbyPlace":    "Strawberry",
+					"longitude":      "-120.003600",
+					"latitude":       "38.198600",
+					"elevation":      "5383",
+					"direction":      "East",
+					"county":         "Tuolumne",
+					"route":          "SR-108",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "31.20",
+					"alignment":      "",
+					"milepost":       "49.01"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-22",
+						"statusTime": "09:09:34"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-108-31.8-E-14E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "STRAWBERRY",
+					"nearbyPlace":    "Strawberry",
+					"longitude":      "-120.012800",
+					"latitude":       "38.200400",
+					"elevation":      "5479",
+					"direction":      "East",
+					"county":         "Tuolumne",
+					"route":          "SR-108",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "31.80",
+					"alignment":      "",
+					"milepost":       "49.61"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-22",
+						"statusTime": "09:09:34"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-108-35.12-W-15W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "BEARDSLY RD",
+					"nearbyPlace":    "Strawberry",
+					"longitude":      "-119.998600",
+					"latitude":       "38.220800",
+					"elevation":      "5898",
+					"direction":      "West",
+					"county":         "Tuolumne",
+					"route":          "SR-108",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "35.12",
+					"alignment":      "",
+					"milepost":       "52.93"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-22",
+						"statusTime": "09:09:34"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-108-35.17-E-15E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "LELAND MEADOWS RD",
+					"nearbyPlace":    "Pinecrest",
+					"longitude":      "-119.998000",
+					"latitude":       "38.221300",
+					"elevation":      "5849",
+					"direction":      "East",
+					"county":         "Tuolumne",
+					"route":          "SR-108",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "35.17",
+					"alignment":      "",
+					"milepost":       "52.98"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-22",
+						"statusTime": "09:09:34"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-108-37.4-E-1",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "SNOW PARK - SONORA PASS",
+					"nearbyPlace":    "Strawberry",
+					"longitude":      "-119.997960",
+					"latitude":       "38.252370",
+					"elevation":      "5921",
+					"direction":      "East",
+					"county":         "Tuolumne",
+					"route":          "SR-108",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "37.40",
+					"alignment":      "",
+					"milepost":       "55.21"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-03-27",
+						"statusTime": "14:00:02"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-108-38.77-E-16E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "SNOW PARK",
+					"nearbyPlace":    "Pinecrest",
+					"longitude":      "-119.990700",
+					"latitude":       "38.271070",
+					"elevation":      "5980",
+					"direction":      "East",
+					"county":         "Tuolumne",
+					"route":          "SR-108",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "38.77",
+					"alignment":      "",
+					"milepost":       "56.58"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-22",
+						"statusTime": "10:27:20"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-108-38.78-W-16W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "SNOW PARK",
+					"nearbyPlace":    "Pinecrest",
+					"longitude":      "-119.990550",
+					"latitude":       "38.271090",
+					"elevation":      "5980",
+					"direction":      "West",
+					"county":         "Tuolumne",
+					"route":          "SR-108",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "38.78",
+					"alignment":      "",
+					"milepost":       "56.59"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-22",
+						"statusTime": "09:09:34"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-108-40.38-E-17E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "CASCADE CREEK",
+					"nearbyPlace":    "Pinecrest",
+					"longitude":      "-119.968450",
+					"latitude":       "38.282160",
+					"elevation":      "6158",
+					"direction":      "East",
+					"county":         "Tuolumne",
+					"route":          "SR-108",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "40.38",
+					"alignment":      "",
+					"milepost":       "58.19"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-22",
+						"statusTime": "10:27:20"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-108-40.381-W-17W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "CASCADE CREEK",
+					"nearbyPlace":    "Pinecrest",
+					"longitude":      "-119.968450",
+					"latitude":       "38.280100",
+					"elevation":      "6135",
+					"direction":      "West",
+					"county":         "Tuolumne",
+					"route":          "SR-108",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "40.38",
+					"alignment":      "",
+					"milepost":       "58.19"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-22",
+						"statusTime": "10:27:20"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-108-44.45-E-2",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "EAGLE MEADOWS RD - SONORA PASS",
+					"nearbyPlace":    "Pinecrest",
+					"longitude":      "-119.925330",
+					"latitude":       "38.322340",
+					"elevation":      "6558",
+					"direction":      "East",
+					"county":         "Tuolumne",
+					"route":          "SR-108",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "44.45",
+					"alignment":      "",
+					"milepost":       "62.26"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-09",
+						"statusTime": "13:54:36"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-108-44.46-E-18E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "EAGLE MEADOWS RD",
+					"nearbyPlace":    "Pinecrest",
+					"longitude":      "-119.925330",
+					"latitude":       "38.322510",
+					"elevation":      "6558",
+					"direction":      "East",
+					"county":         "Tuolumne",
+					"route":          "SR-108",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "44.46",
+					"alignment":      "",
+					"milepost":       "62.27"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-22",
+						"statusTime": "10:27:20"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-108-44.461-W-18W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "EAGLE MEADOWS RD",
+					"nearbyPlace":    "Pinecrest",
+					"longitude":      "-119.925330",
+					"latitude":       "38.322520",
+					"elevation":      "6558",
+					"direction":      "West",
+					"county":         "Tuolumne",
+					"route":          "SR-108",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "44.46",
+					"alignment":      "",
+					"milepost":       "62.27"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-22",
+						"statusTime": "10:27:20"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-108-49.26-E-19E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "CLARKS FORK RD",
+					"nearbyPlace":    "Wagner",
+					"longitude":      "-119.877700",
+					"latitude":       "38.355200",
+					"elevation":      "5738",
+					"direction":      "East",
+					"county":         "Tuolumne",
+					"route":          "SR-108",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "49.26",
+					"alignment":      "",
+					"milepost":       "67.07"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-09-25",
+						"statusTime": "08:40:51"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-108-49.261-W-19W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "CLARKS FORK RD",
+					"nearbyPlace":    "Wagner",
+					"longitude":      "-119.877820",
+					"latitude":       "38.355250",
+					"elevation":      "5738",
+					"direction":      "West",
+					"county":         "Tuolumne",
+					"route":          "SR-108",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "49.26",
+					"alignment":      "",
+					"milepost":       "67.07"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-04-22",
+						"statusTime": "15:17:50"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-108-57.8-E-3",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "KENNEDY MEADOWS - SONORA PASS",
+					"nearbyPlace":    "Kennedy Meadow",
+					"longitude":      "-119.753710",
+					"latitude":       "38.325720",
+					"elevation":      "6292",
+					"direction":      "East",
+					"county":         "Tuolumne",
+					"route":          "SR-108",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "57.80",
+					"alignment":      "",
+					"milepost":       "74.91"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-05-29",
+						"statusTime": "10:45:03"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-108-57.9-W-20W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "KENNEDY MEADOWS",
+					"nearbyPlace":    "Kennedy Meadow",
+					"longitude":      "-119.752100",
+					"latitude":       "38.324800",
+					"elevation":      "6282",
+					"direction":      "West",
+					"county":         "Tuolumne",
+					"route":          "SR-108",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "57.90",
+					"alignment":      "",
+					"milepost":       "75.01"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-09-25",
+						"statusTime": "08:40:51"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-120-27.2-E-00E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "PRIEST GRADE",
+					"nearbyPlace":    "Groveland",
+					"longitude":      "-120.286180",
+					"latitude":       "37.821400",
+					"elevation":      "1893",
+					"direction":      "East",
+					"county":         "Tuolumne",
+					"route":          "SR-120",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "27.20",
+					"alignment":      "",
+					"milepost":       "66.58"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-20",
+						"statusTime": "11:50:49"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-120-29.3-E-01E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "PRIEST STATION",
+					"nearbyPlace":    "Big Oak Flat",
+					"longitude":      "-120.271300",
+					"latitude":       "37.814000",
+					"elevation":      "2486",
+					"direction":      "East",
+					"county":         "Tuolumne",
+					"route":          "SR-120",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "29.30",
+					"alignment":      "",
+					"milepost":       "68.68"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-20",
+						"statusTime": "11:50:49"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-120-32.184-W-01W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "GROVELAND",
+					"nearbyPlace":    "Groveland",
+					"longitude":      "-120.231770",
+					"latitude":       "37.838220",
+					"elevation":      "2851",
+					"direction":      "West",
+					"county":         "Tuolumne",
+					"route":          "SR-120",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "32.18",
+					"alignment":      "",
+					"milepost":       "71.56"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-20",
+						"statusTime": "11:50:49"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-120-34.7-E-02E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "SECOND GAROTTE",
+					"nearbyPlace":    "Groveland",
+					"longitude":      "-120.200860",
+					"latitude":       "37.832660",
+					"elevation":      "2910",
+					"direction":      "East",
+					"county":         "Tuolumne",
+					"route":          "SR-120",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "34.70",
+					"alignment":      "",
+					"milepost":       "73.64"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-20",
+						"statusTime": "13:20:52"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-120-37.7-W-02W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "BIG CREEK",
+					"nearbyPlace":    "Groveland",
+					"longitude":      "-120.150070",
+					"latitude":       "37.819700",
+					"elevation":      "2880",
+					"direction":      "West",
+					"county":         "Tuolumne",
+					"route":          "SR-120",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "37.70",
+					"alignment":      "",
+					"milepost":       "76.64"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-20",
+						"statusTime": "13:20:52"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-120-40.4-E-03E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "LA CASA LOMA",
+					"nearbyPlace":    "Groveland",
+					"longitude":      "-120.105700",
+					"latitude":       "37.819400",
+					"elevation":      "3090",
+					"direction":      "East",
+					"county":         "Tuolumne",
+					"route":          "SR-120",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "40.40",
+					"alignment":      "",
+					"milepost":       "79.34"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-20",
+						"statusTime": "13:20:52"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-120-46.6-W-03W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "S. FORK TUO RIVER",
+					"nearbyPlace":    "Groveland",
+					"longitude":      "-120.020800",
+					"latitude":       "37.825000",
+					"elevation":      "3008",
+					"direction":      "West",
+					"county":         "Tuolumne",
+					"route":          "SR-120",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "46.60",
+					"alignment":      "",
+					"milepost":       "84.99"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-20",
+						"statusTime": "13:20:52"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-120-47.2-E-04E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "CHERRY VALLEY RD",
+					"nearbyPlace":    "Groveland",
+					"longitude":      "-120.010600",
+					"latitude":       "37.824800",
+					"elevation":      "2900",
+					"direction":      "East",
+					"county":         "Tuolumne",
+					"route":          "SR-120",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "47.20",
+					"alignment":      "",
+					"milepost":       "85.59"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-20",
+						"statusTime": "13:20:52"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-120-53.66-E-05E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "UPR S FORK TUO RIVER",
+					"nearbyPlace":    "Groveland",
+					"longitude":      "-119.913600",
+					"latitude":       "37.819100",
+					"elevation":      "3923",
+					"direction":      "East",
+					"county":         "Tuolumne",
+					"route":          "SR-120",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "53.66",
+					"alignment":      "",
+					"milepost":       "92.05"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-02-20",
+						"statusTime": "13:20:52"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-120-56.51-E-00E",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "CRANE FLAT RD (closure gate in park, not chain sign)",
+					"nearbyPlace":    "Yosemite National Park",
+					"longitude":      "-119.803511",
+					"latitude":       "37.747246",
+					"elevation":      "6289",
+					"direction":      "East",
+					"county":         "Tuolumne",
+					"route":          "SR-120",
+					"routeSuffix":    "",
+					"postmilePrefix": "",
+					"postmile":       "56.51",
+					"alignment":      "",
+					"milepost":       "94.90"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-05-29",
+						"statusTime": "12:14:10"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc":
+			{
+				"index": "10-TUO-120-r56.6-W-05W",
+				"recordTimestamp":
+				{
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location":
+				{
+					"district":       "10",
+					"locationName":   "YOSEMITE PARK BOUNDARY",
+					"nearbyPlace":    "El Portal",
+					"longitude":      "-119.873200",
+					"latitude":       "37.810600",
+					"elevation":      "4757",
+					"direction":      "West",
+					"county":         "Tuolumne",
+					"route":          "SR-120",
+					"routeSuffix":    "",
+					"postmilePrefix": "r",
+					"postmile":       "56.60",
+					"alignment":      "",
+					"milepost":       "94.89"
+				},
+				"inService": "true",
+				"statusData":
+				{
+					"statusTimestamp":
+					{
+						"statusDate": "2026-05-26",
+						"statusTime": "17:20:00"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		}
+	]
+}
