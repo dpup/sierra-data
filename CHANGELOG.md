@@ -16,13 +16,61 @@ proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 
 ## 2026-10-01
 
+### New map layer: `camera` — Caltrans traffic cameras
+
+**Additive.** `GET /api/v1/places/{place}/map/camera.geojson` serves the
+cameras `GET /api/v1/cameras?place=` lists (below) as GeoJSON: one `Point`
+per camera, nearest first, with the same ids and distances. Like `mesh_link`,
+`camera` is a map-layer slug only, not a Layer enum value. It never appears in
+`/events`, and it never feeds the place summary.
+
+```json
+{
+  "type": "Feature",
+  "geometry": {"type": "Point", "coordinates": [-120.2748, 37.99242]},
+  "properties": {
+    "id": "d10-172",
+    "layer": "CAMERA",
+    "kind": "Traffic camera",
+    "severity": "INFO",
+    "severityRank": 0,
+    "headline": "EB 108 W/O Soulsbyville Rd",
+    "areaLabel": "Soulsbyville",
+    "source": {"id": "caltrans", "name": "Caltrans CCTV", "url": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/179eb108wosoulsbyvillerd/179eb108wosoulsbyvillerd.jpg", "attribution": "Caltrans"},
+    "camera": {
+      "imageUrl": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/179eb108wosoulsbyvillerd/179eb108wosoulsbyvillerd.jpg",
+      "imageRefreshMinutes": 2,
+      "streamUrl": "https://wzmedia.dot.ca.gov/D10/TUO_EB108_WO_Soulsbyville.stream/playlist.m3u8",
+      "route": "SR-108",
+      "county": "Tuolumne",
+      "elevationFeet": 2926,
+      "distanceMeters": 0
+    }
+  }
+}
+```
+
+- Every feature is `INFO`: cameras are reference views, not hazards. Don't
+  count them as active items, and don't read an empty layer as an all-clear.
+- `properties.camera` carries the RPC's fields, camelCase. `streamUrl`,
+  `direction`, `county`, `elevationFeet` and `imageRefreshMinutes` are omitted
+  when Caltrans gives none. `distanceMeters` is always present (0 = inside the
+  place). Load `imageUrl` and `streamUrl` straight from Caltrans; the Grid does
+  not proxy them.
+- `metadata.sourceStatus` is the camera list's health, as on the RPC: `OK`,
+  `STALE` with `lastSourceUpdate`, or `UNAVAILABLE` when no list has been
+  fetched or cameras aren't configured. `metadata.attribution` is `Caltrans`.
+- The site's Map screen shows the layer, with the live snapshot and a video
+  link in each camera's popup.
+
 ### New: `GET /api/v1/cameras?place=` — Caltrans traffic cameras
 
 **Additive.** The `ListCameras` RPC. It lists Caltrans CCTV cameras in or near
 the coverage area, each with a live snapshot image and, where Caltrans
 publishes one, an HLS video stream. Seeing the pass is the fastest check on
 chain-control and closure data. Cameras are reference views, not events: they
-never appear in `/events`, the summary or the map layers.
+never appear in `/events` or the summary. The `camera` map layer (above) serves
+the same list as GeoJSON.
 
 ```json
 {

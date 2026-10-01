@@ -450,6 +450,30 @@ const GEOJSON = {
       }),
     ],
   },
+  // Real Caltrans cameras and their distances from the Ebbetts Pass area
+  // (2026-10-01). The image URLs are live: the mock still loads them from
+  // Caltrans, exactly as the real page does.
+  camera: {
+    type: 'FeatureCollection', metadata: md('OK', { attribution: 'Caltrans' }),
+    features: [
+      ['d10-172', 'EB 108 W/O Soulsbyville Rd', 'Soulsbyville', 'SR-108', '', 'Tuolumne', 2926, 0, -120.2748, 37.99242, '179eb108wosoulsbyvillerd', 'TUO_EB108_WO_Soulsbyville'],
+      ['d10-136', 'EB SR 88 Pine Grove', 'Pine Grove', 'SR-88', 'East', 'Amador', 2575, 13242, -120.65039, 38.40774, '133ebsr88pinegrove', 'AMA_EB88_PineGrove'],
+      ['d10-129', 'Ferretti Rd Groveland', 'Groveland', 'SR-120', 'East', 'Tuolumne', 2867, 13901, -120.22456, 37.83982, '127ferrettirdgroveland', 'TUO_EB120_FerrettiRd'],
+      ['d10-152', 'EB MPA 120 Buck Meadows', 'Groveland', 'SR-120', 'East', 'Mariposa', 3123, 23937, -120.05672, 37.81765, '144ebmpa120buckmeadows', 'MPA_120_BuckMeadows'],
+    ].map(([id, name, near, route, dir, county, elev, dist, lng, lat, slug, stream]) => {
+      const imageUrl = `https://cwwp2.dot.ca.gov/data/d10/cctv/image/${slug}/${slug}.jpg`;
+      return feat(pt(lng, lat), {
+        id, layer: 'CAMERA', kind: 'Traffic camera', severity: 'INFO', severityRank: 0,
+        headline: name, areaLabel: near,
+        source: { id: 'caltrans', name: 'Caltrans CCTV', url: imageUrl, attribution: 'Caltrans' },
+        camera: {
+          imageUrl, imageRefreshMinutes: 2,
+          streamUrl: `https://wzmedia.dot.ca.gov/D10/${stream}.stream/playlist.m3u8`,
+          route, direction: dir || undefined, county, elevationFeet: elev, distanceMeters: dist,
+        },
+      });
+    }),
+  },
   mesh_link: {
     type: 'FeatureCollection', metadata: md('OK', { attribution: 'MeshCore' }),
     features: MESH_NODES.map((n) => feat(pt(n.lng, n.lat), {

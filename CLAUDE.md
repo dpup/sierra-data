@@ -460,8 +460,8 @@ gateway's `EmitUnpopulated` marshaler.
 - `GET /api/v1/places/{place}/map/{layer}.geojson` - hand-built, one RFC 7946
   `FeatureCollection` per layer for a maps client (MapLibre/Leaflet). Layers:
   `road_incident`, `chain_control`, `road_segment`, `weather_alert`,
-  `fire_weather`, `earthquake`, `wildfire`, `evacuation`, `power`, `mesh_node`
-  (these are layer *values*, still snake_case; `power` matches its enum name so
+  `fire_weather`, `earthquake`, `wildfire`, `evacuation`, `power`, `mesh_node`,
+  `mesh_link`, `camera` (these are layer *values*, still snake_case; `power` matches its enum name so
   `properties.layer` and `Event.layer` read identically). Every feature shares a camelCase `properties` envelope
   (`id, layer, kind, severity, severityRank, headline, source, …`) on the unified
   severity scale `INFO..EXTREME` (rank 0–4). Coordinates
@@ -469,6 +469,12 @@ gateway's `EmitUnpopulated` marshaler.
   (`internal/gridapi.ProjectEvents`); the three condition layers (`road_segment`,
   `chain_control`, `fire_weather`) are live projections of the roads/weather
   services. See `docs/design/hazard-aggregation-design.md` and `internal/hazards/CLAUDE.md`.
+  Two more layers are served by `gridapi` itself: `mesh_link` (relay topology,
+  `internal/gridapi/mesh.go`) and `camera` (Caltrans traffic cameras,
+  `serveCameraLayer` in `internal/gridapi/cameras.go`). `camera` is the place-scoped
+  `ListCameras` as GeoJSON — same cameras, distances and ids, every feature
+  `INFO`, `sourceStatus` from the camera directory — and stays out of the
+  place summary: cameras are reference views, not hazards.
 
 **Fire-weather** (`conditions.fireWeather`, and the `fire_weather` geojson layer):
 `state` escalates `normal` → `elevated` (Fire Weather Watch) → `red-flag` (Red Flag

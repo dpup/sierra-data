@@ -181,6 +181,13 @@ Content-Type: application/json
     <code class="inline">chain_control</code> are condition-backed map-layer
     slugs only — they are projections of live road state, not Layer enum
     values, and never appear in <code class="inline">/api/v1/events</code>.
+    <code class="inline">camera</code> is a map-layer slug only too: Caltrans
+    traffic cameras near the place, every feature <code class="inline">INFO</code>
+    — reference views, not hazards, and never part of the place summary. It
+    serves the same cameras and distances as
+    <code class="inline">/api/v1/cameras?place=</code>, with the live
+    <code class="inline">imageUrl</code> and HLS <code class="inline">streamUrl</code>
+    (links to Caltrans, never proxied) under <code class="inline">properties.camera</code>.
   </p>
 
   <h3>Enum: Severity (the canonical scale + color ramp)</h3>
@@ -363,7 +370,7 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
   }
 }</pre>
   <ul>
-    <li><strong>Per-kind data</strong> lives under a single namespaced key (<code class="inline">wildfire</code>, <code class="inline">earthquake</code>, <code class="inline">evacuation</code>, <code class="inline">weather</code>, <code class="inline">incident</code>, <code class="inline">power</code>, <code class="inline">mesh</code>) — consumers ignore kinds they don't handle; no field collisions.</li>
+    <li><strong>Per-kind data</strong> lives under a single namespaced key (<code class="inline">wildfire</code>, <code class="inline">earthquake</code>, <code class="inline">evacuation</code>, <code class="inline">weather</code>, <code class="inline">incident</code>, <code class="inline">power</code>, <code class="inline">mesh</code>, <code class="inline">camera</code>) — consumers ignore kinds they don't handle; no field collisions.</li>
     <li><strong>Coordinate order is <code class="inline">[longitude, latitude]</code></strong> (GeoJSON axis order), WGS84, trimmed to 5 decimals (~1.1 m). Polygons are simplified to keep features small.</li>
     <li><strong>Null geometry is valid</strong> (e.g. a county-wide advisory): the feature has <code class="inline">"geometry": null</code> with the same properties envelope. Exclude it from the map layer and render it as a full-width banner/list card sorted by <code class="inline">severityRank</code> alongside located features, showing <code class="inline">headline</code>, <code class="inline">source.name</code>, <code class="inline">updatedAt</code>, and <code class="inline">source.url</code>.</li>
     <li><strong>URL fields are scheme-validated upstream</strong>: any upstream-sourced URL that is not <code class="inline">https://</code>/<code class="inline">http://</code> is dropped before it reaches the response. Treat all upstream text (headlines, descriptions) as untrusted anyway.</li>

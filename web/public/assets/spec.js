@@ -136,11 +136,12 @@ export const ENDPOINTS = [
     path: '/api/v1/places/{place}/map/{layer}.geojson',
     blurb: 'One RFC 7946 FeatureCollection per layer, ready for MapLibre or Leaflet.',
     detail:
-      'Eleven layer slugs: wildfire, evacuation, weather_alert, earthquake, road_incident, power, road_segment, chain_control, fire_weather, mesh_node, mesh_link. A foreign top-level metadata member carries sourceStatus (OK | STALE | UNAVAILABLE), generatedAt, lastSourceUpdate, attribution and sourceUrl. UNAVAILABLE arrives with empty features and must render as an unknown-state banner, never an empty map. Coordinates are [lng, lat], trimmed to 5 decimals. Not in the OpenAPI spec — these layers are hand-built. Cache-Control: max-age=60.',
+      'Twelve layer slugs: wildfire, evacuation, weather_alert, earthquake, road_incident, power, road_segment, chain_control, fire_weather, mesh_node, mesh_link, camera. camera is Caltrans traffic cameras (INFO reference views, not hazards: the same cameras and distances as /api/v1/cameras?place=, with imageUrl and streamUrl in properties.camera). A foreign top-level metadata member carries sourceStatus (OK | STALE | UNAVAILABLE), generatedAt, lastSourceUpdate, attribution and sourceUrl. UNAVAILABLE arrives with empty features and must render as an unknown-state banner, never an empty map. Coordinates are [lng, lat], trimmed to 5 decimals. Not in the OpenAPI spec — these layers are hand-built. Cache-Control: max-age=60.',
     params: [],
     examples: [
       '/api/v1/places/ebbetts-pass/map/wildfire.geojson',
       '/api/v1/places/ebbetts-pass/map/evacuation.geojson',
+      '/api/v1/places/ebbetts-pass/map/camera.geojson',
     ],
   },
   {
@@ -252,7 +253,7 @@ export const CONVENTIONS = [
   ['Canonical client sort', 'For events: severity descending, then observedAt descending.'],
 ];
 
-/** The eleven .geojson map layers, in the order the Map screen lists them. */
+/** The twelve .geojson map layers, in the order the Map screen lists them. */
 export const MAP_LAYERS = [
   'wildfire',
   'evacuation',
@@ -265,6 +266,7 @@ export const MAP_LAYERS = [
   'fire_weather',
   'mesh_node',
   'mesh_link',
+  'camera',
 ];
 
 /** Event layer slugs offered as filters on the Events screen. */
