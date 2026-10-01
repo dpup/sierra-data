@@ -102,7 +102,9 @@ garbage and cc.kml doesn't explain (`Unrecognized` — dropped from the map, nev
 shown as a level), or a row with no position. Controls cc.kml reports where
 CWWP2 says R-0 are SHOWN and logged ("cc.kml reports chain controls CWWP2 does
 not"). Road closures (`Closed`) render as `"<highway> road closed"`, category
-`closed`. Feature ids are `cc:<checkpoint index>` for CWWP2 (e.g.
+`closed`, severity `MINOR` — one notch above a clear checkpoint, below R-1,
+because the seasonal gates hold it all winter (and `/summary`'s roads domain
+counts it as active). Feature ids are `cc:<checkpoint index>` for CWWP2 (e.g.
 `cc:10-ALP-4-0.65-W-14W`, Bear Valley WB), `cc:<message id>` for cc.kml, with a
 coordinate fallback; `source.attribution` names the host.
 

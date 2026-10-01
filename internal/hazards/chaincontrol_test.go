@@ -148,6 +148,8 @@ func TestChainControlLayer_RoadClosedEntry(t *testing.T) {
 	p := features[0].Properties
 	assert.Equal(t, "Highway 4 road closed", p.Headline)
 	assert.Equal(t, "closed", p.Category)
+	assert.Equal(t, SevMinor, p.Severity, "one notch above INFO")
+	assert.Equal(t, 1, p.SeverityRank)
 	assert.Equal(t, "cc:9001", p.ID)
 	assert.Equal(t, caltrans.SourceQuickMap, p.Source.Attribution)
 }

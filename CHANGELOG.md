@@ -38,7 +38,11 @@ other's controls: a control either one reports is shown.
 - **Road closures render as closures.** A `cc.kml` "Road Closed" entry (the
   seasonal Ebbetts/Sonora/Tioga gates) used to serve with an empty highway and
   the headline `"chain control"`. It is now `"Highway 4 road closed"`, with
-  `category: "closed"`. Its severity is unchanged (INFO).
+  `category: "closed"`, and severity `MINOR` (rank 1; it was `INFO`). It
+  still ranks below an R-1 chain control. Because `/summary`'s roads domain
+  counts condition features above INFO as active, an in-area seasonal gate (the
+  Ebbetts closure at Mount Reba) now appears in that domain's `activeCount` and
+  headlines all winter. The summary `mode` is unaffected.
 - CWWP2 entries: `properties.chainControl.highway` reads `Highway 4` /
   `US 50` / `I-80`, `areaLabel` is Caltrans's upper-case checkpoint name
   (`ARNOLD`), `effective` is when the checkpoint entered its level (Pacific

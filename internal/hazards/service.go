@@ -344,6 +344,13 @@ func (s *Service) chainControls(ctx context.Context, area config.HazardArea) ([]
 			ChainControl: &ChainControlProps{Level: c.Level, Highway: c.Highway, Direction: c.Direction},
 		}
 		p.setSeverity(fromChainLevelStr(c.Level))
+		if c.Closed {
+			// One notch above a clear checkpoint: a closed road is worth seeing
+			// on the map. Kept below R-1 because the seasonal pass gates hold
+			// this state all winter. Note /summary's roads domain counts
+			// anything above INFO as active, so an in-area gate shows there too.
+			p.setSeverity(SevMinor)
+		}
 		out = append(out, Feature{Type: "Feature", Geometry: PointGeom(c.Coordinates.Latitude, c.Coordinates.Longitude), Properties: p})
 	}
 	var degraded []error
