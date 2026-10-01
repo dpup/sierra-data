@@ -125,3 +125,29 @@ func TestChainControlLayer_UnrecognizedStatus(t *testing.T) {
 	assert.Equal(t, "OK", status)
 	assert.Empty(t, features)
 }
+
+// A CWWP2 row without a position can't be placed in or out of the area, so the
+// layer can't claim to be complete.
+func TestChainControlLayer_PositionlessDegrades(t *testing.T) {
+	cps := loadCheckpoints(t, "cc_d10_20260930.json")
+	cps[0].Level, cps[0].RawStatus = cwwp2.LevelR2, "R-2"
+	cps[0].Location.HasPosition = false
+	features, status, _, _, _, _ := chainService(kmlDoer{200, emptyCCKML}, cps).BuildLayer(testCtx(), ebbettsArea, LayerChainControl)
+	assert.Equal(t, "STALE", status)
+	assert.Empty(t, features)
+}
+
+// A cc.kml road closure renders as a closure, not as a bare "chain control".
+func TestChainControlLayer_RoadClosedEntry(t *testing.T) {
+	const kml = `<?xml version="1.0" encoding="UTF-8"?><kml xmlns="http://www.opengis.net/kml/2.2"><Document>
+<Placemark><name>Eastbound Highway 4 Road Closed</name><styleUrl>#full-closure</styleUrl><description><![CDATA[<p align="left">MOUNT REBA ROAD - EBBETTS PASS</p><p align="left">Closed to traffic.</p>District:10 Message ID:9001]]></description><Point><coordinates>-120.01496,38.48042</coordinates></Point></Placemark>
+</Document></kml>`
+	features, status, _, _, _, _ := chainService(kmlDoer{200, kml}, loadCheckpoints(t, "cc_d10_20260930.json")).BuildLayer(testCtx(), ebbettsArea, LayerChainControl)
+	assert.Equal(t, "OK", status)
+	require.Len(t, features, 1)
+	p := features[0].Properties
+	assert.Equal(t, "Highway 4 road closed", p.Headline)
+	assert.Equal(t, "closed", p.Category)
+	assert.Equal(t, "cc:9001", p.ID)
+	assert.Equal(t, caltrans.SourceQuickMap, p.Source.Attribution)
+}

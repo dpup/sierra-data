@@ -16,37 +16,37 @@ proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 
 ## 2026-09-30
 
-### `chain_control` map layer: levels now come from Caltrans CWWP2
+### `chain_control` map layer: Caltrans CWWP2 merged in
 
-**Not a shape change. Feature ids and attribution values change.** Applies to
-`GET /api/v1/places/{place}/map/chain_control.geojson` and anything built on
-it: the `/summary` roads domain, and a road's `chainControlInfo`.
+**Not a shape change. Feature ids, headlines and attribution values change.**
+Applies to `GET /api/v1/places/{place}/map/chain_control.geojson` and anything
+built on it: the `/summary` roads domain, and a road's `chainControlInfo`.
 
-Chain-control levels now come from Caltrans's CWWP2 data portal
-(`cwwp2.dot.ca.gov`, District 10). Before, they came from QuickMap's `cc.kml`.
-CWWP2 reports every checkpoint, each with an explicit `R-0` when no controls
-are in effect. So `sourceStatus: OK` with zero features is now a **confirmed**
-"no chain controls". Before, it only meant "the KML was empty", which is also
-what a broken feed looked like. An empty or frozen CWWP2 file now makes the
-layer `UNAVAILABLE` (or `STALE` if a last good fetch is cached), not `OK`.
+Chain controls now come from **two** Caltrans sources, merged: QuickMap's
+`cc.kml` (as before) and the CWWP2 data portal (`cwwp2.dot.ca.gov`, District
+10). CWWP2 reports every checkpoint, each with an explicit `R-0` when no
+controls are in effect. So `sourceStatus: OK` with zero features is now a
+**confirmed** "no chain controls". Before, it only meant "the KML was empty",
+which is also what a broken feed looked like. Neither source can erase the
+other's controls: a control either one reports is shown.
 
-- **Feature `id`s** are now `cc:<checkpoint index>`, e.g.
+- **Feature `id`s:** `cc:<checkpoint index>` for CWWP2 entries, e.g.
   `cc:10-ALP-4-0.65-W-14W` (district, county, route, postmile, direction,
-  sign). Before, they were `cc:<KML message id>`. The layer is a live
-  projection, not stored, so no history is affected. Don't persist the old ids.
-- **One feature per checkpoint.** A storm on Hwy 4 shows every signed
-  checkpoint on the controlled stretch (Arnold, Dorrington, Cottage Springs…),
-  not the handful of points `cc.kml` published.
-- `properties.chainControl.highway` reads `Highway 4` / `US 50` / `I-80`.
-  `areaLabel` is Caltrans's upper-case checkpoint name (`ARNOLD`).
-  `effective` is when the checkpoint entered its current level, with a Pacific
-  offset.
-- `properties.source.attribution` is `cwwp2.dot.ca.gov` for CWWP2 entries.
-  Road-closed and truck-only (`MAX`/`MIN`/`TS`) entries still come from `cc.kml`
-  and still say `quickmap.dot.ca.gov`.
-- **New `STALE` cases, with features still returned:** `cc.kml` is down (road
-  closures unknown), or a checkpoint in the area reported a status Caltrans
-  sent malformed. That checkpoint is left off the map rather than guessed at.
+  sign); `cc:<message id>` for `cc.kml` entries, as before. When both report
+  the same checkpoint, only the CWWP2 entry is served. The layer is a live
+  projection, not stored, so no history is affected.
+- **Road closures render as closures.** A `cc.kml` "Road Closed" entry (the
+  seasonal Ebbetts/Sonora/Tioga gates) used to serve with an empty highway and
+  the headline `"chain control"`. It is now `"Highway 4 road closed"`, with
+  `category: "closed"`. Its severity is unchanged (INFO).
+- CWWP2 entries: `properties.chainControl.highway` reads `Highway 4` /
+  `US 50` / `I-80`, `areaLabel` is Caltrans's upper-case checkpoint name
+  (`ARNOLD`), `effective` is when the checkpoint entered its level (Pacific
+  offset), `source.attribution` is `cwwp2.dot.ca.gov`.
+- **`sourceStatus`:** `UNAVAILABLE` (or `STALE` from a cached last-good) when
+  CWWP2 fails and `cc.kml` has nothing; `STALE` with features when either source
+  fails but the other has controls, when an in-area checkpoint reported a
+  malformed status, or when a checkpoint has no position.
 
 ## 2026-09-15 (evening)
 

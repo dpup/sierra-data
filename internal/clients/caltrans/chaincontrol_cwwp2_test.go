@@ -40,44 +40,120 @@ func cwwp2Client(d cwwp2.HTTPDoer) *cwwp2.Client {
 	return c
 }
 
-// kmlOnlyEntries is how many cc.kml entries the CWWP2 mode keeps: road
-// closures and truck-only levels. On the legacy 2025 capture that is exactly
-// the set with no parseable R-level, which pins the positive classifier
-// against the old "no level" rule it replaced.
-func kmlOnlyEntries(t *testing.T) int {
+// legacyKML is the real 2025-12-24 storm capture: R-1/R-2 controls in
+// Districts 3, 9 and 10, road closures, and MAX/MIN/TS truck levels.
+func legacyKML(t *testing.T) []ChainControlData {
 	t.Helper()
-	p := setupTestParser(t)
-	incidents, err := p.ParseChainControls(context.Background())
+	all, err := setupTestParser(t).ParseChainControlsDetailed(context.Background())
 	require.NoError(t, err)
-	kept, levelless := 0, 0
-	for _, in := range incidents {
-		if isKMLSupplement(in) {
-			kept++
-		}
-	}
-	for _, c := range p.parseChainControlDetails(incidents) {
-		if c.Level == "" {
-			levelless++
-		}
-	}
-	require.Positive(t, kept, "fixture should hold road-closed / truck entries")
-	require.Equal(t, levelless, kept)
-	return kept
+	require.NotEmpty(t, all)
+	return all
 }
 
-// Quiet day: 149 checkpoints all R-0 contribute nothing, and the KML
-// supplement still carries its closures.
-func TestChainControlsCWWP2_QuietDay(t *testing.T) {
+// d10Checkpoints parses the real D10 capture, raising to `level` every
+// checkpoint for which raise returns true.
+func d10Checkpoints(t *testing.T, level cwwp2.Level, raise func(cwwp2.ChainControl) bool) stubSource {
+	t.Helper()
+	all, err := cwwp2.ParseChainControls(cwwp2Fixture(t, "cc_d10_20260930.json"))
+	require.NoError(t, err)
+	for i := range all {
+		if raise(all[i]) {
+			all[i].Level, all[i].RawStatus = level, level.String()
+		}
+	}
+	return stubSource(all)
+}
+
+func bySource(controls []ChainControlData, src string) []ChainControlData {
+	var out []ChainControlData
+	for _, c := range controls {
+		if c.Source == src {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func findKML(t *testing.T, controls []ChainControlData, highway, direction, location string) *ChainControlData {
+	t.Helper()
+	for i := range controls {
+		c := &controls[i]
+		if c.Source == SourceQuickMap && c.Highway == highway && c.Direction == direction && strings.HasPrefix(c.LocationName, location) {
+			return c
+		}
+	}
+	return nil
+}
+
+// cc.kml reports a storm while CWWP2 reports R-0 everywhere: the sources
+// disagree, and the control must be SHOWN, not erased by the other source's
+// silence. Every cc.kml entry survives; the ones on a quiet CWWP2 checkpoint
+// are flagged.
+func TestChainControlsCWWP2_DisagreementShowsTheControl(t *testing.T) {
 	p := setupTestParser(t)
 	p.UseCWWP2ChainControls(cwwp2Client(fixedDoer{200, cwwp2Fixture(t, "cc_d10_20260930.json")}), []int{10})
 
 	controls, err := p.ParseChainControlsDetailed(context.Background())
 	require.NoError(t, err)
-	assert.Len(t, controls, kmlOnlyEntries(t))
-	for _, c := range controls {
-		assert.Empty(t, c.Level, "cc.kml R-levels must not leak through: %+v", c)
-		assert.Equal(t, SourceQuickMap, c.Source)
+	assert.Len(t, controls, len(legacyKML(t)))
+	assert.Empty(t, bySource(controls, SourceCWWP2))
+
+	tamarack := findKML(t, controls, "Highway 4", "Eastbound", "TAMARACK")
+	require.NotNil(t, tamarack)
+	assert.Equal(t, "R2", tamarack.Level)
+	assert.True(t, tamarack.Uncorroborated, "on a CWWP2 checkpoint reporting R-0")
+
+	twin := findKML(t, controls, "US 50", "Eastbound", "Twin Bridges")
+	require.NotNil(t, twin, "District 3: CWWP2 isn't configured there, so cc.kml is the only word")
+	assert.False(t, twin.Uncorroborated)
+}
+
+// The sources agree: each cc.kml control at an active CWWP2 checkpoint (same
+// spot, same direction) is the same control reported twice, and only the
+// CWWP2 copy is kept. Everything else in cc.kml stays.
+func TestChainControlsCWWP2_AgreementDeduplicates(t *testing.T) {
+	kml := legacyKML(t)
+	// Raise exactly the D10 checkpoints cc.kml put an R-level on.
+	src := d10Checkpoints(t, cwwp2.LevelR2, func(cp cwwp2.ChainControl) bool {
+		c := chainControlFromCWWP2(cp)
+		for _, k := range kml {
+			if k.Level != "" && sameCheckpoint(k, c) {
+				return true
+			}
+		}
+		return false
+	})
+	p := setupTestParser(t)
+	p.UseCWWP2ChainControls(src, []int{10})
+
+	controls, err := p.ParseChainControlsDetailed(context.Background())
+	require.NoError(t, err)
+	cw := bySource(controls, SourceCWWP2)
+	require.NotEmpty(t, cw)
+	// One cc.kml entry can sit on TWO CWWP2 checkpoints: RED LAKE CREEK and
+	// RED LAKE CREEK - CARSON PASS are 1 m apart, both westbound (a chain
+	// checkpoint and its closure gate). So count the dropped side directly.
+	dropped := 0
+	for _, k := range kml {
+		if k.Level != "" && atActiveCheckpoint(k, cw) {
+			dropped++
+		}
 	}
+	require.Positive(t, dropped)
+	assert.Len(t, controls, len(cw)+len(kml)-dropped)
+	assert.Len(t, bySource(controls, SourceQuickMap), len(kml)-dropped)
+
+	assert.Nil(t, findKML(t, controls, "Highway 4", "Eastbound", "TAMARACK"), "duplicate of CWWP2 TAMARACK East")
+	assert.Nil(t, findKML(t, controls, "Highway 4", "Westbound", "TAMARACK"), "duplicate of CWWP2 TAMARACK West")
+	for _, c := range controls {
+		assert.False(t, c.Uncorroborated, "%+v", c)
+	}
+
+	// Outside District 10: kept from cc.kml.
+	assert.NotNil(t, findKML(t, controls, "US 50", "Eastbound", "Twin Bridges"))
+	assert.NotNil(t, findKML(t, controls, "Highway 108", "Eastbound", "3.8 Mi. W of Jct. 395"), "District 9, 21.8 km from any D10 checkpoint")
+	// Closures stay even where CWWP2 is quiet.
+	assert.NotNil(t, findKML(t, controls, "Highway 4", "Eastbound", "MOUNT REBA ROAD - EBBETTS"))
 }
 
 func TestChainControlsCWWP2_Storm(t *testing.T) {
@@ -87,14 +163,11 @@ func TestChainControlsCWWP2_Storm(t *testing.T) {
 	controls, err := p.ParseChainControlsDetailed(context.Background())
 	require.NoError(t, err)
 
-	var fromCWWP2 []ChainControlData
-	for _, c := range controls {
-		if c.Source == SourceCWWP2 {
-			fromCWWP2 = append(fromCWWP2, c)
-		}
-	}
+	fromCWWP2 := bySource(controls, SourceCWWP2)
 	require.Len(t, fromCWWP2, 7)
-	assert.Len(t, controls, 7+kmlOnlyEntries(t))
+	// The synthetic checkpoints (Arnold..Cottage Springs, Pinecrest) are not
+	// where cc.kml's 2025 storm put its controls, so nothing deduplicates.
+	assert.Len(t, controls, 7+len(legacyKML(t)))
 
 	var arnold *ChainControlData
 	for i := range fromCWWP2 {
@@ -113,10 +186,22 @@ func TestChainControlsCWWP2_Storm(t *testing.T) {
 	assert.False(t, arnold.Unrecognized)
 }
 
-// A CWWP2 failure is a hard error: serving cc.kml's closures alone would read
-// as "no chain controls" over the whole district.
-func TestChainControlsCWWP2_SourceDownIsHardError(t *testing.T) {
+// CWWP2 down: cc.kml alone is what the service served before CWWP2, so its
+// controls come back degraded rather than the layer going blank.
+func TestChainControlsCWWP2_SourceDownFallsBackToKML(t *testing.T) {
 	p := setupTestParser(t)
+	p.UseCWWP2ChainControls(cwwp2Client(fixedDoer{status: 500}), []int{10})
+	controls, err := p.ParseChainControlsDetailed(context.Background())
+	var partial *PartialError
+	require.ErrorAs(t, err, &partial)
+	assert.Len(t, controls, len(legacyKML(t)))
+	require.NotNil(t, findKML(t, controls, "Highway 4", "Eastbound", "TAMARACK"))
+}
+
+// CWWP2 down and cc.kml empty: nothing confirms the quiet, so it is a hard
+// error — never an empty success.
+func TestChainControlsCWWP2_SourceDownWithEmptyKMLIsHardError(t *testing.T) {
+	p := &FeedParser{HTTPClient: fixedDoer{200, []byte(`<kml><Document></Document></kml>`)}}
 	p.UseCWWP2ChainControls(cwwp2Client(fixedDoer{status: 500}), []int{10})
 	controls, err := p.ParseChainControlsDetailed(context.Background())
 	require.Error(t, err)
@@ -127,6 +212,11 @@ func TestChainControlsCWWP2_SourceDownIsHardError(t *testing.T) {
 	p.UseCWWP2ChainControls(cwwp2Client(fixedDoer{200, []byte(`{"data": []}`)}), []int{10})
 	_, err = p.ParseChainControlsDetailed(context.Background())
 	assert.ErrorIs(t, err, cwwp2.ErrEmptyFeed)
+
+	p.HTTPClient = fixedDoer{status: 503} // both down
+	_, err = p.ParseChainControlsDetailed(context.Background())
+	require.Error(t, err)
+	assert.False(t, errors.As(err, &partial))
 }
 
 // cc.kml down while CWWP2 is healthy: the levels are still good, so they come
@@ -139,6 +229,29 @@ func TestChainControlsCWWP2_KMLDownIsPartial(t *testing.T) {
 	var partial *PartialError
 	require.ErrorAs(t, err, &partial)
 	assert.Len(t, controls, 7)
+}
+
+// A pass-closure gate is likely to carry a non-R CWWP2 status all winter.
+// Where cc.kml reports something at that checkpoint, cc.kml says what is there
+// and the unreadable CWWP2 row is dropped instead of degrading the layer.
+func TestChainControlsCWWP2_UnrecognizedExplainedByKML(t *testing.T) {
+	src := d10Checkpoints(t, cwwp2.LevelUnknown, func(cp cwwp2.ChainControl) bool {
+		return cp.Location.Name == "MOUNT REBA ROAD - EBBETTS PASS" || cp.Location.Name == "ARNOLD"
+	})
+	p := setupTestParser(t)
+	p.UseCWWP2ChainControls(src, []int{10})
+	controls, err := p.ParseChainControlsDetailed(context.Background())
+	require.NoError(t, err)
+
+	var unrecognized []string
+	for _, c := range controls {
+		if c.Unrecognized {
+			unrecognized = append(unrecognized, c.LocationName)
+		}
+	}
+	// Mount Reba East has the 2025 "Road Closed" entry on it; Arnold has nothing.
+	assert.ElementsMatch(t, []string{"ARNOLD", "ARNOLD"}, unrecognized)
+	assert.NotNil(t, findKML(t, controls, "Highway 4", "Eastbound", "MOUNT REBA ROAD - EBBETTS"))
 }
 
 func TestChainControlFromCWWP2_Unrecognized(t *testing.T) {
@@ -170,28 +283,36 @@ func TestHighwayAndDirectionLabels(t *testing.T) {
 }
 
 // If cc.kml moves to the 2026 iw-* layout (blank <name>, as the CHP and
-// lane-closure feeds did), no R-level parses from its entries. They must NOT
-// leak through as level-less duplicates of the CWWP2 checkpoints; only the
-// positively-identified closure survives.
-func TestChainControlsCWWP2_IWLayoutKMLDoesNotLeakControls(t *testing.T) {
+// lane-closure feeds did), no level or direction parses from its entries.
+// Matching is positional, so the duplicate of an active checkpoint still
+// drops, a control CWWP2 doesn't confirm is still shown, and a closure is
+// still kept.
+func TestChainControlsCWWP2_IWLayoutKML(t *testing.T) {
 	const kml = `<?xml version="1.0" encoding="UTF-8"?><kml xmlns="http://www.opengis.net/kml/2.2"><Document>
-<Placemark><name> </name><styleUrl>#notclosed</styleUrl><description><![CDATA[<h2 class="iw-title">Chain Controls</h2><p class="iw-text">Arnold</p>]]></description><Point><coordinates>-120.35,38.25</coordinates></Point></Placemark>
-<Placemark><name> </name><styleUrl>#notclosed</styleUrl><description><![CDATA[<h2 class="iw-title">Chain Controls</h2><p class="iw-text">Dorrington</p>]]></description><Point><coordinates>-120.27,38.30</coordinates></Point></Placemark>
-<Placemark><name> </name><styleUrl>#full-closure</styleUrl><description><![CDATA[<h2 class="iw-title">Highway 4 Road Closed</h2><p class="iw-text">Closed to traffic.</p>]]></description><Point><coordinates>-119.92,38.50</coordinates></Point></Placemark>
+<Placemark><name> </name><styleUrl>#notclosed</styleUrl><description><![CDATA[<h2 class="iw-title">Chain Controls</h2><p class="iw-text">Arnold</p>]]></description><Point><coordinates>-120.3476,38.2565</coordinates></Point></Placemark>
+<Placemark><name> </name><styleUrl>#notclosed</styleUrl><description><![CDATA[<h2 class="iw-title">Chain Controls</h2><p class="iw-text">Tamarack</p>]]></description><Point><coordinates>-120.076710,38.439340</coordinates></Point></Placemark>
+<Placemark><name> </name><styleUrl>#full-closure</styleUrl><description><![CDATA[<h2 class="iw-title">Highway 4 Road Closed</h2><p class="iw-text">Closed to traffic.</p>]]></description><Point><coordinates>-120.01496,38.48042</coordinates></Point></Placemark>
 </Document></kml>`
 	p := &FeedParser{HTTPClient: fixedDoer{200, []byte(kml)}}
 	p.UseCWWP2ChainControls(cwwp2Client(fixedDoer{200, cwwp2Fixture(t, "cc_d10_synthetic_storm.json")}), []int{10})
 
 	controls, err := p.ParseChainControlsDetailed(context.Background())
 	require.NoError(t, err)
-	var kmlEntries []ChainControlData
-	for _, c := range controls {
-		if c.Source == SourceQuickMap {
-			kmlEntries = append(kmlEntries, c)
+	kmlEntries := bySource(controls, SourceQuickMap)
+	require.Len(t, kmlEntries, 2, "the Arnold entry duplicates CWWP2's active ARNOLD East")
+	assert.Len(t, controls, 9)
+	for _, k := range kmlEntries {
+		assert.NotEqual(t, -120.3476, k.Coordinates.Longitude)
+	}
+	// Tamarack is R-0 in CWWP2: shown, and flagged as a disagreement.
+	var tamarack *ChainControlData
+	for i := range kmlEntries {
+		if kmlEntries[i].Coordinates.Latitude == 38.43934 {
+			tamarack = &kmlEntries[i]
 		}
 	}
-	require.Len(t, kmlEntries, 1, "only the #full-closure entry may come from cc.kml")
-	assert.Len(t, controls, 8)
+	require.NotNil(t, tamarack)
+	assert.True(t, tamarack.Uncorroborated)
 }
 
 func TestIsKMLSupplement(t *testing.T) {
@@ -224,4 +345,17 @@ func TestChainControlsCWWP2_OutOfService(t *testing.T) {
 	require.Len(t, controls, 1)
 	assert.Equal(t, "a", controls[0].MessageID)
 	assert.Equal(t, "R2", controls[0].Level)
+}
+
+// Closure entries carry their highway and are flagged, so they render as a
+// closure and are never mistaken for a chain requirement.
+func TestChainControlDetails_RoadClosed(t *testing.T) {
+	closure := findKML(t, legacyKML(t), "Highway 4", "Eastbound", "MOUNT REBA ROAD - EBBETTS")
+	require.NotNil(t, closure)
+	assert.True(t, closure.Closed)
+	assert.Empty(t, closure.Level)
+
+	r2 := findKML(t, legacyKML(t), "Highway 4", "Eastbound", "TAMARACK")
+	require.NotNil(t, r2)
+	assert.False(t, r2.Closed)
 }

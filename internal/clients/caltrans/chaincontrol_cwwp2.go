@@ -2,7 +2,9 @@ package caltrans
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"math"
 	"regexp"
 	"strings"
 
@@ -29,19 +31,22 @@ type PartialError struct{ Err error }
 func (e *PartialError) Error() string { return "partial chain-control data: " + e.Err.Error() }
 func (e *PartialError) Unwrap() error { return e.Err }
 
-// UseCWWP2ChainControls switches chain-control LEVELS to the CWWP2 per-
-// checkpoint feed for the given districts.
+// UseCWWP2ChainControls adds the CWWP2 per-checkpoint feed for the given
+// districts as a chain-control source alongside cc.kml.
 //
 // Why: cc.kml lists only active controls, so an empty cc.kml — the normal
 // state from spring to fall — is indistinguishable from a broken one. CWWP2
 // lists every checkpoint with an explicit R-0, and the client fails an empty
 // or frozen file, so "no chain controls" becomes a confirmed state.
 //
-// cc.kml is still read, but only for the entries CWWP2 has not been seen to
-// carry: road closures ("Eastbound Highway 4 Road Closed" — the seasonal pass
-// closures) and truck-only levels (MAX / MIN / TS screening). Every CWWP2
-// status observed so far (all districts, 2026-09-30) was R-0; whether winter
-// closures appear there is unverified, so dropping cc.kml would be a guess.
+// The two are MERGED, not ranked. Both describe the same checkpoint registry
+// (every point in the 2025-12-24 cc.kml capture sits 0 m from a CWWP2
+// checkpoint of the same name, the pass-closure gates included), but cc.kml
+// carries Highway-Information-style "District / Message ID" identifiers, so
+// its STATUS may come from a different Caltrans system, and the two have never
+// been observed side by side in a storm. Dropping one source's controls in
+// favour of the other's silence would turn a disagreement into "no chains".
+// See mergeKML for the rules.
 func (p *FeedParser) UseCWWP2ChainControls(src ChainControlSource, districts []int) {
 	p.chainSource = src
 	p.chainDistricts = append([]int(nil), districts...)
@@ -49,49 +54,142 @@ func (p *FeedParser) UseCWWP2ChainControls(src ChainControlSource, districts []i
 
 // chainControlsCWWP2 is ParseChainControlsDetailed with a CWWP2 source.
 func (p *FeedParser) chainControlsCWWP2(ctx context.Context) ([]ChainControlData, error) {
-	var out []ChainControlData
+	var cw, quiet []ChainControlData
+	var cwErr error
 	for _, d := range p.chainDistricts {
 		checkpoints, err := p.chainSource.ChainControls(ctx, d)
 		if err != nil {
-			// All or nothing per call: a missing district would read as
-			// "no controls" for its whole footprint.
-			return nil, fmt.Errorf("cwwp2 chain controls: %w", err)
+			// All or nothing: a missing district would read as "no controls"
+			// for its whole footprint.
+			cw, cwErr = nil, fmt.Errorf("cwwp2 chain controls: %w", err)
+			break
 		}
 		for _, cp := range checkpoints {
 			// Out-of-service checkpoints are skipped only when they report
 			// nothing: a requirement still on a sign we can't poll is shown.
 			if cp.Level == cwwp2.LevelNone || (!cp.InService && !cp.Level.Active()) {
+				if cp.Level == cwwp2.LevelNone {
+					quiet = append(quiet, chainControlFromCWWP2(cp)) // position only, for mergeKML
+				}
 				continue
 			}
-			out = append(out, chainControlFromCWWP2(cp))
+			cw = append(cw, chainControlFromCWWP2(cp))
 		}
 	}
 
-	incidents, err := p.ParseChainControls(ctx)
-	if err != nil {
-		return out, &PartialError{Err: fmt.Errorf("cc.kml (road closures, truck levels): %w", err)}
-	}
-	var supplement []CaltransIncident
-	for _, in := range incidents {
-		if isKMLSupplement(in) {
-			supplement = append(supplement, in)
+	incidents, kmlErr := p.ParseChainControls(ctx)
+	switch {
+	case cwErr != nil && kmlErr != nil:
+		return nil, errors.Join(cwErr, fmt.Errorf("cc.kml: %w", kmlErr))
+	case cwErr != nil:
+		// CWWP2 down: cc.kml alone is what the service served before CWWP2,
+		// so serve it — degraded. But an EMPTY cc.kml is exactly the answer
+		// that cannot be trusted on its own, so with nothing to show this
+		// stays an error: an error never becomes a 0.
+		kml := p.parseChainControlDetails(incidents)
+		if len(kml) == 0 {
+			return nil, cwErr
 		}
+		for i := range kml {
+			kml[i].Source = SourceQuickMap
+		}
+		return kml, &PartialError{Err: cwErr}
+	case kmlErr != nil:
+		return cw, &PartialError{Err: fmt.Errorf("cc.kml (road closures, truck levels, cross-check): %w", kmlErr)}
 	}
-	for _, c := range p.parseChainControlDetails(supplement) {
-		c.Source = SourceQuickMap
+	return p.mergeKML(cw, quiet, incidents), nil
+}
+
+// sameCheckpointMeters is how close a cc.kml point must be to a CWWP2
+// checkpoint to be the same checkpoint. Measured: cc.kml points sit 0 m from
+// their checkpoint, while the closest distinct checkpoints (TAMARACK East /
+// West) are ~250 m apart — direction is matched too.
+const sameCheckpointMeters = 200
+
+// mergeKML combines active CWWP2 checkpoints with cc.kml's entries:
+//
+//   - Road closures and truck-only levels (isKMLSupplement) are always kept:
+//     no CWWP2 status for them has been observed.
+//   - Any other cc.kml entry at an ACTIVE CWWP2 checkpoint (same spot, same
+//     direction) is that checkpoint reported twice, and is dropped.
+//   - Any other cc.kml entry is KEPT. Outside the configured districts CWWP2
+//     says nothing; inside them the sources disagree, and the safe side of a
+//     disagreement is showing the control. An entry sitting on a CWWP2
+//     checkpoint that reports R-0 is flagged Uncorroborated (positional, so it
+//     works without cc.kml's District field).
+//   - An Unrecognized CWWP2 checkpoint with a cc.kml entry at the same spot is
+//     dropped — cc.kml says what is there (the pass-closure gates are likely
+//     to carry a non-R status all winter, and that must not degrade the layer
+//     for five months).
+//
+// Matching is positional, not by parsing cc.kml's text, so it holds whatever
+// layout cc.kml's markup moves to.
+func (p *FeedParser) mergeKML(cw, quiet []ChainControlData, incidents []CaltransIncident) []ChainControlData {
+	kml := p.parseChainControlDetails(incidents) // one entry per incident, in order
+
+	var out, kept []ChainControlData
+	for i, k := range kml {
+		k.Source = SourceQuickMap
+		if !isKMLSupplement(incidents[i]) {
+			if atActiveCheckpoint(k, cw) {
+				continue // the same control CWWP2 already reports
+			}
+			k.Uncorroborated = sameCheckpointAny(k, quiet)
+		}
+		kept = append(kept, k)
+	}
+	for _, c := range cw {
+		if c.Unrecognized && sameCheckpointAny(c, kept) {
+			continue
+		}
 		out = append(out, c)
 	}
-	return out, nil
+	return append(out, kept...)
+}
+
+func atActiveCheckpoint(k ChainControlData, cw []ChainControlData) bool {
+	for _, c := range cw {
+		if !c.Unrecognized && sameCheckpoint(k, c) {
+			return true
+		}
+	}
+	return false
+}
+
+func sameCheckpointAny(c ChainControlData, kml []ChainControlData) bool {
+	for _, k := range kml {
+		if sameCheckpoint(k, c) {
+			return true
+		}
+	}
+	return false
+}
+
+// sameCheckpoint: within sameCheckpointMeters, and the same direction when both
+// name one (a cc.kml entry whose direction didn't parse matches either).
+func sameCheckpoint(a, b ChainControlData) bool {
+	if a.Coordinates == nil || b.Coordinates == nil {
+		return false
+	}
+	if a.Direction != "" && b.Direction != "" && !strings.EqualFold(a.Direction, b.Direction) {
+		return false
+	}
+	return haversineMeters(a.Coordinates.Latitude, a.Coordinates.Longitude, b.Coordinates.Latitude, b.Coordinates.Longitude) <= sameCheckpointMeters
+}
+
+func haversineMeters(lat1, lon1, lat2, lon2 float64) float64 {
+	const r = 6371000.0
+	p1, p2 := lat1*math.Pi/180, lat2*math.Pi/180
+	dp, dl := p2-p1, (lon2-lon1)*math.Pi/180
+	h := math.Sin(dp/2)*math.Sin(dp/2) + math.Cos(p1)*math.Cos(p2)*math.Sin(dl/2)*math.Sin(dl/2)
+	return 2 * r * math.Asin(math.Sqrt(h))
 }
 
 var truckLevelRe = regexp.MustCompile(`(?i)\blevel\s+(MAX|MIN|TS)\b|truck chain requirements|screening for chains`)
 
-// isKMLSupplement picks the cc.kml entries CWWP2 does not cover, by POSITIVE
-// match only. Selecting "whatever has no parseable R-level" instead would be
-// format-fragile: the CHP and lane-closure KMLs moved to the iw-* layout in
-// 2026 with blank <name>s, and if cc.kml follows, no R-level would parse and
-// every chain control would leak through as a level-less duplicate of its
-// CWWP2 checkpoint. Anything unclassified is dropped — R-levels are CWWP2's.
+// isKMLSupplement identifies the cc.kml entries kept whatever CWWP2 says, by
+// POSITIVE match only — the 2026 iw-* layout (blank <name>s) defeats any rule
+// keyed on parsing a level out of the text:
 //
 //   - road closures: styleUrl "#full-closure" (the style id is the same in
 //     the 2025 legacy capture and the 2026 file).

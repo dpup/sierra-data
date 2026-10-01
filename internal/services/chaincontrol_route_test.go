@@ -30,6 +30,12 @@ func TestFindChainControlForRoute_CWWP2Shapes(t *testing.T) {
 	unreadable := caltrans.ChainControlData{Highway: "Highway 4", Coordinates: at, Unrecognized: true, RawStatus: "-120.35"}
 	assert.Nil(t, s.findChainControlForRoute(context.Background(), route, []caltrans.ChainControlData{unreadable}))
 
+	// The Ebbetts gate at Mount Reba, ~3 km past Bear Valley: a closure is not
+	// a chain requirement on the Arnold–Bear Valley road.
+	gate := caltrans.ChainControlData{Highway: "Highway 4", Closed: true,
+		Coordinates: &api.Coordinates{Latitude: 38.48042, Longitude: -120.01496}}
+	assert.Nil(t, s.findChainControlForRoute(context.Background(), route, []caltrans.ChainControlData{gate}))
+
 	r2 := caltrans.ChainControlData{
 		Highway: "Highway 4", Direction: "Eastbound", Level: "R2", LocationName: "ARNOLD",
 		Coordinates: at, EffectiveTime: "2026-12-24T18:05:00-08:00", MessageID: "10-CAL-4-44.1-E-1E",

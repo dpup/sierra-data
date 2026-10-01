@@ -7,7 +7,7 @@ enhancement live in `internal/services`, not here.
 | Package    | Source                | Auth                          | Notes |
 |------------|-----------------------|-------------------------------|-------|
 | `google`   | Google Routes API     | `PF__GOOGLE_ROUTES__API_KEY`  | Travel time + polyline. Rate-limited; callers cache aggressively (10k/mo budget). |
-| `caltrans` | quickmap.dot.ca.gov KML | none                        | Lane closures, CHP incidents, chain control (levels from `cwwp2` when configured). |
+| `caltrans` | quickmap.dot.ca.gov KML | none                        | Lane closures, CHP incidents, chain control (merged with `cwwp2` when configured). |
 | `cwwp2`    | cwwp2.dot.ca.gov JSON (Caltrans data portal) | none (public, undocumented) | Per-checkpoint chain-control status; lane-closure windows incl. scheduled. See below. |
 | `weather`  | OpenWeatherMap        | `PF__OPENWEATHER__API_KEY`    | Current conditions only. `GetWeatherAlerts` (One Call 3.0, 1,000/day cap) is CLI-diagnostic only — the server sources alerts from `nws`. |
 | `nws`      | api.weather.gov       | none (User-Agent required)    | Authoritative zone alerts + fire-weather products. |
@@ -44,35 +44,55 @@ Caltrans/CHP timestamps are **Pacific time** with no zone marker. Parse them wit
 mislabel them UTC). `cmd/server` blank-imports `time/tzdata` so the zone resolves
 even in a minimal container.
 
-## Caltrans CWWP2 (`cwwp2`) — the portal QuickMap is built from
+## Caltrans CWWP2 (`cwwp2`) — Caltrans's structured data portal
 
 QuickMap (quickmap.dot.ca.gov) is a static app: `/config/layers.json` maps each
-layer to a KML under `/data/`, and those KMLs are generated from Caltrans's
-CWWP2 portal, which publishes structured JSON/XML/CSV per district at
+layer to a KML under `/data/`. Some of those KMLs visibly draw on the CWWP2
+portal (the camera KML links CWWP2 snapshot URLs), which publishes structured
+JSON/XML/CSV per district at
 `https://cwwp2.dot.ca.gov/data/d{N}/{feed}/{feed}StatusD{NN}.json`. **The file
 name zero-pads the district, the directory does not** (`/d3/cc/ccStatusD03.json`).
 District 10 covers our whole footprint (Calaveras, Tuolumne, Alpine, Amador,
 Mariposa).
 
-- **Chain controls (`cc`) — in use.** Every checkpoint with an explicit status,
-  so a quiet day is 149 × `R-0`, not an empty file. That is why it replaced
-  cc.kml's levels: an empty cc.kml can't be told from a broken one. The client
-  fails an empty file (`ErrEmptyFeed`) and a frozen one (`ErrStaleFeed`, newest
-  `recordTimestamp` older than `staleAfter`, default 1h). `caltrans.FeedParser`
-  merges it (`UseCWWP2ChainControls`, configured by
-  `roads.caltransFeeds.cwwp2.chainControlDistricts`): R-levels from CWWP2, plus
-  cc.kml's road closures (`styleUrl #full-closure` — the seasonal pass
-  closures) and truck-only `MAX`/`MIN`/`TS` levels, because no CWWP2 capture has
-  yet shown how (or whether) it represents those. **The supplement is selected
-  by positive match (`isKMLSupplement`), never as "whatever has no parseable
-  R-level"**: if cc.kml moves to the iw-* layout like the other two KMLs, no
-  level would parse and every control would leak through as a duplicate.
-  A CWWP2 failure is a hard error; a cc.kml failure returns the CWWP2 levels
-  with a `caltrans.PartialError` (layer `STALE`). An out-of-service checkpoint
-  is skipped only when it reports R-0 — a requirement on a sign we can't poll
-  is still shown. A non-empty feed with no parseable record stamp is
-  `ErrNoRecordTime`, so a timestamp format change can't silently disable the
-  freshness check.
+- **Chain controls (`cc`) — in use, MERGED with cc.kml, neither ranked.**
+  CWWP2 lists every checkpoint with an explicit status, so a quiet day is
+  149 × `R-0` rather than an empty file — an empty cc.kml can't be told from a
+  broken one. The client fails an empty file (`ErrEmptyFeed`), a frozen one
+  (`ErrStaleFeed`, newest `recordTimestamp` older than `staleAfter`, default
+  1h) and one whose stamps no longer parse (`ErrNoRecordTime`).
+
+  **Do not make either source authoritative over the other.** Both describe
+  the same checkpoint registry — every point in the 2025-12-24 cc.kml capture
+  sits 0 m from a same-named CWWP2 checkpoint, pass-closure gates included —
+  but cc.kml carries Highway-Information-style `District / Message ID`
+  identifiers (the CHIN layer uses the same scheme; CWWP2 uses checkpoint
+  indexes), so its STATUS may come from a different system, and the two have
+  never been seen side by side in a storm. `caltrans.mergeKML`:
+
+  - cc.kml road closures (`#full-closure` → `ChainControlData.Closed`) and
+    truck-only `MAX`/`MIN`/`TS` levels are always kept (`isKMLSupplement`,
+    positive match only).
+  - Any other cc.kml entry at an ACTIVE CWWP2 checkpoint (≤200 m, same
+    direction) is a duplicate and dropped. Matching is **positional**, so it
+    survives cc.kml moving to the blank-`<name>` iw-* layout.
+  - Every other cc.kml entry is KEPT: outside the configured districts CWWP2 is
+    silent, and inside them a disagreement shows the control (flagged
+    `Uncorroborated` when it sits on an R-0 checkpoint; the `chain_control`
+    layer logs these — the evidence #12 needs).
+  - An `Unrecognized` CWWP2 checkpoint with a cc.kml entry at the same spot is
+    dropped (cc.kml says what's there), so a closure gate carrying a non-R
+    status all winter doesn't degrade the layer for five months.
+  - CWWP2 down → cc.kml alone, as `PartialError` (what we served before
+    CWWP2), unless cc.kml is empty, which stays a hard error. cc.kml down →
+    CWWP2 alone, as `PartialError`.
+
+  CWWP2 can list **two checkpoints at one spot** (`RED LAKE CREEK` and
+  `RED LAKE CREEK - CARSON PASS`, 1 m apart, both westbound — a chain sign and
+  its closure gate). An out-of-service checkpoint is skipped only when it
+  reports R-0. `Closed` entries are never a chain requirement: the roads
+  service skips them (the Ebbetts gate ~3 km past Bear Valley would otherwise
+  mark Arnold–Bear Valley "chains required" all winter).
 - **Lane closures (`lcs`) — parsed, not yet wired.** One row per closure
   WINDOW, including scheduled ones (4× the rows lcs2way.kml shows for our
   counties), with epoch times and the radio codes 10-97 (set up), 10-98
@@ -91,8 +111,8 @@ Observed 2026-09-30: `rwis` drops commas between repeated sensor entries (XML
 variant is fine); D11 `cc` is not valid UTF-8; D4/D5/D12 `cc` answer 500; **D7
 carried a longitude in a checkpoint's `status`**. An unparseable status is
 `cwwp2.LevelUnknown` → `ChainControlData.Unrecognized`: the roads service
-ignores it and the `chain_control` layer drops it and degrades to `STALE` when
-it's in-area. The documentation page answers 403 — there is no contract.
+ignores it, and the `chain_control` layer drops it and degrades to `STALE` when
+it's in-area — unless cc.kml reports something at that checkpoint (see above). The documentation page answers 403 — there is no contract.
 Date/time strings are Pacific local; `*Epoch` fields are real Unix epochs.
 
 `./bin/test-caltrans -feed=cwwp2 [-district=N]` probes it live (levels,

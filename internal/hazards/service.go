@@ -303,10 +303,19 @@ func (s *Service) chainControls(ctx context.Context, area config.HazardArea) ([]
 		return nil, err
 	}
 	var out []Feature
-	var unrecognized []string
+	var unrecognized, unplaced, uncorroborated []string
 	for _, c := range controls {
-		if c.Coordinates == nil || !area.Bounds.Contains(c.Coordinates.Latitude, c.Coordinates.Longitude) {
+		if c.Coordinates == nil {
+			// Can't be ruled in or out of the area, so the layer can't claim
+			// to be complete. (Only CWWP2 rows can lack a position.)
+			unplaced = append(unplaced, strings.TrimSpace(c.Highway+" "+c.LocationName))
 			continue
+		}
+		if !area.Bounds.Contains(c.Coordinates.Latitude, c.Coordinates.Longitude) {
+			continue
+		}
+		if c.Uncorroborated {
+			uncorroborated = append(uncorroborated, strings.TrimSpace(c.Highway+" "+c.Direction+" "+c.LocationName+" "+c.Level))
 		}
 		if c.Unrecognized {
 			// Neither a requirement nor an all-clear: keep it off the map, but
@@ -318,12 +327,16 @@ func (s *Service) chainControls(ctx context.Context, area config.HazardArea) ([]
 		if attribution == "" {
 			attribution = caltrans.SourceQuickMap
 		}
+		category, headline := strings.ToLower(c.Level), strings.TrimSpace(c.Highway+" chain control "+c.Level)
+		if c.Closed {
+			category, headline = "closed", strings.TrimSpace(c.Highway+" road closed")
+		}
 		p := Properties{
-			ID:           "cc:" + nonEmpty(c.MessageID, c.LocationName),
+			ID:           "cc:" + nonEmpty(c.MessageID, c.LocationName, fmt.Sprintf("%.5f,%.5f", c.Coordinates.Latitude, c.Coordinates.Longitude)),
 			Layer:        strings.ToUpper(LayerChainControl),
 			Kind:         "Chain control",
-			Category:     strings.ToLower(c.Level),
-			Headline:     strings.TrimSpace(c.Highway + " chain control " + c.Level),
+			Category:     category,
+			Headline:     headline,
 			Description:  c.Description,
 			AreaLabel:    c.LocationName,
 			Effective:    c.EffectiveTime,
@@ -339,6 +352,13 @@ func (s *Service) chainControls(ctx context.Context, area config.HazardArea) ([]
 	}
 	if len(unrecognized) > 0 {
 		degraded = append(degraded, fmt.Errorf("unrecognized chain-control status at %s", strings.Join(unrecognized, "; ")))
+	}
+	if len(unplaced) > 0 {
+		degraded = append(degraded, fmt.Errorf("chain-control entries without a position: %s", strings.Join(unplaced, "; ")))
+	}
+	if len(uncorroborated) > 0 {
+		// Shown (the safe side), not degraded: the evidence for issue #12.
+		logging.Warnw(ctx, "cc.kml reports chain controls CWWP2 does not", "area", area.ID, "controls", uncorroborated)
 	}
 	if len(degraded) > 0 {
 		return out, partialData(errors.Join(degraded...))

@@ -23,12 +23,31 @@ So the following are still unverified:
   layer to STALE rather than guessing.
 - Whether CWWP2 reports **road closures** (the seasonal Ebbetts/Sonora/Tioga
   closures `cc.kml` shows as "Road Closed") or the **truck-only** levels
-  (`MAX`/`MIN`/`TS`). Until this is known, `cc.kml` stays in use for exactly
-  those entries.
+  (`MAX`/`MIN`/`TS`), and what status a closed gate carries.
+- **Whether the two sources agree in a storm.** The `chain_control` layer logs
+  `cc.kml reports chain controls CWWP2 does not` whenever they disagree.
 
 At the first real storm, capture `make fetch-cwwp2-data` alongside
 `make fetch-caltrans-data`. Then replace the synthetic fixture with the real
-one, and resolve the two questions above.
+one, and resolve the questions above.
+
+## What the 2025 cc.kml capture already tells us
+
+Matched against `../caltrans/chain_controls_20251224.kml` (a real storm):
+
+- **Every cc.kml point sits 0 m from a same-named CWWP2 checkpoint**, pass
+  closure gates included (`MOUNT REBA ROAD - EBBETTS PASS`, `KENNEDY MEADOWS -
+  SONORA PASS`, `CRANE FLAT RD (closure gate…)`). One shared registry. The one
+  exception, `Highway 108 R-1 3.8 Mi. W of Jct. 395`, is in District 9.
+- **But cc.kml carries `District:N Message ID:NNNN`**, the Highway Information
+  (CHIN) identifier scheme, not CWWP2's checkpoint index. Its *status* may come
+  from a different system. That's why the two are merged and never ranked.
+- **CWWP2 can list two checkpoints at one spot** (`RED LAKE CREEK` and
+  `RED LAKE CREEK - CARSON PASS`, 1 m apart, both westbound).
+
+The portal regenerated `cc` files within about a minute of the wall clock in
+captures at 17:20 and 20:57 PDT. Overnight regeneration is unverified; the
+1-hour staleness check would fail loudly (not silently) if it pauses.
 
 ## Portal quirks seen while capturing
 

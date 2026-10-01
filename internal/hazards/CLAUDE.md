@@ -92,16 +92,19 @@ in the root `CLAUDE.md`) — do not add manual `SecurityHeaders` calls.
 
 ## `chain_control` sources
 
-Levels come from Caltrans CWWP2 (every checkpoint, explicit `R-0`), with cc.kml
-supplying only its road-closed / truck-level entries — see the `cwwp2` section
-of `internal/clients/CLAUDE.md`. So on a quiet day `OK` + 0 features is a
-**confirmed** "no chain controls", not an empty KML taken on faith. Two
-degraded cases keep features and return `partialData` (→ `STALE`): cc.kml down
-(`caltrans.PartialError`), and an in-area checkpoint whose status CWWP2 sent as
-garbage (`ChainControlData.Unrecognized` — dropped from the map, never shown as
-a level). Feature ids are `cc:<checkpoint index>` (e.g.
-`cc:10-ALP-4-0.65-W-14W`, Bear Valley WB); per-feature `source.attribution` names the host the
-entry came from.
+Caltrans CWWP2 (every checkpoint, explicit `R-0`) MERGED with cc.kml — neither
+source overrides the other's controls; see the `cwwp2` section of
+`internal/clients/CLAUDE.md` for the rules. On a quiet day `OK` + 0 features is
+a **confirmed** "no chain controls", not an empty KML taken on faith. Degraded
+cases keep features and return `partialData` (→ `STALE`): either source down
+(`caltrans.PartialError`), an in-area checkpoint whose status CWWP2 sent as
+garbage and cc.kml doesn't explain (`Unrecognized` — dropped from the map, never
+shown as a level), or a row with no position. Controls cc.kml reports where
+CWWP2 says R-0 are SHOWN and logged ("cc.kml reports chain controls CWWP2 does
+not"). Road closures (`Closed`) render as `"<highway> road closed"`, category
+`closed`. Feature ids are `cc:<checkpoint index>` for CWWP2 (e.g.
+`cc:10-ALP-4-0.65-W-14W`, Bear Valley WB), `cc:<message id>` for cc.kml, with a
+coordinate fallback; `source.attribution` names the host.
 
 ## Changing a condition layer
 

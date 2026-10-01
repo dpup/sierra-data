@@ -609,8 +609,11 @@ func (s *RoadsService) findChainControlForRoute(ctx context.Context, route routi
 	bestDistance := float64(10000) // 10km max distance
 
 	for i, cc := range chainControls {
-		// An unreadable CWWP2 status is not a requirement.
-		if cc.Unrecognized {
+		// An unreadable CWWP2 status is not a requirement, and neither is a
+		// road closure: the Ebbetts gate past Bear Valley would otherwise mark
+		// the Arnold–Bear Valley segment "chains required" all winter. Closures
+		// reach a road through roads.dot.ca.gov conditions instead.
+		if cc.Unrecognized || cc.Closed {
 			continue
 		}
 

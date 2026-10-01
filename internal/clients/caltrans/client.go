@@ -78,6 +78,15 @@ type ChainControlData struct {
 	// area as fully known either. RawStatus keeps the value for diagnosis.
 	Unrecognized bool
 	RawStatus    string
+	// Closed marks a cc.kml road-closure entry ("Eastbound Highway 4 Road
+	// Closed", styleUrl #full-closure) — the seasonal pass gates. It is not a
+	// chain requirement and must not be read as one.
+	Closed bool
+	// Uncorroborated marks a cc.kml control sitting on a CWWP2 checkpoint that
+	// reports R-0 — the sources disagree. It is
+	// still a control (the safe side); the flag exists so the disagreement is
+	// visible in logs while their agreement is unverified (#12).
+	Uncorroborated bool
 }
 
 // KML XML structures for parsing
@@ -194,6 +203,8 @@ func (p *FeedParser) parseChainControlDetails(incidents []CaltransIncident) []Ch
 
 		// Parse name: "Eastbound US 50 Chain Control level R-2"
 		control.Direction, control.Highway, control.Level = parseChainControlName(incident.Name)
+		control.Closed = strings.EqualFold(strings.TrimSpace(incident.StyleUrl), "#full-closure") ||
+			roadClosedPattern.MatchString(incident.Name)
 
 		// Parse description HTML for location, effective time, and requirements
 		control.LocationName, control.EffectiveTime, control.Description, control.LastUpdated, control.District, control.MessageID = parseChainControlDescription(incident.DescriptionHtml)
@@ -203,6 +214,8 @@ func (p *FeedParser) parseChainControlDetails(incidents []CaltransIncident) []Ch
 
 	return controls
 }
+
+var roadClosedPattern = regexp.MustCompile(`(?i)\bRoad\s+Closed\b`)
 
 // parseChainControlName extracts direction, highway, and level from the name
 // Example: "Eastbound US 50 Chain Control level R-2"
@@ -220,8 +233,10 @@ func parseChainControlName(name string) (direction, highway, level string) {
 		level = "R" + match[1]
 	}
 
-	// Extract highway name (everything before "Chain Control")
-	highwayPattern := regexp.MustCompile(`(?i)^(.+?)\s+Chain\s+Control`)
+	// Extract highway name (everything before "Chain Control", or before
+	// "Road Closed" for the closure entries — which otherwise had no highway
+	// at all and rendered as a bare "chain control").
+	highwayPattern := regexp.MustCompile(`(?i)^(.+?)\s+(?:Chain\s+Control|Road\s+Closed)`)
 	if match := highwayPattern.FindStringSubmatch(name); len(match) > 1 {
 		highway = strings.TrimSpace(match[1])
 	}

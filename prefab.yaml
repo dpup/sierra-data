@@ -76,12 +76,14 @@ roads:
     roadConditions:
       refreshInterval: "10m"  # Caltrans road conditions page (closures, chain controls)
       url: "https://roads.dot.ca.gov/roadscell.php?roadnumber=%s"
-    # Caltrans CWWP2 data portal — the structured per-district feeds QuickMap's
-    # KML is built from. Chain-control LEVELS come from here: every checkpoint
-    # reports explicitly (R-0 on a quiet day), so an empty/frozen feed is an
-    # error instead of a silent "no controls". cc.kml is still read for road
-    # closures and truck-only levels. District 10 covers Calaveras, Tuolumne,
-    # Alpine, Amador and Mariposa. See internal/clients/CLAUDE.md.
+    # Caltrans CWWP2 data portal — structured per-district feeds. Chain
+    # controls are MERGED with cc.kml (neither overrides the other): every
+    # CWWP2 checkpoint reports explicitly (R-0 on a quiet day), so an empty or
+    # frozen feed is an error instead of a silent "no controls", while cc.kml
+    # still contributes closures, truck levels, controls outside these
+    # districts, and any control CWWP2 doesn't confirm. District 10 covers
+    # Calaveras, Tuolumne, Alpine, Amador and Mariposa. See
+    # internal/clients/CLAUDE.md.
     cwwp2:
       baseUrl: "https://cwwp2.dot.ca.gov/data"
       chainControlDistricts: [10]
