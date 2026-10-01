@@ -67,9 +67,17 @@ within the monthly API budget — adding monitored roads increases that load.
 ## Region-wide incidents (`incidents.go`)
 
 Surfaces the same Caltrans/CHP data as road alerts, but as a flat list scoped by
-a configured bounding box (`roads.incidentAreas`) instead of per-route. Parsing
-of log number / type / location / time is done structurally from the KML
-description. See `internal/clients/CLAUDE.md` for the 2026 feed-format caveat.
+a configured bounding box (`roads.incidentAreas`) instead of per-route. Its only
+caller is the grid's road-incident poller. Parsing of log number / type /
+location / time is done structurally from the KML description. See
+`internal/clients/CLAUDE.md` for the 2026 feed-format caveat.
+
+**With CWWP2 lane closures configured (`laneClosureDistricts`), `refreshIncidents`
+does not read `lcs2way.kml` at all**: the grid's `LaneClosureNormalizer` owns
+closures, and reading the KML here would only spend enhancement budget on
+incidents nobody stores. CHP is then the only feed, so a CHP failure fails the
+refresh, and `IncidentFeedHealth`'s `laneErr` stays nil. Per-road status
+(`refreshRoadData`) still reads `lcs2way.kml` either way.
 
 **Every incident is AI-enhanced** (`enhanceIncident`), via the same
 content-hash 24h cache as road alerts (`enhanceRawAlert` in `roads.go` —

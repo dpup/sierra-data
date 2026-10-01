@@ -8,7 +8,7 @@ committed and tests depend on their exact counts, so don't overwrite them.
 | File | What | Edited? |
 |---|---|---|
 | `cc_d10_20260930.json` | District 10 chain controls: all 149 checkpoints, every one `R-0`. A quiet September day. | **Verbatim** |
-| `lcs_d10_20260930.json` | District 10 lane closures, trimmed from 370 rows to 84. Keeps every row whose begin county is Alpine, Amador, Calaveras, Mariposa or Tuolumne, plus two rows of any 10-97/10-98/10-22/indefinite combination not otherwise present. | Rows removed, then re-serialized. Row content is untouched. |
+| `lcs_d10_20260930.json` | District 10 lane closures, trimmed from 370 rows to 84 (also drives `internal/ingest`'s lane-closure poller tests, which pin its 54 scheduled + 3 active in-box windows). Keeps every row whose begin county is Alpine, Amador, Calaveras, Mariposa or Tuolumne, plus two rows of any 10-97/10-98/10-22/indefinite combination not otherwise present. | Rows removed, then re-serialized. Row content is untouched. |
 | `cc_d07_bad_status_20260930.json` | District 7: one healthy checkpoint plus the two SR-2 checkpoints whose `status` held a **longitude** (`"-118.1307759"`). This is a real upstream defect. | Rows removed, then re-serialized. Row content is untouched. |
 | `cc_d10_synthetic_storm.json` | **SYNTHETIC.** The D10 capture with 6 Hwy 4 checkpoints (Arnold, Big Trees Park, Dorrington, Cottage Springs) set to `R-2` and Hwy 108 Pinecrest EB set to `R-1`. The requirement text is copied from the real 2025-12-24 `cc.kml` capture. | **Hand-edited** |
 

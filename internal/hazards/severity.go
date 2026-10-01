@@ -99,6 +99,77 @@ func fromRoadImpact(impact string) string {
 	}
 }
 
+// fromLaneClosure grades a Caltrans planned closure (CWWP2) from its structure,
+// with no AI in the loop. The bands match what the model assigned the same
+// closures when they came through the incidents pipeline (23 live closures,
+// 2026-10-01): one-way traffic and a closed travel lane read MODERATE,
+// shoulder-only work MINOR, a full closure SEVERE.
+//
+// The closure TYPE wins over the lane list. "Alternating Lanes" lists every
+// lane it will ever close (C50KB: "Median, LShoulder, 1, 2, Auxiliary,
+// RShoulder" of 2), but closes them in turn, so counting lanes would call it
+// full. Only "Full", or a "Lane"/"Moving" closure that takes every travel lane,
+// closes the road. On a ramp that is a detour, not a closed highway.
+//
+// Anything unrecognized grades MODERATE: nothing says how much is closed, and
+// under-rating a closure is the worse error.
+func fromLaneClosure(facility, closureType, lanesClosed string, totalLanes int) string {
+	ramp := strings.Contains(strings.ToLower(facility), "ramp")
+	closed := func() string {
+		if ramp {
+			return SevModerate
+		}
+		return SevSevere
+	}
+	switch strings.ToLower(strings.TrimSpace(closureType)) {
+	case "full":
+		return closed()
+	case "one-way traffic", "alternating lanes":
+		return SevModerate
+	case "traffic break":
+		return SevMinor
+	}
+	travel, all, other := closedLanes(lanesClosed)
+	switch {
+	case all || (totalLanes > 0 && travel >= totalLanes):
+		return closed()
+	case travel > 0:
+		return SevModerate
+	case other > 0:
+		return SevMinor // shoulders, turn lanes, median: traffic keeps every lane
+	default:
+		return SevModerate
+	}
+}
+
+// closedLanes reads CWWP2's lanesClosed list ("1, RShoulder", "All",
+// "Rt Turn Ln"): numbered travel lanes, whether it says All, and how many
+// other (non-travel) entries it names.
+func closedLanes(list string) (travel int, all bool, other int) {
+	for _, tok := range strings.Split(list, ",") {
+		tok = strings.TrimSpace(tok)
+		switch {
+		case tok == "":
+		case strings.EqualFold(tok, "all"):
+			all = true
+		case isDigits(tok):
+			travel++
+		default:
+			other++
+		}
+	}
+	return travel, all, other
+}
+
+func isDigits(s string) bool {
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return s != ""
+}
+
 // fromFireWeatherState maps a fire-weather state string ("normal"|"elevated"|
 // "red-flag" or their UPPER enum names) onto the unified scale.
 func fromFireWeatherState(state string) string {

@@ -397,3 +397,40 @@ func TestRoadIncidentSeverityFallsBackWhenUnenhanced(t *testing.T) {
 		t.Errorf("unenhanced incident = %v, want SEVERE from the enum fallback", got)
 	}
 }
+
+// With CWWP2 lane closures configured, closures belong to LaneClosureNormalizer.
+// This poller must cover chp alone: if it still listed caltrans, two pollers
+// would sweep one source against different event sets, each resolving the
+// other's closures.
+func TestRoadIncidentPoll_ClosuresElsewhere(t *testing.T) {
+	enhanced, closure, _ := testIncidents()
+	cfg := testConfig()
+	cfg.Roads.CaltransFeeds.CWWP2.LaneClosureDistricts = []int{10}
+	roads := &fakeRoadsAPI{
+		byArea: map[string]*api.ListIncidentsResponse{
+			"mother-lode":  {Incidents: []*api.Incident{enhanced, closure}},
+			"high-country": {},
+		},
+		feedLaneErr: assert.AnError, // stale state from before the switch: ignored
+	}
+	n := NewRoadIncidentNormalizer(cfg, roads)
+	assert.Equal(t, []string{"chp"}, n.SourceIDs())
+
+	res, err := n.Poll(testCtx(), nil)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"chp:250916ST0066"}, eventIDs(res.Events), "a stray KML closure is dropped")
+	assert.Nil(t, res.PerSource)
+
+	// A partial area failure degrades chp only.
+	roads.errs = map[string]error{"high-country": assert.AnError}
+	res, err = n.Poll(testCtx(), nil)
+	require.NoError(t, err)
+	assert.Error(t, res.PerSource["chp"])
+	assert.NotContains(t, res.PerSource, "caltrans")
+
+	// Every area down with the CHP feed down is everything this poller has.
+	roads.errs = map[string]error{"mother-lode": assert.AnError, "high-country": assert.AnError}
+	roads.feedChpErr = assert.AnError
+	_, err = n.Poll(testCtx(), nil)
+	assert.Error(t, err)
+}

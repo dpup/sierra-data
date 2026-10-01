@@ -7,8 +7,8 @@ enhancement live in `internal/services`, not here.
 | Package    | Source                | Auth                          | Notes |
 |------------|-----------------------|-------------------------------|-------|
 | `google`   | Google Routes API     | `PF__GOOGLE_ROUTES__API_KEY`  | Travel time + polyline. Rate-limited; callers cache aggressively (10k/mo budget). |
-| `caltrans` | quickmap.dot.ca.gov KML | none                        | Lane closures, CHP incidents, chain control (merged with `cwwp2` when configured). |
-| `cwwp2`    | cwwp2.dot.ca.gov JSON (Caltrans data portal) | none (public, undocumented) | Per-checkpoint chain-control status; lane-closure windows incl. scheduled. See below. |
+| `caltrans` | quickmap.dot.ca.gov KML | none                        | CHP incidents, chain control (merged with `cwwp2` when configured), lane closures (per-road status; the `road_incident` layer reads `cwwp2` instead when configured). |
+| `cwwp2`    | cwwp2.dot.ca.gov JSON (Caltrans data portal) | none (public, undocumented) | Per-checkpoint chain-control status; lane-closure windows incl. scheduled (the `road_incident` closures). See below. |
 | `weather`  | OpenWeatherMap        | `PF__OPENWEATHER__API_KEY`    | Current conditions only. `GetWeatherAlerts` (One Call 3.0, 1,000/day cap) is CLI-diagnostic only — the server sources alerts from `nws`. |
 | `nws`      | api.weather.gov       | none (User-Agent required)    | Authoritative zone alerts + fire-weather products. |
 | `firis`    | ArcGIS (CAL FIRE org) | none (public)                 | CAL FIRE/FIRIS combo fire perimeters. Dedup + `LastEdit` gating live in `internal/ingest` (wildfire). Replaced `wfigs` (retained unused). |
@@ -93,15 +93,23 @@ Mariposa).
   reports R-0. `Closed` entries are never a chain requirement: the roads
   service skips them (the Ebbetts gate ~3 km past Bear Valley would otherwise
   mark Arnold–Bear Valley "chains required" all winter).
-- **Lane closures (`lcs`) — parsed, not yet wired.** One row per closure
-  WINDOW, including scheduled ones (4× the rows lcs2way.kml shows for our
-  counties), with epoch times and the radio codes 10-97 (set up), 10-98
-  (picked up), 10-22 (cancelled). `LaneClosure.PhaseAt` derives
-  SCHEDULED/ACTIVE/COMPLETED/CANCELLED — codes win over the clock, so a set-up
-  closure past its window is still ACTIVE (overruns happen). **Before wiring it
-  (#11):** an empty `lcs` file is accepted as "no closures" (unlike `cc`), and a
-  code block whose shape changes decodes as "not called" — both would let the
-  disappearance sweep resolve real closures. Gate them like the `cc` checks.
+- **Lane closures (`lcs`) — the `road_incident` layer's closures** (via
+  `ingest.LaneClosureNormalizer`, `laneClosureDistricts: [3, 10]`). One row per
+  closure WINDOW, including scheduled ones (10x the closures lcs2way.kml shows
+  for the incident box), with epoch times and the radio codes 10-97 (set up),
+  10-98 (picked up), 10-22 (cancelled). `LaneClosure.PhaseAt` derives
+  SCHEDULED/ACTIVE/COMPLETED/CANCELLED. Codes win over the clock, so a set-up
+  closure past its window is still ACTIVE (overruns happen). Two gates keep a
+  broken file from reading as "every closure ended":
+  - **An empty file is `ErrEmptyFeed`** (D3 lists ~1,100 windows, D10 ~630, D9
+    81; an empty file also has no record stamp to check freshness against).
+  - **`LaneClosure.Unrecognized`** names a row that can't be phased: a code flag
+    that is not exactly `true`/`false` (a renamed key decodes as blank), no
+    start, no end on a non-indefinite window, no index, or no position at
+    either end. All 2,593 rows across D3/D6/D9/D10 on 2026-10-01 pass. The
+    poller degrades the source on any such row in scope.
+  `recordTimestamp` is the FILE's generation stamp (every row carries the same
+  one), not a per-row edit time. The portal does not gzip.
 - **Also available, unused:** `cms` (message-sign text as plain fields), `cctv`
   (snapshot JPG + HLS stream URLs per camera), `rwis` (road-weather stations —
   D10's are all Valley sites, useless to us, and its JSON doesn't parse).

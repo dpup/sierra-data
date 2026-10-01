@@ -14,6 +14,85 @@ throughout; errors are gRPC-standard `{code, codeName, message, details}`). The
 by a snake_case `/v1` surface on 2026-07-05, which was in turn folded back onto the
 proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 
+## 2026-10-01
+
+### `road_incident`: Caltrans lane closures from CWWP2, scheduled windows included
+
+**Breaking for consumers that read every `road_incident` row as "happening
+now".** Applies to `GET /api/v1/events` (`layer=road_incident`),
+`/api/v1/events/{id}` and its history, `/api/v1/history`, the
+`road_incident.geojson` map layer, `/api/v1/places/{place}/summary`, and
+`/api/v1/sources`. CHP incidents are unchanged.
+
+Lane closures now come from the Caltrans CWWP2 data portal (`cwwp2.dot.ca.gov`,
+Districts 3 and 10) instead of QuickMap's `lcs2way.kml`. The KML listed only
+closures that were set up at that moment. CWWP2 lists every planned work
+window, so the layer now carries upcoming roadwork too. On 2026-10-01 the
+incident box held 234 windows (about 24 set up) against the 23 closures the KML
+showed.
+
+- **One event per work window.** Caltrans files a multi-day job as one row per
+  day, and neither the closure id nor the log number identifies a job: one log
+  number can move between places, and some jobs get a new log number every
+  day. New ids are `caltrans:d{district}-{CWWP2 index without colons}`, e.g.
+  `caltrans:d10-C4QB-0004-2026-10-02-070100`. Don't parse them.
+- **`status: SCHEDULED`** for a window not yet set up, with `effective` set to
+  its planned start. It becomes `ACTIVE` when the crew radios the closure set up
+  (10-97), and `effective` moves to that time. It becomes `RESOLVED` when picked
+  up (10-98), cancelled (10-22), or when its window ends without being set up.
+  The default `/events` filter (`ACTIVE,SCHEDULED`) therefore now returns
+  upcoming roadwork. **Pass `status=ACTIVE` for only what is on the road now.**
+- **`expires` stays `null`.** The planned end is an estimate crews overrun. A
+  set-up closure stays `ACTIVE` until it is picked up, even past its window.
+- **New `roadIncident.closure` block** (`LaneClosureDetail`), on Caltrans
+  closures only: `windowId, district, closureId, logNumber, route, direction,
+  facility, closureType, workType, lanesClosed, totalLanes,
+  estimatedDelayMinutes, closureDuration, plannedStart, plannedEnd,
+  endIndefinite, setUpAt, beginLocation, endLocation, begin, end`.
+  `roadIncident.logNumber` still carries the closure id.
+- **No AI on closures.** The rows are structured, so `headline` (what and why:
+  `"Hwy 88 one-way traffic control (Tree Work)"`), `areaLabel` (where:
+  `"Hwy 88 at Schneidr Road (Left), near Markleeville"`), `description`
+  (`"Closed: lane 1, right shoulder (of 2 lanes). Estimated delay: 10 min."`)
+  and `severity` are composed from Caltrans's own fields. On closures,
+  `summary`, `enhancement`, `roadIncident.impact`, `.duration` and `.metadata`
+  are now empty. Severity: a full closure is `SEVERE` (`MODERATE` on a ramp);
+  one-way traffic, alternating lanes or any closed travel lane is `MODERATE`;
+  shoulders or turn lanes only is `MINOR`.
+- **Closures in place at deploy keep their ids and history.** Each closure
+  stored under the old `caltrans:{closureId}-{log}-{hash}` id is matched to its
+  CWWP2 window and keeps that id until it is picked up. It gets one revision
+  for the new text, not a `RESOLVED` revision plus a duplicate event. Every
+  window after that uses the new ids.
+- **GeoJSON `road_incident`:** `properties.source` follows the feed. CHP is
+  `{"id":"chp","name":"CHP / Caltrans","attribution":"quickmap.dot.ca.gov"}` as
+  before; Caltrans closures are
+  `{"id":"caltrans","name":"Caltrans","attribution":"cwwp2.dot.ca.gov"}` (every
+  feature used to carry the CHP block). `properties.status` is `SCHEDULED` for
+  planned windows. `properties.incident.closure` carries `windowId,
+  closureType, workType, lanesClosed, totalLanes, estimatedDelayMinutes,
+  plannedStart, plannedEnd, setUpAt`. `properties.description` is the composed
+  description. `metadata.attribution` reads `quickmap.dot.ca.gov ·
+  cwwp2.dot.ca.gov`.
+- **Summary:** a `SCHEDULED` road closure is not counted in
+  `summary.totalActive`, `severityCounts` or `topEvents`, nor in the `roads`
+  domain's `activeCount`, `highestSeverity` or `headlines`. Planned roadwork is
+  a calendar; a week of it would bury a live collision. A `SCHEDULED` weather
+  watch or PSPS still counts. `mode` never counted `SCHEDULED` events.
+- **`/api/v1/sources`:** the `caltrans` row's `attribution` is now
+  `cwwp2.dot.ca.gov · quickmap.dot.ca.gov`, and so is the `chain_control`
+  layer's `metadata.attribution`, which had said QuickMap alone since CWWP2
+  began supplying chain-control levels. The row's health is the lane-closure
+  poller's, every 10 minutes. A district file that is unreachable, empty, or
+  has stopped regenerating (newest record over an hour old) degrades it, as
+  does an in-area row whose set-up/pick-up/cancel flags can't be read. None of
+  these ever resolves a closure.
+
+**Migration:** to show only closures on the road now, filter on `status ==
+"ACTIVE"` (or request `status=ACTIVE`). Map clients should style `SCHEDULED`
+features differently from active ones. Don't key anything on the shape of a
+`caltrans:` id.
+
 ## 2026-09-30
 
 ### `chain_control` map layer: Caltrans CWWP2 merged in

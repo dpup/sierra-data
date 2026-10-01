@@ -40,6 +40,13 @@ func SeverityFromNWSSeverity(s string) string { return fromNWSSeverity(s) }
 // caller falls back to the enum path rather than under-rating the incident.
 func SeverityFromRoadImpact(impact string) string { return fromRoadImpact(impact) }
 
+// SeverityFromLaneClosure grades a Caltrans planned lane closure from its
+// facility, closure type, lanes-closed list and lane count (see
+// fromLaneClosure). Deterministic: these closures are not AI-enhanced.
+func SeverityFromLaneClosure(facility, closureType, lanesClosed string, totalLanes int) string {
+	return fromLaneClosure(facility, closureType, lanesClosed, totalLanes)
+}
+
 // NormalizeEvacLevel maps Cal OES free-text STATUS to a coded level ("" only
 // for explicitly-inactive statuses; unrecognized active statuses default to a
 // conservative WARNING — see normalizeEvacLevel).

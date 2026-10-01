@@ -288,6 +288,15 @@ authenticate).
   elements and Pacific-time stamps. See `internal/clients/CLAUDE.md` before
   touching KML parsing.
 
+**Caltrans CWWP2 portal** (`cwwp2.dot.ca.gov`, JSON per district):
+- Chain-control levels (merged with `cc.kml`) and **the `road_incident` layer's
+  lane closures** (`roads.caltransFeeds.cwwp2.laneClosureDistricts: [3, 10]`,
+  replacing `lcs2way.kml` there). One event per work window, SCHEDULED until the
+  crew radios it set up; deterministic text and severity, no AI. Undocumented
+  (the docs page answers 403), hand-templated JSON, no gzip.
+- See the CWWP2 section of `internal/clients/CLAUDE.md` and "Lane closures" in
+  `internal/ingest/CLAUDE.md`. Probe live with `./bin/test-caltrans -feed=cwwp2`.
+
 **National Weather Service** (`api.weather.gov`):
 - Authoritative zone alerts (watches/warnings) and fire-weather products
 - No API key; requires a descriptive `User-Agent` (`weather.nws.userAgent`)
@@ -407,9 +416,11 @@ gateway's `EmitUnpopulated` marshaler.
   LineString. This is the road-incident feed (`layer=road_incident`, scope by
   corridor `place`) and the
   weather-alert listing (`layer=weather_alert`) — there is no separate roads or
-  incidents endpoint. All road incidents are AI-enhanced (`enhancement`:
+  incidents endpoint. CHP road incidents are AI-enhanced (`enhancement`:
   description/summary/impact/metadata), with `severity` driven by the model's
-  impact assessment.
+  impact assessment. Caltrans lane closures (CWWP2) are not: their text and
+  severity are composed from Caltrans's fields, and a planned window not yet set
+  up is `SCHEDULED` (excluded from the place summary's rollups).
 - `GET /api/v1/events/{id}` / `GET /api/v1/events/{id}/history` - current revision /
   revision timeline.
 - `GET /api/v1/history` - cross-event revision archive (`place,from,to,layer`).

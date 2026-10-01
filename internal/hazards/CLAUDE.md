@@ -37,7 +37,10 @@ the rest of `/api/v1`. What remains, and what this package is now, is two things
   maps onto. Editorial response-urgency, not magnitude. Use `setSeverity` so
   `severity_rank` stays in sync. The `SeverityFrom*` / `NormFireName` /
   `NormalizeEvacLevel` wrappers in `severity_export.go` are the exported seam the
-  ingest normalizers (`internal/ingest`) use.
+  ingest normalizers (`internal/ingest`) use. `SeverityFromLaneClosure` grades
+  a CWWP2 closure from its fields alone (no AI). The closure TYPE wins over the
+  lane list: "Alternating Lanes" lists every lane it will ever close but closes
+  them in turn, so counting lanes would call it a full closure.
 
 ## Fail-loud (still enforced for the condition layers)
 

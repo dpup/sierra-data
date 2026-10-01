@@ -87,11 +87,21 @@ roads:
     cwwp2:
       baseUrl: "https://cwwp2.dot.ca.gov/data"
       chainControlDistricts: [10]
+      # Lane closures for the road_incident layer, SCHEDULED windows included,
+      # one event per window (lcs2way.kml, which this replaces, listed only
+      # closures set up right now). Fetched by their own grid poller on the
+      # grid.sources.caltrans interval. The incident box below reaches two
+      # districts: 10 (Calaveras, Tuolumne, Alpine, Amador, Mariposa, the
+      # Valley) and 3 (El Dorado: US-50, SR-49 north of the Cosumnes). A
+      # district missing here is a closure never seen, not a closure ended.
+      # Empty falls back to lcs2way.kml through the incidents pipeline.
+      laneClosureDistricts: [3, 10]
       staleAfter: "1h"
 
   # Scope for the region-wide incidents feed. The CHP/Caltrans KML feeds are
   # STATEWIDE, and this box is the ONLY geographic gate before an incident is
-  # AI-enhanced — so its size is a cost as well as a coverage decision.
+  # AI-enhanced — so its size is a cost as well as a coverage decision. CWWP2
+  # lane closures are scoped by the same box (they are not AI-enhanced).
   #
   # It is the hazards.areas ebbetts-pass box grown by ~0.25 deg (~27 km). The
   # margin is deliberate and is NOT the wildfire margin's reasoning: a fire
@@ -462,8 +472,11 @@ grid:
       pollInterval: "5m"
       disappearance: "resolve"
     caltrans:
-      # Lane closures are scheduled operations; the upstream feed refreshes
-      # on a 10m cadence, so polling faster just re-reads the same data.
+      # Lane closures (CWWP2, roads.caltransFeeds.cwwp2.laneClosureDistricts).
+      # The portal regenerates every few minutes, but each poll moves ~5 MB of
+      # uncompressed JSON (D3 + D10) and closures are planned operations, so
+      # 10m. resolve: a window leaves our set when it is picked up, cancelled,
+      # or past its window without being set up.
       pollInterval: "10m"
       disappearance: "resolve"
     # PG&E electric outages. The outage layers are authoritatively active-only —

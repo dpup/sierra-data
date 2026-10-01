@@ -131,12 +131,24 @@ func (s *RoadsService) resolveIncidentArea(id string) (config.IncidentArea, bool
 // tolerated for availability (the survivor's data is still served) but is
 // recorded so IncidentFeedHealth exposes it — otherwise a dead feed is
 // indistinguishable from an all-clear downstream.
+//
+// When CWWP2 lane closures are configured (laneClosureDistricts), lcs2way.kml
+// is not read at all: the grid's lane-closure poller owns closures, and
+// reading the KML here would only spend enhancement budget on events nobody
+// stores. CHP is then the only feed, so its failure is the refresh's failure.
 func (s *RoadsService) refreshIncidents(ctx context.Context, area config.IncidentArea) ([]*api.Incident, error) {
 	chpIncidents, chpErr := s.caltransClient.ParseCHPIncidents(ctx)
-	laneClosures, lcErr := s.caltransClient.ParseLaneClosures(ctx)
+	var (
+		laneClosures []caltrans.CaltransIncident
+		lcErr        error
+	)
+	kmlClosures := len(s.config.Roads.CaltransFeeds.CWWP2.LaneClosureDistricts) == 0
+	if kmlClosures {
+		laneClosures, lcErr = s.caltransClient.ParseLaneClosures(ctx)
+	}
 	s.recordIncidentFeedHealth(chpErr, lcErr)
-	if chpErr != nil && lcErr != nil {
-		return nil, fmt.Errorf("both incident feeds failed: chp=%v lanes=%v", chpErr, lcErr)
+	if chpErr != nil && (lcErr != nil || !kmlClosures) {
+		return nil, fmt.Errorf("incident feeds failed: chp=%v lanes=%v", chpErr, lcErr)
 	}
 	if chpErr != nil {
 		logging.Errorw(ctx, "CHP incident feed failed; serving lane closures only", "error", chpErr)
@@ -168,7 +180,8 @@ func (s *RoadsService) recordIncidentFeedHealth(chpErr, laneErr error) {
 
 // IncidentFeedHealth reports the per-feed outcome of the most recent incident
 // refresh attempt: chpErr for the CHP dispatch feed (chp-only.kml), laneErr
-// for the lane-closure feed (lcs2way.kml), and at for when the attempt ran.
+// for the lane-closure feed (lcs2way.kml; always nil when CWWP2 lane closures
+// replace it), and at for when the attempt ran.
 // Refresh keeps serving the surviving feed's data when only one feed fails,
 // so this accessor is how consumers (e.g. the grid road-incident poller) tell
 // a dead feed from a genuinely quiet one — an upstream error must never read

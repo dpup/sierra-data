@@ -11,6 +11,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -675,4 +676,51 @@ func TestSummary_InfoPowerExcludedFromRollup(t *testing.T) {
 	// asymmetry the comms domain has for mesh presence.
 	power := out.domain(t, "power")
 	assert.Equal(t, 4, power.ActiveCount, "the domain reports the full picture")
+}
+
+// Planned roadwork is a calendar, not a hazard: a SCHEDULED closure window
+// must not reach total_active, top events, or the roads domain's rollup, where
+// 200 of them would bury a live collision. Once set up (ACTIVE) it counts.
+// A SCHEDULED event on any other layer (a weather watch, a PSPS) still counts.
+func TestSummary_ScheduledRoadworkExcludedFromRollup(t *testing.T) {
+	s := newTestService(t)
+	allSourcesOK(t, s.Store)
+	// The test service seeds a fire, a quake and an alert; measure against them.
+	before := decodeSummary(t, getSummaryWith(t, s, nil, "calaveras"))
+	roadsBefore := before.domain(t, "roads")
+
+	road := func(id string, sev gridv1.Severity, status gridv1.EventStatus) *gridv1.Event {
+		return &gridv1.Event{
+			Id: id, Layer: gridv1.Layer_ROAD_INCIDENT, Category: "closure",
+			Severity: sev, Status: status, Headline: "Road " + id,
+			Geometry:   pointGeom(38.06, -120.54),
+			Provenance: &gridv1.Provenance{SourceId: "caltrans"},
+		}
+	}
+	for i := 0; i < 6; i++ {
+		upsert(t, s.Store, road("caltrans:d10-planned-"+strconv.Itoa(i), gridv1.Severity_SEVERE, gridv1.EventStatus_SCHEDULED))
+	}
+	upsert(t, s.Store, road("caltrans:d10-setup", gridv1.Severity_MODERATE, gridv1.EventStatus_ACTIVE))
+	collision := road("chp:collision", gridv1.Severity_MINOR, gridv1.EventStatus_ACTIVE)
+	collision.Provenance.SourceId = "chp"
+	upsert(t, s.Store, collision)
+	upsert(t, s.Store, &gridv1.Event{
+		Id: "nws:watch", Layer: gridv1.Layer_WEATHER_ALERT, Severity: gridv1.Severity_MODERATE,
+		Status: gridv1.EventStatus_SCHEDULED, Headline: "Fire Weather Watch",
+		Geometry: pointGeom(38.06, -120.54), Provenance: &gridv1.Provenance{SourceId: "nws"},
+	})
+
+	out := decodeSummary(t, getSummaryWith(t, s, nil, "calaveras"))
+	assert.Equal(t, before.Summary.TotalActive+3, out.Summary.TotalActive, "set-up closure + collision + the watch")
+	assert.Equal(t, before.Summary.SeverityCounts["SEVERE"], out.Summary.SeverityCounts["SEVERE"],
+		"six SEVERE planned windows add nothing")
+	for _, te := range out.Summary.TopEvents {
+		assert.NotContains(t, te.ID, "planned", "a planned window must not reach top headlines")
+	}
+
+	roads := out.domain(t, "roads")
+	assert.Equal(t, roadsBefore.ActiveCount+2, roads.ActiveCount, "the set-up closure and the collision")
+	for _, h := range roads.Headlines {
+		assert.NotContains(t, h.ID, "planned", "a planned window must not take a roads headline")
+	}
 }

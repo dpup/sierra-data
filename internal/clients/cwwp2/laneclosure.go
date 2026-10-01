@@ -14,11 +14,12 @@ import (
 // here is a window, not a project.
 type LaneClosure struct {
 	// ID is the portal index: closure id, log number and window start
-	// ("C4QB-0004-2026-10-02-07:01:00"). Unique per window.
+	// ("C4QB-0004-2026-10-02-07:01:00"). Unique per window within a district.
 	ID         string
+	District   int    // the district file the row came from (set by Client.LaneClosures)
 	ClosureID  string // route-level PROJECT id — not unique on its own
 	LogNumber  string
-	RecordedAt time.Time
+	RecordedAt time.Time // the FILE's generation stamp: every row carries the same one
 
 	FlowDirection string // "East / West", "North", ...
 	Begin, End    Location
@@ -44,6 +45,15 @@ type LaneClosure struct {
 	SetUp       bool
 	PickedUp    bool
 	Cancelled   bool
+
+	// Unrecognized is non-empty (the reason) when the row cannot be trusted to
+	// say where or when the window is, or whether it was set up, picked up or
+	// cancelled. Don't phase such a row. The JSON is hand-templated (see the
+	// package doc), and a code block whose key or value drifts would otherwise
+	// decode as "not called": a set-up closure would read SCHEDULED, and the
+	// clock would then call it COMPLETED at its planned end even if it overran.
+	// The caller decides whether the row is in its scope and how loudly to fail.
+	Unrecognized string
 }
 
 // Phase is where a closure window stands at a given instant.
@@ -89,6 +99,19 @@ type lcsCode struct {
 	Date string
 	Time string
 	Ep   string
+}
+
+// called reads the code's "is" flag strictly: "true" or "false" and nothing
+// else. ok is false for a blank or missing flag, which is what a renamed key
+// decodes to.
+func (c lcsCode) called() (called, ok bool) {
+	switch strings.ToLower(strings.TrimSpace(c.Is)) {
+	case "true":
+		return true, true
+	case "false":
+		return false, true
+	}
+	return false, false
 }
 
 // UnmarshalJSON decodes the portal's per-code shape, whose key names embed the
@@ -188,9 +211,30 @@ func pickTime(epoch, date, clock string) time.Time {
 	return parseLocal(date, clock)
 }
 
-// ParseLaneClosures decodes an lcsStatusD{NN}.json body. Unlike chain
-// controls, an empty file is not an error here: a district can have no
-// planned closures.
+// unrecognizedReason names the first thing that makes a row unusable, or "".
+// Every row in the 2026-10-01 captures of D3, D6, D9 and D10 (2,593 rows)
+// passes, so this fires only on drift.
+func unrecognizedReason(lc LaneClosure, codesOK [3]bool) string {
+	for i, code := range []string{"10-97", "10-98", "10-22"} {
+		if !codesOK[i] {
+			return "unreadable " + code + " flag"
+		}
+	}
+	switch {
+	case lc.ID == "":
+		return "no index"
+	case lc.Start.IsZero():
+		return "no start time"
+	case !lc.EndIndefinite && lc.EndTime.IsZero():
+		return "no end time"
+	case !lc.Begin.HasPosition && !lc.End.HasPosition:
+		return "no position"
+	}
+	return ""
+}
+
+// ParseLaneClosures decodes an lcsStatusD{NN}.json body. An empty body parses
+// to no rows; Client.LaneClosures is what refuses it (see there).
 func ParseLaneClosures(body []byte) ([]LaneClosure, error) {
 	var f lcsFile
 	if err := json.Unmarshal(body, &f); err != nil {
@@ -222,13 +266,15 @@ func ParseLaneClosures(body []byte) ([]LaneClosure, error) {
 			LanesClosed:    strings.TrimSpace(c.LanesClosed),
 			TotalLanes:     lanes,
 			CHINReportable: parseBool(c.IsCHINReportable),
-			SetUp:          parseBool(c.Code1097.Is),
-			PickedUp:       parseBool(c.Code1098.Is),
-			Cancelled:      parseBool(c.Code1022.Is),
 		}
+		var codesOK [3]bool
+		lc.SetUp, codesOK[0] = c.Code1097.called()
+		lc.PickedUp, codesOK[1] = c.Code1098.called()
+		lc.Cancelled, codesOK[2] = c.Code1022.called()
 		if !lc.EndIndefinite {
 			lc.EndTime = pickTime(ts.EndEpoch, ts.EndDate, ts.EndTime)
 		}
+		lc.Unrecognized = unrecognizedReason(lc, codesOK)
 		if lc.SetUp {
 			lc.SetUpAt = c.Code1097.at()
 		}
@@ -244,7 +290,13 @@ func ParseLaneClosures(body []byte) ([]LaneClosure, error) {
 }
 
 // LaneClosures fetches and parses one district's closure windows. A frozen
-// file is ErrStaleFeed; an empty one is a legitimate empty result.
+// file is ErrStaleFeed, and an EMPTY one is ErrEmptyFeed.
+//
+// The empty case was once accepted as "a district can have no planned
+// closures". It can't in practice: D3 lists ~1,100 windows and D10 ~630, D9
+// (the quietest district checked) 81. An empty file also has no record stamp,
+// so the freshness check can't run. If it were accepted, the grid's
+// disappearance sweep would read it as every closure ending at once.
 func (c *Client) LaneClosures(ctx context.Context, district int) ([]LaneClosure, error) {
 	body, err := c.get(ctx, c.FeedURL(district, "lcs", "lcs"))
 	if err != nil {
@@ -254,10 +306,14 @@ func (c *Client) LaneClosures(ctx context.Context, district int) ([]LaneClosure,
 	if err != nil {
 		return nil, fmt.Errorf("district %d: %w", district, err)
 	}
+	if len(closures) == 0 {
+		return nil, fmt.Errorf("district %d lane closures: %w", district, ErrEmptyFeed)
+	}
 	var newest time.Time
-	for _, lc := range closures {
-		if lc.RecordedAt.After(newest) {
-			newest = lc.RecordedAt
+	for i := range closures {
+		closures[i].District = district
+		if closures[i].RecordedAt.After(newest) {
+			newest = closures[i].RecordedAt
 		}
 	}
 	if err := c.checkFresh(newest, len(closures)); err != nil {

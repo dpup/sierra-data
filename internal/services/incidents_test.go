@@ -481,6 +481,33 @@ func TestListIncidents_PartialFeedFailure_ServesSurvivorAndReportsHealth(t *test
 	})
 }
 
+// With CWWP2 lane closures configured, lcs2way.kml is not read at all: the
+// grid's lane-closure poller owns closures, so the KML would only burn
+// enhancement budget. CHP is then the only feed, and its failure is the
+// refresh's failure.
+func TestListIncidents_CWWP2LaneClosuresSkipKML(t *testing.T) {
+	doer := &caltransFeedDoer{chpBody: chpFeedKML, laneBody: laneFeedKML, failLane: true}
+	svc, _ := newIncidentsFeedService(doer)
+	svc.config.Roads.CaltransFeeds.CWWP2.LaneClosureDistricts = []int{10}
+
+	resp, err := svc.ListIncidents(testCtx(), &api.ListIncidentsRequest{Area: "mother-lode"})
+	if err != nil {
+		t.Fatalf("ListIncidents: %v", err)
+	}
+	if len(resp.Incidents) != 1 || resp.Incidents[0].Id != "chp:260705SA0001" {
+		t.Fatalf("expected only the CHP incident, got %v", resp.Incidents)
+	}
+	if _, laneErr, _ := svc.IncidentFeedHealth(); laneErr != nil {
+		t.Errorf("laneErr = %v, want nil: the feed was never requested", laneErr)
+	}
+
+	svc2, _ := newIncidentsFeedService(&caltransFeedDoer{laneBody: laneFeedKML, failCHP: true})
+	svc2.config.Roads.CaltransFeeds.CWWP2.LaneClosureDistricts = []int{10}
+	if _, err := svc2.ListIncidents(testCtx(), &api.ListIncidentsRequest{Area: "mother-lode"}); err == nil {
+		t.Error("CHP down with no other feed must fail the refresh, not serve an empty list")
+	}
+}
+
 // A healthy refresh clears previously recorded feed errors.
 func TestIncidentFeedHealth_RecoveryClearsErrors(t *testing.T) {
 	doer := &caltransFeedDoer{chpBody: chpFeedKML, laneBody: laneFeedKML, failLane: true}

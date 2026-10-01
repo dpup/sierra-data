@@ -65,15 +65,21 @@ func main() {
 	// Initialize external API clients using top-level client configurations
 	googleClient := google.NewClient(appConfig.GoogleRoutes.APIKey)
 	caltransClient := caltrans.NewFeedParser()
-	if cw := appConfig.Roads.CaltransFeeds.CWWP2; len(cw.ChainControlDistricts) > 0 {
-		cwClient := cwwp2.NewClient()
+	// One CWWP2 client serves both of the portal's feeds we read: chain-control
+	// levels (merged into cc.kml by the caltrans parser) and lane-closure
+	// windows (their own grid poller, below). nil when neither is configured.
+	var cwClient *cwwp2.Client
+	if cw := appConfig.Roads.CaltransFeeds.CWWP2; len(cw.ChainControlDistricts) > 0 || len(cw.LaneClosureDistricts) > 0 {
+		cwClient = cwwp2.NewClient()
 		if cw.BaseURL != "" {
 			cwClient.BaseURL = cw.BaseURL
 		}
 		if cw.StaleAfter > 0 {
 			cwClient.StaleAfter = cw.StaleAfter
 		}
-		caltransClient.UseCWWP2ChainControls(cwClient, cw.ChainControlDistricts)
+		if len(cw.ChainControlDistricts) > 0 {
+			caltransClient.UseCWWP2ChainControls(cwClient, cw.ChainControlDistricts)
+		}
 	}
 	weatherClient := weather.NewClient(appConfig.OpenWeather.APIKey)
 	nwsClient := nws.NewClient(appConfig.Weather.NWS.UserAgent)
@@ -171,13 +177,25 @@ func main() {
 
 	// One poller per upstream scope; weather_alert and road_incident reuse the
 	// services' cached, budgeted pipelines (plan decision 6).
+	roadIncidents := ingest.NewRoadIncidentNormalizer(appConfig, roadsService)
 	pollers := []ingest.PollerSpec{
 		{Normalizer: ingest.NewEarthquakeNormalizer(appConfig, usgs.NewClient()), Interval: gridPollInterval(appConfig, "usgs")},
 		{Normalizer: ingest.NewWildfireNormalizer(appConfig, calfire.NewClient(), firis.NewClient()), Interval: gridPollInterval(appConfig, "calfire", "firis")},
 		{Normalizer: ingest.NewEvacuationNormalizer(appConfig, caloes.NewClient()), Interval: gridPollInterval(appConfig, "caloes")},
 		{Normalizer: ingest.NewWeatherAlertNormalizer(appConfig, weatherService), Interval: gridPollInterval(appConfig, "nws")},
-		{Normalizer: ingest.NewRoadIncidentNormalizer(appConfig, roadsService), Interval: gridPollInterval(appConfig, "chp", "caltrans")},
+		// chp alone, or chp + caltrans when lane closures still come from
+		// lcs2way.kml (see RoadIncidentNormalizer.SourceIDs).
+		{Normalizer: roadIncidents, Interval: gridPollInterval(appConfig, roadIncidents.SourceIDs()...)},
 		{Normalizer: ingest.NewPowerNormalizer(appConfig, pge.NewClient()), Interval: gridPollInterval(appConfig, "pge", "psps")},
+	}
+	// Caltrans lane closures from CWWP2, scheduled windows included. Its own
+	// poller on the caltrans interval rather than the CHP one: the two district
+	// files are ~5 MB together, uncompressed, and the portal does not gzip.
+	if len(appConfig.Roads.CaltransFeeds.CWWP2.LaneClosureDistricts) > 0 {
+		pollers = append(pollers, ingest.PollerSpec{
+			Normalizer: ingest.NewLaneClosureNormalizer(appConfig, cwClient),
+			Interval:   gridPollInterval(appConfig, "caltrans"),
+		})
 	}
 
 	// Authenticated push ingest (optional): operator-run monitors POST to
@@ -399,10 +417,25 @@ var gridSourceInfo = map[string]struct{ name, attribution, homepage string }{
 	"caloes":   {"Cal OES (evacuation zones)", "Cal OES — reference only", caloes.SourceURL},
 	"nws":      {"National Weather Service (Sacramento)", "NOAA / National Weather Service", "https://www.weather.gov/sto"},
 	"chp":      {"CHP (traffic incidents)", "quickmap.dot.ca.gov", quickMapURL},
-	"caltrans": {"Caltrans (chain control + lane closures)", "quickmap.dot.ca.gov", quickMapURL},
+	"caltrans": {"Caltrans (chain control + lane closures)", caltrans.SourceQuickMap, quickMapURL}, // attribution: see caltransAttribution
 	"meshcore": {"MeshCore Mesh", "MeshCore community mesh", "https://map.meshcore.io"},
 	"pge":      {"PG&E (electric outages)", "Pacific Gas and Electric", pge.OutageMapURL},
 	"psps":     {"PG&E (public safety power shutoffs)", "Pacific Gas and Electric", pge.PSPSUpdatesURL},
+}
+
+// caltransAttribution names the feeds actually behind the caltrans row, which
+// depend on config. Any CWWP2 use means both feeds: CWWP2 chain-control levels
+// are MERGED with cc.kml (never replace it), and CWWP2 lane closures leave
+// chain control on cc.kml when its own districts are unset. The row's
+// attribution is also the chain_control layer's metadata.attribution (via
+// gridapi.conditionLayerSourceIDs), which said quickmap alone after CWWP2
+// started supplying the levels.
+func caltransAttribution(cfg *config.Config) string {
+	cw := cfg.Roads.CaltransFeeds.CWWP2
+	if len(cw.ChainControlDistricts) == 0 && len(cw.LaneClosureDistricts) == 0 {
+		return caltrans.SourceQuickMap
+	}
+	return caltrans.SourceCWWP2 + " · " + caltrans.SourceQuickMap
 }
 
 // Homepages used by more than one source row, or that have no constant of their
@@ -589,6 +622,9 @@ func gridSourceSeeds(cfg *config.Config) []store.SourceSeed {
 		info, ok := gridSourceInfo[id]
 		if !ok {
 			info.name = id
+		}
+		if id == "caltrans" {
+			info.attribution = caltransAttribution(cfg)
 		}
 		seeds = append(seeds, store.SourceSeed{
 			ID:            id,

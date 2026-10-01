@@ -63,6 +63,13 @@ func testCWWP2(ctx context.Context, district int) {
 	phases := map[string]int{}
 	byCounty := map[string]map[string]int{}
 	for _, lc := range closures {
+		if lc.Unrecognized != "" {
+			// The grid's lane-closure poller degrades the caltrans source on any
+			// in-area row like this, so surface every one here.
+			fmt.Printf("   ⚠️  UNRECOGNIZED row %s (%s %s): %s\n", lc.ID, lc.Begin.Route, lc.Begin.Name, lc.Unrecognized)
+			phases["UNRECOGNIZED"]++
+			continue
+		}
 		ph := lc.PhaseAt(now).String()
 		phases[ph]++
 		county := lc.Begin.County

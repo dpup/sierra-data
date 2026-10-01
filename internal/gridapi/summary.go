@@ -163,11 +163,12 @@ func (s *Service) buildPlaceSummary(ctx context.Context, hb hazardsBuilder, plac
 		GeneratedAt: timestamppb.New(s.Now().UTC()),
 	}
 
-	// Two carve-outs from the top-level hazard rollup (total_active, severity
-	// counts, top events, mode). Both are the same rule — ambient state is
-	// monitoring, not an active hazard (the rule that already excludes baseline
-	// conditions, commit d278e43) — and both still appear in their own domain
-	// below, because byLayer is built from the FULL set.
+	// Three carve-outs from the top-level hazard rollup (total_active, severity
+	// counts, top events, mode). The first two are the same rule — ambient state
+	// is monitoring, not an active hazard (the rule that already excludes
+	// baseline conditions, commit d278e43) — and both still appear in their own
+	// domain below, because byLayer is built from the FULL set. The third is
+	// planned roadwork, kept out of its domain's rollup too (see 3).
 	//
 	//  1. Mesh-node presence (MESH): ambient INFO infrastructure state.
 	//  2. INFO-severity POWER: PG&E publishes every outage it has, and the
@@ -182,12 +183,26 @@ func (s *Service) buildPlaceSummary(ctx context.Context, hb hazardsBuilder, plac
 	// The cut is at INFO only. A MINOR power event (10+ customers) is a real
 	// neighbourhood outage and counts, and mode is untouched either way — INFO
 	// never escalates it.
+	//
+	//  3. SCHEDULED road closures: Caltrans roadwork windows that have not been
+	//     set up. CWWP2 publishes about a week of them, 200+ in the incident
+	//     box on an ordinary day, so counting them reported a county as
+	//     `totalActive: 100` and handed `topEvents` and the roads domain's
+	//     headlines to next Tuesday's shoulder work over a collision now. They
+	//     are excluded from the roads domain's rollup as well, which is
+	//     the "what is happening on the roads" answer. They stay in /events
+	//     and on the map, where `status` says SCHEDULED. A SCHEDULED weather
+	//     watch or PSPS shutoff still counts: those warn of a hazard, and
+	//     planned roadwork is a calendar.
 	hazardEvents := make([]*gridv1.Event, 0, len(events))
 	for _, ev := range events {
 		if ev.GetLayer() == gridv1.Layer_MESH {
 			continue
 		}
 		if ev.GetLayer() == gridv1.Layer_POWER && ev.GetSeverity() == gridv1.Severity_INFO {
+			continue
+		}
+		if isPlannedRoadwork(ev) {
 			continue
 		}
 		hazardEvents = append(hazardEvents, ev)
@@ -254,7 +269,7 @@ func (s *Service) buildPlaceSummary(ctx context.Context, hb hazardsBuilder, plac
 			eventItems(byLayer[gridv1.Layer_WEATHER_ALERT])),
 		buildDomain("roads",
 			[]string{eventLayerStatus(hazards.LayerRoadIncident), condChain.status, condSegment.status},
-			append(eventItems(byLayer[gridv1.Layer_ROAD_INCIDENT]),
+			append(eventItems(withoutPlannedRoadwork(byLayer[gridv1.Layer_ROAD_INCIDENT])),
 				featureItems(append(condChain.features, condSegment.features...))...)),
 		buildDomain("seismic",
 			[]string{eventLayerStatus(hazards.LayerEarthquake)},
@@ -336,6 +351,22 @@ func buildCondition(ctx context.Context, hb hazardsBuilder, area config.HazardAr
 // topEventsFrom returns the n most urgent events (severity_rank desc, then
 // observed_at desc — the canonical client sort; the store already yields this
 // order, the stable re-sort makes the contract explicit).
+// isPlannedRoadwork reports a road closure window that is scheduled but not
+// set up (carve-out 3 in GetPlaceSummary).
+func isPlannedRoadwork(ev *gridv1.Event) bool {
+	return ev.GetLayer() == gridv1.Layer_ROAD_INCIDENT && ev.GetStatus() == gridv1.EventStatus_SCHEDULED
+}
+
+func withoutPlannedRoadwork(events []*gridv1.Event) []*gridv1.Event {
+	out := make([]*gridv1.Event, 0, len(events))
+	for _, ev := range events {
+		if !isPlannedRoadwork(ev) {
+			out = append(out, ev)
+		}
+	}
+	return out
+}
+
 func topEventsFrom(events []*gridv1.Event, n int) []*gridv1.SummaryTopEvent {
 	sorted := make([]*gridv1.Event, len(events))
 	copy(sorted, events)
