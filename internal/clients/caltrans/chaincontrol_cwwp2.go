@@ -58,7 +58,9 @@ func (p *FeedParser) chainControlsCWWP2(ctx context.Context) ([]ChainControlData
 			return nil, fmt.Errorf("cwwp2 chain controls: %w", err)
 		}
 		for _, cp := range checkpoints {
-			if !cp.InService || cp.Level == cwwp2.LevelNone {
+			// Out-of-service checkpoints are skipped only when they report
+			// nothing: a requirement still on a sign we can't poll is shown.
+			if cp.Level == cwwp2.LevelNone || (!cp.InService && !cp.Level.Active()) {
 				continue
 			}
 			out = append(out, chainControlFromCWWP2(cp))
@@ -69,14 +71,37 @@ func (p *FeedParser) chainControlsCWWP2(ctx context.Context) ([]ChainControlData
 	if err != nil {
 		return out, &PartialError{Err: fmt.Errorf("cc.kml (road closures, truck levels): %w", err)}
 	}
-	for _, c := range p.parseChainControlDetails(incidents) {
-		if c.Level != "" {
-			continue // an R-level: CWWP2 is authoritative for those
+	var supplement []CaltransIncident
+	for _, in := range incidents {
+		if isKMLSupplement(in) {
+			supplement = append(supplement, in)
 		}
+	}
+	for _, c := range p.parseChainControlDetails(supplement) {
 		c.Source = SourceQuickMap
 		out = append(out, c)
 	}
 	return out, nil
+}
+
+var truckLevelRe = regexp.MustCompile(`(?i)\blevel\s+(MAX|MIN|TS)\b|truck chain requirements|screening for chains`)
+
+// isKMLSupplement picks the cc.kml entries CWWP2 does not cover, by POSITIVE
+// match only. Selecting "whatever has no parseable R-level" instead would be
+// format-fragile: the CHP and lane-closure KMLs moved to the iw-* layout in
+// 2026 with blank <name>s, and if cc.kml follows, no R-level would parse and
+// every chain control would leak through as a level-less duplicate of its
+// CWWP2 checkpoint. Anything unclassified is dropped — R-levels are CWWP2's.
+//
+//   - road closures: styleUrl "#full-closure" (the style id is the same in
+//     the 2025 legacy capture and the 2026 file).
+//   - truck-only levels: "level MAX/MIN/TS" in the name, or the truck
+//     requirement / chain-screening text in the description.
+func isKMLSupplement(in CaltransIncident) bool {
+	if strings.EqualFold(strings.TrimSpace(in.StyleUrl), "#full-closure") {
+		return true
+	}
+	return truckLevelRe.MatchString(in.Name) || truckLevelRe.MatchString(in.DescriptionText)
 }
 
 // chainControlFromCWWP2 maps a checkpoint onto the shape the cc.kml parser

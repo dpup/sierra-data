@@ -167,6 +167,11 @@ func TestClient_ChainControlsFailLoud(t *testing.T) {
 	_, err = c.ChainControls(ctx, 10)
 	assert.ErrorIs(t, err, ErrStaleFeed)
 
+	// Stamps that no longer parse must not switch the freshness check off.
+	unstamped := []byte(`{"data": [{"cc": {"index": "x", "recordTimestamp": {"recordDate": "09/29/2026", "recordTime": "8:57pm"}, "statusData": {"status": "R-0"}}}]}`)
+	_, err = pinnedClient(&fakeDoer{status: 200, body: unstamped}).ChainControls(ctx, 10)
+	assert.ErrorIs(t, err, ErrNoRecordTime)
+
 	c.StaleAfter = 0 // disabled
 	_, err = c.ChainControls(ctx, 10)
 	assert.NoError(t, err)

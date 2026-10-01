@@ -118,10 +118,19 @@ func (c *Client) get(ctx context.Context, url string) ([]byte, error) {
 	return body, nil
 }
 
+// ErrNoRecordTime is returned when a non-empty feed carries no parseable
+// record stamp — the freshness check would otherwise pass vacuously, so a
+// timestamp format change would silently switch it off.
+var ErrNoRecordTime = errors.New("cwwp2: no parseable record timestamp")
+
 // checkFresh fails a feed whose newest record stamp is older than StaleAfter.
-func (c *Client) checkFresh(newest time.Time) error {
-	if c.StaleAfter <= 0 || newest.IsZero() {
+// rows is the record count: an empty feed has no stamp to check.
+func (c *Client) checkFresh(newest time.Time, rows int) error {
+	if c.StaleAfter <= 0 || rows == 0 {
 		return nil
+	}
+	if newest.IsZero() {
+		return ErrNoRecordTime
 	}
 	now := time.Now
 	if c.Now != nil {

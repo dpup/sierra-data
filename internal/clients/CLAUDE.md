@@ -61,17 +61,27 @@ Mariposa).
   `recordTimestamp` older than `staleAfter`, default 1h). `caltrans.FeedParser`
   merges it (`UseCWWP2ChainControls`, configured by
   `roads.caltransFeeds.cwwp2.chainControlDistricts`): R-levels from CWWP2, plus
-  cc.kml's entries that carry **no** R-level — "Road Closed" (the seasonal pass
-  closures) and truck `MAX`/`MIN`/`TS` — because no CWWP2 capture has yet shown
-  how (or whether) it represents those. A CWWP2 failure is a hard error; a
-  cc.kml failure returns the CWWP2 levels with a `caltrans.PartialError`
-  (layer `STALE`).
+  cc.kml's road closures (`styleUrl #full-closure` — the seasonal pass
+  closures) and truck-only `MAX`/`MIN`/`TS` levels, because no CWWP2 capture has
+  yet shown how (or whether) it represents those. **The supplement is selected
+  by positive match (`isKMLSupplement`), never as "whatever has no parseable
+  R-level"**: if cc.kml moves to the iw-* layout like the other two KMLs, no
+  level would parse and every control would leak through as a duplicate.
+  A CWWP2 failure is a hard error; a cc.kml failure returns the CWWP2 levels
+  with a `caltrans.PartialError` (layer `STALE`). An out-of-service checkpoint
+  is skipped only when it reports R-0 — a requirement on a sign we can't poll
+  is still shown. A non-empty feed with no parseable record stamp is
+  `ErrNoRecordTime`, so a timestamp format change can't silently disable the
+  freshness check.
 - **Lane closures (`lcs`) — parsed, not yet wired.** One row per closure
   WINDOW, including scheduled ones (4× the rows lcs2way.kml shows for our
   counties), with epoch times and the radio codes 10-97 (set up), 10-98
   (picked up), 10-22 (cancelled). `LaneClosure.PhaseAt` derives
   SCHEDULED/ACTIVE/COMPLETED/CANCELLED — codes win over the clock, so a set-up
-  closure past its window is still ACTIVE (overruns happen).
+  closure past its window is still ACTIVE (overruns happen). **Before wiring it
+  (#11):** an empty `lcs` file is accepted as "no closures" (unlike `cc`), and a
+  code block whose shape changes decodes as "not called" — both would let the
+  disappearance sweep resolve real closures. Gate them like the `cc` checks.
 - **Also available, unused:** `cms` (message-sign text as plain fields), `cctv`
   (snapshot JPG + HLS stream URLs per camera), `rwis` (road-weather stations —
   D10's are all Valley sites, useless to us, and its JSON doesn't parse).

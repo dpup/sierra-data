@@ -149,7 +149,7 @@ func (c *Client) ChainControls(ctx context.Context, district int) ([]ChainContro
 			newest = cc.RecordedAt
 		}
 	}
-	if err := c.checkFresh(newest); err != nil {
+	if err := c.checkFresh(newest, len(controls)); err != nil {
 		return nil, fmt.Errorf("district %d chain controls: %w", district, err)
 	}
 	return controls, nil

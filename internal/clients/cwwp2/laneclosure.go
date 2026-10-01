@@ -260,7 +260,7 @@ func (c *Client) LaneClosures(ctx context.Context, district int) ([]LaneClosure,
 			newest = lc.RecordedAt
 		}
 	}
-	if err := c.checkFresh(newest); err != nil {
+	if err := c.checkFresh(newest, len(closures)); err != nil {
 		return nil, fmt.Errorf("district %d lane closures: %w", district, err)
 	}
 	return closures, nil

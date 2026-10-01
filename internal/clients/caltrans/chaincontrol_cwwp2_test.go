@@ -40,20 +40,29 @@ func cwwp2Client(d cwwp2.HTTPDoer) *cwwp2.Client {
 	return c
 }
 
-// kmlOnlyEntries is how many cc.kml entries carry no R-level (road closures,
-// MAX/MIN/TS truck levels) — the supplement CWWP2 mode keeps.
+// kmlOnlyEntries is how many cc.kml entries the CWWP2 mode keeps: road
+// closures and truck-only levels. On the legacy 2025 capture that is exactly
+// the set with no parseable R-level, which pins the positive classifier
+// against the old "no level" rule it replaced.
 func kmlOnlyEntries(t *testing.T) int {
 	t.Helper()
-	all, err := setupTestParser(t).ParseChainControlsDetailed(context.Background())
+	p := setupTestParser(t)
+	incidents, err := p.ParseChainControls(context.Background())
 	require.NoError(t, err)
-	n := 0
-	for _, c := range all {
-		if c.Level == "" {
-			n++
+	kept, levelless := 0, 0
+	for _, in := range incidents {
+		if isKMLSupplement(in) {
+			kept++
 		}
 	}
-	require.Positive(t, n, "fixture should hold road-closed / truck entries")
-	return n
+	for _, c := range p.parseChainControlDetails(incidents) {
+		if c.Level == "" {
+			levelless++
+		}
+	}
+	require.Positive(t, kept, "fixture should hold road-closed / truck entries")
+	require.Equal(t, levelless, kept)
+	return kept
 }
 
 // Quiet day: 149 checkpoints all R-0 contribute nothing, and the KML
@@ -158,4 +167,61 @@ func TestHighwayAndDirectionLabels(t *testing.T) {
 	for in, want := range map[string]string{"East": "Eastbound", "west": "Westbound", "North": "Northbound", "South": "Southbound", "": ""} {
 		assert.Equal(t, want, directionLabel(in), in)
 	}
+}
+
+// If cc.kml moves to the 2026 iw-* layout (blank <name>, as the CHP and
+// lane-closure feeds did), no R-level parses from its entries. They must NOT
+// leak through as level-less duplicates of the CWWP2 checkpoints; only the
+// positively-identified closure survives.
+func TestChainControlsCWWP2_IWLayoutKMLDoesNotLeakControls(t *testing.T) {
+	const kml = `<?xml version="1.0" encoding="UTF-8"?><kml xmlns="http://www.opengis.net/kml/2.2"><Document>
+<Placemark><name> </name><styleUrl>#notclosed</styleUrl><description><![CDATA[<h2 class="iw-title">Chain Controls</h2><p class="iw-text">Arnold</p>]]></description><Point><coordinates>-120.35,38.25</coordinates></Point></Placemark>
+<Placemark><name> </name><styleUrl>#notclosed</styleUrl><description><![CDATA[<h2 class="iw-title">Chain Controls</h2><p class="iw-text">Dorrington</p>]]></description><Point><coordinates>-120.27,38.30</coordinates></Point></Placemark>
+<Placemark><name> </name><styleUrl>#full-closure</styleUrl><description><![CDATA[<h2 class="iw-title">Highway 4 Road Closed</h2><p class="iw-text">Closed to traffic.</p>]]></description><Point><coordinates>-119.92,38.50</coordinates></Point></Placemark>
+</Document></kml>`
+	p := &FeedParser{HTTPClient: fixedDoer{200, []byte(kml)}}
+	p.UseCWWP2ChainControls(cwwp2Client(fixedDoer{200, cwwp2Fixture(t, "cc_d10_synthetic_storm.json")}), []int{10})
+
+	controls, err := p.ParseChainControlsDetailed(context.Background())
+	require.NoError(t, err)
+	var kmlEntries []ChainControlData
+	for _, c := range controls {
+		if c.Source == SourceQuickMap {
+			kmlEntries = append(kmlEntries, c)
+		}
+	}
+	require.Len(t, kmlEntries, 1, "only the #full-closure entry may come from cc.kml")
+	assert.Len(t, controls, 8)
+}
+
+func TestIsKMLSupplement(t *testing.T) {
+	assert.True(t, isKMLSupplement(CaltransIncident{StyleUrl: "#full-closure"}))
+	assert.True(t, isKMLSupplement(CaltransIncident{StyleUrl: "#notclosed", Name: "Westbound Interstate 80 Chain Control level MAX"}))
+	assert.True(t, isKMLSupplement(CaltransIncident{StyleUrl: "#notclosed", Name: "Eastbound Interstate 80 Chain Control level TS"}))
+	assert.True(t, isKMLSupplement(CaltransIncident{DescriptionText: "Truck chain requirements are maximum for all trucks."}))
+	assert.False(t, isKMLSupplement(CaltransIncident{StyleUrl: "#notclosed", Name: "Eastbound Highway 4 Chain Control level R-2"}))
+	assert.False(t, isKMLSupplement(CaltransIncident{StyleUrl: "#notclosed", Name: ""}), "unclassifiable entries are CWWP2's")
+	assert.False(t, isKMLSupplement(CaltransIncident{Name: "Highway 4 at Maximilian Rd"}), "MAX must be the level word, not a substring")
+}
+
+// stubSource serves fixed checkpoints.
+type stubSource []cwwp2.ChainControl
+
+func (s stubSource) ChainControls(context.Context, int) ([]cwwp2.ChainControl, error) { return s, nil }
+
+// A sign we can't poll that still reports a requirement is shown; one that
+// reports nothing is skipped.
+func TestChainControlsCWWP2_OutOfService(t *testing.T) {
+	loc := cwwp2.Location{Route: "SR-4", Direction: "East", Name: "ARNOLD", Latitude: 38.25, Longitude: -120.35, HasPosition: true}
+	src := stubSource{
+		{ID: "a", Location: loc, InService: false, Level: cwwp2.LevelR2, RawStatus: "R-2"},
+		{ID: "b", Location: loc, InService: false, Level: cwwp2.LevelNone, RawStatus: "R-0"},
+	}
+	p := &FeedParser{HTTPClient: fixedDoer{200, []byte(`<kml><Document></Document></kml>`)}}
+	p.UseCWWP2ChainControls(src, []int{10})
+	controls, err := p.ParseChainControlsDetailed(context.Background())
+	require.NoError(t, err)
+	require.Len(t, controls, 1)
+	assert.Equal(t, "a", controls[0].MessageID)
+	assert.Equal(t, "R2", controls[0].Level)
 }
