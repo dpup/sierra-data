@@ -1,6 +1,7 @@
 package geojson
 
 import (
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -80,4 +81,25 @@ func TestWithinDistance_NilAndNonPositive(t *testing.T) {
 	assert.False(t, WithinDistance(a, nil, 1000))
 	assert.False(t, WithinDistance(a, a, 0), "a non-positive buffer disables the test entirely")
 	assert.False(t, WithinDistance(a, a, -1))
+}
+
+func TestPointDistanceMeters(t *testing.T) {
+	a := mustParse(t, nearBoxA)
+	assert.Equal(t, 0.0, PointDistanceMeters(38.25, -120.45, a), "inside the polygon")
+
+	// ~0.05° north of the top edge (38.3) ≈ 5.57 km.
+	assert.InDelta(t, 5566, PointDistanceMeters(38.35, -120.45, a), 20)
+	// Agrees with WithinDistance on either side of the measured value.
+	pt := mustParse(t, `{"type":"Point","coordinates":[-120.45,38.35]}`)
+	assert.True(t, WithinDistance(pt, a, 5600))
+	assert.False(t, WithinDistance(pt, a, 5500))
+
+	// Point to point, and point to line (a corridor): the same projection
+	// MetersBetween uses.
+	town := mustParse(t, `{"type":"Point","coordinates":[-120.4,38.2]}`)
+	assert.InDelta(t, MetersBetween(38.3, -120.4, 38.2, -120.4), PointDistanceMeters(38.3, -120.4, town), 1)
+	line := mustParse(t, `{"type":"LineString","coordinates":[[-120.5,38.2],[-120.3,38.2]]}`)
+	assert.InDelta(t, 0.1*metersPerDegreeLat, PointDistanceMeters(38.3, -120.4, line), 1)
+
+	assert.True(t, math.IsInf(PointDistanceMeters(38, -120, nil), 1))
 }

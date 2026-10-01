@@ -10,6 +10,9 @@ committed and tests depend on their exact counts, so don't overwrite them.
 | `cc_d10_20260930.json` | District 10 chain controls: all 149 checkpoints, every one `R-0`. A quiet September day. | **Verbatim** |
 | `lcs_d10_20260930.json` | District 10 lane closures, trimmed from 370 rows to 84. Keeps every row whose begin county is Alpine, Amador, Calaveras, Mariposa or Tuolumne, plus two rows of any 10-97/10-98/10-22/indefinite combination not otherwise present. | Rows removed, then re-serialized. Row content is untouched. |
 | `cc_d07_bad_status_20260930.json` | District 7: one healthy checkpoint plus the two SR-2 checkpoints whose `status` held a **longitude** (`"-118.1307759"`). This is a real upstream defect. | Rows removed, then re-serialized. Row content is untouched. |
+| `cctv_d10_20261001.json` | District 10 cameras, trimmed from 154 rows to 13, captured 2026-10-01 ~19:40 UTC. Keeps the 4 in-area cameras (`d10-172` Soulsbyville, `-136` Pine Grove, `-129` Ferretti Rd, `-152` Buck Meadows), the 2 Mariposa SR-140 ones, all 3 out-of-service rows (`-41`, `-65`, `-76`), an image-only row (`-47`) and 3 Valley rows. | Rows removed, then re-serialized. Row content is untouched. |
+| `cctv_d9_20261001.json` | District 9 cameras, 5 of 23: Sonora Junction (`d9-47`, US-395/SR-108), Bridgeport, Conway Summit, the out-of-service Matthieu Hill (`d9-48`) and US-6 State Line, which carries a description. D9 publishes no streams. | Rows removed, then re-serialized. Row content is untouched. |
+| `cctv_d3_20261001.json` | District 3 cameras, 5 of 275: Echo Summit and Wrights Lake (US-50, the nearest D3 cameras to our area), a "Not Reported" refresh rate with a leading space in its name (`d3-238`), an image-only row (`-130`), and `-328`, flagged out of service while serving live images. | Rows removed, then re-serialized. Row content is untouched. |
 | `cc_d10_synthetic_storm.json` | **SYNTHETIC.** The D10 capture with 6 Hwy 4 checkpoints (Arnold, Big Trees Park, Dorrington, Cottage Springs) set to `R-2` and Hwy 108 Pinecrest EB set to `R-1`. The requirement text is copied from the real 2025-12-24 `cc.kml` capture. | **Hand-edited** |
 
 ## What we have not seen yet (winter TODO)
@@ -56,6 +59,11 @@ captures at 17:20 and 20:57 PDT. Overnight regeneration is unverified; the
 - The road-weather (`rwis`) JSON drops the comma between repeated sensor
   entries, so it fails to parse. Its XML variant is well-formed. D10's RWIS
   stations are all Valley fog/wind sites, so that feed is of no use to us.
+- Out-of-service cameras serve a "Down for Construction" placeholder that is
+  regenerated every cycle, with a current burned-in timestamp and a fresh
+  Last-Modified. Image age therefore cannot tell a dead camera from a live one.
+  The `cctv` file itself has no generation stamp: `recordTimestamp` is the
+  camera record's edit date.
 - The file name zero-pads the district (`ccStatusD03.json`) but the directory
   does not (`/d3/`). `ccStatusD3.json` answers 500.
 - `recordDate`/`recordTime` are Pacific local time. The `*Epoch` fields in the

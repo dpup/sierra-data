@@ -379,9 +379,10 @@ everything from the grid event store. Field names are **camelCase** (protojson
 `UseProtoNames:false`), timestamps RFC 3339, errors gRPC-standard
 `{code, codeName, message, details}` with the mapped HTTP status. gRPC reflection
 is on. Conditional GET (ETag/If-None-Match -> 304) is wired via prefab's `etag`
-plugin on most read RPCs — event detail, the event/history lists, and places
-(`GetPlaceSummary`/`GetConditions`/`ListSources`/`ResolvePlace`/`ListScanners`
-are not yet guarded); the `.geojson` keeps its own body-hash ETag. The prior
+plugin on most read RPCs — event detail, the event/history lists, places, and
+cameras (`GetPlaceSummary`/`GetConditions`/`ListSources`/`ResolvePlace`/
+`ListScanners` are not yet guarded); the `.geojson` keeps its own body-hash
+ETag. The prior
 hand-built REST surfaces (the old `/api/v1/roads|weather|
 hazards|situation|incidents` and the snake_case `/v1`) have all been **removed** —
 they fold into the endpoints below.
@@ -426,6 +427,14 @@ gateway's `EmitUnpopulated` marshaler.
   There is no roads-conditions passthrough (road conditions are the `road_segment`
   / `chain_control` geojson layers).
 - `GET /api/v1/scanners?place=` - Broadcastify feed config.
+- `GET /api/v1/cameras?place=` - `ListCameras`: Caltrans CCTV cameras (CWWP2
+  `cctv`, District 10) within `roads.caltransFeeds.cwwp2.cameras.nearMeters`
+  (25 km) of a coverage area; `?place` keeps those within the same radius of
+  the place, nearest first (`distanceMeters`). Snapshot `imageUrl` + HLS
+  `streamUrl` are **links to Caltrans, never proxied**. Out-of-service cameras
+  are dropped. Not events. The list is near-static, refreshed in the
+  background every 6h (`services.CameraService`); a failed refresh serves
+  the last good list as `sourceStatus: STALE`.
 - `GET /api/v1/sources` - the source registry + per-source health (a source's own
   health is `status`: `OK|STALE|UNAVAILABLE`, last success/attempt, poll interval,
   last error). Includes one **health-only** row per configured push reporter.

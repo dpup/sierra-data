@@ -209,6 +209,14 @@ export const ENDPOINTS = [
     params: [['place', 'place slug or id', 'Filter to a place.', 'all']],
     examples: ['/api/v1/scanners?place=ebbetts-pass'],
   },
+  {
+    path: '/api/v1/cameras',
+    blurb: 'Caltrans traffic cameras near the coverage area — live snapshot and HLS stream links, never proxied.',
+    detail:
+      'Returns CameraList. In-service Caltrans cameras within 25 km of a coverage area, nearest first. ?place keeps those within 25 km of that place; it accepts any place, towns and corridors included, though those contain no camera themselves. Per camera: imageUrl (re-fetch every imageRefreshMinutes; 0 = not reported), streamUrl (HLS .m3u8, empty when image-only), route, location and distanceMeters (0 = inside). sourceStatus is the list\u2019s health: OK, STALE (lastSourceUpdate says when it was fetched) or UNAVAILABLE. Cameras are reference views, not events, and an empty list means no camera nearby, never all-clear. Not paginated.',
+    params: [['place', 'place slug or id', 'Keep cameras within 25 km of a place.', 'the whole coverage area']],
+    examples: ['/api/v1/cameras', '/api/v1/cameras?place=sonora'],
+  },
 ];
 
 /** Cross-cutting conventions, rendered as definition rows on the front page. */
@@ -231,7 +239,7 @@ export const CONVENTIONS = [
   ],
   [
     'Pagination',
-    "Cursor-based on the event lists only — events, events/{id}/history, history. The directories (places, sources, scanners) return their complete set in one response by design. Don't build paging logic for them.",
+    "Cursor-based on the event lists only — events, events/{id}/history, history. The directories (places, sources, scanners, cameras) return their complete set in one response by design. Don't build paging logic for them.",
   ],
   [
     'ETags',

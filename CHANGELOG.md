@@ -14,6 +14,61 @@ throughout; errors are gRPC-standard `{code, codeName, message, details}`). The
 by a snake_case `/v1` surface on 2026-07-05, which was in turn folded back onto the
 proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 
+## 2026-10-01
+
+### New: `GET /api/v1/cameras?place=` — Caltrans traffic cameras
+
+**Additive.** The `ListCameras` RPC. It lists Caltrans CCTV cameras in or near
+the coverage area, each with a live snapshot image and, where Caltrans
+publishes one, an HLS video stream. Seeing the pass is the fastest check on
+chain-control and closure data. Cameras are reference views, not events: they
+never appear in `/events`, the summary or the map layers.
+
+```json
+{
+  "cameras": [{
+    "id": "d10-172",
+    "name": "EB 108 W/O Soulsbyville Rd",
+    "nearbyPlace": "Soulsbyville",
+    "county": "Tuolumne",
+    "route": "SR-108",
+    "direction": "",
+    "location": {"lat": 37.992423, "lng": -120.274801},
+    "elevationFeet": 2926,
+    "imageUrl": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/179eb108wosoulsbyvillerd/179eb108wosoulsbyvillerd.jpg",
+    "imageRefreshMinutes": 2,
+    "streamUrl": "https://wzmedia.dot.ca.gov/D10/TUO_EB108_WO_Soulsbyville.stream/playlist.m3u8",
+    "description": "",
+    "distanceMeters": 0
+  }],
+  "sourceStatus": "OK",
+  "lastSourceUpdate": null,
+  "attribution": "Caltrans"
+}
+```
+
+- **Links, not proxies.** `imageUrl` and `streamUrl` point at Caltrans. Load
+  them directly (`<img>`, an HLS player). Re-fetch the image every
+  `imageRefreshMinutes` (0 = not reported). `streamUrl` is empty for an
+  image-only camera.
+- **Which cameras.** A camera is listed when it is within 25 km of a coverage
+  area and Caltrans marks it in service. Out-of-service cameras are dropped,
+  not flagged, because they serve a "Down for Construction" placeholder.
+  Today that is four cameras: Hwy 108 Soulsbyville, Hwy 88 Pine Grove, and
+  Hwy 120 at Ferretti Rd and Buck Meadows. **There is no camera on Hwy 4 or
+  Hwy 49 inside the area, and none on Ebbetts, Carson or Sonora Pass.** An
+  empty list means "no camera nearby", never "all clear".
+- **`?place=`** keeps the listed cameras within 25 km of the place, nearest
+  first. It accepts any place, including towns and corridors, which contain no
+  camera themselves. `distanceMeters` is measured from the place, or without
+  `?place` from the nearest coverage area; 0 means inside it.
+- **`sourceStatus`** is the camera list's health: `OK`, `STALE` (served from
+  an older fetch; `lastSourceUpdate` says when) or `UNAVAILABLE` (no list yet,
+  or cameras not configured). The images are live either way.
+- **`id`** is `d{district}-{index}`, the Caltrans district plus the portal's
+  camera index.
+- Not paginated. Carries a weak `ETag`; the list refreshes every 6 hours.
+
 ## 2026-09-30
 
 ### `chain_control` map layer: Caltrans CWWP2 merged in
