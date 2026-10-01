@@ -90,6 +90,24 @@ prefab's `securityMiddleware` on the mounted handlers from `prefab.yaml`
 (`server.security`) — now open (`corsOrigins: ["*"]`, GET-only; see the CORS note
 in the root `CLAUDE.md`) — do not add manual `SecurityHeaders` calls.
 
+## `chain_control` sources
+
+Caltrans CWWP2 (every checkpoint, explicit `R-0`) MERGED with cc.kml — neither
+source overrides the other's controls; see the `cwwp2` section of
+`internal/clients/CLAUDE.md` for the rules. On a quiet day `OK` + 0 features is
+a **confirmed** "no chain controls", not an empty KML taken on faith. Degraded
+cases keep features and return `partialData` (→ `STALE`): either source down
+(`caltrans.PartialError`), an in-area checkpoint whose status CWWP2 sent as
+garbage and cc.kml doesn't explain (`Unrecognized` — dropped from the map, never
+shown as a level), or a row with no position. Controls cc.kml reports where
+CWWP2 says R-0 are SHOWN and logged ("cc.kml reports chain controls CWWP2 does
+not"). Road closures (`Closed`) render as `"<highway> road closed"`, category
+`closed`, severity `MINOR` — one notch above a clear checkpoint, below R-1,
+because the seasonal gates hold it all winter (and `/summary`'s roads domain
+counts it as active). Feature ids are `cc:<checkpoint index>` for CWWP2 (e.g.
+`cc:10-ALP-4-0.65-W-14W`, Bear Valley WB), `cc:<message id>` for cc.kml, with a
+coordinate fallback; `source.attribution` names the host.
+
 ## Changing a condition layer
 
 1. If it needs a new per-kind block, add it in `properties.go` and the severity

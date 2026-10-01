@@ -188,7 +188,12 @@ func (s *RoadsService) refreshRoadData(ctx context.Context) ([]*api.Road, error)
 	chainControls, err := s.caltransClient.ParseChainControlsDetailed(ctx)
 	if err != nil {
 		logging.Errorw(ctx, "Failed to get chain controls", "error", err)
-		chainControls = nil
+		// A PartialError still carries usable controls (e.g. CWWP2 levels
+		// with the cc.kml closure supplement down); anything else has none.
+		var partial *caltrans.PartialError
+		if !errors.As(err, &partial) {
+			chainControls = nil
+		}
 	}
 
 	// Fetch road conditions from roads.dot.ca.gov for each unique highway
@@ -604,6 +609,14 @@ func (s *RoadsService) findChainControlForRoute(ctx context.Context, route routi
 	bestDistance := float64(10000) // 10km max distance
 
 	for i, cc := range chainControls {
+		// An unreadable CWWP2 status is not a requirement, and neither is a
+		// road closure: the Ebbetts gate past Bear Valley would otherwise mark
+		// the Arnold–Bear Valley segment "chains required" all winter. Closures
+		// reach a road through roads.dot.ca.gov conditions instead.
+		if cc.Unrecognized || cc.Closed {
+			continue
+		}
+
 		// Check if this chain control is for the same highway
 		ccHighway := extractHighwayNumber(cc.Highway)
 		if ccHighway != routeHighway {

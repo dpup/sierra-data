@@ -14,6 +14,44 @@ throughout; errors are gRPC-standard `{code, codeName, message, details}`). The
 by a snake_case `/v1` surface on 2026-07-05, which was in turn folded back onto the
 proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 
+## 2026-09-30
+
+### `chain_control` map layer: Caltrans CWWP2 merged in
+
+**Not a shape change. Feature ids, headlines and attribution values change.**
+Applies to `GET /api/v1/places/{place}/map/chain_control.geojson` and anything
+built on it: the `/summary` roads domain, and a road's `chainControlInfo`.
+
+Chain controls now come from **two** Caltrans sources, merged: QuickMap's
+`cc.kml` (as before) and the CWWP2 data portal (`cwwp2.dot.ca.gov`, District
+10). CWWP2 reports every checkpoint, each with an explicit `R-0` when no
+controls are in effect. So `sourceStatus: OK` with zero features is now a
+**confirmed** "no chain controls". Before, it only meant "the KML was empty",
+which is also what a broken feed looked like. Neither source can erase the
+other's controls: a control either one reports is shown.
+
+- **Feature `id`s:** `cc:<checkpoint index>` for CWWP2 entries, e.g.
+  `cc:10-ALP-4-0.65-W-14W` (district, county, route, postmile, direction,
+  sign); `cc:<message id>` for `cc.kml` entries, as before. When both report
+  the same checkpoint, only the CWWP2 entry is served. The layer is a live
+  projection, not stored, so no history is affected.
+- **Road closures render as closures.** A `cc.kml` "Road Closed" entry (the
+  seasonal Ebbetts/Sonora/Tioga gates) used to serve with an empty highway and
+  the headline `"chain control"`. It is now `"Highway 4 road closed"`, with
+  `category: "closed"`, and severity `MINOR` (rank 1; it was `INFO`). It
+  still ranks below an R-1 chain control. Because `/summary`'s roads domain
+  counts condition features above INFO as active, an in-area seasonal gate (the
+  Ebbetts closure at Mount Reba) now appears in that domain's `activeCount` and
+  headlines all winter. The summary `mode` is unaffected.
+- CWWP2 entries: `properties.chainControl.highway` reads `Highway 4` /
+  `US 50` / `I-80`, `areaLabel` is Caltrans's upper-case checkpoint name
+  (`ARNOLD`), `effective` is when the checkpoint entered its level (Pacific
+  offset), `source.attribution` is `cwwp2.dot.ca.gov`.
+- **`sourceStatus`:** `UNAVAILABLE` (or `STALE` from a cached last-good) when
+  CWWP2 fails and `cc.kml` has nothing; `STALE` with features when either source
+  fails but the other has controls, when an in-area checkpoint reported a
+  malformed status, or when a checkpoint has no position.
+
 ## 2026-09-15 (evening)
 
 ### New: `GET /api/v1/mesh/telemetry?node=` — one node's telemetry archive

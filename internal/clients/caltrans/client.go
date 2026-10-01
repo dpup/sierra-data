@@ -35,6 +35,11 @@ type HTTPDoer interface {
 type FeedParser struct {
 	HTTPClient HTTPDoer
 	geoUtils   geo.GeoUtils
+
+	// Chain-control levels come from CWWP2 when configured (see
+	// UseCWWP2ChainControls); nil keeps the cc.kml-only behavior.
+	chainSource    ChainControlSource
+	chainDistricts []int
 }
 
 // CaltransIncident represents parsed incident data from KML feeds
@@ -62,8 +67,26 @@ type ChainControlData struct {
 	EffectiveTime string           // ISO 8601 timestamp
 	Description   string           // Human-readable requirements
 	LastUpdated   string           // When data was last updated
-	MessageID     string           // Caltrans message ID
+	MessageID     string           // Caltrans message ID (cc.kml) or CWWP2 checkpoint index
 	District      string           // Caltrans district number
+	// Source is the host the entry came from ("cwwp2.dot.ca.gov" or
+	// "quickmap.dot.ca.gov"), for attribution.
+	Source string
+	// Unrecognized marks a CWWP2 checkpoint whose status is not R-0..R-3 (D7
+	// was observed carrying a longitude there). It is neither a requirement
+	// nor an all-clear: consumers must not act on it, and must not report the
+	// area as fully known either. RawStatus keeps the value for diagnosis.
+	Unrecognized bool
+	RawStatus    string
+	// Closed marks a cc.kml road-closure entry ("Eastbound Highway 4 Road
+	// Closed", styleUrl #full-closure) — the seasonal pass gates. It is not a
+	// chain requirement and must not be read as one.
+	Closed bool
+	// Uncorroborated marks a cc.kml control sitting on a CWWP2 checkpoint that
+	// reports R-0 — the sources disagree. It is
+	// still a control (the safe side); the flag exists so the disagreement is
+	// visible in logs while their agreement is unverified (#12).
+	Uncorroborated bool
 }
 
 // KML XML structures for parsing
@@ -150,14 +173,23 @@ func (p *FeedParser) ParseChainControls(ctx context.Context) ([]CaltransIncident
 	return p.parseKMLFeed(ctx, "https://quickmap.dot.ca.gov/data/cc.kml", CHAIN_CONTROL)
 }
 
-// ParseChainControlsDetailed processes chain control KML feed with detailed parsing
-// Returns structured chain control data with level, location, and timing info
+// ParseChainControlsDetailed returns the ACTIVE chain controls (plus cc.kml's
+// road-closed / truck-level entries) as structured data. With a CWWP2 source
+// configured (UseCWWP2ChainControls) levels come from CWWP2; otherwise from
+// cc.kml alone. A *PartialError return carries usable, incomplete data.
 func (p *FeedParser) ParseChainControlsDetailed(ctx context.Context) ([]ChainControlData, error) {
+	if p.chainSource != nil && len(p.chainDistricts) > 0 {
+		return p.chainControlsCWWP2(ctx)
+	}
 	incidents, err := p.ParseChainControls(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return p.parseChainControlDetails(incidents), nil
+	controls := p.parseChainControlDetails(incidents)
+	for i := range controls {
+		controls[i].Source = SourceQuickMap
+	}
+	return controls, nil
 }
 
 // parseChainControlDetails extracts detailed chain control info from incidents
@@ -171,6 +203,8 @@ func (p *FeedParser) parseChainControlDetails(incidents []CaltransIncident) []Ch
 
 		// Parse name: "Eastbound US 50 Chain Control level R-2"
 		control.Direction, control.Highway, control.Level = parseChainControlName(incident.Name)
+		control.Closed = strings.EqualFold(strings.TrimSpace(incident.StyleUrl), "#full-closure") ||
+			roadClosedPattern.MatchString(incident.Name)
 
 		// Parse description HTML for location, effective time, and requirements
 		control.LocationName, control.EffectiveTime, control.Description, control.LastUpdated, control.District, control.MessageID = parseChainControlDescription(incident.DescriptionHtml)
@@ -180,6 +214,8 @@ func (p *FeedParser) parseChainControlDetails(incidents []CaltransIncident) []Ch
 
 	return controls
 }
+
+var roadClosedPattern = regexp.MustCompile(`(?i)\bRoad\s+Closed\b`)
 
 // parseChainControlName extracts direction, highway, and level from the name
 // Example: "Eastbound US 50 Chain Control level R-2"
@@ -197,8 +233,10 @@ func parseChainControlName(name string) (direction, highway, level string) {
 		level = "R" + match[1]
 	}
 
-	// Extract highway name (everything before "Chain Control")
-	highwayPattern := regexp.MustCompile(`(?i)^(.+?)\s+Chain\s+Control`)
+	// Extract highway name (everything before "Chain Control", or before
+	// "Road Closed" for the closure entries — which otherwise had no highway
+	// at all and rendered as a bare "chain control").
+	highwayPattern := regexp.MustCompile(`(?i)^(.+?)\s+(?:Chain\s+Control|Road\s+Closed)`)
 	if match := highwayPattern.FindStringSubmatch(name); len(match) > 1 {
 		highway = strings.TrimSpace(match[1])
 	}
