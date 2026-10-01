@@ -8,7 +8,7 @@ enhancement live in `internal/services`, not here.
 |------------|-----------------------|-------------------------------|-------|
 | `google`   | Google Routes API     | `PF__GOOGLE_ROUTES__API_KEY`  | Travel time + polyline. Rate-limited; callers cache aggressively (10k/mo budget). |
 | `caltrans` | quickmap.dot.ca.gov KML | none                        | Lane closures, CHP incidents, chain control (merged with `cwwp2` when configured). |
-| `cwwp2`    | cwwp2.dot.ca.gov JSON (Caltrans data portal) | none (public, undocumented) | Per-checkpoint chain-control status; lane-closure windows incl. scheduled. See below. |
+| `cwwp2`    | cwwp2.dot.ca.gov JSON (Caltrans data portal) | none (public, undocumented) | Per-checkpoint chain-control status; lane-closure windows incl. scheduled; message-sign text. See below. |
 | `weather`  | OpenWeatherMap        | `PF__OPENWEATHER__API_KEY`    | Current conditions only. `GetWeatherAlerts` (One Call 3.0, 1,000/day cap) is CLI-diagnostic only — the server sources alerts from `nws`. |
 | `nws`      | api.weather.gov       | none (User-Agent required)    | Authoritative zone alerts + fire-weather products. |
 | `firis`    | ArcGIS (CAL FIRE org) | none (public)                 | CAL FIRE/FIRIS combo fire perimeters. Dedup + `LastEdit` gating live in `internal/ingest` (wildfire). Replaced `wfigs` (retained unused). |
@@ -102,9 +102,52 @@ Mariposa).
   (#11):** an empty `lcs` file is accepted as "no closures" (unlike `cc`), and a
   code block whose shape changes decodes as "not called" — both would let the
   disappearance sweep resolve real closures. Gate them like the `cc` checks.
-- **Also available, unused:** `cms` (message-sign text as plain fields), `cctv`
-  (snapshot JPG + HLS stream URLs per camera), `rwis` (road-weather stations —
-  D10's are all Valley sites, useless to us, and its JSON doesn't parse).
+- **Message signs (`cms`) — parsed, not yet wired (#13).** Every changeable
+  message sign with what it is showing: up to two pages ("phases") of three
+  lines. D10 has 107 signs, 11 of them in the five mountain counties
+  (Hwy 4 west of Murphys, Hwy 108 at Soulsbyville, Hwy 120 at Moccasin and
+  Buck Meadows, Hwy 88 at Pine Grove and Dew Drop, among others).
+  `MessageSign.Display` is believed only when the lines agree with it (blank
+  = no text, one page = text in phase 1 alone, two pages = text in both);
+  anything else, and the portal's `"Not Reported"` placeholder, is
+  `DisplayUnknown`. That is never "blank" and never the text "Not Reported".
+  Read the message through `Pages()`/`Text()`, which honor `Display`;
+  `Phase1`/`Phase2` keep the raw lines for diagnosis. An empty file is
+  `ErrEmptyFeed` and a frozen one `ErrStaleFeed`, like `cc`.
+
+  **Most of what the signs say is boilerplate, and it rotates.** On 2026-10-01,
+  82 of D10's 107 signs showed one statewide safety campaign ("BE THE DRIVER /
+  WHO SAVES LIVES / DON'T SPEED"). The day before, the issue saw a different
+  one on every sign ("SAVE LIVES / SLOW DOWN / IN WORK ZONE"), and most
+  in-area signs changed message at 08:00 PDT on 9/30. So a fixed boilerplate
+  list will go stale; a message on dozens of signs at once is the better
+  tell. Classifying is the caller's job — this package only parses.
+  Real operational text does appear ("SR 20 / TRAFFIC CONTROL / EXPECT
+  DELAYS", D3), so the signal exists.
+
+  Quirks, all from the 2026-10-01 survey of all twelve districts:
+  - Lines are XML-escaped (`DON&apos;T`), sometimes padded to position text on
+    the face (`" .US 50 22 MIN"`), and not always upper case (D8 travel times).
+  - `inService` is `true`/`false` in some districts, `True`/`False` in D3, D8,
+    D11 and D12, and blank on two D2 rows (read as not in service).
+  - The index is unique in D10 (`V42`, matching the sign number in the name)
+    but **not an identity elsewhere**: D12 numbers all 67 signs `1`, D3 and
+    D11 repeat some, D3 has `N/A`. It never carries the district. Key on it
+    only per district, and only where it is unique.
+  - `route` names one route where routes share the road: D10's `45 - EB 49
+    (MOCCASIN)` is filed under SR-120 and `43 - EB 120 W/O YOSEMITE` under
+    SR-108. Match a sign to a corridor by position, not route.
+  - `messageTimestamp` (when the message last changed) is `"Not Reported"`
+    throughout D7, even on signs showing text, and `1970-01-01 00:00:00` on a
+    D10 sign that has never reported. Both parse as zero.
+  - **D7's file was frozen for over two days** while still answering 200, and
+    still showing an `INCIDENT ... RT LANES BLKD` message. Every other
+    district's record stamp was within two minutes of the wall clock; D10's
+    advanced every two minutes.
+  - D2 has a row (index `0`) with an entirely blank location.
+- **Also available, unused:** `cctv` (snapshot JPG + HLS stream URLs per
+  camera), `rwis` (road-weather stations — D10's are all Valley sites, useless
+  to us, and its JSON doesn't parse).
 
 **It is hand-templated JSON; parse strictly and never read garbage as R-0.**
 Observed 2026-09-30: `rwis` drops commas between repeated sensor entries (XML
@@ -116,8 +159,9 @@ it's in-area — unless cc.kml reports something at that checkpoint (see above).
 Date/time strings are Pacific local; `*Epoch` fields are real Unix epochs.
 
 `./bin/test-caltrans -feed=cwwp2 [-district=N]` probes it live (levels,
-unrecognized statuses, freshness, closure phases). Fixtures and the list of
-still-unverified winter behavior: `tests/testdata/cwwp2/README.md`.
+unrecognized statuses, freshness, sign messages grouped by text, closure
+phases). Fixtures and the list of still-unverified winter behavior:
+`tests/testdata/cwwp2/README.md`.
 
 ## NWS (`nws`)
 
