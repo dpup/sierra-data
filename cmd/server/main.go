@@ -65,15 +65,16 @@ func main() {
 	// Initialize external API clients using top-level client configurations
 	googleClient := google.NewClient(appConfig.GoogleRoutes.APIKey)
 	caltransClient := caltrans.NewFeedParser()
-	if cw := appConfig.Roads.CaltransFeeds.CWWP2; len(cw.ChainControlDistricts) > 0 {
-		cwClient := cwwp2.NewClient()
-		if cw.BaseURL != "" {
-			cwClient.BaseURL = cw.BaseURL
-		}
-		if cw.StaleAfter > 0 {
-			cwClient.StaleAfter = cw.StaleAfter
-		}
-		caltransClient.UseCWWP2ChainControls(cwClient, cw.ChainControlDistricts)
+	cwCfg := appConfig.Roads.CaltransFeeds.CWWP2
+	cwClient := cwwp2.NewClient()
+	if cwCfg.BaseURL != "" {
+		cwClient.BaseURL = cwCfg.BaseURL
+	}
+	if cwCfg.StaleAfter > 0 {
+		cwClient.StaleAfter = cwCfg.StaleAfter
+	}
+	if len(cwCfg.ChainControlDistricts) > 0 {
+		caltransClient.UseCWWP2ChainControls(cwClient, cwCfg.ChainControlDistricts)
 	}
 	weatherClient := weather.NewClient(appConfig.OpenWeather.APIKey)
 	nwsClient := nws.NewClient(appConfig.Weather.NWS.UserAgent)
@@ -158,9 +159,11 @@ func main() {
 	}
 
 	// Hazard condition-layer projector: gridapi calls BuildLayer for the live
-	// condition layers (road_segment, chain_control, fire_weather). The event
-	// layers are projected from the grid store by gridapi itself.
+	// condition layers (road_segment, chain_control, fire_weather,
+	// message_sign). The event layers are projected from the grid store by
+	// gridapi itself.
 	hazardsService := hazards.NewServiceWithAPIs(appConfig, roadsService, weatherService, caltransClient, cacheInstance)
+	hazardsService.UseMessageSigns(cwClient, cwCfg.MessageSignDistricts)
 
 	// NWS weather-alert enhancement is optional: nil when disabled or keyless
 	// (the scheduler then serves raw alerts — enhancement never gates ingest).

@@ -34,15 +34,19 @@ type WeatherAPI interface {
 
 // Service projects the roads/weather feeds into the unified GeoJSON hazard
 // model. Since the /api/v1 hazards surface was removed, its only consumer is the
-// /v1 grid API (internal/gridapi), which calls BuildLayer for the three
-// condition layers (road_segment, chain_control, fire_weather); the event
-// layers are projected directly from the store by gridapi.
+// /v1 grid API (internal/gridapi), which calls BuildLayer for the four
+// condition layers (road_segment, chain_control, fire_weather, message_sign);
+// the event layers are projected directly from the store by gridapi.
 type Service struct {
 	cfg      *config.Config
 	roads    RoadsAPI
 	weather  WeatherAPI
 	caltrans *caltrans.FeedParser
 	cache    *cache.Cache
+
+	// signs and signDistricts back message_sign; set by UseMessageSigns.
+	signs         MessageSignAPI
+	signDistricts []int
 
 	// layerBuilders is derived once from layerRegistry() so the dispatch map has
 	// one source of truth.
@@ -85,6 +89,7 @@ func (s *Service) layerRegistry() []layerEntry {
 	return []layerEntry{
 		{LayerChainControl, s.chainControls},
 		{LayerFireWeather, s.fireWeather},
+		{LayerMessageSign, s.messageSigns},
 		{LayerRoadSegment, s.roadSegments},
 	}
 }
@@ -136,7 +141,7 @@ func partialData(err error) error         { return &partialDataError{err} }
 // to the last good fetch (STALE) instead of going UNAVAILABLE.
 func layerTTL(layer string) time.Duration {
 	switch layer {
-	case LayerEarthquake, LayerWildfire, LayerChainControl, LayerFireWeather:
+	case LayerEarthquake, LayerWildfire, LayerChainControl, LayerFireWeather, LayerMessageSign:
 		return 5 * time.Minute
 	case LayerEvacuation:
 		return 2 * time.Minute // life-safety: short, so STALE fallback stays recent
@@ -283,9 +288,10 @@ func finalize(meta layerMetadata, features []Feature, status string, lastUpdate 
 // BuildLayer builds one layer for an area through the same fail-loud path the
 // GeoJSON and /situation endpoints use (buildLayer + layerMeta), exported for
 // the /v1 grid API's condition-backed map layers (road_segment, chain_control,
-// fire_weather). ok is false for an unknown layer; every other return mirrors
-// the metadata block the shipped endpoints emit (status OK|STALE|UNAVAILABLE,
-// lastSourceUpdate zero unless serving stale, per-layer attribution/sourceURL).
+// fire_weather, message_sign). ok is false for an unknown layer; every other
+// return mirrors the metadata block the shipped endpoints emit (status
+// OK|STALE|UNAVAILABLE, lastSourceUpdate zero unless serving stale, per-layer
+// attribution/sourceURL).
 func (s *Service) BuildLayer(ctx context.Context, area config.HazardArea, layer string) (features []Feature, status string, lastSourceUpdate time.Time, attribution, sourceURL string, ok bool) {
 	build, found := s.layerBuilders[layer]
 	if !found {

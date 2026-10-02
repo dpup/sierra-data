@@ -487,6 +487,10 @@ type CWWP2Config struct {
 	// ChainControlDistricts are the Caltrans districts whose per-checkpoint
 	// chain-control status replaces cc.kml's levels. Empty keeps cc.kml alone.
 	ChainControlDistricts []int `koanf:"chainControlDistricts"`
+	// MessageSignDistricts are the Caltrans districts whose changeable message
+	// signs back the message_sign map layer. Empty leaves that layer
+	// UNAVAILABLE — it has no other source.
+	MessageSignDistricts []int `koanf:"messageSignDistricts"`
 	// StaleAfter fails a feed whose newest record is older than this (the
 	// portal can keep serving a file it has stopped regenerating). 0 uses
 	// cwwp2.DefaultStaleAfter.

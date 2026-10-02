@@ -18,6 +18,9 @@ const (
 	// deliberately matches the Layer enum name so properties.layer ("POWER")
 	// reads identically to Event.layer on the /events RPCs.
 	LayerPower = "power"
+	// LayerMessageSign is what each Caltrans changeable message sign is
+	// showing — context, never a hazard: every feature is INFO.
+	LayerMessageSign = "message_sign"
 )
 
 // Properties is the common envelope shared by every hazard feature, plus a
@@ -50,6 +53,7 @@ type Properties struct {
 	Mesh         *MeshProps         `json:"mesh,omitempty"`
 	MeshLink     *MeshLinkProps     `json:"meshLink,omitempty"`
 	Power        *PowerProps        `json:"power,omitempty"`
+	MessageSign  *MessageSignProps  `json:"messageSign,omitempty"`
 }
 
 // Source identifies the upstream feed a feature came from.
@@ -229,6 +233,25 @@ type PowerProps struct {
 	// AllClear is PG&E's PLANNED all-clear, not proof the shutoff ended (it is
 	// populated on rows still at stage Watch). Render it as an estimate.
 	AllClear string `json:"allClear,omitempty"`
+}
+
+// MessageSignProps is the message_sign kind block: one Caltrans changeable
+// message sign and what it is showing, verbatim. The envelope's `category`
+// says whether it is showing a message, is blank, or can't be read.
+type MessageSignProps struct {
+	// SignID is the portal's index, verbatim ("V42"). Unique within District
+	// 10 but not in every district, so the feature `id` is the identity.
+	SignID   string `json:"signId"`
+	District int    `json:"district"`
+	// Route names ONE route where routes share the road (the Moccasin sign on
+	// EB 49 is filed under SR-120).
+	Route     string `json:"route,omitempty"`
+	Direction string `json:"direction,omitempty"`
+	InService bool   `json:"inService"`
+	// Pages is what the sign is showing: one or two pages of exactly three
+	// lines, a blank line kept as "" so a client can draw the sign face.
+	// Omitted when the sign is blank or its message is unknown.
+	Pages [][3]string `json:"pages,omitempty"`
 }
 
 // setSeverity sets both Severity and the derived SeverityRank.

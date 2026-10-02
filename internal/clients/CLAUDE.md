@@ -102,7 +102,9 @@ Mariposa).
   (#11):** an empty `lcs` file is accepted as "no closures" (unlike `cc`), and a
   code block whose shape changes decodes as "not called" — both would let the
   disappearance sweep resolve real closures. Gate them like the `cc` checks.
-- **Message signs (`cms`) — parsed, not yet wired (#13).** Every changeable
+- **Message signs (`cms`) — in use: the `message_sign` map layer (#13).** It
+  is always `INFO` and `/summary` doesn't read it; see
+  `internal/hazards/CLAUDE.md`. Every changeable
   message sign with what it is showing: up to two pages ("phases") of three
   lines. D10 has 107 signs, 11 of them in the five mountain counties
   (Hwy 4 west of Murphys, Hwy 108 at Soulsbyville, Hwy 120 at Moccasin and

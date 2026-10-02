@@ -44,6 +44,9 @@ export const MAP_LAYERS = [
   'road_incident',
   'chain_control',
   'road_segment',
+  // What each Caltrans changeable message sign is showing. Always INFO:
+  // context (mostly safety-campaign boilerplate), never a hazard.
+  'message_sign',
   'weather_alert',
   'fire_weather',
   'earthquake',

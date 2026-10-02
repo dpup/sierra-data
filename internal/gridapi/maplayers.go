@@ -22,10 +22,11 @@ import (
 // Event-backed layers (wildfire, evacuation, weather_alert, earthquake,
 // road_incident) are served from the store via the shared T13 projection, with
 // metadata.source_status derived from the layer's source registry rows.
-// Condition-backed layers (road_segment, chain_control, fire_weather) stay
-// live projections: they delegate to the hazards builders through the narrow
-// hazardsBuilder interface. Both paths emit the SHIPPED FeatureCollection
-// envelope so /v1 map clients and /api/v1/hazards clients read one schema.
+// Condition-backed layers (road_segment, chain_control, fire_weather,
+// message_sign) stay live projections: they delegate to the hazards builders
+// through the narrow hazardsBuilder interface. Both paths emit the SHIPPED
+// FeatureCollection envelope so /v1 map clients and /api/v1/hazards clients
+// read one schema.
 
 // mapSchemaVersion mirrors the shipped hazards metadata schema_version (the
 // unexported hazards const); bump both on a breaking envelope change.
@@ -50,6 +51,7 @@ var conditionLayers = map[string]bool{
 	hazards.LayerRoadSegment:  true,
 	hazards.LayerChainControl: true,
 	hazards.LayerFireWeather:  true,
+	hazards.LayerMessageSign:  true,
 }
 
 // layerSourceIDs maps each event-backed layer slug onto the source registry
@@ -88,6 +90,7 @@ var conditionLayerSourceIDs = map[string][]string{
 	// Google half is credited by the per-feature source block.
 	hazards.LayerRoadSegment: {"caltrans"},
 	hazards.LayerMeshLink:    {"meshcore"},
+	hazards.LayerMessageSign: {"caltrans"},
 }
 
 // registryAttribution joins the attribution lines of the named sources, in

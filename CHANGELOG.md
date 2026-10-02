@@ -14,6 +14,55 @@ throughout; errors are gRPC-standard `{code, codeName, message, details}`). The
 by a snake_case `/v1` surface on 2026-07-05, which was in turn folded back onto the
 proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 
+## 2026-10-02
+
+### New map layer: `message_sign` — what Caltrans's message signs are showing
+
+**Additive.** `GET /api/v1/places/{place}/map/message_sign.geojson` serves one
+Point per Caltrans changeable message sign (the roadside electronic signs)
+inside the place's bounds, with the text it is showing right now. The source is
+the CWWP2 data portal (`cwwp2.dot.ca.gov`, District 10: 107 signs, 6 of them
+within the `ebbetts-pass` bounding box). Like the other condition layers it is
+scoped by the place's bounding box, not its polygon.
+
+**Treat it as context, never as a hazard.** Most of what the signs say is
+statewide safety-campaign boilerplate: on 2026-10-01, 82 of District 10's 107
+signs read "BE THE DRIVER / WHO SAVES LIVES / DON'T SPEED". Nothing is filtered
+out, because the campaigns rotate and no fixed list can keep up. So:
+
+- Every feature is `severity: INFO` (rank 0), even if the text says
+  "CHAINS REQUIRED". The `chain_control` layer carries the requirement.
+- `/summary` does not read this layer. It never moves the `mode`, a domain, or
+  `topEvents`.
+- It is a live projection, not stored. There are no events and no history.
+
+Feature shape:
+
+- `id`: `cms:<district>:<sign index>`, e.g. `cms:10:V50`. Where an index isn't
+  unique in its district (District 12 numbers every sign `1`), the id uses the
+  sign's position instead: `cms:12:38.10000,-120.50000`.
+- `category`: `message` (showing text), `blank` (dark), or `unknown` (the
+  portal didn't report the sign's message, or reported one that contradicts
+  itself). `unknown` is never "blank".
+- `headline`: the sign text verbatim, one line, pages joined by `" / "`
+  (`"GUSTY WIND WARNING / OVER PACHECO PASS"`). For the other categories it is
+  `"Sign is blank"`, `"Sign message unknown"` or `"Sign out of service"`.
+- `areaLabel`: Caltrans's location name without the sign number
+  (`"EB 4 W/O MURPHYS"`).
+- `effective`: when the sign last changed message. Omitted where the portal
+  doesn't report it.
+- `properties.messageSign`: `signId`, `district`, `route`, `direction`,
+  `inService`, and `pages`. `pages` holds one or two pages of exactly three
+  lines, with a blank line kept as `""` so a client can draw the sign face.
+  It is omitted for blank and unknown signs. `route` names one route where two
+  share the road (the Moccasin sign on EB 49 is filed under `SR-120`).
+
+`sourceStatus` follows the usual rules. The portal answering with an error, an
+empty file, or a file older than an hour is `UNAVAILABLE` (or `STALE` from a
+cached last-good). A sign with no position is `STALE`, with the other signs
+kept. A sign that can't be read is listed as `unknown` and does not degrade
+the layer.
+
 ## 2026-09-30
 
 ### `chain_control` map layer: Caltrans CWWP2 merged in
