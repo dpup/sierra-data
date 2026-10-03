@@ -380,3 +380,38 @@ Rules:
 
 `ErrNotFound` from point lookups (`GetEvent`, `GetPlace`) maps to HTTP 404 at the
 API layer — return it, don't invent a sentinel.
+
+## `burn_readings` — the one table an HTTP request writes
+
+Every other table here is written by the ingest scheduler. `burn_readings`
+(migrationV7) is written by the `burn.line` stream of the push-ingest endpoint
+(`internal/pushingest`), and it is the landing spot for a pushed burn-day
+reading. It is the only table an HTTP request writes: the sibling `mesh.repeater`
+stream buffers in memory instead, because it reports every few minutes whereas a
+burn line is called once a day and must survive a restart.
+
+It is a staging table on purpose. The push handler validates a reading and lands
+a row; it does **not** write events. `BurnStatusNormalizer.Poll` reads the latest
+row on the scheduler's tick, so the scheduler remains the single owner of event
+writes and the fail-loud lifecycle rules are unchanged. Single-writer discipline
+still holds because it was never "one caller" — it is `inTx` taking `mu`, which
+`PutBurnReading` goes through like everything else.
+
+Two properties worth keeping:
+
+- **It is keyed by LINE, not by county.** One air-district line routinely speaks
+  for several counties; keying by county would store (and dial) the same reading
+  once per county. Which counties a line answers for is config
+  (`grid.burn.lines[].counties`), not a property of the reading.
+- **The row keeps the upstream's own `observed_at`** (when the phone line was
+  called), separate from `received_at` (when we accepted the push). The former is
+  the freshness signal the ingest gate judges; the latter is diagnostic. Storing
+  only a receive time would make every restart-rehydrated reading look current.
+- **A write is last-write-wins on `observed_at`, not blind replacement.** The
+  `WHERE excluded.observed_at >= burn_readings.observed_at` clause means a retry
+  or duplicate delivery can never move a county BACKWARDS to an older reading,
+  which would hand the freshness gate a stale stamp and blank a facet that was
+  fine. `TestPush_OlderReadingDoesNotOverwriteNewer` pins it.
+
+`line_id` is effectively immutable: it is the row's key, so renaming a line in
+config orphans that line's staged reading (and its history under the old id).

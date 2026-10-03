@@ -18,6 +18,11 @@ const (
 	// deliberately matches the Layer enum name so properties.layer ("POWER")
 	// reads identically to Event.layer on the /events RPCs.
 	LayerPower = "power"
+	// LayerBurnStatus is per-county residential burning status. It is NOT a map
+	// layer: the events carry no geometry (burn status is an administrative fact
+	// about a county, expressed through preset place_ids), so it appears in
+	// layerSourceIDs for source health but deliberately not in eventLayers.
+	LayerBurnStatus = "burn_status"
 	// LayerMessageSign is what each Caltrans changeable message sign is
 	// showing — context, never a hazard: every feature is INFO.
 	LayerMessageSign = "message_sign"
