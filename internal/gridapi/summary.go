@@ -348,15 +348,13 @@ func buildCondition(ctx context.Context, hb hazardsBuilder, area config.HazardAr
 	return conditionResult{features: features, status: status}
 }
 
-// topEventsFrom returns the n most urgent events (severity_rank desc, then
-// observed_at desc — the canonical client sort; the store already yields this
-// order, the stable re-sort makes the contract explicit).
 // isPlannedRoadwork reports a road closure window that is scheduled but not
 // set up (carve-out 3 in GetPlaceSummary).
 func isPlannedRoadwork(ev *gridv1.Event) bool {
 	return ev.GetLayer() == gridv1.Layer_ROAD_INCIDENT && ev.GetStatus() == gridv1.EventStatus_SCHEDULED
 }
 
+// withoutPlannedRoadwork returns events minus planned roadwork (isPlannedRoadwork).
 func withoutPlannedRoadwork(events []*gridv1.Event) []*gridv1.Event {
 	out := make([]*gridv1.Event, 0, len(events))
 	for _, ev := range events {
@@ -367,6 +365,9 @@ func withoutPlannedRoadwork(events []*gridv1.Event) []*gridv1.Event {
 	return out
 }
 
+// topEventsFrom returns the n most urgent events (severity_rank desc, then
+// observed_at desc — the canonical client sort; the store already yields this
+// order, the stable re-sort makes the contract explicit).
 func topEventsFrom(events []*gridv1.Event, n int) []*gridv1.SummaryTopEvent {
 	sorted := make([]*gridv1.Event, len(events))
 	copy(sorted, events)
