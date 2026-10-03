@@ -112,7 +112,9 @@ func (s *RoadsService) fetchActiveCWWP2Closures(ctx context.Context, districts [
 				unrecognized++
 				continue
 			}
-			if lc.PhaseAt(now, 0) == cwwp2.PhaseActive {
+			// Same overrun grace as the lane-closure poller, so a segment never
+			// stays CLOSED on a window the closure events have already resolved.
+			if lc.PhaseAt(now, s.config.Roads.CaltransFeeds.CWWP2.LaneClosureOverrunGrace) == cwwp2.PhaseActive {
 				active = append(active, lc)
 			}
 		}
