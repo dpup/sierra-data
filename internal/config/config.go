@@ -495,6 +495,11 @@ type CWWP2Config struct {
 	// closure in an unlisted district is simply never seen. Empty keeps the
 	// lcs2way.kml path.
 	LaneClosureDistricts []int `koanf:"laneClosureDistricts"`
+	// LaneClosureOverrunGrace bounds an overrun: a closure window that was set
+	// up (10-97) and never picked up (10-98) stays ACTIVE until its planned end
+	// plus this, then is presumed completed and resolves. Indefinite windows
+	// are exempt. 0 uses cwwp2.DefaultOverrunGrace (12h).
+	LaneClosureOverrunGrace time.Duration `koanf:"laneClosureOverrunGrace"`
 	// MessageSignDistricts are the Caltrans districts whose changeable message
 	// signs back the message_sign map layer. Empty leaves that layer
 	// UNAVAILABLE — it has no other source.

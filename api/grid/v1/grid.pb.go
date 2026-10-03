@@ -1696,7 +1696,10 @@ func (x *RoadIncidentDetail) GetClosure() *LaneClosureDetail {
 //
 // The planned window is an estimate that crews overrun, so planned_end is NOT
 // mapped onto the envelope `expires` (the same rule as PG&E's restoration
-// estimate). A set-up closure stays ACTIVE until the crew radios it picked up.
+// estimate). A set-up closure stays ACTIVE until the crew radios it picked up,
+// or until planned_end plus a configured overrun grace (12h by default) passes
+// with no pickup call, when it is presumed picked up and RESOLVED. Indefinite
+// windows have no such bound.
 type LaneClosureDetail struct {
 	state                 protoimpl.MessageState `protogen:"open.v1"`
 	WindowId              string                 `protobuf:"bytes,1,opt,name=window_id,json=windowId,proto3" json:"window_id,omitempty"`                                            // CWWP2 index: "C4QB-0004-2026-10-02-07:01:00"

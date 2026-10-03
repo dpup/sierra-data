@@ -14,6 +14,18 @@ throughout; errors are gRPC-standard `{code, codeName, message, details}`). The
 by a snake_case `/v1` surface on 2026-07-05, which was in turn folded back onto the
 proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 
+## 2026-10-03
+
+### Caltrans lane closures: an unconfirmed overrun now resolves after 12h
+
+**Behavior change, no shape change.** A CWWP2 lane closure the crew radioed set
+up (10-97) but never picked up (10-98) used to stay `ACTIVE` for as long as its
+row stayed in the file, sometimes days past its planned end. It now stays
+`ACTIVE` through an overrun for up to 12 hours past `closure.plannedEnd`
+(configurable), then is presumed picked up and becomes `RESOLVED`, like any
+other ended window. Closures with `closure.endIndefinite: true` are unaffected.
+A real pickup call still resolves a closure as soon as it is seen.
+
 ## 2026-10-02
 
 ### New map layer: `message_sign` — what Caltrans's message signs are showing

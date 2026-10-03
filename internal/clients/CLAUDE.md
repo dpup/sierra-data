@@ -99,7 +99,11 @@ Mariposa).
   for the incident box), with epoch times and the radio codes 10-97 (set up),
   10-98 (picked up), 10-22 (cancelled). `LaneClosure.PhaseAt` derives
   SCHEDULED/ACTIVE/COMPLETED/CANCELLED. Codes win over the clock, so a set-up
-  closure past its window is still ACTIVE (overruns happen). Two gates keep a
+  closure past its window is still ACTIVE (overruns happen) — but only for
+  `laneClosureOverrunGrace` past its planned end (default
+  `DefaultOverrunGrace`, 12h). Crews sometimes never radio the 10-98 and the
+  row lingers for days; after the grace `PhaseAt` presumes it COMPLETED.
+  Indefinite windows have no planned end and are exempt. Two gates keep a
   broken file from reading as "every closure ended":
   - **An empty file is `ErrEmptyFeed`** (D3 lists ~1,100 windows, D10 ~630, D9
     81; an empty file also has no record stamp to check freshness against).

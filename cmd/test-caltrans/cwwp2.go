@@ -81,7 +81,7 @@ func probeLaneClosures(ctx context.Context, c *cwwp2.Client, district int) {
 			phases["UNRECOGNIZED"]++
 			continue
 		}
-		ph := lc.PhaseAt(now).String()
+		ph := lc.PhaseAt(now, 0).String() // default overrun grace
 		phases[ph]++
 		county := lc.Begin.County
 		if byCounty[county] == nil {

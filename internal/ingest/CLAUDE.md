@@ -451,7 +451,16 @@ not have saved much.
   COMPLETED and CANCELLED rows linger in the file but are NOT emitted; their
   absence from a successful poll is what resolves them. The planned end never
   becomes `expires` (the PG&E ETOR rule): crews overrun, and an overrunning
-  closure must stay ACTIVE until the 10-98.
+  closure stays ACTIVE until the 10-98 — **bounded** by
+  `roads.caltransFeeds.cwwp2.laneClosureOverrunGrace` (default 12h) past the
+  planned end. Crews sometimes never radio the pickup and the row lingers for
+  days, so past the grace `PhaseAt` presumes it COMPLETED, the window drops
+  out of the poll, and the `resolve` sweep writes RESOLVED. That is a clock
+  inference, the same kind the no-show case (window over, never set up) has
+  always made; it is a resolve, not an EXPIRED, because the source's policy is
+  `resolve` and the planned window is the upstream's own statement of when the
+  work ends. Indefinite windows are exempt. The bound lives in `PhaseAt`, not
+  in the sweep, so the scheduler stays source-agnostic.
 - **Text and severity are deterministic** (`hazards.SeverityFromLaneClosure`),
   never AI. ~10x the closure volume would have starved CHP of the incidents
   pipeline's 5-per-refresh budget, and the AI headline was hashed, so every
