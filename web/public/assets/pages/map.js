@@ -53,6 +53,10 @@ export const MAP_LAYERS = [
   'wildfire',
   'power',
   'evacuation',
+  // Caltrans traffic cameras: INFO reference views, not hazards. Late so it
+  // rarely drives the auto-fit — cameras are listed up to 25 km outside the
+  // place, on the roads into it.
+  'camera',
   // The relay topology as a self-contained subgraph (nodes in-region + their
   // 1-hop neighbours, plus the edges). Last so it never drives the auto-fit —
   // its neighbour nodes can sit well outside the place. The rich role-colored /
@@ -267,6 +271,7 @@ export function kindDetails(props) {
   const add = (k, v) => { if (v !== undefined && v !== null && v !== '') rows.push([k, String(v)]); };
   add('status', props.status);
   const layer = String(props.layer || '').toUpperCase();
+  let camera = null; // set for CAMERA: the snapshot + stream render below the rows
 
   if (layer === 'ROAD_SEGMENT') {
     const r = asObj(props.road) || {};
@@ -329,6 +334,14 @@ export function kindDetails(props) {
     if (p.deEnergizationStart) add('de-energized from', p.deEnergizationStart);
     if (p.deEnergizationEnd) add('est. until', p.deEnergizationEnd);
     if (p.outageId) add('outage #', p.outageId);
+  } else if (layer === 'CAMERA') {
+    camera = asObj(props.camera) || {};
+    add('route', [camera.route, camera.direction].filter(Boolean).join(' '));
+    add('county', camera.county);
+    if (camera.elevationFeet) add('elevation', camera.elevationFeet.toLocaleString('en-US') + ' ft');
+    if (camera.distanceMeters === 0) add('distance', 'inside this place');
+    else if (camera.distanceMeters != null) add('distance', (camera.distanceMeters / 1000).toFixed(1) + ' km away');
+    if (camera.imageRefreshMinutes) add('refreshes', 'every ' + camera.imageRefreshMinutes + ' min');
   } else if (layer === 'MESH_LINK') {
     const m = asObj(props.meshLink) || {};
     if (m.a) add('a', String(m.a).slice(0, 12) + '…');
@@ -339,7 +352,7 @@ export function kindDetails(props) {
     if (m.lastSeen) add('last seen', timeAgo(m.lastSeen));
   }
 
-  if (!rows.length && !props.description) return null;
+  if (!rows.length && !props.description && !camera) return null;
   const box = document.createElement('div');
   box.className = 'popup-details';
   if (rows.length) {
@@ -357,7 +370,48 @@ export function kindDetails(props) {
     d.textContent = props.description;
     box.append(d);
   }
+  if (camera) box.append(...cameraMedia(camera, props.headline));
   return box;
+}
+
+/**
+ * The camera's live snapshot plus a link to its HLS stream. Both are Caltrans
+ * URLs loaded straight from Caltrans — the Grid never proxies them — and both
+ * pass safeHttpUrl, since they are upstream text.
+ * @param {Object} camera the feature's camera block
+ * @param {string} headline used as the image's alt text
+ * @returns {HTMLElement[]}
+ */
+export function cameraMedia(camera, headline) {
+  const out = [];
+  const img = safeHttpUrl(camera.imageUrl);
+  if (img) {
+    const a = document.createElement('a');
+    a.href = img;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    const pic = document.createElement('img');
+    pic.className = 'popup-camera';
+    pic.src = img;
+    pic.alt = headline ? `Caltrans camera: ${headline}` : 'Caltrans camera snapshot';
+    pic.loading = 'lazy';
+    pic.referrerPolicy = 'no-referrer';
+    a.appendChild(pic);
+    out.push(a);
+  }
+  const stream = safeHttpUrl(camera.streamUrl);
+  if (stream) {
+    const links = document.createElement('div');
+    links.className = 'popup-camera-links muted small';
+    const a = document.createElement('a');
+    a.href = stream;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.textContent = 'live video (HLS) ↗';
+    links.appendChild(a);
+    out.push(links);
+  }
+  return out;
 }
 
 /**

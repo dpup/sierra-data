@@ -16,6 +16,37 @@
     "application/json"
   ],
   "paths": {
+    "/api/v1/cameras": {
+      "get": {
+        "summary": "ListCameras returns Caltrans traffic cameras (CCTV) in or near the\ncoverage areas: a snapshot image and, where Caltrans publishes one, an HLS\nstream per camera. Links only — the images and streams are served by\nCaltrans, never proxied. ?place narrows the set to cameras within the same\nradius of that place, nearest first. Cameras are reference views, not\nevents: nothing here is a hazard and an empty list means no camera nearby.",
+        "operationId": "GridService_ListCameras",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1CameraList"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "place",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "GridService"
+        ]
+      }
+    },
     "/api/v1/conditions": {
       "get": {
         "summary": "GetConditions returns current, non-event state: per-location weather and\nthe region's fire-weather classification, optionally scoped to a place.\n(Weather alerts are events; road conditions are the road_segment /\nchain_control GeoJSON layers.)",
@@ -585,6 +616,91 @@
         "maxLng": {
           "type": "number",
           "format": "double"
+        }
+      }
+    },
+    "v1Camera": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "title": "\"d10-172\": Caltrans district + the portal's camera index"
+        },
+        "name": {
+          "type": "string",
+          "title": "\"EB 108 W/O Soulsbyville Rd\""
+        },
+        "nearbyPlace": {
+          "type": "string",
+          "title": "\"Soulsbyville\""
+        },
+        "county": {
+          "type": "string",
+          "title": "\"Tuolumne\""
+        },
+        "route": {
+          "type": "string",
+          "title": "\"SR-108\", \"US-395\""
+        },
+        "direction": {
+          "type": "string",
+          "title": "\"East\" | \"West\" | \"North\" | \"South\"; may be empty"
+        },
+        "location": {
+          "$ref": "#/definitions/v1LatLng"
+        },
+        "elevationFeet": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "imageUrl": {
+          "type": "string",
+          "title": "the current snapshot JPEG on cwwp2.dot.ca.gov"
+        },
+        "imageRefreshMinutes": {
+          "type": "integer",
+          "format": "int32",
+          "title": "how often Caltrans replaces the snapshot; 0 = not reported"
+        },
+        "streamUrl": {
+          "type": "string",
+          "title": "HLS playlist (.m3u8); empty for an image-only camera"
+        },
+        "description": {
+          "type": "string",
+          "title": "Caltrans's note on the view, e.g. \"Looking South\"; usually empty"
+        },
+        "distanceMeters": {
+          "type": "integer",
+          "format": "int32",
+          "description": "Metres from the requested place — or, without ?place, from the nearest\ncoverage area. 0 means inside it."
+        }
+      },
+      "description": "Camera is one Caltrans CCTV camera. Every listed camera is in service and has\nan image; an out-of-service camera is dropped, not flagged."
+    },
+    "v1CameraList": {
+      "type": "object",
+      "properties": {
+        "cameras": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1Camera"
+          },
+          "title": "nearest first, then by id"
+        },
+        "sourceStatus": {
+          "type": "string",
+          "description": "OK | STALE | UNAVAILABLE — the camera LIST's health, the same honesty\nfield the map layers carry. STALE: served from an older fetch (or a\nconfigured district is missing). UNAVAILABLE: no list has been fetched\nyet, or no camera districts are configured."
+        },
+        "lastSourceUpdate": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the served list was fetched. Unset when source_status is OK."
+        },
+        "attribution": {
+          "type": "string",
+          "title": "\"Caltrans\""
         }
       }
     },

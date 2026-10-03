@@ -22,9 +22,9 @@
     <li><strong>Timestamps</strong> are RFC 3339 strings (e.g. <code class="inline">2026-07-05T14:02:00Z</code>).</li>
     <li><strong>Enum values</strong> render as their proto names (<code class="inline">WILDFIRE</code>, <code class="inline">ACTIVE</code>, <code class="inline">SEVERE</code>). Query parameters accept them case-insensitively, and <code class="inline">layer</code> parameters additionally accept the lowercase layer slugs used in <code class="inline">.geojson</code> paths (<code class="inline">wildfire</code>).</li>
     <li><strong>Repeatable filters</strong>: parameters documented as <em>repeatable</em> may appear multiple times — <code class="inline">?layer=wildfire&amp;layer=evacuation</code>.</li>
-    <li><strong>Pagination</strong> is cursor-based on the <em>event</em> lists — <code class="inline">events</code>, <code class="inline">events/{id}/history</code>, and <code class="inline">history</code>: pass the opaque <code class="inline">nextPageToken</code> from a response as the <code class="inline">page_token</code> query parameter on the next request (base64 keyset cursors; treat them as opaque). The directory lists — <code class="inline">places</code>, <code class="inline">sources</code>, and <code class="inline">scanners</code> — are <strong>not paginated</strong>: each returns its complete set in one response by design (a bounded, slowly-changing directory), with no <code class="inline">nextPageToken</code>. Read them whole; don't build paging logic for them.</li>
+    <li><strong>Pagination</strong> is cursor-based on the <em>event</em> lists — <code class="inline">events</code>, <code class="inline">events/{id}/history</code>, and <code class="inline">history</code>: pass the opaque <code class="inline">nextPageToken</code> from a response as the <code class="inline">page_token</code> query parameter on the next request (base64 keyset cursors; treat them as opaque). The directory lists — <code class="inline">places</code>, <code class="inline">sources</code>, <code class="inline">scanners</code>, and <code class="inline">cameras</code> — are <strong>not paginated</strong>: each returns its complete set in one response by design (a bounded, slowly-changing directory), with no <code class="inline">nextPageToken</code>. Read them whole; don't build paging logic for them.</li>
     <li><strong>Query parameters</strong> stay snake_case regardless of response casing: <code class="inline">severity_min</code>, <code class="inline">page_token</code>, <code class="inline">page_size</code> (camelCase forms are also accepted).</li>
-    <li><strong>ETags</strong>: <em>most</em> read endpoints carry a weak <code class="inline">ETag</code>; a conditional request with a matching <code class="inline">If-None-Match</code> gets <code class="inline">304 Not Modified</code> and skips the work. Coverage: <code class="inline">events/{id}</code> + <code class="inline">.../history</code>, the <code class="inline">events</code> and <code class="inline">history</code> lists, <code class="inline">places</code> + <code class="inline">places/{place}</code>, and the <code class="inline">.geojson</code> layers (body-hash). Not yet instrumented: <code class="inline">conditions</code>, <code class="inline">sources</code>, <code class="inline">places:resolve</code>, <code class="inline">scanners</code>, and <code class="inline">summary</code>. Independently, every proto RPC carries <code class="inline">Cache-Control: public, max-age=30</code>, so a proxy/CDN may serve any of them up to 30&nbsp;s stale (the <code class="inline">.geojson</code> layers use <code class="inline">max-age=60</code>).</li>
+    <li><strong>ETags</strong>: <em>most</em> read endpoints carry a weak <code class="inline">ETag</code>; a conditional request with a matching <code class="inline">If-None-Match</code> gets <code class="inline">304 Not Modified</code> and skips the work. Coverage: <code class="inline">events/{id}</code> + <code class="inline">.../history</code>, the <code class="inline">events</code> and <code class="inline">history</code> lists, <code class="inline">places</code> + <code class="inline">places/{place}</code>, <code class="inline">cameras</code>, and the <code class="inline">.geojson</code> layers (body-hash). Not yet instrumented: <code class="inline">conditions</code>, <code class="inline">sources</code>, <code class="inline">places:resolve</code>, <code class="inline">scanners</code>, and <code class="inline">summary</code>. Independently, every proto RPC carries <code class="inline">Cache-Control: public, max-age=30</code>, so a proxy/CDN may serve any of them up to 30&nbsp;s stale (the <code class="inline">.geojson</code> layers use <code class="inline">max-age=60</code>).</li>
     <li><strong>Errors</strong> from the proto RPCs are gRPC-standard <code class="inline">{code, codeName, message, details}</code> alongside the mapped HTTP status; the one hand-built endpoint (<code class="inline">.geojson</code>) emits the older <code class="inline">google.rpc.Status</code> shape (<code class="inline">{code, message, details}</code>, no <code class="inline">codeName</code>):</li>
   </ul>
   <pre class="code">HTTP/1.1 404 Not Found
@@ -57,7 +57,7 @@ Content-Type: application/json
   <h2>2. Endpoint reference</h2>
   <p>
     Two idioms, one rule: <em>entities</em> (events, places, sources,
-    conditions, scanners) are global collections filtered by query parameter;
+    conditions, scanners, cameras) are global collections filtered by query parameter;
     <em>place-derived documents</em> (summary, map layers) nest under the
     place path. The two hot paths — summary and map layers — take no query
     string at all, so CDN cache keys stay clean.
@@ -181,6 +181,13 @@ Content-Type: application/json
     <code class="inline">chain_control</code> are condition-backed map-layer
     slugs only — they are projections of live road state, not Layer enum
     values, and never appear in <code class="inline">/api/v1/events</code>.
+    <code class="inline">camera</code> is a map-layer slug only too: Caltrans
+    traffic cameras near the place, every feature <code class="inline">INFO</code>
+    — reference views, not hazards, and never part of the place summary. It
+    serves the same cameras and distances as
+    <code class="inline">/api/v1/cameras?place=</code>, with the live
+    <code class="inline">imageUrl</code> and HLS <code class="inline">streamUrl</code>
+    (links to Caltrans, never proxied) under <code class="inline">properties.camera</code>.
   </p>
 
   <h3>Enum: Severity (the canonical scale + color ramp)</h3>
@@ -363,7 +370,7 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
   }
 }</pre>
   <ul>
-    <li><strong>Per-kind data</strong> lives under a single namespaced key (<code class="inline">wildfire</code>, <code class="inline">earthquake</code>, <code class="inline">evacuation</code>, <code class="inline">weather</code>, <code class="inline">incident</code>, <code class="inline">power</code>, <code class="inline">mesh</code>) — consumers ignore kinds they don't handle; no field collisions.</li>
+    <li><strong>Per-kind data</strong> lives under a single namespaced key (<code class="inline">wildfire</code>, <code class="inline">earthquake</code>, <code class="inline">evacuation</code>, <code class="inline">weather</code>, <code class="inline">incident</code>, <code class="inline">power</code>, <code class="inline">mesh</code>, <code class="inline">camera</code>) — consumers ignore kinds they don't handle; no field collisions.</li>
     <li><strong>Coordinate order is <code class="inline">[longitude, latitude]</code></strong> (GeoJSON axis order), WGS84, trimmed to 5 decimals (~1.1 m). Polygons are simplified to keep features small.</li>
     <li><strong>Null geometry is valid</strong> (e.g. a county-wide advisory): the feature has <code class="inline">"geometry": null</code> with the same properties envelope. Exclude it from the map layer and render it as a full-width banner/list card sorted by <code class="inline">severityRank</code> alongside located features, showing <code class="inline">headline</code>, <code class="inline">source.name</code>, <code class="inline">updatedAt</code>, and <code class="inline">source.url</code>.</li>
     <li><strong>URL fields are scheme-validated upstream</strong>: any upstream-sourced URL that is not <code class="inline">https://</code>/<code class="inline">http://</code> is dropped before it reaches the response. Treat all upstream text (headlines, descriptions) as untrusted anyway.</li>

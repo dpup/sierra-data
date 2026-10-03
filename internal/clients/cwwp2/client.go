@@ -16,6 +16,10 @@
 //     message sign and the text it is showing, up to two pages of three
 //     lines. Most of it is statewide safety-campaign boilerplate; the parser
 //     reports what each sign says and leaves deciding what matters to callers.
+//   - CCTV CAMERAS (`/data/d{N}/cctv/cctvStatusD{NN}.json`): the district's
+//     camera registry, with a snapshot JPEG and (mostly) an HLS stream URL per
+//     camera. Near-static, and it carries no generation stamp, so unlike the
+//     others there is no freshness check.
 //
 // CAVEATS, all observed on the live portal (2026-09-30):
 //

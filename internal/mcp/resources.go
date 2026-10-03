@@ -65,6 +65,11 @@ reason over:
   always INFO, never a hazard.)
 - Mesh relay topology: GET /api/v1/places/{place}/map/mesh_link.geojson
   (place-scoped) or GET /api/v1/mesh/links (whole mesh, JSON edge list).
+- Caltrans traffic cameras: GET /api/v1/places/{place}/map/camera.geojson, or
+  the JSON list GET /api/v1/cameras?place=. Each carries a live snapshot
+  imageUrl and (usually) an HLS streamUrl — links to Caltrans for a person to
+  look at. Cameras are reference views, not hazards; an empty list means no
+  camera nearby, never an all-clear.
 Each feature carries the same camelCase properties envelope as the event rows
 (id, layer, severity, headline, source, …), so the map and the tool answers stay
 consistent.

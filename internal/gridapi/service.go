@@ -52,6 +52,10 @@ type Service struct {
 	// (road_segment, chain_control, fire_weather, message_sign) delegate to
 	// (T12b).
 	Hazards *hazards.Service
+	// Cameras is the Caltrans CCTV directory ListCameras serves; nil when no
+	// camera districts are configured. Set it only to a non-nil value — a typed
+	// nil *services.CameraService would not compare equal to nil here.
+	Cameras CameraDirectory
 	// Now is the clock (injectable for tests; summary's generated_at uses it).
 	Now func() time.Time
 }

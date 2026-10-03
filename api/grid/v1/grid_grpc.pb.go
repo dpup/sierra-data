@@ -28,6 +28,7 @@ const (
 	GridService_GetPlace_FullMethodName         = "/grid.v1.GridService/GetPlace"
 	GridService_GetPlaceSummary_FullMethodName  = "/grid.v1.GridService/GetPlaceSummary"
 	GridService_ListScanners_FullMethodName     = "/grid.v1.GridService/ListScanners"
+	GridService_ListCameras_FullMethodName      = "/grid.v1.GridService/ListCameras"
 	GridService_GetConditions_FullMethodName    = "/grid.v1.GridService/GetConditions"
 	GridService_ListSources_FullMethodName      = "/grid.v1.GridService/ListSources"
 	GridService_GetMeshTelemetry_FullMethodName = "/grid.v1.GridService/GetMeshTelemetry"
@@ -64,6 +65,13 @@ type GridServiceClient interface {
 	// ListScanners returns Broadcastify scanner feeds, optionally scoped to a
 	// place (an area serves its feeds; otherwise every area's feeds, deduped).
 	ListScanners(ctx context.Context, in *ListScannersRequest, opts ...grpc.CallOption) (*ScannerList, error)
+	// ListCameras returns Caltrans traffic cameras (CCTV) in or near the
+	// coverage areas: a snapshot image and, where Caltrans publishes one, an HLS
+	// stream per camera. Links only — the images and streams are served by
+	// Caltrans, never proxied. ?place narrows the set to cameras within the same
+	// radius of that place, nearest first. Cameras are reference views, not
+	// events: nothing here is a hazard and an empty list means no camera nearby.
+	ListCameras(ctx context.Context, in *ListCamerasRequest, opts ...grpc.CallOption) (*CameraList, error)
 	// GetConditions returns current, non-event state: per-location weather and
 	// the region's fire-weather classification, optionally scoped to a place.
 	// (Weather alerts are events; road conditions are the road_segment /
@@ -179,6 +187,16 @@ func (c *gridServiceClient) ListScanners(ctx context.Context, in *ListScannersRe
 	return out, nil
 }
 
+func (c *gridServiceClient) ListCameras(ctx context.Context, in *ListCamerasRequest, opts ...grpc.CallOption) (*CameraList, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CameraList)
+	err := c.cc.Invoke(ctx, GridService_ListCameras_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *gridServiceClient) GetConditions(ctx context.Context, in *GetConditionsRequest, opts ...grpc.CallOption) (*Conditions, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(Conditions)
@@ -240,6 +258,13 @@ type GridServiceServer interface {
 	// ListScanners returns Broadcastify scanner feeds, optionally scoped to a
 	// place (an area serves its feeds; otherwise every area's feeds, deduped).
 	ListScanners(context.Context, *ListScannersRequest) (*ScannerList, error)
+	// ListCameras returns Caltrans traffic cameras (CCTV) in or near the
+	// coverage areas: a snapshot image and, where Caltrans publishes one, an HLS
+	// stream per camera. Links only — the images and streams are served by
+	// Caltrans, never proxied. ?place narrows the set to cameras within the same
+	// radius of that place, nearest first. Cameras are reference views, not
+	// events: nothing here is a hazard and an empty list means no camera nearby.
+	ListCameras(context.Context, *ListCamerasRequest) (*CameraList, error)
 	// GetConditions returns current, non-event state: per-location weather and
 	// the region's fire-weather classification, optionally scoped to a place.
 	// (Weather alerts are events; road conditions are the road_segment /
@@ -291,6 +316,9 @@ func (UnimplementedGridServiceServer) GetPlaceSummary(context.Context, *GetPlace
 }
 func (UnimplementedGridServiceServer) ListScanners(context.Context, *ListScannersRequest) (*ScannerList, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListScanners not implemented")
+}
+func (UnimplementedGridServiceServer) ListCameras(context.Context, *ListCamerasRequest) (*CameraList, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListCameras not implemented")
 }
 func (UnimplementedGridServiceServer) GetConditions(context.Context, *GetConditionsRequest) (*Conditions, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetConditions not implemented")
@@ -484,6 +512,24 @@ func _GridService_ListScanners_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _GridService_ListCameras_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListCamerasRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GridServiceServer).ListCameras(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GridService_ListCameras_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GridServiceServer).ListCameras(ctx, req.(*ListCamerasRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _GridService_GetConditions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetConditionsRequest)
 	if err := dec(in); err != nil {
@@ -580,6 +626,10 @@ var GridService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListScanners",
 			Handler:    _GridService_ListScanners_Handler,
+		},
+		{
+			MethodName: "ListCameras",
+			Handler:    _GridService_ListCameras_Handler,
 		},
 		{
 			MethodName: "GetConditions",

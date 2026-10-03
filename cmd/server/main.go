@@ -244,6 +244,21 @@ func main() {
 	censusClient := census.NewClient()
 	gridapiService := gridapi.NewService(gridStore, weatherService, censusClient, appConfig, hazardsService)
 
+	// Caltrans CCTV camera directory (GET /api/v1/cameras). The lists are
+	// near-static, so they refresh in the background and a request never waits
+	// on Caltrans. Without districts the RPC answers UNAVAILABLE.
+	if cams := appConfig.Roads.CaltransFeeds.CWWP2.Cameras; len(cams.Districts) > 0 {
+		camClient := cwwp2.NewClient()
+		if base := appConfig.Roads.CaltransFeeds.CWWP2.BaseURL; base != "" {
+			camClient.BaseURL = base
+		}
+		cameraService := services.NewCameraService(camClient, cams.Districts, cams.RefreshInterval)
+		go cameraService.Run(ctx)
+		gridapiService.Cameras = cameraService
+		logging.Infow(ctx, "Camera directory enabled",
+			"districts", cams.Districts, "nearMeters", cams.Near())
+	}
+
 	// MCP endpoint (docs/design/mcp-design.md): read-only tools for LLM agents over
 	// Streamable HTTP. The tools call the /api/v1 surface in-process against the
 	// gRPC-Gateway mux, which only exists after prefab.New wires the gateway — so

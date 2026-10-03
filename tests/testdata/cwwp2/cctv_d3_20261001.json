@@ -1,0 +1,244 @@
+{
+	"data": [
+		{
+			"cctv": {
+				"index": "106",
+				"recordTimestamp": {
+					"recordDate": "2025-03-20",
+					"recordTime": "12:05:08",
+					"recordEpoch": "1742497508"
+				},
+				"location": {
+					"district": "3",
+					"locationName": "Hwy 50 at Echo Summit",
+					"nearbyPlace": "South Lake Tahoe",
+					"longitude": "-120.02928",
+					"latitude": "38.81321",
+					"elevation": "7427",
+					"direction": "East",
+					"county": "El Dorado",
+					"route": "US-50",
+					"routeSuffix": "",
+					"postmilePrefix": "",
+					"postmile": "66.84",
+					"alignment": "",
+					"milepost": "95"
+				},
+				"inService": "true",
+				"imageData": {
+					"imageDescription": "",
+					"streamingVideoURL": "https://wzmedia.dot.ca.gov/D3/50_Echo_Summit_ED50_EB.stream/playlist.m3u8",
+					"static": {
+						"currentImageUpdateFrequency": "1",
+						"currentImageURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy50atechosummit/hwy50atechosummit.jpg",
+						"referenceImageUpdateFrequency": "15",
+						"referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy50atechosummit/previous/hwy50atechosummit-1.jpg",
+						"referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy50atechosummit/previous/hwy50atechosummit-2.jpg",
+						"referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy50atechosummit/previous/hwy50atechosummit-3.jpg",
+						"referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy50atechosummit/previous/hwy50atechosummit-4.jpg",
+						"referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy50atechosummit/previous/hwy50atechosummit-5.jpg",
+						"referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy50atechosummit/previous/hwy50atechosummit-6.jpg",
+						"referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy50atechosummit/previous/hwy50atechosummit-7.jpg",
+						"referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy50atechosummit/previous/hwy50atechosummit-8.jpg",
+						"referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy50atechosummit/previous/hwy50atechosummit-9.jpg",
+						"referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy50atechosummit/previous/hwy50atechosummit-10.jpg",
+						"referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy50atechosummit/previous/hwy50atechosummit-11.jpg",
+						"referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy50atechosummit/previous/hwy50atechosummit-12.jpg"
+					}
+				}
+			}
+		},
+		{
+			"cctv": {
+				"index": "130",
+				"recordTimestamp": {
+					"recordDate": "2026-06-24",
+					"recordTime": "10:36:23",
+					"recordEpoch": "1782322583"
+				},
+				"location": {
+					"district": "3",
+					"locationName": "Hwy 5 at Twin Cities",
+					"nearbyPlace": "Elk Grove",
+					"longitude": "-121.45575",
+					"latitude": "38.27609",
+					"elevation": "9",
+					"direction": "North",
+					"county": "Sacramento",
+					"route": "I-5",
+					"routeSuffix": "",
+					"postmilePrefix": "",
+					"postmile": "1.547",
+					"alignment": "R",
+					"milepost": "496.630"
+				},
+				"inService": "true",
+				"imageData": {
+					"imageDescription": "",
+					"streamingVideoURL": "",
+					"static": {
+						"currentImageUpdateFrequency": "1",
+						"currentImageURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy5attwincities/hwy5attwincities.jpg",
+						"referenceImageUpdateFrequency": "15",
+						"referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy5attwincities/previous/hwy5attwincities-1.jpg",
+						"referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy5attwincities/previous/hwy5attwincities-2.jpg",
+						"referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy5attwincities/previous/hwy5attwincities-3.jpg",
+						"referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy5attwincities/previous/hwy5attwincities-4.jpg",
+						"referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy5attwincities/previous/hwy5attwincities-5.jpg",
+						"referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy5attwincities/previous/hwy5attwincities-6.jpg",
+						"referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy5attwincities/previous/hwy5attwincities-7.jpg",
+						"referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy5attwincities/previous/hwy5attwincities-8.jpg",
+						"referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy5attwincities/previous/hwy5attwincities-9.jpg",
+						"referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy5attwincities/previous/hwy5attwincities-10.jpg",
+						"referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy5attwincities/previous/hwy5attwincities-11.jpg",
+						"referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy5attwincities/previous/hwy5attwincities-12.jpg"
+					}
+				}
+			}
+		},
+		{
+			"cctv": {
+				"index": "238",
+				"recordTimestamp": {
+					"recordDate": "2023-03-14",
+					"recordTime": "12:12:26",
+					"recordEpoch": "1678821146"
+				},
+				"location": {
+					"district": "3",
+					"locationName": " Hwy 99 at E Eaton Rd 1",
+					"nearbyPlace": "Chico",
+					"longitude": "-121.881511",
+					"latitude": "39.780785",
+					"elevation": "177",
+					"direction": "",
+					"county": "Butte",
+					"route": "SR-99",
+					"routeSuffix": "",
+					"postmilePrefix": "R",
+					"postmile": "36.92",
+					"alignment": "L",
+					"milepost": "381.743"
+				},
+				"inService": "true",
+				"imageData": {
+					"imageDescription": "",
+					"streamingVideoURL": "https://wzmedia.dot.ca.gov/D3/99_E_Eaton_Rd_JNO_BUT99_SB_1.stream/playlist.m3u8",
+					"static": {
+						"currentImageUpdateFrequency": "Not Reported",
+						"currentImageURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy99ateeatonrd1/hwy99ateeatonrd1.jpg",
+						"referenceImageUpdateFrequency": "15",
+						"referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy99ateeatonrd1/previous/hwy99ateeatonrd1-1.jpg",
+						"referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy99ateeatonrd1/previous/hwy99ateeatonrd1-2.jpg",
+						"referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy99ateeatonrd1/previous/hwy99ateeatonrd1-3.jpg",
+						"referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy99ateeatonrd1/previous/hwy99ateeatonrd1-4.jpg",
+						"referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy99ateeatonrd1/previous/hwy99ateeatonrd1-5.jpg",
+						"referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy99ateeatonrd1/previous/hwy99ateeatonrd1-6.jpg",
+						"referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy99ateeatonrd1/previous/hwy99ateeatonrd1-7.jpg",
+						"referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy99ateeatonrd1/previous/hwy99ateeatonrd1-8.jpg",
+						"referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy99ateeatonrd1/previous/hwy99ateeatonrd1-9.jpg",
+						"referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy99ateeatonrd1/previous/hwy99ateeatonrd1-10.jpg",
+						"referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy99ateeatonrd1/previous/hwy99ateeatonrd1-11.jpg",
+						"referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy99ateeatonrd1/previous/hwy99ateeatonrd1-12.jpg"
+					}
+				}
+			}
+		},
+		{
+			"cctv": {
+				"index": "307",
+				"recordTimestamp": {
+					"recordDate": "2025-06-03",
+					"recordTime": "11:33:06",
+					"recordEpoch": "1748975586"
+				},
+				"location": {
+					"district": "3",
+					"locationName": "Hwy 50 at Wrights Lake 1",
+					"nearbyPlace": "Twin Bridges",
+					"longitude": "-120.210437",
+					"latitude": "38.786496",
+					"elevation": "5400",
+					"direction": "East",
+					"county": "El Dorado",
+					"route": "US-50",
+					"routeSuffix": "",
+					"postmilePrefix": "",
+					"postmile": "54.051",
+					"alignment": "",
+					"milepost": "82.316"
+				},
+				"inService": "true",
+				"imageData": {
+					"imageDescription": "",
+					"streamingVideoURL": "https://wzmedia.dot.ca.gov/D3/50_Wrights_Lake_ED50_EB_1.stream/playlist.m3u8",
+					"static": {
+						"currentImageUpdateFrequency": "1",
+						"currentImageURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy50atwrightslake1/hwy50atwrightslake1.jpg",
+						"referenceImageUpdateFrequency": "15",
+						"referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy50atwrightslake1/previous/hwy50atwrightslake1-1.jpg",
+						"referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy50atwrightslake1/previous/hwy50atwrightslake1-2.jpg",
+						"referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy50atwrightslake1/previous/hwy50atwrightslake1-3.jpg",
+						"referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy50atwrightslake1/previous/hwy50atwrightslake1-4.jpg",
+						"referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy50atwrightslake1/previous/hwy50atwrightslake1-5.jpg",
+						"referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy50atwrightslake1/previous/hwy50atwrightslake1-6.jpg",
+						"referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy50atwrightslake1/previous/hwy50atwrightslake1-7.jpg",
+						"referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy50atwrightslake1/previous/hwy50atwrightslake1-8.jpg",
+						"referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy50atwrightslake1/previous/hwy50atwrightslake1-9.jpg",
+						"referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy50atwrightslake1/previous/hwy50atwrightslake1-10.jpg",
+						"referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy50atwrightslake1/previous/hwy50atwrightslake1-11.jpg",
+						"referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy50atwrightslake1/previous/hwy50atwrightslake1-12.jpg"
+					}
+				}
+			}
+		},
+		{
+			"cctv": {
+				"index": "328",
+				"recordTimestamp": {
+					"recordDate": "2026-08-06",
+					"recordTime": "15:09:23",
+					"recordEpoch": "1786054163"
+				},
+				"location": {
+					"district": "3",
+					"locationName": "Hwy 80 at Chiles_Rd_JEO_EB_1",
+					"nearbyPlace": "Davis",
+					"longitude": "-121.639552",
+					"latitude": "38.563052",
+					"elevation": "29",
+					"direction": "East",
+					"county": "Yolo",
+					"route": "I-80",
+					"routeSuffix": "",
+					"postmilePrefix": "",
+					"postmile": "5.740",
+					"alignment": "R",
+					"milepost": "77.946"
+				},
+				"inService": "false",
+				"imageData": {
+					"imageDescription": "",
+					"streamingVideoURL": "https://wzmedia.dot.ca.gov/D3/80_Chiles_Rd_JEO_YOL80_EB_1.stream/playlist.m3u8",
+					"static": {
+						"currentImageUpdateFrequency": "1",
+						"currentImageURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy80atchilesrdjeoeb1/hwy80atchilesrdjeoeb1.jpg",
+						"referenceImageUpdateFrequency": "15",
+						"referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy80atchilesrdjeoeb1/previous/hwy80atchilesrdjeoeb1-1.jpg",
+						"referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy80atchilesrdjeoeb1/previous/hwy80atchilesrdjeoeb1-2.jpg",
+						"referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy80atchilesrdjeoeb1/previous/hwy80atchilesrdjeoeb1-3.jpg",
+						"referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy80atchilesrdjeoeb1/previous/hwy80atchilesrdjeoeb1-4.jpg",
+						"referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy80atchilesrdjeoeb1/previous/hwy80atchilesrdjeoeb1-5.jpg",
+						"referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy80atchilesrdjeoeb1/previous/hwy80atchilesrdjeoeb1-6.jpg",
+						"referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy80atchilesrdjeoeb1/previous/hwy80atchilesrdjeoeb1-7.jpg",
+						"referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy80atchilesrdjeoeb1/previous/hwy80atchilesrdjeoeb1-8.jpg",
+						"referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy80atchilesrdjeoeb1/previous/hwy80atchilesrdjeoeb1-9.jpg",
+						"referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy80atchilesrdjeoeb1/previous/hwy80atchilesrdjeoeb1-10.jpg",
+						"referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy80atchilesrdjeoeb1/previous/hwy80atchilesrdjeoeb1-11.jpg",
+						"referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy80atchilesrdjeoeb1/previous/hwy80atchilesrdjeoeb1-12.jpg"
+					}
+				}
+			}
+		}
+	]
+}

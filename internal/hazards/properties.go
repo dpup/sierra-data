@@ -21,6 +21,10 @@ const (
 	// LayerMessageSign is what each Caltrans changeable message sign is
 	// showing — context, never a hazard: every feature is INFO.
 	LayerMessageSign = "message_sign"
+	// LayerCamera is the Caltrans traffic cameras near a place: reference
+	// views, not hazards — every feature is INFO, and the layer never feeds the
+	// place summary. Same cameras, same radius, as GET /api/v1/cameras?place=.
+	LayerCamera = "camera"
 )
 
 // Properties is the common envelope shared by every hazard feature, plus a
@@ -54,6 +58,7 @@ type Properties struct {
 	MeshLink     *MeshLinkProps     `json:"meshLink,omitempty"`
 	Power        *PowerProps        `json:"power,omitempty"`
 	MessageSign  *MessageSignProps  `json:"messageSign,omitempty"`
+	Camera       *CameraProps       `json:"camera,omitempty"`
 }
 
 // Source identifies the upstream feed a feature came from.
@@ -252,6 +257,21 @@ type MessageSignProps struct {
 	// lines, a blank line kept as "" so a client can draw the sign face.
 	// Omitted when the sign is blank or its message is unknown.
 	Pages [][3]string `json:"pages,omitempty"`
+}
+
+// CameraProps is the camera kind block: one Caltrans CCTV camera. The image
+// and stream URLs are links to Caltrans, never proxied; a client loads them
+// directly. Field names match the ListCameras RPC's Camera message.
+type CameraProps struct {
+	ImageURL            string `json:"imageUrl"`
+	ImageRefreshMinutes int32  `json:"imageRefreshMinutes,omitempty"` // absent = not reported
+	StreamURL           string `json:"streamUrl,omitempty"`           // HLS .m3u8; absent = image-only
+	Route               string `json:"route,omitempty"`
+	Direction           string `json:"direction,omitempty"`
+	County              string `json:"county,omitempty"`
+	ElevationFeet       int32  `json:"elevationFeet,omitempty"`
+	// DistanceMeters is from the requested place; 0 means inside it.
+	DistanceMeters int32 `json:"distanceMeters"`
 }
 
 // setSeverity sets both Severity and the derived SeverityRank.

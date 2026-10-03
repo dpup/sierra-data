@@ -379,9 +379,10 @@ everything from the grid event store. Field names are **camelCase** (protojson
 `UseProtoNames:false`), timestamps RFC 3339, errors gRPC-standard
 `{code, codeName, message, details}` with the mapped HTTP status. gRPC reflection
 is on. Conditional GET (ETag/If-None-Match -> 304) is wired via prefab's `etag`
-plugin on most read RPCs — event detail, the event/history lists, and places
-(`GetPlaceSummary`/`GetConditions`/`ListSources`/`ResolvePlace`/`ListScanners`
-are not yet guarded); the `.geojson` keeps its own body-hash ETag. The prior
+plugin on most read RPCs — event detail, the event/history lists, places, and
+cameras (`GetPlaceSummary`/`GetConditions`/`ListSources`/`ResolvePlace`/
+`ListScanners` are not yet guarded); the `.geojson` keeps its own body-hash
+ETag. The prior
 hand-built REST surfaces (the old `/api/v1/roads|weather|
 hazards|situation|incidents` and the snake_case `/v1`) have all been **removed** —
 they fold into the endpoints below.
@@ -426,6 +427,14 @@ gateway's `EmitUnpopulated` marshaler.
   There is no roads-conditions passthrough (road conditions are the `road_segment`
   / `chain_control` geojson layers).
 - `GET /api/v1/scanners?place=` - Broadcastify feed config.
+- `GET /api/v1/cameras?place=` - `ListCameras`: Caltrans CCTV cameras (CWWP2
+  `cctv`, District 10) within `roads.caltransFeeds.cwwp2.cameras.nearMeters`
+  (25 km) of a coverage area; `?place` keeps those within the same radius of
+  the place, nearest first (`distanceMeters`). Snapshot `imageUrl` + HLS
+  `streamUrl` are **links to Caltrans, never proxied**. Out-of-service cameras
+  are dropped. Not events. The list is near-static, refreshed in the
+  background every 6h (`services.CameraService`); a failed refresh serves
+  the last good list as `sourceStatus: STALE`.
 - `GET /api/v1/sources` - the source registry + per-source health (a source's own
   health is `status`: `OK|STALE|UNAVAILABLE`, last success/attempt, poll interval,
   last error). Includes one **health-only** row per configured push reporter.
@@ -452,7 +461,7 @@ gateway's `EmitUnpopulated` marshaler.
   `FeatureCollection` per layer for a maps client (MapLibre/Leaflet). Layers:
   `road_incident`, `chain_control`, `road_segment`, `message_sign`,
   `weather_alert`, `fire_weather`, `earthquake`, `wildfire`, `evacuation`,
-  `power`, `mesh_node` (these are layer *values*, still snake_case; `power` matches its enum name so
+  `power`, `mesh_node`, `mesh_link`, `camera` (these are layer *values*, still snake_case; `power` matches its enum name so
   `properties.layer` and `Event.layer` read identically). Every feature shares a camelCase `properties` envelope
   (`id, layer, kind, severity, severityRank, headline, source, …`) on the unified
   severity scale `INFO..EXTREME` (rank 0–4). Coordinates
@@ -463,6 +472,12 @@ gateway's `EmitUnpopulated` marshaler.
   Caltrans's roadside message signs are showing) is always `INFO` and `/summary`
   never reads it: the text is context, mostly safety-campaign boilerplate.
   See `docs/design/hazard-aggregation-design.md` and `internal/hazards/CLAUDE.md`.
+  Two more layers are served by `gridapi` itself: `mesh_link` (relay topology,
+  `internal/gridapi/mesh.go`) and `camera` (Caltrans traffic cameras,
+  `serveCameraLayer` in `internal/gridapi/cameras.go`). `camera` is the place-scoped
+  `ListCameras` as GeoJSON — same cameras, distances and ids, every feature
+  `INFO`, `sourceStatus` from the camera directory — and stays out of the
+  place summary: cameras are reference views, not hazards.
 
 **Fire-weather** (`conditions.fireWeather`, and the `fire_weather` geojson layer):
 `state` escalates `normal` → `elevated` (Fire Weather Watch) → `red-flag` (Red Flag
