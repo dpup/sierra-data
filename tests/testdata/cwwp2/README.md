@@ -10,7 +10,7 @@ overwrite them.
 | File | What | Edited? |
 |---|---|---|
 | `cc_d10_20260930.json` | District 10 chain controls: all 149 checkpoints, every one `R-0`. A quiet September day. | **Verbatim** |
-| `lcs_d10_20260930.json` | District 10 lane closures, trimmed from 370 rows to 84. Keeps every row whose begin county is Alpine, Amador, Calaveras, Mariposa or Tuolumne, plus two rows of any 10-97/10-98/10-22/indefinite combination not otherwise present. | Rows removed, then re-serialized. Row content is untouched. |
+| `lcs_d10_20260930.json` | District 10 lane closures, trimmed from 370 rows to 84 (also drives `internal/ingest`'s lane-closure poller tests, which pin its 54 scheduled + 3 active in-box windows). Keeps every row whose begin county is Alpine, Amador, Calaveras, Mariposa or Tuolumne, plus two rows of any 10-97/10-98/10-22/indefinite combination not otherwise present. | Rows removed, then re-serialized. Row content is untouched. |
 | `cc_d07_bad_status_20260930.json` | District 7: one healthy checkpoint plus the two SR-2 checkpoints whose `status` held a **longitude** (`"-118.1307759"`). This is a real upstream defect. | Rows removed, then re-serialized. Row content is untouched. |
 | `cms_d10_20261001.json` | District 10 message signs: all 107. 82 show one statewide safety campaign, 14 are dark, 2 are `Not Reported` (one out of service, one stamped `1970-01-01`). | **Verbatim** |
 | `cms_d07_frozen_20261001.json` | District 7, from a file **frozen since 2026-09-29 05:32 PDT** but still served. Five signs: a bare `&` in the text, a two-page message, a dark sign, a `Not Reported` one. Every message time is `Not Reported`. | Rows removed, then re-serialized. Row content is untouched. |

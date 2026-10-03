@@ -757,6 +757,12 @@ function init() {
     removeLayerFromMap(layer);
     if (!located.length) return;
     const color = severityColorExpression();
+    // SCHEDULED features (a Caltrans roadwork window not yet set up, a planned
+    // PSPS, an NWS watch before onset) draw HOLLOW: same severity colour, so
+    // the scale still reads, but visibly not in effect. On a weekday the
+    // road_incident layer carries a week of planned windows; drawn solid they
+    // were indistinguishable from the closures actually on the road.
+    const planned = ['==', ['get', 'status'], 'SCHEDULED'];
     const src = `grid-${layer}`;
     map.addSource(src, {
       type: 'geojson',
@@ -767,7 +773,7 @@ function init() {
       type: 'fill',
       source: src,
       filter: ['==', ['geometry-type'], 'Polygon'],
-      paint: { 'fill-color': color, 'fill-opacity': 0.35 },
+      paint: { 'fill-color': color, 'fill-opacity': ['case', planned, 0.12, 0.35] },
     });
     map.addLayer({
       id: `grid-${layer}-line`,
@@ -788,9 +794,9 @@ function init() {
       paint: {
         'circle-color': color,
         'circle-radius': 6,
-        'circle-opacity': 0.9,
-        'circle-stroke-color': '#ffffff',
-        'circle-stroke-width': 1,
+        'circle-opacity': ['case', planned, 0, 0.9],
+        'circle-stroke-color': ['case', planned, color, '#ffffff'],
+        'circle-stroke-width': ['case', planned, 2, 1],
       },
     });
     for (const id of sublayerIds(layer)) {

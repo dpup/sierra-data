@@ -5,7 +5,9 @@
 // from the layers the API projects for a place — a live GeoJSON FeatureCollection
 // from GET /api/v1/places/{place}/map/{layer}.geojson:
 //
-//   road_incident — CHP/Caltrans incidents, AI-enhanced (projected events)
+//   road_incident — CHP incidents (AI-enhanced) and Caltrans closures
+//                   (projected events). Read ONCE and split by status: what is
+//                   on the road now, and planned roadwork windows (SCHEDULED).
 //   road_segment  — per-road travel time, delay, congestion, status (Google Routes + Caltrans)
 //   chain_control — active chain controls, R1/R2/R3 (Caltrans)
 //
@@ -28,12 +30,23 @@ import { activePlace, placeMenuOptions, placeMenuLabel } from '../place.js';
 import { requireEls, copyOnClick } from '../ui.js';
 import '../components/menu.js'; // registers <grid-menu>
 
+/** A Caltrans roadwork window that is planned but not set up yet. */
+const isPlanned = (f) => String((f.properties || {}).status || '').toUpperCase() === 'SCHEDULED';
+
 const SECTIONS = [
-  { layer: 'road_incident', status: 'rd-inc-status', content: 'rd-inc', render: renderIncidents,
+  { layer: 'road_incident', filter: (f) => !isPlanned(f),
+    status: 'rd-inc-status', content: 'rd-inc', render: renderIncidents,
     count: 'rd-inc-h', countLabel: 'Incidents',
     empty: {
       head: 'No active road incidents in this place.',
       sub: 'Conditions still exist — an open road is baseline state, carried by the road_segment layer, not by /events.',
+    } },
+  { layer: 'road_incident', filter: isPlanned,
+    status: 'rd-plan-status', content: 'rd-plan', render: renderPlanned,
+    count: 'rd-plan-h', countLabel: 'Planned closures',
+    empty: {
+      head: 'No planned closures in this place.',
+      sub: 'Caltrans lists no upcoming roadwork windows here. Its schedule runs about a week ahead.',
     } },
   { layer: 'road_segment', status: 'rd-seg-status', content: 'rd-seg', render: renderSegments,
     empty: { head: 'No monitored roads in this area.', sub: 'This area has no configured road segments.' } },
@@ -170,6 +183,10 @@ function renderIncidents(container, feats) {
     if (body) extra.push(body);
     const bits = [];
     if (p.incident && p.incident.logNumber) bits.push('log ' + p.incident.logNumber);
+    // A set-up closure's planned end is an estimate: past it, the closure is
+    // still in place until Caltrans records the pick-up.
+    const closure = (p.incident && p.incident.closure) || null;
+    if (closure && closure.plannedEnd) bits.push('planned end ' + timeAbs(closure.plannedEnd));
     if (p.source && p.source.name) bits.push(p.source.name);
     const recBody = row.querySelector('.rec-body');
     if (recBody && body) {
@@ -179,6 +196,45 @@ function renderIncidents(container, feats) {
     if (recBody && bits.length) {
       const idEl = recBody.querySelector('.rec-id');
       if (idEl) idEl.textContent = [p.id, ...bits].filter(Boolean).join(' · ');
+    }
+    list.append(row);
+  }
+  container.append(list);
+}
+
+/**
+ * Planned closures: Caltrans roadwork windows, soonest first. The row's time
+ * is the planned start ("in 2 days"); the id line carries the whole window.
+ */
+function renderPlanned(container, feats) {
+  const closureOf = (f) => ((f.properties || {}).incident || {}).closure || {};
+  const startOf = (f) => closureOf(f).plannedStart || (f.properties || {}).effective || '';
+  feats.sort((a, b) => String(startOf(a)).localeCompare(String(startOf(b))));
+  const list = el('div', 'rec-list');
+  for (const f of feats) {
+    const p = f.properties || {};
+    const c = closureOf(f);
+    const row = recordRow(
+      {
+        id: p.id,
+        layer: p.layer || 'road_incident',
+        severity: p.severity,
+        headline: p.headline,
+        observedAt: startOf(f),
+      },
+      { href: p.id ? `/event?id=${encodeURIComponent(p.id)}` : undefined, tags: ['scheduled'] }
+    );
+    const recBody = row.querySelector('.rec-body');
+    const sub = [p.areaLabel, p.description].filter(Boolean).join(' — ');
+    if (recBody && sub) {
+      recBody.insertBefore(el('div', 'rec-sub muted small', sub), recBody.querySelector('.rec-id'));
+    }
+    const idEl = recBody && recBody.querySelector('.rec-id');
+    if (idEl) {
+      const span = c.plannedStart
+        ? `window ${timeAbs(c.plannedStart)} – ${c.plannedEnd ? timeAbs(c.plannedEnd) : 'open-ended'}`
+        : '';
+      idEl.textContent = [p.id, span, p.source && p.source.name].filter(Boolean).join(' · ');
     }
     list.append(row);
   }
@@ -289,7 +345,7 @@ function setCount(section, n) {
   if (h) h.textContent = n === null ? section.countLabel : `${section.countLabel} · ${n}`;
 }
 
-async function loadSection(place, section) {
+async function loadSection(place, section, fetchLayer) {
   const statusEl = document.getElementById(section.status);
   const contentEl = document.getElementById(section.content);
   const path = `/api/v1/places/${encodeURIComponent(place)}/map/${section.layer}.geojson`;
@@ -298,13 +354,14 @@ async function loadSection(place, section) {
   setCount(section, null);
 
   let fc, err;
-  try { fc = await get(path); } catch (e) { err = e; }
+  try { fc = await fetchLayer(path); } catch (e) { err = e; }
   statusHeader(statusEl, path, fc, err);
   if (err) { contentEl.append(errorBlock(err)); return; }
 
   const md = fc.metadata || {};
   const status = String(md.sourceStatus || '').toUpperCase();
-  const feats = Array.isArray(fc.features) ? fc.features : [];
+  let feats = Array.isArray(fc.features) ? fc.features : [];
+  if (section.filter) feats = feats.filter(section.filter);
 
   if (status === 'UNAVAILABLE') { contentEl.append(unavailableNotice(md)); return; }
 
@@ -337,7 +394,14 @@ export function initRoadsPage() {
 
   function loadAll() {
     if (!place) return;
-    for (const s of SECTIONS) loadSection(place, s);
+    // One request per layer, however many sections read it (incidents and
+    // planned closures are two views of road_incident).
+    const shared = new Map();
+    const fetchLayer = (path) => {
+      if (!shared.has(path)) shared.set(path, get(path));
+      return shared.get(path);
+    };
+    for (const s of SECTIONS) loadSection(place, s, fetchLayer);
   }
 
   placeMenu.addEventListener('change', (e) => {

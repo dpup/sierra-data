@@ -97,6 +97,9 @@ func (s *Server) registerTools() []tool {
 				"— pass a county/area name or a corridor slug (e.g. location \"Calaveras County\", layer " +
 				"\"road_incident\") — and filter or count the returned rows yourself; each row's headline and " +
 				"areaLabel carry the road name and incident type. " +
+				"Caltrans planned lane closures are road_incident rows with category \"closure\", one per " +
+				"work window: a window not yet set up is status SCHEDULED (effective = its planned start), " +
+				"so pass status ACTIVE for only what is on the road now, or SCHEDULED for upcoming roadwork. " +
 				"MeshCore mesh-node presence is layer \"mesh\" (legacy alias \"network\"): one INFO row per " +
 				"node, the node's name in headline/areaLabel and its pubkey + radio telemetry in detail. To " +
 				"find or check a specific node (e.g. one named \"SIERRA…\"), list layer=mesh — unscoped is " +

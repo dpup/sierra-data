@@ -1052,6 +1052,98 @@
         }
       }
     },
+    "v1LaneClosureDetail": {
+      "type": "object",
+      "properties": {
+        "windowId": {
+          "type": "string",
+          "title": "CWWP2 index: \"C4QB-0004-2026-10-02-07:01:00\""
+        },
+        "district": {
+          "type": "integer",
+          "format": "int32",
+          "title": "Caltrans district whose feed listed it"
+        },
+        "closureId": {
+          "type": "string",
+          "title": "route-level project id (\"C4QB\"); not unique"
+        },
+        "logNumber": {
+          "type": "string",
+          "title": "per-project request number (\"4\"); not unique"
+        },
+        "route": {
+          "type": "string",
+          "title": "\"SR-4\", \"US-50\""
+        },
+        "direction": {
+          "type": "string",
+          "title": "travel flow, verbatim: \"East / West\", \"North\""
+        },
+        "facility": {
+          "type": "string",
+          "description": "\"Conventional Hwy\" | \"On Ramp\" | \"Off Ramp\" | ..."
+        },
+        "closureType": {
+          "type": "string",
+          "description": "\"Full\" | \"Lane\" | \"One-Way Traffic\" | \"Alternating Lanes\" | ..."
+        },
+        "workType": {
+          "type": "string",
+          "description": "\"Drainage Work\", \"Tree Work\", ..."
+        },
+        "lanesClosed": {
+          "type": "string",
+          "title": "verbatim: \"1, RShoulder\", \"All\", \"Rt Turn Ln\""
+        },
+        "totalLanes": {
+          "type": "integer",
+          "format": "int32",
+          "title": "lanes at the site; 0 when not reported"
+        },
+        "estimatedDelayMinutes": {
+          "type": "integer",
+          "format": "int32",
+          "title": "0 when none or not reported"
+        },
+        "closureDuration": {
+          "type": "string",
+          "title": "\"Standard\" | \"Long Term\" | \"Intermittent\""
+        },
+        "plannedStart": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "plannedEnd": {
+          "type": "string",
+          "format": "date-time",
+          "title": "absent when end_indefinite"
+        },
+        "endIndefinite": {
+          "type": "boolean"
+        },
+        "setUpAt": {
+          "type": "string",
+          "format": "date-time",
+          "title": "the 10-97 call: crew on scene, closure in place"
+        },
+        "beginLocation": {
+          "type": "string",
+          "title": "\"Avery\""
+        },
+        "endLocation": {
+          "type": "string",
+          "title": "equals begin_location for a closure at one spot"
+        },
+        "begin": {
+          "$ref": "#/definitions/v1LatLng"
+        },
+        "end": {
+          "$ref": "#/definitions/v1LatLng"
+        }
+      },
+      "description": "One Caltrans planned lane-closure WINDOW, read from the CWWP2 data portal.\nEvery field is upstream data; none of it is AI-generated.\n\nThe unit is the window because Caltrans has no other one. A multi-day job is\none row per day, and neither closure_id nor log_number identifies a job:\nclosure_id is a route-level project id, and one log number can cover\nwindows at different places on different days, or be re-issued daily at\nthe same place. window_id is the only unique key.\n\nThe planned window is an estimate that crews overrun, so planned_end is NOT\nmapped onto the envelope `expires` (the same rule as PG\u0026E's restoration\nestimate). A set-up closure stays ACTIVE until the crew radios it picked up."
+    },
     "v1LatLng": {
       "type": "object",
       "properties": {
@@ -1569,7 +1661,8 @@
       "type": "object",
       "properties": {
         "logNumber": {
-          "type": "string"
+          "type": "string",
+          "title": "CHP log number; for a Caltrans closure, its closure id"
         },
         "impact": {
           "type": "string",
@@ -1585,6 +1678,10 @@
             "type": "string"
           },
           "title": "structured extras from AI analysis (internal keys stripped)"
+        },
+        "closure": {
+          "$ref": "#/definitions/v1LaneClosureDetail",
+          "title": "Caltrans planned closures only (source `caltrans`)"
         }
       },
       "description": "Kind-specific only. The incident type is the envelope `category`, the human\nlocation is `area_label`, and the short line is the `headline` — none are\nrepeated here."

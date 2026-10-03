@@ -276,9 +276,92 @@ func TestClient_LaneClosures(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, all, 84)
 	assert.Equal(t, []string{"https://cwwp2.dot.ca.gov/data/d10/lcs/lcsStatusD10.json"}, d.urls)
+	for _, lc := range all {
+		require.Equal(t, 10, lc.District, lc.ID)
+		require.Empty(t, lc.Unrecognized, lc.ID)
+	}
+}
 
-	// A district with no planned closures is a legitimate empty answer.
-	empty, err := pinnedClient(&fakeDoer{status: 200, body: []byte(`{"data": []}`)}).LaneClosures(context.Background(), 10)
-	assert.NoError(t, err)
-	assert.Empty(t, empty)
+// The fail-loud half: everything that would otherwise reach the grid's
+// disappearance sweep as "these closures ended".
+func TestClient_LaneClosuresFailLoud(t *testing.T) {
+	ctx := context.Background()
+
+	// An empty file is broken, not quiet: it has no stamp to check freshness
+	// against, and D10 has never published fewer than hundreds of windows.
+	_, err := pinnedClient(&fakeDoer{status: 200, body: []byte(`{"data": []}`)}).LaneClosures(ctx, 10)
+	assert.ErrorIs(t, err, ErrEmptyFeed)
+
+	// A file the portal stopped regenerating.
+	c := pinnedClient(&fakeDoer{status: 200, body: fixture(t, "lcs_d10_20260930.json")})
+	c.Now = func() time.Time { return fixtureNow.Add(3 * time.Hour) }
+	_, err = c.LaneClosures(ctx, 10)
+	assert.ErrorIs(t, err, ErrStaleFeed)
+
+	_, err = pinnedClient(&fakeDoer{status: 500}).LaneClosures(ctx, 10)
+	assert.Error(t, err)
+}
+
+// A code block whose shape drifts must not decode as "not called".
+func TestParseLaneClosures_UnrecognizedRows(t *testing.T) {
+	body := fixture(t, "lcs_d10_20260930.json")
+	all, err := ParseLaneClosures(body)
+	require.NoError(t, err)
+	for _, lc := range all {
+		require.Empty(t, lc.Unrecognized, "live row %s", lc.ID)
+	}
+
+	// mutate rewrites the first occurrence and returns the row it landed in:
+	// the only row the rewrite can have changed.
+	mutate := func(old, new string) LaneClosure {
+		t.Helper()
+		require.Contains(t, string(body), old)
+		rows, err := ParseLaneClosures([]byte(strings.Replace(string(body), old, new, 1)))
+		require.NoError(t, err)
+		require.Len(t, rows, len(all))
+		for i := range rows {
+			if rows[i].Unrecognized != "" || rows[i].SetUp != all[i].SetUp ||
+				rows[i].PickedUp != all[i].PickedUp || rows[i].Cancelled != all[i].Cancelled {
+				return rows[i]
+			}
+		}
+		return LaneClosure{}
+	}
+	cases := map[string]LaneClosure{
+		"unreadable 10-97 flag": mutate(`"isCode1097": "false"`, `"isCode1097": "no"`),
+		"unreadable 10-98 flag": mutate(`"isCode1098": "false"`, `"code1098Is": "false"`),
+		"unreadable 10-22 flag": mutate(`"isCode1022": "false"`, `"isCode1022": ""`),
+	}
+	for want, row := range cases {
+		assert.Equal(t, want, row.Unrecognized)
+	}
+	assert.Empty(t, mutate(`"isCode1097": "false"`, `"isCode1097": "False"`).Unrecognized, "case is not drift")
+}
+
+func TestUnrecognizedReason(t *testing.T) {
+	ok := [3]bool{true, true, true}
+	at := Location{Latitude: 38.2, Longitude: -120.4, HasPosition: true}
+	good := LaneClosure{ID: "C4QB-0004-2026-10-02-07:01:00", Start: fixtureNow, EndTime: fixtureNow.Add(time.Hour), Begin: at}
+	assert.Empty(t, unrecognizedReason(good, ok))
+
+	endOnly := good
+	endOnly.Begin, endOnly.End = Location{}, at
+	assert.Empty(t, unrecognizedReason(endOnly, ok), "one positioned endpoint is enough")
+
+	open := good
+	open.EndTime, open.EndIndefinite = time.Time{}, true
+	assert.Empty(t, unrecognizedReason(open, ok), "an indefinite window has no end")
+
+	cases := map[string]func(*LaneClosure){
+		"no index":      func(l *LaneClosure) { l.ID = "" },
+		"no start time": func(l *LaneClosure) { l.Start = time.Time{} },
+		"no end time":   func(l *LaneClosure) { l.EndTime = time.Time{} },
+		"no position":   func(l *LaneClosure) { l.Begin = Location{} },
+	}
+	for want, edit := range cases {
+		lc := good
+		edit(&lc)
+		assert.Equal(t, want, unrecognizedReason(lc, ok))
+	}
+	assert.Equal(t, "unreadable 10-98 flag", unrecognizedReason(good, [3]bool{true, false, true}))
 }

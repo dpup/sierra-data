@@ -158,24 +158,56 @@ func projectEarthquake(ev *gridv1.Event) hazards.Feature {
 	return feature(ev, p)
 }
 
-// projectRoadIncident mirrors the shipped roadIncidents builder. The source
-// block is the shipped per-layer CONSTANT for ALL road incidents — store
-// provenance keeps the chp/caltrans split for source health, but the envelope
-// never varied by feed (plan §5 item 5). properties.status is the UPPERCASE
-// lifecycle enum ("ACTIVE" for the live feeds).
+// projectRoadIncident projects CHP incidents and Caltrans closures.
+// properties.status is the UPPERCASE lifecycle enum: ACTIVE, or SCHEDULED for
+// a planned closure window that has not been set up yet.
+//
+// The source block follows the event's provenance, as wildfire's does. It was
+// once a per-layer constant ("chp", "CHP / Caltrans", quickmap), kept for byte
+// compatibility with a live builder that no longer exists. Once closures moved
+// to the CWWP2 portal (2026-10), that constant credited the wrong feed and the
+// wrong source id for most of the layer.
 func projectRoadIncident(ev *gridv1.Event) hazards.Feature {
 	d := ev.GetRoadIncident()
 	p := baseProps(ev, hazards.LayerRoadIncident, "Road incident")
 	// The GeoJSON envelope shows the readable narrative (event.summary), not the
 	// raw verbatim original (event.description) — map popups stay readable; the
-	// original is a /v1-event-only field. Matches the live builder's Description.
+	// original is a /v1-event-only field. A CWWP2 closure has no AI narrative and
+	// no raw original: its description is composed from structured fields, so it
+	// IS the readable text.
 	p.Description = ev.GetSummary()
+	if p.Description == "" && d.GetClosure() != nil {
+		p.Description = ev.GetDescription()
+	}
 	p.Status = lifecycleStatus(ev)
 	p.Effective = rfc3339(ev.GetEffective())
 	p.UpdatedAt = rfc3339(ev.GetObservedAt())
 	p.Source = hazards.Source{ID: "chp", Name: "CHP / Caltrans", Attribution: "quickmap.dot.ca.gov"}
+	if prov := ev.GetProvenance(); prov.GetSourceId() == "caltrans" {
+		p.Source = hazards.Source{ID: "caltrans", Name: "Caltrans", Attribution: nonEmptyString(prov.GetAttribution(), "quickmap.dot.ca.gov")}
+	}
 	p.Incident = &hazards.IncidentProps{LogNumber: d.GetLogNumber()}
+	if c := d.GetClosure(); c != nil {
+		p.Incident.Closure = &hazards.ClosureProps{
+			WindowID:              c.GetWindowId(),
+			ClosureType:           c.GetClosureType(),
+			WorkType:              c.GetWorkType(),
+			LanesClosed:           c.GetLanesClosed(),
+			TotalLanes:            c.GetTotalLanes(),
+			EstimatedDelayMinutes: c.GetEstimatedDelayMinutes(),
+			PlannedStart:          rfc3339(c.GetPlannedStart()),
+			PlannedEnd:            rfc3339(c.GetPlannedEnd()),
+			SetUpAt:               rfc3339(c.GetSetUpAt()),
+		}
+	}
 	return feature(ev, p)
+}
+
+func nonEmptyString(s, fallback string) string {
+	if s != "" {
+		return s
+	}
+	return fallback
 }
 
 // projectNetwork projects a MeshCore mesh-node presence event. This is a new

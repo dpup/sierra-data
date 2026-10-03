@@ -519,6 +519,19 @@ func TestMapLayer_AttributionCreditsEveryFeed(t *testing.T) {
 	assert.Equal(t, "California Highway Patrol · quickmap.dot.ca.gov", md.Attribution)
 }
 
+// A row can itself credit two feeds (caltrans since CWWP2), so dedupe works on
+// the parts: road_incident must not print quickmap twice.
+func TestMapLayer_AttributionDedupesParts(t *testing.T) {
+	s := newTestService(t)
+	seedSourceWithAttribution(t, s.Store, "chp", "CHP", "quickmap.dot.ca.gov")
+	seedSourceWithAttribution(t, s.Store, "caltrans", "Caltrans", "cwwp2.dot.ca.gov · quickmap.dot.ca.gov")
+	recordOK(t, s.Store, "chp")
+	recordOK(t, s.Store, "caltrans")
+
+	md := getFC(t, s, "/v1/places/calaveras/map/road_incident.geojson").Metadata
+	assert.Equal(t, "quickmap.dot.ca.gov · cwwp2.dot.ca.gov", md.Attribution)
+}
+
 // A registry row with no attribution yields an empty one rather than a
 // fabricated line — the layer still serves and the envelope simply claims
 // nothing. (The harness seeds `nws` with a name and no attribution; production

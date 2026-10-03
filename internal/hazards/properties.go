@@ -73,6 +73,24 @@ type Source struct {
 // IncidentProps is the road_incident kind block.
 type IncidentProps struct {
 	LogNumber string `json:"logNumber,omitempty"`
+	// Closure is set on Caltrans planned closures (CWWP2) only.
+	Closure *ClosureProps `json:"closure,omitempty"`
+}
+
+// ClosureProps is one Caltrans planned lane-closure window (the store's
+// grid.v1.LaneClosureDetail, trimmed to what a map popup or list row shows).
+// plannedEnd is an estimate crews overrun: an ACTIVE closure past it is still
+// in place until Caltrans records it picked up.
+type ClosureProps struct {
+	WindowID              string `json:"windowId"`
+	ClosureType           string `json:"closureType,omitempty"`
+	WorkType              string `json:"workType,omitempty"`
+	LanesClosed           string `json:"lanesClosed,omitempty"`
+	TotalLanes            int32  `json:"totalLanes,omitempty"`
+	EstimatedDelayMinutes int32  `json:"estimatedDelayMinutes,omitempty"`
+	PlannedStart          string `json:"plannedStart,omitempty"`
+	PlannedEnd            string `json:"plannedEnd,omitempty"`
+	SetUpAt               string `json:"setUpAt,omitempty"`
 }
 
 // RoadProps is the road_segment kind block. The numeric fields are pointers so a

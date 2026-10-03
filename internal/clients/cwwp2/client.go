@@ -58,8 +58,9 @@ const DefaultStaleAfter = time.Hour
 const maxBody = 16 << 20
 
 // ErrEmptyFeed is returned when a feed parses but holds no rows. A district
-// always has chain-control checkpoints, so zero means the upstream broke — it
-// must never read as "no chain controls".
+// always has chain-control checkpoints and (in practice) hundreds of planned
+// lane closures, so zero means the upstream broke. It must never read as "no
+// chain controls" or "every closure ended".
 var ErrEmptyFeed = errors.New("cwwp2: feed contains no records")
 
 // ErrStaleFeed is returned when a feed's newest record stamp is older than the

@@ -487,6 +487,14 @@ type CWWP2Config struct {
 	// ChainControlDistricts are the Caltrans districts whose per-checkpoint
 	// chain-control status replaces cc.kml's levels. Empty keeps cc.kml alone.
 	ChainControlDistricts []int `koanf:"chainControlDistricts"`
+	// LaneClosureDistricts are the districts whose lane-closure windows feed
+	// the road_incident layer (source `caltrans`), scheduled ones included.
+	// Non-empty REPLACES lcs2way.kml for that layer: the incidents pipeline
+	// stops reading it and a dedicated poller reads these districts instead.
+	// Every district that reaches roads.incidentAreas must be listed — a
+	// closure in an unlisted district is simply never seen. Empty keeps the
+	// lcs2way.kml path.
+	LaneClosureDistricts []int `koanf:"laneClosureDistricts"`
 	// MessageSignDistricts are the Caltrans districts whose changeable message
 	// signs back the message_sign map layer. Empty leaves that layer
 	// UNAVAILABLE — it has no other source.

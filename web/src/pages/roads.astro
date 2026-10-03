@@ -105,8 +105,8 @@ import FilterGroup from '../components/FilterGroup.astro';
       <div class="rail-block">
         <div class="rail-label">What this is</div>
         <p>
-          CHP and Caltrans incidents on these corridors, each AI-enhanced into a readable
-          summary with an impact-driven severity.
+          CHP incidents, AI-enhanced into a readable summary with an impact-driven severity,
+          and Caltrans lane closures a crew has set up, composed from Caltrans's own fields.
         </p>
         <p>
           These are stored events — the same records
@@ -117,6 +117,36 @@ import FilterGroup from '../components/FilterGroup.astro';
       <div class="rail-block">
         <div class="rail-label">Source</div>
         <div id="rd-inc-status" class="rd-status-line"></div>
+      </div>
+    </aside>
+  </div>
+
+  <!-- ================= PLANNED CLOSURES — SCHEDULED road_incident events ================= -->
+  <SectionHead class="section-gap" cap="severity · headline · planned window">
+    <Fragment slot="left">
+      <h2 id="rd-plan-h">Planned closures</h2>
+    </Fragment>
+  </SectionHead>
+  <div class="with-rail">
+    <div class="rail-main">
+      <div id="rd-plan"></div>
+    </div>
+    <aside class="page-rail" aria-label="About planned closures">
+      <div class="rail-block">
+        <div class="rail-label">What this is</div>
+        <p>
+          Caltrans roadwork windows that are scheduled but not set up yet, one event per window,
+          from the same layer with <code class="inline">status: SCHEDULED</code>. A multi-day job
+          is one row per day.
+        </p>
+        <p>
+          When the crew radios the closure set up, it moves to Incidents. When they pick it up, or
+          Caltrans cancels it, it resolves.
+        </p>
+      </div>
+      <div class="rail-block">
+        <div class="rail-label">Source</div>
+        <div id="rd-plan-status" class="rd-status-line"></div>
       </div>
     </aside>
   </div>

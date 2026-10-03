@@ -96,19 +96,29 @@ var conditionLayerSourceIDs = map[string][]string{
 // registryAttribution joins the attribution lines of the named sources, in
 // declared order, deduped — the same rule eventLayerMeta applies.
 func registryAttribution(layer string, sources []*gridv1.Source) string {
+	return joinAttributions(conditionLayerSourceIDs[layer], sources)
+}
+
+// joinAttributions joins the registry attribution of each source id, in order,
+// with " · ", deduping PARTS rather than whole lines: a row can itself credit
+// two feeds ("cwwp2.dot.ca.gov · quickmap.dot.ca.gov" for caltrans), and
+// road_incident pairs it with chp's "quickmap.dot.ca.gov".
+func joinAttributions(ids []string, sources []*gridv1.Source) string {
 	byID := make(map[string]*gridv1.Source, len(sources))
 	for _, src := range sources {
 		byID[src.GetId()] = src
 	}
 	var parts []string
 	seen := map[string]bool{}
-	for _, id := range conditionLayerSourceIDs[layer] {
-		a := strings.TrimSpace(byID[id].GetAttribution())
-		if a == "" || seen[a] {
-			continue
+	for _, id := range ids {
+		for _, a := range strings.Split(byID[id].GetAttribution(), " · ") {
+			a = strings.TrimSpace(a)
+			if a == "" || seen[a] {
+				continue
+			}
+			seen[a] = true
+			parts = append(parts, a)
 		}
-		seen[a] = true
-		parts = append(parts, a)
 	}
 	return strings.Join(parts, " · ")
 }
@@ -393,23 +403,9 @@ func eventLayerMeta(layer string, sources []*gridv1.Source) (attribution, source
 	if layer == hazards.LayerEvacuation {
 		return "Cal OES / California County Governments — reference only", caloes.SourceURL
 	}
-	byID := make(map[string]*gridv1.Source, len(sources))
-	for _, src := range sources {
-		byID[src.GetId()] = src
-	}
 	// A layer can aggregate two feeds (wildfire, road_incident); credit both,
 	// in the registry's declared order, deduped.
-	var parts []string
-	seen := map[string]bool{}
-	for _, id := range layerSourceIDs[layer] {
-		a := strings.TrimSpace(byID[id].GetAttribution())
-		if a == "" || seen[a] {
-			continue
-		}
-		seen[a] = true
-		parts = append(parts, a)
-	}
-	return strings.Join(parts, " · "), ""
+	return joinAttributions(layerSourceIDs[layer], sources), ""
 }
 
 // writeFeatureCollection emits the shipped GeoJSON envelope through the

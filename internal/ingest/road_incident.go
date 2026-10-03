@@ -34,22 +34,42 @@ type roadsIncidentsAPI interface {
 var enhancedFields = []string{"headline", "summary", "severity"}
 
 // RoadIncidentNormalizer ingests region-wide CHP/Caltrans incidents (id
-// namespace "chp:") from every configured incident area. One poller, two
-// source rows: "chp" for dispatch incidents, "caltrans" for lane closures
-// (decision 4 — the split is by api.AlertType).
+// namespaces "chp:" and "caltrans:") from every configured incident area.
+//
+// Lane closures have two possible homes. With
+// roads.caltransFeeds.cwwp2.laneClosureDistricts set, they come from the CWWP2
+// portal through their own poller (LaneClosureNormalizer), the incidents
+// pipeline no longer reads lcs2way.kml, and this poller covers "chp" alone.
+// Without it, this is one poller over two source rows, "chp" for dispatch
+// incidents and "caltrans" for lcs2way.kml closures (decision 4 — the split is
+// by api.AlertType).
 type RoadIncidentNormalizer struct {
 	cfg   *config.Config
 	roads roadsIncidentsAPI
+	// closuresElsewhere: lane closures belong to LaneClosureNormalizer, so this
+	// poller must neither emit nor sweep the caltrans source.
+	closuresElsewhere bool
 }
 
 // NewRoadIncidentNormalizer wires the normalizer to the roads service (the
 // concrete *services.RoadsService satisfies roadsIncidentsAPI).
 func NewRoadIncidentNormalizer(cfg *config.Config, roads roadsIncidentsAPI) *RoadIncidentNormalizer {
-	return &RoadIncidentNormalizer{cfg: cfg, roads: roads}
+	return &RoadIncidentNormalizer{
+		cfg:               cfg,
+		roads:             roads,
+		closuresElsewhere: len(cfg.Roads.CaltransFeeds.CWWP2.LaneClosureDistricts) > 0,
+	}
 }
 
-// SourceIDs implements Normalizer.
-func (n *RoadIncidentNormalizer) SourceIDs() []string { return []string{"chp", "caltrans"} }
+// SourceIDs implements Normalizer. Listing "caltrans" here while the CWWP2
+// poller also owns it would let two pollers sweep one source against two
+// different event sets, each resolving the other's closures.
+func (n *RoadIncidentNormalizer) SourceIDs() []string {
+	if n.closuresElsewhere {
+		return []string{"chp"}
+	}
+	return []string{"chp", "caltrans"}
+}
 
 // Poll implements Normalizer. Both sources come from the same per-area
 // ListIncidents calls, so a partial area failure degrades both source rows
@@ -75,6 +95,9 @@ func (n *RoadIncidentNormalizer) Poll(ctx context.Context, prior Prior) (*PollRe
 			continue
 		}
 		for _, in := range resp.GetIncidents() {
+			if n.closuresElsewhere && in.GetType() == api.AlertType_CLOSURE {
+				continue // not this poller's source (see SourceIDs)
+			}
 			ev := n.buildEvent(in)
 			if ev == nil || seen[ev.Id] {
 				continue // locationless, or duplicated across overlapping areas
@@ -106,15 +129,19 @@ func (n *RoadIncidentNormalizer) Poll(ctx context.Context, prior Prior) (*PollRe
 	// dead feed's events. A hard error stays reserved for the every-area AND
 	// both-feeds-down case, as before.
 	chpErr, laneErr, _ := n.roads.IncidentFeedHealth()
-	if len(errs) == len(areas) && chpErr != nil && laneErr != nil {
+	if n.closuresElsewhere {
+		laneErr = nil // the service no longer reads that feed
+	}
+	if len(errs) == len(areas) && chpErr != nil && (laneErr != nil || n.closuresElsewhere) {
 		return nil, fmt.Errorf("all incident areas failed: %w", errors.Join(errs...))
 	}
 	perSource := make(map[string]error)
 	if len(errs) > 0 {
-		// Area-level failures degrade both source rows — they share the calls.
+		// Area-level failures degrade every source row — they share the calls.
 		err := fmt.Errorf("partial incident coverage: %w", errors.Join(errs...))
-		perSource["chp"] = err
-		perSource["caltrans"] = err
+		for _, src := range n.SourceIDs() {
+			perSource[src] = err
+		}
 	}
 	if chpErr != nil {
 		perSource["chp"] = errors.Join(perSource["chp"], fmt.Errorf("chp feed: %w", chpErr))
