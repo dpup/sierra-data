@@ -38,6 +38,7 @@ import (
 	"flag"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -88,6 +89,19 @@ func main() {
 	var ingestToken string
 	if !*dryRun {
 		ingestToken = mustEnv("GRID_INGEST_TOKEN")
+	}
+
+	// Check the endpoint will take our report BEFORE dialing. Every call costs
+	// Twilio and OpenAI money, and a reading that cannot be delivered is wasted,
+	// so a bad token, a missing grant, or a server that is down must fail here,
+	// for free.
+	if !*dryRun {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		err := preflight(ctx, *endpoint, ingestToken)
+		cancel()
+		if err != nil {
+			fatal("preflight failed, not dialing: %v", err)
+		}
 	}
 
 	tw := twilio.NewClient(sid, authToken)
@@ -225,6 +239,35 @@ func push(ctx context.Context, endpoint, token string, readings []pushReading) e
 	// Warnings mean some readings were skipped; surface them, they are the only
 	// signal that a line silently did not land.
 	fmt.Printf("  server: %s\n", strings.TrimSpace(buf.String()))
+	return nil
+}
+
+// preflight asks the endpoint whether it would accept a report from this token
+// (`?preflight=true` answers 204 after authenticating and checking the stream
+// grant, recording nothing).
+func preflight(ctx context.Context, endpoint, token string) error {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return err
+	}
+	q := u.Query()
+	q.Set("preflight", "true")
+	u.RawQuery = q.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		buf := new(bytes.Buffer)
+		_, _ = buf.ReadFrom(resp.Body)
+		return fmt.Errorf("status %d: %s", resp.StatusCode, strings.TrimSpace(buf.String()))
+	}
 	return nil
 }
 

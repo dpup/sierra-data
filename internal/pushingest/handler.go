@@ -97,6 +97,17 @@ func (r *Registry) ServeStream(w http.ResponseWriter, req *http.Request, stream 
 		return
 	}
 
+	// ?preflight=true stops here: the credential and the grant are good. A
+	// client checks this BEFORE doing expensive work to produce a report (the
+	// burn-line reader places paid phone calls), so a bad token or a server
+	// outage fails for free. It records nothing — not an attempt, not an
+	// acceptance — so it can never move the rate-limit window or paint a
+	// reporter healthy, and it reveals nothing the caller's token did not.
+	if req.URL.Query().Get("preflight") == "true" {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
 	now := r.now()
 	r.mu.Lock()
 	rep.lastAttemptAt = now

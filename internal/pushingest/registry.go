@@ -148,7 +148,8 @@ type Registry struct {
 	mu sync.Mutex
 	// burn is the store the burn.line stream stages readings in, and burnLines
 	// the ids it will accept. Both nil/empty unless WithBurnLines is passed, in
-	// which case the stream is not dispatched at all — see dispatch.
+	// which case the stream still dispatches but ingestBurn rejects every
+	// report as unconfigured — see dispatch.
 	//
 	// This stream is the one that touches the store; see ingestBurn for why a
 	// once-daily reading cannot live in an in-memory buffer like mesh's.
@@ -175,8 +176,10 @@ type Registry struct {
 type Option func(*Registry)
 
 // WithBurnLines enables the burn.line stream, staging readings in st and
-// accepting only the given line ids. Without it the stream is not dispatched
-// (404), because a reading would have nowhere to land.
+// accepting only the given line ids. Without it the stream still routes (so a
+// granted reporter never sees a confusing 404) but every report is rejected
+// with a 400 saying no burn lines are configured: a reading would have nowhere
+// to land.
 func WithBurnLines(st BurnStore, lineIDs []string) Option {
 	return func(r *Registry) {
 		if st == nil || len(lineIDs) == 0 {

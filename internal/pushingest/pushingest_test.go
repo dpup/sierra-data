@@ -330,6 +330,35 @@ func TestMalformedReportsAgeTheReporter(t *testing.T) {
 	assert.NotEmpty(t, h.LastError)
 }
 
+// A preflight answers "would this credential be accepted for this stream?"
+// without recording anything: no acceptance (so it cannot move the rate-limit
+// window or make a never-reporting monitor look healthy) and no failure.
+func TestPreflightChecksCredentialWithoutRecording(t *testing.T) {
+	preflight := func(r *Registry, token, stream string) int {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/"+stream+"?preflight=true", nil)
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		w := httptest.NewRecorder()
+		r.ServeStream(w, req, stream)
+		return w.Code
+	}
+	r := testRegistry(t, func(rep *config.Reporter) { rep.MinInterval = time.Hour })
+
+	assert.Equal(t, http.StatusNoContent, preflight(r, testToken, MeshStream))
+	assert.Equal(t, http.StatusUnauthorized, preflight(r, "nope", MeshStream))
+	assert.Equal(t, http.StatusForbidden, preflight(r, testToken, BurnStream), "the grant is checked too")
+	assert.Equal(t, http.StatusNotFound, preflight(r, testToken, "weather.station"))
+
+	h := r.Health(MeshStream)[0]
+	assert.Equal(t, ReporterUnknown, h.State, "a preflight is not a report")
+	assert.Empty(t, h.LastError)
+	assert.Equal(t, http.StatusAccepted, post(r, testToken, MeshStream, sampleReport).Code,
+		"a preflight must not start the rate-limit window")
+	assert.Equal(t, http.StatusNoContent, preflight(r, testToken, MeshStream),
+		"nor be rate-limited by a real report")
+}
+
 func TestServeHTTPTakesStreamFromPath(t *testing.T) {
 	r := testRegistry(t)
 	req := httptest.NewRequest(http.MethodPost, "/ingest/"+MeshStream, strings.NewReader(sampleReport))

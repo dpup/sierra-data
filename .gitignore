@@ -175,3 +175,6 @@ api-keys.yaml
 server.log
 server.pid
 .claude/settings.local.json
+
+# burn-line build output (go build ./cmd/burn-line at the repo root)
+/burn-line

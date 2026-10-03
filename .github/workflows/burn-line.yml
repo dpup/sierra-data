@@ -11,6 +11,9 @@
 # https://data.sierragridteam.org/api/v1/ingest/burn.line; GRID_INGEST_TOKEN is a
 # grid.ingest reporter granted that stream (`make ingest-token`).
 #
+# Before dialing, the tool preflights the endpoint (`?preflight=true`): a bad
+# token, a missing grant or a server outage fails the run before any paid call.
+#
 # A failure pushes NOTHING — deliberately. The previous reading then ages past
 # the server's freshness gate (grid.burn.burnDayStaleAfter, 36h) and the burn-day
 # facet reads UNKNOWN, which consumers render as "call the line". That is why
@@ -34,9 +37,23 @@ on:
         type: string
         required: false
 
+# Never two runs at once: overlapping runs would dial every line twice and the
+# second push would 429 against the first.
+concurrency:
+  group: burn-line
+  cancel-in-progress: false
+
 jobs:
   read:
+    # Scheduled runs are off until the repo variable GRID_INGEST_ENDPOINT is
+    # set, so merging this before the reporter is deployed costs nothing and
+    # sends no daily failure email. Manual runs always go (a dry run needs no
+    # endpoint; a real one without it fails fast, before dialing).
+    if: vars.GRID_INGEST_ENDPOINT != '' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    # Each line is bounded by the tool's own -timeout (10m); this caps the job
+    # if something hangs outside a call.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
 
