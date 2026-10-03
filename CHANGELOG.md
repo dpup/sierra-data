@@ -14,7 +14,156 @@ throughout; errors are gRPC-standard `{code, codeName, message, details}`). The
 by a snake_case `/v1` surface on 2026-07-05, which was in turn folded back onto the
 proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 
+## 2026-10-02
+
+### New map layer: `message_sign` — what Caltrans's message signs are showing
+
+**Additive.** `GET /api/v1/places/{place}/map/message_sign.geojson` serves one
+Point per Caltrans changeable message sign (the roadside electronic signs)
+inside the place's bounds, with the text it is showing right now. The source is
+the CWWP2 data portal (`cwwp2.dot.ca.gov`, District 10: 107 signs, 6 of them
+within the `ebbetts-pass` bounding box). Like the other condition layers it is
+scoped by the place's bounding box, not its polygon.
+
+**Treat it as context, never as a hazard.** Most of what the signs say is
+statewide safety-campaign boilerplate: on 2026-10-01, 82 of District 10's 107
+signs read "BE THE DRIVER / WHO SAVES LIVES / DON'T SPEED". Nothing is filtered
+out, because the campaigns rotate and no fixed list can keep up. So:
+
+- Every feature is `severity: INFO` (rank 0), even if the text says
+  "CHAINS REQUIRED". The `chain_control` layer carries the requirement.
+- `/summary` does not read this layer. It never moves the `mode`, a domain, or
+  `topEvents`.
+- It is a live projection, not stored. There are no events and no history.
+
+Feature shape:
+
+- `id`: `cms:<district>:<sign index>`, e.g. `cms:10:V50`. Where an index isn't
+  unique in its district (District 12 numbers every sign `1`), the id uses the
+  sign's position instead: `cms:12:38.10000,-120.50000`.
+- `category`: `message` (showing text), `blank` (dark), or `unknown` (the
+  portal didn't report the sign's message, or reported one that contradicts
+  itself). `unknown` is never "blank".
+- `headline`: the sign text verbatim, one line, pages joined by `" / "`
+  (`"GUSTY WIND WARNING / OVER PACHECO PASS"`). For the other categories it is
+  `"Sign is blank"`, `"Sign message unknown"` or `"Sign out of service"`.
+- `areaLabel`: Caltrans's location name without the sign number
+  (`"EB 4 W/O MURPHYS"`).
+- `effective`: when the sign last changed message. Omitted where the portal
+  doesn't report it.
+- `properties.messageSign`: `signId`, `district`, `route`, `direction`,
+  `inService`, and `pages`. `pages` holds one or two pages of exactly three
+  lines, with a blank line kept as `""` so a client can draw the sign face.
+  It is omitted for blank and unknown signs. `route` names one route where two
+  share the road (the Moccasin sign on EB 49 is filed under `SR-120`).
+
+`sourceStatus` follows the usual rules. The portal answering with an error, an
+empty file, or a file older than an hour is `UNAVAILABLE` (or `STALE` from a
+cached last-good). A sign with no position is `STALE`, with the other signs
+kept. A sign that can't be read is listed as `unknown` and does not degrade
+the layer.
 ## 2026-10-01
+
+### New map layer: `camera` — Caltrans traffic cameras
+
+**Additive.** `GET /api/v1/places/{place}/map/camera.geojson` serves the
+cameras `GET /api/v1/cameras?place=` lists (below) as GeoJSON: one `Point`
+per camera, nearest first, with the same ids and distances. Like `mesh_link`,
+`camera` is a map-layer slug only, not a Layer enum value. It never appears in
+`/events`, and it never feeds the place summary.
+
+```json
+{
+  "type": "Feature",
+  "geometry": {"type": "Point", "coordinates": [-120.2748, 37.99242]},
+  "properties": {
+    "id": "d10-172",
+    "layer": "CAMERA",
+    "kind": "Traffic camera",
+    "severity": "INFO",
+    "severityRank": 0,
+    "headline": "EB 108 W/O Soulsbyville Rd",
+    "areaLabel": "Soulsbyville",
+    "source": {"id": "caltrans", "name": "Caltrans CCTV", "url": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/179eb108wosoulsbyvillerd/179eb108wosoulsbyvillerd.jpg", "attribution": "Caltrans"},
+    "camera": {
+      "imageUrl": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/179eb108wosoulsbyvillerd/179eb108wosoulsbyvillerd.jpg",
+      "imageRefreshMinutes": 2,
+      "streamUrl": "https://wzmedia.dot.ca.gov/D10/TUO_EB108_WO_Soulsbyville.stream/playlist.m3u8",
+      "route": "SR-108",
+      "county": "Tuolumne",
+      "elevationFeet": 2926,
+      "distanceMeters": 0
+    }
+  }
+}
+```
+
+- Every feature is `INFO`: cameras are reference views, not hazards. Don't
+  count them as active items, and don't read an empty layer as an all-clear.
+- `properties.camera` carries the RPC's fields, camelCase. `streamUrl`,
+  `direction`, `county`, `elevationFeet` and `imageRefreshMinutes` are omitted
+  when Caltrans gives none. `distanceMeters` is always present (0 = inside the
+  place). Load `imageUrl` and `streamUrl` straight from Caltrans; the Grid does
+  not proxy them.
+- `metadata.sourceStatus` is the camera list's health, as on the RPC: `OK`,
+  `STALE` with `lastSourceUpdate`, or `UNAVAILABLE` when no list has been
+  fetched or cameras aren't configured. `metadata.attribution` is `Caltrans`.
+- The site's Map screen shows the layer, with the live snapshot and a video
+  link in each camera's popup.
+
+### New: `GET /api/v1/cameras?place=` — Caltrans traffic cameras
+
+**Additive.** The `ListCameras` RPC. It lists Caltrans CCTV cameras in or near
+the coverage area, each with a live snapshot image and, where Caltrans
+publishes one, an HLS video stream. Seeing the pass is the fastest check on
+chain-control and closure data. Cameras are reference views, not events: they
+never appear in `/events` or the summary. The `camera` map layer (above) serves
+the same list as GeoJSON.
+
+```json
+{
+  "cameras": [{
+    "id": "d10-172",
+    "name": "EB 108 W/O Soulsbyville Rd",
+    "nearbyPlace": "Soulsbyville",
+    "county": "Tuolumne",
+    "route": "SR-108",
+    "direction": "",
+    "location": {"lat": 37.992423, "lng": -120.274801},
+    "elevationFeet": 2926,
+    "imageUrl": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/179eb108wosoulsbyvillerd/179eb108wosoulsbyvillerd.jpg",
+    "imageRefreshMinutes": 2,
+    "streamUrl": "https://wzmedia.dot.ca.gov/D10/TUO_EB108_WO_Soulsbyville.stream/playlist.m3u8",
+    "description": "",
+    "distanceMeters": 0
+  }],
+  "sourceStatus": "OK",
+  "lastSourceUpdate": null,
+  "attribution": "Caltrans"
+}
+```
+
+- **Links, not proxies.** `imageUrl` and `streamUrl` point at Caltrans. Load
+  them directly (`<img>`, an HLS player). Re-fetch the image every
+  `imageRefreshMinutes` (0 = not reported). `streamUrl` is empty for an
+  image-only camera.
+- **Which cameras.** A camera is listed when it is within 25 km of a coverage
+  area and Caltrans marks it in service. Out-of-service cameras are dropped,
+  not flagged, because they serve a "Down for Construction" placeholder.
+  Today that is four cameras: Hwy 108 Soulsbyville, Hwy 88 Pine Grove, and
+  Hwy 120 at Ferretti Rd and Buck Meadows. **There is no camera on Hwy 4 or
+  Hwy 49 inside the area, and none on Ebbetts, Carson or Sonora Pass.** An
+  empty list means "no camera nearby", never "all clear".
+- **`?place=`** keeps the listed cameras within 25 km of the place, nearest
+  first. It accepts any place, including towns and corridors, which contain no
+  camera themselves. `distanceMeters` is measured from the place, or without
+  `?place` from the nearest coverage area; 0 means inside it.
+- **`sourceStatus`** is the camera list's health: `OK`, `STALE` (served from
+  an older fetch; `lastSourceUpdate` says when) or `UNAVAILABLE` (no list yet,
+  or cameras not configured). The images are live either way.
+- **`id`** is `d{district}-{index}`, the Caltrans district plus the portal's
+  camera index.
+- Not paginated. Carries a weak `ETag`; the list refreshes every 6 hours.
 
 ### `road_incident`: Caltrans lane closures from CWWP2, scheduled windows included
 

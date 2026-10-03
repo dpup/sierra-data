@@ -1,0 +1,142 @@
+{
+	"data": [
+		{
+			"cms": {
+				"index": "4109",
+				"recordTimestamp": {
+					"recordDate": "2026-10-01",
+					"recordTime": "12:45:45"
+				},
+				"location": {
+					"district": "3",
+					"locationName": "EMS - VM002 / Fog - Dillard Road (Daktronics VMS)",
+					"nearbyPlace": "Dillard Road",
+					"longitude": "-121.335148",
+					"latitude": "38.342948",
+					"elevation": "38",
+					"direction": "North",
+					"county": "Sacramento",
+					"route": "SR-99",
+					"routeSuffix": "",
+					"postmilePrefix": "",
+					"postmile": "7.31",
+					"alignment": "",
+					"milepost": "511.63"
+				},
+				"inService": "False",
+				"message": {
+					"messageTimestamp": {
+						"messageDate": "2025-04-29",
+						"messageTime": "13:50:52"
+					},
+					"display": "Blank",
+					"displayTime": "5",
+					"phase1": {
+						"phase1Font": "Not Reported",
+						"phase1Line1": "",
+						"phase1Line2": "",
+						"phase1Line3": ""
+					},
+					"phase2": {
+						"phase2Font": "Not Reported",
+						"phase2Line1": "",
+						"phase2Line2": "",
+						"phase2Line3": ""
+					}
+				}
+			}
+		},
+		{
+			"cms": {
+				"index": "1179",
+				"recordTimestamp": {
+					"recordDate": "2026-10-01",
+					"recordTime": "12:45:45"
+				},
+				"location": {
+					"district": "3",
+					"locationName": "061 - Walnut Ave",
+					"nearbyPlace": "Galt",
+					"longitude": "-121.306954",
+					"latitude": "38.282845",
+					"elevation": "42",
+					"direction": "North",
+					"county": "Sacramento",
+					"route": "SR-99",
+					"routeSuffix": "",
+					"postmilePrefix": "",
+					"postmile": "2.9",
+					"alignment": "",
+					"milepost": "277.35"
+				},
+				"inService": "True",
+				"message": {
+					"messageTimestamp": {
+						"messageDate": "2026-10-01",
+						"messageTime": "12:45:16"
+					},
+					"display": "1 Page (Normal)",
+					"displayTime": "3",
+					"phase1": {
+						"phase1Font": "Not Reported",
+						"phase1Line1": "ELK GROVE 10 MIN",
+						"phase1Line2": " .US 50 22 MIN",
+						"phase1Line3": ""
+					},
+					"phase2": {
+						"phase2Font": "Not Reported",
+						"phase2Line1": "",
+						"phase2Line2": "",
+						"phase2Line3": ""
+					}
+				}
+			}
+		},
+		{
+			"cms": {
+				"index": "1156",
+				"recordTimestamp": {
+					"recordDate": "2026-10-01",
+					"recordTime": "12:45:45"
+				},
+				"location": {
+					"district": "3",
+					"locationName": "037 - Eagle Lakes Rd",
+					"nearbyPlace": "20/80 Jct",
+					"longitude": "-120.571701",
+					"latitude": "39.327833",
+					"elevation": "5479",
+					"direction": "West",
+					"county": "Nevada",
+					"route": "I-80",
+					"routeSuffix": "",
+					"postmilePrefix": "R",
+					"postmile": "61.54",
+					"alignment": "",
+					"milepost": "163.04"
+				},
+				"inService": "True",
+				"message": {
+					"messageTimestamp": {
+						"messageDate": "2026-09-30",
+						"messageTime": "07:44:46"
+					},
+					"display": "1 Page (Normal)",
+					"displayTime": "3",
+					"phase1": {
+						"phase1Font": "Not Reported",
+						"phase1Line1": "SR 20 ",
+						"phase1Line2": "TRAFFIC CONTROL",
+						"phase1Line3": "EXPECT DELAYS"
+					},
+					"phase2": {
+						"phase2Font": "Not Reported",
+						"phase2Line1": "",
+						"phase2Line2": "",
+						"phase2Line3": ""
+					}
+				}
+			}
+		}
+	]
+}

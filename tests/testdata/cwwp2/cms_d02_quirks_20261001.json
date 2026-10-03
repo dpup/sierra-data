@@ -1,0 +1,96 @@
+{
+	"data": [
+		{
+			"cms": {
+				"index": "0",
+				"recordTimestamp": {
+					"recordDate": "2026-10-01",
+					"recordTime": "12:45:02"
+				},
+				"location": {
+					"district": "",
+					"locationName": "",
+					"nearbyPlace": "",
+					"longitude": "",
+					"latitude": "",
+					"elevation": "",
+					"direction": "",
+					"county": "",
+					"route": "",
+					"routeSuffix": "",
+					"postmilePrefix": "",
+					"postmile": "",
+					"alignment": "",
+					"milepost": ""
+				},
+				"inService": "",
+				"message": {
+					"messageTimestamp": {
+						"messageDate": "2026-02-24",
+						"messageTime": "12:30:29"
+					},
+					"display": "Blank",
+					"displayTime": "0.0",
+					"phase1": {
+						"phase1Font": "",
+						"phase1Line1": "",
+						"phase1Line2": "",
+						"phase1Line3": ""
+					},
+					"phase2": {
+						"phase2Font": "",
+						"phase2Line1": "",
+						"phase2Line2": "",
+						"phase2Line3": ""
+					}
+				}
+			}
+		},
+		{
+			"cms": {
+				"index": "46",
+				"recordTimestamp": {
+					"recordDate": "2026-10-01",
+					"recordTime": "12:45:02"
+				},
+				"location": {
+					"district": "",
+					"locationName": "1 SR273 0 Westwood Ave",
+					"nearbyPlace": "",
+					"longitude": "-122.381824",
+					"latitude": "40.520174",
+					"elevation": "",
+					"direction": "",
+					"county": "",
+					"route": "",
+					"routeSuffix": "",
+					"postmilePrefix": "",
+					"postmile": "",
+					"alignment": "",
+					"milepost": ""
+				},
+				"inService": "",
+				"message": {
+					"messageTimestamp": {
+						"messageDate": "2026-09-15",
+						"messageTime": "12:03:29"
+					},
+					"display": "Blank",
+					"displayTime": "0.0",
+					"phase1": {
+						"phase1Font": "",
+						"phase1Line1": "",
+						"phase1Line2": "",
+						"phase1Line3": ""
+					},
+					"phase2": {
+						"phase2Font": "",
+						"phase2Line1": "",
+						"phase2Line2": "",
+						"phase2Line3": ""
+					}
+				}
+			}
+		}
+	]
+}

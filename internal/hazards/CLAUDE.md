@@ -11,13 +11,15 @@ the rest of `/api/v1`. What remains, and what this package is now, is two things
    grid store's events into map layers, so the envelope stays identical to what
    the old feed emitted.
 2. **The live condition-layer builder** (`(*Service).BuildLayer`) — the only
-   runtime entry point now. `internal/gridapi` calls it for the three
-   **condition** layers only: `road_segment`, `chain_control`, `fire_weather`
-   (see `conditionLayers` in `internal/gridapi/maplayers.go`). The five
-   **event** layers (wildfire, evacuation, weather_alert, earthquake,
+   runtime entry point now. `internal/gridapi` calls it for the four
+   **condition** layers only: `road_segment`, `chain_control`, `fire_weather`,
+   `message_sign` (see `conditionLayers` in `internal/gridapi/maplayers.go`).
+   The five **event** layers (wildfire, evacuation, weather_alert, earthquake,
    road_incident) are projected from the grid store by
    `internal/gridapi.ProjectEvents` / the per-kind `project*` helpers — **not
-   here**. The live event builders and the store-backed path that used to live
+   here**. Two layers are neither: `mesh_link` and `camera` are built by
+   `internal/gridapi` itself (`mesh.go`, `cameras.go`) and only borrow this
+   package's envelope (`MeshLinkProps`, `CameraProps`). The live event builders and the store-backed path that used to live
    in this package were deleted with the endpoints.
 
 ## The model (don't break the envelope)
@@ -29,7 +31,8 @@ the rest of `/api/v1`. What remains, and what this package is now, is two things
   and trim to 5 decimals.
 - `properties.go` — the common `Properties` envelope shared by every layer, plus
   a namespaced per-kind block (`incident`, `road`, `chain_control`, `weather`,
-  `fire_weather`, `earthquake`, `wildfire`, `evacuation`). The envelope is
+  `fire_weather`, `earthquake`, `wildfire`, `evacuation`, `mesh`, `meshLink`,
+  `power`, `camera`). The envelope is
   identical across layers — that's the unification; a client renders any card
   from `headline/severity/source`. `gridapi`'s projection builds these same
   structs.
@@ -44,7 +47,7 @@ the rest of `/api/v1`. What remains, and what this package is now, is two things
 
 ## Fail-loud (still enforced for the condition layers)
 
-`buildLayer` applies the fail-loud rules for the three condition layers. On a
+`buildLayer` applies the fail-loud rules for the condition layers. On a
 source **error** it returns `source_status = UNAVAILABLE` with empty features —
 never a fabricated clear state. The load-bearing property is **"an error never
 becomes a 0"**: `UNAVAILABLE` means the source genuinely failed (consumer shows
@@ -110,6 +113,38 @@ because the seasonal gates hold it all winter (and `/summary`'s roads domain
 counts it as active). Feature ids are `cc:<checkpoint index>` for CWWP2 (e.g.
 `cc:10-ALP-4-0.65-W-14W`, Bear Valley WB), `cc:<message id>` for cc.kml, with a
 coordinate fallback; `source.attribution` names the host.
+
+## `message_sign` — context, never a hazard
+
+What each Caltrans changeable message sign inside the area is showing, from
+the CWWP2 `cms` feed (`messagesign.go`; the parser's rules are in the `cwwp2`
+section of `internal/clients/CLAUDE.md`). Wired by `UseMessageSigns` from
+`roads.caltransFeeds.cwwp2.messageSignDistricts`. Without districts the layer
+is `UNAVAILABLE`, since it has no other source.
+
+**Every feature is `INFO` and `/summary` does not read the layer.** Keep it
+that way until a storm capture shows how real messages look. On 2026-10-01, 82
+of District 10's 107 signs showed one statewide safety campaign, and the
+campaign rotates, so filtering by a fixed list would go stale and ranking by
+text would let boilerplate move the summary. A "CHAINS REQUIRED" sign stays
+`INFO` too: `chain_control` carries the requirement, and two layers ranking
+the same fact would double-count it. `TestSummary_IgnoresMessageSigns`
+(gridapi) pins the summary half.
+
+- `category` is `message` | `blank` | `unknown`. A sign the portal can't read
+  (out of service, `Not Reported`) is LISTED as `unknown` and does not degrade
+  the layer: the layer still knows every sign in the area and says which one
+  it can't read. That differs from `chain_control`, where an unreadable status
+  could hide a requirement.
+- A fetch failure in any configured district is a hard error (all or nothing,
+  like `chain_control`). A sign with no position degrades to `STALE`.
+- Ids are `cms:<district>:<index>`, falling back to the sign's position when
+  the index isn't unique in its district's file (D12 numbers every sign `1`).
+- Scoped by `area.Bounds` like the other condition layers, so `ebbetts-pass`
+  gets the six D10 signs in its fetch rectangle. Only two of them (Hwy 108 at
+  Soulsbyville, Hwy 4 west of Murphys) are inside the hand-drawn area polygon.
+  The Hwy 88 signs (Pine Grove, Dew Drop and its "Virtual CMS" twin) and
+  `43 - EB 120 W/O YOSEMITE` are outside it.
 
 ## Changing a condition layer
 

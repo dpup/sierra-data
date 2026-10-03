@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -168,9 +169,15 @@ type condFake struct {
 // fakeHazards returns one result for all layers; the summary needs three).
 type fakeCondBuilder struct {
 	byLayer map[string]condFake
+
+	mu        sync.Mutex // the summary builds its condition layers concurrently
+	requested []string
 }
 
 func (f *fakeCondBuilder) BuildLayer(_ context.Context, _ config.HazardArea, layer string) ([]hazards.Feature, string, time.Time, string, string, bool) {
+	f.mu.Lock()
+	f.requested = append(f.requested, layer)
+	f.mu.Unlock()
 	c, ok := f.byLayer[layer]
 	if !ok {
 		return nil, "", time.Time{}, "", "", false
@@ -723,4 +730,20 @@ func TestSummary_ScheduledRoadworkExcludedFromRollup(t *testing.T) {
 	for _, h := range roads.Headlines {
 		assert.NotContains(t, h.ID, "planned", "a planned window must not take a roads headline")
 	}
+}
+
+// message_sign is context, never a hazard: /summary must not read it, so sign
+// text (a safety campaign today, a chain message in a storm) can never move the
+// mode, a domain or topEvents. chain_control carries the requirement.
+func TestSummary_IgnoresMessageSigns(t *testing.T) {
+	s := newTestService(t)
+	hb := condOKBuilder("normal")
+	hb.byLayer[hazards.LayerMessageSign] = condFake{status: "OK", features: []hazards.Feature{
+		condFeature("cms:10:V50", hazards.LayerMessageSign, "INFO", "CHAINS REQUIRED", nil),
+	}}
+	rec := getSummaryWith(t, s, hb, "calaveras")
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.NotContains(t, hb.requested, hazards.LayerMessageSign)
+	assert.Contains(t, hb.requested, hazards.LayerChainControl, "the fake is wired")
+	assert.NotContains(t, rec.Body.String(), "CHAINS REQUIRED")
 }

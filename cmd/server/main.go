@@ -65,21 +65,16 @@ func main() {
 	// Initialize external API clients using top-level client configurations
 	googleClient := google.NewClient(appConfig.GoogleRoutes.APIKey)
 	caltransClient := caltrans.NewFeedParser()
-	// One CWWP2 client serves both of the portal's feeds we read: chain-control
-	// levels (merged into cc.kml by the caltrans parser) and lane-closure
-	// windows (their own grid poller, below). nil when neither is configured.
-	var cwClient *cwwp2.Client
-	if cw := appConfig.Roads.CaltransFeeds.CWWP2; len(cw.ChainControlDistricts) > 0 || len(cw.LaneClosureDistricts) > 0 {
-		cwClient = cwwp2.NewClient()
-		if cw.BaseURL != "" {
-			cwClient.BaseURL = cw.BaseURL
-		}
-		if cw.StaleAfter > 0 {
-			cwClient.StaleAfter = cw.StaleAfter
-		}
-		if len(cw.ChainControlDistricts) > 0 {
-			caltransClient.UseCWWP2ChainControls(cwClient, cw.ChainControlDistricts)
-		}
+	cwCfg := appConfig.Roads.CaltransFeeds.CWWP2
+	cwClient := cwwp2.NewClient()
+	if cwCfg.BaseURL != "" {
+		cwClient.BaseURL = cwCfg.BaseURL
+	}
+	if cwCfg.StaleAfter > 0 {
+		cwClient.StaleAfter = cwCfg.StaleAfter
+	}
+	if len(cwCfg.ChainControlDistricts) > 0 {
+		caltransClient.UseCWWP2ChainControls(cwClient, cwCfg.ChainControlDistricts)
 	}
 	weatherClient := weather.NewClient(appConfig.OpenWeather.APIKey)
 	nwsClient := nws.NewClient(appConfig.Weather.NWS.UserAgent)
@@ -164,9 +159,11 @@ func main() {
 	}
 
 	// Hazard condition-layer projector: gridapi calls BuildLayer for the live
-	// condition layers (road_segment, chain_control, fire_weather). The event
-	// layers are projected from the grid store by gridapi itself.
+	// condition layers (road_segment, chain_control, fire_weather,
+	// message_sign). The event layers are projected from the grid store by
+	// gridapi itself.
 	hazardsService := hazards.NewServiceWithAPIs(appConfig, roadsService, weatherService, caltransClient, cacheInstance)
+	hazardsService.UseMessageSigns(cwClient, cwCfg.MessageSignDistricts)
 
 	// NWS weather-alert enhancement is optional: nil when disabled or keyless
 	// (the scheduler then serves raw alerts — enhancement never gates ingest).
@@ -258,6 +255,21 @@ func main() {
 	// /api/v1/places:resolve?address=).
 	censusClient := census.NewClient()
 	gridapiService := gridapi.NewService(gridStore, weatherService, censusClient, appConfig, hazardsService)
+
+	// Caltrans CCTV camera directory (GET /api/v1/cameras). The lists are
+	// near-static, so they refresh in the background and a request never waits
+	// on Caltrans. Without districts the RPC answers UNAVAILABLE.
+	if cams := appConfig.Roads.CaltransFeeds.CWWP2.Cameras; len(cams.Districts) > 0 {
+		camClient := cwwp2.NewClient()
+		if base := appConfig.Roads.CaltransFeeds.CWWP2.BaseURL; base != "" {
+			camClient.BaseURL = base
+		}
+		cameraService := services.NewCameraService(camClient, cams.Districts, cams.RefreshInterval)
+		go cameraService.Run(ctx)
+		gridapiService.Cameras = cameraService
+		logging.Infow(ctx, "Camera directory enabled",
+			"districts", cams.Districts, "nearMeters", cams.Near())
+	}
 
 	// MCP endpoint (docs/design/mcp-design.md): read-only tools for LLM agents over
 	// Streamable HTTP. The tools call the /api/v1 surface in-process against the

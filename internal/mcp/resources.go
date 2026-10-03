@@ -59,10 +59,17 @@ reason over:
 - GET /api/v1/places/{place}/map/{layer}.geojson — one RFC 7946 FeatureCollection
   per layer, coordinates [lng,lat]. {layer} is a slug: wildfire, evacuation,
   weather_alert, earthquake, road_incident, power, mesh_node, road_segment,
-  chain_control, fire_weather. (mesh_node here is the map slug for the same layer
-  that grid_events calls "mesh".)
+  chain_control, message_sign, fire_weather. (mesh_node here is the map slug for
+  the same layer that grid_events calls "mesh". message_sign is what Caltrans's
+  roadside message signs are showing — mostly safety-campaign boilerplate,
+  always INFO, never a hazard.)
 - Mesh relay topology: GET /api/v1/places/{place}/map/mesh_link.geojson
   (place-scoped) or GET /api/v1/mesh/links (whole mesh, JSON edge list).
+- Caltrans traffic cameras: GET /api/v1/places/{place}/map/camera.geojson, or
+  the JSON list GET /api/v1/cameras?place=. Each carries a live snapshot
+  imageUrl and (usually) an HLS streamUrl — links to Caltrans for a person to
+  look at. Cameras are reference views, not hazards; an empty list means no
+  camera nearby, never an all-clear.
 Each feature carries the same camelCase properties envelope as the event rows
 (id, layer, severity, headline, source, …), so the map and the tool answers stay
 consistent.

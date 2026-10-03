@@ -1,0 +1,234 @@
+{
+	"data": [
+		{
+			"cms": {
+				"index": "726684",
+				"recordTimestamp": {
+					"recordDate": "2026-09-29",
+					"recordTime": "05:32:32"
+				},
+				"location": {
+					"district": "7",
+					"locationName": "S/O EL SEGUNDO BLVD",
+					"nearbyPlace": "Hawthorne",
+					"longitude": "-118.370131",
+					"latitude": "33.909795",
+					"elevation": "98",
+					"direction": "North",
+					"county": "Los Angeles",
+					"route": "I-405",
+					"routeSuffix": "",
+					"postmilePrefix": "",
+					"postmile": "19.77",
+					"alignment": "",
+					"milepost": "43.54"
+				},
+				"inService": "true",
+				"message": {
+					"messageTimestamp": {
+						"messageDate": "Not Reported",
+						"messageTime": "Not Reported"
+					},
+					"display": "Blank",
+					"displayTime": "Not Reported",
+					"phase1": {
+						"phase1Font": "Not Reported",
+						"phase1Line1": "",
+						"phase1Line2": "",
+						"phase1Line3": ""
+					},
+					"phase2": {
+						"phase2Font": "Not Reported",
+						"phase2Line1": "",
+						"phase2Line2": "",
+						"phase2Line3": ""
+					}
+				}
+			}
+		},
+		{
+			"cms": {
+				"index": "726730",
+				"recordTimestamp": {
+					"recordDate": "2026-09-29",
+					"recordTime": "05:32:32"
+				},
+				"location": {
+					"district": "7",
+					"locationName": "S/O WILLOW ST.",
+					"nearbyPlace": "Long Beach",
+					"longitude": "-118.206701",
+					"latitude": "33.798039",
+					"elevation": "19",
+					"direction": "North",
+					"county": "Los Angeles",
+					"route": "I-710",
+					"routeSuffix": "",
+					"postmilePrefix": "",
+					"postmile": "7.45",
+					"alignment": "",
+					"milepost": "2.49"
+				},
+				"inService": "true",
+				"message": {
+					"messageTimestamp": {
+						"messageDate": "Not Reported",
+						"messageTime": "Not Reported"
+					},
+					"display": "2 Pages (Extended)",
+					"displayTime": "Not Reported",
+					"phase1": {
+						"phase1Font": "Not Reported",
+						"phase1Line1": "SAVE LIVES",
+						"phase1Line2": "SLOW DOWN",
+						"phase1Line3": "IN WORK ZONE"
+					},
+					"phase2": {
+						"phase2Font": "Not Reported",
+						"phase2Line1": "EAST 91 EXIT",
+						"phase2Line2": "CLOSED",
+						"phase2Line3": ""
+					}
+				}
+			}
+		},
+		{
+			"cms": {
+				"index": "759126",
+				"recordTimestamp": {
+					"recordDate": "2026-09-29",
+					"recordTime": "05:32:32"
+				},
+				"location": {
+					"district": "7",
+					"locationName": "W/O HOLLYWOOD WAY",
+					"nearbyPlace": "Burbank",
+					"longitude": "-118.349584",
+					"latitude": "34.153774",
+					"elevation": "574",
+					"direction": "West",
+					"county": "Los Angeles",
+					"route": "SR-134",
+					"routeSuffix": "",
+					"postmilePrefix": "",
+					"postmile": "1.55",
+					"alignment": "",
+					"milepost": "1.55"
+				},
+				"inService": "true",
+				"message": {
+					"messageTimestamp": {
+						"messageDate": "Not Reported",
+						"messageTime": "Not Reported"
+					},
+					"display": "1 Page (Normal)",
+					"displayTime": "Not Reported",
+					"phase1": {
+						"phase1Font": "Not Reported",
+						"phase1Line1": "S405 AT SEPULVDA",
+						"phase1Line2": "3 LANES ONLY",
+						"phase1Line3": "10-03 & 10-04"
+					},
+					"phase2": {
+						"phase2Font": "Not Reported",
+						"phase2Line1": "",
+						"phase2Line2": "",
+						"phase2Line3": ""
+					}
+				}
+			}
+		},
+		{
+			"cms": {
+				"index": "759134",
+				"recordTimestamp": {
+					"recordDate": "2026-09-29",
+					"recordTime": "05:32:32"
+				},
+				"location": {
+					"district": "7",
+					"locationName": "SAN FERNANDO ROAD",
+					"nearbyPlace": "Newhall",
+					"longitude": "-118.504475",
+					"latitude": "34.363996",
+					"elevation": "1437",
+					"direction": "South",
+					"county": "Los Angeles",
+					"route": "SR-14",
+					"routeSuffix": "",
+					"postmilePrefix": "R",
+					"postmile": "26.95",
+					"alignment": "",
+					"milepost": "2.16"
+				},
+				"inService": "true",
+				"message": {
+					"messageTimestamp": {
+						"messageDate": "Not Reported",
+						"messageTime": "Not Reported"
+					},
+					"display": "1 Page (Normal)",
+					"displayTime": "Not Reported",
+					"phase1": {
+						"phase1Font": "Not Reported",
+						"phase1Line1": "S405 AT SEPULVDA",
+						"phase1Line2": "3 LANES ONLY",
+						"phase1Line3": "10-03 & 10-04"
+					},
+					"phase2": {
+						"phase2Font": "Not Reported",
+						"phase2Line1": "",
+						"phase2Line2": "",
+						"phase2Line3": ""
+					}
+				}
+			}
+		},
+		{
+			"cms": {
+				"index": "777475",
+				"recordTimestamp": {
+					"recordDate": "2026-09-29",
+					"recordTime": "05:32:32"
+				},
+				"location": {
+					"district": "7",
+					"locationName": "WESTHILLS COURT",
+					"nearbyPlace": "Simi Valley",
+					"longitude": "-118.800019",
+					"latitude": "34.287912",
+					"elevation": "839",
+					"direction": "West",
+					"county": "Ventura",
+					"route": "SR-118",
+					"routeSuffix": "",
+					"postmilePrefix": "R",
+					"postmile": "22.509",
+					"alignment": "",
+					"milepost": "21.798"
+				},
+				"inService": "false",
+				"message": {
+					"messageTimestamp": {
+						"messageDate": "Not Reported",
+						"messageTime": "Not Reported"
+					},
+					"display": "Not Reported",
+					"displayTime": "Not Reported",
+					"phase1": {
+						"phase1Font": "Not Reported",
+						"phase1Line1": "Not Reported",
+						"phase1Line2": "Not Reported",
+						"phase1Line3": "Not Reported"
+					},
+					"phase2": {
+						"phase2Font": "Not Reported",
+						"phase2Line1": "Not Reported",
+						"phase2Line2": "Not Reported",
+						"phase2Line3": "Not Reported"
+					}
+				}
+			}
+		}
+	]
+}

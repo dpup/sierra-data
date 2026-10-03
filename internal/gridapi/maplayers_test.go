@@ -22,6 +22,7 @@ import (
 
 	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
 	api "github.com/dpup/sierra-data/api/v1"
+	"github.com/dpup/sierra-data/internal/clients/cwwp2"
 	"github.com/dpup/sierra-data/internal/clients/nws"
 	"github.com/dpup/sierra-data/internal/config"
 	"github.com/dpup/sierra-data/internal/hazards"
@@ -419,6 +420,37 @@ func TestMapLayer_ConditionThroughRouter(t *testing.T) {
 	require.Len(t, fc.Features, 2, "both monitored roads have an endpoint in calaveras")
 	assert.Equal(t, "road:hwy-4", fc.Features[0].Properties.ID)
 	assert.Equal(t, "road:hwy-108", fc.Features[1].Properties.ID)
+}
+
+// fakeSigns serves message signs to a real hazards.Service.
+type fakeSigns []cwwp2.MessageSign
+
+func (f fakeSigns) MessageSigns(context.Context, int) ([]cwwp2.MessageSign, error) { return f, nil }
+
+// TestMapLayer_MessageSignThroughRouter: message_sign is a condition layer the
+// router hands to the real hazards builder; its envelope credits the caltrans
+// registry row like chain_control does.
+func TestMapLayer_MessageSignThroughRouter(t *testing.T) {
+	s := newTestService(t)
+	seedSourceWithAttribution(t, s.Store, "caltrans", "Caltrans", "quickmap.dot.ca.gov")
+	s.Hazards = hazards.NewServiceWithAPIs(s.Cfg, nil, nil, nil, nil)
+	s.Hazards.UseMessageSigns(fakeSigns{
+		{ID: "V50", Location: cwwp2.Location{Name: "50 - EB 4 W/O MURPHYS", Latitude: 38.143015, Longitude: -120.451378, HasPosition: true},
+			InService: true, Display: cwwp2.DisplayOnePage, Phase1: [3]string{"BE THE DRIVER", "WHO SAVES LIVES", "DON'T SPEED"}},
+		{ID: "V35", Location: cwwp2.Location{Name: "35 - SB I-5 N/O 33 (Santa Nella)", Latitude: 37.115404, Longitude: -121.023155, HasPosition: true},
+			InService: true, Display: cwwp2.DisplayBlank},
+	}, []int{10})
+
+	fc := getFC(t, s, "/v1/places/calaveras/map/message_sign.geojson")
+	assert.Equal(t, "message_sign", fc.Metadata.Layer)
+	assert.Equal(t, "OK", fc.Metadata.SourceStatus)
+	assert.Equal(t, "quickmap.dot.ca.gov", fc.Metadata.Attribution)
+	require.Len(t, fc.Features, 1, "Santa Nella is outside calaveras")
+	p := fc.Features[0].Properties
+	assert.Equal(t, "cms:10:V50", p.ID)
+	assert.Equal(t, "MESSAGE_SIGN", p.Layer)
+	assert.Equal(t, "INFO", p.Severity)
+	assert.Equal(t, "BE THE DRIVER WHO SAVES LIVES DON'T SPEED", p.Headline)
 }
 
 // TestMapLayer_ConditionUnwired: a Service constructed without a hazards

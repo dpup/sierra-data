@@ -1,0 +1,244 @@
+{
+	"data": [
+		{
+			"cctv": {
+				"index": "8",
+				"recordTimestamp": {
+					"recordDate": "2024-12-17",
+					"recordTime": "15:04:28",
+					"recordEpoch": "1734476668"
+				},
+				"location": {
+					"district": "9",
+					"locationName": "US-395 : Conway Summit",
+					"nearbyPlace": "Lee Vining",
+					"longitude": "-119.181251",
+					"latitude": "38.08782",
+					"elevation": "8149",
+					"direction": "North",
+					"county": "Mono",
+					"route": "US-395",
+					"routeSuffix": "",
+					"postmilePrefix": "",
+					"postmile": "63.54",
+					"alignment": "",
+					"milepost": "297.14"
+				},
+				"inService": "true",
+				"imageData": {
+					"imageDescription": "",
+					"streamingVideoURL": "",
+					"static": {
+						"currentImageUpdateFrequency": "5",
+						"currentImageURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395conwaysummit/us395conwaysummit.jpg",
+						"referenceImageUpdateFrequency": "60",
+						"referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395conwaysummit/previous/us395conwaysummit-1.jpg",
+						"referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395conwaysummit/previous/us395conwaysummit-2.jpg",
+						"referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395conwaysummit/previous/us395conwaysummit-3.jpg",
+						"referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395conwaysummit/previous/us395conwaysummit-4.jpg",
+						"referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395conwaysummit/previous/us395conwaysummit-5.jpg",
+						"referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395conwaysummit/previous/us395conwaysummit-6.jpg",
+						"referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395conwaysummit/previous/us395conwaysummit-7.jpg",
+						"referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395conwaysummit/previous/us395conwaysummit-8.jpg",
+						"referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395conwaysummit/previous/us395conwaysummit-9.jpg",
+						"referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395conwaysummit/previous/us395conwaysummit-10.jpg",
+						"referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395conwaysummit/previous/us395conwaysummit-11.jpg",
+						"referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395conwaysummit/previous/us395conwaysummit-12.jpg"
+					}
+				}
+			}
+		},
+		{
+			"cctv": {
+				"index": "22",
+				"recordTimestamp": {
+					"recordDate": "2025-12-17",
+					"recordTime": "15:04:30",
+					"recordEpoch": "1766012670"
+				},
+				"location": {
+					"district": "9",
+					"locationName": "US-6 : State Line",
+					"nearbyPlace": "Benton",
+					"longitude": "-118.47842",
+					"latitude": "37.84225",
+					"elevation": "5472",
+					"direction": "West",
+					"county": "Mono",
+					"route": "US-6",
+					"routeSuffix": "",
+					"postmilePrefix": "",
+					"postmile": "27.378",
+					"alignment": "L",
+					"milepost": "35.593"
+				},
+				"inService": "true",
+				"imageData": {
+					"imageDescription": "Looking South",
+					"streamingVideoURL": "",
+					"static": {
+						"currentImageUpdateFrequency": "5",
+						"currentImageURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us6stateline/us6stateline.jpg",
+						"referenceImageUpdateFrequency": "60",
+						"referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us6stateline/previous/us6stateline-1.jpg",
+						"referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us6stateline/previous/us6stateline-2.jpg",
+						"referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us6stateline/previous/us6stateline-3.jpg",
+						"referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us6stateline/previous/us6stateline-4.jpg",
+						"referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us6stateline/previous/us6stateline-5.jpg",
+						"referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us6stateline/previous/us6stateline-6.jpg",
+						"referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us6stateline/previous/us6stateline-7.jpg",
+						"referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us6stateline/previous/us6stateline-8.jpg",
+						"referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us6stateline/previous/us6stateline-9.jpg",
+						"referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us6stateline/previous/us6stateline-10.jpg",
+						"referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us6stateline/previous/us6stateline-11.jpg",
+						"referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us6stateline/previous/us6stateline-12.jpg"
+					}
+				}
+			}
+		},
+		{
+			"cctv": {
+				"index": "47",
+				"recordTimestamp": {
+					"recordDate": "2024-08-07",
+					"recordTime": "14:43:06",
+					"recordEpoch": "1723066986"
+				},
+				"location": {
+					"district": "9",
+					"locationName": "US-395 : SR-108 Sonora Junction",
+					"nearbyPlace": "Coleville",
+					"longitude": "-119.45038",
+					"latitude": "38.35058",
+					"elevation": "6902",
+					"direction": "North",
+					"county": "Mono",
+					"route": "US-395",
+					"routeSuffix": "",
+					"postmilePrefix": "",
+					"postmile": "93.872",
+					"alignment": "L",
+					"milepost": "327.386"
+				},
+				"inService": "true",
+				"imageData": {
+					"imageDescription": "",
+					"streamingVideoURL": "",
+					"static": {
+						"currentImageUpdateFrequency": "5",
+						"currentImageURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395sr108sonorajunction/us395sr108sonorajunction.jpg",
+						"referenceImageUpdateFrequency": "15",
+						"referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395sr108sonorajunction/previous/us395sr108sonorajunction-1.jpg",
+						"referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395sr108sonorajunction/previous/us395sr108sonorajunction-2.jpg",
+						"referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395sr108sonorajunction/previous/us395sr108sonorajunction-3.jpg",
+						"referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395sr108sonorajunction/previous/us395sr108sonorajunction-4.jpg",
+						"referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395sr108sonorajunction/previous/us395sr108sonorajunction-5.jpg",
+						"referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395sr108sonorajunction/previous/us395sr108sonorajunction-6.jpg",
+						"referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395sr108sonorajunction/previous/us395sr108sonorajunction-7.jpg",
+						"referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395sr108sonorajunction/previous/us395sr108sonorajunction-8.jpg",
+						"referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395sr108sonorajunction/previous/us395sr108sonorajunction-9.jpg",
+						"referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395sr108sonorajunction/previous/us395sr108sonorajunction-10.jpg",
+						"referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395sr108sonorajunction/previous/us395sr108sonorajunction-11.jpg",
+						"referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395sr108sonorajunction/previous/us395sr108sonorajunction-12.jpg"
+					}
+				}
+			}
+		},
+		{
+			"cctv": {
+				"index": "48",
+				"recordTimestamp": {
+					"recordDate": "2025-05-05",
+					"recordTime": "13:32:29",
+					"recordEpoch": "1746477149"
+				},
+				"location": {
+					"district": "9",
+					"locationName": "US-6 : Matthieu Hill Summit",
+					"nearbyPlace": "Benton",
+					"longitude": "-118.4554166",
+					"latitude": "37.7550303",
+					"elevation": "5190",
+					"direction": "South",
+					"county": "Mono",
+					"route": "US-6",
+					"routeSuffix": "",
+					"postmilePrefix": "",
+					"postmile": "21.14",
+					"alignment": "",
+					"milepost": "21.14"
+				},
+				"inService": "false",
+				"imageData": {
+					"imageDescription": "US-6 road conditions at Matthieu hill",
+					"streamingVideoURL": "",
+					"static": {
+						"currentImageUpdateFrequency": "5",
+						"currentImageURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us6matthieuhillsummit/us6matthieuhillsummit.jpg",
+						"referenceImageUpdateFrequency": "60",
+						"referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us6matthieuhillsummit/previous/us6matthieuhillsummit-1.jpg",
+						"referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us6matthieuhillsummit/previous/us6matthieuhillsummit-2.jpg",
+						"referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us6matthieuhillsummit/previous/us6matthieuhillsummit-3.jpg",
+						"referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us6matthieuhillsummit/previous/us6matthieuhillsummit-4.jpg",
+						"referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us6matthieuhillsummit/previous/us6matthieuhillsummit-5.jpg",
+						"referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us6matthieuhillsummit/previous/us6matthieuhillsummit-6.jpg",
+						"referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us6matthieuhillsummit/previous/us6matthieuhillsummit-7.jpg",
+						"referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us6matthieuhillsummit/previous/us6matthieuhillsummit-8.jpg",
+						"referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us6matthieuhillsummit/previous/us6matthieuhillsummit-9.jpg",
+						"referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us6matthieuhillsummit/previous/us6matthieuhillsummit-10.jpg",
+						"referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us6matthieuhillsummit/previous/us6matthieuhillsummit-11.jpg",
+						"referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us6matthieuhillsummit/previous/us6matthieuhillsummit-12.jpg"
+					}
+				}
+			}
+		},
+		{
+			"cctv": {
+				"index": "50",
+				"recordTimestamp": {
+					"recordDate": "2024-08-06",
+					"recordTime": "16:08:59",
+					"recordEpoch": "1722985739"
+				},
+				"location": {
+					"district": "9",
+					"locationName": "US-395 : Bridgeport",
+					"nearbyPlace": "Bridgeport",
+					"longitude": "-119.224608",
+					"latitude": "38.234129",
+					"elevation": "6486",
+					"direction": "",
+					"county": "Mono",
+					"route": "US-395",
+					"routeSuffix": "",
+					"postmilePrefix": "",
+					"postmile": "74.778",
+					"alignment": "L",
+					"milepost": "308.313"
+				},
+				"inService": "true",
+				"imageData": {
+					"imageDescription": "",
+					"streamingVideoURL": "",
+					"static": {
+						"currentImageUpdateFrequency": "5",
+						"currentImageURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395bridgeport/us395bridgeport.jpg",
+						"referenceImageUpdateFrequency": "60",
+						"referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395bridgeport/previous/us395bridgeport-1.jpg",
+						"referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395bridgeport/previous/us395bridgeport-2.jpg",
+						"referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395bridgeport/previous/us395bridgeport-3.jpg",
+						"referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395bridgeport/previous/us395bridgeport-4.jpg",
+						"referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395bridgeport/previous/us395bridgeport-5.jpg",
+						"referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395bridgeport/previous/us395bridgeport-6.jpg",
+						"referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395bridgeport/previous/us395bridgeport-7.jpg",
+						"referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395bridgeport/previous/us395bridgeport-8.jpg",
+						"referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395bridgeport/previous/us395bridgeport-9.jpg",
+						"referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395bridgeport/previous/us395bridgeport-10.jpg",
+						"referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395bridgeport/previous/us395bridgeport-11.jpg",
+						"referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395bridgeport/previous/us395bridgeport-12.jpg"
+					}
+				}
+			}
+		}
+	]
+}

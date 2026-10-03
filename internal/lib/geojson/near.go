@@ -70,6 +70,40 @@ func MetersBetween(aLat, aLng, bLat, bLng float64) float64 {
 	return math.Hypot(dx, dy)
 }
 
+// PointDistanceMeters is how far (lat, lng) is from g: 0 when the point lies
+// inside a polygon, otherwise the closest approach to g's edges (or, for a
+// Point/MultiPoint, its vertices). It is the measuring counterpart of
+// WithinDistance, using the same local equirectangular projection. A nil or
+// empty geometry is +Inf (unlocatable is not "here").
+//
+// The camera directory sorts and filters by it: a traffic camera is a fixed
+// point that is useful well outside the place it watches the road into.
+func PointDistanceMeters(lat, lng float64, g *Geom) float64 {
+	if g == nil {
+		return math.Inf(1)
+	}
+	if PointInGeometry(lat, lng, g) {
+		return 0
+	}
+	minLat, _, maxLat, _ := g.Bbox()
+	lat0 := (lat + (minLat+maxLat)/2) / 2
+	kx := metersPerDegreeLat * math.Cos(lat0*math.Pi/180)
+	p := xy{x: lng * kx, y: lat * metersPerDegreeLat}
+
+	best := math.Inf(1)
+	edges := projectEdges(g, kx)
+	for _, e := range edges {
+		best = math.Min(best, pointSegDistSq(p, e))
+	}
+	if len(edges) == 0 {
+		for _, q := range project(g, kx) {
+			dx, dy := p.x-q.x, p.y-q.y
+			best = math.Min(best, dx*dx+dy*dy)
+		}
+	}
+	return math.Sqrt(best)
+}
+
 // minCos is the smallest cos(latitude) among the given latitudes — i.e. the
 // shortest longitude degree, which gives the widest (safest) degree margin.
 func minCos(lats ...float64) float64 {

@@ -493,6 +493,15 @@ service GridService {
   rpc ListScanners(ListScannersRequest) returns (ScannerList) {
     option (google.api.http) = {get: "/api/v1/scanners"};
   }
+  // ListCameras returns Caltrans traffic cameras (CCTV) in or near the
+  // coverage areas: a snapshot image and, where Caltrans publishes one, an HLS
+  // stream per camera. Links only — the images and streams are served by
+  // Caltrans, never proxied. ?place narrows the set to cameras within the same
+  // radius of that place, nearest first. Cameras are reference views, not
+  // events: nothing here is a hazard and an empty list means no camera nearby.
+  rpc ListCameras(ListCamerasRequest) returns (CameraList) {
+    option (google.api.http) = {get: "/api/v1/cameras"};
+  }
   // GetConditions returns current, non-event state: per-location weather and
   // the region's fire-weather classification, optionally scoped to a place.
   // (Weather alerts are events; road conditions are the road_segment /
@@ -701,6 +710,39 @@ message Scanner {
 }
 message ScannerList {
   repeated Scanner scanners = 1;
+}
+message ListCamerasRequest {
+  string place = 1;
+}
+// Camera is one Caltrans CCTV camera. Every listed camera is in service and has
+// an image; an out-of-service camera is dropped, not flagged.
+message Camera {
+  string id = 1;                    // "d10-172": Caltrans district + the portal's camera index
+  string name = 2;                  // "EB 108 W/O Soulsbyville Rd"
+  string nearby_place = 3;          // "Soulsbyville"
+  string county = 4;                // "Tuolumne"
+  string route = 5;                 // "SR-108", "US-395"
+  string direction = 6;             // "East" | "West" | "North" | "South"; may be empty
+  LatLng location = 7;
+  int32 elevation_feet = 8;
+  string image_url = 9;             // the current snapshot JPEG on cwwp2.dot.ca.gov
+  int32 image_refresh_minutes = 10; // how often Caltrans replaces the snapshot; 0 = not reported
+  string stream_url = 11;           // HLS playlist (.m3u8); empty for an image-only camera
+  string description = 12;          // Caltrans's note on the view, e.g. "Looking South"; usually empty
+  // Metres from the requested place — or, without ?place, from the nearest
+  // coverage area. 0 means inside it.
+  int32 distance_meters = 13;
+}
+message CameraList {
+  repeated Camera cameras = 1;      // nearest first, then by id
+  // OK | STALE | UNAVAILABLE — the camera LIST's health, the same honesty
+  // field the map layers carry. STALE: served from an older fetch (or a
+  // configured district is missing). UNAVAILABLE: no list has been fetched
+  // yet, or no camera districts are configured.
+  string source_status = 2;
+  // When the served list was fetched. Unset when source_status is OK.
+  google.protobuf.Timestamp last_source_update = 3;
+  string attribution = 4;           // "Caltrans"
 }
 message GetConditionsRequest {
   string place = 1;

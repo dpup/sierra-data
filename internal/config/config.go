@@ -495,10 +495,48 @@ type CWWP2Config struct {
 	// closure in an unlisted district is simply never seen. Empty keeps the
 	// lcs2way.kml path.
 	LaneClosureDistricts []int `koanf:"laneClosureDistricts"`
+	// MessageSignDistricts are the Caltrans districts whose changeable message
+	// signs back the message_sign map layer. Empty leaves that layer
+	// UNAVAILABLE — it has no other source.
+	MessageSignDistricts []int `koanf:"messageSignDistricts"`
 	// StaleAfter fails a feed whose newest record is older than this (the
 	// portal can keep serving a file it has stopped regenerating). 0 uses
 	// cwwp2.DefaultStaleAfter.
 	StaleAfter time.Duration `koanf:"staleAfter"`
+	// Cameras configures the CCTV camera directory (GET /api/v1/cameras).
+	Cameras CWWP2CamerasConfig `koanf:"cameras"`
+}
+
+// DefaultCameraNearMeters is how close a camera must be to a coverage area to
+// be listed when roads.caltransFeeds.cwwp2.cameras.nearMeters is unset. At 25 km
+// the Ebbetts Pass area lists exactly its four approach-road cameras (Hwy 108
+// Soulsbyville inside it; Hwy 88 Pine Grove 13.2 km, Hwy 120 Ferretti Rd
+// 13.9 km, Hwy 120 Buck Meadows 23.9 km). The next camera out is US-50 at
+// Wrights Lake (26.5 km, District 3), on a different corridor.
+const DefaultCameraNearMeters = 25000
+
+// CWWP2CamerasConfig configures the Caltrans CCTV camera directory.
+type CWWP2CamerasConfig struct {
+	// Districts are the Caltrans districts whose camera lists are fetched.
+	// Empty disables the directory: ListCameras then answers UNAVAILABLE.
+	Districts []int `koanf:"districts"`
+	// NearMeters is the camera geography, and the ?place radius. A camera is
+	// listed when it is within this distance of a configured hazards area's
+	// polygon, and ?place keeps the listed cameras within this distance of
+	// that place. A camera watches the road INTO a place, so it is useful well
+	// outside it. Unset/<=0 => DefaultCameraNearMeters.
+	NearMeters float64 `koanf:"nearMeters"`
+	// RefreshInterval is how often each district's camera list is refetched.
+	// 0 uses services.DefaultCameraRefresh (6h): the list is near-static.
+	RefreshInterval time.Duration `koanf:"refreshInterval"`
+}
+
+// Near is NearMeters with the default applied.
+func (c CWWP2CamerasConfig) Near() float64 {
+	if c.NearMeters > 0 {
+		return c.NearMeters
+	}
+	return DefaultCameraNearMeters
 }
 
 // CaltransFeedConfig holds individual feed configuration
