@@ -63,9 +63,11 @@ const (
 	// PhaseScheduled: not set up yet — the window is in the future, or it has
 	// opened but no 10-97 has been called (crews are often late or no-show).
 	PhaseScheduled Phase = iota
-	// PhaseActive: 10-97 called and not yet picked up.
+	// PhaseActive: 10-97 called and not yet picked up, and not overrun past
+	// its planned end by more than the overrun grace.
 	PhaseActive
-	// PhaseCompleted: 10-98 called, or the window ended.
+	// PhaseCompleted: 10-98 called, or the window ended (planned end with no
+	// set-up call, or planned end + overrun grace with one).
 	PhaseCompleted
 	// PhaseCancelled: 10-22 called.
 	PhaseCancelled
@@ -75,19 +77,43 @@ func (p Phase) String() string {
 	return [...]string{"SCHEDULED", "ACTIVE", "COMPLETED", "CANCELLED"}[p]
 }
 
+// DefaultOverrunGrace is how long past its planned end a set-up closure with
+// no 10-98 stays ACTIVE when roads.caltransFeeds.cwwp2.laneClosureOverrunGrace
+// is unset. Windows are mostly day shifts of 8-10h, so a crew working late or
+// through the night fits inside 12h, while a closure still "set up" by the next
+// morning's shift is far more likely a pickup nobody radioed than a lane still
+// coned off. Days-long jobs are filed as indefinite or as one row per day, and
+// those rows are unaffected.
+const DefaultOverrunGrace = 12 * time.Hour
+
 // PhaseAt derives the window's lifecycle phase. The radio codes win over the
-// clock: a closure set up and not picked up is ACTIVE even past its planned
-// end (overruns happen), and a cancelled one is CANCELLED whatever the window
-// says. Only without codes does the clock decide.
-func (l LaneClosure) PhaseAt(now time.Time) Phase {
+// clock: a cancelled window is CANCELLED whatever the window says, a picked-up
+// one COMPLETED, and a set-up one ACTIVE even past its planned end, because
+// crews overrun. Without codes the clock decides.
+//
+// The one exception bounds the overrun. Crews sometimes never radio the 10-98,
+// and the row can stay in the file for days, so a set-up window with a planned
+// end (not indefinite) is presumed COMPLETED once now reaches that end plus
+// overrunGrace (<= 0 uses DefaultOverrunGrace). That is an inference from the
+// clock, the same kind the no-show case (planned end, never set up) already
+// makes; an ACTIVE closure days after its plan says something we have no
+// evidence for. Indefinite windows have no planned end and stay ACTIVE until
+// a code ends them.
+func (l LaneClosure) PhaseAt(now time.Time, overrunGrace time.Duration) Phase {
+	if overrunGrace <= 0 {
+		overrunGrace = DefaultOverrunGrace
+	}
+	planned := !l.EndIndefinite && !l.EndTime.IsZero()
 	switch {
 	case l.Cancelled:
 		return PhaseCancelled
 	case l.PickedUp:
 		return PhaseCompleted
+	case l.SetUp && planned && !now.Before(l.EndTime.Add(overrunGrace)):
+		return PhaseCompleted
 	case l.SetUp:
 		return PhaseActive
-	case !l.EndIndefinite && !l.EndTime.IsZero() && !now.Before(l.EndTime):
+	case planned && !now.Before(l.EndTime):
 		return PhaseCompleted
 	default:
 		return PhaseScheduled

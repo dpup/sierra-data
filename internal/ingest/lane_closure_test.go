@@ -517,3 +517,58 @@ func TestTickLaneClosureDistrictDownNeverResolves(t *testing.T) {
 	assert.Equal(t, gridv1.EventStatus_ACTIVE, eventStatus(t, st, id))
 	assert.NotEmpty(t, sourceByID(t, st, "caltrans").GetLastError())
 }
+
+// An overrun the crew never radios picked up stays ACTIVE for the configured
+// grace past its planned end, then drops out of the poll and the sweep
+// resolves it. P88AA log 4 was set up on 2026-09-29 and planned to end at
+// 16:01 PDT (23:01 UTC); it has no 10-98.
+func TestTickLaneClosureOverrunGraceResolves(t *testing.T) {
+	ctx := testCtx()
+	st := newSchedStore(t)
+	seedSchedSources(t, st, "caltrans")
+
+	const overrun = "caltrans:d10-P88AA-0004-2026-09-29-080100"
+	const longTerm = "caltrans:d10-C26EA-0001-2026-08-24-070100" // planned to 2026-11-09
+	plannedEnd := time.Date(2026, 9, 29, 23, 1, 0, 0, time.UTC)
+
+	cfg := laneClosureConfig(10)
+	cfg.Roads.CaltransFeeds.CWWP2.LaneClosureOverrunGrace = 6 * time.Hour
+	cfg.Roads.IncidentAreas = []config.IncidentArea{motherLode} // P88AA is outside the test box
+	client := &fakeLaneClosures{rows: map[int][]cwwp2.LaneClosure{10: d10Fixture(t)}}
+	n := newTestLaneClosureNormalizer(cfg, client, lcsFixtureNow) // 4h59m past its end
+	sched := NewScheduler(st, SchedulerConfig{
+		Tuning: map[string]config.SourceTuning{"caltrans": {Disappearance: store.DisappearanceResolve}},
+	})
+	ps := &pollerState{}
+	spec := PollerSpec{Normalizer: n, Interval: time.Minute}
+
+	sched.tick(ctx, spec, ps)
+	require.Equal(t, gridv1.EventStatus_ACTIVE, eventStatus(t, st, overrun), "a normal overrun: codes win")
+
+	n.now = func() time.Time { return plannedEnd.Add(6 * time.Hour) }
+	sched.tick(ctx, spec, ps)
+	assert.Equal(t, gridv1.EventStatus_RESOLVED, eventStatus(t, st, overrun), "past the grace: presumed picked up")
+	assert.Equal(t, gridv1.EventStatus_ACTIVE, eventStatus(t, st, longTerm), "a window still inside its plan is untouched")
+	assert.Equal(t, gridv1.SourceStatus_OK, sourceByID(t, st, "caltrans").GetStatus())
+}
+
+// Unset config means the conservative default, not "no limit".
+func TestLaneClosurePoll_OverrunGraceDefault(t *testing.T) {
+	plannedEnd := time.Date(2026, 9, 29, 23, 1, 0, 0, time.UTC)
+	client := &fakeLaneClosures{rows: map[int][]cwwp2.LaneClosure{10: d10Fixture(t)}}
+	const overrun = "caltrans:d10-P88AA-0004-2026-09-29-080100"
+
+	cfg := laneClosureConfig(10)
+	cfg.Roads.IncidentAreas = []config.IncidentArea{motherLode}
+	n := newTestLaneClosureNormalizer(cfg, client, plannedEnd.Add(cwwp2.DefaultOverrunGrace-time.Minute))
+	res, err := n.Poll(testCtx(), &fakePrior{})
+	require.NoError(t, err)
+	require.NotNil(t, findEvent(res.Events, overrun))
+	assert.Equal(t, gridv1.EventStatus_ACTIVE, findEvent(res.Events, overrun).GetStatus())
+
+	n.now = func() time.Time { return plannedEnd.Add(cwwp2.DefaultOverrunGrace) }
+	res, err = n.Poll(testCtx(), &fakePrior{})
+	require.NoError(t, err)
+	assert.Nil(t, findEvent(res.Events, overrun), "past the default grace: not emitted, so the sweep resolves it")
+	assert.Nil(t, res.PerSource)
+}

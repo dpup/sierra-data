@@ -14,6 +14,31 @@ throughout; errors are gRPC-standard `{code, codeName, message, details}`). The
 by a snake_case `/v1` surface on 2026-07-05, which was in turn folded back onto the
 proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 
+## 2026-10-03
+
+### Caltrans lane closures: an unconfirmed overrun now resolves after 12h
+
+**Behavior change, no shape change.** A CWWP2 lane closure the crew radioed set
+up (10-97) but never picked up (10-98) used to stay `ACTIVE` for as long as its
+row stayed in the file, sometimes days past its planned end. It now stays
+`ACTIVE` through an overrun for up to 12 hours past `closure.plannedEnd`
+(configurable), then is presumed picked up and becomes `RESOLVED`, like any
+other ended window. Closures with `closure.endIndefinite: true` are unaffected.
+A real pickup call still resolves a closure as soon as it is seen.
+
+### Road segment status now uses the same lane closures as the closure events
+
+**Behavior change, no shape change.** A road's `status` / `statusExplanation`
+(the `road_segment` map layer's `status` and `description`, and the place
+`summary`'s `roads` domain built from them) now derive their lane closures from
+the CWWP2 portal — the same source as the `road_incident` layer's Caltrans
+closures — instead of `lcs2way.kml`. Only closures that are set up right now
+(ACTIVE events) count; SCHEDULED windows never mark a segment RESTRICTED or
+CLOSED. Previously the two could disagree. If CWWP2 is unreachable for longer
+than two roads refresh intervals (~30 min), segment data stops refreshing and
+ages (the last good value is served) rather than reporting OPEN on unknown
+closure state.
+
 ## 2026-10-02
 
 ### New map layer: `message_sign` — what Caltrans's message signs are showing
