@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/dpup/prefab/logging"
 
@@ -82,6 +83,63 @@ func TestBuildLayer_PartialIsStale(t *testing.T) {
 	r := s.buildLayer(testCtx(), config.HazardArea{ID: "x"}, LayerWildfire, partial)
 	if r.status != "STALE" || len(r.features) != 1 {
 		t.Fatalf("got %q/%d, want STALE/1", r.status, len(r.features))
+	}
+}
+
+// TestBuildLayer_PartialIsCachedAsStale: a partial (STALE-with-data) result is
+// cached for the layer's TTL, so a degraded upstream is fetched at most once per
+// TTL instead of on every request (message_sign re-downloaded 125KB+ per request
+// while one sign lacked a position). The cached entry must still read STALE —
+// never promoted to OK — and a later clean fetch must replace it.
+func TestBuildLayer_PartialIsCachedAsStale(t *testing.T) {
+	s := &Service{cache: cache.NewCache()}
+	area := config.HazardArea{ID: "x"}
+	calls := 0
+	partial := func(context.Context, config.HazardArea) ([]Feature, error) {
+		calls++
+		return []Feature{feat(SevInfo, "sign")}, partialData(errors.New("sign without a position"))
+	}
+
+	r1 := s.buildLayer(testCtx(), area, LayerMessageSign, partial)
+	if r1.status != "STALE" || len(r1.features) != 1 {
+		t.Fatalf("first build = %q/%d, want STALE/1", r1.status, len(r1.features))
+	}
+	r2 := s.buildLayer(testCtx(), area, LayerMessageSign, partial)
+	if calls != 1 {
+		t.Fatalf("builder called %d times inside the TTL, want 1", calls)
+	}
+	if r2.status != "STALE" || len(r2.features) != 1 {
+		t.Fatalf("cached partial = %q/%d, want STALE/1 (must not be promoted to OK)", r2.status, len(r2.features))
+	}
+	if r2.lastSourceUpdate.IsZero() {
+		t.Error("cached STALE result must carry last_source_update")
+	}
+
+	// TTL elapses; upstream heals. The clean fetch replaces the partial entry.
+	s.cache.Backdate("hazard:x:"+LayerMessageSign, 10*time.Minute)
+	r3 := s.buildLayer(testCtx(), area, LayerMessageSign, okBuild(feat(SevInfo, "a"), feat(SevInfo, "b")))
+	if r3.status != "OK" || len(r3.features) != 2 {
+		t.Fatalf("clean refetch = %q/%d, want OK/2", r3.status, len(r3.features))
+	}
+	r4 := s.buildLayer(testCtx(), area, LayerMessageSign, partial)
+	if calls != 1 || r4.status != "OK" || len(r4.features) != 2 {
+		t.Fatalf("after clean fetch got %q/%d (calls=%d), want cached OK/2", r4.status, len(r4.features), calls)
+	}
+}
+
+// TestBuildLayer_ErrorAfterPartialServesStale: a hard error once a cached
+// partial has expired still serves it as last-good STALE + lastSourceUpdate.
+func TestBuildLayer_ErrorAfterPartialServesStale(t *testing.T) {
+	s := &Service{cache: cache.NewCache()}
+	area := config.HazardArea{ID: "x"}
+	partial := func(context.Context, config.HazardArea) ([]Feature, error) {
+		return []Feature{feat(SevInfo, "sign")}, partialData(errors.New("degraded"))
+	}
+	s.buildLayer(testCtx(), area, LayerMessageSign, partial)
+	s.cache.Backdate("hazard:x:"+LayerMessageSign, 10*time.Minute)
+	r := s.buildLayer(testCtx(), area, LayerMessageSign, errBuild(errors.New("down")))
+	if r.status != "STALE" || len(r.features) != 1 || r.lastSourceUpdate.IsZero() {
+		t.Fatalf("got %q/%d lastUpdate=%v, want STALE/1 with lastSourceUpdate", r.status, len(r.features), r.lastSourceUpdate)
 	}
 }
 
