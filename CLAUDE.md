@@ -459,16 +459,19 @@ gateway's `EmitUnpopulated` marshaler.
   conditions) and appears only in the `comms` domain.
 - `GET /api/v1/places/{place}/map/{layer}.geojson` - hand-built, one RFC 7946
   `FeatureCollection` per layer for a maps client (MapLibre/Leaflet). Layers:
-  `road_incident`, `chain_control`, `road_segment`, `weather_alert`,
-  `fire_weather`, `earthquake`, `wildfire`, `evacuation`, `power`, `mesh_node`,
-  `mesh_link`, `camera` (these are layer *values*, still snake_case; `power` matches its enum name so
+  `road_incident`, `chain_control`, `road_segment`, `message_sign`,
+  `weather_alert`, `fire_weather`, `earthquake`, `wildfire`, `evacuation`,
+  `power`, `mesh_node`, `mesh_link`, `camera` (these are layer *values*, still snake_case; `power` matches its enum name so
   `properties.layer` and `Event.layer` read identically). Every feature shares a camelCase `properties` envelope
   (`id, layer, kind, severity, severityRank, headline, source, …`) on the unified
   severity scale `INFO..EXTREME` (rank 0–4). Coordinates
   are `[lng, lat]`. Event layers project from the store
-  (`internal/gridapi.ProjectEvents`); the three condition layers (`road_segment`,
-  `chain_control`, `fire_weather`) are live projections of the roads/weather
-  services. See `docs/design/hazard-aggregation-design.md` and `internal/hazards/CLAUDE.md`.
+  (`internal/gridapi.ProjectEvents`); the four condition layers (`road_segment`,
+  `chain_control`, `fire_weather`, `message_sign`) are live projections of the
+  roads/weather services and the Caltrans CWWP2 portal. `message_sign` (what
+  Caltrans's roadside message signs are showing) is always `INFO` and `/summary`
+  never reads it: the text is context, mostly safety-campaign boilerplate.
+  See `docs/design/hazard-aggregation-design.md` and `internal/hazards/CLAUDE.md`.
   Two more layers are served by `gridapi` itself: `mesh_link` (relay topology,
   `internal/gridapi/mesh.go`) and `camera` (Caltrans traffic cameras,
   `serveCameraLayer` in `internal/gridapi/cameras.go`). `camera` is the place-scoped

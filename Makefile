@@ -321,8 +321,9 @@ fetch-cwwp2-data:
 	$(eval TIMESTAMP := $(shell date +%Y%m%d_%H%M%S))
 	@curl -sf "https://cwwp2.dot.ca.gov/data/d10/cc/ccStatusD10.json" > tests/testdata/cwwp2/cc_d10_$(TIMESTAMP).json
 	@curl -sf "https://cwwp2.dot.ca.gov/data/d10/lcs/lcsStatusD10.json" > tests/testdata/cwwp2/lcs_d10_full_$(TIMESTAMP).json
+	@curl -sf "https://cwwp2.dot.ca.gov/data/d10/cms/cmsStatusD10.json" > tests/testdata/cwwp2/cms_d10_$(TIMESTAMP).json
 	@curl -sf "https://cwwp2.dot.ca.gov/data/d10/cctv/cctvStatusD10.json" > tests/testdata/cwwp2/cctv_d10_full_$(TIMESTAMP).json
-	@echo "✅ CWWP2 snapshots saved (cc_d10_$(TIMESTAMP).json, lcs_d10_full_$(TIMESTAMP).json, cctv_d10_full_$(TIMESTAMP).json)"
+	@echo "✅ CWWP2 snapshots saved (cc_d10_$(TIMESTAMP).json, lcs_d10_full_$(TIMESTAMP).json, cms_d10_$(TIMESTAMP).json, cctv_d10_full_$(TIMESTAMP).json)"
 
 # Fetch Google Routes API test data
 fetch-google-data:

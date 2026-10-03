@@ -34,7 +34,7 @@ func main() {
 		fmt.Printf("  chain - Chain control feed only\n")
 		fmt.Printf("  lanes - Lane closures feed only\n")
 		fmt.Printf("  chp   - CHP incidents feed only\n")
-		fmt.Printf("  cwwp2 - CWWP2 portal: per-checkpoint chain controls, lane closures, cameras (live only; -district=N)\n")
+		fmt.Printf("  cwwp2 - CWWP2 portal: per-checkpoint chain controls, message signs, lane closures, cameras (live only; -district=N)\n")
 		fmt.Printf("\nExamples:\n")
 		fmt.Printf("  %s\n", os.Args[0])
 		fmt.Printf("  %s -feed=chain\n", os.Args[0])

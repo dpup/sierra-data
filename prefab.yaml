@@ -84,9 +84,14 @@ roads:
     # districts, and any control CWWP2 doesn't confirm. District 10 covers
     # Calaveras, Tuolumne, Alpine, Amador and Mariposa. See
     # internal/clients/CLAUDE.md.
+    #
+    # messageSignDistricts backs the message_sign map layer: what each
+    # changeable message sign is showing, verbatim and always INFO (mostly
+    # safety-campaign boilerplate; context, never a hazard).
     cwwp2:
       baseUrl: "https://cwwp2.dot.ca.gov/data"
       chainControlDistricts: [10]
+      messageSignDistricts: [10]
       staleAfter: "1h"
       # Traffic cameras (GET /api/v1/cameras): links to Caltrans's snapshot
       # images and HLS streams, never proxied. A camera is listed when it is in

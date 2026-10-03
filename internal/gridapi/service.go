@@ -49,7 +49,8 @@ type Service struct {
 	Census  CensusAPI
 	Cfg     *config.Config
 	// Hazards is the live hazards service the condition-backed map layers
-	// (road_segment, chain_control, fire_weather) delegate to (T12b).
+	// (road_segment, chain_control, fire_weather, message_sign) delegate to
+	// (T12b).
 	Hazards *hazards.Service
 	// Cameras is the Caltrans CCTV directory ListCameras serves; nil when no
 	// camera districts are configured. Set it only to a non-nil value — a typed

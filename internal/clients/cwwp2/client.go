@@ -12,10 +12,14 @@
 //     including SCHEDULED ones (lcs2way.kml shows only what is currently set
 //     up), with epoch start/end times and the Caltrans radio codes that mark
 //     a closure's lifecycle (10-97 set up, 10-98 picked up, 10-22 cancelled).
+//   - MESSAGE SIGNS (`/data/d{N}/cms/cmsStatusD{NN}.json`): every changeable
+//     message sign and the text it is showing, up to two pages of three
+//     lines. Most of it is statewide safety-campaign boilerplate; the parser
+//     reports what each sign says and leaves deciding what matters to callers.
 //   - CCTV CAMERAS (`/data/d{N}/cctv/cctvStatusD{NN}.json`): the district's
 //     camera registry, with a snapshot JPEG and (mostly) an HLS stream URL per
 //     camera. Near-static, and it carries no generation stamp, so unlike the
-//     other two there is no freshness check.
+//     others there is no freshness check.
 //
 // CAVEATS, all observed on the live portal (2026-09-30):
 //
