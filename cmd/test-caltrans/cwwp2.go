@@ -11,7 +11,7 @@ import (
 
 // testCWWP2 probes the CWWP2 portal live for one district: what the server's
 // chain_control layer would see (and whether it would call the feed frozen),
-// plus the lane-closure feed's lifecycle breakdown.
+// the lane-closure feed's lifecycle breakdown, and the camera list.
 func testCWWP2(ctx context.Context, district int) {
 	fmt.Printf("🗂️  CWWP2 portal, district %d\n", district)
 	fmt.Printf("---------------------------\n")
@@ -54,6 +54,13 @@ func testCWWP2(ctx context.Context, district int) {
 	}
 	fmt.Println()
 
+	probeLaneClosures(ctx, c, district)
+	fmt.Println()
+	probeCameras(ctx, c, district)
+}
+
+// probeLaneClosures prints the lane-closure feed's lifecycle breakdown by county.
+func probeLaneClosures(ctx context.Context, c *cwwp2.Client, district int) {
 	closures, err := c.LaneClosures(ctx, district)
 	if err != nil {
 		fmt.Printf("❌ lane closures (%s): %v\n", c.FeedURL(district, "lcs", "lcs"), err)
@@ -79,5 +86,46 @@ func testCWWP2(ctx context.Context, district int) {
 	sort.Strings(counties)
 	for _, k := range counties {
 		fmt.Printf("   %-14s %v\n", k, byCounty[k])
+	}
+}
+
+// probeCameras prints the district's camera list as the camera directory sees
+// it: how many it would serve, and which it drops. The geography filter needs
+// the place directory, so it is not applied here; cameras are listed by county.
+func probeCameras(ctx context.Context, c *cwwp2.Client, district int) {
+	cams, err := c.Cameras(ctx, district)
+	if err != nil {
+		fmt.Printf("❌ cameras (%s): %v\n", c.FeedURL(district, "cctv", "cctv"), err)
+		return
+	}
+	byCounty := map[string]int{}
+	var outOfService []cwwp2.Camera
+	noImage, imageOnly := 0, 0
+	for _, cam := range cams {
+		switch {
+		case !cam.InService:
+			outOfService = append(outOfService, cam)
+		case cam.ImageURL == "" || !cam.Location.HasPosition:
+			noImage++
+		default:
+			byCounty[cam.Location.County]++
+			if cam.StreamURL == "" {
+				imageOnly++
+			}
+		}
+	}
+	served := len(cams) - len(outOfService) - noImage
+	fmt.Printf("✅ %d cameras; %d servable (%d image-only), %d out of service, %d without a position or https image\n",
+		len(cams), served, imageOnly, len(outOfService), noImage)
+	counties := make([]string, 0, len(byCounty))
+	for k := range byCounty {
+		counties = append(counties, k)
+	}
+	sort.Strings(counties)
+	for _, k := range counties {
+		fmt.Printf("   %-14s %d\n", k, byCounty[k])
+	}
+	for _, cam := range outOfService {
+		fmt.Printf("   📵 out of service: %s %s (%s)\n", cam.Location.Route, cam.Name, cam.ID)
 	}
 }

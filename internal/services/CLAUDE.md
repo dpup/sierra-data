@@ -10,6 +10,7 @@ caching, route classification, and AI enhancement.
 | `weather.go`      | `WeatherService`: current conditions + combined alerts list. |
 | `weather_nws.go`  | NWS zone alerts + fire-weather classification for `WeatherService`. |
 | `periodic_refresh.go` | Background goroutine that warms the roads cache. |
+| `cameras.go`      | `CameraService`: the Caltrans CCTV directory behind `GET /api/v1/cameras`. Own background refresh, not the TTL cache — see below. |
 
 ## Caching model (read this before adding an endpoint)
 
@@ -49,6 +50,16 @@ returning early.
 
 Google Routes has a separate 20-minute cache (`google_routes_<id>`) to stay
 within the monthly API budget — adding monitored roads increases that load.
+
+**The camera directory is the one exception to the model above.**
+`CameraService` refreshes every district in the background (`Run`, 6h; 5 min
+after a failure) and keeps each district's last good list for as long as a
+failure lasts, served as `STALE` with its fetch time. It never evicts at 2×TTL.
+The camera list is near-static (edited weeks to months apart), so last week's
+list is still right, and the images it points at are live regardless. Evicting
+it would turn a portal blip into "no cameras". Out-of-service cameras and rows
+with no position or https image are dropped there; the geography filter lives in
+`internal/gridapi/cameras.go`, which has the place directory.
 
 ## Adding a new endpoint
 

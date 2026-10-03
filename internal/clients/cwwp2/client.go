@@ -1,7 +1,7 @@
 // Package cwwp2 reads Caltrans's CWWP2 data portal (cwwp2.dot.ca.gov), the
 // structured per-district feeds that QuickMap's KML layers are built from.
 //
-// Two feeds are implemented:
+// Three feeds are implemented:
 //
 //   - CHAIN CONTROLS (`/data/d{N}/cc/ccStatusD{NN}.json`): every chain-control
 //     checkpoint in the district, WITH an explicit status — "R-0" (no controls)
@@ -12,6 +12,10 @@
 //     including SCHEDULED ones (lcs2way.kml shows only what is currently set
 //     up), with epoch start/end times and the Caltrans radio codes that mark
 //     a closure's lifecycle (10-97 set up, 10-98 picked up, 10-22 cancelled).
+//   - CCTV CAMERAS (`/data/d{N}/cctv/cctvStatusD{NN}.json`): the district's
+//     camera registry, with a snapshot JPEG and (mostly) an HLS stream URL per
+//     camera. Near-static, and it carries no generation stamp, so unlike the
+//     other two there is no freshness check.
 //
 // CAVEATS, all observed on the live portal (2026-09-30):
 //

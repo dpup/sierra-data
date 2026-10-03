@@ -1,0 +1,628 @@
+{
+	"data": [
+		{
+			"cctv": {
+				"index": "2",
+				"recordTimestamp": {
+					"recordDate": "2025-10-16",
+					"recordTime": "11:45:27",
+					"recordEpoch": "1760640327"
+				},
+				"location": {
+					"district": "10",
+					"locationName": "137 - SB I-5 N/O Lathrop Rd",
+					"nearbyPlace": "Lathrop",
+					"longitude": "-121.28509",
+					"latitude": "37.84451",
+					"elevation": "19",
+					"direction": "South",
+					"county": "San Joaquin",
+					"route": "I-5",
+					"routeSuffix": "",
+					"postmilePrefix": "R",
+					"postmile": "18.817",
+					"alignment": "L",
+					"milepost": "464.094"
+				},
+				"inService": "true",
+				"imageData": {
+					"imageDescription": "",
+					"streamingVideoURL": "https://wzmedia.dot.ca.gov/D10/SJ_SB5_NO_LathropRd.stream/playlist.m3u8",
+					"static": {
+						"currentImageUpdateFrequency": "2",
+						"currentImageURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/137sbi5nolathroprd/137sbi5nolathroprd.jpg",
+						"referenceImageUpdateFrequency": "15",
+						"referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/137sbi5nolathroprd/previous/137sbi5nolathroprd-1.jpg",
+						"referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/137sbi5nolathroprd/previous/137sbi5nolathroprd-2.jpg",
+						"referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/137sbi5nolathroprd/previous/137sbi5nolathroprd-3.jpg",
+						"referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/137sbi5nolathroprd/previous/137sbi5nolathroprd-4.jpg",
+						"referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/137sbi5nolathroprd/previous/137sbi5nolathroprd-5.jpg",
+						"referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/137sbi5nolathroprd/previous/137sbi5nolathroprd-6.jpg",
+						"referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/137sbi5nolathroprd/previous/137sbi5nolathroprd-7.jpg",
+						"referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/137sbi5nolathroprd/previous/137sbi5nolathroprd-8.jpg",
+						"referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/137sbi5nolathroprd/previous/137sbi5nolathroprd-9.jpg",
+						"referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/137sbi5nolathroprd/previous/137sbi5nolathroprd-10.jpg",
+						"referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/137sbi5nolathroprd/previous/137sbi5nolathroprd-11.jpg",
+						"referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/137sbi5nolathroprd/previous/137sbi5nolathroprd-12.jpg"
+					}
+				}
+			}
+		},
+		{
+			"cctv": {
+				"index": "35",
+				"recordTimestamp": {
+					"recordDate": "2026-09-16",
+					"recordTime": "12:12:33",
+					"recordEpoch": "1789585953"
+				},
+				"location": {
+					"district": "10",
+					"locationName": "35 - EB SR 140 Mariposa",
+					"nearbyPlace": "Mariposa",
+					"longitude": "-119.9731",
+					"latitude": "37.49408",
+					"elevation": "2086",
+					"direction": "East",
+					"county": "Mariposa",
+					"route": "SR-140",
+					"routeSuffix": "",
+					"postmilePrefix": "",
+					"postmile": "22.14",
+					"alignment": "",
+					"milepost": "72.2"
+				},
+				"inService": "true",
+				"imageData": {
+					"imageDescription": "",
+					"streamingVideoURL": "https://wzmedia.dot.ca.gov/D10/MPA_EB140_Mariposa.stream/playlist.m3u8",
+					"static": {
+						"currentImageUpdateFrequency": "2",
+						"currentImageURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/35ebsr140mariposa/35ebsr140mariposa.jpg",
+						"referenceImageUpdateFrequency": "15",
+						"referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/35ebsr140mariposa/previous/35ebsr140mariposa-1.jpg",
+						"referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/35ebsr140mariposa/previous/35ebsr140mariposa-2.jpg",
+						"referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/35ebsr140mariposa/previous/35ebsr140mariposa-3.jpg",
+						"referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/35ebsr140mariposa/previous/35ebsr140mariposa-4.jpg",
+						"referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/35ebsr140mariposa/previous/35ebsr140mariposa-5.jpg",
+						"referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/35ebsr140mariposa/previous/35ebsr140mariposa-6.jpg",
+						"referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/35ebsr140mariposa/previous/35ebsr140mariposa-7.jpg",
+						"referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/35ebsr140mariposa/previous/35ebsr140mariposa-8.jpg",
+						"referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/35ebsr140mariposa/previous/35ebsr140mariposa-9.jpg",
+						"referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/35ebsr140mariposa/previous/35ebsr140mariposa-10.jpg",
+						"referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/35ebsr140mariposa/previous/35ebsr140mariposa-11.jpg",
+						"referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/35ebsr140mariposa/previous/35ebsr140mariposa-12.jpg"
+					}
+				}
+			}
+		},
+		{
+			"cctv": {
+				"index": "36",
+				"recordTimestamp": {
+					"recordDate": "2025-10-16",
+					"recordTime": "16:50:51",
+					"recordEpoch": "1760658651"
+				},
+				"location": {
+					"district": "10",
+					"locationName": "36 - EB SR 140 Midpines",
+					"nearbyPlace": "Midpines",
+					"longitude": "-119.95044",
+					"latitude": "37.57784",
+					"elevation": "2181",
+					"direction": "West",
+					"county": "Mariposa",
+					"route": "SR-140",
+					"routeSuffix": "",
+					"postmilePrefix": "R",
+					"postmile": "30.9",
+					"alignment": "",
+					"milepost": "80.97"
+				},
+				"inService": "true",
+				"imageData": {
+					"imageDescription": "",
+					"streamingVideoURL": "https://wzmedia.dot.ca.gov/D10/MPA_EB140_Midpines.stream/playlist.m3u8",
+					"static": {
+						"currentImageUpdateFrequency": "2",
+						"currentImageURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/36ebsr140midpines/36ebsr140midpines.jpg",
+						"referenceImageUpdateFrequency": "15",
+						"referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/36ebsr140midpines/previous/36ebsr140midpines-1.jpg",
+						"referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/36ebsr140midpines/previous/36ebsr140midpines-2.jpg",
+						"referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/36ebsr140midpines/previous/36ebsr140midpines-3.jpg",
+						"referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/36ebsr140midpines/previous/36ebsr140midpines-4.jpg",
+						"referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/36ebsr140midpines/previous/36ebsr140midpines-5.jpg",
+						"referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/36ebsr140midpines/previous/36ebsr140midpines-6.jpg",
+						"referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/36ebsr140midpines/previous/36ebsr140midpines-7.jpg",
+						"referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/36ebsr140midpines/previous/36ebsr140midpines-8.jpg",
+						"referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/36ebsr140midpines/previous/36ebsr140midpines-9.jpg",
+						"referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/36ebsr140midpines/previous/36ebsr140midpines-10.jpg",
+						"referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/36ebsr140midpines/previous/36ebsr140midpines-11.jpg",
+						"referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/36ebsr140midpines/previous/36ebsr140midpines-12.jpg"
+					}
+				}
+			}
+		},
+		{
+			"cctv": {
+				"index": "41",
+				"recordTimestamp": {
+					"recordDate": "2026-05-28",
+					"recordTime": "13:34:26",
+					"recordEpoch": "1780000466"
+				},
+				"location": {
+					"district": "10",
+					"locationName": "41 - EB I-205 East Banta RWIS",
+					"nearbyPlace": "Banta",
+					"longitude": "-121.34643",
+					"latitude": "37.76541",
+					"elevation": "3",
+					"direction": "North",
+					"county": "San Joaquin",
+					"route": "I-205",
+					"routeSuffix": "",
+					"postmilePrefix": "R",
+					"postmile": "11.93",
+					"alignment": "",
+					"milepost": "12.86"
+				},
+				"inService": "false",
+				"imageData": {
+					"imageDescription": "",
+					"streamingVideoURL": "https://wzmedia.dot.ca.gov/D10/SJ_EB205_EastBantaRwis.stream/playlist.m3u8",
+					"static": {
+						"currentImageUpdateFrequency": "2",
+						"currentImageURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/41ebi205eastbantarwis/41ebi205eastbantarwis.jpg",
+						"referenceImageUpdateFrequency": "15",
+						"referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/41ebi205eastbantarwis/previous/41ebi205eastbantarwis-1.jpg",
+						"referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/41ebi205eastbantarwis/previous/41ebi205eastbantarwis-2.jpg",
+						"referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/41ebi205eastbantarwis/previous/41ebi205eastbantarwis-3.jpg",
+						"referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/41ebi205eastbantarwis/previous/41ebi205eastbantarwis-4.jpg",
+						"referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/41ebi205eastbantarwis/previous/41ebi205eastbantarwis-5.jpg",
+						"referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/41ebi205eastbantarwis/previous/41ebi205eastbantarwis-6.jpg",
+						"referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/41ebi205eastbantarwis/previous/41ebi205eastbantarwis-7.jpg",
+						"referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/41ebi205eastbantarwis/previous/41ebi205eastbantarwis-8.jpg",
+						"referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/41ebi205eastbantarwis/previous/41ebi205eastbantarwis-9.jpg",
+						"referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/41ebi205eastbantarwis/previous/41ebi205eastbantarwis-10.jpg",
+						"referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/41ebi205eastbantarwis/previous/41ebi205eastbantarwis-11.jpg",
+						"referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/41ebi205eastbantarwis/previous/41ebi205eastbantarwis-12.jpg"
+					}
+				}
+			}
+		},
+		{
+			"cctv": {
+				"index": "47",
+				"recordTimestamp": {
+					"recordDate": "2025-10-16",
+					"recordTime": "12:24:11",
+					"recordEpoch": "1760642651"
+				},
+				"location": {
+					"district": "10",
+					"locationName": "47 - EB SR-12 Tower Park RWIS",
+					"nearbyPlace": "Lodi",
+					"longitude": "-121.48523",
+					"latitude": "38.11525",
+					"elevation": "-16",
+					"direction": "East",
+					"county": "San Joaquin",
+					"route": "SR-12",
+					"routeSuffix": "",
+					"postmilePrefix": "",
+					"postmile": "5.39",
+					"alignment": "",
+					"milepost": "75.17"
+				},
+				"inService": "true",
+				"imageData": {
+					"imageDescription": "",
+					"streamingVideoURL": "",
+					"static": {
+						"currentImageUpdateFrequency": "2",
+						"currentImageURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/47ebsr12towerparkrwis/47ebsr12towerparkrwis.jpg",
+						"referenceImageUpdateFrequency": "15",
+						"referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/47ebsr12towerparkrwis/previous/47ebsr12towerparkrwis-1.jpg",
+						"referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/47ebsr12towerparkrwis/previous/47ebsr12towerparkrwis-2.jpg",
+						"referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/47ebsr12towerparkrwis/previous/47ebsr12towerparkrwis-3.jpg",
+						"referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/47ebsr12towerparkrwis/previous/47ebsr12towerparkrwis-4.jpg",
+						"referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/47ebsr12towerparkrwis/previous/47ebsr12towerparkrwis-5.jpg",
+						"referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/47ebsr12towerparkrwis/previous/47ebsr12towerparkrwis-6.jpg",
+						"referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/47ebsr12towerparkrwis/previous/47ebsr12towerparkrwis-7.jpg",
+						"referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/47ebsr12towerparkrwis/previous/47ebsr12towerparkrwis-8.jpg",
+						"referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/47ebsr12towerparkrwis/previous/47ebsr12towerparkrwis-9.jpg",
+						"referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/47ebsr12towerparkrwis/previous/47ebsr12towerparkrwis-10.jpg",
+						"referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/47ebsr12towerparkrwis/previous/47ebsr12towerparkrwis-11.jpg",
+						"referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/47ebsr12towerparkrwis/previous/47ebsr12towerparkrwis-12.jpg"
+					}
+				}
+			}
+		},
+		{
+			"cctv": {
+				"index": "65",
+				"recordTimestamp": {
+					"recordDate": "2026-01-15",
+					"recordTime": "12:14:34",
+					"recordEpoch": "1768508074"
+				},
+				"location": {
+					"district": "10",
+					"locationName": "65 - NB SR-99 S/O Mariposa Way RWIS",
+					"nearbyPlace": "Merced",
+					"longitude": "-120.40295",
+					"latitude": "37.24494",
+					"elevation": "196",
+					"direction": "North",
+					"county": "Merced",
+					"route": "SR-99",
+					"routeSuffix": "",
+					"postmilePrefix": "",
+					"postmile": "8.86",
+					"alignment": "",
+					"milepost": "182.21"
+				},
+				"inService": "false",
+				"imageData": {
+					"imageDescription": "",
+					"streamingVideoURL": "https://wzmedia.dot.ca.gov/D10/MER_NB99_SO_MariposaWay.stream/playlist.m3u8",
+					"static": {
+						"currentImageUpdateFrequency": "2",
+						"currentImageURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/65nbsr99somariposawayrwis/65nbsr99somariposawayrwis.jpg",
+						"referenceImageUpdateFrequency": "15",
+						"referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/65nbsr99somariposawayrwis/previous/65nbsr99somariposawayrwis-1.jpg",
+						"referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/65nbsr99somariposawayrwis/previous/65nbsr99somariposawayrwis-2.jpg",
+						"referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/65nbsr99somariposawayrwis/previous/65nbsr99somariposawayrwis-3.jpg",
+						"referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/65nbsr99somariposawayrwis/previous/65nbsr99somariposawayrwis-4.jpg",
+						"referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/65nbsr99somariposawayrwis/previous/65nbsr99somariposawayrwis-5.jpg",
+						"referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/65nbsr99somariposawayrwis/previous/65nbsr99somariposawayrwis-6.jpg",
+						"referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/65nbsr99somariposawayrwis/previous/65nbsr99somariposawayrwis-7.jpg",
+						"referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/65nbsr99somariposawayrwis/previous/65nbsr99somariposawayrwis-8.jpg",
+						"referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/65nbsr99somariposawayrwis/previous/65nbsr99somariposawayrwis-9.jpg",
+						"referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/65nbsr99somariposawayrwis/previous/65nbsr99somariposawayrwis-10.jpg",
+						"referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/65nbsr99somariposawayrwis/previous/65nbsr99somariposawayrwis-11.jpg",
+						"referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/65nbsr99somariposawayrwis/previous/65nbsr99somariposawayrwis-12.jpg"
+					}
+				}
+			}
+		},
+		{
+			"cctv": {
+				"index": "76",
+				"recordTimestamp": {
+					"recordDate": "2025-10-16",
+					"recordTime": "16:06:01",
+					"recordEpoch": "1760655961"
+				},
+				"location": {
+					"district": "10",
+					"locationName": "76 - SB SR-99 N/O Louise Ave",
+					"nearbyPlace": "Manteca",
+					"longitude": "-121.205386",
+					"latitude": "37.812354",
+					"elevation": "26",
+					"direction": "South",
+					"county": "San Joaquin",
+					"route": "SR-99",
+					"routeSuffix": "",
+					"postmilePrefix": "",
+					"postmile": "7.98",
+					"alignment": "",
+					"milepost": "243.83"
+				},
+				"inService": "false",
+				"imageData": {
+					"imageDescription": "",
+					"streamingVideoURL": "https://wzmedia.dot.ca.gov/D10/SJ_SB99_NO_LouiseAveOC.stream/playlist.m3u8",
+					"static": {
+						"currentImageUpdateFrequency": "2",
+						"currentImageURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/76sbsr99nolouiseave/76sbsr99nolouiseave.jpg",
+						"referenceImageUpdateFrequency": "15",
+						"referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/76sbsr99nolouiseave/previous/76sbsr99nolouiseave-1.jpg",
+						"referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/76sbsr99nolouiseave/previous/76sbsr99nolouiseave-2.jpg",
+						"referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/76sbsr99nolouiseave/previous/76sbsr99nolouiseave-3.jpg",
+						"referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/76sbsr99nolouiseave/previous/76sbsr99nolouiseave-4.jpg",
+						"referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/76sbsr99nolouiseave/previous/76sbsr99nolouiseave-5.jpg",
+						"referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/76sbsr99nolouiseave/previous/76sbsr99nolouiseave-6.jpg",
+						"referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/76sbsr99nolouiseave/previous/76sbsr99nolouiseave-7.jpg",
+						"referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/76sbsr99nolouiseave/previous/76sbsr99nolouiseave-8.jpg",
+						"referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/76sbsr99nolouiseave/previous/76sbsr99nolouiseave-9.jpg",
+						"referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/76sbsr99nolouiseave/previous/76sbsr99nolouiseave-10.jpg",
+						"referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/76sbsr99nolouiseave/previous/76sbsr99nolouiseave-11.jpg",
+						"referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/76sbsr99nolouiseave/previous/76sbsr99nolouiseave-12.jpg"
+					}
+				}
+			}
+		},
+		{
+			"cctv": {
+				"index": "129",
+				"recordTimestamp": {
+					"recordDate": "2026-08-04",
+					"recordTime": "12:06:32",
+					"recordEpoch": "1785870392"
+				},
+				"location": {
+					"district": "10",
+					"locationName": "127 - Ferretti Rd Groveland",
+					"nearbyPlace": "Groveland",
+					"longitude": "-120.22456",
+					"latitude": "37.83982",
+					"elevation": "2867",
+					"direction": "East",
+					"county": "Tuolumne",
+					"route": "SR-120",
+					"routeSuffix": "",
+					"postmilePrefix": "",
+					"postmile": "32.60",
+					"alignment": "",
+					"milepost": "71.98"
+				},
+				"inService": "true",
+				"imageData": {
+					"imageDescription": "",
+					"streamingVideoURL": "https://wzmedia.dot.ca.gov/D10/TUO_EB120_FerrettiRd.stream/playlist.m3u8",
+					"static": {
+						"currentImageUpdateFrequency": "2",
+						"currentImageURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/127ferrettirdgroveland/127ferrettirdgroveland.jpg",
+						"referenceImageUpdateFrequency": "15",
+						"referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/127ferrettirdgroveland/previous/127ferrettirdgroveland-1.jpg",
+						"referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/127ferrettirdgroveland/previous/127ferrettirdgroveland-2.jpg",
+						"referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/127ferrettirdgroveland/previous/127ferrettirdgroveland-3.jpg",
+						"referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/127ferrettirdgroveland/previous/127ferrettirdgroveland-4.jpg",
+						"referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/127ferrettirdgroveland/previous/127ferrettirdgroveland-5.jpg",
+						"referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/127ferrettirdgroveland/previous/127ferrettirdgroveland-6.jpg",
+						"referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/127ferrettirdgroveland/previous/127ferrettirdgroveland-7.jpg",
+						"referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/127ferrettirdgroveland/previous/127ferrettirdgroveland-8.jpg",
+						"referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/127ferrettirdgroveland/previous/127ferrettirdgroveland-9.jpg",
+						"referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/127ferrettirdgroveland/previous/127ferrettirdgroveland-10.jpg",
+						"referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/127ferrettirdgroveland/previous/127ferrettirdgroveland-11.jpg",
+						"referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/127ferrettirdgroveland/previous/127ferrettirdgroveland-12.jpg"
+					}
+				}
+			}
+		},
+		{
+			"cctv": {
+				"index": "130",
+				"recordTimestamp": {
+					"recordDate": "2026-02-11",
+					"recordTime": "08:47:26",
+					"recordEpoch": "1770828446"
+				},
+				"location": {
+					"district": "10",
+					"locationName": "132 - SJ 88 Liberty Rd",
+					"nearbyPlace": "Clements",
+					"longitude": "-121.05158",
+					"latitude": "38.235701",
+					"elevation": "170",
+					"direction": "West",
+					"county": "San Joaquin",
+					"route": "SR-88",
+					"routeSuffix": "",
+					"postmilePrefix": "",
+					"postmile": "22.059",
+					"alignment": "L",
+					"milepost": "22.106"
+				},
+				"inService": "true",
+				"imageData": {
+					"imageDescription": "",
+					"streamingVideoURL": "https://wzmedia.dot.ca.gov/D10/SJ_WB88_LibertyRd.stream/playlist.m3u8",
+					"static": {
+						"currentImageUpdateFrequency": "2",
+						"currentImageURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/132sj88libertyrd/132sj88libertyrd.jpg",
+						"referenceImageUpdateFrequency": "15",
+						"referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/132sj88libertyrd/previous/132sj88libertyrd-1.jpg",
+						"referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/132sj88libertyrd/previous/132sj88libertyrd-2.jpg",
+						"referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/132sj88libertyrd/previous/132sj88libertyrd-3.jpg",
+						"referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/132sj88libertyrd/previous/132sj88libertyrd-4.jpg",
+						"referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/132sj88libertyrd/previous/132sj88libertyrd-5.jpg",
+						"referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/132sj88libertyrd/previous/132sj88libertyrd-6.jpg",
+						"referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/132sj88libertyrd/previous/132sj88libertyrd-7.jpg",
+						"referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/132sj88libertyrd/previous/132sj88libertyrd-8.jpg",
+						"referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/132sj88libertyrd/previous/132sj88libertyrd-9.jpg",
+						"referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/132sj88libertyrd/previous/132sj88libertyrd-10.jpg",
+						"referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/132sj88libertyrd/previous/132sj88libertyrd-11.jpg",
+						"referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/132sj88libertyrd/previous/132sj88libertyrd-12.jpg"
+					}
+				}
+			}
+		},
+		{
+			"cctv": {
+				"index": "136",
+				"recordTimestamp": {
+					"recordDate": "2025-10-16",
+					"recordTime": "12:26:21",
+					"recordEpoch": "1760642781"
+				},
+				"location": {
+					"district": "10",
+					"locationName": "133 - EB SR 88 Pine Grove",
+					"nearbyPlace": "Pine Grove",
+					"longitude": "-120.65039",
+					"latitude": "38.40774",
+					"elevation": "2575",
+					"direction": "East",
+					"county": "Amador",
+					"route": "SR-88",
+					"routeSuffix": "",
+					"postmilePrefix": "R",
+					"postmile": "23.856",
+					"alignment": "R",
+					"milepost": "49.226"
+				},
+				"inService": "true",
+				"imageData": {
+					"imageDescription": "",
+					"streamingVideoURL": "https://wzmedia.dot.ca.gov/D10/AMA_EB88_PineGrove.stream/playlist.m3u8",
+					"static": {
+						"currentImageUpdateFrequency": "2",
+						"currentImageURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/133ebsr88pinegrove/133ebsr88pinegrove.jpg",
+						"referenceImageUpdateFrequency": "15",
+						"referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/133ebsr88pinegrove/previous/133ebsr88pinegrove-1.jpg",
+						"referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/133ebsr88pinegrove/previous/133ebsr88pinegrove-2.jpg",
+						"referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/133ebsr88pinegrove/previous/133ebsr88pinegrove-3.jpg",
+						"referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/133ebsr88pinegrove/previous/133ebsr88pinegrove-4.jpg",
+						"referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/133ebsr88pinegrove/previous/133ebsr88pinegrove-5.jpg",
+						"referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/133ebsr88pinegrove/previous/133ebsr88pinegrove-6.jpg",
+						"referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/133ebsr88pinegrove/previous/133ebsr88pinegrove-7.jpg",
+						"referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/133ebsr88pinegrove/previous/133ebsr88pinegrove-8.jpg",
+						"referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/133ebsr88pinegrove/previous/133ebsr88pinegrove-9.jpg",
+						"referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/133ebsr88pinegrove/previous/133ebsr88pinegrove-10.jpg",
+						"referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/133ebsr88pinegrove/previous/133ebsr88pinegrove-11.jpg",
+						"referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/133ebsr88pinegrove/previous/133ebsr88pinegrove-12.jpg"
+					}
+				}
+			}
+		},
+		{
+			"cctv": {
+				"index": "152",
+				"recordTimestamp": {
+					"recordDate": "2026-06-23",
+					"recordTime": "06:52:35",
+					"recordEpoch": "1782222755"
+				},
+				"location": {
+					"district": "10",
+					"locationName": "144 - EB MPA 120 Buck Meadows",
+					"nearbyPlace": "Groveland",
+					"longitude": "-120.05672",
+					"latitude": "37.81765",
+					"elevation": "3123",
+					"direction": "East",
+					"county": "Mariposa",
+					"route": "SR-120",
+					"routeSuffix": "",
+					"postmilePrefix": "",
+					"postmile": "43.679",
+					"alignment": "L",
+					"milepost": "82.678"
+				},
+				"inService": "true",
+				"imageData": {
+					"imageDescription": "",
+					"streamingVideoURL": "https://wzmedia.dot.ca.gov/D10/MPA_120_BuckMeadows.stream/playlist.m3u8",
+					"static": {
+						"currentImageUpdateFrequency": "2",
+						"currentImageURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/144ebmpa120buckmeadows/144ebmpa120buckmeadows.jpg",
+						"referenceImageUpdateFrequency": "15",
+						"referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/144ebmpa120buckmeadows/previous/144ebmpa120buckmeadows-1.jpg",
+						"referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/144ebmpa120buckmeadows/previous/144ebmpa120buckmeadows-2.jpg",
+						"referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/144ebmpa120buckmeadows/previous/144ebmpa120buckmeadows-3.jpg",
+						"referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/144ebmpa120buckmeadows/previous/144ebmpa120buckmeadows-4.jpg",
+						"referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/144ebmpa120buckmeadows/previous/144ebmpa120buckmeadows-5.jpg",
+						"referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/144ebmpa120buckmeadows/previous/144ebmpa120buckmeadows-6.jpg",
+						"referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/144ebmpa120buckmeadows/previous/144ebmpa120buckmeadows-7.jpg",
+						"referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/144ebmpa120buckmeadows/previous/144ebmpa120buckmeadows-8.jpg",
+						"referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/144ebmpa120buckmeadows/previous/144ebmpa120buckmeadows-9.jpg",
+						"referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/144ebmpa120buckmeadows/previous/144ebmpa120buckmeadows-10.jpg",
+						"referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/144ebmpa120buckmeadows/previous/144ebmpa120buckmeadows-11.jpg",
+						"referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/144ebmpa120buckmeadows/previous/144ebmpa120buckmeadows-12.jpg"
+					}
+				}
+			}
+		},
+		{
+			"cctv": {
+				"index": "169",
+				"recordTimestamp": {
+					"recordDate": "2026-09-21",
+					"recordTime": "13:04:07",
+					"recordEpoch": "1790021047"
+				},
+				"location": {
+					"district": "10",
+					"locationName": "176 - EB 120 E/O Atlas Rd",
+					"nearbyPlace": "Oakdale",
+					"longitude": "-120.80556",
+					"latitude": "37.77628",
+					"elevation": "239",
+					"direction": "",
+					"county": "Stanislaus",
+					"route": "SR-120",
+					"routeSuffix": "",
+					"postmilePrefix": "",
+					"postmile": "7.566",
+					"alignment": "L",
+					"milepost": "28.944"
+				},
+				"inService": "true",
+				"imageData": {
+					"imageDescription": "",
+					"streamingVideoURL": "https://wzmedia.dot.ca.gov/D10/STA_EB120_EO_Atlas.stream/playlist.m3u8",
+					"static": {
+						"currentImageUpdateFrequency": "2",
+						"currentImageURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/176eb120eoatlasrd/176eb120eoatlasrd.jpg",
+						"referenceImageUpdateFrequency": "15",
+						"referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/176eb120eoatlasrd/previous/176eb120eoatlasrd-1.jpg",
+						"referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/176eb120eoatlasrd/previous/176eb120eoatlasrd-2.jpg",
+						"referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/176eb120eoatlasrd/previous/176eb120eoatlasrd-3.jpg",
+						"referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/176eb120eoatlasrd/previous/176eb120eoatlasrd-4.jpg",
+						"referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/176eb120eoatlasrd/previous/176eb120eoatlasrd-5.jpg",
+						"referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/176eb120eoatlasrd/previous/176eb120eoatlasrd-6.jpg",
+						"referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/176eb120eoatlasrd/previous/176eb120eoatlasrd-7.jpg",
+						"referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/176eb120eoatlasrd/previous/176eb120eoatlasrd-8.jpg",
+						"referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/176eb120eoatlasrd/previous/176eb120eoatlasrd-9.jpg",
+						"referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/176eb120eoatlasrd/previous/176eb120eoatlasrd-10.jpg",
+						"referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/176eb120eoatlasrd/previous/176eb120eoatlasrd-11.jpg",
+						"referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/176eb120eoatlasrd/previous/176eb120eoatlasrd-12.jpg"
+					}
+				}
+			}
+		},
+		{
+			"cctv": {
+				"index": "172",
+				"recordTimestamp": {
+					"recordDate": "2026-08-06",
+					"recordTime": "15:03:53",
+					"recordEpoch": "1786053833"
+				},
+				"location": {
+					"district": "10",
+					"locationName": "179 - EB 108 W/O Soulsbyville Rd",
+					"nearbyPlace": "Soulsbyville",
+					"longitude": "-120.274801",
+					"latitude": "37.992423",
+					"elevation": "2926",
+					"direction": "",
+					"county": "Tuolumne",
+					"route": "SR-108",
+					"routeSuffix": "",
+					"postmilePrefix": "",
+					"postmile": "6.996",
+					"alignment": "R",
+					"milepost": "25.734"
+				},
+				"inService": "true",
+				"imageData": {
+					"imageDescription": "",
+					"streamingVideoURL": "https://wzmedia.dot.ca.gov/D10/TUO_EB108_WO_Soulsbyville.stream/playlist.m3u8",
+					"static": {
+						"currentImageUpdateFrequency": "2",
+						"currentImageURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/179eb108wosoulsbyvillerd/179eb108wosoulsbyvillerd.jpg",
+						"referenceImageUpdateFrequency": "15",
+						"referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/179eb108wosoulsbyvillerd/previous/179eb108wosoulsbyvillerd-1.jpg",
+						"referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/179eb108wosoulsbyvillerd/previous/179eb108wosoulsbyvillerd-2.jpg",
+						"referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/179eb108wosoulsbyvillerd/previous/179eb108wosoulsbyvillerd-3.jpg",
+						"referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/179eb108wosoulsbyvillerd/previous/179eb108wosoulsbyvillerd-4.jpg",
+						"referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/179eb108wosoulsbyvillerd/previous/179eb108wosoulsbyvillerd-5.jpg",
+						"referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/179eb108wosoulsbyvillerd/previous/179eb108wosoulsbyvillerd-6.jpg",
+						"referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/179eb108wosoulsbyvillerd/previous/179eb108wosoulsbyvillerd-7.jpg",
+						"referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/179eb108wosoulsbyvillerd/previous/179eb108wosoulsbyvillerd-8.jpg",
+						"referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/179eb108wosoulsbyvillerd/previous/179eb108wosoulsbyvillerd-9.jpg",
+						"referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/179eb108wosoulsbyvillerd/previous/179eb108wosoulsbyvillerd-10.jpg",
+						"referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/179eb108wosoulsbyvillerd/previous/179eb108wosoulsbyvillerd-11.jpg",
+						"referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/179eb108wosoulsbyvillerd/previous/179eb108wosoulsbyvillerd-12.jpg"
+					}
+				}
+			}
+		}
+	]
+}

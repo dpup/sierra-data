@@ -17,7 +17,9 @@ the rest of `/api/v1`. What remains, and what this package is now, is two things
    **event** layers (wildfire, evacuation, weather_alert, earthquake,
    road_incident) are projected from the grid store by
    `internal/gridapi.ProjectEvents` / the per-kind `project*` helpers — **not
-   here**. The live event builders and the store-backed path that used to live
+   here**. Two layers are neither: `mesh_link` and `camera` are built by
+   `internal/gridapi` itself (`mesh.go`, `cameras.go`) and only borrow this
+   package's envelope (`MeshLinkProps`, `CameraProps`). The live event builders and the store-backed path that used to live
    in this package were deleted with the endpoints.
 
 ## The model (don't break the envelope)
@@ -29,7 +31,8 @@ the rest of `/api/v1`. What remains, and what this package is now, is two things
   and trim to 5 decimals.
 - `properties.go` — the common `Properties` envelope shared by every layer, plus
   a namespaced per-kind block (`incident`, `road`, `chain_control`, `weather`,
-  `fire_weather`, `earthquake`, `wildfire`, `evacuation`). The envelope is
+  `fire_weather`, `earthquake`, `wildfire`, `evacuation`, `mesh`, `meshLink`,
+  `power`, `camera`). The envelope is
   identical across layers — that's the unification; a client renders any card
   from `headline/severity/source`. `gridapi`'s projection builds these same
   structs.

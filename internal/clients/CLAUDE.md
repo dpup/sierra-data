@@ -8,7 +8,7 @@ enhancement live in `internal/services`, not here.
 |------------|-----------------------|-------------------------------|-------|
 | `google`   | Google Routes API     | `PF__GOOGLE_ROUTES__API_KEY`  | Travel time + polyline. Rate-limited; callers cache aggressively (10k/mo budget). |
 | `caltrans` | quickmap.dot.ca.gov KML | none                        | Lane closures, CHP incidents, chain control (merged with `cwwp2` when configured). |
-| `cwwp2`    | cwwp2.dot.ca.gov JSON (Caltrans data portal) | none (public, undocumented) | Per-checkpoint chain-control status; lane-closure windows incl. scheduled. See below. |
+| `cwwp2`    | cwwp2.dot.ca.gov JSON (Caltrans data portal) | none (public, undocumented) | Per-checkpoint chain-control status; lane-closure windows incl. scheduled; CCTV camera list. See below. |
 | `weather`  | OpenWeatherMap        | `PF__OPENWEATHER__API_KEY`    | Current conditions only. `GetWeatherAlerts` (One Call 3.0, 1,000/day cap) is CLI-diagnostic only — the server sources alerts from `nws`. |
 | `nws`      | api.weather.gov       | none (User-Agent required)    | Authoritative zone alerts + fire-weather products. |
 | `firis`    | ArcGIS (CAL FIRE org) | none (public)                 | CAL FIRE/FIRIS combo fire perimeters. Dedup + `LastEdit` gating live in `internal/ingest` (wildfire). Replaced `wfigs` (retained unused). |
@@ -102,9 +102,34 @@ Mariposa).
   (#11):** an empty `lcs` file is accepted as "no closures" (unlike `cc`), and a
   code block whose shape changes decodes as "not called" — both would let the
   disappearance sweep resolve real closures. Gate them like the `cc` checks.
-- **Also available, unused:** `cms` (message-sign text as plain fields), `cctv`
-  (snapshot JPG + HLS stream URLs per camera), `rwis` (road-weather stations —
-  D10's are all Valley sites, useless to us, and its JSON doesn't parse).
+- **Cameras (`cctv`) — in use, District 10 only** (`GET /api/v1/cameras`, via
+  `services.CameraService`). One row per camera: snapshot JPG URL, refresh
+  minutes, HLS `.m3u8` URL (D9 has none: image-only), position, route.
+  `Camera.ID` is `d{district}-{index}` because the index is per-district. D10
+  names carry a camera-number prefix (`179 - EB 108 …`), which is stripped.
+  Findings from 2026-10-01:
+  - **No freshness check is possible.** `recordTimestamp` is when the camera's
+    RECORD was edited (2022–2026), not when the file was generated. The file's
+    Last-Modified moves only when Caltrans edits the registry, weeks to months
+    apart.
+  - **`inService: false` is the only dead-camera signal, and it is
+    conservative.** Every out-of-service camera checked in D10 and D9 serves a
+    "Down for Construction" placeholder, so the directory drops them. Two D3
+    ones (I-80 Chiles Rd) were live anyway. **Image age cannot catch a dead
+    camera**: the placeholder is regenerated every cycle with a current
+    burned-in timestamp and a fresh Last-Modified.
+  - Coverage near us: Hwy 108 Soulsbyville (inside the Ebbetts Pass area),
+    Hwy 88 Pine Grove (13.2 km out), Hwy 120 Ferretti Rd (13.9 km) and Buck
+    Meadows (23.9 km). There are none on Hwy 4 or Hwy 49, and none on Carson,
+    Ebbetts or Sonora Pass. **D3** has no Hwy 88 camera; its Sierra cameras
+    are all US-50, the nearest at Wrights Lake (26.5 km). **D9**'s only Sonora
+    Pass camera is image-only, at the US-395/SR-108 junction (43 km). Both are
+    outside the 25 km radius, so only D10 is configured.
+  - URLs go straight into consumers' `<img>`/players, so anything that is not
+    an absolute `https` URL is dropped at parse.
+- **Also available, unused:** `cms` (message-sign text as plain fields), `rwis`
+  (road-weather stations — D10's are all Valley sites, useless to us, and its
+  JSON doesn't parse).
 
 **It is hand-templated JSON; parse strictly and never read garbage as R-0.**
 Observed 2026-09-30: `rwis` drops commas between repeated sensor entries (XML
@@ -116,8 +141,9 @@ it's in-area — unless cc.kml reports something at that checkpoint (see above).
 Date/time strings are Pacific local; `*Epoch` fields are real Unix epochs.
 
 `./bin/test-caltrans -feed=cwwp2 [-district=N]` probes it live (levels,
-unrecognized statuses, freshness, closure phases). Fixtures and the list of
-still-unverified winter behavior: `tests/testdata/cwwp2/README.md`.
+unrecognized statuses, freshness, closure phases, servable and out-of-service
+cameras by county). Fixtures and the list of still-unverified winter behavior:
+`tests/testdata/cwwp2/README.md`.
 
 ## NWS (`nws`)
 

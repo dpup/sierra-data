@@ -136,11 +136,12 @@ export const ENDPOINTS = [
     path: '/api/v1/places/{place}/map/{layer}.geojson',
     blurb: 'One RFC 7946 FeatureCollection per layer, ready for MapLibre or Leaflet.',
     detail:
-      'Eleven layer slugs: wildfire, evacuation, weather_alert, earthquake, road_incident, power, road_segment, chain_control, fire_weather, mesh_node, mesh_link. A foreign top-level metadata member carries sourceStatus (OK | STALE | UNAVAILABLE), generatedAt, lastSourceUpdate, attribution and sourceUrl. UNAVAILABLE arrives with empty features and must render as an unknown-state banner, never an empty map. Coordinates are [lng, lat], trimmed to 5 decimals. Not in the OpenAPI spec — these layers are hand-built. Cache-Control: max-age=60.',
+      'Twelve layer slugs: wildfire, evacuation, weather_alert, earthquake, road_incident, power, road_segment, chain_control, fire_weather, mesh_node, mesh_link, camera. camera is Caltrans traffic cameras (INFO reference views, not hazards: the same cameras and distances as /api/v1/cameras?place=, with imageUrl and streamUrl in properties.camera). A foreign top-level metadata member carries sourceStatus (OK | STALE | UNAVAILABLE), generatedAt, lastSourceUpdate, attribution and sourceUrl. UNAVAILABLE arrives with empty features and must render as an unknown-state banner, never an empty map. Coordinates are [lng, lat], trimmed to 5 decimals. Not in the OpenAPI spec — these layers are hand-built. Cache-Control: max-age=60.',
     params: [],
     examples: [
       '/api/v1/places/ebbetts-pass/map/wildfire.geojson',
       '/api/v1/places/ebbetts-pass/map/evacuation.geojson',
+      '/api/v1/places/ebbetts-pass/map/camera.geojson',
     ],
   },
   {
@@ -209,6 +210,14 @@ export const ENDPOINTS = [
     params: [['place', 'place slug or id', 'Filter to a place.', 'all']],
     examples: ['/api/v1/scanners?place=ebbetts-pass'],
   },
+  {
+    path: '/api/v1/cameras',
+    blurb: 'Caltrans traffic cameras near the coverage area — live snapshot and HLS stream links, never proxied.',
+    detail:
+      'Returns CameraList. In-service Caltrans cameras within 25 km of a coverage area, nearest first. ?place keeps those within 25 km of that place; it accepts any place, towns and corridors included, though those contain no camera themselves. Per camera: imageUrl (re-fetch every imageRefreshMinutes; 0 = not reported), streamUrl (HLS .m3u8, empty when image-only), route, location and distanceMeters (0 = inside). sourceStatus is the list\u2019s health: OK, STALE (lastSourceUpdate says when it was fetched) or UNAVAILABLE. Cameras are reference views, not events, and an empty list means no camera nearby, never all-clear. Not paginated.',
+    params: [['place', 'place slug or id', 'Keep cameras within 25 km of a place.', 'the whole coverage area']],
+    examples: ['/api/v1/cameras', '/api/v1/cameras?place=sonora'],
+  },
 ];
 
 /** Cross-cutting conventions, rendered as definition rows on the front page. */
@@ -231,7 +240,7 @@ export const CONVENTIONS = [
   ],
   [
     'Pagination',
-    "Cursor-based on the event lists only — events, events/{id}/history, history. The directories (places, sources, scanners) return their complete set in one response by design. Don't build paging logic for them.",
+    "Cursor-based on the event lists only — events, events/{id}/history, history. The directories (places, sources, scanners, cameras) return their complete set in one response by design. Don't build paging logic for them.",
   ],
   [
     'ETags',
@@ -244,7 +253,7 @@ export const CONVENTIONS = [
   ['Canonical client sort', 'For events: severity descending, then observedAt descending.'],
 ];
 
-/** The eleven .geojson map layers, in the order the Map screen lists them. */
+/** The twelve .geojson map layers, in the order the Map screen lists them. */
 export const MAP_LAYERS = [
   'wildfire',
   'evacuation',
@@ -257,6 +266,7 @@ export const MAP_LAYERS = [
   'fire_weather',
   'mesh_node',
   'mesh_link',
+  'camera',
 ];
 
 /** Event layer slugs offered as filters on the Events screen. */
