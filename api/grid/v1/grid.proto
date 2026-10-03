@@ -226,10 +226,47 @@ message RoadIncidentDetail {
   // envelope `category`), 3 = location_description (now `area_label`),
   // 6 = condensed_summary (now the `headline`).
   reserved 2, 3, 6;
-  string log_number = 1;
+  string log_number = 1;            // CHP log number; for a Caltrans closure, its closure id
   string impact = 4;                // AI-assessed: none | light | moderate | severe
   string duration = 5;              // AI-assessed: unknown | < 1 hour | several hours | ongoing
   map<string, string> metadata = 7; // structured extras from AI analysis (internal keys stripped)
+  LaneClosureDetail closure = 8;    // Caltrans planned closures only (source `caltrans`)
+}
+
+// One Caltrans planned lane-closure WINDOW, read from the CWWP2 data portal.
+// Every field is upstream data; none of it is AI-generated.
+//
+// The unit is the window because Caltrans has no other one. A multi-day job is
+// one row per day, and neither closure_id nor log_number identifies a job:
+// closure_id is a route-level project id, and one log number can cover
+// windows at different places on different days, or be re-issued daily at
+// the same place. window_id is the only unique key.
+//
+// The planned window is an estimate that crews overrun, so planned_end is NOT
+// mapped onto the envelope `expires` (the same rule as PG&E's restoration
+// estimate). A set-up closure stays ACTIVE until the crew radios it picked up.
+message LaneClosureDetail {
+  string window_id = 1;                  // CWWP2 index: "C4QB-0004-2026-10-02-07:01:00"
+  int32 district = 2;                    // Caltrans district whose feed listed it
+  string closure_id = 3;                 // route-level project id ("C4QB"); not unique
+  string log_number = 4;                 // per-project request number ("4"); not unique
+  string route = 5;                      // "SR-4", "US-50"
+  string direction = 6;                  // travel flow, verbatim: "East / West", "North"
+  string facility = 7;                   // "Conventional Hwy" | "On Ramp" | "Off Ramp" | ...
+  string closure_type = 8;               // "Full" | "Lane" | "One-Way Traffic" | "Alternating Lanes" | ...
+  string work_type = 9;                  // "Drainage Work", "Tree Work", ...
+  string lanes_closed = 10;              // verbatim: "1, RShoulder", "All", "Rt Turn Ln"
+  int32 total_lanes = 11;                // lanes at the site; 0 when not reported
+  int32 estimated_delay_minutes = 12;    // 0 when none or not reported
+  string closure_duration = 13;          // "Standard" | "Long Term" | "Intermittent"
+  google.protobuf.Timestamp planned_start = 14;
+  google.protobuf.Timestamp planned_end = 15;  // absent when end_indefinite
+  bool end_indefinite = 16;
+  google.protobuf.Timestamp set_up_at = 17;    // the 10-97 call: crew on scene, closure in place
+  string begin_location = 18;            // "Avery"
+  string end_location = 19;              // equals begin_location for a closure at one spot
+  LatLng begin = 20;
+  LatLng end = 21;
 }
 
 // MeshCore mesh-node presence (Layer_MESH). One event per node, keyed by
@@ -570,6 +607,15 @@ service GridService {
   rpc ListScanners(ListScannersRequest) returns (ScannerList) {
     option (google.api.http) = {get: "/api/v1/scanners"};
   }
+  // ListCameras returns Caltrans traffic cameras (CCTV) in or near the
+  // coverage areas: a snapshot image and, where Caltrans publishes one, an HLS
+  // stream per camera. Links only — the images and streams are served by
+  // Caltrans, never proxied. ?place narrows the set to cameras within the same
+  // radius of that place, nearest first. Cameras are reference views, not
+  // events: nothing here is a hazard and an empty list means no camera nearby.
+  rpc ListCameras(ListCamerasRequest) returns (CameraList) {
+    option (google.api.http) = {get: "/api/v1/cameras"};
+  }
   // GetConditions returns current, non-event state: per-location weather and
   // the region's fire-weather classification, optionally scoped to a place.
   // (Weather alerts are events; road conditions are the road_segment /
@@ -778,6 +824,39 @@ message Scanner {
 }
 message ScannerList {
   repeated Scanner scanners = 1;
+}
+message ListCamerasRequest {
+  string place = 1;
+}
+// Camera is one Caltrans CCTV camera. Every listed camera is in service and has
+// an image; an out-of-service camera is dropped, not flagged.
+message Camera {
+  string id = 1;                    // "d10-172": Caltrans district + the portal's camera index
+  string name = 2;                  // "EB 108 W/O Soulsbyville Rd"
+  string nearby_place = 3;          // "Soulsbyville"
+  string county = 4;                // "Tuolumne"
+  string route = 5;                 // "SR-108", "US-395"
+  string direction = 6;             // "East" | "West" | "North" | "South"; may be empty
+  LatLng location = 7;
+  int32 elevation_feet = 8;
+  string image_url = 9;             // the current snapshot JPEG on cwwp2.dot.ca.gov
+  int32 image_refresh_minutes = 10; // how often Caltrans replaces the snapshot; 0 = not reported
+  string stream_url = 11;           // HLS playlist (.m3u8); empty for an image-only camera
+  string description = 12;          // Caltrans's note on the view, e.g. "Looking South"; usually empty
+  // Metres from the requested place — or, without ?place, from the nearest
+  // coverage area. 0 means inside it.
+  int32 distance_meters = 13;
+}
+message CameraList {
+  repeated Camera cameras = 1;      // nearest first, then by id
+  // OK | STALE | UNAVAILABLE — the camera LIST's health, the same honesty
+  // field the map layers carry. STALE: served from an older fetch (or a
+  // configured district is missing). UNAVAILABLE: no list has been fetched
+  // yet, or no camera districts are configured.
+  string source_status = 2;
+  // When the served list was fetched. Unset when source_status is OK.
+  google.protobuf.Timestamp last_source_update = 3;
+  string attribution = 4;           // "Caltrans"
 }
 message GetConditionsRequest {
   string place = 1;

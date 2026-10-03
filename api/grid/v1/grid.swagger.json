@@ -16,6 +16,37 @@
     "application/json"
   ],
   "paths": {
+    "/api/v1/cameras": {
+      "get": {
+        "summary": "ListCameras returns Caltrans traffic cameras (CCTV) in or near the\ncoverage areas: a snapshot image and, where Caltrans publishes one, an HLS\nstream per camera. Links only — the images and streams are served by\nCaltrans, never proxied. ?place narrows the set to cameras within the same\nradius of that place, nearest first. Cameras are reference views, not\nevents: nothing here is a hazard and an empty list means no camera nearby.",
+        "operationId": "GridService_ListCameras",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1CameraList"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "place",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "GridService"
+        ]
+      }
+    },
     "/api/v1/conditions": {
       "get": {
         "summary": "GetConditions returns current, non-event state: per-location weather and\nthe region's fire-weather classification, optionally scoped to a place.\n(Weather alerts are events; road conditions are the road_segment /\nchain_control GeoJSON layers.)",
@@ -708,6 +739,91 @@
       "default": "CALFIRE_BURN_STATUS_UNKNOWN",
       "title": "- CALFIRE_BURNING_SUSPENDED: permits suspended; no residential burning\n - CALFIRE_PERMIT_REQUIRED: burning allowed with a valid permit\n - CALFIRE_NO_PERMIT_REQUIRED: off-season; no permit needed"
     },
+    "v1Camera": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "title": "\"d10-172\": Caltrans district + the portal's camera index"
+        },
+        "name": {
+          "type": "string",
+          "title": "\"EB 108 W/O Soulsbyville Rd\""
+        },
+        "nearbyPlace": {
+          "type": "string",
+          "title": "\"Soulsbyville\""
+        },
+        "county": {
+          "type": "string",
+          "title": "\"Tuolumne\""
+        },
+        "route": {
+          "type": "string",
+          "title": "\"SR-108\", \"US-395\""
+        },
+        "direction": {
+          "type": "string",
+          "title": "\"East\" | \"West\" | \"North\" | \"South\"; may be empty"
+        },
+        "location": {
+          "$ref": "#/definitions/v1LatLng"
+        },
+        "elevationFeet": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "imageUrl": {
+          "type": "string",
+          "title": "the current snapshot JPEG on cwwp2.dot.ca.gov"
+        },
+        "imageRefreshMinutes": {
+          "type": "integer",
+          "format": "int32",
+          "title": "how often Caltrans replaces the snapshot; 0 = not reported"
+        },
+        "streamUrl": {
+          "type": "string",
+          "title": "HLS playlist (.m3u8); empty for an image-only camera"
+        },
+        "description": {
+          "type": "string",
+          "title": "Caltrans's note on the view, e.g. \"Looking South\"; usually empty"
+        },
+        "distanceMeters": {
+          "type": "integer",
+          "format": "int32",
+          "description": "Metres from the requested place — or, without ?place, from the nearest\ncoverage area. 0 means inside it."
+        }
+      },
+      "description": "Camera is one Caltrans CCTV camera. Every listed camera is in service and has\nan image; an out-of-service camera is dropped, not flagged."
+    },
+    "v1CameraList": {
+      "type": "object",
+      "properties": {
+        "cameras": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1Camera"
+          },
+          "title": "nearest first, then by id"
+        },
+        "sourceStatus": {
+          "type": "string",
+          "description": "OK | STALE | UNAVAILABLE — the camera LIST's health, the same honesty\nfield the map layers carry. STALE: served from an older fetch (or a\nconfigured district is missing). UNAVAILABLE: no list has been fetched\nyet, or no camera districts are configured."
+        },
+        "lastSourceUpdate": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the served list was fetched. Unset when source_status is OK."
+        },
+        "attribution": {
+          "type": "string",
+          "title": "\"Caltrans\""
+        }
+      }
+    },
     "v1Conditions": {
       "type": "object",
       "properties": {
@@ -1058,6 +1174,98 @@
           "$ref": "#/definitions/v1LatLng"
         }
       }
+    },
+    "v1LaneClosureDetail": {
+      "type": "object",
+      "properties": {
+        "windowId": {
+          "type": "string",
+          "title": "CWWP2 index: \"C4QB-0004-2026-10-02-07:01:00\""
+        },
+        "district": {
+          "type": "integer",
+          "format": "int32",
+          "title": "Caltrans district whose feed listed it"
+        },
+        "closureId": {
+          "type": "string",
+          "title": "route-level project id (\"C4QB\"); not unique"
+        },
+        "logNumber": {
+          "type": "string",
+          "title": "per-project request number (\"4\"); not unique"
+        },
+        "route": {
+          "type": "string",
+          "title": "\"SR-4\", \"US-50\""
+        },
+        "direction": {
+          "type": "string",
+          "title": "travel flow, verbatim: \"East / West\", \"North\""
+        },
+        "facility": {
+          "type": "string",
+          "description": "\"Conventional Hwy\" | \"On Ramp\" | \"Off Ramp\" | ..."
+        },
+        "closureType": {
+          "type": "string",
+          "description": "\"Full\" | \"Lane\" | \"One-Way Traffic\" | \"Alternating Lanes\" | ..."
+        },
+        "workType": {
+          "type": "string",
+          "description": "\"Drainage Work\", \"Tree Work\", ..."
+        },
+        "lanesClosed": {
+          "type": "string",
+          "title": "verbatim: \"1, RShoulder\", \"All\", \"Rt Turn Ln\""
+        },
+        "totalLanes": {
+          "type": "integer",
+          "format": "int32",
+          "title": "lanes at the site; 0 when not reported"
+        },
+        "estimatedDelayMinutes": {
+          "type": "integer",
+          "format": "int32",
+          "title": "0 when none or not reported"
+        },
+        "closureDuration": {
+          "type": "string",
+          "title": "\"Standard\" | \"Long Term\" | \"Intermittent\""
+        },
+        "plannedStart": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "plannedEnd": {
+          "type": "string",
+          "format": "date-time",
+          "title": "absent when end_indefinite"
+        },
+        "endIndefinite": {
+          "type": "boolean"
+        },
+        "setUpAt": {
+          "type": "string",
+          "format": "date-time",
+          "title": "the 10-97 call: crew on scene, closure in place"
+        },
+        "beginLocation": {
+          "type": "string",
+          "title": "\"Avery\""
+        },
+        "endLocation": {
+          "type": "string",
+          "title": "equals begin_location for a closure at one spot"
+        },
+        "begin": {
+          "$ref": "#/definitions/v1LatLng"
+        },
+        "end": {
+          "$ref": "#/definitions/v1LatLng"
+        }
+      },
+      "description": "One Caltrans planned lane-closure WINDOW, read from the CWWP2 data portal.\nEvery field is upstream data; none of it is AI-generated.\n\nThe unit is the window because Caltrans has no other one. A multi-day job is\none row per day, and neither closure_id nor log_number identifies a job:\nclosure_id is a route-level project id, and one log number can cover\nwindows at different places on different days, or be re-issued daily at\nthe same place. window_id is the only unique key.\n\nThe planned window is an estimate that crews overrun, so planned_end is NOT\nmapped onto the envelope `expires` (the same rule as PG\u0026E's restoration\nestimate). A set-up closure stays ACTIVE until the crew radios it picked up."
     },
     "v1LatLng": {
       "type": "object",
@@ -1577,7 +1785,8 @@
       "type": "object",
       "properties": {
         "logNumber": {
-          "type": "string"
+          "type": "string",
+          "title": "CHP log number; for a Caltrans closure, its closure id"
         },
         "impact": {
           "type": "string",
@@ -1593,6 +1802,10 @@
             "type": "string"
           },
           "title": "structured extras from AI analysis (internal keys stripped)"
+        },
+        "closure": {
+          "$ref": "#/definitions/v1LaneClosureDetail",
+          "title": "Caltrans planned closures only (source `caltrans`)"
         }
       },
       "description": "Kind-specific only. The incident type is the envelope `category`, the human\nlocation is `area_label`, and the short line is the `headline` — none are\nrepeated here."

@@ -21,6 +21,7 @@ import (
 	"github.com/dpup/sierra-data/internal/clients/caloes"
 	"github.com/dpup/sierra-data/internal/clients/caltrans"
 	"github.com/dpup/sierra-data/internal/clients/census"
+	"github.com/dpup/sierra-data/internal/clients/cwwp2"
 	"github.com/dpup/sierra-data/internal/clients/firis"
 	"github.com/dpup/sierra-data/internal/clients/google"
 	"github.com/dpup/sierra-data/internal/clients/meshcore"
@@ -66,6 +67,17 @@ func main() {
 	// Initialize external API clients using top-level client configurations
 	googleClient := google.NewClient(appConfig.GoogleRoutes.APIKey)
 	caltransClient := caltrans.NewFeedParser()
+	cwCfg := appConfig.Roads.CaltransFeeds.CWWP2
+	cwClient := cwwp2.NewClient()
+	if cwCfg.BaseURL != "" {
+		cwClient.BaseURL = cwCfg.BaseURL
+	}
+	if cwCfg.StaleAfter > 0 {
+		cwClient.StaleAfter = cwCfg.StaleAfter
+	}
+	if len(cwCfg.ChainControlDistricts) > 0 {
+		caltransClient.UseCWWP2ChainControls(cwClient, cwCfg.ChainControlDistricts)
+	}
 	weatherClient := weather.NewClient(appConfig.OpenWeather.APIKey)
 	nwsClient := nws.NewClient(appConfig.Weather.NWS.UserAgent)
 
@@ -149,9 +161,11 @@ func main() {
 	}
 
 	// Hazard condition-layer projector: gridapi calls BuildLayer for the live
-	// condition layers (road_segment, chain_control, fire_weather). The event
-	// layers are projected from the grid store by gridapi itself.
+	// condition layers (road_segment, chain_control, fire_weather,
+	// message_sign). The event layers are projected from the grid store by
+	// gridapi itself.
 	hazardsService := hazards.NewServiceWithAPIs(appConfig, roadsService, weatherService, caltransClient, cacheInstance)
+	hazardsService.UseMessageSigns(cwClient, cwCfg.MessageSignDistricts)
 
 	// NWS weather-alert enhancement is optional: nil when disabled or keyless
 	// (the scheduler then serves raw alerts — enhancement never gates ingest).
@@ -162,13 +176,25 @@ func main() {
 
 	// One poller per upstream scope; weather_alert and road_incident reuse the
 	// services' cached, budgeted pipelines (plan decision 6).
+	roadIncidents := ingest.NewRoadIncidentNormalizer(appConfig, roadsService)
 	pollers := []ingest.PollerSpec{
 		{Normalizer: ingest.NewEarthquakeNormalizer(appConfig, usgs.NewClient()), Interval: gridPollInterval(appConfig, "usgs")},
 		{Normalizer: ingest.NewWildfireNormalizer(appConfig, calfire.NewClient(), firis.NewClient()), Interval: gridPollInterval(appConfig, "calfire", "firis")},
 		{Normalizer: ingest.NewEvacuationNormalizer(appConfig, caloes.NewClient()), Interval: gridPollInterval(appConfig, "caloes")},
 		{Normalizer: ingest.NewWeatherAlertNormalizer(appConfig, weatherService), Interval: gridPollInterval(appConfig, "nws")},
-		{Normalizer: ingest.NewRoadIncidentNormalizer(appConfig, roadsService), Interval: gridPollInterval(appConfig, "chp", "caltrans")},
+		// chp alone, or chp + caltrans when lane closures still come from
+		// lcs2way.kml (see RoadIncidentNormalizer.SourceIDs).
+		{Normalizer: roadIncidents, Interval: gridPollInterval(appConfig, roadIncidents.SourceIDs()...)},
 		{Normalizer: ingest.NewPowerNormalizer(appConfig, pge.NewClient()), Interval: gridPollInterval(appConfig, "pge", "psps")},
+	}
+	// Caltrans lane closures from CWWP2, scheduled windows included. Its own
+	// poller on the caltrans interval rather than the CHP one: the two district
+	// files are ~5 MB together, uncompressed, and the portal does not gzip.
+	if len(appConfig.Roads.CaltransFeeds.CWWP2.LaneClosureDistricts) > 0 {
+		pollers = append(pollers, ingest.PollerSpec{
+			Normalizer: ingest.NewLaneClosureNormalizer(appConfig, cwClient),
+			Interval:   gridPollInterval(appConfig, "caltrans"),
+		})
 	}
 
 	// Authenticated push ingest (optional): operator-run monitors POST to
@@ -251,6 +277,21 @@ func main() {
 	// /api/v1/places:resolve?address=).
 	censusClient := census.NewClient()
 	gridapiService := gridapi.NewService(gridStore, weatherService, censusClient, appConfig, hazardsService)
+
+	// Caltrans CCTV camera directory (GET /api/v1/cameras). The lists are
+	// near-static, so they refresh in the background and a request never waits
+	// on Caltrans. Without districts the RPC answers UNAVAILABLE.
+	if cams := appConfig.Roads.CaltransFeeds.CWWP2.Cameras; len(cams.Districts) > 0 {
+		camClient := cwwp2.NewClient()
+		if base := appConfig.Roads.CaltransFeeds.CWWP2.BaseURL; base != "" {
+			camClient.BaseURL = base
+		}
+		cameraService := services.NewCameraService(camClient, cams.Districts, cams.RefreshInterval)
+		go cameraService.Run(ctx)
+		gridapiService.Cameras = cameraService
+		logging.Infow(ctx, "Camera directory enabled",
+			"districts", cams.Districts, "nearMeters", cams.Near())
+	}
 
 	// MCP endpoint (docs/design/mcp-design.md): read-only tools for LLM agents over
 	// Streamable HTTP. The tools call the /api/v1 surface in-process against the
@@ -410,7 +451,7 @@ var gridSourceInfo = map[string]struct{ name, attribution, homepage string }{
 	"caloes":   {"Cal OES (evacuation zones)", "Cal OES — reference only", caloes.SourceURL},
 	"nws":      {"National Weather Service (Sacramento)", "NOAA / National Weather Service", "https://www.weather.gov/sto"},
 	"chp":      {"CHP (traffic incidents)", "quickmap.dot.ca.gov", quickMapURL},
-	"caltrans": {"Caltrans (chain control + lane closures)", "quickmap.dot.ca.gov", quickMapURL},
+	"caltrans": {"Caltrans (chain control + lane closures)", caltrans.SourceQuickMap, quickMapURL}, // attribution: see caltransAttribution
 	"meshcore": {"MeshCore Mesh", "MeshCore community mesh", "https://map.meshcore.io"},
 	"pge":      {"PG&E (electric outages)", "Pacific Gas and Electric", pge.OutageMapURL},
 	"psps":     {"PG&E (public safety power shutoffs)", "Pacific Gas and Electric", pge.PSPSUpdatesURL},
@@ -419,6 +460,21 @@ var gridSourceInfo = map[string]struct{ name, attribution, homepage string }{
 	// county's line, so its name stays generic.
 	"burnline":     {"County burn line (burn day)", "County air district burn information line", burnDayHomepage},
 	"calfire-burn": {"CAL FIRE (burn permit suspension)", "CAL FIRE", calfireBurnHomepage},
+}
+
+// caltransAttribution names the feeds actually behind the caltrans row, which
+// depend on config. Any CWWP2 use means both feeds: CWWP2 chain-control levels
+// are MERGED with cc.kml (never replace it), and CWWP2 lane closures leave
+// chain control on cc.kml when its own districts are unset. The row's
+// attribution is also the chain_control layer's metadata.attribution (via
+// gridapi.conditionLayerSourceIDs), which said quickmap alone after CWWP2
+// started supplying the levels.
+func caltransAttribution(cfg *config.Config) string {
+	cw := cfg.Roads.CaltransFeeds.CWWP2
+	if len(cw.ChainControlDistricts) == 0 && len(cw.LaneClosureDistricts) == 0 {
+		return caltrans.SourceQuickMap
+	}
+	return caltrans.SourceCWWP2 + " · " + caltrans.SourceQuickMap
 }
 
 // Homepages used by more than one source row, or that have no constant of their
@@ -611,6 +667,9 @@ func gridSourceSeeds(cfg *config.Config) []store.SourceSeed {
 		info, ok := gridSourceInfo[id]
 		if !ok {
 			info.name = id
+		}
+		if id == "caltrans" {
+			info.attribution = caltransAttribution(cfg)
 		}
 		seeds = append(seeds, store.SourceSeed{
 			ID:            id,

@@ -10,6 +10,7 @@ caching, route classification, and AI enhancement.
 | `weather.go`      | `WeatherService`: current conditions + combined alerts list. |
 | `weather_nws.go`  | NWS zone alerts + fire-weather classification for `WeatherService`. |
 | `periodic_refresh.go` | Background goroutine that warms the roads cache. |
+| `cameras.go`      | `CameraService`: the Caltrans CCTV directory behind `GET /api/v1/cameras`. Own background refresh, not the TTL cache — see below. |
 
 ## Caching model (read this before adding an endpoint)
 
@@ -50,6 +51,16 @@ returning early.
 Google Routes has a separate 20-minute cache (`google_routes_<id>`) to stay
 within the monthly API budget — adding monitored roads increases that load.
 
+**The camera directory is the one exception to the model above.**
+`CameraService` refreshes every district in the background (`Run`, 6h; 5 min
+after a failure) and keeps each district's last good list for as long as a
+failure lasts, served as `STALE` with its fetch time. It never evicts at 2×TTL.
+The camera list is near-static (edited weeks to months apart), so last week's
+list is still right, and the images it points at are live regardless. Evicting
+it would turn a portal blip into "no cameras". Out-of-service cameras and rows
+with no position or https image are dropped there; the geography filter lives in
+`internal/gridapi/cameras.go`, which has the place directory.
+
 ## Adding a new endpoint
 
 1. Add the RPC + messages to the relevant `.proto`, then `make proto`
@@ -67,9 +78,17 @@ within the monthly API budget — adding monitored roads increases that load.
 ## Region-wide incidents (`incidents.go`)
 
 Surfaces the same Caltrans/CHP data as road alerts, but as a flat list scoped by
-a configured bounding box (`roads.incidentAreas`) instead of per-route. Parsing
-of log number / type / location / time is done structurally from the KML
-description. See `internal/clients/CLAUDE.md` for the 2026 feed-format caveat.
+a configured bounding box (`roads.incidentAreas`) instead of per-route. Its only
+caller is the grid's road-incident poller. Parsing of log number / type /
+location / time is done structurally from the KML description. See
+`internal/clients/CLAUDE.md` for the 2026 feed-format caveat.
+
+**With CWWP2 lane closures configured (`laneClosureDistricts`), `refreshIncidents`
+does not read `lcs2way.kml` at all**: the grid's `LaneClosureNormalizer` owns
+closures, and reading the KML here would only spend enhancement budget on
+incidents nobody stores. CHP is then the only feed, so a CHP failure fails the
+refresh, and `IncidentFeedHealth`'s `laneErr` stays nil. Per-road status
+(`refreshRoadData`) still reads `lcs2way.kml` either way.
 
 **Every incident is AI-enhanced** (`enhanceIncident`), via the same
 content-hash 24h cache as road alerts (`enhanceRawAlert` in `roads.go` —

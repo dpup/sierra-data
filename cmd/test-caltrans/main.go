@@ -16,7 +16,8 @@ import (
 
 func main() {
 	var (
-		feedType = flag.String("feed", "all", "Feed type: all, chain, lanes, chp")
+		feedType = flag.String("feed", "all", "Feed type: all, chain, lanes, chp, cwwp2")
+		district = flag.Int("district", 10, "Caltrans district for -feed=cwwp2")
 		offline  = flag.Bool("offline", false, "Use local test data instead of live feeds")
 		help     = flag.Bool("help", false, "Show help")
 	)
@@ -33,6 +34,7 @@ func main() {
 		fmt.Printf("  chain - Chain control feed only\n")
 		fmt.Printf("  lanes - Lane closures feed only\n")
 		fmt.Printf("  chp   - CHP incidents feed only\n")
+		fmt.Printf("  cwwp2 - CWWP2 portal: per-checkpoint chain controls, message signs, lane closures, cameras (live only; -district=N)\n")
 		fmt.Printf("\nExamples:\n")
 		fmt.Printf("  %s\n", os.Args[0])
 		fmt.Printf("  %s -feed=chain\n", os.Args[0])
@@ -67,6 +69,11 @@ func main() {
 		testLaneClosures(parser, ctx)
 	case "chp":
 		testCHPIncidents(parser, ctx)
+	case "cwwp2":
+		if *offline {
+			log.Fatalf("-feed=cwwp2 is live only; its fixtures are exercised by go test ./internal/clients/cwwp2")
+		}
+		testCWWP2(ctx, *district)
 	case "all":
 		testChainControls(parser, ctx)
 		testLaneClosures(parser, ctx)

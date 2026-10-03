@@ -1,0 +1,106 @@
+{
+	"data": [
+		{
+			"cc": {
+				"index": "7-KER-5-10.2-N-",
+				"recordTimestamp": {
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location": {
+					"district": "7",
+					"locationName": "Grapevine",
+					"nearbyPlace": "Lebec",
+					"longitude": "-118.930776",
+					"latitude": "34.939684",
+					"elevation": "1528",
+					"direction": "North",
+					"county": "Kern",
+					"route": "I-5",
+					"routeSuffix": "",
+					"postmilePrefix": "",
+					"postmile": "10.20",
+					"alignment": "",
+					"milepost": "215.32"
+				},
+				"inService": "true",
+				"statusData": {
+					"statusTimestamp": {
+						"statusDate": "2023-01-02",
+						"statusTime": "18:05:16"
+					},
+					"status": "R-0",
+					"statusDescription": "No chain controls are in effect at this time."
+				}
+			}
+		},
+		{
+			"cc": {
+				"index": "7-LA-2-35.3-E-",
+				"recordTimestamp": {
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location": {
+					"district": "7",
+					"locationName": "Ladybug curve",
+					"nearbyPlace": "Not Reported",
+					"longitude": "Not Reported",
+					"latitude": "Not Reported",
+					"elevation": "Not Reported",
+					"direction": "East",
+					"county": "Los Angeles",
+					"route": "SR-2",
+					"routeSuffix": "",
+					"postmilePrefix": "",
+					"postmile": "35.30",
+					"alignment": "",
+					"milepost": "25.03"
+				},
+				"inService": "true",
+				"statusData": {
+					"statusTimestamp": {
+						"statusDate": "2026-03-11",
+						"statusTime": "10:22:15"
+					},
+					"status": "-118.1307759",
+					"statusDescription": ""
+				}
+			}
+		},
+		{
+			"cc": {
+				"index": "7-LA-2-57-E-",
+				"recordTimestamp": {
+					"recordDate": "2026-09-29",
+					"recordTime": "20:57:03"
+				},
+				"location": {
+					"district": "7",
+					"locationName": "6 miles East of Newcomb's Ranch",
+					"nearbyPlace": "Not Reported",
+					"longitude": "Not Reported",
+					"latitude": "Not Reported",
+					"elevation": "Not Reported",
+					"direction": "East",
+					"county": "Los Angeles",
+					"route": "SR-2",
+					"routeSuffix": "",
+					"postmilePrefix": "",
+					"postmile": "57.00",
+					"alignment": "",
+					"milepost": "46.73"
+				},
+				"inService": "true",
+				"statusData": {
+					"statusTimestamp": {
+						"statusDate": "2026-03-11",
+						"statusTime": "10:22:15"
+					},
+					"status": "-117.9363729",
+					"statusDescription": ""
+				}
+			}
+		}
+	]
+}

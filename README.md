@@ -420,6 +420,19 @@ Operator-configured Broadcastify public-safety scanner feeds for the area
 Areas (bounds, scanner feeds, incident region) are configured under
 `hazards.areas` in `prefab.yaml`.
 
+#### Traffic Cameras
+
+```
+GET /api/v1/cameras?place=
+```
+
+Caltrans CCTV cameras within 25 km of a coverage area (`?place` keeps those
+within 25 km of that place, nearest first): `imageUrl` (live snapshot),
+`imageRefreshMinutes`, `streamUrl` (HLS, when published), route, position and
+`distanceMeters`. Link-out only: the images and streams are Caltrans's and are
+never proxied. Sourced from the CWWP2 portal's District 10 camera list;
+configured under `roads.caltransFeeds.cwwp2.cameras` in `prefab.yaml`.
+
 ## Grid Info Service (v2)
 
 The v2 layer normalizes every hazard source into a canonical **event** model and

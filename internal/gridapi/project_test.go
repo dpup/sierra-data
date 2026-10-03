@@ -307,7 +307,7 @@ func TestProjectEvents_Earthquake_UpdatedAtRule(t *testing.T) {
 	assert.Empty(t, feats[1].Properties.Source.URL, "no canonical URL projects no source URL")
 }
 
-func TestProjectEvents_RoadIncident_ConstantSourceBlock(t *testing.T) {
+func TestProjectEvents_RoadIncident_SourceBlockPerFeed(t *testing.T) {
 	const point = `{"type":"Point","coordinates":[-120.35,38.2]}`
 	chp := &gridv1.Event{
 		Id:          "chp:250916ST0066",
@@ -327,11 +327,9 @@ func TestProjectEvents_RoadIncident_ConstantSourceBlock(t *testing.T) {
 			LogNumber: "250916ST0066", Impact: "severe",
 		}},
 	}
-	// Lane closures carry caltrans provenance in the STORE (source health), but
-	// the shipped envelope always used the one constant block — the projection
-	// must too (plan §5 item 5).
-	closure := &gridv1.Event{
-		Id:         "chp:closure-hwy-4-avery",
+	// A closure from the old lcs2way.kml path: caltrans, credited to quickmap.
+	kmlClosure := &gridv1.Event{
+		Id:         "caltrans:C4TA-7-abc123",
 		Layer:      gridv1.Layer_ROAD_INCIDENT,
 		Category:   "closure",
 		Severity:   gridv1.Severity_MODERATE,
@@ -339,12 +337,36 @@ func TestProjectEvents_RoadIncident_ConstantSourceBlock(t *testing.T) {
 		Headline:   "One-way traffic control for utility work",
 		AreaLabel:  "Hwy 4 EB near Avery",
 		Geometry:   geom(point),
-		Provenance: &gridv1.Provenance{SourceId: "caltrans", SourceName: "Caltrans"},
+		Provenance: &gridv1.Provenance{SourceId: "caltrans", SourceName: "Caltrans", Attribution: "quickmap.dot.ca.gov"},
 		Detail:     &gridv1.Event_RoadIncident{RoadIncident: &gridv1.RoadIncidentDetail{}},
 	}
+	// A scheduled CWWP2 window: no AI summary, a composed description, and the
+	// planned window in the closure block.
+	window := &gridv1.Event{
+		Id:          "caltrans:d10-C4QB-0004-2026-10-02-070100",
+		Layer:       gridv1.Layer_ROAD_INCIDENT,
+		Category:    "closure",
+		Severity:    gridv1.Severity_MINOR,
+		Status:      gridv1.EventStatus_SCHEDULED,
+		Headline:    "Hwy 4 shoulder closure (Drainage Work)",
+		Description: "Closed: right shoulder (of 2 lanes).",
+		AreaLabel:   "Hwy 4 at Avery",
+		Geometry:    geom(point),
+		Effective:   ts("2026-10-02T14:01:00Z"),
+		ObservedAt:  ts("2026-09-30T03:55:00Z"),
+		Provenance:  &gridv1.Provenance{SourceId: "caltrans", SourceName: "Caltrans", Attribution: "cwwp2.dot.ca.gov"},
+		Detail: &gridv1.Event_RoadIncident{RoadIncident: &gridv1.RoadIncidentDetail{
+			LogNumber: "C4QB",
+			Closure: &gridv1.LaneClosureDetail{
+				WindowId: "C4QB-0004-2026-10-02-07:01:00", ClosureType: "Lane", WorkType: "Drainage Work",
+				LanesClosed: "RShoulder", TotalLanes: 2,
+				PlannedStart: ts("2026-10-02T14:01:00Z"), PlannedEnd: ts("2026-10-02T21:59:00Z"),
+			},
+		}},
+	}
 
-	feats := ProjectEvents(hazards.LayerRoadIncident, []*gridv1.Event{chp, closure})
-	require.Len(t, feats, 2)
+	feats := ProjectEvents(hazards.LayerRoadIncident, []*gridv1.Event{chp, kmlClosure, window})
+	require.Len(t, feats, 3)
 
 	assert.JSONEq(t, `{
 	  "type": "Feature",
@@ -367,14 +389,44 @@ func TestProjectEvents_RoadIncident_ConstantSourceBlock(t *testing.T) {
 	  }
 	}`, featJSON(t, feats[0]))
 
-	// caltrans-sourced closure still emits the constant chp block, an empty
-	// incident kind block (no log number), and no effective (no dispatch time).
 	cl := feats[1]
-	assert.Equal(t, hazards.Source{ID: "chp", Name: "CHP / Caltrans", Attribution: "quickmap.dot.ca.gov"}, cl.Properties.Source)
+	assert.Equal(t, hazards.Source{ID: "caltrans", Name: "Caltrans", Attribution: "quickmap.dot.ca.gov"}, cl.Properties.Source)
 	require.NotNil(t, cl.Properties.Incident)
-	assert.Empty(t, cl.Properties.Incident.LogNumber)
+	assert.Nil(t, cl.Properties.Incident.Closure)
+	assert.Empty(t, cl.Properties.Description, "a KML closure without AI text projects no description, as before")
 	assert.Empty(t, cl.Properties.Effective)
-	assert.Equal(t, "ACTIVE", cl.Properties.Status)
+
+	assert.JSONEq(t, `{
+	  "type": "Feature",
+	  "geometry": `+point+`,
+	  "properties": {
+	    "id": "caltrans:d10-C4QB-0004-2026-10-02-070100",
+	    "layer": "ROAD_INCIDENT",
+	    "kind": "Road incident",
+	    "category": "closure",
+	    "severity": "MINOR",
+	    "severityRank": 1,
+	    "headline": "Hwy 4 shoulder closure (Drainage Work)",
+	    "description": "Closed: right shoulder (of 2 lanes).",
+	    "status": "SCHEDULED",
+	    "effective": "2026-10-02T14:01:00Z",
+	    "updatedAt": "2026-09-30T03:55:00Z",
+	    "areaLabel": "Hwy 4 at Avery",
+	    "source": {"id": "caltrans", "name": "Caltrans", "attribution": "cwwp2.dot.ca.gov"},
+	    "incident": {
+	      "logNumber": "C4QB",
+	      "closure": {
+	        "windowId": "C4QB-0004-2026-10-02-07:01:00",
+	        "closureType": "Lane",
+	        "workType": "Drainage Work",
+	        "lanesClosed": "RShoulder",
+	        "totalLanes": 2,
+	        "plannedStart": "2026-10-02T14:01:00Z",
+	        "plannedEnd": "2026-10-02T21:59:00Z"
+	      }
+	    }
+	  }
+	}`, featJSON(t, feats[2]))
 }
 
 func TestProjectEvents_Network_MeshNode(t *testing.T) {

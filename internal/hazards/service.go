@@ -34,15 +34,19 @@ type WeatherAPI interface {
 
 // Service projects the roads/weather feeds into the unified GeoJSON hazard
 // model. Since the /api/v1 hazards surface was removed, its only consumer is the
-// /v1 grid API (internal/gridapi), which calls BuildLayer for the three
-// condition layers (road_segment, chain_control, fire_weather); the event
-// layers are projected directly from the store by gridapi.
+// /v1 grid API (internal/gridapi), which calls BuildLayer for the four
+// condition layers (road_segment, chain_control, fire_weather, message_sign);
+// the event layers are projected directly from the store by gridapi.
 type Service struct {
 	cfg      *config.Config
 	roads    RoadsAPI
 	weather  WeatherAPI
 	caltrans *caltrans.FeedParser
 	cache    *cache.Cache
+
+	// signs and signDistricts back message_sign; set by UseMessageSigns.
+	signs         MessageSignAPI
+	signDistricts []int
 
 	// layerBuilders is derived once from layerRegistry() so the dispatch map has
 	// one source of truth.
@@ -85,6 +89,7 @@ func (s *Service) layerRegistry() []layerEntry {
 	return []layerEntry{
 		{LayerChainControl, s.chainControls},
 		{LayerFireWeather, s.fireWeather},
+		{LayerMessageSign, s.messageSigns},
 		{LayerRoadSegment, s.roadSegments},
 	}
 }
@@ -130,13 +135,13 @@ func partialData(err error) error         { return &partialDataError{err} }
 
 // layerTTL is the cache lifetime for a layer's upstream data, or 0 for layers
 // that are already cached by the underlying roads/weather services (no
-// double-caching). The new keyless upstreams + the live Caltrans KML chain-
-// control fetch are cached here so a burst of map clients doesn't fan out to
+// double-caching). The new keyless upstreams + the live Caltrans chain-control
+// fetch (CWWP2 + cc.kml) are cached here so a burst of map clients doesn't fan out to
 // every source on every request, and so a transient upstream blip can fall back
 // to the last good fetch (STALE) instead of going UNAVAILABLE.
 func layerTTL(layer string) time.Duration {
 	switch layer {
-	case LayerEarthquake, LayerWildfire, LayerChainControl, LayerFireWeather:
+	case LayerEarthquake, LayerWildfire, LayerChainControl, LayerFireWeather, LayerMessageSign:
 		return 5 * time.Minute
 	case LayerEvacuation:
 		return 2 * time.Minute // life-safety: short, so STALE fallback stays recent
@@ -283,9 +288,10 @@ func finalize(meta layerMetadata, features []Feature, status string, lastUpdate 
 // BuildLayer builds one layer for an area through the same fail-loud path the
 // GeoJSON and /situation endpoints use (buildLayer + layerMeta), exported for
 // the /v1 grid API's condition-backed map layers (road_segment, chain_control,
-// fire_weather). ok is false for an unknown layer; every other return mirrors
-// the metadata block the shipped endpoints emit (status OK|STALE|UNAVAILABLE,
-// lastSourceUpdate zero unless serving stale, per-layer attribution/sourceURL).
+// fire_weather, message_sign). ok is false for an unknown layer; every other
+// return mirrors the metadata block the shipped endpoints emit (status
+// OK|STALE|UNAVAILABLE, lastSourceUpdate zero unless serving stale, per-layer
+// attribution/sourceURL).
 func (s *Service) BuildLayer(ctx context.Context, area config.HazardArea, layer string) (features []Feature, status string, lastSourceUpdate time.Time, attribution, sourceURL string, ok bool) {
 	build, found := s.layerBuilders[layer]
 	if !found {
@@ -298,28 +304,77 @@ func (s *Service) BuildLayer(ctx context.Context, area config.HazardArea, layer 
 // --- layer builders (re-project existing feeds) ---
 func (s *Service) chainControls(ctx context.Context, area config.HazardArea) ([]Feature, error) {
 	controls, err := s.caltrans.ParseChainControlsDetailed(ctx)
-	if err != nil {
+	var partial *caltrans.PartialError
+	if err != nil && !errors.As(err, &partial) {
 		return nil, err
 	}
 	var out []Feature
+	var unrecognized, unplaced, uncorroborated []string
 	for _, c := range controls {
-		if c.Coordinates == nil || !area.Bounds.Contains(c.Coordinates.Latitude, c.Coordinates.Longitude) {
+		if c.Coordinates == nil {
+			// Can't be ruled in or out of the area, so the layer can't claim
+			// to be complete. (Only CWWP2 rows can lack a position.)
+			unplaced = append(unplaced, strings.TrimSpace(c.Highway+" "+c.LocationName))
 			continue
 		}
+		if !area.Bounds.Contains(c.Coordinates.Latitude, c.Coordinates.Longitude) {
+			continue
+		}
+		if c.Uncorroborated {
+			uncorroborated = append(uncorroborated, strings.TrimSpace(c.Highway+" "+c.Direction+" "+c.LocationName+" "+c.Level))
+		}
+		if c.Unrecognized {
+			// Neither a requirement nor an all-clear: keep it off the map, but
+			// don't let the layer claim OK over a checkpoint we can't read.
+			unrecognized = append(unrecognized, fmt.Sprintf("%s %s (%q)", c.Highway, c.LocationName, c.RawStatus))
+			continue
+		}
+		attribution := c.Source
+		if attribution == "" {
+			attribution = caltrans.SourceQuickMap
+		}
+		category, headline := strings.ToLower(c.Level), strings.TrimSpace(c.Highway+" chain control "+c.Level)
+		if c.Closed {
+			category, headline = "closed", strings.TrimSpace(c.Highway+" road closed")
+		}
 		p := Properties{
-			ID:           "cc:" + nonEmpty(c.MessageID, c.LocationName),
+			ID:           "cc:" + nonEmpty(c.MessageID, c.LocationName, fmt.Sprintf("%.5f,%.5f", c.Coordinates.Latitude, c.Coordinates.Longitude)),
 			Layer:        strings.ToUpper(LayerChainControl),
 			Kind:         "Chain control",
-			Category:     strings.ToLower(c.Level),
-			Headline:     strings.TrimSpace(c.Highway + " chain control " + c.Level),
+			Category:     category,
+			Headline:     headline,
 			Description:  c.Description,
 			AreaLabel:    c.LocationName,
 			Effective:    c.EffectiveTime,
-			Source:       Source{ID: "caltrans", Name: "Caltrans", Attribution: "quickmap.dot.ca.gov"},
+			Source:       Source{ID: "caltrans", Name: "Caltrans", Attribution: attribution},
 			ChainControl: &ChainControlProps{Level: c.Level, Highway: c.Highway, Direction: c.Direction},
 		}
 		p.setSeverity(fromChainLevelStr(c.Level))
+		if c.Closed {
+			// One notch above a clear checkpoint: a closed road is worth seeing
+			// on the map. Kept below R-1 because the seasonal pass gates hold
+			// this state all winter. Note /summary's roads domain counts
+			// anything above INFO as active, so an in-area gate shows there too.
+			p.setSeverity(SevMinor)
+		}
 		out = append(out, Feature{Type: "Feature", Geometry: PointGeom(c.Coordinates.Latitude, c.Coordinates.Longitude), Properties: p})
+	}
+	var degraded []error
+	if partial != nil {
+		degraded = append(degraded, partial)
+	}
+	if len(unrecognized) > 0 {
+		degraded = append(degraded, fmt.Errorf("unrecognized chain-control status at %s", strings.Join(unrecognized, "; ")))
+	}
+	if len(unplaced) > 0 {
+		degraded = append(degraded, fmt.Errorf("chain-control entries without a position: %s", strings.Join(unplaced, "; ")))
+	}
+	if len(uncorroborated) > 0 {
+		// Shown (the safe side), not degraded: the evidence for issue #12.
+		logging.Warnw(ctx, "cc.kml reports chain controls CWWP2 does not", "area", area.ID, "controls", uncorroborated)
+	}
+	if len(degraded) > 0 {
+		return out, partialData(errors.Join(degraded...))
 	}
 	return out, nil
 }

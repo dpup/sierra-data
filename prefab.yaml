@@ -76,10 +76,57 @@ roads:
     roadConditions:
       refreshInterval: "10m"  # Caltrans road conditions page (closures, chain controls)
       url: "https://roads.dot.ca.gov/roadscell.php?roadnumber=%s"
+    # Caltrans CWWP2 data portal — structured per-district feeds. Chain
+    # controls are MERGED with cc.kml (neither overrides the other): every
+    # CWWP2 checkpoint reports explicitly (R-0 on a quiet day), so an empty or
+    # frozen feed is an error instead of a silent "no controls", while cc.kml
+    # still contributes closures, truck levels, controls outside these
+    # districts, and any control CWWP2 doesn't confirm. District 10 covers
+    # Calaveras, Tuolumne, Alpine, Amador and Mariposa. See
+    # internal/clients/CLAUDE.md.
+    #
+    # messageSignDistricts backs the message_sign map layer: what each
+    # changeable message sign is showing, verbatim and always INFO (mostly
+    # safety-campaign boilerplate; context, never a hazard).
+    cwwp2:
+      baseUrl: "https://cwwp2.dot.ca.gov/data"
+      chainControlDistricts: [10]
+      # Lane closures for the road_incident layer, SCHEDULED windows included,
+      # one event per window (lcs2way.kml, which this replaces, listed only
+      # closures set up right now). Fetched by their own grid poller on the
+      # grid.sources.caltrans interval. The incident box below reaches two
+      # districts: 10 (Calaveras, Tuolumne, Alpine, Amador, Mariposa, the
+      # Valley) and 3 (El Dorado: US-50, SR-49 north of the Cosumnes). A
+      # district missing here is a closure never seen, not a closure ended.
+      # Empty falls back to lcs2way.kml through the incidents pipeline.
+      laneClosureDistricts: [3, 10]
+      messageSignDistricts: [10]
+      staleAfter: "1h"
+      # Traffic cameras (GET /api/v1/cameras): links to Caltrans's snapshot
+      # images and HLS streams, never proxied. A camera is listed when it is in
+      # service and within nearMeters of a hazards.areas polygon; ?place keeps
+      # those within nearMeters of the place. At 25 km Ebbetts Pass gets its
+      # four approach cameras (Hwy 108 Soulsbyville, Hwy 88 Pine Grove, Hwy 120
+      # Ferretti Rd and Buck Meadows, the farthest at 23.9 km).
+      #
+      # Only District 10 is fetched because nothing in the other districts
+      # falls inside that radius (surveyed 2026-10-01). District 3 has no Hwy 88
+      # or Carson Pass camera; its nearest are US-50 at Wrights Lake (26.5 km)
+      # and Echo Summit (31 km). District 9's one camera on Sonora Pass is
+      # image-only, at the US-395/SR-108 junction (43 km).
+      #
+      # The lists are near-static (edited weeks to months apart), hence the
+      # long refresh. A failed refresh keeps serving the last good list as
+      # STALE and retries in 5 minutes.
+      cameras:
+        districts: [10]
+        nearMeters: 25000
+        refreshInterval: "6h"
 
   # Scope for the region-wide incidents feed. The CHP/Caltrans KML feeds are
   # STATEWIDE, and this box is the ONLY geographic gate before an incident is
-  # AI-enhanced — so its size is a cost as well as a coverage decision.
+  # AI-enhanced — so its size is a cost as well as a coverage decision. CWWP2
+  # lane closures are scoped by the same box (they are not AI-enhanced).
   #
   # It is the hazards.areas ebbetts-pass box grown by ~0.25 deg (~27 km). The
   # margin is deliberate and is NOT the wildfire margin's reasoning: a fire
@@ -450,8 +497,11 @@ grid:
       pollInterval: "5m"
       disappearance: "resolve"
     caltrans:
-      # Lane closures are scheduled operations; the upstream feed refreshes
-      # on a 10m cadence, so polling faster just re-reads the same data.
+      # Lane closures (CWWP2, roads.caltransFeeds.cwwp2.laneClosureDistricts).
+      # The portal regenerates every few minutes, but each poll moves ~5 MB of
+      # uncompressed JSON (D3 + D10) and closures are planned operations, so
+      # 10m. resolve: a window leaves our set when it is picked up, cancelled,
+      # or past its window without being set up.
       pollInterval: "10m"
       disappearance: "resolve"
     # PG&E electric outages. The outage layers are authoritatively active-only —

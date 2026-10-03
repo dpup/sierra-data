@@ -19,7 +19,11 @@ type Normalizer interface {
 ```
 
 - **`SourceIDs`** — the source rows this one poller writes health for. A poller may
-  span several (wildfire → `calfire`+`firis`; road incidents → `chp`+`caltrans`).
+  span several (wildfire → `calfire`+`firis`; PG&E → `pge`+`psps`). The reverse
+  is forbidden: **a source has exactly one poller.** Two pollers sweeping one
+  source against different event sets resolve each other's events every tick.
+  That is why road incidents cover `chp`+`caltrans` only while closures still
+  come from `lcs2way.kml`, and `chp` alone once CWWP2 owns `caltrans`.
 - **`Prior`** — a read-only view of the store's current ACTIVE/SCHEDULED events for
   this poller's sources (`ByID`, `ForSource`), built by the scheduler before each
   tick. Normalizers use it to keep **identity/state stable across ticks** — e.g.
@@ -422,6 +426,66 @@ would both mint a revision and confuse the per-source sweep, which diffs
 records an ERROR, not a success — `RecordAttempt(nil)` would paint a monitor that
 was never set up as a healthy feed.
 
+## Lane closures: one event per window, from CWWP2 (`lane_closure.go`)
+
+With `roads.caltransFeeds.cwwp2.laneClosureDistricts` set, Caltrans closures come
+from the CWWP2 portal through `LaneClosureNormalizer` (source `caltrans`, its own
+10m poller because the D3 + D10 files are ~5 MB uncompressed). The incidents
+pipeline stops reading `lcs2way.kml`, and `RoadIncidentNormalizer` drops
+`caltrans` from its `SourceIDs` (see "a source has exactly one poller" above).
+Empty districts fall back to the old KML path.
+
+**The unit is the window, because Caltrans has no other one.** A multi-day job is
+one row per day, and neither identifier upstream names a job: `C50KB` log 8 is an
+alternating closure on US-50 at Sly Park Rd one week and a lane closure at Point
+View Dr the next, and `C88EA` issues a new log number every day at the same spot
+(logs 4/5, 9/10, 14/15, 19/20). A per-job event's geometry would walk between
+windows: the history-walks-30-km bug from `services.incidentID`, again. Only 31
+of 203 (closure, log) groups had more than one window anyway, so grouping would
+not have saved much.
+
+- **Id**: `caltrans:d{district}-{index}` with the index's colons dropped. The
+  index embeds the planned start, so a rescheduled window is a new id upstream
+  too. The district is there because the index is only unique per district file.
+- **Status** is `PhaseAt(now)`: SCHEDULED until the 10-97 call, then ACTIVE.
+  COMPLETED and CANCELLED rows linger in the file but are NOT emitted; their
+  absence from a successful poll is what resolves them. The planned end never
+  becomes `expires` (the PG&E ETOR rule): crews overrun, and an overrunning
+  closure must stay ACTIVE until the 10-98.
+- **Text and severity are deterministic** (`hazards.SeverityFromLaneClosure`),
+  never AI. ~10x the closure volume would have starved CHP of the incidents
+  pipeline's 5-per-refresh budget, and the AI headline was hashed, so every
+  re-wording minted a revision. Two KML-era closures reached revisions 40 and 56
+  that way. The headline is what and why, the area label is where, and the
+  description is the lanes. Times are typed fields and are not repeated in text.
+- **Geometry is the begin point**, not a begin→end LineString. A straight chord
+  across a winding mountain road attaches to places the road never touches.
+
+**Fail-loud.** Every district down is a hard error. One district down (HTTP, a
+frozen file, an EMPTY file; the client refuses all three, see
+`internal/clients/CLAUDE.md`) is a `PerSource` error: the healthy district's events
+land, and nothing is swept. An in-scope row the client marks `Unrecognized` (a
+code flag that is not exactly true/false, no start, no end, no position) degrades
+the source the same way, and is not emitted, because its phase is unknown. A row
+with NO position counts as in scope, because it might be. This follows the
+chain-control precedent and is deliberately strict: one bad row holds every
+closure's lifecycle until it is fixed, and `/api/v1/sources` names the row.
+
+**The feed switch adopts KML-era ids** (`adoptLegacyClosureIDs`). Without it the
+first tick after deploy resolves every closure physically in place (a fabricated
+all-clear in ~20 histories) and opens a duplicate for each. A legacy
+`caltrans:{closureId}-{log}-{hash}` event is matched to an ACTIVE window with the
+same closure id and log number and an endpoint within 250 m, unique in both
+directions. On 2026-10-01 all 23 live closures matched exactly one window, at
+0 m. The match recurs each tick until the window is picked up, and no new legacy
+ids are minted, so the shim retires itself. **Delete it after 2026-11-09**, when
+the longest KML-era closure (C26EA, SR-26 at Mokelumne Hill) is planned to end.
+
+**SCHEDULED closures are not counted in the place summary** (`totalActive`, top
+events, the roads domain). That carve-out lives in `internal/gridapi/summary.go`
+with the other two. CWWP2 publishes a week of windows, 200+ in the incident
+box, and planned roadwork is a calendar, not a hazard.
+
 ## Weather-alert headline: deterministic, never AI
 
 `nws.Alert.ShortHeadline` composes `<Event> — <reason>` from the product name
@@ -442,8 +506,9 @@ banner (`nws.fireWeatherFromAlert`, which does not go through the store).
 
 ## Enhancement budget + carry-forward
 
-Only the `WEATHER_ALERT` layer is enhanced here (road incidents arrive already
-AI-enhanced from the `RoadsService` pipeline — do not re-enhance them).
+Only the `WEATHER_ALERT` layer is enhanced here (CHP road incidents arrive already
+AI-enhanced from the `RoadsService` pipeline — do not re-enhance them; CWWP2 lane
+closures are deliberately never enhanced, see above).
 `maybeEnhance`:
 
 - No-op when the enhancer is nil (no OpenAI key / `grid.enhancement.enabled:

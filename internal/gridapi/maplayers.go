@@ -22,10 +22,11 @@ import (
 // Event-backed layers (wildfire, evacuation, weather_alert, earthquake,
 // road_incident) are served from the store via the shared T13 projection, with
 // metadata.source_status derived from the layer's source registry rows.
-// Condition-backed layers (road_segment, chain_control, fire_weather) stay
-// live projections: they delegate to the hazards builders through the narrow
-// hazardsBuilder interface. Both paths emit the SHIPPED FeatureCollection
-// envelope so /v1 map clients and /api/v1/hazards clients read one schema.
+// Condition-backed layers (road_segment, chain_control, fire_weather,
+// message_sign) stay live projections: they delegate to the hazards builders
+// through the narrow hazardsBuilder interface. Both paths emit the SHIPPED
+// FeatureCollection envelope so /v1 map clients and /api/v1/hazards clients
+// read one schema.
 
 // mapSchemaVersion mirrors the shipped hazards metadata schema_version (the
 // unexported hazards const); bump both on a breaking envelope change.
@@ -50,6 +51,7 @@ var conditionLayers = map[string]bool{
 	hazards.LayerRoadSegment:  true,
 	hazards.LayerChainControl: true,
 	hazards.LayerFireWeather:  true,
+	hazards.LayerMessageSign:  true,
 }
 
 // layerSourceIDs maps each event-backed layer slug onto the source registry
@@ -101,24 +103,35 @@ var conditionLayerSourceIDs = map[string][]string{
 	// Google half is credited by the per-feature source block.
 	hazards.LayerRoadSegment: {"caltrans"},
 	hazards.LayerMeshLink:    {"meshcore"},
+	hazards.LayerMessageSign: {"caltrans"},
 }
 
 // registryAttribution joins the attribution lines of the named sources, in
 // declared order, deduped — the same rule eventLayerMeta applies.
 func registryAttribution(layer string, sources []*gridv1.Source) string {
+	return joinAttributions(conditionLayerSourceIDs[layer], sources)
+}
+
+// joinAttributions joins the registry attribution of each source id, in order,
+// with " · ", deduping PARTS rather than whole lines: a row can itself credit
+// two feeds ("cwwp2.dot.ca.gov · quickmap.dot.ca.gov" for caltrans), and
+// road_incident pairs it with chp's "quickmap.dot.ca.gov".
+func joinAttributions(ids []string, sources []*gridv1.Source) string {
 	byID := make(map[string]*gridv1.Source, len(sources))
 	for _, src := range sources {
 		byID[src.GetId()] = src
 	}
 	var parts []string
 	seen := map[string]bool{}
-	for _, id := range conditionLayerSourceIDs[layer] {
-		a := strings.TrimSpace(byID[id].GetAttribution())
-		if a == "" || seen[a] {
-			continue
+	for _, id := range ids {
+		for _, a := range strings.Split(byID[id].GetAttribution(), " · ") {
+			a = strings.TrimSpace(a)
+			if a == "" || seen[a] {
+				continue
+			}
+			seen[a] = true
+			parts = append(parts, a)
 		}
-		seen[a] = true
-		parts = append(parts, a)
 	}
 	return strings.Join(parts, " · ")
 }
@@ -148,6 +161,8 @@ func (s *Service) serveMapLayer(w http.ResponseWriter, r *http.Request, placeKey
 	switch {
 	case layer == hazards.LayerMeshLink:
 		s.serveMeshLinkLayer(w, r, place)
+	case layer == hazards.LayerCamera:
+		s.serveCameraLayer(w, r, place)
 	case eventLayers[layer] != gridv1.Layer_LAYER_UNSPECIFIED:
 		s.serveEventLayer(w, r, place, layer)
 	case conditionLayers[layer]:
@@ -401,23 +416,9 @@ func eventLayerMeta(layer string, sources []*gridv1.Source) (attribution, source
 	if layer == hazards.LayerEvacuation {
 		return "Cal OES / California County Governments — reference only", caloes.SourceURL
 	}
-	byID := make(map[string]*gridv1.Source, len(sources))
-	for _, src := range sources {
-		byID[src.GetId()] = src
-	}
 	// A layer can aggregate two feeds (wildfire, road_incident); credit both,
 	// in the registry's declared order, deduped.
-	var parts []string
-	seen := map[string]bool{}
-	for _, id := range layerSourceIDs[layer] {
-		a := strings.TrimSpace(byID[id].GetAttribution())
-		if a == "" || seen[a] {
-			continue
-		}
-		seen[a] = true
-		parts = append(parts, a)
-	}
-	return strings.Join(parts, " · "), ""
+	return joinAttributions(layerSourceIDs[layer], sources), ""
 }
 
 // writeFeatureCollection emits the shipped GeoJSON envelope through the

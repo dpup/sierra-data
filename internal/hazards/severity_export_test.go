@@ -166,3 +166,32 @@ func TestSeverityFromRoadImpact(t *testing.T) {
 		assert.Equal(t, "", SeverityFromRoadImpact(unknown), unknown)
 	}
 }
+
+// The rows are live 2026-10-01 CWWP2 closures; the comment is the severity the
+// AI incidents pipeline gave the same closure, where it had one.
+func TestSeverityFromLaneClosure(t *testing.T) {
+	cases := []struct {
+		name                 string
+		facility, typ, lanes string
+		total                int
+		want                 string
+	}{
+		{"C26EA full closure of SR-26 (AI: SEVERE)", "Conventional Hwy", "Full", "All", 2, SevSevere},
+		{"full closure of a ramp is a detour", "Off Ramp", "Full", "All", 1, SevModerate},
+		{"T88AA one-way traffic (AI: MODERATE)", "Conventional Hwy", "One-Way Traffic", "1", 2, SevModerate},
+		{"C50KB alternating lists every lane but is not full (AI: MODERATE)", "Conventional Hwy", "Alternating Lanes", "Median, LShoulder, 1, 2, Auxiliary, RShoulder", 2, SevModerate},
+		{"C88EA 1 of 3 lanes (AI: MODERATE)", "Conventional Hwy", "Lane", "1, RShoulder", 3, SevModerate},
+		{"T88GA moving closure, 1 of 2 (AI: MODERATE)", "Conventional Hwy", "Moving", "1", 2, SevModerate},
+		{"lane closure taking every travel lane closes the road", "Conventional Hwy", "Lane", "1, 2, RShoulder", 2, SevSevere},
+		{"...unless it is a ramp", "On Ramp", "Lane", "1", 1, SevModerate},
+		{"T88AA-2 shoulder only (AI: MINOR)", "Conventional Hwy", "Lane", "RShoulder", 2, SevMinor},
+		{"C49GA turn lane + shoulder (AI: MINOR)", "Conventional Hwy", "Lane", "Rt Turn Ln, LShoulder", 2, SevMinor},
+		{"lane count unknown, travel lane closed", "Conventional Hwy", "Lane", "1", 0, SevModerate},
+		{"traffic break", "Freeway", "Traffic Break", "", 4, SevMinor},
+		{"unknown type, nothing listed: conservative", "Conventional Hwy", "Something New", "", 2, SevModerate},
+		{"case and padding are not drift", "conventional hwy", " full ", "", 2, SevSevere},
+	}
+	for _, c := range cases {
+		assert.Equal(t, c.want, SeverityFromLaneClosure(c.facility, c.typ, c.lanes, c.total), c.name)
+	}
+}

@@ -14,7 +14,7 @@ throughout; errors are gRPC-standard `{code, codeName, message, details}`). The
 by a snake_case `/v1` surface on 2026-07-05, which was in turn folded back onto the
 proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 
-## 2026-09-18
+## 2026-10-03
 
 ### New layer `BURN_STATUS`: per-county residential burning status
 
@@ -104,6 +104,282 @@ INFO state: it is excluded from `summary.totalActive`, `severityCounts`,
 Tuolumne's line is published but not dialed, so its `burnDay` reads
 `BURN_DAY_UNKNOWN` while `calfireStatus` is populated; its entry in
 `burnLines[]` still carries the county's real number.
+
+### `POST /api/v1/ingest/{stream}?preflight=true` — check a token before reporting
+
+**Additive** (write endpoint only). A credentialed POST with `?preflight=true`
+answers `204 No Content` once the token authenticates and is granted the
+stream, and returns the usual `401`/`403`/`404` otherwise. The body is ignored
+and nothing is recorded: it doesn't count as a report, doesn't start the
+rate-limit window, and doesn't change the reporter's health. Use it before
+expensive work to produce a report. The burn-line reader checks it before
+placing any paid call.
+
+## 2026-10-02
+
+### New map layer: `message_sign` — what Caltrans's message signs are showing
+
+**Additive.** `GET /api/v1/places/{place}/map/message_sign.geojson` serves one
+Point per Caltrans changeable message sign (the roadside electronic signs)
+inside the place's bounds, with the text it is showing right now. The source is
+the CWWP2 data portal (`cwwp2.dot.ca.gov`, District 10: 107 signs, 6 of them
+within the `ebbetts-pass` bounding box). Like the other condition layers it is
+scoped by the place's bounding box, not its polygon.
+
+**Treat it as context, never as a hazard.** Most of what the signs say is
+statewide safety-campaign boilerplate: on 2026-10-01, 82 of District 10's 107
+signs read "BE THE DRIVER / WHO SAVES LIVES / DON'T SPEED". Nothing is filtered
+out, because the campaigns rotate and no fixed list can keep up. So:
+
+- Every feature is `severity: INFO` (rank 0), even if the text says
+  "CHAINS REQUIRED". The `chain_control` layer carries the requirement.
+- `/summary` does not read this layer. It never moves the `mode`, a domain, or
+  `topEvents`.
+- It is a live projection, not stored. There are no events and no history.
+
+Feature shape:
+
+- `id`: `cms:<district>:<sign index>`, e.g. `cms:10:V50`. Where an index isn't
+  unique in its district (District 12 numbers every sign `1`), the id uses the
+  sign's position instead: `cms:12:38.10000,-120.50000`.
+- `category`: `message` (showing text), `blank` (dark), or `unknown` (the
+  portal didn't report the sign's message, or reported one that contradicts
+  itself). `unknown` is never "blank".
+- `headline`: the sign text verbatim, one line, pages joined by `" / "`
+  (`"GUSTY WIND WARNING / OVER PACHECO PASS"`). For the other categories it is
+  `"Sign is blank"`, `"Sign message unknown"` or `"Sign out of service"`.
+- `areaLabel`: Caltrans's location name without the sign number
+  (`"EB 4 W/O MURPHYS"`).
+- `effective`: when the sign last changed message. Omitted where the portal
+  doesn't report it.
+- `properties.messageSign`: `signId`, `district`, `route`, `direction`,
+  `inService`, and `pages`. `pages` holds one or two pages of exactly three
+  lines, with a blank line kept as `""` so a client can draw the sign face.
+  It is omitted for blank and unknown signs. `route` names one route where two
+  share the road (the Moccasin sign on EB 49 is filed under `SR-120`).
+
+`sourceStatus` follows the usual rules. The portal answering with an error, an
+empty file, or a file older than an hour is `UNAVAILABLE` (or `STALE` from a
+cached last-good). A sign with no position is `STALE`, with the other signs
+kept. A sign that can't be read is listed as `unknown` and does not degrade
+the layer.
+## 2026-10-01
+
+### New map layer: `camera` — Caltrans traffic cameras
+
+**Additive.** `GET /api/v1/places/{place}/map/camera.geojson` serves the
+cameras `GET /api/v1/cameras?place=` lists (below) as GeoJSON: one `Point`
+per camera, nearest first, with the same ids and distances. Like `mesh_link`,
+`camera` is a map-layer slug only, not a Layer enum value. It never appears in
+`/events`, and it never feeds the place summary.
+
+```json
+{
+  "type": "Feature",
+  "geometry": {"type": "Point", "coordinates": [-120.2748, 37.99242]},
+  "properties": {
+    "id": "d10-172",
+    "layer": "CAMERA",
+    "kind": "Traffic camera",
+    "severity": "INFO",
+    "severityRank": 0,
+    "headline": "EB 108 W/O Soulsbyville Rd",
+    "areaLabel": "Soulsbyville",
+    "source": {"id": "caltrans", "name": "Caltrans CCTV", "url": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/179eb108wosoulsbyvillerd/179eb108wosoulsbyvillerd.jpg", "attribution": "Caltrans"},
+    "camera": {
+      "imageUrl": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/179eb108wosoulsbyvillerd/179eb108wosoulsbyvillerd.jpg",
+      "imageRefreshMinutes": 2,
+      "streamUrl": "https://wzmedia.dot.ca.gov/D10/TUO_EB108_WO_Soulsbyville.stream/playlist.m3u8",
+      "route": "SR-108",
+      "county": "Tuolumne",
+      "elevationFeet": 2926,
+      "distanceMeters": 0
+    }
+  }
+}
+```
+
+- Every feature is `INFO`: cameras are reference views, not hazards. Don't
+  count them as active items, and don't read an empty layer as an all-clear.
+- `properties.camera` carries the RPC's fields, camelCase. `streamUrl`,
+  `direction`, `county`, `elevationFeet` and `imageRefreshMinutes` are omitted
+  when Caltrans gives none. `distanceMeters` is always present (0 = inside the
+  place). Load `imageUrl` and `streamUrl` straight from Caltrans; the Grid does
+  not proxy them.
+- `metadata.sourceStatus` is the camera list's health, as on the RPC: `OK`,
+  `STALE` with `lastSourceUpdate`, or `UNAVAILABLE` when no list has been
+  fetched or cameras aren't configured. `metadata.attribution` is `Caltrans`.
+- The site's Map screen shows the layer, with the live snapshot and a video
+  link in each camera's popup.
+
+### New: `GET /api/v1/cameras?place=` — Caltrans traffic cameras
+
+**Additive.** The `ListCameras` RPC. It lists Caltrans CCTV cameras in or near
+the coverage area, each with a live snapshot image and, where Caltrans
+publishes one, an HLS video stream. Seeing the pass is the fastest check on
+chain-control and closure data. Cameras are reference views, not events: they
+never appear in `/events` or the summary. The `camera` map layer (above) serves
+the same list as GeoJSON.
+
+```json
+{
+  "cameras": [{
+    "id": "d10-172",
+    "name": "EB 108 W/O Soulsbyville Rd",
+    "nearbyPlace": "Soulsbyville",
+    "county": "Tuolumne",
+    "route": "SR-108",
+    "direction": "",
+    "location": {"lat": 37.992423, "lng": -120.274801},
+    "elevationFeet": 2926,
+    "imageUrl": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/179eb108wosoulsbyvillerd/179eb108wosoulsbyvillerd.jpg",
+    "imageRefreshMinutes": 2,
+    "streamUrl": "https://wzmedia.dot.ca.gov/D10/TUO_EB108_WO_Soulsbyville.stream/playlist.m3u8",
+    "description": "",
+    "distanceMeters": 0
+  }],
+  "sourceStatus": "OK",
+  "lastSourceUpdate": null,
+  "attribution": "Caltrans"
+}
+```
+
+- **Links, not proxies.** `imageUrl` and `streamUrl` point at Caltrans. Load
+  them directly (`<img>`, an HLS player). Re-fetch the image every
+  `imageRefreshMinutes` (0 = not reported). `streamUrl` is empty for an
+  image-only camera.
+- **Which cameras.** A camera is listed when it is within 25 km of a coverage
+  area and Caltrans marks it in service. Out-of-service cameras are dropped,
+  not flagged, because they serve a "Down for Construction" placeholder.
+  Today that is four cameras: Hwy 108 Soulsbyville, Hwy 88 Pine Grove, and
+  Hwy 120 at Ferretti Rd and Buck Meadows. **There is no camera on Hwy 4 or
+  Hwy 49 inside the area, and none on Ebbetts, Carson or Sonora Pass.** An
+  empty list means "no camera nearby", never "all clear".
+- **`?place=`** keeps the listed cameras within 25 km of the place, nearest
+  first. It accepts any place, including towns and corridors, which contain no
+  camera themselves. `distanceMeters` is measured from the place, or without
+  `?place` from the nearest coverage area; 0 means inside it.
+- **`sourceStatus`** is the camera list's health: `OK`, `STALE` (served from
+  an older fetch; `lastSourceUpdate` says when) or `UNAVAILABLE` (no list yet,
+  or cameras not configured). The images are live either way.
+- **`id`** is `d{district}-{index}`, the Caltrans district plus the portal's
+  camera index.
+- Not paginated. Carries a weak `ETag`; the list refreshes every 6 hours.
+
+### `road_incident`: Caltrans lane closures from CWWP2, scheduled windows included
+
+**Breaking for consumers that read every `road_incident` row as "happening
+now".** Applies to `GET /api/v1/events` (`layer=road_incident`),
+`/api/v1/events/{id}` and its history, `/api/v1/history`, the
+`road_incident.geojson` map layer, `/api/v1/places/{place}/summary`, and
+`/api/v1/sources`. CHP incidents are unchanged.
+
+Lane closures now come from the Caltrans CWWP2 data portal (`cwwp2.dot.ca.gov`,
+Districts 3 and 10) instead of QuickMap's `lcs2way.kml`. The KML listed only
+closures that were set up at that moment. CWWP2 lists every planned work
+window, so the layer now carries upcoming roadwork too. On 2026-10-01 the
+incident box held 234 windows (about 24 set up) against the 23 closures the KML
+showed.
+
+- **One event per work window.** Caltrans files a multi-day job as one row per
+  day, and neither the closure id nor the log number identifies a job: one log
+  number can move between places, and some jobs get a new log number every
+  day. New ids are `caltrans:d{district}-{CWWP2 index without colons}`, e.g.
+  `caltrans:d10-C4QB-0004-2026-10-02-070100`. Don't parse them.
+- **`status: SCHEDULED`** for a window not yet set up, with `effective` set to
+  its planned start. It becomes `ACTIVE` when the crew radios the closure set up
+  (10-97), and `effective` moves to that time. It becomes `RESOLVED` when picked
+  up (10-98), cancelled (10-22), or when its window ends without being set up.
+  The default `/events` filter (`ACTIVE,SCHEDULED`) therefore now returns
+  upcoming roadwork. **Pass `status=ACTIVE` for only what is on the road now.**
+- **`expires` stays `null`.** The planned end is an estimate crews overrun. A
+  set-up closure stays `ACTIVE` until it is picked up, even past its window.
+- **New `roadIncident.closure` block** (`LaneClosureDetail`), on Caltrans
+  closures only: `windowId, district, closureId, logNumber, route, direction,
+  facility, closureType, workType, lanesClosed, totalLanes,
+  estimatedDelayMinutes, closureDuration, plannedStart, plannedEnd,
+  endIndefinite, setUpAt, beginLocation, endLocation, begin, end`.
+  `roadIncident.logNumber` still carries the closure id.
+- **No AI on closures.** The rows are structured, so `headline` (what and why:
+  `"Hwy 88 one-way traffic control (Tree Work)"`), `areaLabel` (where:
+  `"Hwy 88 at Schneidr Road (Left), near Markleeville"`), `description`
+  (`"Closed: lane 1, right shoulder (of 2 lanes). Estimated delay: 10 min."`)
+  and `severity` are composed from Caltrans's own fields. On closures,
+  `summary`, `enhancement`, `roadIncident.impact`, `.duration` and `.metadata`
+  are now empty. Severity: a full closure is `SEVERE` (`MODERATE` on a ramp);
+  one-way traffic, alternating lanes or any closed travel lane is `MODERATE`;
+  shoulders or turn lanes only is `MINOR`.
+- **Closures in place at deploy keep their ids and history.** Each closure
+  stored under the old `caltrans:{closureId}-{log}-{hash}` id is matched to its
+  CWWP2 window and keeps that id until it is picked up. It gets one revision
+  for the new text, not a `RESOLVED` revision plus a duplicate event. Every
+  window after that uses the new ids.
+- **GeoJSON `road_incident`:** `properties.source` follows the feed. CHP is
+  `{"id":"chp","name":"CHP / Caltrans","attribution":"quickmap.dot.ca.gov"}` as
+  before; Caltrans closures are
+  `{"id":"caltrans","name":"Caltrans","attribution":"cwwp2.dot.ca.gov"}` (every
+  feature used to carry the CHP block). `properties.status` is `SCHEDULED` for
+  planned windows. `properties.incident.closure` carries `windowId,
+  closureType, workType, lanesClosed, totalLanes, estimatedDelayMinutes,
+  plannedStart, plannedEnd, setUpAt`. `properties.description` is the composed
+  description. `metadata.attribution` reads `quickmap.dot.ca.gov ·
+  cwwp2.dot.ca.gov`.
+- **Summary:** a `SCHEDULED` road closure is not counted in
+  `summary.totalActive`, `severityCounts` or `topEvents`, nor in the `roads`
+  domain's `activeCount`, `highestSeverity` or `headlines`. Planned roadwork is
+  a calendar; a week of it would bury a live collision. A `SCHEDULED` weather
+  watch or PSPS still counts. `mode` never counted `SCHEDULED` events.
+- **`/api/v1/sources`:** the `caltrans` row's `attribution` is now
+  `cwwp2.dot.ca.gov · quickmap.dot.ca.gov`, and so is the `chain_control`
+  layer's `metadata.attribution`, which had said QuickMap alone since CWWP2
+  began supplying chain-control levels. The row's health is the lane-closure
+  poller's, every 10 minutes. A district file that is unreachable, empty, or
+  has stopped regenerating (newest record over an hour old) degrades it, as
+  does an in-area row whose set-up/pick-up/cancel flags can't be read. None of
+  these ever resolves a closure.
+
+**Migration:** to show only closures on the road now, filter on `status ==
+"ACTIVE"` (or request `status=ACTIVE`). Map clients should style `SCHEDULED`
+features differently from active ones. Don't key anything on the shape of a
+`caltrans:` id.
+
+## 2026-09-30
+
+### `chain_control` map layer: Caltrans CWWP2 merged in
+
+**Not a shape change. Feature ids, headlines and attribution values change.**
+Applies to `GET /api/v1/places/{place}/map/chain_control.geojson` and anything
+built on it: the `/summary` roads domain, and a road's `chainControlInfo`.
+
+Chain controls now come from **two** Caltrans sources, merged: QuickMap's
+`cc.kml` (as before) and the CWWP2 data portal (`cwwp2.dot.ca.gov`, District
+10). CWWP2 reports every checkpoint, each with an explicit `R-0` when no
+controls are in effect. So `sourceStatus: OK` with zero features is now a
+**confirmed** "no chain controls". Before, it only meant "the KML was empty",
+which is also what a broken feed looked like. Neither source can erase the
+other's controls: a control either one reports is shown.
+
+- **Feature `id`s:** `cc:<checkpoint index>` for CWWP2 entries, e.g.
+  `cc:10-ALP-4-0.65-W-14W` (district, county, route, postmile, direction,
+  sign); `cc:<message id>` for `cc.kml` entries, as before. When both report
+  the same checkpoint, only the CWWP2 entry is served. The layer is a live
+  projection, not stored, so no history is affected.
+- **Road closures render as closures.** A `cc.kml` "Road Closed" entry (the
+  seasonal Ebbetts/Sonora/Tioga gates) used to serve with an empty highway and
+  the headline `"chain control"`. It is now `"Highway 4 road closed"`, with
+  `category: "closed"`, and severity `MINOR` (rank 1; it was `INFO`). It
+  still ranks below an R-1 chain control. Because `/summary`'s roads domain
+  counts condition features above INFO as active, an in-area seasonal gate (the
+  Ebbetts closure at Mount Reba) now appears in that domain's `activeCount` and
+  headlines all winter. The summary `mode` is unaffected.
+- CWWP2 entries: `properties.chainControl.highway` reads `Highway 4` /
+  `US 50` / `I-80`, `areaLabel` is Caltrans's upper-case checkpoint name
+  (`ARNOLD`), `effective` is when the checkpoint entered its level (Pacific
+  offset), `source.attribution` is `cwwp2.dot.ca.gov`.
+- **`sourceStatus`:** `UNAVAILABLE` (or `STALE` from a cached last-good) when
+  CWWP2 fails and `cc.kml` has nothing; `STALE` with features when either source
+  fails but the other has controls, when an in-area checkpoint reported a
+  malformed status, or when a checkpoint has no position.
 
 ## 2026-09-15 (evening)
 
