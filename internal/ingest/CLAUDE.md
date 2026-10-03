@@ -433,7 +433,9 @@ from the CWWP2 portal through `LaneClosureNormalizer` (source `caltrans`, its ow
 10m poller because the D3 + D10 files are ~5 MB uncompressed). The incidents
 pipeline stops reading `lcs2way.kml`, and `RoadIncidentNormalizer` drops
 `caltrans` from its `SourceIDs` (see "a source has exactly one poller" above).
-Empty districts fall back to the old KML path.
+Per-road segment status (the roads service) reads the same districts' ACTIVE
+windows, so it agrees with these events (`internal/services/CLAUDE.md`).
+Empty districts fall back to the old KML path for both.
 
 **The unit is the window, because Caltrans has no other one.** A multi-day job is
 one row per day, and neither identifier upstream names a job: `C50KB` log 8 is an

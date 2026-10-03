@@ -26,6 +26,19 @@ row stayed in the file, sometimes days past its planned end. It now stays
 other ended window. Closures with `closure.endIndefinite: true` are unaffected.
 A real pickup call still resolves a closure as soon as it is seen.
 
+### Road segment status now uses the same lane closures as the closure events
+
+**Behavior change, no shape change.** A road's `status` / `statusExplanation`
+(the `road_segment` map layer's `status` and `description`, and the place
+`summary`'s `roads` domain built from them) now derive their lane closures from
+the CWWP2 portal — the same source as the `road_incident` layer's Caltrans
+closures — instead of `lcs2way.kml`. Only closures that are set up right now
+(ACTIVE events) count; SCHEDULED windows never mark a segment RESTRICTED or
+CLOSED. Previously the two could disagree. If CWWP2 is unreachable for longer
+than two roads refresh intervals (~30 min), segment data stops refreshing and
+ages (the last good value is served) rather than reporting OPEN on unknown
+closure state.
+
 ## 2026-10-02
 
 ### New map layer: `message_sign` — what Caltrans's message signs are showing

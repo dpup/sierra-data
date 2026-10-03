@@ -491,6 +491,8 @@ type CWWP2Config struct {
 	// the road_incident layer (source `caltrans`), scheduled ones included.
 	// Non-empty REPLACES lcs2way.kml for that layer: the incidents pipeline
 	// stops reading it and a dedicated poller reads these districts instead.
+	// Per-road segment status then reads these districts' ACTIVE (set-up)
+	// windows too, instead of lcs2way.kml.
 	// Every district that reaches roads.incidentAreas must be listed — a
 	// closure in an unlisted district is simply never seen. Empty keeps the
 	// lcs2way.kml path.

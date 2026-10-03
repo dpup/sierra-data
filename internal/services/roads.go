@@ -47,6 +47,13 @@ type RoadsService struct {
 	incidentFeedChpErr  error
 	incidentFeedLaneErr error
 	incidentFeedAt      time.Time
+
+	// laneClosureSource feeds segment-status closures when
+	// roads.caltransFeeds.cwwp2.laneClosureDistricts is set; see
+	// segmentLaneClosures. now is the clock closure phases are taken at
+	// (nil = time.Now; tests pin it).
+	laneClosureSource LaneClosureFetcher
+	now               func() time.Time
 }
 
 // trafficData holds traffic information for a road
@@ -179,8 +186,13 @@ func (s *RoadsService) GetProcessingMetrics(ctx context.Context, req *api.GetPro
 
 // refreshRoadData fetches fresh data from all external sources
 func (s *RoadsService) refreshRoadData(ctx context.Context) ([]*api.Road, error) {
-	// Fetch Caltrans data once for all roads
-	laneClosures, _ := s.caltransClient.ParseLaneClosures(ctx)
+	// Fetch Caltrans data once for all roads. Lane closures come from CWWP2
+	// when laneClosureDistricts is set (lcs2way.kml otherwise); an unknown
+	// CWWP2 closure state fails the refresh rather than reading as OPEN.
+	laneClosures, err := s.segmentLaneClosures(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("lane closures: %w", err)
+	}
 	chpIncidents, _ := s.caltransClient.ParseCHPIncidents(ctx)
 	allIncidents := append(laneClosures, chpIncidents...)
 

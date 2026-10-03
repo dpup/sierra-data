@@ -7,7 +7,7 @@ enhancement live in `internal/services`, not here.
 | Package    | Source                | Auth                          | Notes |
 |------------|-----------------------|-------------------------------|-------|
 | `google`   | Google Routes API     | `PF__GOOGLE_ROUTES__API_KEY`  | Travel time + polyline. Rate-limited; callers cache aggressively (10k/mo budget). |
-| `caltrans` | quickmap.dot.ca.gov KML | none                        | CHP incidents, chain control (merged with `cwwp2` when configured), lane closures (per-road status; the `road_incident` layer reads `cwwp2` instead when configured). |
+| `caltrans` | quickmap.dot.ca.gov KML | none                        | CHP incidents, chain control (merged with `cwwp2` when configured), lane closures (`lcs2way.kml`; read only when `cwwp2.laneClosureDistricts` is empty; otherwise the `road_incident` layer and per-road status both read `cwwp2`). |
 | `cwwp2`    | cwwp2.dot.ca.gov JSON (Caltrans data portal) | none (public, undocumented) | Per-checkpoint chain-control status; lane-closure windows incl. scheduled (the `road_incident` closures); message-sign text; CCTV camera list. See below. |
 | `weather`  | OpenWeatherMap        | `PF__OPENWEATHER__API_KEY`    | Current conditions only. `GetWeatherAlerts` (One Call 3.0, 1,000/day cap) is CLI-diagnostic only — the server sources alerts from `nws`. |
 | `nws`      | api.weather.gov       | none (User-Agent required)    | Authoritative zone alerts + fire-weather products. |
@@ -94,7 +94,9 @@ Mariposa).
   service skips them (the Ebbetts gate ~3 km past Bear Valley would otherwise
   mark Arnold–Bear Valley "chains required" all winter).
 - **Lane closures (`lcs`) — the `road_incident` layer's closures** (via
-  `ingest.LaneClosureNormalizer`, `laneClosureDistricts: [3, 10]`). One row per
+  `ingest.LaneClosureNormalizer`, `laneClosureDistricts: [3, 10]`) **and
+  per-road segment status** (ACTIVE windows only, via
+  `caltrans.IncidentFromCWWP2LaneClosure`; see `internal/services/CLAUDE.md`). One row per
   closure WINDOW, including scheduled ones (10x the closures lcs2way.kml shows
   for the incident box), with epoch times and the radio codes 10-97 (set up),
   10-98 (picked up), 10-22 (cancelled). `LaneClosure.PhaseAt` derives
