@@ -408,9 +408,8 @@ function renderNodeTable(nodes) {
     td.append(
       el('div', 'mono', 'No located nodes in this window.'),
       el('div', 'muted small',
-        'The query succeeded and returned no node with a known location. A node is only ' +
-        'listed once we have heard it advertise one — a short list is not a claim that ' +
-        'the mesh is small.')
+        'The query succeeded, but no node in this window has advertised a location. ' +
+        'A node is listed only once a location has been heard.')
     );
     tr.append(td);
     tbody.append(tr);

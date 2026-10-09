@@ -17,7 +17,7 @@
 export const SEV = {
   EXTREME: { rank: 4, note: 'Evacuation Order, an active EXTREME event — act now.' },
   SEVERE: { rank: 3, note: 'Evacuation Warning, a severe wildfire, an M5 quake.' },
-  MODERATE: { rank: 2, note: 'Advisory-level. Worth surfacing, not worth waking anyone.' },
+  MODERATE: { rank: 2, note: 'Advisory level. Worth showing; not urgent.' },
   MINOR: { rank: 1, note: 'Minor incident — a lane closure, a small quake.' },
   INFO: { rank: 0, note: 'Ambient state. Mesh-node presence, baseline monitoring.' },
 };

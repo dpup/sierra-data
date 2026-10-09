@@ -111,7 +111,7 @@ const examples = [
     Clients <strong>POST</strong> JSON-RPC 2.0; there's no server-initiated stream, so a
     <code class="inline">GET</code> returns <code class="inline">405</code>. It's a thin
     adapter over <a href="/docs">the /api/v1 API</a>: geometry is stripped for token efficiency,
-    and the fail-loud honesty contract is preserved on every result.
+    and the fail-loud contract is preserved on every result.
   </p>
 
   <div class="section-gap"></div>
@@ -211,13 +211,13 @@ const examples = [
   <pre class="code">{curlList}</pre>
   <p class="prose">Ask what's happening near a town:</p>
   <pre class="code">{curlSituation}</pre>
-  <p class="prose">A trimmed response — note the preserved honesty fields:</p>
+  <p class="prose">A trimmed response. Note the <code class="inline">null</code> and the status fields:</p>
   <pre class="code">{situationResult}</pre>
   <p class="prose">Handshake (what an MCP client sends first):</p>
   <pre class="code">{curlInit}</pre>
 
   <div class="section-gap"></div>
-  <SectionHead heading="Reading the data honestly" cap="required of every consumer" />
+  <SectionHead heading="Reading the data" cap="required of every consumer" />
   <div class="with-notes">
   <p class="prose">
     This is <strong class="accent-orange">reference-only, life-safety data</strong>. Every
@@ -235,8 +235,8 @@ const examples = [
   </aside>
   <ul class="prose">
     <li>Every source reports <span class="mono">OK</span> / <span class="mono">STALE</span> /
-      <span class="mono">UNAVAILABLE</span>. <strong>UNAVAILABLE means the status is unknown,
-      not clear</strong> — never present absence of data as an all-clear.</li>
+      <span class="mono">UNAVAILABLE</span>. <strong>UNAVAILABLE means unknown, not
+      clear.</strong> Never present missing data as an all-clear.</li>
     <li>Evacuations: <code class="inline">active_evacuations</code> is an explicit
       <code class="inline">null</code> (source errored → unknown), <code class="inline">0</code>
       (Cal OES healthy, no active zones — caveated, not a guarantee), or <code class="inline">N</code>

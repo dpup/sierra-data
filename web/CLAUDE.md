@@ -485,7 +485,7 @@ The API's contract is that absence is never an all-clear, and the UI is bound by
 it. In particular:
 
 1. **`null` ≠ `0`.** `activeEvacuations: null` renders as the word UNKNOWN
-   ("evacuation count unknown — not zero"), never `0`, never blank.
+   (ledger) and "evacuation zone count unknown" (subline), never `0`, never blank.
 2. **A failed or timed-out fetch never renders as zero.** It becomes `—`/UNKNOWN
    at heading size plus a banner naming the request.
 3. **Calm is a positive assertion** and needs *every* input known: summary
