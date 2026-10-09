@@ -39,7 +39,7 @@ on:
         type: string
         default: "low"
       no_thinking:
-        description: "Also send chat_template_kwargs.enable_thinking=false (LunaRoute leg only; OpenAI rejects it)"
+        description: "LEAVE UNCHECKED for the recommended configuration. Ticked, every LunaRoute request also disables thinking outright (enable_thinking=false), which is NOT what the design proposes; the probe compares both knobs on its own regardless."
         type: boolean
         default: false
 

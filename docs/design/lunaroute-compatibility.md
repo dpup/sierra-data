@@ -393,6 +393,55 @@ change; `glm-5.3-flash` is both slower and less accurate than `glm-5.3`.
 What remains: confirm `low` alone keeps the NWS and burn outputs whole (run
 4), then phase 1.
 
+## 6c. Probe results (run 4, 2026-10-09 15:31 UTC, same tuning as run 3)
+
+Workflow run [37952188309](https://github.com/dpup/sierra-data/actions/runs/37952188309).
+Dispatched with `no_thinking` ticked again, so the LunaRoute leg repeated
+run 3's configuration (`low` plus `enable_thinking: false`) rather than the
+`low`-alone check. That makes it a second sample of the same setting, which
+turned out to be what was needed.
+
+| Check | gpt-5-mini (`low`) | glm-5.3 (off) | glm-5.3-flash (off) | deepseek-4.1-flash (off) |
+|---|---|---|---|---|
+| Incident schema, verbatim | valid, 6.2 s | valid, 4.3 s | valid, 2.9 s | 400, schema |
+| NWS summary | 323 chars (cap 320), 2.5 s | **283 chars, whole**, 1.0 s | 358 chars, 2.0 s | 299 chars, 0.5 s |
+| Burn extraction | 400 (temperature) | `orange`, 97, **transcript whole**, 1.5 s | `orange`, 99, **transcript `"..."` again**, 2.2 s | `orange`, **confidence 0.98**, 1.1 s |
+| Incident latency, 3 runs | 4.8 / 4.8 / 4.9 s | 1.8 / 2.0 / 2.5 s | 2.9 / 3.8 / 4.1 s | schema |
+| `low` alone, incident | 512 reasoning tok, 5.3 s, valid | 1 tok, 1.9 s, valid | 1 tok, 4.1 s, valid | schema |
+| Audio | whisper-1, 1.9 s, exact | whisper-large-v3, 1.0 s, exact | | |
+| 3 parallel requests | 3 × 200, 3 to 5 s | 3 × 200, 4.4 to 9.3 s | | |
+
+What changed against run 3: `glm-5.3`'s NWS summary and burn transcript
+came back **whole** under the same setting that produced `"..."` last time,
+while `glm-5.3-flash` produced the `"..."` transcript **twice in two runs**.
+So the placeholder is **intermittent for `glm-5.3` and habitual for
+`glm-5.3-flash`**, and the knob is not the clean explanation §6b proposed.
+That changes the conclusion in one way: whichever setting ships, the code
+must treat a placeholder as a failed enhancement rather than as content.
+Specifically:
+
+- `enhance_nws.go` already rejects an empty summary; it must also reject a
+  summary that is a placeholder (`"..."` or a handful of characters), so the
+  raw alert is served instead.
+- `burnline/reader.go` falls back to the raw transcript only when the cleaned
+  one is empty; `"..."` would be stored as the transcript. Same fix.
+- `reader.go` should read a confidence in (0, 1] as a fraction and scale it,
+  since DeepSeek returned `0.98` twice and `glm-5.3-flash` once.
+
+All three are cheap, provider-neutral, and belong in phase 2 whichever
+provider is used. The remaining `low`-alone comparison is still worth one
+run, and the probe now judges the NWS and burn requests under each knob on
+its own, so the next dispatch answers it however the inputs are set.
+
+Hand scoring, incident outputs: `glm-5.3` correct on all three variants
+again (one `enable_thinking: false` output returned an empty
+`additional_info` object, the only blemish). `glm-5.3-flash` correct on all
+three, with one thinking-off output that narrated the dispatch log
+timestamp by timestamp in `details`. DeepSeek, portable schema, correct this
+time but with three thin metadata pairs; the portable form also led
+`glm-5.3` to copy every top-level field into `additional_info` (12 pairs of
+noise), which closes the question of ever shipping it.
+
 ## 7. Model evaluation
 
 Candidates are the chat models in the supplied catalog: `deepseek-4.1-flash`,
@@ -431,9 +480,11 @@ Reading:
   gpt-5-mini under the same setting, and its three hand-scored incident
   outputs were all correct. Without the setting it is unusable (65 s, empty
   output), so the config change in §5 is a prerequisite, not a nicety. Use
-  `reasoning_effort: low`, **not** `enable_thinking: false`: fully off, the
-  model answered the NWS request with a literal `"..."` (§6b), pending the
-  run-4 confirmation.
+  `reasoning_effort: low`, the one knob OpenAI also accepts. The placeholder
+  answers seen with thinking fully off (§6b) recurred only on
+  `glm-5.3-flash` in run 4 (§6c); on `glm-5.3` they are intermittent, and
+  the phase-2 guards in §6c make them a served raw alert rather than bad
+  content either way.
 - **`deepseek-4.1-flash` is not recommended.** It needs a schema change to
   run at all (§6a), and with that change in place it invented "one-way
   traffic control is in effect" on the first fixture (§6b), the exact
@@ -462,9 +513,9 @@ for free.
 
 | Phase | Work | Size |
 |---|---|---|
-| 0. Probe | **Runs 2 and 3 done (§6a, §6b).** One last dispatch with the workflow defaults (`low` only, `no_thinking` off) confirms the GLM placeholder outputs were the thinking-off knob. | done |
+| 0. Probe | **Runs 2 to 4 done (§6a to §6c).** The probe now compares both knobs on NWS and burn by itself; one more dispatch is optional confirmation, not a blocker. | done |
 | 1. Compatibility option | §5 config + client constructor + both enhancers + burn-line CLI + workflow variables + docs. Default behaviour unchanged. | 1 day |
-| 2. Robustness | Real `maxRetries` (429 honouring `Retry-After`, one bounded 503 retry); startup `HealthCheck`; empty-content-on-length error; a per-request enhancement deadline so a slow provider cannot hold `ListIncidents` past its own refresh interval. These are worth doing for OpenAI too. | 0.5 to 1 day |
+| 2. Robustness | Real `maxRetries` (429 honouring `Retry-After`, one bounded 503 retry); startup `HealthCheck`; empty-content-on-length error; placeholder-output and fraction-confidence guards (§6c); a per-request enhancement deadline so a slow provider cannot hold `ListIncidents` past its own refresh interval. These are worth doing for OpenAI too. | 0.5 to 1 day |
 | 3. Bake-off | Run production with `PF__OPENAI__BASE_URL` set on a staging or second instance, `glm-5.3` first, for a week. Compare stored `summary`/`headline` revisions against OpenAI's by `enhancement.model`. Score on the §6 item 7 rubric. | calendar week, ~0.5 day of review |
 | 4. Cutover (optional) | Flip defaults in `prefab.yaml` and the burn-line repo variables; retire the OpenAI key if nothing else uses it. | hours |
 

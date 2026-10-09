@@ -533,6 +533,44 @@ func (p *probe) chatModel(r *report, model string, runs int) {
 			scoreIncident(r, parsed)
 			r.details("raw response ("+c.name+")", res.content)
 		}
+		// The placeholder failures seen in runs 3 and 4 were on the NWS summary
+		// and the burn transcript, never the incident, so each knob is also
+		// judged on those two, independently of how the tuned checks above
+		// were configured.
+		nreq := nwsRequest(model)
+		c.mod(&nreq)
+		if nres := p.chat(nreq); nres.err != nil {
+			r.li(fmt.Sprintf("`%s` NWS: request failed — %s", c.name, describe(nres.err)))
+		} else {
+			var o struct {
+				Summary string `json:"summary"`
+			}
+			if json.Unmarshal([]byte(nres.content), &o) != nil {
+				r.li(fmt.Sprintf("`%s` NWS: **unparseable**", c.name))
+			} else {
+				r.li(fmt.Sprintf("`%s` NWS: %s", c.name, nres.latency.Round(100*time.Millisecond)))
+				scoreNWS(r, o.Summary)
+			}
+		}
+		breq := burnRequest(model)
+		c.mod(&breq)
+		if bres := p.chat(breq); bres.err != nil {
+			r.li(fmt.Sprintf("`%s` burn: request failed — %s", c.name, describe(bres.err)))
+		} else {
+			var o struct {
+				Status               string  `json:"status"`
+				CleanedTranscription string  `json:"cleanedTranscription"`
+				Confidence           float64 `json:"confidence"`
+			}
+			if json.Unmarshal([]byte(bres.content), &o) != nil {
+				r.li(fmt.Sprintf("`%s` burn: **unparseable**", c.name))
+			} else {
+				r.li(fmt.Sprintf("`%s` burn: status `%s` (%s), confidence %g, transcript %s, %s", c.name, o.Status,
+					yesno(o.Status == "orange", "correct", "**WRONG**"), o.Confidence,
+					yesno(!degenerate(o.CleanedTranscription), "whole", "**placeholder**"),
+					bres.latency.Round(100*time.Millisecond)))
+			}
+		}
 	}
 
 	// 6. Latency over N runs of the production incident request.
