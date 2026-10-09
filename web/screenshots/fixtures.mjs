@@ -185,6 +185,49 @@ const EVENTS = [
     geometry: { centroid: { lat: 38.15, lng: -120.42 },
       geojson: geo({ type: 'Point', coordinates: [-120.42, 38.15] }) },
   },
+  // Burn status: one county with a definite answer, one whose answer is
+  // UNKNOWN, so the front page's "unknown" wording is exercised rather than
+  // only the happy path. UNKNOWN needs CAL FIRE NOT to prohibit: a suspension
+  // alone makes permission PROHIBITED whatever the line says (live Tuolumne,
+  // 2026-10-09: burnDay UNKNOWN + suspended = PROHIBITED), so the second
+  // fixture is set in permit season. No geometry — the API attaches
+  // a county's burn event through placeIds alone.
+  {
+    id: 'burn:calaveras-county', layer: 'burn_status', severity: 'INFO', status: 'ACTIVE',
+    headline: 'Calaveras County — no-burn day; CAL FIRE burning suspended', areaLabel: 'Calaveras County',
+    category: 'burn_status', canonicalUrl: 'https://burnpermit.fire.ca.gov/current-burn-status',
+    placeIds: ['area:ebbetts-pass', 'county:calaveras-county'],
+    observedAt: ago(55), ingestedAt: ingested(ago(55)), revision: 2,
+    provenance: { sourceId: 'burnline', sourceName: 'County Burn Line', attribution: 'County air district burn information line', sourceUrl: '', fetchedAt: ago(55) },
+    geometry: null,
+    burnStatus: {
+      burnDay: 'BURN_DAY_NO', calfireStatus: 'CALFIRE_BURNING_SUSPENDED', permission: 'BURN_PERMISSION_PROHIBITED',
+      calfireEffective: '2026-06-15T15:00:00Z', calfireArea: 'All SRA', calfireObservedAt: ago(58),
+      burnLines: [{
+        id: 'calaveras-apcd', name: 'Calaveras County burn line', phone: '+12097546600', burnDay: 'BURN_DAY_NO',
+        observation: {
+          message: 'Burning is prohibited in Calaveras County as all residential burn permits and outdoor burning are suspended until further notice.',
+          transcript: 'Thank you for calling the Calaveras County burn information line. Cal Fire has suspended all residential burn permits and outdoor burning in Calaveras County until further notice.',
+          confidence: 95, observedAt: ago(62),
+        },
+      }],
+    },
+  },
+  {
+    id: 'burn:tuolumne-county', layer: 'burn_status', severity: 'INFO', status: 'ACTIVE',
+    headline: 'Tuolumne County — burn day unknown; CAL FIRE permit required', areaLabel: 'Tuolumne County',
+    category: 'burn_status', canonicalUrl: 'https://burnpermit.fire.ca.gov/current-burn-status',
+    placeIds: ['area:ebbetts-pass', 'county:tuolumne-county'],
+    observedAt: ago(55), ingestedAt: ingested(ago(55)), revision: 1,
+    provenance: { sourceId: 'calfire-burn', sourceName: 'CAL FIRE Burn Permits', attribution: 'CAL FIRE', sourceUrl: 'https://burnpermit.fire.ca.gov/current-burn-status', fetchedAt: ago(58) },
+    geometry: null,
+    burnStatus: {
+      burnDay: 'BURN_DAY_UNKNOWN', calfireStatus: 'CALFIRE_PERMIT_REQUIRED', permission: 'BURN_PERMISSION_UNKNOWN',
+      calfireEffective: '2026-06-15T15:00:00Z', calfireArea: 'All SRA', calfireObservedAt: ago(58),
+      // A published-but-undialed line: number shown, no observation.
+      burnLines: [{ id: 'tuolumne-apcd', name: 'Tuolumne County APCD burn line', phone: '+12095335598', burnDay: 'BURN_DAY_UNKNOWN', observation: null }],
+    },
+  },
 ];
 
 // A small MeshCore relay network (layer=mesh events + /mesh/links topology).

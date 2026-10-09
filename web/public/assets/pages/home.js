@@ -151,7 +151,8 @@ function renderDeck(placeName, summary, events, eventsOk, query, truncated) {
     row1.append(` · ${fmtNum(past24)} in the past 24h`);
   }
   const row2 = el('div', null, `${query}   ·   generatedAt ${(summary && summary.generatedAt) || '—'}`);
-  sub.append(row1, row2);
+  const burn = eventsOk ? burnRow(events) : null;
+  sub.append(...[row1, burn, row2].filter(Boolean));
 
   // ---- ledger: four fixed cells
   // The first three are one axis: events by severity. Labelled so.
@@ -179,6 +180,38 @@ function renderDeck(placeName, summary, events, eventsOk, query, truncated) {
   if (evacUnknown) evacV.style.fontSize = '18px';
   evacCell.append(evacV, el('div', 'ledger-l', 'Evacuation zones'));
   ledger.append(evacCell);
+}
+
+// burnStatus.permission is the combined answer of the two burn authorities (the
+// county's burn line AND CAL FIRE). Anything but a definite answer is "unknown",
+// in words: a missing permission must never read as "burning allowed".
+const BURN_WORDS = {
+  BURN_PERMISSION_ALLOWED: 'burning allowed',
+  BURN_PERMISSION_PROHIBITED: 'no burning',
+};
+
+/**
+ * One subline row: each county's burn status, linked to its event. Burn status
+ * is ambient INFO state, not a hazard, so it sits under the counts rather than
+ * taking a ledger cell (the ledger is four fixed tracks of hazard counts).
+ * Returns null when the place has no burn events — that place is simply not
+ * covered by a configured county, which is not the same as "allowed".
+ */
+function burnRow(events) {
+  const burn = events.filter((e) => String(e.layer || '').toUpperCase() === 'BURN_STATUS');
+  if (!burn.length) return null;
+  burn.sort((a, b) => String(a.areaLabel || a.id).localeCompare(String(b.areaLabel || b.id)));
+  const row = el('div');
+  row.append('burn status · ');
+  burn.forEach((e, i) => {
+    if (i > 0) row.append(' · ');
+    const permission = (e.burnStatus && e.burnStatus.permission) || '';
+    const a = el('a', null, `${e.areaLabel || e.id}: ${BURN_WORDS[permission] || 'unknown'}`);
+    a.href = `/event?id=${encodeURIComponent(e.id || '')}`;
+    a.title = e.headline || '';
+    row.append(a);
+  });
+  return row;
 }
 
 /* ------------------------------------------------------------------ feed */

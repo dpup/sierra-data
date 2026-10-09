@@ -35,6 +35,7 @@ export const LAYER_OPTIONS = [
   'air_quality',
   'mesh',
   'announcement',
+  'burn_status',
 ];
 
 /** Page sizes offered in the control. Empty string = server default. */
