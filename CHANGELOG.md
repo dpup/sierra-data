@@ -16,6 +16,45 @@ proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 
 ## 2026-10-09
 
+### Mesh: values change on every `MESH` event, and `meshcore` health now reports a deaf broker
+
+**No field or shape changes.** Three values change, and because two of them are
+hashed, every mesh node gets **one new revision** in
+`/api/v1/events/{id}/history` on the first tick after deploy. That revision
+records these values changing, not anything about the node.
+
+- **`canonicalUrl`** was `https://map.meshcore.io` for every node, which is a
+  world map: that site has no per-node URL. It is now the node's own page on
+  CoreScope, a packet analyzer subscribed to the same MQTT broker as the Grid:
+  `https://corescope.stonekitty.net/#/nodes/{publicKey}`. The page lists the
+  node's recent adverts, each with every receiving gateway and relay path, and
+  links to each packet. The URL is the same for every revision of a node
+  (it is built from the public key only). A node known only by a key prefix (a
+  monitored repeater no advert has matched yet) keeps the map URL. The
+  `mesh_node.geojson` features carry it as `properties.source.url`.
+- **`provenance.attribution`** was `MeshCore community mesh via LetsMesh`, and
+  **`provenance.sourceUrl`** was `https://analyzer.letsmesh.net/about`. They
+  are now `MeshCore community mesh via gomesh.dev` and `https://www.gomesh.dev/`.
+  The Grid has only ever subscribed to `mqtt.gomesh.dev`. The LetsMesh label was
+  a mistake: gomesh.dev's own page names no LetsMesh connection, and LetsMesh
+  runs separate brokers. Nodes credited to a push forwarder are unchanged.
+- **`GET /api/v1/sources` → `meshcore`** now goes `STALE`, then `UNAVAILABLE`,
+  with the reason in `lastError`, when a configured MQTT broker is not
+  delivering. "Not delivering" means the session is down, or it is open but has
+  carried no message for 15 minutes. It used to read `OK` in both cases whenever
+  an operator monitor was reporting. While the source is failing, mesh nodes are
+  not expired, and the mesh map layers say `STALE` rather than going empty.
+
+Why: from 2026-10-03 to ~09:00 UTC on 2026-10-09 the subscriber received almost
+nothing, `meshcore` read `OK` throughout, and about 680 nodes were marked
+`EXPIRED`. Those nodes become `ACTIVE` again on their next advert, as usual.
+The likeliest cause, reproduced: any second process using the Grid's fixed MQTT
+client id knocked its broker session off. Client ids now carry a per-process
+suffix.
+The `mesh.packet` entry below says the brokers hear the SIERRA backbone "every
+few days". That was measured during this outage. Through a working subscription,
+the broker carries most backbone repeaters' adverts, several of them twice a day.
+
 ### New push-ingest stream: `mesh.packet` — forward the adverts your radio hears
 
 **Additive**, and only for operators holding a push-ingest token. `POST

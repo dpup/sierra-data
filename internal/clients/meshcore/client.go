@@ -2,14 +2,17 @@ package meshcore
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
@@ -64,6 +67,13 @@ type Config struct {
 	CadenceK   float64
 	GraceFloor time.Duration
 	GraceCeil  time.Duration
+	// SilenceAfter is how long an open broker session may go without carrying a
+	// single message before Brokers reports it as not delivering. A session can
+	// be up and still deliver nothing (a stalled subscription, a broker-side ACL
+	// change, a session another client keeps taking over), and only the message
+	// clock can see that. <= 0 disables the check, leaving "session open" as the
+	// only test.
+	SilenceAfter time.Duration
 }
 
 // Observation is one received advert, captured for the relay-topology store
@@ -168,10 +178,19 @@ type Registry struct {
 	cfg     Config
 	baseCtx context.Context
 
-	mu        sync.Mutex
-	nodes     map[string]*nodeEntry
-	clients   []mqtt.Client
-	lastMsgAt time.Time
+	// instance is a random per-process suffix appended to every MQTT client id.
+	// A broker allows one session per client id and closes the older one when a
+	// second connects, so two processes sharing an id (a local dev server run
+	// with production credentials, an overlapping deploy) would knock each other
+	// off in a loop, each receiving a fraction of the feed. Generated once, so
+	// this process's own reconnects keep their id.
+	instance string
+
+	mu      sync.Mutex
+	nodes   map[string]*nodeEntry
+	clients []mqtt.Client
+	// links is parallel to clients: per-broker delivery clocks for Brokers.
+	links []*brokerLink
 
 	// obsBuf accumulates receptions between scheduler drains; obsGate tracks the
 	// last buffered time per (pubkey,gateway) for the SpamFloor. Both guarded by mu.
@@ -198,12 +217,36 @@ func NewRegistry(cfg Config) *Registry {
 		cfg.RetainFor = cfg.GraceCeil
 	}
 	return &Registry{
-		cfg:     cfg,
-		baseCtx: context.Background(),
-		nodes:   make(map[string]*nodeEntry),
-		obsGate: make(map[string]time.Time),
-		now:     time.Now,
+		cfg:      cfg,
+		baseCtx:  context.Background(),
+		instance: newInstanceSuffix(),
+		nodes:    make(map[string]*nodeEntry),
+		obsGate:  make(map[string]time.Time),
+		now:      time.Now,
 	}
+}
+
+// newInstanceSuffix returns 8 random hex characters. A crypto/rand failure is
+// effectively impossible on the platforms we run on; the clock fallback still
+// differs between two processes started at different nanoseconds.
+func newInstanceSuffix() string {
+	var b [4]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return strconv.FormatInt(time.Now().UnixNano()&0xffffffff, 16)
+	}
+	return hex.EncodeToString(b[:])
+}
+
+// clientID is the MQTT client id this process presents to a broker: the
+// configured (or default) base, which names us to the broker operator, plus the
+// per-process instance suffix, which keeps two of our processes from sharing a
+// session.
+func (r *Registry) clientID(idx int, b Broker) string {
+	base := b.ClientID
+	if base == "" {
+		base = fmt.Sprintf("sierra-grid-meshcore-%d", idx)
+	}
+	return base + "-" + r.instance
 }
 
 // SeedNode is one node's persisted presence, used to rehydrate the Registry on
@@ -260,33 +303,32 @@ func (r *Registry) Seed(nodes []SeedNode) {
 }
 
 // Connect dials every configured broker. It does NOT block on connectivity:
-// paho retries in the background, and Health() reflects the live connection
-// count. Returns an error only when no brokers are configured.
+// paho retries in the background, and Brokers reflects each one's live state.
+// Returns an error only when no brokers are configured.
 func (r *Registry) Connect(ctx context.Context) error {
 	if len(r.cfg.Brokers) == 0 {
 		return fmt.Errorf("meshcore: no brokers configured")
 	}
 	r.baseCtx = ctx
 	for i, b := range r.cfg.Brokers {
-		c := r.buildClient(ctx, i, b)
+		link := &brokerLink{url: b.URL, startedAt: r.now()}
+		c := r.buildClient(ctx, i, b, link)
 		c.Connect() // fire-and-forget; SetConnectRetry keeps trying
 		r.mu.Lock()
 		r.clients = append(r.clients, c)
+		r.links = append(r.links, link)
 		r.mu.Unlock()
 	}
 	return nil
 }
 
 // buildClient constructs a paho client that (re)subscribes on every connect.
-func (r *Registry) buildClient(ctx context.Context, idx int, b Broker) mqtt.Client {
+func (r *Registry) buildClient(ctx context.Context, idx int, b Broker, link *brokerLink) mqtt.Client {
 	topics := b.Topics
 	if len(topics) == 0 {
 		topics = []string{defaultTopic}
 	}
-	clientID := b.ClientID
-	if clientID == "" {
-		clientID = fmt.Sprintf("sierra-grid-meshcore-%d", idx)
-	}
+	clientID := r.clientID(idx, b)
 
 	opts := mqtt.NewClientOptions().
 		AddBroker(b.URL).
@@ -307,9 +349,9 @@ func (r *Registry) buildClient(ctx context.Context, idx int, b Broker) mqtt.Clie
 		opts.SetTLSConfig(&tls.Config{MinVersion: tls.VersionTLS12})
 	}
 
-	handler := r.onMessage(b.URL)
+	handler := r.onMessage(link)
 	opts.SetOnConnectHandler(func(c mqtt.Client) {
-		logging.Infow(ctx, "MeshCore broker connected", "broker", b.URL)
+		logging.Infow(ctx, "MeshCore broker connected", "broker", b.URL, "clientId", clientID)
 		for _, t := range topics {
 			if tok := c.Subscribe(t, b.QoS, handler); tok.Wait() && tok.Error() != nil {
 				logging.Warnw(ctx, "MeshCore subscribe failed", "broker", b.URL, "topic", t, "error", tok.Error())
@@ -322,11 +364,94 @@ func (r *Registry) buildClient(ctx context.Context, idx int, b Broker) mqtt.Clie
 	return mqtt.NewClient(opts)
 }
 
-// onMessage returns a handler bound to a broker id (used as a gateway fallback).
-func (r *Registry) onMessage(brokerID string) mqtt.MessageHandler {
+// onMessage returns a handler bound to one broker. Every message stamps the
+// broker's delivery clock before anything else, whatever its packet type: the
+// feed is a firehose of every type, and "is this subscription carrying
+// anything" is a question about the pipe, not about adverts.
+func (r *Registry) onMessage(link *brokerLink) mqtt.MessageHandler {
 	return func(_ mqtt.Client, m mqtt.Message) {
-		r.ingestRaw(m.Payload(), brokerID)
+		link.lastMsg.Store(r.now().UnixNano())
+		r.ingestRaw(m.Payload(), link.url)
 	}
+}
+
+// brokerLink is one broker's delivery clock. Written from paho's callback
+// goroutines and read by Brokers, so the clock is atomic rather than under mu
+// (which every advert already contends for).
+type brokerLink struct {
+	url       string
+	startedAt time.Time    // when Connect first dialed it; immutable
+	lastMsg   atomic.Int64 // UnixNano of the last message of any type; 0 = none
+}
+
+// BrokerHealth is one configured broker's delivery state, judged by Brokers.
+type BrokerHealth struct {
+	URL string
+	// Open reports whether an MQTT session is up NOW. It is deliberately not
+	// paho's IsConnected, which with auto-reconnect on also reports true while
+	// the client is reconnecting: a broker that had dropped us read as connected
+	// indefinitely, so the fail-loud guard downstream could never fire.
+	Open bool
+	// LastMsgAt is when the broker last carried a message of any packet type.
+	// Zero means none since this process started.
+	LastMsgAt time.Time
+	// Problem is empty when the broker is delivering, and otherwise says why
+	// not, in words fit for a log line and a source's last_error.
+	Problem string
+}
+
+// Delivering reports whether the broker is open and carrying traffic.
+func (h BrokerHealth) Delivering() bool { return h.Problem == "" }
+
+// Brokers reports every configured broker's delivery state, in config order.
+// Empty before Connect, and always empty for a registry fed only by push
+// forwarders.
+//
+// A broker is delivering when its session is open AND it has carried a message
+// within SilenceAfter. The silence is measured from the last message, falling
+// back to when Connect first dialed the broker, and never from the latest
+// reconnect: a session that keeps being dropped and re-established while
+// carrying nothing must not look fresh each time it comes back.
+func (r *Registry) Brokers() []BrokerHealth {
+	r.mu.Lock()
+	clients := slices.Clone(r.clients)
+	links := slices.Clone(r.links)
+	r.mu.Unlock()
+
+	now := r.now()
+	out := make([]BrokerHealth, 0, len(links))
+	for i, l := range links {
+		h := BrokerHealth{URL: l.url, Open: clients[i] != nil && clients[i].IsConnectionOpen()}
+		if ns := l.lastMsg.Load(); ns != 0 {
+			h.LastMsgAt = time.Unix(0, ns)
+		}
+		h.Problem = deliveryProblem(h.Open, l.startedAt, h.LastMsgAt, now, r.cfg.SilenceAfter)
+		out = append(out, h)
+	}
+	return out
+}
+
+// deliveryProblem is the judgment behind Brokers, split out so it is testable
+// without a broker. It returns "" for a delivering broker.
+func deliveryProblem(open bool, startedAt, lastMsgAt, now time.Time, silenceAfter time.Duration) string {
+	heard := "no message since " + startedAt.UTC().Format(time.RFC3339)
+	if !lastMsgAt.IsZero() {
+		heard = "last message " + now.Sub(lastMsgAt).Round(time.Second).String() + " ago"
+	}
+	if !open {
+		return "not connected (" + heard + ")"
+	}
+	if silenceAfter <= 0 {
+		return ""
+	}
+	ref := lastMsgAt
+	if ref.IsZero() {
+		ref = startedAt
+	}
+	if now.Sub(ref) <= silenceAfter {
+		return ""
+	}
+	return "connected but silent (" + heard + ")"
 }
 
 // PacketOutcome classifies what became of one packet envelope handed to
@@ -431,7 +556,6 @@ func (r *Registry) ingestPacket(env *packetEnvelope, source, defaultGateway stri
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.lastMsgAt = now
 
 	e := r.nodes[adv.PubKey]
 	if e == nil {
@@ -649,20 +773,6 @@ func resolvePath(hops []string, idx map[string][]string) []string {
 		}
 	}
 	return res
-}
-
-// Health reports how many brokers are currently connected and when the last
-// message arrived. Zero connected → the normalizer hard-errors its Poll so the
-// disappearance sweep is skipped (our outage must not expire live nodes).
-func (r *Registry) Health() (connected int, lastMsg time.Time) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for _, c := range r.clients {
-		if c != nil && c.IsConnected() {
-			connected++
-		}
-	}
-	return connected, r.lastMsgAt
 }
 
 // Close disconnects every broker.

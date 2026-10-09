@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -16,15 +17,33 @@ import (
 )
 
 // fakeMeshRegistry is a canned MeshRegistry for the normalizer tests.
+//
+// connected is how many configured brokers are delivering; down is how many
+// more are configured but not (the registry's own judgment, see
+// meshcore.Registry.Brokers). Both zero is a registry with no brokers at all —
+// MQTT off, fed only by push forwarders — which is not a failure.
 type fakeMeshRegistry struct {
 	nodes     []meshcore.NodeState
 	connected int
+	down      int
 	obs       []meshcore.Observation
 }
 
 func (f *fakeMeshRegistry) Snapshot() []meshcore.NodeState            { return f.nodes }
-func (f *fakeMeshRegistry) Health() (int, time.Time)                  { return f.connected, time.Time{} }
 func (f *fakeMeshRegistry) DrainObservations() []meshcore.Observation { return f.obs }
+
+func (f *fakeMeshRegistry) Brokers() []meshcore.BrokerHealth {
+	var out []meshcore.BrokerHealth
+	for i := 0; i < f.connected; i++ {
+		out = append(out, meshcore.BrokerHealth{URL: fmt.Sprintf("wss://up-%d.example", i), Open: true})
+	}
+	for i := 0; i < f.down; i++ {
+		out = append(out, meshcore.BrokerHealth{
+			URL: fmt.Sprintf("wss://down-%d.example", i), Problem: "not connected (last message 5h0m0s ago)",
+		})
+	}
+	return out
+}
 
 // ResolvePrefix matches the production rule: a unique prefix match, or nothing.
 func (f *fakeMeshRegistry) ResolvePrefix(prefix string) (string, bool) {
@@ -129,8 +148,8 @@ func TestNetworkPollWiderBoundsOverrideHazardAreas(t *testing.T) {
 func TestNetworkProvenanceAttributesBrokerOperator(t *testing.T) {
 	cfg := testConfig()
 	cfg.Grid.Meshcore.Brokers = []config.MeshcoreBroker{{
-		URL: "wss://mqtt.gomesh.dev:443/mqtt", Operator: "LetsMesh",
-		OperatorURL: "https://analyzer.letsmesh.net/about",
+		URL: "wss://mqtt.gomesh.dev:443/mqtt", Operator: "gomesh.dev",
+		OperatorURL: "https://www.gomesh.dev/",
 	}}
 	reg := &fakeMeshRegistry{connected: 1, nodes: []meshcore.NodeState{{
 		PubKey: "aa11bb22", Role: meshcore.RoleRepeater, Name: "Ridge",
@@ -146,10 +165,55 @@ func TestNetworkProvenanceAttributesBrokerOperator(t *testing.T) {
 
 	prov := ev.GetProvenance()
 	// provenance points at the operator's https page (not the wss:// broker URL)…
-	assert.Equal(t, "https://analyzer.letsmesh.net/about", prov.GetSourceUrl())
-	assert.Equal(t, "MeshCore community mesh via LetsMesh", prov.GetAttribution())
-	// …while the node's map deep-link stays on canonical_url.
+	assert.Equal(t, "https://www.gomesh.dev/", prov.GetSourceUrl())
+	assert.Equal(t, "MeshCore community mesh via gomesh.dev", prov.GetAttribution())
+	// …while canonical_url stays the node link (the map, with no nodeUrl configured).
 	assert.Equal(t, meshMapURL, ev.GetCanonicalUrl())
+}
+
+// A node's canonical_url lands on THAT node's packets — its page on an analyzer
+// reading the same broker — rather than a world map. It is built from the key
+// alone: canonical_url is hashed, so following the latest packet would mint a
+// revision on every advert.
+func TestMeshCanonicalURLDeepLinksToTheNode(t *testing.T) {
+	const tmpl = "https://corescope.stonekitty.net/#/nodes/{publicKey}"
+	full := strings.Repeat("ab", 32)
+	withTemplate := func(t string) *NetworkNormalizer {
+		cfg := testConfig()
+		cfg.Grid.Meshcore.NodeURL = t
+		return NewNetworkNormalizer(cfg, nil, nil)
+	}
+
+	t.Run("a full key gets its node page", func(t *testing.T) {
+		assert.Equal(t, "https://corescope.stonekitty.net/#/nodes/"+full, withTemplate(tmpl).meshNodeURL(full))
+	})
+	t.Run("an unmatched prefix gets the map, not a page that would not resolve", func(t *testing.T) {
+		assert.Equal(t, meshMapURL, withTemplate(tmpl).meshNodeURL(full[:16]))
+	})
+	t.Run("no template configured gets the map", func(t *testing.T) {
+		assert.Equal(t, meshMapURL, withTemplate("").meshNodeURL(full))
+	})
+	t.Run("a template without the placeholder would send every node to one page", func(t *testing.T) {
+		assert.Equal(t, meshMapURL, withTemplate("https://corescope.stonekitty.net/").meshNodeURL(full))
+	})
+	t.Run("a non-http template is refused, like every canonical_url", func(t *testing.T) {
+		assert.Equal(t, meshMapURL, withTemplate("javascript:alert('{publicKey}')").meshNodeURL(full))
+	})
+	t.Run("a key that is not plain hex never reaches the URL", func(t *testing.T) {
+		assert.Equal(t, meshMapURL, withTemplate(tmpl).meshNodeURL(strings.Repeat("A", 63)+"/"))
+	})
+
+	t.Run("Poll sets it on the event", func(t *testing.T) {
+		cfg := testConfig()
+		cfg.Grid.Meshcore.NodeURL = tmpl
+		reg := &fakeMeshRegistry{connected: 1, nodes: []meshcore.NodeState{{
+			PubKey: full, Role: meshcore.RoleRepeater, HasLocation: true, Lat: 38.14, Lng: -120.45,
+		}}}
+		res, err := NewNetworkNormalizer(cfg, reg, nil).Poll(testCtx(), nil)
+		require.NoError(t, err)
+		require.Len(t, res.Events, 1)
+		assert.Equal(t, "https://corescope.stonekitty.net/#/nodes/"+full, res.Events[0].GetCanonicalUrl())
+	})
 }
 
 func TestNetworkProvenanceFallsBackWithoutOperator(t *testing.T) {
@@ -167,7 +231,7 @@ func TestNetworkProvenanceFallsBackWithoutOperator(t *testing.T) {
 }
 
 func TestNetworkPollHardErrorsWhenNoBrokers(t *testing.T) {
-	reg := &fakeMeshRegistry{connected: 0, nodes: []meshcore.NodeState{
+	reg := &fakeMeshRegistry{down: 1, nodes: []meshcore.NodeState{
 		{PubKey: "aa", Role: meshcore.RoleRepeater, HasLocation: true, Lat: 38.1, Lng: -120.4},
 	}}
 	n := NewNetworkNormalizer(testConfig(), reg, nil)
@@ -262,8 +326,8 @@ func reheardAt(t *testing.T, lat, lng float64, prev *gridv1.Event) *gridv1.Event
 func TestSeededNodeKeepsItsBrokerAttribution(t *testing.T) {
 	cfg := testConfig()
 	cfg.Grid.Meshcore.Brokers = []config.MeshcoreBroker{{
-		URL: "wss://mqtt.gomesh.dev:443/mqtt", Operator: "LetsMesh",
-		OperatorURL: "https://analyzer.letsmesh.net/about",
+		URL: "wss://mqtt.gomesh.dev:443/mqtt", Operator: "gomesh.dev",
+		OperatorURL: "https://www.gomesh.dev/",
 	}}
 	node := meshcore.NodeState{
 		PubKey: "aa11bb22", Role: meshcore.RoleRepeater, Name: "Ridge",
@@ -277,7 +341,7 @@ func TestSeededNodeKeepsItsBrokerAttribution(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, res.Events, 1)
 	stored := res.Events[0]
-	assert.Contains(t, stored.GetProvenance().GetAttribution(), "LetsMesh")
+	assert.Contains(t, stored.GetProvenance().GetAttribution(), "gomesh.dev")
 	baseHash := store.ContentHash(stored)
 
 	// After a restart the same node is in the snapshot from the seed, with no
@@ -304,5 +368,5 @@ func TestSeededNodeKeepsItsBrokerAttribution(t *testing.T) {
 	res, err = NewNetworkNormalizer(cfg, fresh, nil).Poll(testCtx(), &fakePrior{})
 	require.NoError(t, err)
 	require.Len(t, res.Events, 1)
-	assert.NotContains(t, res.Events[0].GetProvenance().GetAttribution(), "LetsMesh")
+	assert.NotContains(t, res.Events[0].GetProvenance().GetAttribution(), "gomesh.dev")
 }

@@ -484,6 +484,40 @@ type MeshcoreConfig struct {
 	// for nine nodes a year costs tens of megabytes, which is why the default is
 	// generous.
 	TelemetryRetention time.Duration `koanf:"telemetryRetention"`
+	// SilenceAfter is how long a connected broker may carry no message at all
+	// before the `meshcore` source is reported as failing (and its sweep held
+	// off). The subscription is the global firehose — several messages a second
+	// — so silence is a dead pipe, not a quiet mesh. It exists because a session
+	// can be up and deliver nothing; from 2026-10-03 to 2026-10-09 ours did, and
+	// nothing noticed. Narrow the subscribe topic to a quiet region and this
+	// needs widening with it.
+	//
+	// Unset (0) => DefaultMeshcoreSilenceAfter. A NEGATIVE value disables the
+	// silence check (a closed session still fails the source) and is returned
+	// verbatim, the same explicit-opt-out rule as PowerConfig.OutageStaleAfter.
+	SilenceAfter time.Duration `koanf:"silenceAfter"`
+	// NodeURL is the template for each node event's canonical_url, with
+	// `{publicKey}` replaced by the node's full 64-hex public key: the node's
+	// own page on a packet analyzer that reads the same broker feed we do, so a
+	// reader lands on that node's recent packets rather than a world map. Unset,
+	// or a node known only by a key prefix, falls back to the community map.
+	// canonical_url is hashed, so changing this mints one revision per node.
+	NodeURL string `koanf:"nodeUrl"`
+}
+
+// DefaultMeshcoreSilenceAfter is the default grid.meshcore.silenceAfter. The
+// global topic carries several messages a second, so 15 minutes of nothing is
+// far outside any lull and still catches a dead subscription within a tick or
+// three of the mesh source's 60s poll.
+const DefaultMeshcoreSilenceAfter = 15 * time.Minute
+
+// Silence is SilenceAfter with the default applied. A negative configured value
+// disables the check and is returned as-is (the registry treats <= 0 as off).
+func (m MeshcoreConfig) Silence() time.Duration {
+	if m.SilenceAfter != 0 {
+		return m.SilenceAfter
+	}
+	return DefaultMeshcoreSilenceAfter
 }
 
 // MeshcoreBroker is one MQTT endpoint. URL scheme selects transport

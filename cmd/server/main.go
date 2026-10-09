@@ -239,10 +239,9 @@ func main() {
 	//
 	// The MeshCore registry itself has two doors: the MQTT brokers, and the
 	// mesh.packet push stream, through which an operator's companion radio
-	// forwards the raw adverts it hears (the SIERRA backbone reaches the
-	// community brokers only every few days; a companion in Arnold hears it
-	// daily). Either door justifies the registry; only the brokers need a
-	// connection.
+	// forwards the raw adverts it hears (a companion in Arnold hears SIERRA
+	// nodes no MQTT observer does). Either door justifies the registry; only
+	// the brokers need a connection.
 	var meshcoreReg ingest.MeshRegistry
 	mqttEnabled := appConfig.Grid.Meshcore.Enabled && len(appConfig.Grid.Meshcore.Brokers) > 0
 	packetReporters := pushRegistry.ReporterIDs(pushingest.MeshPacketStream)
@@ -585,6 +584,7 @@ func meshcoreClientConfig(cfg *config.Config) meshcore.Config {
 		CadenceK:              mc.CadenceK,
 		GraceFloor:            mc.GraceFloor,
 		GraceCeil:             graceCeil,
+		SilenceAfter:          mc.Silence(),
 	}
 }
 

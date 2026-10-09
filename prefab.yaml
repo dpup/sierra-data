@@ -679,9 +679,10 @@ grid:
   #
   # NOTE: bayme.sh's public broker (mqtt.bayme.sh, topic msh/US/bayarea) is
   # MESHTASTIC — a different protocol, NOT usable here. MeshCore brokers include
-  # mqtt.meshmapper.net, the LetsMesh US/EU servers, and mqttmc01.bostonme.sh
-  # (all WSS+TLS :443). meshmapper access: a Region Onboarding form → creds via
-  # Discord. For local testing, self-host a broker + a publishing observer.
+  # mqtt.gomesh.dev (the one we use), mqtt.meshmapper.net, the LetsMesh US/EU
+  # servers, and mqttmc01.bostonme.sh (all WSS+TLS :443). meshmapper access: a
+  # Region Onboarding form → creds via Discord. For local testing, self-host a
+  # broker + a publishing observer.
   meshcore:
     enabled: true
     # Keeps a recently-heard node in each poll snapshot; expireAfter (above), not
@@ -719,6 +720,24 @@ grid:
     compactionInterval: "1h"
     observationRetention: "48h" # Tier 0 raw: live-map freshness + hop re-resolution
     rollupRetention: "17520h"   # Tier 1 link history: 2 years, cheap to keep
+    # A broker session that is open but carries NOTHING for this long fails the
+    # `meshcore` source (STALE, then UNAVAILABLE, on /api/v1/sources) and holds
+    # off the expiry sweep. The global topic below carries several messages a
+    # second, so this is a dead pipe, not a quiet mesh. A CLOSED session fails
+    # the source at once. Added after 2026-10-03..09, when the subscriber went
+    # near-silent, the sweep expired ~680 nodes, and the source read OK: paho
+    # counts a reconnecting client as connected, and a live monitor kept the
+    # all-inputs-dead check from firing. Widen it if the topic is narrowed to a
+    # quiet region; a negative value turns the silence check off.
+    silenceAfter: "15m"
+    # Each node event's canonicalUrl: the node's page on CoreScope
+    # (github.com/Kpa-clawbot/CoreScope), an open-source packet analyzer that
+    # subscribes to the same gomesh broker we do. It lists the node's recent
+    # adverts with every receiving gateway and relay path, each linking to the
+    # packet. map.meshcore.io has no per-node URL, so it is only the fallback
+    # (unset, or a node known only by a key prefix). Hashed: changing this mints
+    # one revision per node.
+    nodeUrl: "https://corescope.stonekitty.net/#/nodes/{publicKey}"
     # Geofence for node inclusion (a node's advertised location must fall inside a
     # box). Deliberately WIDER than the Ebbetts Pass hazard area: our Sierra
     # repeaters run in power-saver mode and are quiet, so we also track the busier
@@ -739,10 +758,18 @@ grid:
     # can't merge an env key onto a YAML array element — so use the scalars above.)
     brokers:
       - url: "wss://mqtt.gomesh.dev:443/mqtt"
+        # The BASE of our client id: the registry appends a random per-process
+        # suffix (data.sierragridteam.org-1a2b3c4d). A broker keeps one session
+        # per id and drops the older one when another connects, so two of our
+        # processes on one id — a local server run with production credentials,
+        # an overlapping deploy — would keep knocking each other off.
         clientId: "data.sierragridteam.org"
         topics: ["meshcore/+/+/packets"]
         # Who runs this MQTT server — used for event provenance (an https page,
         # not the wss:// URL). A node's events attribute to the operator(s) of
-        # the broker(s) that heard it.
-        operator: "LetsMesh"
-        operatorUrl: "https://analyzer.letsmesh.net/about"
+        # the broker(s) that heard it. This said "LetsMesh" until 2026-10-09;
+        # gomesh.dev's own page ("Open infrastructure for the MeshCore
+        # community") names no LetsMesh connection, and LetsMesh runs its own
+        # brokers.
+        operator: "gomesh.dev"
+        operatorUrl: "https://www.gomesh.dev/"

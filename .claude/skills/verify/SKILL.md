@@ -60,6 +60,14 @@ make proto   # then: git status api/ — only files for protos you edited should
 ```
 
 ## Gotchas
+- **Never run a server binary built from before 2026-10-09 with mesh enabled
+  (`grid.meshcore.enabled: true` is the committed default).** Those builds
+  connect to the production MQTT broker as `data.sierragridteam.org`, which is
+  production's own client id, and the broker accepts them even with no
+  credentials. Each connect knocks production's session off. Current builds
+  append a random per-process suffix. When comparing against an old build, set
+  `PF__GRID__MESHCORE__ENABLED=false` for it. See "A deaf broker" in
+  `internal/ingest/CLAUDE.md`.
 - Weather refresh is lazy (request-driven); the first `/weather` hit triggers
   the OpenWeather fan-out. Mind API budgets: don't loop requests that bust
   caches, and never wire `/data/3.0/onecall` back into the server (1,000/day cap).
