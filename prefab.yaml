@@ -648,16 +648,14 @@ grid:
       #
       # Mint/rotate with: make ingest-token REPORTER=burn-line STREAMS=burn.line
       #
-      # Commented out because an empty/invalid tokenSha256 is FATAL at startup by
-      # design. Run the mint command, which fills the hash in and uncomments
-      # nothing else, then remove these comment markers:
-      #
-      # - id: burn-line
-      #   name: "County burn line reader"
-      #   tokenSha256: "<64 hex chars — `make ingest-token` writes it>"
-      #   streams: ["burn.line"]
-      #   staleAfter: "30h"
-      #   minInterval: "60s"
+      # The token itself lives only with the operator (and in the repo secret
+      # BURNLINE_INGEST_TOKEN); only its SHA-256 is committed.
+      - id: burn-line
+        name: "County burn line reader"
+        tokenSha256: "8427c3c2698c64f8d27a4edd378fdce22f94e933c8c7366e6dfb4d3e75dcc363"
+        streams: ["burn.line"]
+        staleAfter: "30h"
+        minInterval: "60s"
 
   # MeshCore mesh-node presence source. Subscribes to community MQTT bridges,
   # several for resilience; a node heard on more than one collapses to a single

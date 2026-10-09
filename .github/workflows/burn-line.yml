@@ -8,8 +8,10 @@
 # the shared push-ingest endpoint as the `burn.line` stream.
 #
 # GRID_INGEST_ENDPOINT is the full stream URL, e.g.
-# https://data.sierragridteam.org/api/v1/ingest/burn.line; GRID_INGEST_TOKEN is a
-# grid.ingest reporter granted that stream (`make ingest-token`).
+# https://data.sierragridteam.org/api/v1/ingest/burn.line; the repo secret
+# BURNLINE_INGEST_TOKEN is the `burn-line` grid.ingest reporter's token
+# (`make ingest-token REPORTER=burn-line STREAMS=burn.line`), granted only that
+# stream. Named per reporter so other push reporters can get their own.
 #
 # Before dialing, the tool preflights the endpoint (`?preflight=true`): a bad
 # token, a missing grant or a server outage fails the run before any paid call.
@@ -82,7 +84,7 @@ jobs:
           TWILIO_FROM_NUMBER: ${{ secrets.TWILIO_FROM_NUMBER }}
           TWILIO_TWIML_URL: ${{ secrets.TWILIO_TWIML_URL }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GRID_INGEST_TOKEN: ${{ secrets.GRID_INGEST_TOKEN }}
+          GRID_INGEST_TOKEN: ${{ secrets.BURNLINE_INGEST_TOKEN }}
         run: |
           ./bin/burn-line \
             -endpoint="${{ vars.GRID_INGEST_ENDPOINT }}" \
