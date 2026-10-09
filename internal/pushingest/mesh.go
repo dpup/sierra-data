@@ -1,6 +1,7 @@
 package pushingest
 
 import (
+	"context"
 	"encoding/hex"
 	"fmt"
 	"strings"
@@ -148,7 +149,7 @@ type meshRepeaterIn struct {
 // ENVELOPE is an error (the whole request is rejected), while a malformed NODE
 // is a warning (the rest of the report still lands). A monitor that adds a
 // repeater with a typo'd id should not lose the other eight.
-func (r *Registry) ingestMesh(rep *reporter, body []byte, maxItems int) (accepted int, warnings []string, err error) {
+func (r *Registry) ingestMesh(_ context.Context, rep *reporter, body []byte, maxItems int) (accepted int, warnings []string, err error) {
 	payload, err := decodeJSON[meshPayload](body)
 	if err != nil {
 		return 0, nil, err

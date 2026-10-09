@@ -1,6 +1,7 @@
 package pushingest
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -88,7 +89,7 @@ type packetPayload struct {
 //
 // `accepted` counts ADVERTs applied to the registry, not packets received, so a
 // forwarder can see from the response whether what it sends is useful.
-func (r *Registry) ingestPackets(rep *reporter, body []byte, maxItems int) (accepted int, warnings []string, err error) {
+func (r *Registry) ingestPackets(_ context.Context, rep *reporter, body []byte, maxItems int) (accepted int, warnings []string, err error) {
 	r.mu.Lock()
 	sink := r.packets
 	r.mu.Unlock()

@@ -48,6 +48,7 @@ message Event {
     RoadIncidentDetail road_incident = 25;
     MeshDetail mesh = 26;
     PowerDetail power = 27;
+    BurnStatusDetail burn_status = 31;
   }
 
   // Gauge/AirQuality/Announcement details — defined with their pollers.
@@ -68,6 +69,7 @@ enum Layer {
   AIR_QUALITY = 12;
   MESH = 13;
   ANNOUNCEMENT = 14;
+  BURN_STATUS = 15;
 }
 
 // The shipped scale, unchanged. rank = enum value; INFO=0 ... EXTREME=4.
@@ -417,6 +419,118 @@ message PowerDetail {
   // the worst thing this layer could do. It is carried so a client can show the
   // expected all-clear alongside the other estimates.
   google.protobuf.Timestamp all_clear = 13;
+}
+
+// Residential/outdoor burning status for one county (Layer_BURN_STATUS).
+//
+// TWO INDEPENDENT AUTHORITIES gate a legal burn, and BOTH must permit it:
+//
+//  1. `burn_day` — the county air district's permissive-burn-day call, decided
+//     daily from meteorology and air quality. Flips weekly in winter/spring.
+//  2. `calfire_status` — CAL FIRE's seasonal suspension of residential burn
+//     permits on State Responsibility Area land. Moves about twice a year.
+//
+// They are carried separately, never merged into one upstream value, because
+// they fail independently: the county line can be unreachable while CAL FIRE's
+// page is fine, and vice versa. `permission` is the only derived answer, and it
+// is deliberately pessimistic (see below).
+//
+// This is AMBIENT state, not a hazard: the event exists for a county at all
+// times and is excluded from the summary hazard rollup, exactly like mesh-node
+// presence. Its VALUE is the revision history — "when did it change" is the
+// question this layer answers.
+message BurnStatusDetail {
+  BurnDay burn_day = 1;
+  CalfireBurnStatus calfire_status = 2;
+
+  // Derived: the MORE RESTRICTIVE of the two facets, never the more permissive.
+  // UNKNOWN whenever either facet is unknown or stale — a missing answer must
+  // never read as ALLOWED. Someone acts on this with a match in their hand.
+  BurnPermission permission = 3;
+
+  // --- CAL FIRE facet (source `calfire-burn`) ---
+  // When the suspension took effect. The county phone line only ever says
+  // "until further notice"; this date exists nowhere else we read.
+  google.protobuf.Timestamp calfire_effective = 4;
+  string calfire_area = 5;          // "All SRA" — the land classes covered
+
+  // --- county facet (source `burnline`) ---
+  // Every recorded line that speaks for this county, each with its own reading.
+  //
+  // Repeated rather than one phone number because the line-to-county mapping is
+  // not 1:1 in EITHER direction: a county can have more than one relevant
+  // recording, and one air-district line routinely covers several counties.
+  // `burn_day` above is these lines merged, taking the most restrictive.
+  //
+  // A line with no usable reading still appears here, with burn_day UNKNOWN and
+  // its phone populated — that is the honest thing to show, and it is what lets
+  // a consumer say "we could not read it, here is the number".
+  repeated BurnLineReading burn_lines = 6;
+
+  // When the CAL FIRE page was last read successfully. EXCLUDED from the content
+  // hash (store.ContentHash), like the per-line observations: it moves every
+  // tick and would otherwise mint a revision every tick.
+  //
+  // It exists because the envelope's own observed_at cannot answer this. When
+  // the CAL FIRE scrape fails, that facet is carried forward from the stored
+  // event while observed_at still advances (we did poll) — so this is the only
+  // way a consumer can see the suspension value is not freshly confirmed.
+  google.protobuf.Timestamp calfire_observed_at = 7;
+}
+
+// BurnLineReading is one recorded phone line's answer for today.
+message BurnLineReading {
+  string id = 1;            // stable config id ("calaveras-apcd")
+  string name = 2;          // "Calaveras County APCD burn line"
+  string phone = 3;         // the number a resident can call
+  BurnDay burn_day = 4;     // this line's own answer; UNKNOWN if unread or stale
+
+  // Volatile per-observation fields — EXCLUDED from the content hash (see
+  // store.ContentHash), so they refresh without minting a revision. The line's
+  // burn_day above IS hashed: a line changing its answer, or going unreadable,
+  // is a real transition worth recording.
+  BurnObservation observation = 5;
+}
+
+// BurnObservation is the volatile half of a burn status reading. It is grouped
+// into its own sub-message so store.ContentHash can zero the whole field.
+//
+// This is load-bearing, not tidiness. The county line's message NAMES THE DATE
+// ("Today, September 10th, is a burn day in Calaveras County"), so the text
+// differs every single day even when the answer has not changed. Hashed, it
+// would mint a revision daily and bury the handful of real transitions — the
+// only thing this layer exists to record — in 365 rows of noise a year.
+message BurnObservation {
+  string message = 1;               // the line's plain-language answer
+  string transcript = 2;            // cleaned transcript of the recording
+  // The transcription model's own confidence, 0-100. Surfaced rather than
+  // thresholded: this is an LLM reading of phone audio, and a consumer deserves
+  // to see when the read was shaky.
+  int32 confidence = 3;
+  google.protobuf.Timestamp observed_at = 4;   // when this line was last called
+
+  reserved 5;                       // was calfire_observed_at, now on BurnStatusDetail
+  reserved "calfire_observed_at";
+}
+
+enum BurnDay {
+  BURN_DAY_UNKNOWN = 0;    // not reached, or the reading was unusable/stale
+  BURN_DAY_YES = 1;        // permissive burn day — burning allowed
+  BURN_DAY_NO = 2;         // no-burn day — burning prohibited
+  BURN_DAY_MARGINAL = 3;   // restricted/partial (the line's "orange")
+}
+
+enum CalfireBurnStatus {
+  CALFIRE_BURN_STATUS_UNKNOWN = 0;
+  CALFIRE_BURNING_SUSPENDED = 1;    // permits suspended; no residential burning
+  CALFIRE_PERMIT_REQUIRED = 2;      // burning allowed with a valid permit
+  CALFIRE_NO_PERMIT_REQUIRED = 3;   // off-season; no permit needed
+}
+
+enum BurnPermission {
+  BURN_PERMISSION_UNKNOWN = 0;      // at least one facet unknown — assume nothing
+  BURN_PERMISSION_ALLOWED = 1;      // both facets permit burning today
+  BURN_PERMISSION_PROHIBITED = 2;   // at least one facet prohibits it
 }
 
 // List / response wrappers for the hand-built /v1 handlers.

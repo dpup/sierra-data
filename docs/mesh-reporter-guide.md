@@ -339,7 +339,18 @@ Recommended: retry `429` and `5xx` with exponential backoff; do not retry `400`,
 
 ## Checking it worked
 
-Both are public — no token needed.
+**Before you report: is my token accepted?** Add `?preflight=true` to the
+POST. You get `204` when the token is good and granted the stream, or the
+usual `401`/`403`/`404` when it isn't. Nothing is recorded: it is not a
+report and does not count against the minimum gap.
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' -X POST \
+  -H "Authorization: Bearer $GRID_INGEST_TOKEN" \
+  'https://data.sierragridteam.org/api/v1/ingest/mesh.repeater?preflight=true'
+```
+
+The two checks below are public — no token needed.
 
 **Your reporter's health:**
 

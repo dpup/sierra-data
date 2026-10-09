@@ -46,6 +46,19 @@ func ContentHash(ev *gridv1.Event) string {
 	if n := c.GetMesh(); n != nil {
 		n.Telemetry = nil
 	}
+	// The county burn line's message names the date ("Today, September 10th, is
+	// a burn day"), so its text changes daily even when the ANSWER has not.
+	// Hashed, that would mint a revision every day and bury the few real
+	// transitions this layer exists to record. Each LINE carries its own
+	// observation, so this zeroes all of them; the lines' burn_day values stay
+	// hashed, because a line changing its answer IS the transition.
+	if b := c.GetBurnStatus(); b != nil {
+		for _, line := range b.GetBurnLines() {
+			line.Observation = nil
+		}
+		// Moves every tick; hashed, it would mint a revision every tick.
+		b.CalfireObservedAt = nil
+	}
 	b, err := proto.MarshalOptions{Deterministic: true}.Marshal(c)
 	if err != nil {
 		// Marshal of a well-formed generated message cannot fail; a sentinel

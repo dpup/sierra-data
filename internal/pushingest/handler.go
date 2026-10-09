@@ -2,6 +2,7 @@ package pushingest
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,7 +20,11 @@ import (
 // streamHandler consumes one validated request body for one stream. Adding a
 // stream is adding an entry to the map in dispatch — routing, auth, rate
 // limiting, size limits and health are already done by the time it is called.
-type streamHandler func(rep *reporter, body []byte, maxItems int) (accepted int, warnings []string, err error)
+//
+// It takes the request's context because a handler may do I/O: the mesh stream
+// only touches an in-memory buffer, but burn.line stages its reading in the
+// store (see ingestBurn for why that one must survive a restart).
+type streamHandler func(ctx context.Context, rep *reporter, body []byte, maxItems int) (accepted int, warnings []string, err error)
 
 func (r *Registry) dispatch(stream string) (streamHandler, bool) {
 	switch stream {
@@ -27,6 +32,12 @@ func (r *Registry) dispatch(stream string) (streamHandler, bool) {
 		return r.ingestMesh, true
 	case MeshPacketStream:
 		return r.ingestPackets, true
+	case BurnStream:
+		// Always dispatched, even with no store wired: KnownStreams promises that
+		// every listed stream routes, so a reporter granted one never collects a
+		// confusing 404. An unconfigured deployment gets ingestBurn's explicit
+		// error instead, which says what is actually wrong.
+		return r.ingestBurn, true
 	default:
 		return nil, false
 	}
@@ -39,7 +50,7 @@ func (r *Registry) dispatch(stream string) (streamHandler, bool) {
 // 404s, and the config is the wrong place to discover that.
 //
 // TestKnownStreamsAllDispatch keeps this honest.
-func KnownStreams() []string { return []string{MeshStream, MeshPacketStream} }
+func KnownStreams() []string { return []string{MeshStream, MeshPacketStream, BurnStream} }
 
 // ingestResponse is the 202 body. camelCase, like the rest of /api/v1.
 type ingestResponse struct {
@@ -88,6 +99,17 @@ func (r *Registry) ServeStream(w http.ResponseWriter, req *http.Request, stream 
 		return
 	}
 
+	// ?preflight=true stops here: the credential and the grant are good. A
+	// client checks this BEFORE doing expensive work to produce a report (the
+	// burn-line reader places paid phone calls), so a bad token or a server
+	// outage fails for free. It records nothing — not an attempt, not an
+	// acceptance — so it can never move the rate-limit window or paint a
+	// reporter healthy, and it reveals nothing the caller's token did not.
+	if req.URL.Query().Get("preflight") == "true" {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
 	now := r.now()
 	r.mu.Lock()
 	rep.lastAttemptAt = now
@@ -127,7 +149,7 @@ func (r *Registry) ServeStream(w http.ResponseWriter, req *http.Request, stream 
 		return
 	}
 
-	accepted, warnings, err := handler(rep, body, r.cfg.MaxItemsOrDefault())
+	accepted, warnings, err := handler(ctx, rep, body, r.cfg.MaxItemsOrDefault())
 	if err != nil {
 		r.recordFailure(rep, err.Error())
 		logging.Warnw(ctx, "Push ingest: rejected report",
