@@ -367,12 +367,31 @@ func (n *NetworkNormalizer) buildEvent(m *mergedNode, now time.Time, prior Prior
 	if m.mqtt != nil {
 		ev.Geometry = stablePosition(prior, ev.GetId(), m.mqtt.Lat, m.mqtt.Lng)
 		brokers = m.mqtt.Brokers
+	} else {
+		// A report carries no coordinates, and the Grid does not invent them —
+		// but it does not FORGET them either. A node in this branch is one the
+		// monitor still reaches while no bridge has heard it within its presence
+		// window, and for the quiet backbone repeaters this path exists for that
+		// is the normal state: they advertise about once a day and are present
+		// in the registry snapshot for 14h of it. Rebuilding the event without
+		// geometry here wiped the position the node's last advert established,
+		// which detached it from every place (and so from every place-scoped map
+		// and summary), minted a revision, and minted another when the next
+		// advert put it back. Lilac Park reached revision 40 that way, and the
+		// Ebbetts Pass mesh map showed one of nine SIERRA repeaters.
+		//
+		// So the stored position rides forward, byte for byte, the same way
+		// `stablePosition` keeps it across GPS wobble and `keepPriorAttribution`
+		// keeps the broker attribution across a restart: this tick says nothing
+		// about where the node is, and "nothing new" is not "nowhere". A node a
+		// monitor knows that has NEVER advertised a location stays place-less,
+		// as before, until an advert supplies one.
+		ev.Geometry = priorByID(prior, ev.GetId()).GetGeometry()
 	}
-	// A node known only from a monitor has NO geometry: a report carries no
-	// coordinates, and the Grid does not invent them. Its place attachment
-	// therefore comes from the reporter's configured placeIds, which UpsertEvent
-	// unions with (absent) geometric matches. Where a reporter configures none,
-	// the node is honestly place-less until an advert supplies a location.
+	// Place attachment: the reporter's configured placeIds, which UpsertEvent
+	// unions with the geometric matches for whatever geometry is set above.
+	// Where a reporter configures none and the node has no stored position, the
+	// node is honestly place-less.
 	ev.PlaceIds = reporterPlaceIDs(reports)
 
 	// observed_at is when this node's content was observed; it's zeroed in the
