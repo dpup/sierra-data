@@ -424,6 +424,9 @@ func (p *probe) chatModel(r *report, model string, runs int) {
 			r.li("**Parse: FAIL** — " + err.Error())
 		} else {
 			r.li(fmt.Sprintf("Parse: ok; %d additional_info pairs; details %d chars", len(o.AdditionalInfo), len(o.Details)))
+			if len(o.AdditionalInfo) == 0 {
+				r.li("**No additional_info pairs** — the model skipped the metadata under the list form (the prompt describes it as an object)")
+			}
 		}
 		r.details("raw response", port.content)
 	}
@@ -450,15 +453,22 @@ func (p *probe) chatModel(r *report, model string, runs int) {
 	p.describeResult(r, burn)
 	if burn.err == nil {
 		var o struct {
-			Status     string  `json:"status"`
-			Message    string  `json:"message"`
-			Confidence float64 `json:"confidence"`
+			Status               string  `json:"status"`
+			Message              string  `json:"message"`
+			CleanedTranscription string  `json:"cleanedTranscription"`
+			Confidence           float64 `json:"confidence"`
 		}
 		if err := json.Unmarshal([]byte(burn.content), &o); err != nil {
 			r.li("**Parse: FAIL** — " + err.Error())
 		} else {
-			r.li(fmt.Sprintf("status `%s` (%s), confidence %.0f, message: %s",
+			r.li(fmt.Sprintf("status `%s` (%s), confidence %g, message: %s",
 				o.Status, yesno(o.Status == "orange", "correct", "**WRONG**"), o.Confidence, o.Message))
+			if o.Confidence > 0 && o.Confidence <= 1 {
+				r.li("**Confidence on the wrong scale** (a 0-1 fraction; the prompt asks for 0-100 and reader.go would store it as 0)")
+			}
+			if degenerate(o.CleanedTranscription) {
+				r.li(fmt.Sprintf("**Degenerate cleanedTranscription** %q — reader.go would fall back to the raw transcript", o.CleanedTranscription))
+			}
 		}
 		r.details("raw response", burn.content)
 	}
@@ -599,6 +609,10 @@ func scoreIncident(r *report, o alerts.StructuredDescription) {
 }
 
 func scoreNWS(r *report, s string) {
+	if degenerate(s) {
+		r.li(fmt.Sprintf("**Degenerate summary** %q — a placeholder, not a summary (seen from glm-5.3 with thinking fully disabled)", s))
+		return
+	}
 	sentences := strings.Count(s, ". ") + 1
 	r.li(fmt.Sprintf("summary %d chars, ~%d sentences %s", len(s), sentences,
 		yesno(len(s) <= 320 && sentences <= 2, "ok", "**over the 2-sentence / 320-char cap**")))
@@ -740,6 +754,13 @@ func describe(err error) string {
 		return fmt.Sprintf("HTTP %d: %v", reqErr.HTTPStatusCode, reqErr.Err)
 	}
 	return err.Error()
+}
+
+// degenerate reports a placeholder answer: empty, "...", or too short to be
+// the field it stands in for. Length checks alone pass these.
+func degenerate(s string) bool {
+	t := strings.Trim(strings.TrimSpace(s), ".…-– ")
+	return len(t) < 20
 }
 
 func yesno(b bool, yes, no string) string {

@@ -233,13 +233,9 @@ Code changes, by file:
   dated note anyway that `enhancement.model` may now carry non-OpenAI ids,
   since consuming sites may render it.
 
-- `internal/lib/alerts/openai.go`: **make the incident schema portable** by
-  redefining `additional_info` as an array of `{key, value}` objects (the one
-  construct DeepSeek's backend rejects, §6a), with a three-line conversion to
-  the existing `map[string]string` in `enhancer.go` and a `promptVersion`
-  bump so cached enhancements are regenerated. Decide after the next probe
-  run confirms the variant passes on all three models and on OpenAI strict
-  mode; if DeepSeek is never going to be used, this can be skipped.
+- `internal/lib/alerts/openai.go`: **no schema change.** The portable
+  `additional_info` form was only ever for DeepSeek, which §6b rules out, and
+  it costs the GLM models their metadata. Keep the schema as is.
 - `internal/clients/burnline/reader.go`: the extraction sends
   `temperature: 0.1`, which the gpt-5 family rejects (the OpenAI baseline leg
   failed exactly there) and the LunaRoute models accept. Production is fine
@@ -336,6 +332,67 @@ settle: the portable schema on all four models, DeepSeek with thinking
 tuned, and hand-scored incident outputs from `glm-5.3` with tuning on (the
 tool now prints them).
 
+## 6b. Probe results (run 3, 2026-10-09 12:34 UTC, tuning on)
+
+Workflow run [37930798331](https://github.com/dpup/sierra-data/actions/runs/37930798331).
+Every production-shape request carried `reasoning_effort: low`; the
+LunaRoute leg **also** carried `chat_template_kwargs.enable_thinking: false`
+(the dispatch set `no_thinking`), so its figures are for thinking fully off.
+The OpenAI leg is now the true production baseline (gpt-5-mini sends `low`).
+
+| Check | gpt-5-mini (`low`) | glm-5.3 (off) | glm-5.3-flash (off) | deepseek-4.1-flash (off) |
+|---|---|---|---|---|
+| Incident schema, verbatim | valid, 5.2 s | valid, 1.9 s | valid, 3.0 s | **400**, schema rejected |
+| Incident schema, portable `additional_info` | valid, 6 pairs, 5.2 s | valid, **0 pairs**, 1.5 s | valid, **0 pairs**, 2.1 s | valid, 5 pairs, 1.6 s |
+| NWS summary | 309 chars, 2.9 s | **`"..."`** (6 tokens), 5.1 s | 323 chars (cap 320), 1.0 s | 305 chars, 0.7 s |
+| Burn extraction, expected `orange` | 400 (temperature) | `orange`, 98, 2.6 s | `orange`, **confidence 0.98 and transcript `"..."`**, 0.8 s | `orange`, 100, 0.6 s |
+| Incident latency, 3 runs | 4.7 / 5.0 / 5.1 s | 1.0 / 1.1 / 1.2 s | 2.5 / 2.6 / 3.5 s | all failed (schema) |
+| Provider-default thinking, incident | 1152 reasoning tok, 11 s | 3000 tok, empty, 17.7 s | 2115 tok, valid, 26.4 s | schema |
+| `reasoning_effort: low` alone, incident | 384 tok, 5.5 s, valid | 1 tok, 1.6 s, valid | 1 tok, 2.5 s, valid | schema |
+| Audio | whisper-1, 2.4 s, exact | whisper-large-v3, 0.9 s, exact | | |
+| 3 parallel requests | 3 × 200, 2.4 to 4 s | 3 × 200, 4.8 to 6.4 s | | |
+
+Hand scoring of the incident outputs (all tuned):
+
+- **`glm-5.3`**: three outputs, all correct. Enums `moderate`/`restricted`,
+  timestamps exact, "near Arnold" from the place list, lane number and
+  responder carried through, no decoration, no invention. Equivalent to
+  gpt-5-mini's and a fifth of the latency.
+- **`glm-5.3-flash`**: correct on the verbatim-schema run; the
+  thinking-off variant graded a blocked through lane `road_status: open`,
+  and the `low` variant returned `restriction_details: null`. Weaker
+  classification than `glm-5.3`.
+- **`deepseek-4.1-flash`** (portable schema): enums and timestamps correct,
+  but `details` dropped the route ("blocking one lane of the highway") and
+  `restriction_details` asserted **"one-way traffic control is in effect"**,
+  which is nowhere in the input. That is the invented-fact failure mode the
+  prompt exists to prevent, on the first fixture.
+
+Two **new findings**, both from thinking being fully off rather than `low`:
+
+1. **Placeholder output.** `glm-5.3` answered the NWS request with
+   `{"summary": "..."}` and `glm-5.3-flash` answered the burn request with
+   `cleanedTranscription: "..."` and `confidence: 0.98` (a fraction; the
+   prompt asks for 0 to 100 and `reader.go` would store 0). Neither happened
+   with `reasoning_effort: low` alone on the incident request, and both
+   fields are the ones that ask the model to reproduce or condense a long
+   text, so the hypothesis is that `enable_thinking: false` costs the GLM
+   models the pass they use to do that. **Run 4 with the workflow defaults
+   (`low` only, `no_thinking` off) decides it.** The probe now flags
+   placeholder answers and fraction-scaled confidence explicitly.
+2. **The portable schema costs the GLM models their metadata**: both
+   returned an empty `additional_info` list where gpt-5-mini gave six pairs
+   and DeepSeek five. The prompt still describes the field as an object with
+   named keys; if the portable form ships, one prompt line ("a list of
+   key/value pairs; include at least incident_type") should restore it.
+
+What this settles beyond §6a: with `low`, `glm-5.3` is faster than
+gpt-5-mini by about 4 s per incident with equal output quality; DeepSeek
+fails the faithfulness bar on first contact and is not worth the schema
+change; `glm-5.3-flash` is both slower and less accurate than `glm-5.3`.
+What remains: confirm `low` alone keeps the NWS and burn outputs whole (run
+4), then phase 1.
+
 ## 7. Model evaluation
 
 Candidates are the chat models in the supplied catalog: `deepseek-4.1-flash`,
@@ -370,18 +427,23 @@ Reading:
   rules depend on, and it is in the same capability band as the gpt-5-mini it
   would replace. The condition from the first draft is now met: with
   `reasoning_effort: low` it answered the production incident request in
-  2.8 s with valid output (§6a), against 5.3 s for gpt-5-mini under the same
-  setting. Without the setting it is unusable (65 s, empty output), so the
-  config change in §5 is a prerequisite, not a nicety.
-- **`deepseek-4.1-flash` is the fallback if latency wins**, and it costs a
-  schema change: its backend rejects the incident schema as written (§6a),
-  so it is only usable after the portable `additional_info` form ships. It
-  was fastest on the checks it could run (burn extraction 1.5 s), but the
-  negative hallucination score is the wrong direction for a prompt whose main
-  failure mode was an invented "(near Merced)". Use it only if the fixture
-  scoring shows no invented geography.
-- **`glm-5.3-flash` is dominated**: slower output than `glm-5.3` on the
-  measured host and less faithful. No reason to pick it here.
+  1.6 to 2.8 s with valid output (§6a, §6b), against 5.0 to 5.5 s for
+  gpt-5-mini under the same setting, and its three hand-scored incident
+  outputs were all correct. Without the setting it is unusable (65 s, empty
+  output), so the config change in §5 is a prerequisite, not a nicety. Use
+  `reasoning_effort: low`, **not** `enable_thinking: false`: fully off, the
+  model answered the NWS request with a literal `"..."` (§6b), pending the
+  run-4 confirmation.
+- **`deepseek-4.1-flash` is not recommended.** It needs a schema change to
+  run at all (§6a), and with that change in place it invented "one-way
+  traffic control is in effect" on the first fixture (§6b), the exact
+  failure mode the grounding rules exist to prevent. Its speed advantage over
+  `glm-5.3` with thinking off is also gone (1.6 s vs 1.0 s). Drop the
+  portable-schema work unless another reason for it appears.
+- **`glm-5.3-flash` is dominated**: slower than `glm-5.3` with thinking
+  off (2.6 s vs 1.1 s median) and less accurate on the fixture (graded a
+  blocked lane `open`, returned a placeholder transcript, §6b). No reason to
+  pick it here.
 - **`-background` variants**: appropriate for the burn-line CLI (one call a
   day, 10-minute budget) and nothing else; a 240 s park would blow the
   enhancers' timeout and starve an ingest tick. Not worth a config knob on
@@ -400,7 +462,7 @@ for free.
 
 | Phase | Work | Size |
 |---|---|---|
-| 0. Probe | **Run 2 done (§6a).** One more dispatch with the defaults (now `reasoning_effort=low` plus the portable-schema check) settles DeepSeek and gives hand-scorable `glm-5.3` outputs. | done |
+| 0. Probe | **Runs 2 and 3 done (§6a, §6b).** One last dispatch with the workflow defaults (`low` only, `no_thinking` off) confirms the GLM placeholder outputs were the thinking-off knob. | done |
 | 1. Compatibility option | §5 config + client constructor + both enhancers + burn-line CLI + workflow variables + docs. Default behaviour unchanged. | 1 day |
 | 2. Robustness | Real `maxRetries` (429 honouring `Retry-After`, one bounded 503 retry); startup `HealthCheck`; empty-content-on-length error; a per-request enhancement deadline so a slow provider cannot hold `ListIncidents` past its own refresh interval. These are worth doing for OpenAI too. | 0.5 to 1 day |
 | 3. Bake-off | Run production with `PF__OPENAI__BASE_URL` set on a staging or second instance, `glm-5.3` first, for a week. Compare stored `summary`/`headline` revisions against OpenAI's by `enhancement.model`. Score on the §6 item 7 rubric. | calendar week, ~0.5 day of review |
