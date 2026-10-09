@@ -475,6 +475,81 @@ func TestFailLoudAcrossInputs(t *testing.T) {
 	})
 }
 
+// TestDeafBrokerFailsTheMeshSource pins the broker half of the fail-loud rule.
+//
+// Before it, a broker that had stopped delivering was invisible whenever a
+// monitor was live: the registry counted a reconnecting client as connected,
+// nothing read the message clock, and Poll's hard error needs EVERY input dead.
+// So the poll succeeded with only the monitor's nodes, the sweep expired every
+// node only the broker hears, and /api/v1/sources said OK — for six days from
+// 2026-10-03, ~680 expirations. A configured broker that is not delivering is
+// now a PerSource failure on `meshcore`, which keeps the sweep and the
+// last-seen refresh off and shows on the source row.
+func TestDeafBrokerFailsTheMeshSource(t *testing.T) {
+	located := meshcore.NodeState{
+		PubKey: fullKey, Role: meshcore.RoleRepeater, Name: "SIERRA Arnold Summit",
+		HasLocation: true, Lat: 38.3016, Lng: -120.3203, LastHeardAt: pollNow,
+	}
+
+	t.Run("the only broker deaf, monitor live: the monitor still reports, the source fails", func(t *testing.T) {
+		reg := &fakeMeshRegistry{down: 1, nodes: []meshcore.NodeState{located}}
+		n := pushNormalizer(t, reg, pushingest.MeshSnapshot{
+			Live:      1,
+			Reporters: []pushingest.ReporterHealth{{ID: "alan-pi", State: pushingest.ReporterOK}},
+			Reports:   []pushingest.MeshNodeReport{report(keyPrefix, "SIERRA Arnold Summit", pollNow)},
+		})
+		res, err := n.Poll(testCtx(), &fakePrior{})
+		require.NoError(t, err, "a live monitor is still an input")
+
+		require.Len(t, res.Events, 1)
+		assert.Nil(t, res.Events[0].GetGeometry(),
+			"no broker delivering: the registry snapshot is what we heard before going deaf, so it is left out")
+		srcErr := res.PerSource["meshcore"]
+		require.Error(t, srcErr, "the sweep must not run on a snapshot our outage emptied")
+		assert.Contains(t, srcErr.Error(), "1 of 1 MQTT brokers not delivering")
+		assert.Contains(t, srcErr.Error(), "wss://down-0.example not connected")
+		assert.NoError(t, res.PerSource["alan-pi"], "the monitor's own row is healthy")
+	})
+
+	t.Run("one of two brokers deaf: the live one's nodes land, the source still fails", func(t *testing.T) {
+		reg := &fakeMeshRegistry{connected: 1, down: 1, nodes: []meshcore.NodeState{located}}
+		n := pushNormalizer(t, reg, pushingest.MeshSnapshot{})
+		res, err := n.Poll(testCtx(), &fakePrior{})
+		require.NoError(t, err)
+		require.Len(t, res.Events, 1)
+		assert.NotNil(t, res.Events[0].GetGeometry())
+		srcErr := res.PerSource["meshcore"]
+		require.Error(t, srcErr, "nodes only the deaf broker hears are missing for our reason")
+		assert.Contains(t, srcErr.Error(), "1 of 2 MQTT brokers not delivering")
+	})
+
+	t.Run("broker deaf, forwarder live: the snapshot is current, the source still fails", func(t *testing.T) {
+		reg := &fakeMeshRegistry{down: 1, nodes: []meshcore.NodeState{located}}
+		n := pushNormalizer(t, reg, pushingest.MeshSnapshot{PacketLive: 1})
+		res, err := n.Poll(testCtx(), &fakePrior{})
+		require.NoError(t, err)
+		require.Len(t, res.Events, 1)
+		assert.NotNil(t, res.Events[0].GetGeometry(), "a forwarder is a live door into the registry")
+		assert.Error(t, res.PerSource["meshcore"])
+	})
+
+	t.Run("broker deaf and nothing else live is a hard error that names it", func(t *testing.T) {
+		n := pushNormalizer(t, &fakeMeshRegistry{down: 1}, pushingest.MeshSnapshot{})
+		_, err := n.Poll(testCtx(), &fakePrior{})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "wss://down-0.example not connected")
+	})
+
+	t.Run("every broker delivering is clean", func(t *testing.T) {
+		reg := &fakeMeshRegistry{connected: 2, nodes: []meshcore.NodeState{located}}
+		n := pushNormalizer(t, reg, pushingest.MeshSnapshot{})
+		res, err := n.Poll(testCtx(), &fakePrior{})
+		require.NoError(t, err)
+		assert.NoError(t, res.PerSource["meshcore"])
+		assert.Empty(t, res.SweepSuppress)
+	})
+}
+
 func TestReporterHealthMapsToSourceRows(t *testing.T) {
 	n := pushNormalizer(t, nil, pushingest.MeshSnapshot{
 		Live: 1,

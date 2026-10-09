@@ -14,12 +14,13 @@ import (
 // packets: POST /api/v1/ingest/mesh.packet.
 //
 // It exists because the radios that hear the SIERRA backbone at zero hops are
-// companions in Arnold and Dorrington, and what they hear reaches the community
-// MQTT brokers only when a distant gateway happens to relay it — every few days
-// per repeater, measured 2026-10. The map at map.meshcore.io hears those same
-// adverts daily, through a small uploader bot that reads a companion's
-// received-packet log and POSTs each ADVERT frame. This stream accepts exactly
-// that: the raw frame, in the envelope the MQTT bridges already publish, so the
+// companions in Arnold and Dorrington, and some of what they hear reaches no
+// MQTT observer at all. (The first measurement, "every few days per repeater",
+// was taken during our own subscriber outage of 2026-10-03..09; through a
+// delivering subscription the brokers carry most of the backbone. See "A deaf
+// broker" in internal/ingest/CLAUDE.md.) The map at map.meshcore.io hears those
+// adverts through a small uploader bot that reads a companion's received-packet
+// log and POSTs each ADVERT frame. This stream accepts exactly that: the raw frame, in the envelope the MQTT bridges already publish, so the
 // MeshCore registry ingests it through the same code and the same trust rule.
 // The node signed the advert; the forwarder is only the courier, and the
 // Ed25519 check (grid.meshcore.requireValidSignature) still applies.

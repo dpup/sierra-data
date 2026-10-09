@@ -323,10 +323,13 @@ of recently-heard, in-region nodes on each tick. This keeps single-writer
 discipline, tick-based health, and the disappearance sweep unchanged. Two
 mesh-specific rules:
 
-- **All brokers down ⇒ hard `Poll` error.** An empty snapshot from *our* outage
-  must never read as "every node left the mesh" (fail-loud invariant). A mesh has
-  no goodbye packet, so the source uses `disappearance: expire` with a multi-day
-  `expireAfter`; genuine silence expires a node, our downtime does not.
+- **No broker delivering ⇒ hard `Poll` error** (when nothing else is live). An
+  empty snapshot from *our* outage must never read as "every node left the mesh"
+  (fail-loud invariant). A mesh has no goodbye packet, so the source uses
+  `disappearance: expire`; genuine silence expires a node, our downtime does
+  not. "Delivering" is judged by the registry (`meshcore.Registry.Brokers`): a
+  session that is actually OPEN and has carried a message within
+  `grid.meshcore.silenceAfter`. See "A deaf broker" below for why both halves.
 - **Volatile telemetry stays out of the content hash.** SNR/RSSI/hops/gateways
   ride in `NetworkDetail.telemetry`, which `store.ContentHash` zeroes — so the
   advert firehose refreshes `last_seen_at` without minting a revision. Only a
@@ -417,10 +420,12 @@ counters would assert that it has sent and received nothing. "Never read" and
 The old rule was "all brokers down ⇒ hard `Poll` error". With two inputs it
 splits, and both halves matter:
 
-- **Every input dead** (no broker connected AND no reporter fresh) ⇒ hard error,
-  exactly as before.
-- **Some input degraded** ⇒ emit what we have, plus `SweepSuppress["meshcore"]`.
-  The nodes missing from this snapshot are missing for OUR reason.
+- **Every input dead** (no broker delivering AND no reporter fresh) ⇒ hard
+  error, exactly as before.
+- **Some input degraded** ⇒ emit what we have, and keep the sweep off. The
+  nodes missing from this snapshot are missing for OUR reason. A degraded
+  REPORTER does it with `SweepSuppress["meshcore"]` (its own source row carries
+  its health); a degraded BROKER with `PerSource["meshcore"]` (next section).
 
 A silent reporter contributes NOTHING to the snapshot (replaying its last set
 would refresh `last_seen_at` and fabricate liveness for nodes nobody has checked
@@ -435,6 +440,57 @@ bound is acceptable only because `meshcore` is an `expire` source — nodes reac
 EXPIRED, the "we lost track of this" terminus, not the fabricated all-clear that
 RESOLVED would be — and because mesh presence is ambient INFO. **Do not copy this
 bound onto a life-safety layer.**
+
+### A deaf broker fails the `meshcore` source (2026-10-09)
+
+Any configured broker that is not delivering is a `PerSource["meshcore"]`
+error naming the broker and why (`not connected (last message 5h ago)`,
+`connected but silent (...)`). That one mechanism does all three jobs: the
+sweep and the `TouchSeen` refresh are skipped, and `/api/v1/sources` shows
+`meshcore` STALE, then UNAVAILABLE, with the reason in `lastError`. The map
+layers keep their features and say STALE (`hazards.DegradeStoreStatus`). The
+events a live input still produces (a monitor's reports, a forwarder's
+adverts, another broker's nodes) upsert as usual.
+
+Why this is a section and not a footnote: until 2026-10-09 the broker half of
+the fail-loud rule could not fire.
+
+- "Connected" was paho's `IsConnected`, which with auto-reconnect on is ALSO
+  true while the client is reconnecting. A broker that had dropped us counted
+  as connected for as long as it stayed gone. `Brokers` uses
+  `IsConnectionOpen`.
+- An open session can still carry nothing (a stalled subscription, an ACL
+  change, another client taking over the session). The registry recorded a
+  message clock and nothing read it. Now every MQTT message of any type stamps
+  a per-broker clock, and silence past `silenceAfter` (15m; the global topic
+  carries several a second) is a failure. Silence is measured from the last
+  message, else from the first dial, **never from the latest reconnect**: a
+  session that keeps dropping and coming back with nothing must not look fresh
+  each time.
+- A live monitor kept the all-inputs-dead hard error from firing, so the poll
+  succeeded with only the monitor's nodes, and the sweep expired the rest.
+
+From 2026-10-03 to a restart on 2026-10-09 ~09:00 UTC, the mesh layer logged
+14-22 activations a day against 85-198 expirations (it had been ~60-130
+activations a day), relay-link discovery ran at 1-5 an hour against ~150 an
+hour after the restart, and `/api/v1/sources` said `meshcore OK` throughout.
+CoreScope, reading the same gomesh broker, showed the SIERRA repeaters
+advertising normally all week. The root cause of the silence is not
+established, but the likeliest one was reproduced the same day. The client id
+was a fixed `data.sierragridteam.org`, committed in `prefab.yaml`, and gomesh
+ACCEPTS a connection with no credentials (it just delivers nothing to it). A
+local build run with that config was accepted under production's id and then
+dropped every 1-2 seconds, as the broker handed the session back and forth
+between it and production. The same build with a unique id stayed connected.
+So any second process on the committed config (a dev server, an agent sandbox
+following the verify skill, an overlapping deploy) knocks production off the
+broker for as long as it runs, and production hears only the fragments in
+between. That is why the registry now appends a random per-process suffix to
+every client id.
+
+The broker failure is deliberately **not bounded** the way a dead reporter is.
+A broker that is gone for good is a config fix (remove it), and a source row
+that stays red until someone does is the point.
 
 ### A second door into the registry: `mesh.packet` (2026-10)
 
@@ -451,22 +507,28 @@ and `meshProvenance` names the reporter from config the way it names a
 broker's operator.
 
 Why it exists: the radios that hear the SIERRA backbone at zero hops are
-companions in Arnold and Dorrington, and the community brokers hear that
-backbone only through a distant gateway, every few days per repeater
-(measured 2026-10-09 against map.meshcore.io, which hears the same adverts
-daily through its uploader bot — a companion-attached script reading the
-radio's RX log). The stream accepts exactly what that bot produces. The trust
-rule is unchanged: the node signed the advert, the forwarder is the courier,
-and `requireValidSignature` still applies.
+companions in Arnold and Dorrington, and some of what they hear never reaches
+an MQTT observer at all (Doud Hill and Dorrington West appear on
+map.meshcore.io, through its uploader bot — a companion-attached script reading
+the radio's RX log — and on no broker). The stream accepts exactly what that
+bot produces. The trust rule is unchanged: the node signed the advert, the
+forwarder is the courier, and `requireValidSignature` still applies.
+
+(The original rationale said the brokers hear the backbone "every few days per
+repeater". That was measured during our own subscriber outage — see "A deaf
+broker" above. Through a delivering subscription, gomesh carries most SIERRA
+repeaters' flood adverts, several of them twice a day, via the two SIERRA
+observers that publish to it.)
 
 What it changes in `Poll`:
 
-- **The snapshot is current while EITHER door is open.** `connected > 0 ||
-  snap.PacketLive > 0` is the gate on reading `Snapshot`; with every broker
-  down and no forwarder live the snapshot is only what was heard before we
-  went deaf, and is left out as before.
-- **Fail-loud counts three things**: no broker connected, no monitor live, no
-  forwarder live ⇒ hard error.
+- **The snapshot is current while EITHER door is open.** `delivering > 0 ||
+  snap.PacketLive > 0` is the gate on reading `Snapshot`; with no broker
+  delivering and no forwarder live the snapshot is only what was heard before
+  we went deaf, and is left out as before.
+- **Fail-loud counts three things**: no broker delivering, no monitor live, no
+  forwarder live ⇒ hard error. A forwarder being live does not excuse a deaf
+  broker: that is still a `PerSource["meshcore"]` failure.
 - **A STALE forwarder suppresses the sweep**, like a stale monitor: the nodes
   only it heard are about to age out of the snapshot for OUR reason. Bounded
   the same way (DEAD stops suppressing).

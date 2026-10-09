@@ -336,8 +336,10 @@ survives as a legacy alias):
   (`packet_type` 4)** — unencrypted, carrying pubkey/role/location/name — and
   decode `raw` in `internal/clients/meshcore` (std-lib crypto; no heavy dep).
 - **`mqtt.bayme.sh` is Bay Area Mesh's Meshtastic broker — a different protocol,
-  not usable here.** MeshCore brokers: `mqtt.meshmapper.net`, LetsMesh US/EU,
-  `mqttmc01.bostonme.sh` (all WSS+TLS on :443).
+  not usable here.** MeshCore brokers: `mqtt.gomesh.dev` (ours; operator
+  "gomesh.dev" — it was mislabeled "LetsMesh" until 2026-10-09),
+  `mqtt.meshmapper.net`, LetsMesh US/EU, `mqttmc01.bostonme.sh` (all WSS+TLS on
+  :443).
 - **Auth: subscribing is operator-gated, not self-serve.** These brokers split
   auth (michaelhart/meshcore-mqtt-broker model): *publishing* is self-sovereign
   (username `v1_{PUBKEY}` + a self-signed Ed25519 JWT password, no allowlist),
@@ -352,9 +354,22 @@ survives as a legacy alias):
   observer (Cisien/meshcoretomqtt) rather than waiting on access.
 - Architecture: a long-lived subscriber (`meshcore.Registry`) buffers node state;
   `ingest.NetworkNormalizer` serves a snapshot on each scheduler tick (a push
-  source wrapped as a poller). Lifecycle is `disappearance: expire` with a
-  multi-day `expireAfter` (no goodbye packet); when all brokers are down `Poll`
-  hard-errors so the sweep never falsely expires live nodes.
+  source wrapped as a poller). Lifecycle is `disappearance: expire` (no goodbye
+  packet). **A configured broker that is not delivering fails the `meshcore`
+  source** (`PerSource`: no sweep, STALE/UNAVAILABLE on `/sources`), even while
+  a monitor is live, and with nothing else live `Poll` hard-errors. "Delivering"
+  = a session that is really open (paho `IsConnectionOpen`, NOT `IsConnected`,
+  which is true while reconnecting) and carried a message within
+  `grid.meshcore.silenceAfter` (15m). That gap hid a six-day outage in
+  2026-10; see "A deaf broker" in `internal/ingest/CLAUDE.md`. The MQTT client
+  id gets a random per-process suffix so two of our processes never share a
+  broker session.
+- **Cross-check the feed with CoreScope** (`corescope.stonekitty.net`, open
+  source: Kpa-clawbot/CoreScope): a keyless analyzer subscribed to the same
+  gomesh broker. `/api/nodes/{pubkey}` lists a node's recent adverts with every
+  receiving observer and path; `/api/observers`, `/api/mqtt/status`. If it sees
+  adverts our store does not, the problem is ours. Each mesh event's
+  `canonicalUrl` is the node's CoreScope page (`grid.meshcore.nodeUrl`).
 
 **PG&E ArcGIS** (`ags.pge.esriemcs.com`, the `POWER` layer):
 - Keyless and public, but **entirely undocumented** — no contract, no version,

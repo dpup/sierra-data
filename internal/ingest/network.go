@@ -18,8 +18,10 @@ import (
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
-// MeshCore presence source constants. Nodes deep-link to the community map
-// (there is no authoritative per-node page); see the source-url-deeplinks memo.
+// MeshCore presence source constants. A node's canonical_url is its page on a
+// packet analyzer reading the same broker (grid.meshcore.nodeUrl, see
+// meshNodeURL); the community map is the fallback, because it has no per-node
+// URL at all — only a map position and filters.
 const (
 	meshSourceID    = "meshcore"
 	meshSourceName  = "MeshCore Mesh"
@@ -68,8 +70,9 @@ type MeshRegistry interface {
 	// Snapshot returns the nodes currently present (each within its own
 	// cadence-derived window; see meshcore.Registry.Snapshot).
 	Snapshot() []meshcore.NodeState
-	// Health reports connected broker count and last-message time.
-	Health() (connected int, lastMsg time.Time)
+	// Brokers reports each configured broker's delivery state; empty when the
+	// registry has no brokers (fed only by push forwarders).
+	Brokers() []meshcore.BrokerHealth
 	// DrainObservations returns the receptions buffered since the last drain
 	// (cleared), for the append-only relay-observation store (Tier 0).
 	DrainObservations() []meshcore.Observation
@@ -172,13 +175,27 @@ type mergedNode struct {
 // snapshot produced by OUR outage must never read as "every node left the mesh".
 // With two kinds of input that same reasoning splits in two:
 //
-//   - no broker AND no live reporter ⇒ hard error, exactly as before;
-//   - one input healthy, another silent ⇒ emit what we actually have, but set
-//     SweepSuppress, because the nodes missing from this snapshot are missing
+//   - no broker delivering AND no live reporter ⇒ hard error, exactly as before;
+//   - one input healthy, another silent ⇒ emit what we actually have, but keep
+//     the sweep off, because the nodes missing from this snapshot are missing
 //     for our reason, not theirs.
 //
-// Suppression is bounded on the reporter side (pushingest.reporterDeadMultiple):
-// a monitor that never comes back must not freeze the layer's lifecycle forever.
+// A silent REPORTER sets SweepSuppress: its own source row already carries its
+// health, and suppression is bounded (pushingest.reporterDeadMultiple) so a
+// monitor that never comes back cannot freeze the layer's lifecycle forever.
+//
+// A configured BROKER that is not delivering (session down, or open and
+// carrying nothing for grid.meshcore.silenceAfter) fails the `meshcore` source
+// itself, through PerSource. A broker has no source row of its own, so this is
+// the only place its outage can show, and PerSource also skips the sweep and
+// the last-seen refresh. This is deliberately unbounded: a broker that is gone
+// for good is a config fix (remove it), not something to age past.
+//
+// The broker half used to be blind. "Connected" was paho's IsConnected, which
+// is true while the client is reconnecting, nothing read the message clock, and
+// a live monitor kept the hard error from firing. From 2026-10-03 to a restart
+// on 2026-10-09 almost no adverts landed, the sweep expired ~680 nodes, and
+// /api/v1/sources said OK throughout.
 func (n *NetworkNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult, error) {
 	now := n.now()
 
@@ -193,21 +210,25 @@ func (n *NetworkNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult,
 	}
 
 	// The registry has two doors — MQTT brokers and mesh.packet forwarders — and
-	// its snapshot is current while EITHER is open. With every broker down and no
-	// forwarder live the snapshot is only what was heard before we went deaf, so
-	// it is left out exactly as before.
-	connected := 0
+	// its snapshot is current while EITHER is delivering. With no broker
+	// delivering and no forwarder live the snapshot is only what was heard
+	// before we went deaf, so it is left out exactly as before.
+	var brokers []meshcore.BrokerHealth
 	var nodes []meshcore.NodeState
 	if n.registry != nil {
-		connected, _ = n.registry.Health()
-		if connected > 0 || snap.PacketLive > 0 {
-			nodes = n.registry.Snapshot()
-		}
+		brokers = n.registry.Brokers()
+	}
+	delivering, brokerErr := brokerDelivery(brokers)
+	if n.registry != nil && (delivering > 0 || snap.PacketLive > 0) {
+		nodes = n.registry.Snapshot()
 	}
 
-	if connected == 0 && snap.Live == 0 && snap.PacketLive == 0 {
-		return nil, fmt.Errorf(
-			"meshcore: no brokers connected and no reporter live; not asserting node disappearance")
+	if delivering == 0 && snap.Live == 0 && snap.PacketLive == 0 {
+		err := fmt.Errorf("meshcore: no broker delivering and no reporter live; not asserting node disappearance")
+		if brokerErr != nil {
+			err = fmt.Errorf("%w (%v)", err, brokerErr)
+		}
+		return nil, err
 	}
 
 	merged := make(map[string]*mergedNode, len(nodes)+len(snap.Reports))
@@ -260,6 +281,13 @@ func (n *NetworkNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult,
 	sort.Slice(events, func(i, j int) bool { return events[i].GetId() < events[j].GetId() })
 
 	promotions := promotedPrefixKeys(merged, prior)
+	perSource := n.reporterHealth(snap)
+	if brokerErr != nil {
+		if perSource == nil {
+			perSource = make(map[string]error, 1)
+		}
+		perSource[meshSourceID] = brokerErr
+	}
 	result := &PollResult{
 		Events:               events,
 		ForceWrite:           forceWrite,
@@ -267,12 +295,32 @@ func (n *NetworkNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult,
 		MeshObservations:     n.drainObservations(),
 		MeshTelemetry:        meshTelemetrySamples(events, now),
 		MeshTelemetryRenames: promotions,
-		PerSource:            n.reporterHealth(snap),
+		PerSource:            perSource,
 	}
 	if snap.SuppressSweep {
 		result.SweepSuppress = append(result.SweepSuppress, meshSourceID)
 	}
 	return result, nil
+}
+
+// brokerDelivery counts the brokers that are delivering and, when any
+// configured broker is not, returns an error naming each one and why. Nil
+// brokers (MQTT not configured, a forwarder-only registry) is not a failure:
+// nothing was expected.
+func brokerDelivery(brokers []meshcore.BrokerHealth) (delivering int, err error) {
+	var deaf []string
+	for _, b := range brokers {
+		if b.Delivering() {
+			delivering++
+			continue
+		}
+		deaf = append(deaf, b.URL+" "+b.Problem)
+	}
+	if len(deaf) == 0 {
+		return delivering, nil
+	}
+	return delivering, fmt.Errorf("%d of %d MQTT brokers not delivering: %s",
+		len(deaf), len(brokers), strings.Join(deaf, "; "))
 }
 
 // drainObservations drains the MQTT reception firehose into the append-only
@@ -380,7 +428,7 @@ func (n *NetworkNormalizer) buildEvent(m *mergedNode, now time.Time, prior Prior
 	// geocode, and inventing a description from lat/lng would be worse than
 	// leaving it empty. Empty is the honest answer, and the geometry carries
 	// the position for anyone who needs it.
-	ev.CanonicalUrl = meshMapURL
+	ev.CanonicalUrl = n.meshNodeURL(m.key)
 
 	var brokers []string
 	if m.mqtt != nil {
@@ -790,6 +838,36 @@ func (n *NetworkNormalizer) meshProvenance(brokers []string) *gridv1.Provenance 
 		sourceURL = meshMapURL
 	}
 	return NewProvenance(meshSourceID, meshSourceName, attribution, sourceURL)
+}
+
+// meshNodeURL is a node event's canonical_url: grid.meshcore.nodeUrl with the
+// node's public key substituted, which lands a reader on that node's recent
+// packets as the broker delivered them.
+//
+// It must be a function of the node's identity ALONE. canonical_url is hashed,
+// so a link that followed the latest packet (or the broker that heard it) would
+// mint a revision on every advert; the packet links live one click in, on the
+// node page. A key we only know as a prefix (a monitored node no advert has
+// matched yet) gets the map instead of a page that would not resolve, and so
+// does anything that is not plain hex, because it is going into a URL.
+func (n *NetworkNormalizer) meshNodeURL(key string) string {
+	tmpl := n.cfg.Grid.Meshcore.NodeURL
+	if tmpl == "" || !strings.Contains(tmpl, "{publicKey}") || len(key) != meshPubKeyHex || !isLowerHex(key) {
+		return meshMapURL
+	}
+	if u := safeURL(strings.ReplaceAll(tmpl, "{publicKey}", key)); u != "" {
+		return u
+	}
+	return meshMapURL
+}
+
+func isLowerHex(s string) bool {
+	for _, c := range s {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // keepPriorAttribution holds on to the bridge credit when this tick did not

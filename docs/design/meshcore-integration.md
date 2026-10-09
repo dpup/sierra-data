@@ -10,7 +10,8 @@
 >
 > - **Not blocked, not disabled.** A subscriber credential was obtained;
 >   `grid.meshcore.enabled: true` against `wss://mqtt.gomesh.dev:443/mqtt`
->   (operator LetsMesh). All three "Remaining steps to go live" are done.
+>   (operator gomesh.dev; mislabeled "LetsMesh" until 2026-10-09). All three
+>   "Remaining steps to go live" are done.
 > - **The layer was renamed `NETWORK` → `MESH`** (2026-07-25, breaking — see
 >   `CHANGELOG.md`). Read every `NETWORK` / `detail.network` /
 >   `network.telemetry` / `?layer=network` below as `MESH` / `detail.mesh` /
