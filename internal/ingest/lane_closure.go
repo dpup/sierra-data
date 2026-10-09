@@ -53,6 +53,7 @@ type LaneClosureNormalizer struct {
 	cfg       *config.Config
 	client    laneClosureAPI
 	districts []int
+	grace     time.Duration    // overrun grace past a set-up window's planned end
 	now       func() time.Time // injectable: phase is a function of the clock
 }
 
@@ -64,6 +65,7 @@ func NewLaneClosureNormalizer(cfg *config.Config, client laneClosureAPI) *LaneCl
 		cfg:       cfg,
 		client:    client,
 		districts: cfg.Roads.CaltransFeeds.CWWP2.LaneClosureDistricts,
+		grace:     cfg.Roads.CaltransFeeds.CWWP2.LaneClosureOverrunGrace,
 		now:       time.Now,
 	}
 }
@@ -129,15 +131,18 @@ func (n *LaneClosureNormalizer) Poll(ctx context.Context, prior Prior) (*PollRes
 			continue
 		}
 		var status gridv1.EventStatus
-		switch lc.PhaseAt(now) {
+		switch lc.PhaseAt(now, n.grace) {
 		case cwwp2.PhaseScheduled:
 			status = gridv1.EventStatus_SCHEDULED
 		case cwwp2.PhaseActive:
 			status = gridv1.EventStatus_ACTIVE
 		default:
-			// Picked up, cancelled, or past its window with no set-up call. The
-			// row lingers in the file for a while; the event's absence from this
-			// (successful) poll is what resolves it.
+			// Picked up, cancelled, past its window with no set-up call, or set
+			// up and overrun past planned end + grace with no 10-98 (presumed
+			// picked up; see cwwp2.LaneClosure.PhaseAt). The row lingers in the
+			// file for a while; the event's absence from this (successful) poll
+			// is what resolves it, so the store records a RESOLVED revision at
+			// the tick that crosses the line, like any other ended window.
 			continue
 		}
 		ev := buildLaneClosureEvent(lc, status)
@@ -212,7 +217,8 @@ func buildLaneClosureEvent(lc cwwp2.LaneClosure, status gridv1.EventStatus) *gri
 	// effective is when it actually took effect where we know that (the 10-97
 	// set-up call), else the planned start. The planned END is deliberately
 	// not `expires`: crews overrun, and a set-up closure stays ACTIVE until it
-	// is picked up (see grid.proto LaneClosureDetail).
+	// is picked up or overruns by more than the grace (see grid.proto
+	// LaneClosureDetail and cwwp2.LaneClosure.PhaseAt).
 	ev.Effective = tsProto(lc.Start)
 	if status == gridv1.EventStatus_ACTIVE && !lc.SetUpAt.IsZero() {
 		ev.Effective = tsProto(lc.SetUpAt)

@@ -213,7 +213,7 @@ func TestParseLaneClosures_Live(t *testing.T) {
 	assert.Equal(t, time.Date(2026, 10, 2, 14, 1, 0, 0, time.UTC), lc.Start.UTC())
 	assert.Equal(t, time.Date(2026, 10, 2, 21, 59, 0, 0, time.UTC), lc.EndTime.UTC())
 	assert.False(t, lc.SetUp || lc.PickedUp || lc.Cancelled)
-	assert.Equal(t, PhaseScheduled, lc.PhaseAt(fixtureNow))
+	assert.Equal(t, PhaseScheduled, lc.PhaseAt(fixtureNow, 0))
 }
 
 // Every lifecycle the live capture holds, at capture time.
@@ -223,7 +223,7 @@ func TestLaneClosurePhases_Live(t *testing.T) {
 
 	counts := map[Phase]int{}
 	for _, lc := range all {
-		counts[lc.PhaseAt(fixtureNow)]++
+		counts[lc.PhaseAt(fixtureNow, 0)]++
 	}
 	assert.Equal(t, map[Phase]int{PhaseScheduled: 57, PhaseCompleted: 21, PhaseCancelled: 3, PhaseActive: 3}, counts)
 
@@ -236,7 +236,7 @@ func TestLaneClosurePhases_Live(t *testing.T) {
 		"C4JA-0003-2026-09-30-08:01:00":  PhaseCancelled, // 10-22 before it started
 	}
 	for id, want := range cases {
-		assert.Equal(t, want, findClosure(t, all, id).PhaseAt(fixtureNow), id)
+		assert.Equal(t, want, findClosure(t, all, id).PhaseAt(fixtureNow, 0), id)
 	}
 
 	active := findClosure(t, all, "C26EA-0001-2026-08-24-07:01:00")
@@ -250,24 +250,24 @@ func TestLaneClosurePhaseAt(t *testing.T) {
 	base := LaneClosure{Start: start, EndTime: end}
 	before, during, after := start.Add(-time.Hour), start.Add(time.Hour), end.Add(time.Hour)
 
-	assert.Equal(t, PhaseScheduled, base.PhaseAt(before))
-	assert.Equal(t, PhaseScheduled, base.PhaseAt(during), "window open but no 10-97 yet")
-	assert.Equal(t, PhaseCompleted, base.PhaseAt(after))
+	assert.Equal(t, PhaseScheduled, base.PhaseAt(before, 0))
+	assert.Equal(t, PhaseScheduled, base.PhaseAt(during, 0), "window open but no 10-97 yet")
+	assert.Equal(t, PhaseCompleted, base.PhaseAt(after, 0))
 
 	set := base
 	set.SetUp = true
-	assert.Equal(t, PhaseActive, set.PhaseAt(during))
-	assert.Equal(t, PhaseActive, set.PhaseAt(after), "overrun: codes win over the clock")
+	assert.Equal(t, PhaseActive, set.PhaseAt(during, 0))
+	assert.Equal(t, PhaseActive, set.PhaseAt(after, 0), "overrun: codes win over the clock")
 
 	set.PickedUp = true
-	assert.Equal(t, PhaseCompleted, set.PhaseAt(during))
+	assert.Equal(t, PhaseCompleted, set.PhaseAt(during, 0))
 
 	cancelled := base
 	cancelled.Cancelled = true
-	assert.Equal(t, PhaseCancelled, cancelled.PhaseAt(before))
+	assert.Equal(t, PhaseCancelled, cancelled.PhaseAt(before, 0))
 
 	open := LaneClosure{Start: start, EndIndefinite: true}
-	assert.Equal(t, PhaseScheduled, open.PhaseAt(after.Add(1000*time.Hour)))
+	assert.Equal(t, PhaseScheduled, open.PhaseAt(after.Add(1000*time.Hour), 0))
 }
 
 func TestClient_LaneClosures(t *testing.T) {
@@ -364,4 +364,45 @@ func TestUnrecognizedReason(t *testing.T) {
 		assert.Equal(t, want, unrecognizedReason(lc, ok))
 	}
 	assert.Equal(t, "unreadable 10-98 flag", unrecognizedReason(good, [3]bool{true, false, true}))
+}
+
+// A set-up closure nobody radios picked up stays ACTIVE through a normal
+// overrun, but not forever: past its planned end plus the grace it is presumed
+// COMPLETED. Indefinite windows have no planned end to measure from.
+func TestLaneClosurePhaseAt_OverrunGrace(t *testing.T) {
+	start := time.Date(2026, 10, 1, 14, 0, 0, 0, time.UTC)
+	end := start.Add(8 * time.Hour)
+	setUp := LaneClosure{Start: start, EndTime: end, SetUp: true}
+	pickedUp := setUp
+	pickedUp.PickedUp = true
+	cancelled := setUp
+	cancelled.Cancelled = true
+	indefinite := LaneClosure{Start: start, EndIndefinite: true, SetUp: true}
+	noShow := LaneClosure{Start: start, EndTime: end}
+
+	cases := []struct {
+		name  string
+		lc    LaneClosure
+		now   time.Time
+		grace time.Duration
+		want  Phase
+	}{
+		{"during the window", setUp, start.Add(time.Hour), time.Hour, PhaseActive},
+		{"overrun inside the grace", setUp, end.Add(59 * time.Minute), time.Hour, PhaseActive},
+		{"grace boundary is presumed completed", setUp, end.Add(time.Hour), time.Hour, PhaseCompleted},
+		{"long past the grace", setUp, end.Add(72 * time.Hour), time.Hour, PhaseCompleted},
+		{"default grace keeps a short overrun", setUp, end.Add(DefaultOverrunGrace - time.Minute), 0, PhaseActive},
+		{"default grace ends a long one", setUp, end.Add(DefaultOverrunGrace), 0, PhaseCompleted},
+		{"negative grace uses the default", setUp, end.Add(DefaultOverrunGrace - time.Minute), -time.Hour, PhaseActive},
+		{"indefinite never times out", indefinite, start.Add(1000 * time.Hour), time.Hour, PhaseActive},
+		{"10-98 still wins", pickedUp, start.Add(time.Hour), time.Hour, PhaseCompleted},
+		{"10-22 still wins past the grace", cancelled, end.Add(72 * time.Hour), time.Hour, PhaseCancelled},
+		{"no-show ends at the planned end, no grace", noShow, end, time.Hour, PhaseCompleted},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, tc.lc.PhaseAt(tc.now, tc.grace))
+		})
+	}
+	assert.Equal(t, 12*time.Hour, DefaultOverrunGrace)
 }

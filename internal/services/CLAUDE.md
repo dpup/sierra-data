@@ -87,8 +87,30 @@ location / time is done structurally from the KML description. See
 does not read `lcs2way.kml` at all**: the grid's `LaneClosureNormalizer` owns
 closures, and reading the KML here would only spend enhancement budget on
 incidents nobody stores. CHP is then the only feed, so a CHP failure fails the
-refresh, and `IncidentFeedHealth`'s `laneErr` stays nil. Per-road status
-(`refreshRoadData`) still reads `lcs2way.kml` either way.
+refresh, and `IncidentFeedHealth`'s `laneErr` stays nil.
+
+## Per-road status closures (`roads_lane_closures.go`)
+
+Per-road status (`refreshRoadData`, behind the `road_segment` layer) takes its
+lane closures from `segmentLaneClosures`. With `laneClosureDistricts` empty that
+is `lcs2way.kml`, fetch errors swallowed, as before. With them set it is the
+CWWP2 windows that are **set up right now** (`PhaseAt == PhaseActive`) — the
+same rows the `road_incident` layer shows as ACTIVE, so a segment's status and
+the closure events agree. SCHEDULED windows never count; `Unrecognized` rows are
+logged and skipped. `caltrans.IncidentFromCWWP2LaneClosure` reshapes each window
+into the `CaltransIncident` lcs2way.kml produced, so route matching, the
+Closure-ID alert id and the AI `road_status` call are unchanged. Its text is
+built only from fields fixed for the window's life: it is the enhancement cache
+key, so a time-varying field would cost an OpenAI call per closure per refresh.
+
+**Fail-loud, unlike the KML path.** Any district failing fails the set (a missing
+district reads as "no closures", so OPEN, across its footprint). The last good
+ACTIVE set (`cwwp2_lane_closures:active`) is served while servable-stale
+(< 2x `roads.refreshInterval`); past that `refreshRoadData` errors, and the
+periodic refresher keeps the last good `roads:all` instead of publishing a guessed
+OPEN. Budget: one fetch per district per roads refresh (15m), the cadence
+lcs2way.kml had; it uses the shared `cwwp2.Client` from `cmd/server`
+(`UseCWWP2LaneClosures`), the one the lane-closure poller also uses.
 
 **Every incident is AI-enhanced** (`enhanceIncident`), via the same
 content-hash 24h cache as road alerts (`enhanceRawAlert` in `roads.go` —

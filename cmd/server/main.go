@@ -98,6 +98,9 @@ func main() {
 
 	// Initialize gRPC services
 	roadsService := services.NewRoadsService(googleClient, caltransClient, cacheInstance, appConfig, alertEnhancer)
+	// Segment status reads CWWP2 lane closures (set-up windows only) when
+	// laneClosureDistricts is set, so it agrees with the road_incident layer.
+	roadsService.UseCWWP2LaneClosures(cwClient)
 	weatherService := services.NewWeatherService(weatherClient, nwsClient, cacheInstance, appConfig)
 
 	logging.Infow(ctx, "Live Data API Server starting",

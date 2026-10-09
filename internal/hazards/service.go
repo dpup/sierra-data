@@ -174,7 +174,9 @@ func cacheEmptyResults(layer string) bool { return layer != LayerEvacuation }
 // Status resolution:
 //   - fresh cache hit            -> OK (served from cache, no upstream call)
 //   - builder OK                 -> OK (and the non-empty result is cached)
-//   - builder partialData(err)   -> STALE, features kept (one source degraded)
+//   - builder partialData(err)   -> STALE, features kept (one source degraded);
+//     a non-empty partial is cached for the TTL, tagged so a hit stays STALE
+//   - fresh cached partial       -> STALE + its fetch time (no upstream call)
 //   - builder hard error + cache -> STALE, last good features served
 //   - builder hard error, none   -> UNAVAILABLE, empty
 //
@@ -188,9 +190,16 @@ func (s *Service) buildLayer(ctx context.Context, area config.HazardArea, layer 
 	ttl := layerTTL(layer)
 	key := "hazard:" + area.ID + ":" + layer
 
+	cleanSource, partialSource := "hazard:"+layer, "hazard:"+layer+":partial"
+
 	if ttl > 0 && s.cache != nil {
 		var cached []Feature
-		if ok, _ := s.cache.Get(key, &cached); ok {
+		if entry, ok, derr := s.cache.GetWithMetadata(key, &cached); ok && derr == nil && time.Now().Before(entry.ExpiresAt) {
+			// A cached partial result is still partial: it stays STALE for its
+			// whole TTL, dated to when it was fetched — never promoted to OK.
+			if entry.Source == partialSource {
+				return finalize(meta, cached, "STALE", entry.CreatedAt)
+			}
 			return finalize(meta, cached, "OK", time.Time{})
 		}
 	}
@@ -201,7 +210,17 @@ func (s *Service) buildLayer(ctx context.Context, area config.HazardArea, layer 
 		if errors.As(err, &pd) {
 			// Usable but incomplete — keep the features, flag STALE.
 			logging.Warnw(ctx, "Hazard layer degraded (partial data)", "layer", layer, "area", area.ID, "error", err)
-			return finalize(meta, features, "STALE", time.Now())
+			// Cache it for the TTL, tagged partial, so a degraded upstream is
+			// refetched at most once per TTL instead of on every request
+			// (message_sign is 125KB+ per fetch). The tag keeps a cache hit
+			// STALE; the next clean fetch overwrites it with an untagged entry.
+			// Only cache when there is data: a partial with nothing in it has
+			// nothing worth serving for a TTL.
+			now := time.Now()
+			if ttl > 0 && s.cache != nil && len(features) > 0 {
+				_ = s.cache.Set(key, features, ttl, partialSource)
+			}
+			return finalize(meta, features, "STALE", now)
 		}
 		logging.Errorw(ctx, "Hazard layer build failed", "layer", layer, "area", area.ID, "error", err)
 		// Stale-on-error: serve the last good fetch if we have one.
@@ -245,7 +264,7 @@ func (s *Service) buildLayer(ctx context.Context, area config.HazardArea, layer 
 	// error still yields UNAVAILABLE + empty ("status unknown"). What is cached
 	// is a success, not an absence of information.
 	if ttl > 0 && s.cache != nil && (len(features) > 0 || cacheEmptyResults(layer)) {
-		_ = s.cache.Set(key, features, ttl, "hazard:"+layer)
+		_ = s.cache.Set(key, features, ttl, cleanSource)
 	}
 	return finalize(meta, features, "OK", time.Time{})
 }

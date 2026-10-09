@@ -110,7 +110,9 @@ func (g *GridServer) ListCameras(ctx context.Context, req *gridv1.ListCamerasReq
 
 	cams, status, lastUpdate, version := g.svc.Cameras.Cameras()
 	// The list changes only on a refresh (version) and the geography only on a
-	// redeploy (placesVersion covers the seeded areas and the radius config).
+	// restart. placesVersion is a per-process random nonce, so it covers the
+	// seeded areas and the radius config only because both can change only on
+	// a restart, which mints a new nonce.
 	if err := etag.Guard(ctx, weakListTag(g.placesVersion+"."+version, req.GetPlace())); err != nil {
 		return nil, err // 304 — skip the distance pass
 	}

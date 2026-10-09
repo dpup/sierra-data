@@ -100,6 +100,13 @@ roads:
       # district missing here is a closure never seen, not a closure ended.
       # Empty falls back to lcs2way.kml through the incidents pipeline.
       laneClosureDistricts: [3, 10]
+      # A closure set up (10-97) and never radioed picked up (10-98) stays
+      # ACTIVE past its planned end, because crews overrun, but only for this
+      # long; after it the window is presumed picked up and resolves (crews
+      # sometimes never radio the 10-98, and the row lingers for days).
+      # Indefinite windows are exempt. 12h covers a day shift running late or
+      # through the night. Unset/0 uses the same 12h default.
+      laneClosureOverrunGrace: "12h"
       messageSignDistricts: [10]
       staleAfter: "1h"
       # Traffic cameras (GET /api/v1/cameras): links to Caltrans's snapshot
@@ -501,7 +508,8 @@ grid:
       # The portal regenerates every few minutes, but each poll moves ~5 MB of
       # uncompressed JSON (D3 + D10) and closures are planned operations, so
       # 10m. resolve: a window leaves our set when it is picked up, cancelled,
-      # or past its window without being set up.
+      # past its window without being set up, or overrun past
+      # roads.caltransFeeds.cwwp2.laneClosureOverrunGrace with no pickup call.
       pollInterval: "10m"
       disappearance: "resolve"
     # PG&E electric outages. The outage layers are authoritatively active-only —

@@ -56,7 +56,11 @@ healthy, currently reports nothing). Status resolution:
 
 - fresh cache hit → `OK` (no upstream call)
 - builder OK (incl. a clean empty) → `OK`; non-empty results cached for `layerTTL`
-- builder returns `partialData(err)` → `STALE`, features kept
+- builder returns `partialData(err)` → `STALE`, features kept; a non-empty
+  partial is cached for `layerTTL` tagged partial (cache `Source`
+  `hazard:<layer>:partial`), so a fresh hit stays `STALE` + its fetch time and
+  a degraded upstream is refetched at most once per TTL; the next clean fetch
+  overwrites it
 - builder hard error **with** a cached value → `STALE`, last-good features served
 - builder hard error, nothing cached → `UNAVAILABLE`, empty
 
