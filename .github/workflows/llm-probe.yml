@@ -62,10 +62,17 @@ jobs:
       # speech-shaped input without placing a paid phone call. espeak is robotic
       # but Whisper transcribes it well enough to prove the endpoint, the
       # multipart upload and the prompt priming work. Mono 48 kbps MP3 is the
-      # encoding LunaRoute's audio page recommends.
+      # encoding LunaRoute's audio page recommends. ffmpeg is NOT preinstalled
+      # on ubuntu-latest (noble), so it is installed here. Best-effort: if
+      # synthesis fails the chat checks still run and the audio check reports
+      # itself as skipped, rather than the whole probe dying before its first
+      # model call (which is what happened on run 1).
       - name: Synthesize a test recording
+        id: audio
+        continue-on-error: true
         run: |
-          sudo apt-get update -q && sudo apt-get install -y -q espeak-ng > /dev/null
+          sudo apt-get update -q
+          sudo apt-get install -y -q espeak-ng ffmpeg > /dev/null
           espeak-ng -s 150 -w burnline.wav "Thank you for calling the Calaveras County burn information line. Today is a permissive burn day at 3500 feet elevation or more. Below 3500 feet, burning is not permitted today. A burn permit from Cal Fire is required."
           ffmpeg -loglevel error -y -i burnline.wav -ac 1 -b:a 48k burnline.mp3
           ls -l burnline.mp3
@@ -101,7 +108,7 @@ jobs:
           ./bin/test-llm \
             -models "${{ steps.cfg.outputs.models }}" \
             -transcribe-model "${{ steps.cfg.outputs.transcribe }}" \
-            -audio burnline.mp3 \
+            $([ -s burnline.mp3 ] && echo "-audio burnline.mp3") \
             -runs ${{ inputs.runs }} \
             -concurrency ${{ inputs.concurrency }} \
             -out "probe-${{ matrix.provider }}.md"
