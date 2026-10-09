@@ -198,8 +198,10 @@ func (r *Reader) transcribe(ctx context.Context, audio []byte) (string, error) {
 	return resp.Text, nil
 }
 
-// extractSchema is the structured-output contract for the extraction step.
-var extractSchema = openai.ChatCompletionResponseFormatJSONSchema{
+// ExtractSchema is the structured-output contract for the extraction step.
+// Exported (with ExtractPrompt) so cmd/test-llm can send the production request
+// shape to a candidate provider.
+var ExtractSchema = openai.ChatCompletionResponseFormatJSONSchema{
 	Name:   "burn_status_analysis",
 	Strict: true,
 	Schema: json.RawMessage(`{
@@ -222,11 +224,11 @@ type extraction struct {
 	Confidence           float64 `json:"confidence"`
 }
 
-// extract reads today's status out of the transcript.
-func (r *Reader) extract(ctx context.Context, transcript string) (*Reading, error) {
-	today := r.now().Format("Monday, January 2, 2006")
-
-	prompt := fmt.Sprintf(`You are analyzing a transcription of the %s burn information line.
+// ExtractPrompt is the extraction prompt for one transcript. county is the
+// display name the line is primed with, today the date the recording must be
+// checked against.
+func ExtractPrompt(county, today, transcript string) string {
+	return fmt.Sprintf(`You are analyzing a transcription of the %s burn information line.
 
 Today's date: %s
 
@@ -249,7 +251,12 @@ current.
 Also return a 0-100 confidence, and a one-sentence summary suitable for display.
 
 Transcription:
-%q`, r.cfg.County, today, transcript)
+%q`, county, today, transcript)
+}
+
+// extract reads today's status out of the transcript.
+func (r *Reader) extract(ctx context.Context, transcript string) (*Reading, error) {
+	prompt := ExtractPrompt(r.cfg.County, r.now().Format("Monday, January 2, 2006"), transcript)
 
 	resp, err := r.ai.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
 		Model:       r.cfg.Model,
@@ -259,7 +266,7 @@ Transcription:
 		},
 		ResponseFormat: &openai.ChatCompletionResponseFormat{
 			Type:       openai.ChatCompletionResponseFormatTypeJSONSchema,
-			JSONSchema: &extractSchema,
+			JSONSchema: &ExtractSchema,
 		},
 	})
 	if err != nil {

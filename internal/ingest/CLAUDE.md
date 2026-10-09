@@ -589,7 +589,7 @@ closures are deliberately never enhanced, see above).
 - Enhancement failure is log-and-continue (serve raw); the enhancer may localize
   only against the event's attached place **names** (grounding, not a requirement).
 - **The summary is a regional summary, capped at 2 sentences / 320 characters.**
-  Policies 4-7 of `nwsSystemPrompt` exist because the unbounded version produced
+  Policies 4-7 of `NWSSystemPrompt` exist because the unbounded version produced
   865-character summaries whose bulk was a roster of out-of-area forecast zones
   and a restatement of the timestamps the card already shows. It must not repeat
   the headline it sits under, name zone identifiers, or state the office or the

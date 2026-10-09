@@ -33,7 +33,7 @@ type NWSEnhancer interface {
 	Enhance(ctx context.Context, headline, description string, placeNames []string) (NWSEnhancement, error)
 }
 
-// nwsSystemPrompt enforces the spec §3.1 enhancement policy: the model
+// NWSSystemPrompt enforces the spec §3.1 enhancement policy: the model
 // translates, never asserts. Quotable rules, in policy order.
 //
 // Rules 4-7 exist because the first version produced 865-character summaries
@@ -46,7 +46,7 @@ type NWSEnhancer interface {
 // displays. The reader of a regional summary is answering one question: does
 // this affect me, here, today. Zone rosters and timestamps do not help them
 // answer it, and they crowded out the part that did.
-const nwsSystemPrompt = `You condense National Weather Service alerts for a local hazard dashboard.
+const NWSSystemPrompt = `You condense National Weather Service alerts for a local hazard dashboard.
 
 Policy — enhancement translates, never asserts:
 1. Your summary may contain no place, number, or instruction not present in the alert text or the supplied place-name list.
@@ -58,9 +58,9 @@ Policy — enhancement translates, never asserts:
 7. The headline, which names the product, is displayed directly above your summary. Do not open with the product's name or restate the headline — start with the hazard itself, and add what the headline does not say.
 8. Add no advice, speculation, or urgency the alert does not itself state.`
 
-// nwsSummarySchema is the structured-output contract: exactly one required
+// NWSSummarySchema is the structured-output contract: exactly one required
 // string field, so a well-formed response can never be missing the summary.
-var nwsSummarySchema = openai.ChatCompletionResponseFormatJSONSchema{
+var NWSSummarySchema = openai.ChatCompletionResponseFormatJSONSchema{
 	Name:   "nws_alert_summary",
 	Strict: true,
 	Schema: json.RawMessage(`{
@@ -126,12 +126,12 @@ func (e *openaiNWSEnhancer) Enhance(ctx context.Context, headline, description s
 	req := openai.ChatCompletionRequest{
 		Model: e.model,
 		Messages: []openai.ChatCompletionMessage{
-			{Role: openai.ChatMessageRoleSystem, Content: nwsSystemPrompt},
+			{Role: openai.ChatMessageRoleSystem, Content: NWSSystemPrompt},
 			{Role: openai.ChatMessageRoleUser, Content: userPrompt},
 		},
 		ResponseFormat: &openai.ChatCompletionResponseFormat{
 			Type:       openai.ChatCompletionResponseFormatTypeJSONSchema,
-			JSONSchema: &nwsSummarySchema,
+			JSONSchema: &NWSSummarySchema,
 		},
 		MaxCompletionTokens: 1500,
 	}

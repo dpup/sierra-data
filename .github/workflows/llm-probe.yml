@@ -1,0 +1,115 @@
+# Probes an OpenAI-compatible provider with the exact requests the service
+# sends (cmd/test-llm) and publishes the Markdown report as the step summary.
+#
+# This is phase 0 of docs/design/lunaroute-compatibility.md: before the
+# provider becomes a configuration option, find out whether the gateway honours
+# strict json_schema with our schemas, which token-budget field it reads,
+# whether reasoning can be switched off, what latency looks like, and whether
+# audio transcription is enabled for our organisation. Manual only — every run
+# spends a few dozen model calls.
+#
+# Secrets: LUNAROUTE_API_KEY (an lr_ key) for the LunaRoute leg;
+# OPENAI_API_KEY (already present for burn-line) for the baseline leg, so the
+# two reports can be read side by side. A leg whose secret is missing is
+# skipped, not failed.
+
+name: LLM provider probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      models:
+        description: "Comma-separated LunaRoute model ids to probe"
+        type: string
+        default: "glm-5.3,deepseek-4.1-flash,glm-5.3-flash"
+      runs:
+        description: "Latency repetitions per model"
+        type: number
+        default: 3
+      concurrency:
+        description: "Parallel requests for the 429 probe (0 = skip; 3 exceeds a Pro plan's 2 slots)"
+        type: number
+        default: 3
+      baseline:
+        description: "Also run the same probe against OpenAI (gpt-5-mini, whisper-1)"
+        type: boolean
+        default: true
+
+concurrency:
+  group: llm-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        provider: [lunaroute, openai]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build
+        run: go build -o bin/test-llm ./cmd/test-llm
+
+      # A synthetic burn-line recording: the audio endpoint is probed with real
+      # speech-shaped input without placing a paid phone call. espeak is robotic
+      # but Whisper transcribes it well enough to prove the endpoint, the
+      # multipart upload and the prompt priming work. Mono 48 kbps MP3 is the
+      # encoding LunaRoute's audio page recommends.
+      - name: Synthesize a test recording
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y -q espeak-ng > /dev/null
+          espeak-ng -s 150 -w burnline.wav "Thank you for calling the Calaveras County burn information line. Today is a permissive burn day at 3500 feet elevation or more. Below 3500 feet, burning is not permitted today. A burn permit from Cal Fire is required."
+          ffmpeg -loglevel error -y -i burnline.wav -ac 1 -b:a 48k burnline.mp3
+          ls -l burnline.mp3
+
+      - name: Select provider
+        id: cfg
+        env:
+          LR_KEY: ${{ secrets.LUNAROUTE_API_KEY }}
+          OAI_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          case "${{ matrix.provider }}" in
+            lunaroute)
+              if [ -z "$LR_KEY" ]; then echo "skip=true" >> "$GITHUB_OUTPUT"; echo "LUNAROUTE_API_KEY not set; skipping"; exit 0; fi
+              echo "base_url=https://gw.lunaroute.com/v1" >> "$GITHUB_OUTPUT"
+              echo "models=${{ inputs.models }}" >> "$GITHUB_OUTPUT"
+              echo "transcribe=whisper-large-v3" >> "$GITHUB_OUTPUT"
+              ;;
+            openai)
+              if [ "${{ inputs.baseline }}" != "true" ] || [ -z "$OAI_KEY" ]; then echo "skip=true" >> "$GITHUB_OUTPUT"; echo "baseline off or OPENAI_API_KEY not set; skipping"; exit 0; fi
+              echo "base_url=" >> "$GITHUB_OUTPUT"
+              echo "models=gpt-5-mini" >> "$GITHUB_OUTPUT"
+              echo "transcribe=whisper-1" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Probe
+        if: steps.cfg.outputs.skip == 'false'
+        env:
+          OPENAI_API_KEY: ${{ matrix.provider == 'lunaroute' && secrets.LUNAROUTE_API_KEY || secrets.OPENAI_API_KEY }}
+          OPENAI_BASE_URL: ${{ steps.cfg.outputs.base_url }}
+        run: |
+          ./bin/test-llm \
+            -models "${{ steps.cfg.outputs.models }}" \
+            -transcribe-model "${{ steps.cfg.outputs.transcribe }}" \
+            -audio burnline.mp3 \
+            -runs ${{ inputs.runs }} \
+            -concurrency ${{ inputs.concurrency }} \
+            -out "probe-${{ matrix.provider }}.md"
+          cat "probe-${{ matrix.provider }}.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload report
+        if: steps.cfg.outputs.skip == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: llm-probe-${{ matrix.provider }}
+          path: probe-${{ matrix.provider }}.md
