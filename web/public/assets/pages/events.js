@@ -579,7 +579,7 @@ export function initEventsPage() {
     const box = el('div');
     box.append(el('div', 'ev-empty-head', '0 RESULTS'));
     box.append(
-      el('p', 'prose', 'The request succeeded and matched nothing. That is an empty result, not a source failure — a failed feed surfaces as a red band above, never as a quiet empty list.')
+      el('p', 'prose', 'The request succeeded and matched nothing. A failed request would show as a red band above.')
     );
     const chips = el('div');
     const removable = [];

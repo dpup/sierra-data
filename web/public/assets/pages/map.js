@@ -631,7 +631,7 @@ function init() {
     if (!urlState.place || selected.length === 0) {
       suppressMap({
         title: 'no layer selected',
-        body: 'Pick a place and at least one layer. Nothing is drawn until a layer answers.',
+        body: 'Pick a place and at least one layer.',
       });
       return;
     }
@@ -655,32 +655,29 @@ function init() {
       // reported as a confirmed empty region.
       const all = failed.length === results.length;
       suppressMap({
-        title: 'layer unavailable — state unknown, not clear',
+        title: 'layer request failed — state unknown',
         body: all
-          ? 'Every selected layer failed to fetch or timed out. Nothing is drawn, because ' +
-            'an empty map would claim there is nothing there — and we do not know that. ' +
-            'The exact requests are listed in the feed metadata below; replay them yourself.'
+          ? 'Every selected layer failed to fetch or timed out, so the map is not drawn and ' +
+            'the state of this place is unknown. The requests are listed in the feed metadata below.'
           : `${failed.length} of ${results.length} selected layers failed to fetch or timed out, ` +
-            'and the rest returned no features. That is not a confirmed empty region — the ' +
-            'failed layers are unknown, and nothing is drawn rather than implying they are clear. ' +
-            'Per-layer status is in the feed metadata below.',
+            'and the rest returned no features. The map is not drawn because the failed layers ' +
+            'are unknown. Per-layer status is in the feed metadata below.',
         sourceUrl,
       });
     } else if (unavailable.length) {
       suppressMap({
-        title: 'sourceStatus: UNAVAILABLE — layer suppressed',
+        title: 'sourceStatus: UNAVAILABLE — layer not drawn',
         body:
-          'The upstream feed errored, so this layer arrives with empty features by contract. ' +
-          'It is suppressed rather than drawn: showing nothing is not the same as reporting nothing.',
+          'The upstream feed failed, so this layer came back with no features and its state ' +
+          'is unknown. The map is not drawn.',
         sourceUrl,
       });
     } else {
       suppressMap({
         title: 'no features in range',
         body:
-          'Every selected layer answered OK and returned no features for this place. That is a ' +
-          'confirmed empty result — not a failure — but the map is left unmounted so an empty ' +
-          'basemap is never mistaken for a surveyed all-clear.',
+          'Every selected layer answered OK and returned no features for this place. ' +
+          'The map is not drawn when there is nothing to draw.',
         sourceUrl,
       });
     }
@@ -1031,11 +1028,11 @@ function init() {
         const tdRest = document.createElement('td');
         tdRest.colSpan = 3;
         tdRest.className = 'muted';
-        tdRest.textContent = 'unknown — the request did not answer';
+        tdRest.textContent = 'unknown — request failed';
         tr.append(tdStatus, tdRest);
         tbody.appendChild(tr);
         tbody.appendChild(noteRow('note-fault',
-          'Request failed — showing nothing ≠ all clear. Layer state is unknown. ' +
+          'Request failed, so this layer’s state is unknown. ' +
           (r.error instanceof ApiError
             ? `GET ${r.error.url} → ${r.error.status || 'network error'}: ${r.error.message}`
             : String((r.error && r.error.message) || r.error))));
@@ -1077,7 +1074,7 @@ function init() {
       // --- the loud channel, beneath the row ---
       if (!md) {
         tbody.appendChild(noteRow('note-fault',
-          'Response carried no metadata member — freshness and source health are unknown.'));
+          'The response has no metadata block, so freshness and source status are unknown.'));
       } else if (status === 'UNAVAILABLE') {
         let link = null;
         const src = safeHttpUrl(md.sourceUrl);
@@ -1089,11 +1086,11 @@ function init() {
           link.textContent = 'check the authoritative source ↗';
         }
         tbody.appendChild(noteRow('note-fault',
-          'UNAVAILABLE — the upstream feed errored. Showing nothing ≠ all clear.', link));
+          'UNAVAILABLE — the upstream feed failed, so this layer’s state is unknown.', link));
       } else if (status === 'STALE') {
         tbody.appendChild(noteRow('note-stale', md.lastSourceUpdate
-          ? `STALE — serving last-good data; last source update ${timeAgo(md.lastSourceUpdate)} (${timeAbs(md.lastSourceUpdate)}).`
-          : 'STALE — serving last-good data; last source update unknown.'));
+          ? `STALE — showing the last good data; the source last updated ${timeAgo(md.lastSourceUpdate)} (${timeAbs(md.lastSourceUpdate)}).`
+          : 'STALE — showing the last good data; when the source last updated is unknown.'));
       }
     }
 

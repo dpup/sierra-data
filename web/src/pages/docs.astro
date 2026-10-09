@@ -197,8 +197,8 @@ import docsBody from '../partials/docs-body.html?raw';
     ETag · every <span class="chip-get"><b>GET</b></span> below is a live link into the running
     service · a feed's <code class="inline">sourceStatus</code> is
     <code class="inline">OK</code>, <code class="inline">STALE</code> or
-    <code class="inline">UNAVAILABLE</code> — an unavailable feed is reported as such, never as
-    an all-clear (§6)
+    <code class="inline">UNAVAILABLE</code>; an unavailable feed returns UNAVAILABLE with no
+    data, never an empty OK (§6)
   </p>
 
   <Fragment set:html={docsBody} />

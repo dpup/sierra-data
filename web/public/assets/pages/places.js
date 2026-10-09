@@ -255,7 +255,7 @@ export function initPlacesPage() {
       const note = el(
         'div',
         'notice',
-        'Map library failed to load — the resolve tester still works via the lat/lng and address inputs below.'
+        'The map library failed to load. The lat/lng and address inputs below still work.'
       );
       container.replaceWith(note);
       return;
@@ -495,7 +495,7 @@ export function initPlacesPage() {
     wrap.append(table);
     directoryEl.append(wrap);
     directoryEl.append(
-      el('p', 'freshness', `${sorted.length} of ${allPlaces.length} place(s) — the directory is unpaginated.`)
+      el('p', 'freshness', `${sorted.length} of ${allPlaces.length} place(s).`)
     );
   }
 
@@ -660,9 +660,8 @@ export function initPlacesPage() {
       el(
         'p',
         'muted small',
-        'Results in API order — the contract is most-specific first ' +
-          '(SITE, EVAC_ZONE, TOWN, CORRIDOR, COUNTY, AREA); anything out of ' +
-          'order here is a zone-import bug worth reporting.'
+        'Results in API order, most specific first ' +
+          '(SITE, EVAC_ZONE, TOWN, CORRIDOR, COUNTY, AREA).'
       )
     );
   }
@@ -701,7 +700,7 @@ export function initPlacesPage() {
         el(
           'div',
           'error-block',
-          'Invalid coordinates — lat must be in [-90, 90] and lng in [-180, 180].'
+          'Invalid coordinates: lat must be between -90 and 90, lng between -180 and 180.'
         )
       );
       return;

@@ -7,7 +7,7 @@ import FilterGroup from '../components/FilterGroup.astro';
 <Shell
   current="map"
   title="Map — layer previews · The Grid"
-  description="Per-layer GeoJSON previews on MapLibre with the honest-freshness metadata block: source status, generated-at, attribution, and the exact .geojson URL. An UNAVAILABLE layer draws nothing — and nothing on the map is not an all-clear."
+  description="Per-layer GeoJSON previews on MapLibre with each layer's metadata: source status, generated-at, attribution, and the exact .geojson URL. An UNAVAILABLE layer is not drawn; its state is unknown."
 >
   <Fragment slot="head">
     <link rel="stylesheet" href="/lib/maplibre-gl.css" />
@@ -85,8 +85,8 @@ import FilterGroup from '../components/FilterGroup.astro';
   <p class="rail-caption">
     <b>Layers</b>one GET per selected layer, exactly what a MapLibre, Leaflet or QGIS source
     points at · every response carries <code class="inline">metadata.sourceStatus</code> —
-    <strong class="accent-orange">an UNAVAILABLE layer draws nothing, and nothing on the map is
-    not an all-clear</strong>
+    <strong class="accent-orange">an UNAVAILABLE layer is not drawn, and an empty map does not
+    mean the area is clear</strong>
   </p>
 
   <!-- The shared filter set (app.css §14), same as every other screen: a facet
@@ -136,16 +136,15 @@ import FilterGroup from '../components/FilterGroup.astro';
           would point at.
         </p>
         <p>
-          It is why a consumer can trust — or knows not to trust — what the map shows.
+          It tells a consumer how current each layer is and where it came from.
         </p>
       </div>
       <div class="rail-block">
-        <div class="rail-label alert">A failed layer is loud</div>
+        <div class="rail-label alert">Failed layers</div>
         <p>
-          A degraded row is tinted and says which failure in words underneath.
-          <strong>Nothing on the map is never an all-clear</strong> — an UNAVAILABLE layer draws
-          nothing, and that is a different statement from a layer that drew nothing because there
-          was nothing to draw.
+          A degraded row is tinted, with the failure written out beneath it. An UNAVAILABLE
+          layer is not drawn because its state is unknown; a layer with nothing to draw is OK
+          with zero features. The table tells the two apart.
         </p>
       </div>
     </aside>
@@ -154,8 +153,8 @@ import FilterGroup from '../components/FilterGroup.astro';
   <section aria-labelledby="unlocated-h" class="section-gap">
     <h2 id="unlocated-h">Unlocated features</h2>
     <p class="section-intro">
-      Features with <code class="inline">"geometry": null</code> — e.g. a county-wide advisory — are
-      valid and can't be drawn on the map, so they are listed here instead (never dropped).
+      Features with <code class="inline">"geometry": null</code>, such as a county-wide advisory,
+      are valid but cannot be drawn, so they are listed here instead.
     </p>
     <div id="unlocated"></div>
   </section>

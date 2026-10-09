@@ -55,11 +55,10 @@ import PageHead from '../components/PageHead.astro';
   <p class="rail-caption">
     <b>Nodes</b><code class="inline">/api/v1/events?layer=mesh</code>, colored by role ·
     <b>links</b><code class="inline">/api/v1/mesh/links</code>, each advert's relay path rolled up
-    into a durable weighted edge list — links fade by recency (a quiet-but-recent link is dim, not
-    gone) and thicken with traffic, and the window trades currency for history · coverage is
-    deliberately wide, Bay Area → Sierra ·
-    <strong class="accent-orange">a sparse map is not an all-clear — a node is drawn only once we
-    have heard it advertise a location</strong>
+    into a weighted edge list; links fade with age and thicken with traffic, and the window sets
+    how far back they are kept · coverage is wide, Bay Area to Sierra ·
+    <strong class="accent-orange">a node is drawn only once it has advertised a location, so a
+    sparse map does not mean a small mesh</strong>
   </p>
 
   <div class="mesh-topbar">
@@ -116,11 +115,11 @@ import PageHead from '../components/PageHead.astro';
             at all — pushed to <code class="inline">/api/v1/ingest/mesh.repeater</code>.
           </p>
           <p>
-            <span class="mono">not monitored</span> is the common state and means nobody is
-            watching, <strong class="accent-orange">not that the node is down</strong>. A mesh has
-            no goodbye packet, so silence is ambiguous — a monitor that logged in and failed is
-            not, which is why <span class="mono">UNREACHABLE</span> is worth its own ring on the
-            map. Open a node for its full telemetry.
+            <span class="mono">not monitored</span> is the common state: no monitor is watching
+            the node, <strong class="accent-orange">which does not mean it is down</strong>. A
+            node that has gone quiet cannot be told from one that is fine, but a monitor that
+            tried to log in and failed can, which is why <span class="mono">UNREACHABLE</span>
+            gets its own ring on the map. Open a node for its full telemetry.
           </p>
         </div>
         <div class="rail-block">

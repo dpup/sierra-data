@@ -7,7 +7,7 @@ import FilterGroup from '../components/FilterGroup.astro';
 <Shell
   current="roads"
   title="Roads · The Grid"
-  description="Roads split across two idioms: road incidents are events (GET /api/v1/events?layer=road_incident), while road conditions — congestion and chain control — are not events and exist only as the road_segment and chain_control map layers. Each layer reports its own source status honestly."
+  description="Roads split across two idioms: road incidents are events (GET /api/v1/events?layer=road_incident), while road conditions — congestion and chain control — are not events and exist only as the road_segment and chain_control map layers. Each layer reports its own source status."
 >
   <Fragment slot="head">
     <style is:global>
@@ -191,9 +191,9 @@ import FilterGroup from '../components/FilterGroup.astro';
         </p>
       </div>
       <div class="rail-block">
-        <div class="rail-label alert">Empty is a clean report</div>
+        <div class="rail-label alert">Empty means none</div>
         <p>
-          It means the source reported no controls — not a failed feed. A failed feed says
+          An empty table means Caltrans reported no controls. A failed feed shows
           <span class="mono">UNAVAILABLE</span> in the source block above.
         </p>
       </div>
