@@ -50,6 +50,8 @@ func main() {
 		runs        = flag.Int("runs", 3, "repetitions of the incident request for the latency figures")
 		concurrency = flag.Int("concurrency", 0, "fire this many parallel requests to observe the concurrency limit (0 = skip)")
 		timeout     = flag.Duration("timeout", 180*time.Second, "per-request timeout")
+		effort      = flag.String("reasoning-effort", "", "send reasoning_effort on every production-shape request (what prefab.yaml would configure; empty = omit)")
+		noThinking  = flag.Bool("no-thinking", false, "send chat_template_kwargs.enable_thinking=false on every production-shape request")
 		out         = flag.String("out", "", "also write the Markdown report to this file")
 	)
 	flag.Parse()
@@ -67,11 +69,13 @@ func main() {
 	client := openai.NewClientWithConfig(cfg)
 
 	p := &probe{
-		client:  client,
-		baseURL: cfg.BaseURL,
-		key:     key,
-		http:    &http.Client{Timeout: *timeout},
-		timeout: *timeout,
+		client:     client,
+		baseURL:    cfg.BaseURL,
+		key:        key,
+		http:       &http.Client{Timeout: *timeout},
+		timeout:    *timeout,
+		effort:     *effort,
+		noThinking: *noThinking,
 	}
 
 	var ids []string
@@ -86,6 +90,7 @@ func main() {
 	r.kv("Base URL", cfg.BaseURL)
 	r.kv("Chat models", strings.Join(ids, ", "))
 	r.kv("Transcription model", *transcribe)
+	r.kv("Reasoning tuning on production requests", tuningLabel(*effort, *noThinking))
 	r.kv("Run at", time.Now().UTC().Format(time.RFC3339))
 
 	p.catalog(r, ids)
@@ -112,11 +117,40 @@ func main() {
 }
 
 type probe struct {
-	client  *openai.Client
-	baseURL string
-	key     string
-	http    *http.Client
-	timeout time.Duration
+	client     *openai.Client
+	baseURL    string
+	key        string
+	http       *http.Client
+	timeout    time.Duration
+	effort     string // -reasoning-effort
+	noThinking bool   // -no-thinking
+}
+
+// tuned applies the configured reasoning knobs to a production-shape request.
+// Production sets reasoning_effort from config (today: "low" on the gpt-5
+// family), so the probe's "as in production" checks carry the same setting.
+func (p *probe) tuned(req openai.ChatCompletionRequest) openai.ChatCompletionRequest {
+	if p.effort != "" {
+		req.ReasoningEffort = p.effort
+	}
+	if p.noThinking {
+		req.ChatTemplateKwargs = map[string]any{"enable_thinking": false}
+	}
+	return req
+}
+
+func tuningLabel(effort string, noThinking bool) string {
+	var parts []string
+	if effort != "" {
+		parts = append(parts, "reasoning_effort="+effort)
+	}
+	if noThinking {
+		parts = append(parts, "chat_template_kwargs.enable_thinking=false")
+	}
+	if len(parts) == 0 {
+		return "none (provider default)"
+	}
+	return strings.Join(parts, ", ")
 }
 
 func (p *probe) ctx() (context.Context, context.CancelFunc) {
@@ -277,6 +311,44 @@ For the condensed summary, follow the examples provided - do NOT include locatio
 	}
 }
 
+// portableIncidentRequest is incidentRequest with additional_info redefined as
+// a list of {key, value} pairs. Everything else (prompt, strictness, budget)
+// is identical, so a pass here isolates the schema construct.
+func portableIncidentRequest(model string) openai.ChatCompletionRequest {
+	encoded, err := json.Marshal(alerts.AlertEnhancementSchema.Schema)
+	if err != nil {
+		panic(err)
+	}
+	var schema map[string]any
+	if err := json.Unmarshal(encoded, &schema); err != nil {
+		panic(err)
+	}
+	props := schema["properties"].(map[string]any)
+	props["additional_info"] = map[string]any{
+		"type":        "array",
+		"description": "Structured facts as key/value pairs (keys: alphanumeric/._/- only)",
+		"items": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"key":   map[string]any{"type": "string"},
+				"value": map[string]any{"type": "string"},
+			},
+			"required":             []string{"key", "value"},
+			"additionalProperties": false,
+		},
+	}
+	schema["required"] = append(schema["required"].([]any), "additional_info")
+	raw, _ := json.Marshal(schema)
+	req := incidentRequest(model)
+	req.ResponseFormat = &openai.ChatCompletionResponseFormat{
+		Type: openai.ChatCompletionResponseFormatTypeJSONSchema,
+		JSONSchema: &openai.ChatCompletionResponseFormatJSONSchema{
+			Name: "alert_enhancement_portable", Strict: true, Schema: json.RawMessage(raw),
+		},
+	}
+	return req
+}
+
 // nwsRequest mirrors internal/ingest/enhance_nws.go.
 func nwsRequest(model string) openai.ChatCompletionRequest {
 	input, _ := json.Marshal(map[string]any{
@@ -319,7 +391,7 @@ func (p *probe) chatModel(r *report, model string, runs int) {
 	// 1. The incident schema, verbatim — the complex one (patternProperties,
 	//    maxLength, nullable types).
 	r.h3("Strict json_schema: incident enhancement")
-	inc := p.chat(incidentRequest(model))
+	inc := p.chat(p.tuned(incidentRequest(model)))
 	p.describeResult(r, inc)
 	var incOut alerts.StructuredDescription
 	if inc.err == nil {
@@ -332,9 +404,33 @@ func (p *probe) chatModel(r *report, model string, runs int) {
 		r.details("raw response", inc.content)
 	}
 
+	// 1b. The same request with the portable schema variant (§5 of the design
+	//     doc): additional_info as a list of {key, value} pairs instead of an
+	//     object with patternProperties and no properties, which the Outlines
+	//     grammar engine behind deepseek-4.1-flash rejects ("Unsupported JSON
+	//     Schema structure false").
+	r.h3("Strict json_schema: incident enhancement, portable additional_info")
+	port := p.chat(p.tuned(portableIncidentRequest(model)))
+	p.describeResult(r, port)
+	if port.err == nil {
+		var o struct {
+			Details        string `json:"details"`
+			AdditionalInfo []struct {
+				Key   string `json:"key"`
+				Value string `json:"value"`
+			} `json:"additional_info"`
+		}
+		if err := json.Unmarshal([]byte(port.content), &o); err != nil {
+			r.li("**Parse: FAIL** — " + err.Error())
+		} else {
+			r.li(fmt.Sprintf("Parse: ok; %d additional_info pairs; details %d chars", len(o.AdditionalInfo), len(o.Details)))
+		}
+		r.details("raw response", port.content)
+	}
+
 	// 2. The one-field NWS schema.
 	r.h3("Strict json_schema: NWS summary")
-	nws := p.chat(nwsRequest(model))
+	nws := p.chat(p.tuned(nwsRequest(model)))
 	p.describeResult(r, nws)
 	if nws.err == nil {
 		var o struct {
@@ -350,7 +446,7 @@ func (p *probe) chatModel(r *report, model string, runs int) {
 
 	// 3. The burn extraction schema (+ temperature).
 	r.h3("Strict json_schema: burn-line extraction (expected `orange`)")
-	burn := p.chat(burnRequest(model))
+	burn := p.chat(p.tuned(burnRequest(model)))
 	p.describeResult(r, burn)
 	if burn.err == nil {
 		var o struct {
@@ -394,12 +490,13 @@ func (p *probe) chatModel(r *report, model string, runs int) {
 
 	// 5. Reasoning control. Baseline is check 1; try the two knobs go-openai
 	//    can send.
-	r.h3("Reasoning control (incident request)")
-	if inc.err != nil {
-		r.li("baseline: request failed (see above)")
+	r.h3("Reasoning control (incident request, no tuning vs each knob)")
+	base := p.chat(incidentRequest(model))
+	if base.err != nil {
+		r.li("provider default: request failed — " + describe(base.err))
 	} else {
-		r.li(fmt.Sprintf("baseline: reasoning_content=%d chars, reasoning_tokens=%d, completion_tokens=%d, %s",
-			inc.reasoning, inc.reasonTok, inc.completion, inc.latency.Round(100*time.Millisecond)))
+		r.li(fmt.Sprintf("provider default: reasoning_content=%d chars, reasoning_tokens=%d, completion_tokens=%d, finish_reason=%s, %s",
+			base.reasoning, base.reasonTok, base.completion, base.finish, base.latency.Round(100*time.Millisecond)))
 	}
 	for _, c := range []struct {
 		name string
@@ -422,6 +519,10 @@ func (p *probe) chatModel(r *report, model string, runs int) {
 		r.li(fmt.Sprintf("`%s`: accepted; reasoning_content=%d chars, reasoning_tokens=%d, completion_tokens=%d, %s, output %s",
 			c.name, res.reasoning, res.reasonTok, res.completion, res.latency.Round(100*time.Millisecond),
 			yesno(ok, "valid", "**unusable**")))
+		if ok {
+			scoreIncident(r, parsed)
+			r.details("raw response ("+c.name+")", res.content)
+		}
 	}
 
 	// 6. Latency over N runs of the production incident request.
@@ -429,7 +530,7 @@ func (p *probe) chatModel(r *report, model string, runs int) {
 	var ds []time.Duration
 	failures := 0
 	for i := 0; i < runs; i++ {
-		res := p.chat(incidentRequest(model))
+		res := p.chat(p.tuned(incidentRequest(model)))
 		if res.err != nil {
 			failures++
 			continue

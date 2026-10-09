@@ -34,6 +34,14 @@ on:
         description: "Also run the same probe against OpenAI (gpt-5-mini, whisper-1)"
         type: boolean
         default: true
+      reasoning_effort:
+        description: "reasoning_effort sent on every production-shape request, both legs (empty = provider default). Production sends low."
+        type: string
+        default: "low"
+      no_thinking:
+        description: "Also send chat_template_kwargs.enable_thinking=false (LunaRoute leg only; OpenAI rejects it)"
+        type: boolean
+        default: false
 
 concurrency:
   group: llm-probe
@@ -111,6 +119,8 @@ jobs:
             $([ -s burnline.mp3 ] && echo "-audio burnline.mp3") \
             -runs ${{ inputs.runs }} \
             -concurrency ${{ inputs.concurrency }} \
+            -reasoning-effort "${{ inputs.reasoning_effort }}" \
+            ${{ (matrix.provider == 'lunaroute' && inputs.no_thinking) && '-no-thinking' || '' }} \
             -out "probe-${{ matrix.provider }}.md"
           cat "probe-${{ matrix.provider }}.md" >> "$GITHUB_STEP_SUMMARY"
 

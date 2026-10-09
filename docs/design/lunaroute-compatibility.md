@@ -1,6 +1,7 @@
 # Scoping: LunaRoute as a compatibility option for every AI feature
 
-Status: proposed (2026-10-09). Nothing here is implemented. This document
+Status: proposed (2026-10-09); **phase 0 probe run on 2026-10-09, results in
+§6a**. Nothing beyond the probe is implemented. This document
 inventories every model call the service makes, assesses whether each can be
 routed through LunaRoute's OpenAI-compatible gateway unchanged, lists the
 changes needed to make the provider a configuration choice, and recommends a
@@ -94,26 +95,32 @@ Verified from the documentation (docs.lunaroute.com):
   and the vision variants, so schema-constrained output is claimed; its exact
   dialect is **unverified** (§6).
 
-Unverified and material:
+Resolved by the phase 0 probe (§6a), originally unverified:
 
-1. Whether the gateway honours OpenAI's `response_format: {type: json_schema,
-   json_schema: {strict: true, schema}}` as sent by go-openai, and whether the
-   upstream grammar engine accepts the constructs our schemas use
-   (`patternProperties`, `maxLength`, `"type": ["string", "null"]`).
-2. Whether `max_completion_tokens` is accepted, translated to `max_tokens`, or
-   ignored. The docs show only `max_tokens` (on the Messages example).
-3. How to disable or bound reasoning. All three chat candidates are
-   reasoning models and DeepSeek V4.1 Flash **thinks by default**; its
-   reasoning shares the completion budget and arrives in a separate
-   `reasoning_content` field (which go-openai v1.41.1 decodes). With our
-   current 1500/3000-token budgets, a long think can return
-   `finish_reason: length` and an **empty `content`**, which today surfaces as
-   a JSON parse error (handled, but it means zero enhancements).
-   go-openai has no `extra_body`; the only non-standard field it can send is
-   `chat_template_kwargs`, which vLLM/SGLang-style backends read as
-   `{"enable_thinking": false}`. Whether LunaRoute's upstream honours it, or
-   accepts `reasoning_effort`, is **unverified**.
-4. The `-flex` variants in the catalog are undocumented.
+1. **Strict `json_schema` is honoured** by the gateway and by `glm-5.3` /
+   `glm-5.3-flash` with our schemas verbatim. **`deepseek-4.1-flash` rejects
+   the incident schema** (400, "Unsupported JSON Schema structure false"):
+   its Outlines grammar backend cannot compile the `additional_info` object,
+   which has `patternProperties` and `additionalProperties: false` but no
+   `properties`. The one-field NWS schema and the burn schema pass on all
+   three models.
+2. **Both `max_completion_tokens` and `max_tokens` are honoured** on all three
+   models (OpenAI's gpt-5 family rejects `max_tokens`; keep sending
+   `max_completion_tokens`).
+3. **All three models think by default and it breaks the production
+   budgets**: `glm-5.3` spent the whole 3000-token incident budget on
+   reasoning (65 s, empty `content`, `finish_reason: length`), and every
+   model spent the whole 1500-token NWS budget the same way. **Both knobs
+   work on the GLM models**: `reasoning_effort: low` cut `glm-5.3` to 11
+   reasoning tokens, 2.8 s, valid output; `chat_template_kwargs.enable_thinking:
+   false` to 0 tokens, 3.3 s. Since OpenAI also accepts `reasoning_effort`
+   (and rejects `chat_template_kwargs`), one config key covers both
+   providers. DeepSeek's reaction to the knobs is still unknown because its
+   schema rejection pre-empted the test; the portable-schema run will tell.
+4. **Audio is live and included**: `GET /v1/audio/transcriptions/models`
+   returns `whisper-large-v3` with `audio_policy: included`, and the synthetic
+   burn-line recording transcribed word-perfectly in 0.9 s.
+5. The `-flex` variants remain undocumented and were not probed.
 
 ## 4. Fit, surface by surface
 
@@ -124,8 +131,8 @@ must become configuration, because `deepseek-4.1-flash` matches no prefix yet
 is a reasoning model; (b) the 30 s `openai.timeout` is below LunaRoute's own
 60 s park window and well below the measured time-to-first-answer of these
 models in thinking mode (10 to 26 s on Artificial Analysis), so it must rise;
-(c) thinking must be turned off or bounded, or the completion budgets raised,
-or both.
+(c) thinking must be turned off: the probe showed the budgets are consumed by
+reasoning otherwise, and `reasoning_effort: low` is enough.
 
 **Concurrency.** Our worst case is three chat calls in flight at once: the
 ingest scheduler runs each poller in its own goroutine (`go s.run` in
@@ -182,23 +189,24 @@ openai:
   model: "gpt-5-mini"             # PF__OPENAI__MODEL
   timeout: "120s"                 # was 30s; see §4 (b)
   maxRetries: 1                   # make it real, or delete it
-  # Reasoning control, replacing the gpt-5 name-prefix heuristic:
+  # Reasoning control, replacing the gpt-5 name-prefix heuristic. Sent
+  # verbatim whenever non-empty; OpenAI's gpt-5 family and LunaRoute's GLM
+  # models both honour it (§6a), so one key covers both providers.
   reasoningEffort: "low"          # "" = don't send the field
-  disableThinking: false          # sends chat_template_kwargs.enable_thinking=false
 ```
 
 Code changes, by file:
 
-- `internal/config/config.go`: add `BaseURL`, `ReasoningEffort`,
-  `DisableThinking` to `OpenAIClient`. One new constructor,
+- `internal/config/config.go`: add `BaseURL` and `ReasoningEffort` to
+  `OpenAIClient`. One new constructor,
   `OpenAIClient.NewClient() *openai.Client`, that applies `DefaultConfig(key)`,
   overrides `BaseURL` when set, and installs an `http.Client` with `Timeout`.
   (Or a tiny `internal/lib/llm` package if config should stay dependency-free;
   either is fine, the point is one constructor.)
 - `internal/lib/alerts/enhancer.go` and `internal/ingest/enhance_nws.go`:
   take the config (or the built client) instead of `(apiKey, model)`; delete
-  both copies of `isReasoningModel`; set `ReasoningEffort` and
-  `ChatTemplateKwargs` from config; treat empty `content` with
+  both copies of `isReasoningModel`; set `ReasoningEffort` from config;
+  treat empty `content` with
   `finish_reason == "length"` as a distinct error so the log says "budget" not
   "invalid JSON"; keep `MaxCompletionTokens` and, if the probe says the gateway
   ignores it, also set `MaxTokens` (go-openai sends both when both are set).
@@ -225,9 +233,23 @@ Code changes, by file:
   dated note anyway that `enhancement.model` may now carry non-OpenAI ids,
   since consuming sites may render it.
 
-What does **not** change: the prompts, the schemas (unless §6 forces a
-simplification), the cache, the budgets, the single-writer ingest model, the
-`translate, never assert` policy, and the `Enhancement` proto.
+- `internal/lib/alerts/openai.go`: **make the incident schema portable** by
+  redefining `additional_info` as an array of `{key, value}` objects (the one
+  construct DeepSeek's backend rejects, §6a), with a three-line conversion to
+  the existing `map[string]string` in `enhancer.go` and a `promptVersion`
+  bump so cached enhancements are regenerated. Decide after the next probe
+  run confirms the variant passes on all three models and on OpenAI strict
+  mode; if DeepSeek is never going to be used, this can be skipped.
+- `internal/clients/burnline/reader.go`: the extraction sends
+  `temperature: 0.1`, which the gpt-5 family rejects (the OpenAI baseline leg
+  failed exactly there) and the LunaRoute models accept. Production is fine
+  only because the CLI defaults to gpt-4o. Either drop the temperature or
+  keep the burn-line model off the gpt-5 family; drop it, since the
+  structured output does not benefit from it.
+
+What does **not** change: the prompts, the cache, the budgets, the
+single-writer ingest model, the `translate, never assert` policy, and the
+`Enhancement` proto.
 
 ## 6. Probe checklist (phase 0, before any of §5)
 
@@ -281,6 +303,39 @@ in Go; item 2 decides the token-field handling; item 3 decides whether
 `disableThinking` is implementable or budgets must rise to ~8k; item 5 decides
 whether transcription moves at all.
 
+## 6a. Probe results (run 2, 2026-10-09 12:20 UTC)
+
+Workflow run [37929213439](https://github.com/dpup/sierra-data/actions/runs/37929213439);
+the full reports are its step summary and artifacts. Production-shape
+requests were sent **without** `reasoning_effort` on this run (the tool now
+sends it by default, matching production on gpt-5-mini).
+
+| Check | gpt-5-mini (OpenAI) | glm-5.3 | glm-5.3-flash | deepseek-4.1-flash |
+|---|---|---|---|---|
+| Listed in `/models` | yes (137) | yes (14) | yes | yes |
+| Incident schema, verbatim, 3000 budget | 200, valid, 11.7 s (1344 reasoning tok) | **empty**: all 3000 tokens reasoning, 65 s | 200, valid, 19.2 s (1092 reasoning tok) | **400**: schema rejected |
+| NWS schema, 1500 budget | 200, 7.8 s; summary 324 chars (cap 320) | **empty**, 17.8 s | **empty**, 16.2 s | **empty**, 9.2 s |
+| Burn extraction (temp 0.1), expected `orange` | **400**: temperature not allowed | `orange`, 98, 5.4 s | `orange`, 98, 3.9 s | `orange`, 100, 1.5 s |
+| `max_completion_tokens` / `max_tokens` | honoured / rejected | both honoured | both honoured | both honoured |
+| `reasoning_effort: low` on the incident request | 384 reasoning tok, 5.3 s, valid | 11 tok, 2.8 s, valid | 1 tok, 3.2 s, valid | blocked by schema |
+| `enable_thinking: false` | rejected (400) | 0 tok, 3.3 s, valid | 0 tok, 3.9 s, valid | blocked by schema |
+| Latency, 3 runs, no tuning | 8.5 / 9.1 / 11.2 s | 15.1 / 22.6 / 45 s | 16.9 / 19.8 / 20.1 s | all failed |
+| Audio (synthetic burn line) | whisper-1, 1.8 s, exact | whisper-large-v3, 0.9 s, exact (shared) | | |
+| 3 parallel requests | n/a (probe bug, fixed) | 3 × 200 in ~10.5 s, no 429 | | |
+
+Hand scoring of the one complete LunaRoute incident output (`glm-5.3-flash`):
+valid enums, `moderate`/`restricted`, both timestamps correct, 74-character
+condensed summary with no location, "near Arnold" taken from the supplied
+place list, no decoration. Equivalent to the gpt-5-mini output.
+
+What this settles: the gateway is a drop-in for the request shapes, the
+single required change is sending `reasoning_effort` from config (not from a
+model-name prefix), and the incident schema needs the portable
+`additional_info` form only if DeepSeek is in play. What the next run must
+settle: the portable schema on all four models, DeepSeek with thinking
+tuned, and hand-scored incident outputs from `glm-5.3` with tuning on (the
+tool now prints them).
+
 ## 7. Model evaluation
 
 Candidates are the chat models in the supplied catalog: `deepseek-4.1-flash`,
@@ -313,16 +368,18 @@ Reading:
   the burn-line extraction.** It is the most faithful of the three by a wide
   margin on the hallucination index, which is the property the grounding
   rules depend on, and it is in the same capability band as the gpt-5-mini it
-  would replace. Its thinking-mode latency is unacceptable on the request
-  path, so this recommendation is **conditional on §6 item 3**: thinking off
-  (or `reasoning_effort: low` honoured). With thinking off its time-to-first-
-  token and 83 tok/s put a 600-token incident response around 10 s, in the
-  same range as today.
-- **`deepseek-4.1-flash` is the fallback if latency wins.** Fastest by far
-  and the cheapest per token on third-party hosts, but the negative
-  hallucination score is the wrong direction for a prompt whose main failure
-  mode was an invented "(near Merced)". Use it only if the fixture scoring in
-  §6 item 7 shows no invented geography.
+  would replace. The condition from the first draft is now met: with
+  `reasoning_effort: low` it answered the production incident request in
+  2.8 s with valid output (§6a), against 5.3 s for gpt-5-mini under the same
+  setting. Without the setting it is unusable (65 s, empty output), so the
+  config change in §5 is a prerequisite, not a nicety.
+- **`deepseek-4.1-flash` is the fallback if latency wins**, and it costs a
+  schema change: its backend rejects the incident schema as written (§6a),
+  so it is only usable after the portable `additional_info` form ships. It
+  was fastest on the checks it could run (burn extraction 1.5 s), but the
+  negative hallucination score is the wrong direction for a prompt whose main
+  failure mode was an invented "(near Merced)". Use it only if the fixture
+  scoring shows no invented geography.
 - **`glm-5.3-flash` is dominated**: slower output than `glm-5.3` on the
   measured host and less faithful. No reason to pick it here.
 - **`-background` variants**: appropriate for the burn-line CLI (one call a
@@ -330,9 +387,9 @@ Reading:
   enhancers' timeout and starve an ingest tick. Not worth a config knob on
   day one; the model id is already configurable.
 - **`whisper-large-v3`** for transcription: the newer sibling of OpenAI's
-  `whisper-1` (large-v2), same prompt-priming behaviour, and free of charge on
-  the gateway at launch. The only risk is the audio feature being off for the
-  organisation (§6 item 5).
+  `whisper-1` (large-v2), same prompt-priming behaviour, free of charge on
+  the gateway at launch, and confirmed live for this organisation with a
+  word-perfect transcript in half the time (§6a).
 
 Keep `gpt-5-mini` on OpenAI as the shipped default until the bake-off has run
 against real traffic for a week with both providers' outputs stored under
@@ -343,15 +400,16 @@ for free.
 
 | Phase | Work | Size |
 |---|---|---|
-| 0. Probe | **Done, pending a key**: `cmd/test-llm` + `llm-probe.yml`. Add `LUNAROUTE_API_KEY` as a repo secret, dispatch the workflow, write the answers into this doc. | 0.5 day |
+| 0. Probe | **Run 2 done (§6a).** One more dispatch with the defaults (now `reasoning_effort=low` plus the portable-schema check) settles DeepSeek and gives hand-scorable `glm-5.3` outputs. | done |
 | 1. Compatibility option | §5 config + client constructor + both enhancers + burn-line CLI + workflow variables + docs. Default behaviour unchanged. | 1 day |
 | 2. Robustness | Real `maxRetries` (429 honouring `Retry-After`, one bounded 503 retry); startup `HealthCheck`; empty-content-on-length error; a per-request enhancement deadline so a slow provider cannot hold `ListIncidents` past its own refresh interval. These are worth doing for OpenAI too. | 0.5 to 1 day |
 | 3. Bake-off | Run production with `PF__OPENAI__BASE_URL` set on a staging or second instance, `glm-5.3` first, for a week. Compare stored `summary`/`headline` revisions against OpenAI's by `enhancement.model`. Score on the §6 item 7 rubric. | calendar week, ~0.5 day of review |
 | 4. Cutover (optional) | Flip defaults in `prefab.yaml` and the burn-line repo variables; retire the OpenAI key if nothing else uses it. | hours |
 
 Phases 1 and 2 are mergeable with no behaviour change and no LunaRoute
-account. Phase 0 blocks on a key and should run first because its answers can
-change phase 1 (schema simplification, token-field handling).
+account. Phase 0's answers (§6a) fixed phase 1's shape: `reasoningEffort` from
+config, `max_completion_tokens` kept, the portable schema only if DeepSeek
+matters.
 
 ## 9. Cost and operational notes
 
