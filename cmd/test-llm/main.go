@@ -548,10 +548,13 @@ func (p *probe) audio(r *report, model, path string) {
 
 func (p *probe) concurrency(r *report, model string, n int) {
 	r.h2(fmt.Sprintf("Concurrency: %d parallel requests to `%s`", n, model))
+	// No token-budget field on purpose: OpenAI's gpt-5 family rejects
+	// max_tokens and other gateways may not know max_completion_tokens, and
+	// a 400 would hide the 429 this check exists to observe. The prompt is
+	// short enough to bound the spend by itself.
 	body, _ := json.Marshal(map[string]any{
-		"model":      model,
-		"max_tokens": 200,
-		"messages":   []map[string]string{{"role": "user", "content": "Count slowly from one to forty, one number per line."}},
+		"model":    model,
+		"messages": []map[string]string{{"role": "user", "content": "Count slowly from one to forty, one number per line."}},
 	})
 	type outcome struct {
 		status     int
