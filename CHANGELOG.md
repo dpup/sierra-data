@@ -14,7 +14,132 @@ throughout; errors are gRPC-standard `{code, codeName, message, details}`). The
 by a snake_case `/v1` surface on 2026-07-05, which was in turn folded back onto the
 proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 
-## 2026-10-03
+## 2026-10-09
+
+### New push-ingest stream: `mesh.packet` — forward the adverts your radio hears
+
+**Additive**, and only for operators holding a push-ingest token. `POST
+/api/v1/ingest/mesh.packet` accepts the raw over-the-air packets a MeshCore
+companion radio received, in the per-packet envelope the community MQTT
+bridges publish (`packet_type`, hex `raw`, `SNR`, `RSSI`, `origin_id`), and
+feeds the ADVERTs to the Grid's MeshCore registry through the same decoder and
+Ed25519 signature check as an MQTT reception. Non-advert packets are accepted
+and ignored. The `202` response's `accepted` counts adverts applied; a packet
+that could not be used is a `warnings[]` entry naming its index and why
+(`malformed` or `rejected`). The rate limit on the write endpoint is now **per
+stream**, so a reporter authorized for both streams can run a forwarder and a
+telemetry monitor on two cadences.
+
+Why: the SIERRA backbone repeaters reach the community brokers only through a
+distant gateway, every few days each, while companions in the area hear them
+daily. A forwarder closes that gap with no change to the read API: nodes it
+hears appear in `GET /api/v1/events?layer=mesh` and the `mesh_node` /
+`mesh_link` map layers as before, with `provenance.attribution` naming the
+reporter (`MeshCore community mesh via <reporter name>`) the way it names a
+broker's operator. `GET /api/v1/sources` shows one health row per reporter
+whichever streams it posts to.
+
+The read surface is unchanged. Setup is in `docs/mesh-reporter-guide.md`
+("Forwarding packets").
+
+### New layer `BURN_STATUS`: per-county residential burning status
+
+**Purely additive.** A new event layer, two new sources, and a new
+`GetPlaceSummary` domain. Nothing existing changes shape; a client that ignores
+the layer sees no difference.
+
+Two independent authorities gate a legal burn and **both** must permit it. They
+are carried as separate facets and never merged, because they fail
+independently:
+
+| facet | authority | changes |
+| --- | --- | --- |
+| `burnDay` | the county air district's permissive-burn-day call | daily; flips weekly in winter/spring |
+| `calfireStatus` | CAL FIRE's seasonal suspension of burn permits on State Responsibility Area land | about twice a year |
+
+- **`GET /api/v1/events?layer=burn_status`** returns one event per configured
+  county (`burn:calaveras-county`, `burn:tuolumne-county`), carrying a
+  `burnStatus` detail block. `place` filtering works for the county, its towns
+  and any overlapping area — a query for a town sees its county's status.
+- **`GET /api/v1/events/{id}/history`** is the point of the layer. The event is
+  ambient and permanently ACTIVE, so its **revision timeline is the answer to
+  "when did this change"**. Per-reading fields (the message text, transcript,
+  confidence, observation timestamps) are excluded from the content hash, so
+  only a real transition mints a revision.
+- **`GET /api/v1/places/{place}/summary`** gains a `burn` domain, reported only
+  where at least one county is configured.
+- **`GET /api/v1/sources`** gains `burnline` and `calfire-burn`.
+
+**New push stream: `burn.line`** on the existing
+`POST /api/v1/ingest/{stream}` endpoint. No new endpoint and no new auth
+surface — a reporter granted the `burn.line` stream posts a reading and gets the
+same 202 body, rate limiting, size caps and `/api/v1/sources` health row as the
+`mesh.repeater` stream. Mint a credential with
+`make ingest-token REPORTER=<id> STREAMS=burn.line`.
+
+Unlike `mesh.repeater`, an accepted `burn.line` reading is **staged in the
+store** rather than held in memory, and that difference is deliberate: a mesh
+monitor re-reports every few minutes, so losing a buffer to a restart costs
+nothing, whereas a burn line is called **once a day** — an in-memory buffer would
+leave `burnDay` UNKNOWN until the next morning after any deploy. The reading
+keeps its own `observedAt`, so a rehydrated one is re-judged by the freshness
+gate rather than resurrected as current. It still writes no events; the
+scheduler remains the only writer of those.
+
+**`burnStatus` fields**: `burnDay` (`BURN_DAY_UNKNOWN|_YES|_NO|_MARGINAL`),
+`calfireStatus` (`CALFIRE_BURN_STATUS_UNKNOWN|CALFIRE_BURNING_SUSPENDED|CALFIRE_PERMIT_REQUIRED|CALFIRE_NO_PERMIT_REQUIRED`),
+`permission` (`BURN_PERMISSION_UNKNOWN|_ALLOWED|_PROHIBITED`), `calfireEffective`,
+`calfireArea`, `calfireObservedAt`, and `burnLines[]`.
+
+**`burnLines[]` is a LIST, not one phone number.** Each entry is
+`{id, name, phone, burnDay, observation{message, transcript, confidence, observedAt}}`.
+A county can have more than one recorded line, and one air-district line can
+speak for several counties — so render the per-line answers when they differ,
+and treat the top-level `burnDay` as their merge (most restrictive wins). A line
+we publish but do not read still appears, with `burnDay: BURN_DAY_UNKNOWN` and
+its `phone` populated; that is deliberate, so you can always offer the number.
+
+#### Two things a consumer MUST get right
+
+1. **`permission` is deliberately pessimistic — do not re-derive it optimistically.**
+   It is the *more restrictive* of the two facets. `PROHIBITED` is conclusive on
+   its own (either authority can forbid burning), but `ALLOWED` requires **both**
+   facets to be known and permissive. Anything else is `UNKNOWN`. Render
+   `UNKNOWN` as "check the burn line", never as a green light — someone acts on
+   this holding a match.
+2. **`burnDay` is not a government API.** The authority is the county's recorded
+   phone line, which a scheduled job calls daily, transcribes, and extracts — so
+   `observation.confidence` is a transcription confidence and the value can be
+   wrong in ways an API cannot. Always offer `burnLinePhone` alongside it. A
+   reading older than `grid.burn.burnDayStaleAfter` (36h default) is **not**
+   served as today's answer: the facet reads `BURN_DAY_UNKNOWN` and the
+   `burnline` source goes unhealthy.
+3. **`BURN_DAY_MARGINAL` means elevation-restricted**, not "somewhat". It is a
+   burn day that applies only above a stated elevation (typically 3500 ft); only
+   `observation.message` carries the threshold, and `permission` deliberately
+   reports `UNKNOWN` rather than `ALLOWED` for it.
+
+**Not a map layer.** These events carry no geometry — burn status is an
+administrative fact about a county, not a footprint — so there is no
+`burn_status.geojson`, and the layer is absent from the map namespace.
+
+**Not counted as a hazard.** Like mesh-node presence, burn status is ambient
+INFO state: it is excluded from `summary.totalActive`, `severityCounts`,
+`topEvents` and `mode`, and appears only in its own `burn` domain.
+
+Tuolumne's line is published but not dialed, so its `burnDay` reads
+`BURN_DAY_UNKNOWN` while `calfireStatus` is populated; its entry in
+`burnLines[]` still carries the county's real number.
+
+### `POST /api/v1/ingest/{stream}?preflight=true` — check a token before reporting
+
+**Additive** (write endpoint only). A credentialed POST with `?preflight=true`
+answers `204 No Content` once the token authenticates and is granted the
+stream, and returns the usual `401`/`403`/`404` otherwise. The body is ignored
+and nothing is recorded: it doesn't count as a report, doesn't start the
+rate-limit window, and doesn't change the reporter's health. Use it before
+expensive work to produce a report. The burn-line reader checks it before
+placing any paid call.
 
 ### Caltrans lane closures: an unconfirmed overrun now resolves after 12h
 

@@ -13,6 +13,9 @@ enhancement live in `internal/services`, not here.
 | `nws`      | api.weather.gov       | none (User-Agent required)    | Authoritative zone alerts + fire-weather products. |
 | `firis`    | ArcGIS (CAL FIRE org) | none (public)                 | CAL FIRE/FIRIS combo fire perimeters. Dedup + `LastEdit` gating live in `internal/ingest` (wildfire). Replaced `wfigs` (retained unused). |
 | `pge`      | ArcGIS (PG&E)         | none (public, undocumented)   | Electric outages (points + affected-area polygons) and PSPS coverage, plus PG&E's own ETL stamp. See below. |
+| `burnline` | county burn phone line | Twilio + OpenAI              | Places a recorded call, transcribes it, extracts today's burn day. Driven by `cmd/burn-line` from CI, not the server — see below. |
+| `twilio`   | Twilio REST API       | account SID + auth token      | Minimal hand-rolled client: place a recorded call, hang up, fetch the recording. |
+| `calfireburn` | burnpermit.fire.ca.gov HTML | none (browser headers required) | CAL FIRE per-county burn suspension. HTML scrape behind Akamai bot management — see below. |
 
 All clients accept an `HTTPDoer` interface and expose a `NewClientWithHTTPDoer`
 constructor so tests can inject canned responses instead of hitting the network.
@@ -343,3 +346,94 @@ Consequences to keep in mind:
   misspelling), and sending them to `protect.genasys.com` links a resident to a
   viewer their zone will never appear in. County viewers show **live zones only**,
   so never construct a per-zone deep link into one.
+
+## Burn status: two clients, two very different trust levels
+
+`burnline` and `calfireburn` back one poller (`internal/ingest/burn_status.go`).
+Both are unusual, in opposite directions, and neither should be treated like the
+ArcGIS feeds above.
+
+### `calfireburn` — an HTML scrape behind a bot wall
+
+There is no API. As of 2026-09 no per-county burn-status layer exists on CAL
+FIRE's ArcGIS org (368 services checked), on data.ca.gov, or in AGOL search. The
+closest-named layer, `BP_Restrictions_Log_View`, is a **per-applicant** log
+carrying names, emails and phone numbers — do not use it.
+
+The host rejects any client that does not present as a browser NAVIGATION.
+Measured against the live host:
+
+| request shape | result |
+|---|---|
+| bare curl | 403 |
+| descriptive bot UA (`SierraGrid/1.0`) | 403 |
+| Chrome UA + `Accept` + `Accept-Language` | 403 |
+| Chrome UA + `Accept` + `Sec-Fetch-*` | **200** |
+| bot UA + `Accept` + `Sec-Fetch-*` | 403 |
+
+So `browserHeaders` is load-bearing and an honest self-identifying User-Agent is
+not an option that works. Worth knowing: the site's own `robots.txt` is
+`User-agent: *` with **zero Disallow rules** plus an advertised sitemap, so its
+declared crawl policy permits this while its edge configuration does not. We
+poll twice a day.
+
+**Expect it to break** — Sitecore markup that can change without notice (the
+Caltrans KML feeds did exactly that in 2026), behind a fingerprinting WAF a third
+party updates. That is why it is the **secondary** source: the burn line carries
+the answer that changes often, and a 403 leaves the burn-day facet untouched.
+
+Two parsing rules that must not be relaxed:
+
+- **An empty table is an ERROR, never an empty map.** CAL FIRE lists every
+  county, so zero rows means the markup moved. Returning an empty map would tell
+  ingest that no county has a suspension — in fire season the most dangerous
+  wrong answer this package could give.
+- **Effective times are PACIFIC with no zone marker** ("Effective, June 15, 2026
+  at 8:00 AM"). Parse with `time.ParseInLocation`, never `time.Parse`, or every
+  suspension shifts 7-8 hours.
+
+### `burnline` — an LLM reading of a phone recording
+
+The authority is the county's recorded burn-information line (Calaveras:
+(209) 754-6600). There is no API and no website behind it — the number IS the
+source. `burnline.Reader` places a recorded call via `twilio`, transcribes it
+with Whisper, and extracts today's status with a structured-output chat call.
+
+**The server never runs this.** `cmd/burn-line` does, on a daily schedule from
+`.github/workflows/burn-line.yml`, and PUSHES the results to
+`POST /api/v1/ingest/burn.line` as ONE batched report.
+It reads `grid.burn.lines` from `prefab.yaml` and dials every enabled line, so
+the workflow enumerates no phone numbers — one source of truth, and no CI edit
+that can drift from config in either direction.
+Placing a phone call costs money and must happen exactly once a day; a
+long-running server would re-dial on every restart unless carefully guarded,
+whereas a scheduled workflow has those semantics for free.
+
+Three behaviours are deliberate:
+
+- **The caller hangs up.** The line is a looping recorded message that never ends
+  the call, so an un-hung-up call bills until Twilio's own timeout. `HangUpAfter`
+  (90s) covers one full pass of the message.
+- **An unusable extraction is an ERROR, not a fallback.** The TypeScript pipeline
+  this replaces (`dpup/burnday`) defaulted to `"red"` on any failure, reasoning
+  that no-burn is the safe direction. It is — but it is still an assertion we
+  never read. Here a failure pushes NOTHING, the previous reading ages past the
+  server's freshness gate, and the facet reads UNKNOWN, which a consumer renders
+  as "call the line". Equally safe, and honest.
+- **`orange` is specifically an ELEVATION-RESTRICTED burn day** ("permissive burn
+  days at 3500 feet elevation or more"), not a vague middle. It is the
+  classification people get wrong, so the extraction prompt calls it out
+  explicitly and `TestRead_ElevationRestrictedIsOrange` pins it.
+
+The result carries a `Confidence` and the cleaned `Transcript` because it is a
+model's reading of phone audio, and every event publishes the phone number
+alongside it so a reader can always reach the actual authority.
+
+### `twilio`
+
+Hand-rolled rather than pulling in the Twilio SDK: the surface used here is three
+form-encoded POSTs and a media download, and the SDK would add a large dependency
+tree to a service whose other upstreams are plain HTTP. Operational failures
+(unverified caller id, insufficient balance) come back as a 4xx with a
+human-readable body, which the client carries into the error — without it a CI
+log says only "status 400".

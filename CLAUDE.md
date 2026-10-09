@@ -172,6 +172,14 @@ curl -s http://localhost:8181/api/v1/events?layer=road_incident | jq .
 
 **API Design**:
 - REST endpoints via gRPC Gateway
+- **One write endpoint, and only one**: `POST /api/v1/ingest/{stream}`
+  (`internal/pushingest`) — the sole authenticated route (bearer token per
+  reporter, hash-only in config). Streams today: `mesh.repeater` (operator
+  repeater telemetry) and `burn.line` (county burn-day readings). Neither writes
+  events: mesh buffers in memory, burn stages a store row, and the ingest
+  scheduler remains the only writer of events. It stays browser-unreachable
+  cross-origin because `corsAllowMethods: [GET]` denies the POST preflight.
+  Do not add POST to that list.
 - **CORS is open**: `corsOrigins: ["*"]` in `prefab.yaml` emits a literal
   `Access-Control-Allow-Origin: *` for every origin (prefab >= v0.6.1's wildcard
   sentinel). Safe here because the API is public, read-only, and keyless — a
@@ -221,6 +229,10 @@ export PORT=8181
 # TRUNCATE. It also means every random row read is a network round trip, which
 # is why the store's index statistics matter so much — see store.Analyze.
 export PF__GRID__DB_PATH=/data/grid.db
+
+# Push-ingest credentials are NOT env vars: a reporter's token hash lives in
+# prefab.yaml (grid.ingest.reporters[].tokenSha256) and the token itself only on
+# the operator's machine. Mint with `make ingest-token`.
 ```
 
 **Env-var naming — a camelCase config key needs an underscore.** prefab maps
@@ -252,7 +264,10 @@ authenticate).
   approaching fire attach to an area/town it has not reached yet. Fire is the
   only layer with its own geography; see `internal/ingest/CLAUDE.md`.) Also
   `grid.power.outageStaleAfter` — the PG&E freeze detector, not a fetch timeout;
-  see the PG&E notes below.
+  see the PG&E notes below. And `grid.burn` — the tracked `counties`, the
+  recorded `lines` (id, phone, the counties each speaks for, and whether we dial
+  it) plus `burnDayStaleAfter`, the equivalent freeze detector for a pushed
+  burn-line reading.
 - Environment variables override config file values for secrets
 - Use `.envrc` for local development (already in .gitignore)
 
@@ -363,6 +378,43 @@ survives as a legacy alias):
 - Diagnose with `./bin/test-pge` (`make test-pge`); see
   `internal/clients/CLAUDE.md` for field-type traps and query hygiene.
 
+**CAL FIRE burn permits** (`burnpermit.fire.ca.gov`, the `calfire-burn` source):
+- Per-county suspension of residential burning on State Responsibility Area land.
+- **No API — an HTML scrape behind Akamai bot management.** The host 403s any
+  client that does not present as a browser navigation, and a descriptive bot
+  User-Agent is refused with otherwise identical headers; the required
+  `Sec-Fetch-*` + Chrome UA header set is load-bearing. Its own `robots.txt` has
+  ZERO Disallow rules, so the declared crawl policy permits what the edge blocks.
+  Polled twice a day. Expect breakage; it is deliberately the SECONDARY source.
+- An empty table is an ERROR, never "no county is suspended". Effective times are
+  Pacific with no zone marker. See `internal/clients/CLAUDE.md`.
+
+**County burn line** (a recorded phone line, the `burnline` source):
+- The daily permissive-burn-day call. **The authority is a phone number, not an
+  API** (Calaveras: 209-754-6600). `cmd/burn-line` places a recorded call via
+  Twilio, transcribes it with Whisper, and extracts the status with a
+  structured-output chat call.
+- **It runs from CI, not the server** (`.github/workflows/burn-line.yml`, daily
+  at 14:00 UTC) and PUSHES the readings to `POST /api/v1/ingest/burn.line` in ONE
+  batched report (the endpoint rate-limits per reporter, so a push per line would
+  429 everything after the first). A phone call costs
+  money and must happen once a day; a scheduled workflow has those semantics, a
+  restarting server does not.
+- The value can therefore be wrong in ways an API cannot (a `confidence` and the
+  cleaned transcript ride along), and a stopped pipeline is INVISIBLE except by
+  age — `grid.burn.burnDayStaleAfter` (36h, one missed run plus slack) turns an
+  old reading into a source failure and blanks the facet to UNKNOWN.
+- **A LINE is the config unit, not a county** (`grid.burn.lines`): a county can
+  have several relevant recordings, and one air-district line routinely covers
+  several counties (list them all and it is dialed ONCE). A county's lines merge
+  taking the MOST RESTRICTIVE answer; each line's own answer stays visible in
+  `burnStatus.burnLines[]`.
+- Calaveras is dialed today. Tuolumne's number (209-533-5598) is published on its
+  event but not dialed (`enabled: false`), so it carries the CAL FIRE facet with
+  `burnDay` UNKNOWN. **`prefab.yaml` is the single source of truth** — the
+  workflow enumerates no numbers, it just runs the tool, so adding or enabling a
+  line is one edit in one file.
+
 **OpenAI API** (Optional):
 - **AI-Enhanced Road Status Determination**: Intelligently analyzes traffic incidents to determine accurate road status (open/restricted/closed)
 - **Status Explanations**: Provides clear explanations when roads are restricted or closed (populates `status_explanation` field)
@@ -451,9 +503,14 @@ gateway's `EmitUnpopulated` marshaler.
   last error). Includes one **health-only** row per configured push reporter.
 - `POST /api/v1/ingest/{stream}` - **the one WRITE endpoint**, and the only one
   requiring a credential (`Authorization: Bearer`). Operator-run monitors push
-  data no upstream feed publishes; today the `mesh.repeater` stream carries
-  MeshCore repeater admin telemetry + explicit reachability. Not mounted unless
-  `grid.ingest.reporters` is non-empty. It does NOT write the store — it buffers,
+  data no upstream feed publishes. Two streams: `mesh.repeater` carries MeshCore
+  repeater admin telemetry + explicit reachability; `mesh.packet` forwards the
+  raw advert frames a companion radio heard (the SIERRA backbone reaches the
+  community MQTT brokers only every few days; a companion in Arnold hears it
+  daily), handed to the MeshCore registry through the same decode and
+  signature check as an MQTT reception. Not mounted unless
+  `grid.ingest.reporters` is non-empty. It does NOT write the store — it buffers
+  (or, for packets, updates the in-memory registry),
   and the mesh poller merges on its next tick, so single-writer discipline holds.
   `corsAllowMethods: [GET]` is what keeps it browser-unreachable cross-origin;
   never add POST there. See `internal/pushingest` and `internal/ingest/CLAUDE.md`;
@@ -489,6 +546,16 @@ gateway's `EmitUnpopulated` marshaler.
   `ListCameras` as GeoJSON — same cameras, distances and ids, every feature
   `INFO`, `sourceStatus` from the camera directory — and stays out of the
   place summary: cameras are reference views, not hazards.
+
+**Burn status** (`layer=burn_status`, no geojson layer): per-county residential
+burning status from TWO independent authorities that must BOTH permit a burn —
+the county air district's permissive-burn-day call (daily) and CAL FIRE's
+seasonal suspension on SRA land (twice a year). Carried as separate facets on one
+ambient, permanently-ACTIVE event per county, so the **revision history is the
+product** ("when did it change"). Excluded from the summary hazard rollup like
+mesh presence; surfaces in its own `burn` domain. `permission` is deliberately
+pessimistic: PROHIBITED is conclusive from either facet alone, ALLOWED needs both
+known and permissive, everything else UNKNOWN. See `internal/ingest/CLAUDE.md`.
 
 **Fire-weather** (`conditions.fireWeather`, and the `fire_weather` geojson layer):
 `state` escalates `normal` → `elevated` (Fire Weather Watch) → `red-flag` (Red Flag

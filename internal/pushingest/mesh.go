@@ -1,6 +1,7 @@
 package pushingest
 
 import (
+	"context"
 	"encoding/hex"
 	"fmt"
 	"strings"
@@ -83,6 +84,16 @@ type MeshSnapshot struct {
 	// this tick, which (with no MQTT broker connected) is what makes the poll
 	// fail loud rather than report an empty mesh.
 	Live int
+
+	// PacketReporters is every reporter authorized for mesh.packet, for the
+	// source rows, and PacketLive counts those currently OK. A packet forwarder
+	// is a door into the MeshCore registry, not a source of reports: its packets
+	// are already in the registry by the time the normalizer looks, so a live
+	// forwarder keeps the registry's Snapshot in play when no MQTT broker is
+	// connected, and a STALE one sets SuppressSweep like a stale monitor does —
+	// the nodes only it heard are about to age out for OUR reason.
+	PacketReporters []ReporterHealth
+	PacketLive      int
 }
 
 // meshPayload is the wire contract, matching the document an operator monitor
@@ -138,7 +149,7 @@ type meshRepeaterIn struct {
 // ENVELOPE is an error (the whole request is rejected), while a malformed NODE
 // is a warning (the rest of the report still lands). A monitor that adds a
 // repeater with a typo'd id should not lose the other eight.
-func (r *Registry) ingestMesh(rep *reporter, body []byte, maxItems int) (accepted int, warnings []string, err error) {
+func (r *Registry) ingestMesh(_ context.Context, rep *reporter, body []byte, maxItems int) (accepted int, warnings []string, err error) {
 	payload, err := decodeJSON[meshPayload](body)
 	if err != nil {
 		return 0, nil, err
@@ -195,6 +206,7 @@ func (r *Registry) ingestMesh(rep *reporter, body []byte, maxItems int) (accepte
 	// would make a node immortal the moment a monitor stopped listing it.
 	r.mesh[rep.cfg.ID] = set
 	rep.lastAcceptedAt = now
+	rep.lastAcceptedByStream[MeshStream] = now
 	rep.lastError = ""
 	rep.reports++
 	r.mu.Unlock()
@@ -213,24 +225,39 @@ func (r *Registry) MeshReports() MeshSnapshot {
 
 	var snap MeshSnapshot
 	for _, rep := range r.order {
-		if !rep.streams[MeshStream] {
+		if !rep.streams[MeshStream] && !rep.streams[MeshPacketStream] {
 			continue
 		}
+		// Health is per reporter, not per stream: a reporter that posts on either
+		// stream is alive. A reporter on both streams appears in both lists below
+		// with the same health, and the normalizer folds them onto one source row.
 		h := r.healthLocked(rep, now)
-		snap.Reporters = append(snap.Reporters, h)
-		switch h.State {
-		case ReporterOK:
-			snap.Live++
-			for _, nr := range r.mesh[rep.cfg.ID] {
-				snap.Reports = append(snap.Reports, nr)
+		if rep.streams[MeshStream] {
+			snap.Reporters = append(snap.Reporters, h)
+			switch h.State {
+			case ReporterOK:
+				snap.Live++
+				for _, nr := range r.mesh[rep.cfg.ID] {
+					snap.Reports = append(snap.Reports, nr)
+				}
+			case ReporterStale:
+				// Silent, but plausibly coming back: contribute nothing, and stop
+				// the sweep from reading that silence as nodes having left.
+				snap.SuppressSweep = true
+			case ReporterDead, ReporterUnknown:
+				// DEAD: silent long enough that we must admit we no longer know.
+				// UNKNOWN: never configured up, so it has no nodes to protect.
 			}
-		case ReporterStale:
-			// Silent, but plausibly coming back: contribute nothing, and stop the
-			// sweep from reading that silence as nodes having left.
-			snap.SuppressSweep = true
-		case ReporterDead, ReporterUnknown:
-			// DEAD: silent long enough that we must admit we no longer know.
-			// UNKNOWN: never configured up, so it has no nodes to protect.
+		}
+		if rep.streams[MeshPacketStream] {
+			snap.PacketReporters = append(snap.PacketReporters, h)
+			switch h.State {
+			case ReporterOK:
+				snap.PacketLive++
+			case ReporterStale:
+				snap.SuppressSweep = true
+			case ReporterDead, ReporterUnknown:
+			}
 		}
 	}
 	return snap

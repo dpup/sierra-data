@@ -619,6 +619,126 @@
         }
       }
     },
+    "v1BurnDay": {
+      "type": "string",
+      "enum": [
+        "BURN_DAY_UNKNOWN",
+        "BURN_DAY_YES",
+        "BURN_DAY_NO",
+        "BURN_DAY_MARGINAL"
+      ],
+      "default": "BURN_DAY_UNKNOWN",
+      "title": "- BURN_DAY_UNKNOWN: not reached, or the reading was unusable/stale\n - BURN_DAY_YES: permissive burn day — burning allowed\n - BURN_DAY_NO: no-burn day — burning prohibited\n - BURN_DAY_MARGINAL: restricted/partial (the line's \"orange\")"
+    },
+    "v1BurnLineReading": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "title": "stable config id (\"calaveras-apcd\")"
+        },
+        "name": {
+          "type": "string",
+          "title": "\"Calaveras County APCD burn line\""
+        },
+        "phone": {
+          "type": "string",
+          "title": "the number a resident can call"
+        },
+        "burnDay": {
+          "$ref": "#/definitions/v1BurnDay",
+          "title": "this line's own answer; UNKNOWN if unread or stale"
+        },
+        "observation": {
+          "$ref": "#/definitions/v1BurnObservation",
+          "description": "Volatile per-observation fields — EXCLUDED from the content hash (see\nstore.ContentHash), so they refresh without minting a revision. The line's\nburn_day above IS hashed: a line changing its answer, or going unreadable,\nis a real transition worth recording."
+        }
+      },
+      "description": "BurnLineReading is one recorded phone line's answer for today."
+    },
+    "v1BurnObservation": {
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string",
+          "title": "the line's plain-language answer"
+        },
+        "transcript": {
+          "type": "string",
+          "title": "cleaned transcript of the recording"
+        },
+        "confidence": {
+          "type": "integer",
+          "format": "int32",
+          "description": "The transcription model's own confidence, 0-100. Surfaced rather than\nthresholded: this is an LLM reading of phone audio, and a consumer deserves\nto see when the read was shaky."
+        },
+        "observedAt": {
+          "type": "string",
+          "format": "date-time",
+          "title": "when this line was last called"
+        }
+      },
+      "description": "BurnObservation is the volatile half of a burn status reading. It is grouped\ninto its own sub-message so store.ContentHash can zero the whole field.\n\nThis is load-bearing, not tidiness. The county line's message NAMES THE DATE\n(\"Today, September 10th, is a burn day in Calaveras County\"), so the text\ndiffers every single day even when the answer has not changed. Hashed, it\nwould mint a revision daily and bury the handful of real transitions — the\nonly thing this layer exists to record — in 365 rows of noise a year."
+    },
+    "v1BurnPermission": {
+      "type": "string",
+      "enum": [
+        "BURN_PERMISSION_UNKNOWN",
+        "BURN_PERMISSION_ALLOWED",
+        "BURN_PERMISSION_PROHIBITED"
+      ],
+      "default": "BURN_PERMISSION_UNKNOWN",
+      "title": "- BURN_PERMISSION_UNKNOWN: at least one facet unknown — assume nothing\n - BURN_PERMISSION_ALLOWED: both facets permit burning today\n - BURN_PERMISSION_PROHIBITED: at least one facet prohibits it"
+    },
+    "v1BurnStatusDetail": {
+      "type": "object",
+      "properties": {
+        "burnDay": {
+          "$ref": "#/definitions/v1BurnDay"
+        },
+        "calfireStatus": {
+          "$ref": "#/definitions/v1CalfireBurnStatus"
+        },
+        "permission": {
+          "$ref": "#/definitions/v1BurnPermission",
+          "description": "Derived: the MORE RESTRICTIVE of the two facets, never the more permissive.\nUNKNOWN whenever either facet is unknown or stale — a missing answer must\nnever read as ALLOWED. Someone acts on this with a match in their hand."
+        },
+        "calfireEffective": {
+          "type": "string",
+          "format": "date-time",
+          "description": "--- CAL FIRE facet (source `calfire-burn`) ---\nWhen the suspension took effect. The county phone line only ever says\n\"until further notice\"; this date exists nowhere else we read."
+        },
+        "calfireArea": {
+          "type": "string",
+          "title": "\"All SRA\" — the land classes covered"
+        },
+        "burnLines": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1BurnLineReading"
+          },
+          "description": "--- county facet (source `burnline`) ---\nEvery recorded line that speaks for this county, each with its own reading.\n\nRepeated rather than one phone number because the line-to-county mapping is\nnot 1:1 in EITHER direction: a county can have more than one relevant\nrecording, and one air-district line routinely covers several counties.\n`burn_day` above is these lines merged, taking the most restrictive.\n\nA line with no usable reading still appears here, with burn_day UNKNOWN and\nits phone populated — that is the honest thing to show, and it is what lets\na consumer say \"we could not read it, here is the number\"."
+        },
+        "calfireObservedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the CAL FIRE page was last read successfully. EXCLUDED from the content\nhash (store.ContentHash), like the per-line observations: it moves every\ntick and would otherwise mint a revision every tick.\n\nIt exists because the envelope's own observed_at cannot answer this. When\nthe CAL FIRE scrape fails, that facet is carried forward from the stored\nevent while observed_at still advances (we did poll) — so this is the only\nway a consumer can see the suspension value is not freshly confirmed."
+        }
+      },
+      "description": "Residential/outdoor burning status for one county (Layer_BURN_STATUS).\n\nTWO INDEPENDENT AUTHORITIES gate a legal burn, and BOTH must permit it:\n\n 1. `burn_day` — the county air district's permissive-burn-day call, decided\n    daily from meteorology and air quality. Flips weekly in winter/spring.\n 2. `calfire_status` — CAL FIRE's seasonal suspension of residential burn\n    permits on State Responsibility Area land. Moves about twice a year.\n\nThey are carried separately, never merged into one upstream value, because\nthey fail independently: the county line can be unreachable while CAL FIRE's\npage is fine, and vice versa. `permission` is the only derived answer, and it\nis deliberately pessimistic (see below).\n\nThis is AMBIENT state, not a hazard: the event exists for a county at all\ntimes and is excluded from the summary hazard rollup, exactly like mesh-node\npresence. Its VALUE is the revision history — \"when did it change\" is the\nquestion this layer answers."
+    },
+    "v1CalfireBurnStatus": {
+      "type": "string",
+      "enum": [
+        "CALFIRE_BURN_STATUS_UNKNOWN",
+        "CALFIRE_BURNING_SUSPENDED",
+        "CALFIRE_PERMIT_REQUIRED",
+        "CALFIRE_NO_PERMIT_REQUIRED"
+      ],
+      "default": "CALFIRE_BURN_STATUS_UNKNOWN",
+      "title": "- CALFIRE_BURNING_SUSPENDED: permits suspended; no residential burning\n - CALFIRE_PERMIT_REQUIRED: burning allowed with a valid permit\n - CALFIRE_NO_PERMIT_REQUIRED: off-season; no permit needed"
+    },
     "v1Camera": {
       "type": "object",
       "properties": {
@@ -900,6 +1020,9 @@
         },
         "power": {
           "$ref": "#/definitions/v1PowerDetail"
+        },
+        "burnStatus": {
+          "$ref": "#/definitions/v1BurnStatusDetail"
         }
       }
     },
@@ -1171,7 +1294,8 @@
         "GAUGE",
         "AIR_QUALITY",
         "MESH",
-        "ANNOUNCEMENT"
+        "ANNOUNCEMENT",
+        "BURN_STATUS"
       ],
       "default": "LAYER_UNSPECIFIED",
       "title": "- POWER: condition-backed layers (ROAD_SEGMENT, CHAIN_CONTROL) are projections, not events"

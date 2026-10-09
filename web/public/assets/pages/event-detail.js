@@ -34,7 +34,7 @@ import { diffObjects } from '../diff.js';
 import { BASE_STYLE, BASE_ATTRIBUTION_OPTS, ensureBasemap, deferInteraction } from '../basemap.js';
 
 /**
- * The Event.detail oneof's protojson field names (grid.proto fields 20–30).
+ * The Event.detail oneof's protojson field names (grid.proto fields 20–27 and 31; 28–30 are reserved).
  * Exactly one may be present on an event; protojson uses the lowerCamelCase
  * proto field name as the JSON key.
  */
@@ -50,6 +50,7 @@ export const DETAIL_FIELDS = [
   'airQuality',
   'mesh',
   'announcement',
+  'burnStatus',
 ];
 
 /**
@@ -754,10 +755,10 @@ function renderMeshDetail(body, m) {
     // one sentence, and a paragraph about what an advert would have carried is a
     // second explanation of nothing.
     heard
-      ? 'What the community MQTT bridges heard of this node’s last advert. Volatile by design: the ' +
-        'store zeroes this block before hashing, so a firehose of adverts refreshes liveness ' +
-        'without minting a revision. The advert time is stamped by the node’s own unsynchronized ' +
-        'clock — “heard” everywhere else is the event’s observedAt.'
+      ? 'What the community MQTT bridges heard of this node’s last advert. These values are ' +
+        'excluded from the content hash, so a new advert refreshes them without creating a ' +
+        'revision. The advert time is stamped by the node’s own unsynchronized clock; “heard” ' +
+        'elsewhere on this page is the event’s observedAt.'
       : ''
   );
   if (!heard) {
@@ -765,9 +766,8 @@ function renderMeshDetail(body, m) {
       el(
         'p',
         'muted small',
-        'No bridge has reported hearing this node advertise. Everything the Grid holds for it comes ' +
-          'from the monitor below — so there is no SNR, no hop count and no gateway here, rather ' +
-          'than a row of zeros claiming it was heard direct at 0 dB.'
+        'No bridge has reported hearing this node advertise. Everything the Grid holds for it ' +
+          'comes from the monitor below, so there is no SNR, hop count or gateway to show.'
       )
     );
     restRows(sig, t, MESH_TELEMETRY_KNOWN, 'Other telemetry fields');
@@ -795,7 +795,7 @@ function renderMeshDetail(body, m) {
   } else {
     sig.append(blockCap('Gateways'));
     sig.append(
-      el('p', 'muted small', 'No gateway id came with this advert. That is a gap in what the bridge told us, not evidence the node was heard by nobody.')
+      el('p', 'muted small', 'The bridge did not include a gateway id with this advert.')
     );
   }
   restRows(sig, t, MESH_TELEMETRY_KNOWN, 'Other telemetry fields');
@@ -815,10 +815,9 @@ function renderMeshAdmin(body, m, t, admin) {
     body,
     'Self-reported — admin monitor',
     admin
-      ? 'Read off the node’s own admin interface by an operator-run monitor and pushed to ' +
-        'POST /api/v1/ingest/mesh.repeater. The node’s view of itself — which is why its SNR and ' +
-        'RSSI sit beside the gateway-reported pair above rather than replacing them. Nothing here ' +
-        'mints a revision.'
+      ? 'Read from the node’s admin interface by an operator-run monitor and pushed to ' +
+        'POST /api/v1/ingest/mesh.repeater. These are the node’s own readings, so its SNR and ' +
+        'RSSI sit beside the gateway-reported pair above. None of these values creates a revision.'
       : ''
   );
   if (!admin) {
@@ -834,12 +833,10 @@ function renderMeshAdmin(body, m, t, admin) {
         'p',
         'muted small',
         unreachable
-          ? 'A monitor is watching this node and cannot reach it, so it reports no readings at all — ' +
-            'rather than the row of zeros that would claim a flat battery and no traffic. The failure ' +
-            'is itself the signal; reachability above is what carries it.'
-          : 'No monitor reports this node. Battery, temperature, airtime and packet counters exist only ' +
-            'where an operator runs a monitor against a node’s admin interface — nothing a node ' +
-            'broadcasts carries them. Their absence here is a gap in monitoring, not a reading of zero.'
+          ? 'A monitor is watching this node but cannot reach it, so there are no readings. ' +
+            'See reachability above.'
+          : 'No monitor reports this node. Battery, temperature, airtime and packet counters come ' +
+            'only from an operator-run monitor on the node’s admin interface; adverts do not carry them.'
       )
     );
     restRows(adm, t.admin, MESH_ADMIN_KNOWN, 'Other monitor fields');
@@ -1243,7 +1240,7 @@ export async function renderEventDetail(root, id, opts = {}) {
                 el(
                   'p',
                   'muted small',
-                  'Map unavailable (MapLibre failed to start in this browser) — bbox and centroid above are the geometry.'
+                  'Map unavailable: MapLibre failed to start in this browser. The bbox and centroid above describe the geometry.'
                 )
               );
             }
@@ -1356,9 +1353,8 @@ export async function renderEventDetail(root, id, opts = {}) {
           el(
             'p',
             'muted small',
-            'The model rewrites the source feed’s wording into plain language — it translates, it does not ' +
-              'add facts. The verbatim original is shown first; the structured model output follows, so you ' +
-              'can check one against the other.'
+            'The model rewrites the source feed’s wording into plain language; it does not add facts. ' +
+              'The original text is shown first, then the model output, so the two can be compared.'
           )
         );
 
@@ -1407,7 +1403,7 @@ export async function renderEventDetail(root, id, opts = {}) {
       a.href = layer
         ? `/history?layer=${encodeURIComponent(String(layer).toLowerCase())}`
         : '/history';
-      archive.append('This is one event\u2019s arc. ', a);
+      archive.append('One event\u2019s history. ', a);
       sec.body.append(archive);
 
       if (histRes.status === 'rejected') {

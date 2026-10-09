@@ -37,7 +37,7 @@ export class ApiError extends Error {
     this.url = url;
     this.body = body;
     this.reason = reason || null;
-    this.timedOut = Boolean(reason && reason.includes('request abandoned'));
+    this.timedOut = Boolean(reason && reason.startsWith('timed out'));
   }
 }
 
@@ -165,7 +165,7 @@ export async function get(path, params, opts) {
     // the drawer distinguishes "the server never answered" from "DNS failed".
     if (err && err.name === 'AbortError') {
       entry.timedOut = true;
-      entry.error = `no response within ${timeoutMs} ms — request abandoned`;
+      entry.error = `timed out after ${timeoutMs} ms with no response`;
     } else {
       entry.error = String(err && err.message ? err.message : err);
     }
@@ -223,7 +223,7 @@ export async function get(path, params, opts) {
     const aborted = err && err.name === 'AbortError';
     if (aborted) entry.timedOut = true;
     entry.error = aborted
-      ? `response body did not arrive within ${timeoutMs} ms — request abandoned`
+      ? `timed out after ${timeoutMs} ms waiting for the response body`
       : `response was not valid JSON: ${(err && err.message) || err}`;
     announce(entry);
     throw new ApiError(res.status, url, null, entry.error);

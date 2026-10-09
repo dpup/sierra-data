@@ -4,7 +4,7 @@ import Shell from '../layouts/Shell.astro';
 <Shell
   current="home"
   title="The Grid — hazard, road & weather data for the central Sierra"
-  description="Public, keyless, real-time hazard, road, and weather data for the central Sierra — wildfire, evacuation, weather, earthquake, road incidents and power outages unified into one honest API. Run by S.I.E.R.R.A, a volunteer emergency-response alliance."
+  description="Public, keyless, real-time hazard, road, and weather data for the central Sierra — wildfire, evacuation, weather, earthquake, road incidents and power outages unified into one API. Run by S.I.E.R.R.A, a volunteer emergency-response alliance."
 >
   <style is:global slot="head">
     /* Page-local: the deck's static skeleton and the front-page feed. Every
@@ -64,8 +64,8 @@ import Shell from '../layouts/Shell.astro';
       <p class="deck-lede">
         The Grid is the public data service of S.I.E.R.R.A — a volunteer 501(c)(3)
         serving the central Sierra. Wildfire, evacuation, weather, earthquake,
-        road incidents and power outages from a dozen upstream feeds, normalized into one queryable
-        event model with full revision history. Read-only, keyless, CORS-open.
+        road incidents, power outages and county burn status from a dozen upstream feeds, normalized
+        into one queryable event model with full revision history. Read-only, keyless, CORS-open.
       </p>
       <div class="ledger" id="deck-ledger">
         <div class="ledger-cell"><div class="ledger-v">—</div><div class="ledger-l">Events · extreme</div></div>
@@ -90,9 +90,9 @@ import Shell from '../layouts/Shell.astro';
   <div class="sec">
     <div class="numbered-head"><span class="ord">01</span><h2>Your first request</h2></div>
     <p class="sec-body">
-      There is no key, no signup and no CORS preflight to negotiate. The response
-      below was fetched by this page, in your browser, from the same public
-      endpoint your code would call — the button copies the exact curl.
+      No key, no signup, no CORS preflight. The response below was fetched by
+      this page, in your browser, from the same public endpoint your code would
+      call. The button copies the curl.
     </p>
     <div class="resp-pane" id="first-req">
       <div class="resp-head">
@@ -107,7 +107,7 @@ import Shell from '../layouts/Shell.astro';
 
   <!-- ================= 02 Three contracts, not conventions ================= -->
   <div class="sec">
-    <div class="numbered-head"><span class="ord">02</span><h2>Three contracts, not conventions</h2></div>
+    <div class="numbered-head"><span class="ord">02</span><h2>Three guarantees</h2></div>
     <div class="cap-grid contracts">
       <div class="cap-card">
         <div class="cap-eyebrow">One model</div>
@@ -122,10 +122,9 @@ import Shell from '../layouts/Shell.astro';
         <div class="cap-eyebrow">Fail loud</div>
         <div class="cap-h">Absence is never an all-clear</div>
         <div class="cap-p">
-          Every feed reports <span class="mono">OK</span> / <span class="mono">STALE</span> /
-          <span class="mono">UNAVAILABLE</span>, and a failure is rendered as a failure —
-          <span class="mono">null</span> means <em>unknown</em>, never zero. Life-safety
-          data you can trust <em>because</em> it tells you when it can't.
+          Every feed reports <span class="mono">OK</span>, <span class="mono">STALE</span> or
+          <span class="mono">UNAVAILABLE</span>, and a failure is returned as a failure.
+          <span class="mono">null</span> means <em>unknown</em>, never zero.
         </div>
       </div>
       <div class="cap-card">
@@ -133,8 +132,8 @@ import Shell from '../layouts/Shell.astro';
         <div class="cap-h">Built to be built on</div>
         <div class="cap-p">
           Public, keyless, CORS-open, RFC 7946 GeoJSON. Any website, map client or
-          radio-room dashboard can consume it directly. This site is just one
-          client of the same API — nothing here is privileged.
+          radio-room dashboard can consume it directly. This site is one client
+          of the same API; nothing here is privileged.
         </div>
       </div>
     </div>
@@ -151,10 +150,8 @@ import Shell from '../layouts/Shell.astro';
     <h2>Keep this service running</h2>
     <p class="support-p">
       S.I.E.R.R.A is an all-volunteer 501(c)(3). This service runs on donated time and a small
-      cloud bill — the feeds, the servers, and the radio infrastructure behind them. The page
-      you're on is the case for support: it's live, it's honest about what it doesn't know, and
-      anyone can verify or build on it. If an open, always-on data source for the central Sierra
-      is worth keeping online, please help fund it.
+      cloud bill: the feeds, the servers, and the radio infrastructure behind them. If an open,
+      always-on data source for the central Sierra is worth keeping online, please help fund it.
     </p>
     <a class="btn-primary" href="https://sierragridteam.org/donate" rel="noopener">Donate</a>
     <a class="btn-ghost" href="/docs">Read the API reference</a>

@@ -58,7 +58,7 @@ async function runExample(url, pane) {
   } catch (err) {
     const timedOut = err instanceof ApiError && err.timedOut;
     body.textContent = timedOut
-      ? 'no response within 6000 ms — request abandoned'
+      ? 'timed out after 6000 ms'
       : String((err && err.message) || err);
     foot.textContent = '';
     foot.append(
@@ -190,8 +190,7 @@ async function renderEnvelope() {
       el('strong', null, 'Could not fetch a sample record. '),
       el('span', 'error-url', err instanceof ApiError ? `GET ${err.url}` : ''),
       el('div', null,
-        'The field table below is still accurate — it is static reference — but the ' +
-        'live column is unavailable, which is itself worth knowing.')
+        'The field table below is static and still applies; the live column could not be loaded.')
     );
     host.append(block);
     return;
@@ -202,7 +201,7 @@ async function renderEnvelope() {
     host.append(
       el('p', 'notice',
         'The event query succeeded and returned no records, so there is nothing to ' +
-        'sample right now. This is a confirmed empty result, not a failure.')
+        'sample right now.')
     );
     return;
   }

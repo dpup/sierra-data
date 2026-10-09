@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
@@ -29,6 +30,12 @@ type fakePush struct{ snap pushingest.MeshSnapshot }
 
 func (f *fakePush) MeshReports() pushingest.MeshSnapshot { return f.snap }
 func (f *fakePush) ReporterIDs(string) []string          { return []string{"alan-pi"} }
+func (f *fakePush) ReporterConfig(id string) (config.Reporter, bool) {
+	if id != "alan-pi" {
+		return config.Reporter{}, false
+	}
+	return config.Reporter{ID: id, Name: "Alan's repeater monitor"}, true
+}
 
 // fakePrior is a canned Prior over a fixed event set.
 type fakePrior struct{ events []*gridv1.Event }
@@ -111,6 +118,67 @@ func TestPushOnlyNodeBecomesAnEvent(t *testing.T) {
 	assert.InDelta(t, 4.14, admin.GetBatteryVolts().GetValue(), 0.001)
 	assert.Equal(t, int64(150305), admin.GetPacketsSent())
 	assert.Equal(t, gridv1.MeshReachability_REACHABLE, ev.GetMesh().GetReachability())
+}
+
+// TestPushOnlyTickKeepsStoredPosition pins the rule that a tick which learns
+// nothing about WHERE a node is leaves its stored position alone.
+//
+// This shipped wrong from the day the push stream went live (2026-09-15) until
+// 2026-10-09. The SIERRA backbone repeaters advertise about once a day and sit
+// in the registry snapshot for 14h of it (graceFloor); for the rest of the day
+// the monitor was the only input, and the event was rebuilt with NO geometry —
+// which detached it from every place, dropped it from every place-scoped map
+// and summary, and minted a revision, with another when the next advert put the
+// position back. Lilac Park reached revision 40 that way and the Ebbetts Pass
+// mesh map showed one of nine SIERRA repeaters, the one a distant gateway had
+// happened to hear in the last 14 hours.
+func TestPushOnlyTickKeepsStoredPosition(t *testing.T) {
+	reg := &fakeMeshRegistry{connected: 1, nodes: []meshcore.NodeState{{
+		PubKey: fullKey, Role: meshcore.RoleRepeater, Name: "SIERRA Lilac Park",
+		HasLocation: true, Lat: 38.2501, Lng: -120.3468,
+		LastHeardAt: pollNow, Brokers: []string{"wss://mqtt.gomesh.dev:443/mqtt"},
+	}}}
+	n := pushNormalizer(t, reg, pushingest.MeshSnapshot{
+		Live:    1,
+		Reports: []pushingest.MeshNodeReport{report(keyPrefix, "SIERRA Lilac Park", pollNow)},
+	})
+
+	// Tick 1: a bridge heard the node, so its advert supplies the position.
+	first, err := n.Poll(testCtx(), &fakePrior{})
+	require.NoError(t, err)
+	require.Len(t, first.Events, 1)
+	stored := first.Events[0]
+	require.NotNil(t, stored.GetGeometry(), "the advert supplies the location")
+
+	// Tick 2: the node has aged out of the registry's presence window (the
+	// snapshot no longer carries it) while the monitor still reaches it.
+	reg.nodes = nil
+	second, err := n.Poll(testCtx(), &fakePrior{events: []*gridv1.Event{stored}})
+	require.NoError(t, err)
+	require.Len(t, second.Events, 1)
+	ev := second.Events[0]
+	require.Equal(t, stored.GetId(), ev.GetId(), "the prefix resolves to the stored event")
+
+	assert.True(t, proto.Equal(stored.GetGeometry(), ev.GetGeometry()),
+		"a report carries no coordinates; the stored position rides forward, not nil")
+	assert.Equal(t, store.ContentHash(stored), store.ContentHash(ev),
+		"a tick that learned nothing new about the node must not mint a revision")
+}
+
+// A node only an operator's monitor knows — one that has NEVER advertised a
+// location — stays place-less: there is no stored position to carry.
+func TestPushOnlyNodeNeverLocatedStaysPlaceless(t *testing.T) {
+	reg := &fakeMeshRegistry{connected: 1}
+	n := pushNormalizer(t, reg, pushingest.MeshSnapshot{
+		Live:    1,
+		Reports: []pushingest.MeshNodeReport{report(fullKey, "SIERRA Snowshoe Lake", pollNow)},
+	})
+	stored := NewEvent("meshcore:"+fullKey, gridv1.Layer_MESH, gridv1.Severity_INFO,
+		gridv1.EventStatus_ACTIVE, "SIERRA Snowshoe Lake (repeater)")
+	res, err := n.Poll(testCtx(), &fakePrior{events: []*gridv1.Event{stored}})
+	require.NoError(t, err)
+	require.Len(t, res.Events, 1)
+	assert.Nil(t, res.Events[0].GetGeometry(), "nothing stored, nothing invented")
 }
 
 // A node only an operator's monitor knows publishes NO signal readings — not
@@ -481,4 +549,58 @@ func TestPollProjectsTelemetrySamples(t *testing.T) {
 	res2, err := n2.Poll(testCtx(), &fakePrior{})
 	require.NoError(t, err)
 	assert.Empty(t, res2.MeshTelemetry)
+}
+
+// TestPacketForwarderKeepsTheRegistryInPlay pins the mesh.packet half of the
+// fail-loud rule: a live forwarder is a door into the registry, so its snapshot
+// is current with every broker down — and with every door shut the poll still
+// fails hard.
+func TestPacketForwarderKeepsTheRegistryInPlay(t *testing.T) {
+	reg := &fakeMeshRegistry{connected: 0, nodes: []meshcore.NodeState{{
+		PubKey: fullKey, Role: meshcore.RoleRepeater, Name: "SIERRA Camp Connell",
+		HasLocation: true, Lat: 38.3101, Lng: -120.278, LastHeardAt: pollNow,
+		Brokers: []string{"reporter:alan-pi"},
+	}}}
+
+	t.Run("brokers down, forwarder live: the snapshot is emitted", func(t *testing.T) {
+		n := pushNormalizer(t, reg, pushingest.MeshSnapshot{PacketLive: 1})
+		res, err := n.Poll(testCtx(), &fakePrior{})
+		require.NoError(t, err)
+		require.Len(t, res.Events, 1)
+		ev := res.Events[0]
+		assert.Equal(t, "meshcore:"+fullKey, ev.GetId())
+		assert.NotNil(t, ev.GetGeometry(), "the forwarded advert carried the position")
+		assert.Empty(t, res.SweepSuppress, "a live door is not a degraded one")
+		// Provenance names the forwarder's operator the way it names a broker's.
+		assert.Equal(t, "MeshCore community mesh via Alan's repeater monitor", ev.GetProvenance().GetAttribution())
+	})
+
+	t.Run("brokers down, forwarder stale: nothing current, sweep suppressed", func(t *testing.T) {
+		n := pushNormalizer(t, reg, pushingest.MeshSnapshot{Live: 1, SuppressSweep: true})
+		res, err := n.Poll(testCtx(), &fakePrior{})
+		require.NoError(t, err)
+		assert.Empty(t, res.Events, "a snapshot nobody is feeding is only what was heard before we went deaf")
+		assert.Equal(t, []string{"meshcore"}, res.SweepSuppress)
+	})
+
+	t.Run("every door shut is a hard error", func(t *testing.T) {
+		n := pushNormalizer(t, reg, pushingest.MeshSnapshot{})
+		_, err := n.Poll(testCtx(), &fakePrior{})
+		require.Error(t, err)
+	})
+}
+
+// A reporter on both streams is one reporter: one source row, one health entry.
+func TestReporterOnBothStreamsIsOneSourceRow(t *testing.T) {
+	n := pushNormalizer(t, &fakeMeshRegistry{connected: 1}, pushingest.MeshSnapshot{
+		Reporters:       []pushingest.ReporterHealth{{ID: "alan-pi", State: pushingest.ReporterOK}},
+		PacketReporters: []pushingest.ReporterHealth{{ID: "alan-pi", State: pushingest.ReporterOK}},
+		Live:            1,
+		PacketLive:      1,
+	})
+	assert.Equal(t, []string{"meshcore", "alan-pi"}, n.SourceIDs())
+	res, err := n.Poll(testCtx(), &fakePrior{})
+	require.NoError(t, err)
+	require.Len(t, res.PerSource, 1)
+	assert.NoError(t, res.PerSource["alan-pi"])
 }

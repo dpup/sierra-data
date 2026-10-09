@@ -385,8 +385,28 @@ of `refreshEventPlaces`, which rewrites the blob WITHOUT bumping the revision.
 broadcast feed; a reporter is an authenticated operator asserting facts about its
 own equipment, and the nodes that most need this path — quiet backbone repeaters
 — are exactly the ones that advertise no location to test. The cost is that a
-push-only node has no geometry and therefore no geometric place attachment, until
-an advert supplies one or the operator configures `placeIds` on the reporter.
+node known ONLY from a monitor has no geometry and therefore no geometric place
+attachment, until an advert supplies one or the operator configures `placeIds`
+on the reporter.
+
+**A report-only tick keeps the stored position.** A node drops out of the
+registry snapshot when its last advert is older than its presence window — for
+a once-a-day backbone repeater, 14h (`graceFloor`) of every day — while the
+monitor goes on reaching it, so for most of the day the monitor is the only
+input. `buildEvent` carries the prior geometry forward on that path, byte for
+byte, the same way `stablePosition` carries it across GPS wobble: a report says
+nothing about where the node is, and "nothing new" is not "nowhere". Shipped
+without this from 2026-09-15 to 2026-10-09: the event was rebuilt with nil
+geometry, which detached it from every place (dropping it from every
+place-scoped map and summary), minted a revision, and minted another when the
+next advert put the position back. Lilac Park reached revision 40 that way,
+and the Ebbetts Pass mesh map showed one of nine SIERRA repeaters — the one a
+distant gateway had happened to hear in the last 14 hours. The visible
+symptom is a node's history alternating geometry/no-geometry with nothing else
+changing; `TestPushOnlyTickKeepsStoredPosition` pins the rule on the content
+hash, not just the geometry. Recovery after the fix is per node, on its next
+advert: a node already stored WITHOUT geometry has nothing to carry until a
+bridge hears it again. See `docs/solutions/logic-errors/push-only-mesh-tick-wiped-stored-position.md`.
 
 **A node the monitor has never reached carries NO telemetry block.** Zeroed
 counters would assert that it has sent and received nothing. "Never read" and
@@ -415,6 +435,51 @@ bound is acceptable only because `meshcore` is an `expire` source — nodes reac
 EXPIRED, the "we lost track of this" terminus, not the fabricated all-clear that
 RESOLVED would be — and because mesh presence is ambient INFO. **Do not copy this
 bound onto a life-safety layer.**
+
+### A second door into the registry: `mesh.packet` (2026-10)
+
+The two inputs above are the MQTT registry and the monitor's REPORTS. There is
+now a third way data arrives, but it is not a third input: the `mesh.packet`
+push stream forwards raw advert frames a companion radio heard, and the push
+handler hands each one to `meshcore.Registry.IngestEnvelope` — the same decode,
+signature policy, spam floor and presence update an MQTT reception gets. By the
+time `Poll` runs, a forwarded advert is already in the registry's `Snapshot`,
+indistinguishable from one a broker delivered except for its provenance: the
+reporter occupies a broker's slot (`NodeState.Brokers` and
+`Observation.Broker` carry `reporter:<id>`, see `pushingest.PacketSource`),
+and `meshProvenance` names the reporter from config the way it names a
+broker's operator.
+
+Why it exists: the radios that hear the SIERRA backbone at zero hops are
+companions in Arnold and Dorrington, and the community brokers hear that
+backbone only through a distant gateway, every few days per repeater
+(measured 2026-10-09 against map.meshcore.io, which hears the same adverts
+daily through its uploader bot — a companion-attached script reading the
+radio's RX log). The stream accepts exactly what that bot produces. The trust
+rule is unchanged: the node signed the advert, the forwarder is the courier,
+and `requireValidSignature` still applies.
+
+What it changes in `Poll`:
+
+- **The snapshot is current while EITHER door is open.** `connected > 0 ||
+  snap.PacketLive > 0` is the gate on reading `Snapshot`; with every broker
+  down and no forwarder live the snapshot is only what was heard before we
+  went deaf, and is left out as before.
+- **Fail-loud counts three things**: no broker connected, no monitor live, no
+  forwarder live ⇒ hard error.
+- **A STALE forwarder suppresses the sweep**, like a stale monitor: the nodes
+  only it heard are about to age out of the snapshot for OUR reason. Bounded
+  the same way (DEAD stops suppressing).
+- **A forwarder contributes no `Reports`** — its packets are already in the
+  registry — so `buildEvent`'s report-side rules (prefix resolution,
+  reachability, admin telemetry) never see it.
+- **One reporter on both streams is one source row**: `SourceIDs` and
+  `reporterHealth` dedupe by id, and `pushingest` rate-limits per stream so a
+  forwarder and a monitor on one token do not 429 each other.
+
+The registry is constructed whenever either door is configured
+(`cmd/server/main.go`): MQTT enabled with brokers, OR a reporter authorized for
+`mesh.packet`. Only the brokers need `Connect`.
 
 Each reporter also gets its own **health-only source row** (`SourceIDs` returns
 `meshcore` plus every reporter id), so `/api/v1/sources` answers "is that monitor
@@ -543,6 +608,128 @@ closures are deliberately never enhanced, see above).
   be unit-tested; `TestNWSEnhancerLive` (skipped unless `NWS_ENHANCE_LIVE=1`)
   runs the real prompt against a real product and asserts these.
 
+## Burn status: ambient state whose VALUE is the revision history
+
+`burn_status.go` is the first layer that is not about a hazard at all. It reports
+whether residential burning is currently legal in a county, and it is shaped by
+three decisions worth keeping.
+
+**A LINE is the unit, not a county.** `grid.burn.lines` is a list of recorded
+phone lines, each naming the counties it speaks for, because the mapping is not
+1:1 in EITHER direction: a county can have more than one relevant recording, and
+one air-district line routinely covers several counties (listed once, dialed
+once, attached to each). Modelling a phone number as a field on a county forces
+you to either duplicate a shared line per county — and dial it N times, paying
+N calls for one answer — or flatten two real lines into one field.
+
+`mergeBurnDays` collapses a county's lines into `burn_day`, taking the MOST
+RESTRICTIVE: any NO wins outright, else any MARGINAL (an elevation-restricted
+burn day is a restriction and YES is not), and YES requires that every DIALED
+line produced a usable answer. That last clause is the same asymmetry
+`derivePermission` applies across facets — a line we expected to read but could
+not is a gap, and a gap must never render as a green light. Each line's own
+answer stays visible in `burn_lines[]`, so a consumer can show the disagreement
+rather than only the merge.
+
+**`enabled` governs what we DIAL, not what we BELIEVE.** A configured line that
+is not dialed is still published on the event (with its number, and burn_day
+UNKNOWN) so a reader can call it, and it cannot block a YES — we never asked it
+anything. But a fresh reading that *does* arrive for it is used: the push
+endpoint accepts readings for any configured line, so accepting one and then
+silently ignoring it would be the surprising behaviour, and it would make a
+manual one-off push useless. Only DIALED lines are expected to report, so only
+they degrade the source.
+
+**One of the two facets is PUSHED, not polled — the only one in the service.**
+`cmd/burn-line` calls the county line from CI and POSTs the reading to
+`POST /api/v1/ingest/burn.line` — the `burn.line` stream on the shared
+push-ingest endpoint (`internal/pushingest`) — which lands it in the
+`burn_readings` staging table. `Poll` reads the latest row on the tick. The push
+handler deliberately does NOT write events: the scheduler stays the single owner
+of event writes, and this is the same push-source-wrapped-as-a-poller shape
+`network.go` uses for MeshCore. Reading from the STORE rather than an in-memory
+buffer is what makes a reading survive a restart — it keeps its own
+`observed_at`, so a rehydrated reading is re-judged by the freshness gate rather
+than resurrected as current.
+
+**Two authorities, carried separately, never merged.** A legal burn needs BOTH
+the county air district's permissive-burn-day call (daily; flips weekly in
+winter/spring) and the absence of a CAL FIRE suspension on SRA land (moves about
+twice a year). They are separate facets on one event because they fail
+independently — the county line can be unreachable while CAL FIRE's page is
+fine. `derivePermission` is the only place they combine, and it is deliberately
+asymmetric: **PROHIBITED is conclusive from either facet alone, ALLOWED requires
+both to be known and permissive.** Someone acts on this holding a match, so an
+unreadable authority must never render as a green light.
+
+**The event is ambient and permanently ACTIVE.** One per configured county,
+severity INFO, excluded from the summary hazard rollup exactly like mesh-node
+presence (`totalActive`, `severityCounts`, `topEvents`, `mode`). Its value is
+`/api/v1/events/{id}/history` — "when did it change" is the question the layer
+exists to answer. That is also why:
+
+- **The per-reading fields live in `BurnObservation`, which `store.ContentHash`
+  zeroes.** The county line's message NAMES THE DATE ("Today, September 10th, is
+  not a burn day"), so the text differs every single day even when the answer has
+  not. Hashed, it would mint a revision daily and bury the handful of real
+  transitions in 365 rows of noise a year. Same mechanism as `MeshTelemetry`.
+- **The headline is composed deterministically** (`burnHeadline`). `ContentHash`
+  does NOT zero `Headline`, so a generated or reworded one would differ every
+  tick and mint a revision each time — the same rule, and the same reason, as the
+  NWS alert headline above.
+- **Provenance keys off CONFIGURATION, not on whether the fetch succeeded.**
+  Provenance is hashed (only `fetched_at` is zeroed), so flipping `source_id`
+  when the burn line blips would mint a spurious revision pair on an event that
+  never changed. `TestBurnPoll_ProvenanceIsStableAcrossABurnLineOutage` pins it.
+- **The id is `burn:<county place slug>`** — nothing but an immutable identifier.
+  The id trap above applies with full force here: deriving it from a status field
+  would mint a new id on the very transition this layer records, and the sweep
+  would RESOLVE the old one.
+
+**One facet carries forward, the other must not.** On a CAL FIRE failure the
+stored suspension is carried forward from `Prior`: that page being down is no
+evidence the suspension lifted, and it changes twice a year. The burn-day facet
+is deliberately NOT carried forward — it is a statement about TODAY, and
+yesterday's answer is exactly what the freshness gate exists to reject. Carrying
+it would reintroduce the freeze through the back door.
+
+### A sixth freeze case (`burnline`) — and why a PUSH source needs one MORE
+
+Every other freeze case is about an upstream that keeps answering 200 with stale
+data. A push source has the same problem in a starker form: **there is no fetch
+to fail at all.** A pipeline that silently stops looks exactly like one that has
+not run yet — the staging row simply sits there. Age is the ONLY signal.
+
+`grid.burn.burnDayStaleAfter` (36h — one missed daily run plus slack) turns an
+old `observed_at` into a `PerSource` failure AND blanks the facet to UNKNOWN.
+Both halves matter: a stale "no-burn" is merely over-cautious, but a stale "burn
+day" tells someone today is fine when the district may since have said
+otherwise. A dialed county with NO row at all is the same failure, reported as
+"no reading has been pushed". A negative value disables the gate verbatim, the
+same explicit-opt-out rule as `grid.power.outageStaleAfter`.
+
+This is also why the burn-day facet is never carried forward from `Prior`:
+durability is the staging row's job (which keeps a real timestamp the gate can
+judge), never the last published answer's.
+
+**`BurnLine.Dialed()` is what "we expect a reading" means**, and it is
+deliberately `enabled && phone != "" && id != ""` rather than just the presence
+of a number. Publishing a county's number so readers can call it must not, by
+itself, flip that county's source unhealthy for a reading we never ask for.
+Tuolumne is the live example.
+
+### Not a map layer, and place attachment without geometry
+
+These events carry **no geometry** — burn status is an administrative fact about
+a county, not a footprint — so `burn_status` is absent from `eventLayers` and
+there is no `.geojson` for it. Attachment instead presets `ev.PlaceIds` (the
+mechanism NWS zone alerts already use; `UpsertEvent` unions preset ids with
+geometric matches and never drops the preset ones), resolved through the
+`PlaceIndex` interface: the county, its towns, and any AREA overlapping it, so a
+query for a town sees its county's status. Writing the county polygon instead
+would put 18-32 KB into the event *and every revision of it* to express something
+true of the county by definition.
+
 ## Wildfire has its own, wider geography
 
 Every other spatial poller (earthquake, evacuation) fetches over `unionBounds`
@@ -598,3 +785,25 @@ the bare `unionBounds`. Don't generalize the wildfire margin to new layers.
 
 Per the spec, that's the whole surface — a new poller shows up in summary domains,
 `/api/v1/events`, and the map namespace automatically; no new endpoints.
+
+### Why burn.line stages in the store when mesh.repeater buffers in memory
+
+Both streams live on the same endpoint and both honour the same invariant — the
+scheduler is the only thing that writes EVENTS — but they persist differently,
+and the reason is cadence, not taste.
+
+A mesh monitor re-reports every few minutes, so an in-memory buffer losing a
+restart costs nothing: the next report refills it. **A burn line is called once a
+day.** An in-memory buffer would leave `burn_day` UNKNOWN until the next morning
+after any deploy, on the one layer whose entire job is to answer "can I burn
+today". So `ingestBurn` writes a staging row (through the same store mutex as
+every other writer), the row keeps the reading's own `observed_at`, and the
+freshness gate re-judges a rehydrated one rather than resurrecting it as current.
+
+The same cadence drives two more settings worth not "tidying":
+
+- **The reporter batches every line into ONE report.** The endpoint rate-limits
+  per reporter against the last ACCEPTED report, so a push per line would 429
+  everything after the first.
+- **A bad reading in a report is a WARNING, not a rejection.** The next attempt
+  is tomorrow, so one malformed line must not discard the ones that were read.

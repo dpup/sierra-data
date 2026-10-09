@@ -35,6 +35,7 @@ export const LAYER_OPTIONS = [
   'air_quality',
   'mesh',
   'announcement',
+  'burn_status',
 ];
 
 /** Page sizes offered in the control. Empty string = server default. */
@@ -419,10 +420,10 @@ export function initHistoryPage() {
           el(
             'div',
             'muted small',
-            `The API responded OK but returned no revisions for ${describeRange()}` +
+            `The query succeeded but found no revisions for ${describeRange()}` +
               (state.place ? ` in place "${state.place}"` : '') +
               (state.layers.length ? ` for layer(s) ${state.layers.join(', ')}` : '') +
-              '. Widen the time range or clear filters.'
+              '. Widen the time range or clear a filter.'
           )
         );
         feed.append(empty);

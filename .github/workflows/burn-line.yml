@@ -1,0 +1,92 @@
+# Calls each configured county burn line once a day and PUSHES the reading to
+# The Grid.
+#
+# Why this lives in CI rather than in the server: placing a phone call costs
+# money and must happen exactly once a day. A long-running server would re-dial
+# on every restart or deploy unless carefully guarded; a scheduled workflow has
+# the semantics we want for free. The server only ever receives the result, on
+# the shared push-ingest endpoint as the `burn.line` stream.
+#
+# GRID_INGEST_ENDPOINT is the full stream URL, e.g.
+# https://data.sierragridteam.org/api/v1/ingest/burn.line; the repo secret
+# BURNLINE_INGEST_TOKEN is the `burn-line` grid.ingest reporter's token
+# (`make ingest-token REPORTER=burn-line STREAMS=burn.line`), granted only that
+# stream. Named per reporter so other push reporters can get their own.
+#
+# Before dialing, the tool preflights the endpoint (`?preflight=true`): a bad
+# token, a missing grant or a server outage fails the run before any paid call.
+#
+# A failure pushes NOTHING — deliberately. The previous reading then ages past
+# the server's freshness gate (grid.burn.burnDayStaleAfter, 36h) and the burn-day
+# facet reads UNKNOWN, which consumers render as "call the line". That is why
+# 36h allows one missed run: a single failure is absorbed, two in a row is
+# visible on /api/v1/sources.
+name: Burn line
+
+on:
+  schedule:
+    # 14:00 UTC — 6am PST / 7am PDT. The districts decide the day early, and
+    # people burn in the morning, so read it before they do.
+    - cron: "0 14 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Call and extract, but do not push"
+        type: boolean
+        default: false
+      line:
+        description: "Dial only this line id (default: every enabled line)"
+        type: string
+        required: false
+
+# Never two runs at once: overlapping runs would dial every line twice and the
+# second push would 429 against the first.
+concurrency:
+  group: burn-line
+  cancel-in-progress: false
+
+jobs:
+  read:
+    # Scheduled runs are off until the repo variable GRID_INGEST_ENDPOINT is
+    # set, so merging this before the reporter is deployed costs nothing and
+    # sends no daily failure email. Manual runs always go (a dry run needs no
+    # endpoint; a real one without it fails fast, before dialing).
+    if: vars.GRID_INGEST_ENDPOINT != '' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    # Each line is bounded by the tool's own -timeout (10m); this caps the job
+    # if something hangs outside a call.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build
+        run: go build -o bin/burn-line ./cmd/burn-line
+
+      # No matrix, and no phone numbers here on purpose. The tool reads
+      # grid.burn.lines from prefab.yaml and dials every enabled line, so
+      # enabling a county is ONE flag in ONE file. A matrix duplicating those
+      # numbers would be a second source of truth that drifts silently in both
+      # directions: config-on/CI-off degrades the source with no reading,
+      # CI-on/config-off just gets 400s from the endpoint.
+      #
+      # Lines are independent inside the tool — one being unreachable does not
+      # stop the others — and it exits non-zero if ANY failed, so a single bad
+      # line is visible without losing the good ones.
+      - name: Read burn lines and push
+        env:
+          TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
+          TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
+          TWILIO_FROM_NUMBER: ${{ secrets.TWILIO_FROM_NUMBER }}
+          TWILIO_TWIML_URL: ${{ secrets.TWILIO_TWIML_URL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GRID_INGEST_TOKEN: ${{ secrets.BURNLINE_INGEST_TOKEN }}
+        run: |
+          ./bin/burn-line \
+            -endpoint="${{ vars.GRID_INGEST_ENDPOINT }}" \
+            ${{ inputs.line && format('-line={0}', inputs.line) || '' }} \
+            ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && '-dry-run' || '' }}

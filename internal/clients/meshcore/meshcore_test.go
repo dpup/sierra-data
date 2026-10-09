@@ -394,3 +394,90 @@ func TestRegistrySeed(t *testing.T) {
 	assert.True(t, got["aa"], "reconstructed cadence carries the slow node across a restart")
 	assert.False(t, got["bb"], "unknown-cadence node uses GraceFloor")
 }
+
+// TestIngestEnvelopeOutcomes pins the exported door the mesh.packet push stream
+// uses: the same decode, the same signature policy, the same presence update as
+// an MQTT reception, with the outcome reported rather than logged.
+func TestIngestEnvelopeOutcomes(t *testing.T) {
+	_, priv, err := ed25519.GenerateKey(nil)
+	require.NoError(t, err)
+	loc := [2]float64{38.2501, -120.3468}
+	payload := buildAdvert(t, priv, 2, &loc, "SIERRA Lilac Park", 1_700_000_000)
+
+	t.Run("advert is accepted and attributed to the source and default gateway", func(t *testing.T) {
+		r := NewRegistry(Config{RequireValidSignature: true})
+		// No origin in the envelope: the forwarder's observer key stands in.
+		out, err := r.IngestEnvelope(envelopeJSON(t, 4, payload, 4.5, -93, ""), "reporter:alan-pi", "e3635c65")
+		require.NoError(t, err)
+		assert.Equal(t, PacketAccepted, out)
+		nodes := r.Snapshot()
+		require.Len(t, nodes, 1)
+		assert.Equal(t, "SIERRA Lilac Park", nodes[0].Name)
+		assert.True(t, nodes[0].HasLocation)
+		assert.Equal(t, []string{"e3635c65"}, nodes[0].Gateways)
+		assert.Equal(t, []string{"reporter:alan-pi"}, nodes[0].Brokers, "a forwarder occupies a broker's slot")
+		obs := r.DrainObservations()
+		require.Len(t, obs, 1)
+		assert.Equal(t, "reporter:alan-pi", obs[0].Broker)
+		assert.Equal(t, "e3635c65", obs[0].Gateway)
+	})
+
+	t.Run("an envelope with its own origin keeps it", func(t *testing.T) {
+		r := NewRegistry(Config{})
+		out, _ := r.IngestEnvelope(envelopeJSON(t, 4, payload, 4.5, -93, "gw-east"), "reporter:alan-pi", "e3635c65")
+		assert.Equal(t, PacketAccepted, out)
+		assert.Equal(t, []string{"gw-east"}, r.Snapshot()[0].Gateways)
+	})
+
+	t.Run("a meshcore:// link is the same frame", func(t *testing.T) {
+		r := NewRegistry(Config{RequireValidSignature: true})
+		env, err := json.Marshal(map[string]any{
+			"packet_type": 4,
+			"raw":         "meshcore://" + hex.EncodeToString(advertFrame(payload)),
+		})
+		require.NoError(t, err)
+		out, err := r.IngestEnvelope(env, "reporter:alan-pi", "")
+		require.NoError(t, err)
+		assert.Equal(t, PacketAccepted, out)
+		assert.Equal(t, []string{"reporter:alan-pi"}, r.Snapshot()[0].Gateways, "no origin, no observer: the source itself")
+	})
+
+	t.Run("a non-advert is ignored, not an error", func(t *testing.T) {
+		r := NewRegistry(Config{})
+		out, err := r.IngestEnvelope(envelopeJSON(t, 2, payload, 5, -90, "gw"), "src", "")
+		require.NoError(t, err)
+		assert.Equal(t, PacketIgnored, out)
+		assert.Empty(t, r.Snapshot())
+	})
+
+	t.Run("malformed envelopes say why", func(t *testing.T) {
+		r := NewRegistry(Config{})
+		out, err := r.IngestEnvelope([]byte(`not json`), "src", "")
+		assert.Equal(t, PacketMalformed, out)
+		assert.Error(t, err)
+		out, err = r.IngestEnvelope([]byte(`{"packet_type":4,"raw":"zz"}`), "src", "")
+		assert.Equal(t, PacketMalformed, out)
+		assert.Error(t, err)
+		out, err = r.IngestEnvelope([]byte(`{"packet_type":4,"raw":"11"}`), "src", "")
+		assert.Equal(t, PacketMalformed, out, "an advert frame too short to decode")
+		assert.Error(t, err)
+		assert.Empty(t, r.Snapshot())
+	})
+
+	t.Run("a bad signature is rejected under the policy and only then", func(t *testing.T) {
+		tampered := append([]byte(nil), payload...)
+		tampered[advSignatureAt+3] ^= 0xff
+		env := envelopeJSON(t, 4, tampered, 4.5, -93, "gw")
+
+		strict := NewRegistry(Config{RequireValidSignature: true})
+		out, err := strict.IngestEnvelope(env, "src", "")
+		assert.Equal(t, PacketRejected, out)
+		assert.Error(t, err)
+		assert.Empty(t, strict.Snapshot())
+
+		lax := NewRegistry(Config{})
+		out, err = lax.IngestEnvelope(env, "src", "")
+		require.NoError(t, err)
+		assert.Equal(t, PacketAccepted, out)
+	})
+}

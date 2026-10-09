@@ -39,7 +39,7 @@ const SECTIONS = [
     count: 'rd-inc-h', countLabel: 'Incidents',
     empty: {
       head: 'No active road incidents in this place.',
-      sub: 'Conditions still exist — an open road is baseline state, carried by the road_segment layer, not by /events.',
+      sub: 'Road conditions are in the Road segments section below. An open road is not an event.',
     } },
   { layer: 'road_incident', filter: isPlanned,
     status: 'rd-plan-status', content: 'rd-plan', render: renderPlanned,
@@ -51,7 +51,7 @@ const SECTIONS = [
   { layer: 'road_segment', status: 'rd-seg-status', content: 'rd-seg', render: renderSegments,
     empty: { head: 'No monitored roads in this area.', sub: 'This area has no configured road segments.' } },
   { layer: 'chain_control', status: 'rd-chain-status', content: 'rd-chain', render: renderChain,
-    empty: { head: 'No chain controls in effect.', sub: 'Caltrans reports no active chain controls right now — a clean report, not a source failure.' } },
+    empty: { head: 'No chain controls in effect.', sub: 'Caltrans reports no active chain controls. The feed answered normally.' } },
 ];
 
 /* ---------- small DOM helpers ---------- */
@@ -313,8 +313,8 @@ function statusHeader(statusEl, path, fc, err) {
 
 function unavailableNotice(md) {
   const n = el('div', 'loud-banner');
-  n.append(el('div', 'loud-title', 'Source unavailable — state unknown, not clear'));
-  n.append(el('p', '', 'The upstream feed failed, so the Grid returns no features rather than a fabricated clear state (metadata.sourceStatus = UNAVAILABLE). Check the official source directly.'));
+  n.append(el('div', 'loud-title', 'Source unavailable — state unknown'));
+  n.append(el('p', '', 'The upstream feed failed (metadata.sourceStatus = UNAVAILABLE), so there is no data for this section. Check the official source directly.'));
   const url = md && md.sourceUrl;
   if (url && /^https?:\/\//.test(url)) {
     const p = el('p');
@@ -330,7 +330,7 @@ function emptyNotice(empty, stale) {
   const n = el('div', 'notice');
   n.append(el('div', 'mono', empty.head));
   n.append(el('div', 'muted small', empty.sub));
-  if (stale) n.append(el('div', 'meta-stale small', 'Serving last-good cached data (source is STALE).'));
+  if (stale) n.append(el('div', 'meta-stale small', 'Showing the last good data; the source is STALE.'));
   return n;
 }
 
@@ -371,7 +371,7 @@ async function loadSection(place, section, fetchLayer) {
 
   if (feats.length === 0) { contentEl.append(emptyNotice(section.empty, status === 'STALE')); return; }
   if (status === 'STALE') {
-    contentEl.append(el('div', 'meta-stale small', 'Source STALE — showing last-good cached data.'));
+    contentEl.append(el('div', 'meta-stale small', 'Source STALE — showing the last good data.'));
   }
   section.render(contentEl, feats);
 }
@@ -428,7 +428,7 @@ export function initRoadsPage() {
         (() => {
           const b = el('div', 'loud-banner');
           b.append(el('div', 'loud-title', 'Place directory unavailable'));
-          b.append(el('p', '', 'GET /api/v1/places?kind=AREA failed, so no place could be resolved and nothing below was requested. This is an unknown state, not an empty one — reload, or name a place explicitly with ?place=.'));
+          b.append(el('p', '', 'GET /api/v1/places?kind=AREA failed, so no place could be selected and nothing below was requested. Reload, or name a place with ?place=.'));
           return b;
         })()
       );

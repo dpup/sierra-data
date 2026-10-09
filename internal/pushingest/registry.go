@@ -10,9 +10,9 @@
 //
 // # The shape of the thing
 //
-// A reporter POSTs a report; the handler authenticates it, validates it, and
-// writes it into an in-memory buffer. It does NOT touch the store. The mesh
-// poller drains that buffer on its next scheduler tick, exactly as it already
+// A reporter POSTs a report; the handler authenticates it and validates it, then
+// hands it to the stream. It does NOT write EVENTS — the poller for that layer
+// publishes them on its next scheduler tick, exactly as the mesh poller already
 // drains the MQTT subscriber's buffer, so:
 //
 //   - single-writer discipline holds (the scheduler goroutine is still the only
@@ -27,6 +27,25 @@
 // (see internal/ingest/CLAUDE.md). This is the second instance of it, not a new
 // idea.
 //
+// # What a stream owns, and what it does not
+//
+// The framework owns TRANSPORT: routing, auth, per-stream grants, rate limiting,
+// size caps, the 202 envelope, and reporter health. Those are stream-agnostic,
+// and Health/MeshReports are each scoped to their own stream so one stream's
+// silent reporter can never affect another's.
+//
+// A stream owns its PAYLOAD and its DURABILITY. mesh.repeater holds accepted
+// reports in the in-memory buffer below because a monitor re-reports every few
+// minutes; burn.line stages them in the store because a burn line is called once
+// a day and an in-memory buffer would lose the day's answer to any deploy. Do
+// not generalize either choice into the framework — it is a property of how
+// often the source speaks.
+//
+// Two more things are mesh's, not the framework's, despite living on shared
+// types: Reporter.Priority and Reporter.PlaceIDs (read only by mesh.go), and the
+// STALE-vs-DEAD split in ReporterState, which exists to decide mesh sweep
+// suppression. A stream that does not suppress sweeps sees both as "unhealthy".
+//
 // # Extensibility
 //
 // A stream names a payload contract ("mesh.repeater"); the body's own
@@ -34,6 +53,12 @@
 // authorized per stream, so a second monitor pushing a different shape is one
 // StreamHandler plus a config block — no changes to routing, auth, rate
 // limiting, health, or the normalizer contract.
+//
+// The second stream, "mesh.packet" (packet.go), is the proof: raw advert frames
+// a companion radio heard, forwarded in the envelope the MQTT bridges publish
+// and handed straight to the MeshCore registry (PacketSink) rather than
+// buffered here. It is a second door into the MQTT path, not a third input to
+// the normalizer.
 package pushingest
 
 import (
@@ -109,10 +134,14 @@ type reporter struct {
 	streams map[string]bool
 
 	// Guarded by Registry.mu.
-	lastAcceptedAt time.Time
+	lastAcceptedAt time.Time // any stream — drives health
 	lastAttemptAt  time.Time
 	lastError      string
 	reports        int64
+	// lastAcceptedByStream drives the rate limit, per stream: one reporter may
+	// run two processes (a telemetry monitor and a packet forwarder) on two
+	// cadences, and the one must not 429 the other.
+	lastAcceptedByStream map[string]time.Time
 }
 
 // Registry authenticates reporters and holds the buffered reports between the
@@ -127,12 +156,25 @@ type Registry struct {
 	order       []*reporter // config order, for stable iteration
 
 	mu sync.Mutex
+	// burn is the store the burn.line stream stages readings in, and burnLines
+	// the ids it will accept. Both nil/empty unless WithBurnLines is passed, in
+	// which case the stream still dispatches but ingestBurn rejects every
+	// report as unconfigured — see dispatch.
+	//
+	// This stream is the one that touches the store; see ingestBurn for why a
+	// once-daily reading cannot live in an in-memory buffer like mesh's.
+	burn      BurnStore
+	burnLines map[string]bool
+
 	// mesh holds the latest full set per reporter: reporterID -> nodeID -> report.
 	// A report REPLACES its reporter's map wholesale, because a report is that
 	// reporter's complete current set — the same contract PollResult.Events has
 	// with the disappearance sweep. A node dropped from a report is therefore no
 	// longer monitored, which is information, not a gap.
 	mesh map[string]map[string]MeshNodeReport
+	// packets is where mesh.packet reports go (the MeshCore registry); nil until
+	// SetPacketSink, which leaves that stream answering 400.
+	packets PacketSink
 
 	now func() time.Time
 }
@@ -142,12 +184,37 @@ type Registry struct {
 // skipped: a typo'd hash would otherwise present as a reporter that silently
 // never authenticates, which is the worst possible failure mode for a
 // credential — indistinguishable from a wrong token on the client side.
-func NewRegistry(cfg config.IngestConfig) (*Registry, error) {
+// Option configures a Registry at construction. Variadic so a stream that needs
+// a collaborator can be wired without changing every call site.
+type Option func(*Registry)
+
+// WithBurnLines enables the burn.line stream, staging readings in st and
+// accepting only the given line ids. Without it the stream still routes (so a
+// granted reporter never sees a confusing 404) but every report is rejected
+// with a 400 saying no burn lines are configured: a reading would have nowhere
+// to land.
+func WithBurnLines(st BurnStore, lineIDs []string) Option {
+	return func(r *Registry) {
+		if st == nil || len(lineIDs) == 0 {
+			return
+		}
+		r.burn = st
+		r.burnLines = make(map[string]bool, len(lineIDs))
+		for _, id := range lineIDs {
+			r.burnLines[strings.ToLower(strings.TrimSpace(id))] = true
+		}
+	}
+}
+
+func NewRegistry(cfg config.IngestConfig, opts ...Option) (*Registry, error) {
 	r := &Registry{
 		cfg:         cfg,
 		byTokenHash: make(map[string]*reporter, len(cfg.Reporters)),
 		mesh:        make(map[string]map[string]MeshNodeReport),
 		now:         time.Now,
+	}
+	for _, opt := range opts {
+		opt(r)
 	}
 	seen := make(map[string]bool, len(cfg.Reporters))
 	for _, rc := range cfg.Reporters {
@@ -172,7 +239,11 @@ func NewRegistry(cfg config.IngestConfig) (*Registry, error) {
 		if len(rc.Streams) == 0 {
 			return nil, fmt.Errorf("pushingest: reporter %q authorizes no streams", rc.ID)
 		}
-		rep := &reporter{cfg: rc, streams: make(map[string]bool, len(rc.Streams))}
+		rep := &reporter{
+			cfg:                  rc,
+			streams:              make(map[string]bool, len(rc.Streams)),
+			lastAcceptedByStream: make(map[string]time.Time, len(rc.Streams)),
+		}
 		for _, s := range rc.Streams {
 			rep.streams[s] = true
 		}

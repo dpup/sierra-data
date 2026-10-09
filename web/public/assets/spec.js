@@ -17,7 +17,7 @@
 export const SEV = {
   EXTREME: { rank: 4, note: 'Evacuation Order, an active EXTREME event — act now.' },
   SEVERE: { rank: 3, note: 'Evacuation Warning, a severe wildfire, an M5 quake.' },
-  MODERATE: { rank: 2, note: 'Advisory-level. Worth surfacing, not worth waking anyone.' },
+  MODERATE: { rank: 2, note: 'Advisory level. Worth showing; not urgent.' },
   MINOR: { rank: 1, note: 'Minor incident — a lane closure, a small quake.' },
   INFO: { rank: 0, note: 'Ambient state. Mesh-node presence, baseline monitoring.' },
 };
@@ -64,6 +64,7 @@ export const FIELD_DOCS = {
   earthquake: ['detail', 'magnitude, depthKm, felt.'],
   roadIncident: ['detail', 'logNumber, impact, duration, metadata map.'],
   power: ['detail', 'Outage: outageId, cause, customersAffected, crewStatus, estimatedRestoration. PSPS: eventId, eventName, timePeriod, stage (Watch | Warning), medicalBaselineAffected, deEnergizationStart, deEnergizationEnd. estimatedRestoration and deEnergizationEnd are ESTIMATES PG&E routinely overruns — they are deliberately not mapped onto expires, so never use them to hide an event.'],
+  burnStatus: ['detail', 'Per-county residential burning status from two independent authorities that must BOTH permit a burn. permission (ALLOWED | PROHIBITED | UNKNOWN) is the combined answer — lead with it. burnDay (YES | NO | MARGINAL | UNKNOWN) is the county air district\'s call from its phone line; MARGINAL is elevation-restricted (the line\'s "orange"). calfireStatus (BURNING_SUSPENDED | PERMIT_REQUIRED | NO_PERMIT_REQUIRED | UNKNOWN) is CAL FIRE\'s seasonal permit status, with calfireEffective and calfireArea. burnLines[] carries each line\'s own answer, phone number and observation {message, transcript, confidence, observedAt — when the line was CALLED}. A reading older than 36h is UNKNOWN, never a stale answer. No geometry: the event attaches to its county through placeIds, so it has no map layer.'],
   mesh: ['detail', 'publicKey, nodeType, name, reachability, and telemetry {snr, rssi, hopCount, gateways, lastAdvertAt, admin} — volatile, never mints a revision. snr/rssi/hopCount are NULL, not 0, for a node no MQTT bridge has heard (0 hops means heard direct, so it cannot also mean unknown). telemetry.admin is one sample an operator-run monitor read off the node itself (battery, temperature, airtime, packet counters) and pushed to /api/v1/ingest/mesh.repeater; its gauges are wrapper types, so an unread value is null and never a zero. reachability is the exception that IS hashed — a node going unreachable is a lifecycle change worth a history entry. Relay paths are NOT here (proto tag reserved): a path belongs to one reception, not to a node, so topology is served derived at GET /api/v1/mesh/links.'],
 };
 
@@ -279,4 +280,5 @@ export const EVENT_LAYERS = [
   'road_incident',
   'power',
   'mesh',
+  'burn_status',
 ];

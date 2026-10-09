@@ -257,7 +257,7 @@ export function initSourcesPage() {
     block.textContent =
       `${bad.length} source${bad.length === 1 ? '' : 's'} degraded — ` +
       bad.map((s) => `${s.id || s.name || '?'} ${normStatus(s.status)}`).join(', ') +
-      '. Their data may be stale or missing; absence is not an all-clear.';
+      '. Their data may be stale or missing.';
     alertBox.append(block);
   }
 

@@ -32,7 +32,7 @@ const el = (t, c, x) => {
 /** A failed request, stated as a fact with the URL that produced it. */
 function errBlock(err, what) {
   const d = el('div', 'error-block');
-  d.append(el('strong', null, what ? `${what} — request failed. ` : 'Request failed. '));
+  d.append(el('strong', null, what ? `${what}: request failed. ` : 'Request failed. '));
   if (err instanceof ApiError) {
     const u = el('span', 'error-url', `GET ${err.url}`);
     d.append(u, ` → ${err.timedOut ? 'no response in 6s' : err.status || 'network error'}`);
@@ -106,9 +106,9 @@ function renderDeck(placeName, summary, events, eventsOk, query, truncated) {
     // A blocked fetch never becomes a zero. State the unknown at heading size.
     hero.append(
       el('span', 'figure', 'UNKNOWN'),
-      ' — the event query did not answer, so the current state of ',
+      ' — the event query failed, so the current state of ',
       placeName || 'this place',
-      ' is unknown, not clear.'
+      ' is unknown.'
     );
   } else {
     const total = events.length;
@@ -122,7 +122,7 @@ function renderDeck(placeName, summary, events, eventsOk, query, truncated) {
     } else {
       const severe = counts.SEVERE || 0;
       if (severe > 0) hero.append(el('span', 'figure', `${fmtNum(severe)} of them SEVERE`), '.');
-      else hero.append(el('span', 'figure', 'severity of the region unconfirmed'), '.');
+      else hero.append(el('span', 'figure', 'none SEVERE reported, but some data is unknown'), '.');
     }
   }
 
@@ -132,7 +132,7 @@ function renderDeck(placeName, summary, events, eventsOk, query, truncated) {
   const row1 = el('div');
   row1.append(
     evacUnknown
-      ? 'evacuation count unknown — not zero'
+      ? 'evacuation zone count unknown'
       : `${fmtNum(evac)} evacuation zone${Number(evac) === 1 ? '' : 's'}`
   );
   if (!eventsOk) {
@@ -140,7 +140,7 @@ function renderDeck(placeName, summary, events, eventsOk, query, truncated) {
     // are all unknown. Printing "0 severe · 0 moderate" here would put three
     // reassuring zeros directly under a hero that says UNKNOWN — the precise
     // shape of "absence read as an all-clear" the contract forbids.
-    row1.append(' · severity counts unknown — the event query did not answer');
+    row1.append(' · severity counts unknown (event query failed)');
   } else {
     row1.append(` · ${fmtNum(counts.SEVERE || 0)} severe · ${fmtNum(counts.MODERATE || 0)} moderate`);
     const dayAgo = Date.now() - 86400_000;
@@ -151,7 +151,8 @@ function renderDeck(placeName, summary, events, eventsOk, query, truncated) {
     row1.append(` · ${fmtNum(past24)} in the past 24h`);
   }
   const row2 = el('div', null, `${query}   ·   generatedAt ${(summary && summary.generatedAt) || '—'}`);
-  sub.append(row1, row2);
+  const burn = eventsOk ? burnRow(events) : null;
+  sub.append(...[row1, burn, row2].filter(Boolean));
 
   // ---- ledger: four fixed cells
   // The first three are one axis: events by severity. Labelled so.
@@ -177,8 +178,40 @@ function renderDeck(placeName, summary, events, eventsOk, query, truncated) {
   const evacV = el('div', 'ledger-v' + (evacUnknown ? ' unknown' : Number(evac) === 0 && calm ? ' zero' : ''),
     evacUnknown ? 'UNKNOWN' : fmtNum(evac));
   if (evacUnknown) evacV.style.fontSize = '18px';
-  evacCell.append(evacV, el('div', 'ledger-l', evacUnknown ? 'Evacuation zones — not zero' : 'Evacuation zones'));
+  evacCell.append(evacV, el('div', 'ledger-l', 'Evacuation zones'));
   ledger.append(evacCell);
+}
+
+// burnStatus.permission is the combined answer of the two burn authorities (the
+// county's burn line AND CAL FIRE). Anything but a definite answer is "unknown",
+// in words: a missing permission must never read as "burning allowed".
+const BURN_WORDS = {
+  BURN_PERMISSION_ALLOWED: 'burning allowed',
+  BURN_PERMISSION_PROHIBITED: 'no burning',
+};
+
+/**
+ * One subline row: each county's burn status, linked to its event. Burn status
+ * is ambient INFO state, not a hazard, so it sits under the counts rather than
+ * taking a ledger cell (the ledger is four fixed tracks of hazard counts).
+ * Returns null when the place has no burn events — that place is simply not
+ * covered by a configured county, which is not the same as "allowed".
+ */
+function burnRow(events) {
+  const burn = events.filter((e) => String(e.layer || '').toUpperCase() === 'BURN_STATUS');
+  if (!burn.length) return null;
+  burn.sort((a, b) => String(a.areaLabel || a.id).localeCompare(String(b.areaLabel || b.id)));
+  const row = el('div');
+  row.append('burn status · ');
+  burn.forEach((e, i) => {
+    if (i > 0) row.append(' · ');
+    const permission = (e.burnStatus && e.burnStatus.permission) || '';
+    const a = el('a', null, `${e.areaLabel || e.id}: ${BURN_WORDS[permission] || 'unknown'}`);
+    a.href = `/event?id=${encodeURIComponent(e.id || '')}`;
+    a.title = e.headline || '';
+    row.append(a);
+  });
+  return row;
 }
 
 /* ------------------------------------------------------------------ feed */
@@ -192,9 +225,8 @@ function renderFeed(events) {
   if (!events.length) {
     lead.append(
       el('p', 'sec-body',
-        'No active events in this place right now. That is a confirmed empty result from ' +
-        'a successful query — not a failed one; the request and its response are in the ' +
-        'drawer at the foot of the page.')
+        'No active events in this place right now. The query succeeded and returned ' +
+        'nothing; the request and its response are in the drawer at the foot of the page.')
     );
     return;
   }
@@ -269,7 +301,7 @@ async function renderFirstRequest(place) {
   } catch (err) {
     body.textContent =
       err instanceof ApiError && err.timedOut
-        ? 'no response within 6000 ms — request abandoned'
+        ? 'timed out after 6000 ms'
         : String((err && err.message) || err);
     foot.textContent = '';
     foot.append(
@@ -301,7 +333,7 @@ async function main() {
     // deck that would read as "nothing is happening".
     $('deck-dateline').textContent = 'PLACE DIRECTORY UNREACHABLE';
     $('deck-hero').textContent =
-      'The place directory did not answer, so there is nothing to report on — this is an unknown state, not a clear one.';
+      'The place directory request failed, so no place could be loaded and the state of the region is unknown.';
     $('feed-lead').textContent = '';
     $('deck-error').append(errBlock(new Error('GET /api/v1/places?kind=AREA'), 'Place directory'));
     return;
@@ -333,7 +365,7 @@ async function main() {
   else {
     $('feed-lead').textContent = '';
     $('feed-lead').append(
-      el('p', 'sec-body', 'The feed is unavailable because the event query above failed. This is not an empty region.')
+      el('p', 'sec-body', 'The event query failed, so the feed could not be loaded and the state of the region is unknown.')
     );
   }
 

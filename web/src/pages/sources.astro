@@ -6,7 +6,7 @@ import GetChip from '../components/GetChip.astro';
 <Shell
   current="sources"
   title="Sources · The Grid"
-  description="The honest feed-health board for the Grid: per-source poll interval, last success, staleness, thresholds, and last error — live from GET /api/v1/sources. A failing feed says so; absence is never an all-clear."
+  description="Feed health for the Grid: per-source poll interval, last success, staleness thresholds, and last error, live from GET /api/v1/sources."
 >
   <!-- Page-scoped, but is:global because the rules target rows built at runtime
        by sources.js (scoped styles would not match dynamically-created DOM).
@@ -47,9 +47,9 @@ import GetChip from '../components/GetChip.astro';
     <p class="section-intro">
       Every event and every layer traces to one of these feeds. For each you get the poll
       interval, the last successful fetch, how close it is to going
-      <span class="mono">STALE</span>, the staleness thresholds and the last error verbatim —
-      the honest-freshness contract, exposed. A feed that fails says so;
-      <span class="accent-orange">absence of data is never shown as an all-clear.</span>
+      <span class="mono">STALE</span>, the staleness thresholds and the last error verbatim.
+      <span class="accent-orange">A feed that fails is shown as failed; missing data is never
+      shown as a clear state.</span>
     </p>
     <aside class="sidenote">
       <div class="rail-label">Reading the board</div>
@@ -81,9 +81,9 @@ import GetChip from '../components/GetChip.astro';
     <aside class="sidenote">
       <div class="rail-label alert">Evacuation is reference-only</div>
       <p>
-        In every state, and it must always be shown with its link to the authoritative
+        Evacuation data must always be shown with its link to the authoritative
         <a href="https://protect.genasys.com/search" target="_blank" rel="noopener noreferrer">Genasys</a>
-        viewer — a zone count from this API is never the instruction to act on.
+        viewer. A zone count from this API is not an instruction to act on.
       </p>
     </aside>
   </div>

@@ -104,7 +104,7 @@ export function errorBand(err, lastGoodAt, onRetry) {
     // old data never reads as current. The AGE is rendered by the caller, which
     // owns the timestamp; ui.js deliberately imports nothing (format.js already
     // imports copyOnClick from here, so reaching for timeAgo would be a cycle).
-    div.append(el('div', 'muted', 'Showing the last good response — not current.'));
+    div.append(el('div', 'muted', 'Showing the last successful response, which may be out of date.'));
   }
   if (typeof onRetry === 'function') {
     const btn = el('button', 'btn-ghost', 'Retry');
