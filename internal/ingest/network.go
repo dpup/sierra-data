@@ -82,6 +82,7 @@ type MeshRegistry interface {
 type MeshPushSource interface {
 	MeshReports() pushingest.MeshSnapshot
 	ReporterIDs(stream string) []string
+	ReporterConfig(id string) (config.Reporter, bool)
 }
 
 // NetworkNormalizer projects mesh-node presence into MESH events from TWO kinds
@@ -135,10 +136,21 @@ func NewNetworkNormalizer(cfg *config.Config, registry MeshRegistry, push MeshPu
 // whichever input heard it, is deliberate: a source_id that flipped as inputs
 // came and went would both mint a revision and confuse the per-source sweep,
 // which diffs each source's polled set against its stored set.
+//
+// A reporter authorized for both streams (a monitor and a packet forwarder on
+// one Pi) is still one reporter and one row.
 func (n *NetworkNormalizer) SourceIDs() []string {
 	ids := []string{meshSourceID}
 	if n.push != nil {
-		ids = append(ids, n.push.ReporterIDs(pushingest.MeshStream)...)
+		seen := map[string]bool{meshSourceID: true}
+		for _, stream := range []string{pushingest.MeshStream, pushingest.MeshPacketStream} {
+			for _, id := range n.push.ReporterIDs(stream) {
+				if !seen[id] {
+					seen[id] = true
+					ids = append(ids, id)
+				}
+			}
+		}
 	}
 	return ids
 }
@@ -175,21 +187,25 @@ func (n *NetworkNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult,
 		return nil, errEmptyScope("meshcore geofence")
 	}
 
-	connected := 0
-	var nodes []meshcore.NodeState
-	if n.registry != nil {
-		connected, _ = n.registry.Health()
-		if connected > 0 {
-			nodes = n.registry.Snapshot()
-		}
-	}
-
 	var snap pushingest.MeshSnapshot
 	if n.push != nil {
 		snap = n.push.MeshReports()
 	}
 
-	if connected == 0 && snap.Live == 0 {
+	// The registry has two doors — MQTT brokers and mesh.packet forwarders — and
+	// its snapshot is current while EITHER is open. With every broker down and no
+	// forwarder live the snapshot is only what was heard before we went deaf, so
+	// it is left out exactly as before.
+	connected := 0
+	var nodes []meshcore.NodeState
+	if n.registry != nil {
+		connected, _ = n.registry.Health()
+		if connected > 0 || snap.PacketLive > 0 {
+			nodes = n.registry.Snapshot()
+		}
+	}
+
+	if connected == 0 && snap.Live == 0 && snap.PacketLive == 0 {
 		return nil, fmt.Errorf(
 			"meshcore: no brokers connected and no reporter live; not asserting node disappearance")
 	}
@@ -293,12 +309,15 @@ func (n *NetworkNormalizer) drainObservations() []store.MeshObservation {
 // reporterHealth maps each reporter's state onto its source row. A reporter that
 // has never reported is an error, not a success: RecordAttempt(nil) would paint
 // a monitor that was never set up as a healthy feed.
+//
+// A reporter on both streams is listed under each and has one health, so the
+// second listing overwrites the first with the same verdict.
 func (n *NetworkNormalizer) reporterHealth(snap pushingest.MeshSnapshot) map[string]error {
-	if len(snap.Reporters) == 0 {
+	if len(snap.Reporters) == 0 && len(snap.PacketReporters) == 0 {
 		return nil
 	}
-	out := make(map[string]error, len(snap.Reporters))
-	for _, h := range snap.Reporters {
+	out := make(map[string]error, len(snap.Reporters)+len(snap.PacketReporters))
+	for _, h := range append(append([]pushingest.ReporterHealth{}, snap.Reporters...), snap.PacketReporters...) {
 		switch h.State {
 		case pushingest.ReporterOK:
 			out[h.ID] = nil
@@ -734,6 +753,23 @@ func (n *NetworkNormalizer) meshProvenance(brokers []string) *gridv1.Provenance 
 	var names []string
 	seen := map[string]bool{}
 	for _, b := range brokers {
+		// A mesh.packet forwarder occupies a broker's slot in the registry; its
+		// operator is the reporter, named from config like a broker's is.
+		if id, ok := pushingest.ReporterFromPacketSource(b); ok {
+			if n.push == nil {
+				continue
+			}
+			rc, ok := n.push.ReporterConfig(id)
+			if !ok {
+				continue
+			}
+			name := firstNonBlank(rc.Name, rc.ID)
+			if !seen[name] {
+				seen[name] = true
+				names = append(names, name)
+			}
+			continue
+		}
 		mb, ok := n.brokerOps[b]
 		if !ok {
 			continue
@@ -828,6 +864,15 @@ func meshHeadline(name, nodeType, key string) string {
 		return name
 	}
 	return fmt.Sprintf("%s (%s)", name, nodeType)
+}
+
+func firstNonBlank(vals ...string) string {
+	for _, v := range vals {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func quantizeCoord(v float64) float64 {

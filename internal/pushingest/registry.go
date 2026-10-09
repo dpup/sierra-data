@@ -34,6 +34,12 @@
 // authorized per stream, so a second monitor pushing a different shape is one
 // StreamHandler plus a config block — no changes to routing, auth, rate
 // limiting, health, or the normalizer contract.
+//
+// The second stream, "mesh.packet" (packet.go), is the proof: raw advert frames
+// a companion radio heard, forwarded in the envelope the MQTT bridges publish
+// and handed straight to the MeshCore registry (PacketSink) rather than
+// buffered here. It is a second door into the MQTT path, not a third input to
+// the normalizer.
 package pushingest
 
 import (
@@ -109,10 +115,14 @@ type reporter struct {
 	streams map[string]bool
 
 	// Guarded by Registry.mu.
-	lastAcceptedAt time.Time
+	lastAcceptedAt time.Time // any stream — drives health
 	lastAttemptAt  time.Time
 	lastError      string
 	reports        int64
+	// lastAcceptedByStream drives the rate limit, per stream: one reporter may
+	// run two processes (a telemetry monitor and a packet forwarder) on two
+	// cadences, and the one must not 429 the other.
+	lastAcceptedByStream map[string]time.Time
 }
 
 // Registry authenticates reporters and holds the buffered reports between the
@@ -133,6 +143,9 @@ type Registry struct {
 	// with the disappearance sweep. A node dropped from a report is therefore no
 	// longer monitored, which is information, not a gap.
 	mesh map[string]map[string]MeshNodeReport
+	// packets is where mesh.packet reports go (the MeshCore registry); nil until
+	// SetPacketSink, which leaves that stream answering 400.
+	packets PacketSink
 
 	now func() time.Time
 }
@@ -172,7 +185,11 @@ func NewRegistry(cfg config.IngestConfig) (*Registry, error) {
 		if len(rc.Streams) == 0 {
 			return nil, fmt.Errorf("pushingest: reporter %q authorizes no streams", rc.ID)
 		}
-		rep := &reporter{cfg: rc, streams: make(map[string]bool, len(rc.Streams))}
+		rep := &reporter{
+			cfg:                  rc,
+			streams:              make(map[string]bool, len(rc.Streams)),
+			lastAcceptedByStream: make(map[string]time.Time, len(rc.Streams)),
+		}
 		for _, s := range rc.Streams {
 			rep.streams[s] = true
 		}

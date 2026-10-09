@@ -537,6 +537,10 @@ grid:
   # SHA-256 of a reporter's bearer token is stored here, never the token itself,
   # which is what makes it safe in a public repo. Add one with
   # `make ingest-token REPORTER=<id> NAME="..."`; see docs/mesh-reporter-guide.md.
+  # Streams a reporter may be granted: `mesh.repeater` (admin telemetry +
+  # reachability read off each repeater) and `mesh.packet` (raw advert frames a
+  # companion radio heard, fed to the MeshCore registry like an MQTT reception —
+  # add it with STREAMS="mesh.repeater,mesh.packet").
   ingest:
     maxBodyBytes: 1048576
     maxItems: 1000

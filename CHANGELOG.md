@@ -14,6 +14,34 @@ throughout; errors are gRPC-standard `{code, codeName, message, details}`). The
 by a snake_case `/v1` surface on 2026-07-05, which was in turn folded back onto the
 proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 
+## 2026-10-09
+
+### New push-ingest stream: `mesh.packet` — forward the adverts your radio hears
+
+**Additive**, and only for operators holding a push-ingest token. `POST
+/api/v1/ingest/mesh.packet` accepts the raw over-the-air packets a MeshCore
+companion radio received, in the per-packet envelope the community MQTT
+bridges publish (`packet_type`, hex `raw`, `SNR`, `RSSI`, `origin_id`), and
+feeds the ADVERTs to the Grid's MeshCore registry through the same decoder and
+Ed25519 signature check as an MQTT reception. Non-advert packets are accepted
+and ignored. The `202` response's `accepted` counts adverts applied; a packet
+that could not be used is a `warnings[]` entry naming its index and why
+(`malformed` or `rejected`). The rate limit on the write endpoint is now **per
+stream**, so a reporter authorized for both streams can run a forwarder and a
+telemetry monitor on two cadences.
+
+Why: the SIERRA backbone repeaters reach the community brokers only through a
+distant gateway, every few days each, while companions in the area hear them
+daily. A forwarder closes that gap with no change to the read API: nodes it
+hears appear in `GET /api/v1/events?layer=mesh` and the `mesh_node` /
+`mesh_link` map layers as before, with `provenance.attribution` naming the
+reporter (`MeshCore community mesh via <reporter name>`) the way it names a
+broker's operator. `GET /api/v1/sources` shows one health row per reporter
+whichever streams it posts to.
+
+The read surface is unchanged. Setup is in `docs/mesh-reporter-guide.md`
+("Forwarding packets").
+
 ## 2026-10-02
 
 ### New map layer: `message_sign` — what Caltrans's message signs are showing

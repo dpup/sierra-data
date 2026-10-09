@@ -436,6 +436,51 @@ EXPIRED, the "we lost track of this" terminus, not the fabricated all-clear that
 RESOLVED would be — and because mesh presence is ambient INFO. **Do not copy this
 bound onto a life-safety layer.**
 
+### A second door into the registry: `mesh.packet` (2026-10)
+
+The two inputs above are the MQTT registry and the monitor's REPORTS. There is
+now a third way data arrives, but it is not a third input: the `mesh.packet`
+push stream forwards raw advert frames a companion radio heard, and the push
+handler hands each one to `meshcore.Registry.IngestEnvelope` — the same decode,
+signature policy, spam floor and presence update an MQTT reception gets. By the
+time `Poll` runs, a forwarded advert is already in the registry's `Snapshot`,
+indistinguishable from one a broker delivered except for its provenance: the
+reporter occupies a broker's slot (`NodeState.Brokers` and
+`Observation.Broker` carry `reporter:<id>`, see `pushingest.PacketSource`),
+and `meshProvenance` names the reporter from config the way it names a
+broker's operator.
+
+Why it exists: the radios that hear the SIERRA backbone at zero hops are
+companions in Arnold and Dorrington, and the community brokers hear that
+backbone only through a distant gateway, every few days per repeater
+(measured 2026-10-09 against map.meshcore.io, which hears the same adverts
+daily through its uploader bot — a companion-attached script reading the
+radio's RX log). The stream accepts exactly what that bot produces. The trust
+rule is unchanged: the node signed the advert, the forwarder is the courier,
+and `requireValidSignature` still applies.
+
+What it changes in `Poll`:
+
+- **The snapshot is current while EITHER door is open.** `connected > 0 ||
+  snap.PacketLive > 0` is the gate on reading `Snapshot`; with every broker
+  down and no forwarder live the snapshot is only what was heard before we
+  went deaf, and is left out as before.
+- **Fail-loud counts three things**: no broker connected, no monitor live, no
+  forwarder live ⇒ hard error.
+- **A STALE forwarder suppresses the sweep**, like a stale monitor: the nodes
+  only it heard are about to age out of the snapshot for OUR reason. Bounded
+  the same way (DEAD stops suppressing).
+- **A forwarder contributes no `Reports`** — its packets are already in the
+  registry — so `buildEvent`'s report-side rules (prefix resolution,
+  reachability, admin telemetry) never see it.
+- **One reporter on both streams is one source row**: `SourceIDs` and
+  `reporterHealth` dedupe by id, and `pushingest` rate-limits per stream so a
+  forwarder and a monitor on one token do not 429 each other.
+
+The registry is constructed whenever either door is configured
+(`cmd/server/main.go`): MQTT enabled with brokers, OR a reporter authorized for
+`mesh.packet`. Only the brokers need `Connect`.
+
 Each reporter also gets its own **health-only source row** (`SourceIDs` returns
 `meshcore` plus every reporter id), so `/api/v1/sources` answers "is that monitor
 still reporting?" the way it answers that for every other feed. No event is ever
