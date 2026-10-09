@@ -32,7 +32,7 @@ const el = (t, c, x) => {
 /** A failed request, stated as a fact with the URL that produced it. */
 function errBlock(err, what) {
   const d = el('div', 'error-block');
-  d.append(el('strong', null, what ? `${what} — request failed. ` : 'Request failed. '));
+  d.append(el('strong', null, what ? `${what}: request failed. ` : 'Request failed. '));
   if (err instanceof ApiError) {
     const u = el('span', 'error-url', `GET ${err.url}`);
     d.append(u, ` → ${err.timedOut ? 'no response in 6s' : err.status || 'network error'}`);
@@ -106,9 +106,9 @@ function renderDeck(placeName, summary, events, eventsOk, query, truncated) {
     // A blocked fetch never becomes a zero. State the unknown at heading size.
     hero.append(
       el('span', 'figure', 'UNKNOWN'),
-      ' — the event query did not answer, so the current state of ',
+      ' — the event query failed, so the current state of ',
       placeName || 'this place',
-      ' is unknown, not clear.'
+      ' is unknown.'
     );
   } else {
     const total = events.length;
@@ -122,7 +122,7 @@ function renderDeck(placeName, summary, events, eventsOk, query, truncated) {
     } else {
       const severe = counts.SEVERE || 0;
       if (severe > 0) hero.append(el('span', 'figure', `${fmtNum(severe)} of them SEVERE`), '.');
-      else hero.append(el('span', 'figure', 'severity of the region unconfirmed'), '.');
+      else hero.append(el('span', 'figure', 'none SEVERE reported, but some data is unknown'), '.');
     }
   }
 
@@ -132,7 +132,7 @@ function renderDeck(placeName, summary, events, eventsOk, query, truncated) {
   const row1 = el('div');
   row1.append(
     evacUnknown
-      ? 'evacuation count unknown — not zero'
+      ? 'evacuation zone count unknown'
       : `${fmtNum(evac)} evacuation zone${Number(evac) === 1 ? '' : 's'}`
   );
   if (!eventsOk) {
@@ -140,7 +140,7 @@ function renderDeck(placeName, summary, events, eventsOk, query, truncated) {
     // are all unknown. Printing "0 severe · 0 moderate" here would put three
     // reassuring zeros directly under a hero that says UNKNOWN — the precise
     // shape of "absence read as an all-clear" the contract forbids.
-    row1.append(' · severity counts unknown — the event query did not answer');
+    row1.append(' · severity counts unknown (event query failed)');
   } else {
     row1.append(` · ${fmtNum(counts.SEVERE || 0)} severe · ${fmtNum(counts.MODERATE || 0)} moderate`);
     const dayAgo = Date.now() - 86400_000;
@@ -177,7 +177,7 @@ function renderDeck(placeName, summary, events, eventsOk, query, truncated) {
   const evacV = el('div', 'ledger-v' + (evacUnknown ? ' unknown' : Number(evac) === 0 && calm ? ' zero' : ''),
     evacUnknown ? 'UNKNOWN' : fmtNum(evac));
   if (evacUnknown) evacV.style.fontSize = '18px';
-  evacCell.append(evacV, el('div', 'ledger-l', evacUnknown ? 'Evacuation zones — not zero' : 'Evacuation zones'));
+  evacCell.append(evacV, el('div', 'ledger-l', 'Evacuation zones'));
   ledger.append(evacCell);
 }
 
@@ -192,9 +192,8 @@ function renderFeed(events) {
   if (!events.length) {
     lead.append(
       el('p', 'sec-body',
-        'No active events in this place right now. That is a confirmed empty result from ' +
-        'a successful query — not a failed one; the request and its response are in the ' +
-        'drawer at the foot of the page.')
+        'No active events in this place right now. The query succeeded and returned ' +
+        'nothing; the request and its response are in the drawer at the foot of the page.')
     );
     return;
   }
@@ -269,7 +268,7 @@ async function renderFirstRequest(place) {
   } catch (err) {
     body.textContent =
       err instanceof ApiError && err.timedOut
-        ? 'no response within 6000 ms — request abandoned'
+        ? 'timed out after 6000 ms'
         : String((err && err.message) || err);
     foot.textContent = '';
     foot.append(
@@ -301,7 +300,7 @@ async function main() {
     // deck that would read as "nothing is happening".
     $('deck-dateline').textContent = 'PLACE DIRECTORY UNREACHABLE';
     $('deck-hero').textContent =
-      'The place directory did not answer, so there is nothing to report on — this is an unknown state, not a clear one.';
+      'The place directory request failed, so no place could be loaded and the state of the region is unknown.';
     $('feed-lead').textContent = '';
     $('deck-error').append(errBlock(new Error('GET /api/v1/places?kind=AREA'), 'Place directory'));
     return;
@@ -333,7 +332,7 @@ async function main() {
   else {
     $('feed-lead').textContent = '';
     $('feed-lead').append(
-      el('p', 'sec-body', 'The feed is unavailable because the event query above failed. This is not an empty region.')
+      el('p', 'sec-body', 'The event query failed, so the feed could not be loaded and the state of the region is unknown.')
     );
   }
 

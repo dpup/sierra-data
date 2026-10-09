@@ -86,12 +86,11 @@ import FilterGroup from '../components/FilterGroup.astro';
   <div class="with-rail">
     <div class="rail-main">
       <p class="section-intro intro-full">
-        <strong>These are the events from the <a href="/events">Events browser</a>, unrolled.</strong>
-        That screen shows each event once, as it stands now; this one shows every revision it has
-        passed through — so you read the arc, not the current state. A row is a revision, carries
-        its <code class="inline">rev n</code>, and opens the same record its counterpart on Events
-        opens. Absence is recorded as deliberately as onset: "nothing here now" is a fact you can
-        trace to the revision that made it true, never inferred from an empty screen.
+        <strong>The same events as the <a href="/events">Events browser</a>, one row per
+        revision.</strong> Events shows each event as it stands now; this screen shows every
+        revision it has passed through. A row carries its <code class="inline">rev n</code> and
+        opens the same record. An event ending is a revision too, so a resolved or expired event
+        can be traced to the revision that closed it.
       </p>
 
       <!-- The archive is a list of records, not a spreadsheet: the same .rec row
@@ -118,9 +117,9 @@ import FilterGroup from '../components/FilterGroup.astro';
         </div>
         <p class="muted small">RFC&nbsp;3339 · newest first · pages by
           <code class="inline">next_page_token</code> · days grouped in UTC</p>
-        <p class="muted small"><code class="inline">from</code>/<code class="inline">to</code> are
-          entered in your local time and sent as UTC — the echoed request shows exactly what
-          went over the wire.</p>
+        <p class="muted small"><code class="inline">from</code> and <code class="inline">to</code>
+          are entered in your local time and sent as UTC; the request above shows the values
+          sent.</p>
       </div>
 
       <!-- A measured caveat, not a theoretical one: mesh nodes stamp their own
@@ -130,11 +129,11 @@ import FilterGroup from '../components/FilterGroup.astro';
       <div class="rail-block">
         <div class="rail-label alert">Clock caveat</div>
         <p>
-          Ordering is by <code class="inline">observedAt</code>, which is upstream-stamped. Mesh
-          nodes timestamp their own adverts from an unsynchronized clock, so a
+          Rows are ordered by <code class="inline">observedAt</code>, which the upstream source
+          stamps. Mesh nodes stamp their own adverts from unsynchronized clocks, so a
           <code class="inline">MESH</code> revision can carry a future time and sort above newer
-          records. Reported verbatim — we do not rewrite it. For when <em>this service</em>
-          learned something, read <code class="inline">ingestedAt</code>.
+          rows. The value is kept as reported. For when this service recorded a revision, read
+          <code class="inline">ingestedAt</code>.
         </p>
       </div>
     </aside>

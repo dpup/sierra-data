@@ -66,8 +66,7 @@ Content-Type: application/json
     Every entry expands to its parameter table and example requests. The
     examples are not illustrations: press <b>RUN</b> and the page fetches that
     exact URL live and prints the real response, status, timing and byte count.
-    An example that has gone stale therefore fails in front of you rather than
-    quietly misleading you.
+    If an example has gone stale, it fails here.
   </p>
 
   <!-- Built by assets/pages/docs.js from assets/spec.js — the same ENDPOINTS
@@ -326,9 +325,8 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
 
   <h3><code class="inline">metadata.sourceStatus</code></h3>
   <p>
-    Layers are fail-loud: a source error never becomes a fabricated clear
-    state. The three states render differently and <strong>must not be
-    collapsed</strong>:
+    A source error never becomes an empty OK response. The three states render
+    differently and <strong>must not be collapsed</strong>:
   </p>
   <div class="table-wrap"><table class="data-table">
     <thead><tr><th>sourceStatus</th><th>Features</th><th>Required client rendering</th></tr></thead>
@@ -395,20 +393,17 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
     <h2>6. The evacuation fail-loud contract</h2>
     <p class="invariant">An error never becomes a 0.</p>
     <div class="fail-banner">
-      <strong>Absence ≠ all-clear.</strong> An empty evacuation response is not
-      a safe response. A source that errored returns
-      <code class="inline">null</code>, not <code class="inline">0</code> — and
-      your client must render <em>unknown</em>, never a blank and never a green
-      "no evacuations." This is a contractual obligation on every consumer, not
-      a styling suggestion.
+      <strong>Absence is not an all-clear.</strong> A source that errored returns
+      <code class="inline">null</code>, not <code class="inline">0</code>, and a
+      client must render it as <em>unknown</em>: never blank, never a green
+      "no evacuations". Every consumer is bound by this.
     </div>
     <p>
       Evacuation data is life-safety data, and it is <strong>reference
       only</strong>. This service surfaces the <em>presence</em> of orders
       from Cal OES and links out to the authoritative source; it never
-      asserts "you are safe." Every consumer of this API inherits the
-      following obligations — they are part of the contract, not styling
-      advice.
+      asserts that an area is safe. Every consumer of this API inherits the
+      obligations below.
     </p>
 
     <h3>The invariant, mechanically</h3>
@@ -428,13 +423,11 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
       </tbody>
     </table></div>
     <p>
-      The distinction between the first two rows is the entire point:
       <code class="inline">null</code> and <code class="inline">0</code> are
-      different values with different meanings, and the API will never
-      collapse one into the other. Clients must not either. An UNAVAILABLE
-      evacuation source also forces the area
-      <code class="inline">mode</code> to at least
-      <code class="inline">WATCH</code> — unknown is not quiet.
+      different values with different meanings. The API never collapses one
+      into the other, and clients must not either. An UNAVAILABLE evacuation
+      source also forces the area <code class="inline">mode</code> to at least
+      <code class="inline">WATCH</code>.
     </p>
     <p>
       The same rule applies to the evacuation map layer
@@ -612,9 +605,55 @@ Authorization: Bearer &lt;token&gt;
       (<code class="inline">last_success: null</code>) is published with no
       telemetry block at all rather than a row of zeroed counters.</li>
     <li><strong>Timestamps are clamped to server time.</strong> A stamp in the
-      future is treated as "now" — a monitor's clock is not ours.</li>
+      future is treated as now.</li>
     <li>Reposting an identical report is harmless: entries are keyed by node, so
       a retry after a network failure overwrites rather than duplicates.</li>
+  </ul>
+
+  <h3>Stream <code class="inline">mesh.packet</code> (schema_version 1)</h3>
+  <p>
+    The raw over-the-air packets a MeshCore companion radio received, forwarded
+    as-is. The Grid otherwise hears a node's <em>advert</em> — the signed packet
+    carrying its name, role and position — through community MQTT bridges, which
+    the SIERRA backbone reaches only when a distant gateway relays it (every few
+    days per repeater, measured 2026-10); a companion in the area hears the same
+    adverts daily. Each packet is the per-packet envelope the MQTT bridges publish,
+    and it goes through the same decoder and the same Ed25519 signature check as
+    an MQTT reception, so a forwarded packet can only say what the node itself
+    signed.
+  </p>
+  <pre class="code">POST /api/v1/ingest/mesh.packet
+Authorization: Bearer &lt;token&gt;
+
+{
+  "schema_version": 1,
+  "generated_at": "2026-10-09T05:00:00Z",
+  "observer": "e3635c65dcd443e7…",        // the receiving radio's public key (optional)
+  "packets": [
+    {
+      "packet_type": 4,                   // ADVERT; other types are accepted and ignored
+      "raw": "11001148edae5567…",         // the full frame as hex, or a meshcore:// link
+      "SNR": 8.5, "RSSI": -95,            // optional, the radio's reading
+      "origin_id": "…",                   // optional, overrides observer for this packet
+      "timestamp": "2026-10-09T04:58:12Z" // optional; receive time is the Grid's own clock
+    }
+  ]
+}</pre>
+  <ul>
+    <li><strong><code class="inline">accepted</code> counts adverts applied</strong>,
+      not packets received. A packet that could not be used is a
+      <code class="inline">warnings[]</code> entry naming its index and why:
+      <code class="inline">malformed</code> (not hex, or not a decodable advert
+      frame) or <code class="inline">rejected</code> (the node's signature did not
+      verify). Up to 25 are listed, then a count.</li>
+    <li><strong>The rate limit is per stream.</strong> A reporter authorized for
+      both streams can run a forwarder and a telemetry monitor as two processes on
+      two cadences without one throttling the other.</li>
+    <li>Nodes heard this way are ordinary mesh events — presence, position and
+      relay path exactly as from a bridge — with
+      <code class="inline">provenance.attribution</code> naming the reporter
+      (<code class="inline">MeshCore community mesh via &lt;reporter name&gt;</code>)
+      the way it names a broker's operator.</li>
   </ul>
 
   <h3>Stream <code class="inline">burn.line</code> (schema_version 1)</h3>
@@ -659,7 +698,6 @@ Authorization: Bearer &lt;token&gt;
       events; the scheduler remains the only writer of those.</li>
   </ul>
 
-
   <h3>How it surfaces</h3>
   <ul>
     <li><strong>One event per node, not one per input.</strong> A node reported by a
@@ -688,13 +726,15 @@ Authorization: Bearer &lt;token&gt;
       revision per report: poll <code class="inline">events/{id}</code> for current
       values, and expect <code class="inline">/history</code> to show only
       meaningful changes.</li>
-    <li>A node known only to a monitor has <strong>no geometry</strong> — a report
-      carries no coordinates and the Grid does not invent them — so it appears in
+    <li>A node known only to a monitor, that no advert has ever located, has
+      <strong>no geometry</strong> — a report carries no coordinates and the Grid
+      does not invent them — so it appears in
       <code class="inline">/api/v1/events?layer=mesh</code> and, where the operator
       has configured a place attachment, in place-scoped views, but its
       <code class="inline">mesh_node</code> map feature has
       <code class="inline">"geometry": null</code> until an advert supplies a
-      position.</li>
+      position. Once one has, the position persists through the monitor's reports
+      between adverts (or arrives sooner through <code class="inline">mesh.packet</code>).</li>
   </ul>
   <div class="live-examples">
     <a href="/api/v1/events?layer=mesh">/api/v1/events?layer=mesh</a>

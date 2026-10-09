@@ -503,9 +503,14 @@ gateway's `EmitUnpopulated` marshaler.
   last error). Includes one **health-only** row per configured push reporter.
 - `POST /api/v1/ingest/{stream}` - **the one WRITE endpoint**, and the only one
   requiring a credential (`Authorization: Bearer`). Operator-run monitors push
-  data no upstream feed publishes; today the `mesh.repeater` stream carries
-  MeshCore repeater admin telemetry + explicit reachability. Not mounted unless
-  `grid.ingest.reporters` is non-empty. It does NOT write the store — it buffers,
+  data no upstream feed publishes. Two streams: `mesh.repeater` carries MeshCore
+  repeater admin telemetry + explicit reachability; `mesh.packet` forwards the
+  raw advert frames a companion radio heard (the SIERRA backbone reaches the
+  community MQTT brokers only every few days; a companion in Arnold hears it
+  daily), handed to the MeshCore registry through the same decode and
+  signature check as an MQTT reception. Not mounted unless
+  `grid.ingest.reporters` is non-empty. It does NOT write the store — it buffers
+  (or, for packets, updates the in-memory registry),
   and the mesh poller merges on its next tick, so single-writer discipline holds.
   `corsAllowMethods: [GET]` is what keeps it browser-unreachable cross-origin;
   never add POST there. See `internal/pushingest` and `internal/ingest/CLAUDE.md`;

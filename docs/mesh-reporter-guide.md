@@ -8,6 +8,16 @@ of it is public and read-only. This is the one endpoint that accepts data, and i
 needs a token — you should have been given one out of band. If you have not, ask
 whoever maintains the service; tokens are issued per reporter.
 
+It carries two kinds of report, as two *streams* on the same endpoint. Most of
+this guide is about the first:
+
+| Stream | What you send | Where it goes |
+|---|---|---|
+| `mesh.repeater` | What your monitor read by logging into each repeater: battery, airtime, counters, and whether it could log in at all | The repeater's record on the Grid, as telemetry and reachability |
+| `mesh.packet` | The raw advert packets a companion radio near you hears, forwarded as-is | The same place the community MQTT bridges feed, so the Grid hears your backbone directly — see [Forwarding packets](#forwarding-packets-the-meshpacket-stream) |
+
+A token can be authorized for either or both.
+
 **What your reports add.** The Grid otherwise learns about mesh nodes from
 community MQTT bridges, which only ever see what a node broadcasts. Your monitor
 logs into the node, so it can report things nothing broadcasts — battery,
@@ -313,7 +323,7 @@ Errors are `{"code": <number>, "message": "..."}`.
 | `400` | Malformed JSON, wrong `schema_version`, or too many repeaters | Fix the output. Retrying unchanged won't help. |
 | `401` | Missing or unrecognized token | Check the `Authorization` header format. If it looks right, the token may have been rotated — ask. |
 | `403` | Token is valid but not authorized for this stream | Ask; it's a config fix on our end. |
-| `404` | Unknown stream in the URL | Check the path spelling: `mesh.repeater`, singular. |
+| `404` | Unknown stream in the URL | Check the path spelling: `mesh.repeater` or `mesh.packet`, singular. |
 | `413` | Body over 1 MB | Reduce the report. |
 | `429` | Reporting too fast | Honour the `Retry-After` header (seconds). |
 | `5xx` | Our problem | Retry with backoff. |
@@ -368,6 +378,103 @@ curl -s 'https://data.sierragridteam.org/api/v1/events?layer=mesh' \
 ```
 
 Give it a minute after posting — `202` means queued, not stored.
+
+---
+
+## Forwarding packets: the `mesh.packet` stream
+
+**Why it exists.** The Grid learns where a node is, and that it is alive, from
+the node's own *advert* — the signed packet every MeshCore node broadcasts with
+its name, role and position. The Grid hears adverts through community MQTT
+bridges, and the SIERRA backbone reaches those only when a distant gateway
+happens to relay it: measured in October 2026, every few days per repeater. A
+companion radio in Arnold or Dorrington hears the same adverts every day. This
+stream lets that radio hand them to the Grid directly.
+
+The Grid treats a forwarded packet exactly like one from a bridge: it decodes
+the advert, **checks the node's Ed25519 signature**, and updates the node's
+presence, position and relay path. You are the courier, not the author — a
+packet you forward unchanged can only ever say what the node itself signed, so
+nothing you send can move a node or rename it. A tampered or corrupt advert is
+dropped and named in the response.
+
+### What to send
+
+```
+POST https://data.sierragridteam.org/api/v1/ingest/mesh.packet
+```
+
+Same headers, same token (if it is authorized for this stream — ask), same
+limits: 1 MB, 1000 packets per report.
+
+```json
+{
+  "schema_version": 1,
+  "generated_at": "2026-10-09T05:00:00Z",
+  "observer": "e3635c65dcd443e7982d2f2ddbd02853d02c195dd2c9be071b7ec3ab01b0d609",
+  "packets": [
+    {
+      "packet_type": 4,
+      "raw": "11001148edae55676cd38008283a6236e9452f48ab074a85…",
+      "SNR": 8.5,
+      "RSSI": -95,
+      "timestamp": "2026-10-09T04:58:12Z"
+    }
+  ]
+}
+```
+
+| Field | | |
+|---|---|---|
+| `schema_version` | required | `1` |
+| `generated_at` | optional | When you built the report, RFC 3339 |
+| `observer` | optional | The public key (hex, full or a prefix of 4+ bytes) of the radio that heard these packets. It becomes the *gateway* on every packet that does not name its own `origin_id`. Leave it out and your reporter id stands in. |
+| `packets[]` | required | One object per received packet, below |
+
+Each packet is the per-packet document the MeshCore MQTT bridges publish, so
+if you already run a bridge you can forward its messages unchanged:
+
+| Field | | |
+|---|---|---|
+| `packet_type` | required | The MeshCore payload type. Only `4` (ADVERT) is used; anything else is accepted and ignored, so forwarding your whole RX log is fine. |
+| `raw` | required | The full over-the-air frame as hex — header, path and payload, exactly as the radio received it. A `meshcore://<hex>` link (what the map's uploader builds from the same bytes) is accepted too. |
+| `SNR`, `RSSI` | optional | Your radio's reading for this reception, dB and dBm. Numbers or strings, as the bridges send them. |
+| `origin_id` | optional | The receiving radio's public key, if it differs from `observer`. |
+| `timestamp` | optional | Ignored for presence: the Grid stamps every packet with its own receive time, because node and gateway clocks are not trusted. |
+
+**Getting the bytes.** A companion radio exposes every packet it receives
+through its RX-log push (`LogRxData` in `@liamcottle/meshcore.js`; the
+[map.meshcore.io uploader](https://github.com/recrof/map.meshcore.io-uploader)
+is a 100-line example that listens to exactly this and keeps the ADVERTs). The
+`raw` bytes that event hands you are what goes in the field — do not strip the
+header or path; the Grid needs both. A serial companion serves one host
+process at a time, so a forwarder and a telemetry monitor on one Pi either
+share a connection or use two radios.
+
+### Responses
+
+`202` as for the other stream. `accepted` counts **adverts applied**, not
+packets received — a report of fifty text messages and no adverts is accepted
+with `accepted: 0`, which is your signal that what you are sending is not
+useful. A packet the Grid could not use is a warning naming its index and why
+(`malformed`: not hex, or not a decodable advert frame; `rejected`: the node's
+signature did not verify). Up to 25 are listed, then a count.
+
+### Cadence
+
+Batch and send every minute or so; the Grid merges presence on a one-minute
+cycle anyway. The rate limit is **per stream**, so a forwarder and a telemetry
+monitor on the same token do not throttle each other. The same go-quiet
+threshold applies: silence past it degrades your reporter row and, as with the
+other stream, holds rather than expires the nodes you alone were hearing — for
+a bounded time.
+
+### Checking it worked
+
+The nodes you forward show up on the mesh map and in
+`/api/v1/events?layer=mesh` with your reporter named in `provenance.attribution`
+(`MeshCore community mesh via <your reporter name>`), and the relay paths you
+hear feed `/api/v1/places/{place}/map/mesh_link.geojson`.
 
 ---
 
@@ -474,5 +581,5 @@ Run it from cron or a systemd timer:
 The public API reference is at <https://data.sierragridteam.org/docs>, and the
 endpoint is documented there under **Push ingest**. For anything about your
 token, your reporting cadence, or reporting something other than MeshCore
-repeaters, ask the service maintainer — new kinds of report are a small
-configuration change on our side.
+repeaters and packets, ask the service maintainer — new kinds of report are a
+small configuration change on our side.

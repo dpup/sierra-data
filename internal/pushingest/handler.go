@@ -30,6 +30,8 @@ func (r *Registry) dispatch(stream string) (streamHandler, bool) {
 	switch stream {
 	case MeshStream:
 		return r.ingestMesh, true
+	case MeshPacketStream:
+		return r.ingestPackets, true
 	case BurnStream:
 		// Always dispatched, even with no store wired: KnownStreams promises that
 		// every listed stream routes, so a reporter granted one never collects a
@@ -48,7 +50,7 @@ func (r *Registry) dispatch(stream string) (streamHandler, bool) {
 // 404s, and the config is the wrong place to discover that.
 //
 // TestKnownStreamsAllDispatch keeps this honest.
-func KnownStreams() []string { return []string{MeshStream, BurnStream} }
+func KnownStreams() []string { return []string{MeshStream, MeshPacketStream, BurnStream} }
 
 // ingestResponse is the 202 body. camelCase, like the rest of /api/v1.
 type ingestResponse struct {
@@ -111,14 +113,17 @@ func (r *Registry) ServeStream(w http.ResponseWriter, req *http.Request, stream 
 	now := r.now()
 	r.mu.Lock()
 	rep.lastAttemptAt = now
-	// Rate limit against the last ACCEPTED report, not the last attempt: limiting
-	// on attempts would let a client that is being rejected lock itself out
-	// indefinitely, since every retry would push the window forward.
+	// Rate limit against the last ACCEPTED report ON THIS STREAM, not the last
+	// attempt: limiting on attempts would let a client that is being rejected
+	// lock itself out indefinitely, since every retry would push the window
+	// forward. Per stream, because one reporter may run a telemetry monitor and
+	// a packet forwarder as two processes on two cadences.
 	minInterval := rep.cfg.MinIntervalOrDefault()
-	tooSoon := !rep.lastAcceptedAt.IsZero() && now.Sub(rep.lastAcceptedAt) < minInterval
+	last := rep.lastAcceptedByStream[stream]
+	tooSoon := !last.IsZero() && now.Sub(last) < minInterval
 	retryAfter := time.Duration(0)
 	if tooSoon {
-		retryAfter = minInterval - now.Sub(rep.lastAcceptedAt)
+		retryAfter = minInterval - now.Sub(last)
 	}
 	r.mu.Unlock()
 

@@ -34,8 +34,8 @@ import FilterGroup from '../components/FilterGroup.astro';
     <h2 id="directory-h" class="sr-only">Directory</h2>
 
     <p class="rail-caption">
-      <b>Kind</b>filtered in your browser — the directory is
-      <strong>not paginated</strong> and returns whole, so this is not another request
+      <b>Kind</b>filtered in your browser; the directory is
+      <strong>not paginated</strong>, so changing it makes no request
     </p>
 
     <div class="filter-set">
@@ -60,8 +60,8 @@ import FilterGroup from '../components/FilterGroup.astro';
         <div class="rail-block">
           <div class="rail-label">Geometry</div>
           <p>
-            The column distinguishes a full GeoJSON body from <span class="mono">bbox only</span> —
-            worth knowing before you rely on a place for point-in-polygon work.
+            The column shows whether a place has a full GeoJSON body or a
+            <span class="mono">bbox only</span>. Point-in-polygon work needs the full body.
           </p>
         </div>
       </aside>
