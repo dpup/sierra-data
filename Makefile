@@ -1,5 +1,5 @@
 # Live Data API Server - Build, Test, and Deployment Tasks
-.PHONY: ingest-token test-pge burn-line-dry-run build test proto proto-tools clean server tools site site-modules site-ensure site-install site-dev site-shots site-shots-mock check-wiring run dev lint fmt docker docker-build docker-run docker-run-dev docker-push docker-clean deploy install help test-meshcore
+.PHONY: ingest-token test-pge test-llm burn-line-dry-run build test proto proto-tools clean server tools site site-modules site-ensure site-install site-dev site-shots site-shots-mock check-wiring run dev lint fmt docker docker-build docker-run docker-run-dev docker-push docker-clean deploy install help test-meshcore
 
 # Go parameters
 GOCMD=go
@@ -32,6 +32,7 @@ TEST_CALTRANS_BINARY=$(BUILD_DIR)/test-caltrans
 TEST_WEATHER_BINARY=$(BUILD_DIR)/test-weather
 TEST_MESHCORE_BINARY=$(BUILD_DIR)/test-meshcore
 TEST_PGE_BINARY=$(BUILD_DIR)/test-pge
+TEST_LLM_BINARY=$(BUILD_DIR)/test-llm
 BURN_LINE_BINARY=$(BUILD_DIR)/burn-line
 TEST_GEO_UTILS_BINARY=$(BUILD_DIR)/test-geo-utils
 TEST_ALERT_ENHANCER_BINARY=$(BUILD_DIR)/test-alert-enhancer
@@ -59,7 +60,7 @@ $(SERVER_BINARY): proto site-ensure
 	$(GOBUILD) -o $(SERVER_BINARY) ./$(CMD_DIR)/server
 
 # Build CLI testing tools only
-tools: $(TEST_GOOGLE_BINARY) $(TEST_CALTRANS_BINARY) $(TEST_WEATHER_BINARY) $(TEST_MESHCORE_BINARY) $(TEST_PGE_BINARY) $(BURN_LINE_BINARY)
+tools: $(TEST_GOOGLE_BINARY) $(TEST_CALTRANS_BINARY) $(TEST_WEATHER_BINARY) $(TEST_MESHCORE_BINARY) $(TEST_PGE_BINARY) $(TEST_LLM_BINARY) $(BURN_LINE_BINARY)
 
 $(TEST_GOOGLE_BINARY): proto
 	$(GOBUILD) -o $(TEST_GOOGLE_BINARY) ./$(CMD_DIR)/test-google
@@ -75,6 +76,9 @@ $(TEST_WEATHER_BINARY): proto
 
 $(TEST_MESHCORE_BINARY): proto
 	$(GOBUILD) -o $(TEST_MESHCORE_BINARY) ./$(CMD_DIR)/test-meshcore
+
+$(TEST_LLM_BINARY): proto
+	$(GOBUILD) -o $(TEST_LLM_BINARY) ./$(CMD_DIR)/test-llm
 
 $(TEST_PGE_BINARY): proto
 	$(GOBUILD) -o $(TEST_PGE_BINARY) ./$(CMD_DIR)/test-pge
@@ -270,6 +274,19 @@ test-meshcore: $(TEST_MESHCORE_BINARY)
 # these undocumented endpoints show instead of an error.
 test-pge: $(TEST_PGE_BINARY)
 	./$(TEST_PGE_BINARY) $(if $(BOUNDS),--bounds=$(BOUNDS)) $(if $(JSON),--json)
+
+# Probe an OpenAI-compatible provider with the exact requests the AI features
+# send (strict json_schema with the production schemas, token-budget field,
+# reasoning control, latency, audio). Prints a Markdown report. Spends model
+# calls, so it is manual; .github/workflows/llm-probe.yml runs it from CI where
+# the keys live. See docs/design/lunaroute-compatibility.md §6.
+#
+#   OPENAI_API_KEY=lr_... make test-llm BASE_URL=https://gw.lunaroute.com/v1
+#   make test-llm MODELS=gpt-5-mini TRANSCRIBE=whisper-1 AUDIO=recording.mp3
+test-llm: $(TEST_LLM_BINARY)
+	./$(TEST_LLM_BINARY) $(if $(BASE_URL),-base-url="$(BASE_URL)") \
+		$(if $(MODELS),-models="$(MODELS)") $(if $(TRANSCRIBE),-transcribe-model="$(TRANSCRIBE)") \
+		$(if $(AUDIO),-audio="$(AUDIO)") $(if $(RUNS),-runs=$(RUNS)) $(if $(CONCURRENCY),-concurrency=$(CONCURRENCY))
 
 # Call the configured county burn lines and print the readings WITHOUT pushing.
 # This places REAL phone calls and spends Twilio + OpenAI credit, so it is

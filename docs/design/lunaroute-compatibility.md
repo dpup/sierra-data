@@ -231,8 +231,24 @@ simplification), the cache, the budgets, the single-writer ingest model, the
 
 ## 6. Probe checklist (phase 0, before any of §5)
 
-A throwaway Go test or `cmd/test-enhancer` tool, run with a real `lr_` key
-against each candidate model, recording the raw request and response:
+**Implemented as `cmd/test-llm`** (`make test-llm`), run from CI by the manual
+workflow `.github/workflows/llm-probe.yml`. The workflow reads the repo secret
+`LUNAROUTE_API_KEY` for the LunaRoute leg and the existing `OPENAI_API_KEY`
+for a gpt-5-mini baseline leg, synthesizes a burn-line recording with espeak
+so the audio endpoint is exercised without a phone call, and posts both
+Markdown reports as the run's step summary (also uploaded as artifacts). Run
+it from the Actions tab once the secret exists; the inputs let you change the
+model list, the latency repetitions and the parallel-request count.
+
+The tool sends the production request shapes (it imports the incident prompt
+and schema, and the exported `ingest.NWSSystemPrompt`/`NWSSummarySchema` and
+`burnline.ExtractPrompt`/`ExtractSchema`), so a pass means the real code would
+pass. Items 1 to 6 are automated; item 7 prints the raw outputs for hand
+scoring with the enum, length, decoration and forbidden-place checks applied
+heuristically.
+
+The checks, against each candidate model, recording the raw request and
+response:
 
 1. `response_format: json_schema, strict: true` with the **incident schema
    verbatim** (`AlertEnhancementSchema`). Does it 200? Does the output validate?
@@ -327,7 +343,7 @@ for free.
 
 | Phase | Work | Size |
 |---|---|---|
-| 0. Probe | §6 checklist as a disposable tool or live test; write the answers into this doc. Needs an `lr_` key. | 0.5 day |
+| 0. Probe | **Done, pending a key**: `cmd/test-llm` + `llm-probe.yml`. Add `LUNAROUTE_API_KEY` as a repo secret, dispatch the workflow, write the answers into this doc. | 0.5 day |
 | 1. Compatibility option | §5 config + client constructor + both enhancers + burn-line CLI + workflow variables + docs. Default behaviour unchanged. | 1 day |
 | 2. Robustness | Real `maxRetries` (429 honouring `Retry-After`, one bounded 503 retry); startup `HealthCheck`; empty-content-on-length error; a per-request enhancement deadline so a slow provider cannot hold `ListIncidents` past its own refresh interval. These are worth doing for OpenAI too. | 0.5 to 1 day |
 | 3. Bake-off | Run production with `PF__OPENAI__BASE_URL` set on a staging or second instance, `glm-5.3` first, for a week. Compare stored `summary`/`headline` revisions against OpenAI's by `enhancement.model`. Score on the §6 item 7 rubric. | calendar week, ~0.5 day of review |
