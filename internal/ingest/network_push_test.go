@@ -30,6 +30,12 @@ type fakePush struct{ snap pushingest.MeshSnapshot }
 
 func (f *fakePush) MeshReports() pushingest.MeshSnapshot { return f.snap }
 func (f *fakePush) ReporterIDs(string) []string          { return []string{"alan-pi"} }
+func (f *fakePush) ReporterConfig(id string) (config.Reporter, bool) {
+	if id != "alan-pi" {
+		return config.Reporter{}, false
+	}
+	return config.Reporter{ID: id, Name: "Alan's repeater monitor"}, true
+}
 
 // fakePrior is a canned Prior over a fixed event set.
 type fakePrior struct{ events []*gridv1.Event }
@@ -543,4 +549,58 @@ func TestPollProjectsTelemetrySamples(t *testing.T) {
 	res2, err := n2.Poll(testCtx(), &fakePrior{})
 	require.NoError(t, err)
 	assert.Empty(t, res2.MeshTelemetry)
+}
+
+// TestPacketForwarderKeepsTheRegistryInPlay pins the mesh.packet half of the
+// fail-loud rule: a live forwarder is a door into the registry, so its snapshot
+// is current with every broker down — and with every door shut the poll still
+// fails hard.
+func TestPacketForwarderKeepsTheRegistryInPlay(t *testing.T) {
+	reg := &fakeMeshRegistry{connected: 0, nodes: []meshcore.NodeState{{
+		PubKey: fullKey, Role: meshcore.RoleRepeater, Name: "SIERRA Camp Connell",
+		HasLocation: true, Lat: 38.3101, Lng: -120.278, LastHeardAt: pollNow,
+		Brokers: []string{"reporter:alan-pi"},
+	}}}
+
+	t.Run("brokers down, forwarder live: the snapshot is emitted", func(t *testing.T) {
+		n := pushNormalizer(t, reg, pushingest.MeshSnapshot{PacketLive: 1})
+		res, err := n.Poll(testCtx(), &fakePrior{})
+		require.NoError(t, err)
+		require.Len(t, res.Events, 1)
+		ev := res.Events[0]
+		assert.Equal(t, "meshcore:"+fullKey, ev.GetId())
+		assert.NotNil(t, ev.GetGeometry(), "the forwarded advert carried the position")
+		assert.Empty(t, res.SweepSuppress, "a live door is not a degraded one")
+		// Provenance names the forwarder's operator the way it names a broker's.
+		assert.Equal(t, "MeshCore community mesh via Alan's repeater monitor", ev.GetProvenance().GetAttribution())
+	})
+
+	t.Run("brokers down, forwarder stale: nothing current, sweep suppressed", func(t *testing.T) {
+		n := pushNormalizer(t, reg, pushingest.MeshSnapshot{Live: 1, SuppressSweep: true})
+		res, err := n.Poll(testCtx(), &fakePrior{})
+		require.NoError(t, err)
+		assert.Empty(t, res.Events, "a snapshot nobody is feeding is only what was heard before we went deaf")
+		assert.Equal(t, []string{"meshcore"}, res.SweepSuppress)
+	})
+
+	t.Run("every door shut is a hard error", func(t *testing.T) {
+		n := pushNormalizer(t, reg, pushingest.MeshSnapshot{})
+		_, err := n.Poll(testCtx(), &fakePrior{})
+		require.Error(t, err)
+	})
+}
+
+// A reporter on both streams is one reporter: one source row, one health entry.
+func TestReporterOnBothStreamsIsOneSourceRow(t *testing.T) {
+	n := pushNormalizer(t, &fakeMeshRegistry{connected: 1}, pushingest.MeshSnapshot{
+		Reporters:       []pushingest.ReporterHealth{{ID: "alan-pi", State: pushingest.ReporterOK}},
+		PacketReporters: []pushingest.ReporterHealth{{ID: "alan-pi", State: pushingest.ReporterOK}},
+		Live:            1,
+		PacketLive:      1,
+	})
+	assert.Equal(t, []string{"meshcore", "alan-pi"}, n.SourceIDs())
+	res, err := n.Poll(testCtx(), &fakePrior{})
+	require.NoError(t, err)
+	require.Len(t, res.PerSource, 1)
+	assert.NoError(t, res.PerSource["alan-pi"])
 }

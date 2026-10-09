@@ -608,6 +608,52 @@ Authorization: Bearer &lt;token&gt;
       a retry after a network failure overwrites rather than duplicates.</li>
   </ul>
 
+  <h3>Stream <code class="inline">mesh.packet</code> (schema_version 1)</h3>
+  <p>
+    The raw over-the-air packets a MeshCore companion radio received, forwarded
+    as-is. The Grid otherwise hears a node's <em>advert</em> — the signed packet
+    carrying its name, role and position — through community MQTT bridges, which
+    the SIERRA backbone reaches only when a distant gateway relays it (every few
+    days per repeater, measured 2026-10); a companion in the area hears the same
+    adverts daily. Each packet is the per-packet envelope the MQTT bridges publish,
+    and it goes through the same decoder and the same Ed25519 signature check as
+    an MQTT reception: the forwarder is a courier, and a packet it relays can only
+    say what the node itself signed.
+  </p>
+  <pre class="code">POST /api/v1/ingest/mesh.packet
+Authorization: Bearer &lt;token&gt;
+
+{
+  "schema_version": 1,
+  "generated_at": "2026-10-09T05:00:00Z",
+  "observer": "e3635c65dcd443e7…",        // the receiving radio's public key (optional)
+  "packets": [
+    {
+      "packet_type": 4,                   // ADVERT; other types are accepted and ignored
+      "raw": "11001148edae5567…",         // the full frame as hex, or a meshcore:// link
+      "SNR": 8.5, "RSSI": -95,            // optional, the radio's reading
+      "origin_id": "…",                   // optional, overrides observer for this packet
+      "timestamp": "2026-10-09T04:58:12Z" // optional; receive time is the Grid's own clock
+    }
+  ]
+}</pre>
+  <ul>
+    <li><strong><code class="inline">accepted</code> counts adverts applied</strong>,
+      not packets received. A packet that could not be used is a
+      <code class="inline">warnings[]</code> entry naming its index and why:
+      <code class="inline">malformed</code> (not hex, or not a decodable advert
+      frame) or <code class="inline">rejected</code> (the node's signature did not
+      verify). Up to 25 are listed, then a count.</li>
+    <li><strong>The rate limit is per stream.</strong> A reporter authorized for
+      both streams can run a forwarder and a telemetry monitor as two processes on
+      two cadences without one throttling the other.</li>
+    <li>Nodes heard this way are ordinary mesh events — presence, position and
+      relay path exactly as from a bridge — with
+      <code class="inline">provenance.attribution</code> naming the reporter
+      (<code class="inline">MeshCore community mesh via &lt;reporter name&gt;</code>)
+      the way it names a broker's operator.</li>
+  </ul>
+
   <h3>How it surfaces</h3>
   <ul>
     <li><strong>One event per node, not one per input.</strong> A node reported by a
@@ -636,13 +682,15 @@ Authorization: Bearer &lt;token&gt;
       revision per report: poll <code class="inline">events/{id}</code> for current
       values, and expect <code class="inline">/history</code> to show only
       meaningful changes.</li>
-    <li>A node known only to a monitor has <strong>no geometry</strong> — a report
-      carries no coordinates and the Grid does not invent them — so it appears in
+    <li>A node known only to a monitor, that no advert has ever located, has
+      <strong>no geometry</strong> — a report carries no coordinates and the Grid
+      does not invent them — so it appears in
       <code class="inline">/api/v1/events?layer=mesh</code> and, where the operator
       has configured a place attachment, in place-scoped views, but its
       <code class="inline">mesh_node</code> map feature has
       <code class="inline">"geometry": null</code> until an advert supplies a
-      position.</li>
+      position. Once one has, the position persists through the monitor's reports
+      between adverts (or arrives sooner through <code class="inline">mesh.packet</code>).</li>
   </ul>
   <div class="live-examples">
     <a href="/api/v1/events?layer=mesh">/api/v1/events?layer=mesh</a>

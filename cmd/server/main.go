@@ -211,29 +211,52 @@ func main() {
 	// broadcast adverts) and the push-ingest buffer (operator monitors reading
 	// repeater admin interfaces). The NetworkNormalizer merges them into one event
 	// per node on the scheduler's tick.
+	//
+	// The MeshCore registry itself has two doors: the MQTT brokers, and the
+	// mesh.packet push stream, through which an operator's companion radio
+	// forwards the raw adverts it hears (the SIERRA backbone reaches the
+	// community brokers only every few days; a companion in Arnold hears it
+	// daily). Either door justifies the registry; only the brokers need a
+	// connection.
 	var meshcoreReg ingest.MeshRegistry
-	if appConfig.Grid.Meshcore.Enabled && len(appConfig.Grid.Meshcore.Brokers) > 0 {
+	mqttEnabled := appConfig.Grid.Meshcore.Enabled && len(appConfig.Grid.Meshcore.Brokers) > 0
+	packetReporters := pushRegistry.ReporterIDs(pushingest.MeshPacketStream)
+	if mqttEnabled || len(packetReporters) > 0 {
 		reg := meshcore.NewRegistry(meshcoreClientConfig(appConfig))
 		// Rehydrate presence from the persisted store BEFORE connecting, so a
 		// deploy doesn't drop the whole mesh to "unknown" (and let the sweep expire
 		// the slow SIERRA repeaters) until every node re-adverts.
 		seedMeshRegistry(ctx, reg, gridStore)
-		if err := reg.Connect(ctx); err != nil {
-			logging.Errorw(ctx, "Failed to start MeshCore subscriber", "error", err)
-		} else {
-			defer reg.Close()
-			logging.Infow(ctx, "MeshCore subscriber started", "brokers", len(appConfig.Grid.Meshcore.Brokers))
-			meshcoreReg = reg
+		if mqttEnabled {
+			if err := reg.Connect(ctx); err != nil {
+				logging.Errorw(ctx, "Failed to start MeshCore subscriber", "error", err)
+			} else {
+				defer reg.Close()
+				logging.Infow(ctx, "MeshCore subscriber started", "brokers", len(appConfig.Grid.Meshcore.Brokers))
+			}
 		}
+		if len(packetReporters) > 0 {
+			pushRegistry.SetPacketSink(reg)
+			logging.Infow(ctx, "MeshCore packet forwarding enabled", "reporters", packetReporters)
+		}
+		meshcoreReg = reg
 	}
 	var meshPush ingest.MeshPushSource
 	if pushRegistry.Enabled() {
 		meshPush = pushRegistry
 		logging.Infow(ctx, "Push ingest enabled",
-			"reporters", pushRegistry.ReporterIDs(pushingest.MeshStream))
+			"reporters", pushRegistry.ReporterIDs(pushingest.MeshStream),
+			"packetReporters", packetReporters)
 	}
 	if meshcoreReg != nil || meshPush != nil {
-		meshSources := append([]string{"meshcore"}, pushRegistry.ReporterIDs(pushingest.MeshStream)...)
+		meshSources := []string{"meshcore"}
+		seen := map[string]bool{"meshcore": true}
+		for _, id := range append(pushRegistry.ReporterIDs(pushingest.MeshStream), packetReporters...) {
+			if !seen[id] {
+				seen[id] = true
+				meshSources = append(meshSources, id)
+			}
+		}
 		pollers = append(pollers, ingest.PollerSpec{
 			Normalizer: ingest.NewNetworkNormalizer(appConfig, meshcoreReg, meshPush),
 			Interval:   gridPollInterval(appConfig, meshSources...),

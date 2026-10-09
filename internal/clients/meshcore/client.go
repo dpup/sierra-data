@@ -329,43 +329,105 @@ func (r *Registry) onMessage(brokerID string) mqtt.MessageHandler {
 	}
 }
 
-// ingestRaw parses the bridge's JSON envelope and, if it's an advert, updates
-// the registry. Malformed/unrelated messages are dropped quietly (the feed is a
-// firehose of every packet type; adverts are a small slice).
+// PacketOutcome classifies what became of one packet envelope handed to
+// IngestEnvelope. The MQTT path only logs it; the push-ingest path reports it
+// back to the forwarder, which is why it is a value and not a log line.
+type PacketOutcome int
+
+const (
+	// PacketAccepted: an ADVERT that decoded (and verified, when required) and
+	// updated the registry.
+	PacketAccepted PacketOutcome = iota
+	// PacketIgnored: a well-formed envelope for a packet type we do not ingest.
+	// The bridges are a firehose of every packet type; this is the common case.
+	PacketIgnored
+	// PacketMalformed: the envelope was not JSON, `raw` was not hex, or the frame
+	// did not parse as an ADVERT.
+	PacketMalformed
+	// PacketRejected: an ADVERT whose Ed25519 signature did not verify, dropped
+	// under RequireValidSignature. The forwarder relayed it faithfully; the
+	// node (or whoever minted the frame) is the problem.
+	PacketRejected
+)
+
+func (o PacketOutcome) String() string {
+	switch o {
+	case PacketAccepted:
+		return "accepted"
+	case PacketIgnored:
+		return "ignored"
+	case PacketMalformed:
+		return "malformed"
+	case PacketRejected:
+		return "rejected"
+	default:
+		return fmt.Sprintf("PacketOutcome(%d)", int(o))
+	}
+}
+
+// ingestRaw is the MQTT door: it parses the bridge's JSON envelope and, if it's
+// an advert, updates the registry. Malformed/unrelated messages are dropped
+// quietly (the feed is a firehose of every packet type; adverts are a small
+// slice), with a Debug line for the malformed and a Warn for a bad signature.
 func (r *Registry) ingestRaw(payload []byte, brokerID string) {
+	outcome, err := r.IngestEnvelope(payload, brokerID, "")
+	switch outcome {
+	case PacketMalformed:
+		logging.Debugw(r.baseCtx, "MeshCore: dropping malformed packet", "broker", brokerID, "error", err)
+	case PacketRejected:
+		logging.Warnw(r.baseCtx, "MeshCore: dropping advert with invalid signature", "broker", brokerID, "error", err)
+	}
+}
+
+// IngestEnvelope applies one bridge-style JSON packet envelope (the per-packet
+// document the map-ecosystem bridges publish: `packet_type`, hex `raw`, `SNR`,
+// `RSSI`, `origin_id`, ...) to the registry, whichever door it arrived through.
+//
+// `source` names the delivery path for provenance — an MQTT broker URL, or a
+// push reporter's id — and is recorded on the node and on the observation
+// exactly as a broker URL is. `defaultGateway` names the receiving radio when
+// the envelope carries no `origin_id`/`origin` of its own (a forwarder that
+// knows which companion heard the packet but does not stamp every envelope);
+// empty falls back to `source`, as the MQTT path always has.
+//
+// `raw` may be bare hex or a `meshcore://<hex>` link, the form the map's own
+// uploader produces for the same frame, so a forwarder built from that code can
+// hand its packets over unchanged.
+//
+// The returned error carries detail for a Malformed or Rejected outcome and is
+// nil otherwise.
+func (r *Registry) IngestEnvelope(payload []byte, source, defaultGateway string) (PacketOutcome, error) {
 	var env packetEnvelope
 	if err := json.Unmarshal(payload, &env); err != nil {
-		logging.Debugw(r.baseCtx, "MeshCore: bad envelope JSON", "error", err)
-		return
+		return PacketMalformed, fmt.Errorf("bad envelope JSON: %w", err)
 	}
-	r.ingestPacket(&env, brokerID)
+	return r.ingestPacket(&env, source, defaultGateway)
 }
 
 // ingestPacket applies one decoded envelope to the registry. Split out from the
-// MQTT plumbing so it is unit-testable without a broker.
-func (r *Registry) ingestPacket(env *packetEnvelope, brokerID string) {
+// transport plumbing so it is unit-testable without a broker.
+func (r *Registry) ingestPacket(env *packetEnvelope, source, defaultGateway string) (PacketOutcome, error) {
 	if env.PacketType.int() != packetTypeAdvert {
-		return
+		return PacketIgnored, nil
 	}
-	raw, err := hex.DecodeString(strings.TrimSpace(env.Raw))
+	rawHex := strings.TrimPrefix(strings.TrimSpace(env.Raw), "meshcore://")
+	raw, err := hex.DecodeString(rawHex)
 	if err != nil {
-		logging.Debugw(r.baseCtx, "MeshCore: undecodable raw hex", "error", err)
-		return
+		return PacketMalformed, fmt.Errorf("raw is not hex: %w", err)
 	}
 	// The bridge `raw` is the full over-the-air frame (header + path + payload),
 	// so strip the transport framing before decoding the advert payload.
 	adv, err := DecodeFrame(raw)
 	if err != nil {
-		logging.Debugw(r.baseCtx, "MeshCore: advert decode failed", "error", err)
-		return
+		return PacketMalformed, err
 	}
 	if r.cfg.RequireValidSignature && !adv.SignatureValid {
-		logging.Warnw(r.baseCtx, "MeshCore: dropping advert with invalid signature", "pubkey", adv.PubKey)
-		return
+		return PacketRejected, fmt.Errorf("advert signature does not verify (pubkey %s)", adv.PubKey)
 	}
 
 	now := r.now()
-	gw := firstNonEmpty(env.OriginID, env.Origin, brokerID)
+	brokerID := source
+	gw := firstNonEmpty(env.OriginID, env.Origin, defaultGateway, brokerID)
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -439,6 +501,7 @@ func (r *Registry) ingestPacket(env *packetEnvelope, brokerID string) {
 	}
 
 	r.pruneLocked(now)
+	return PacketAccepted, nil
 }
 
 // allowObservationLocked reports whether a reception should be buffered, applying
