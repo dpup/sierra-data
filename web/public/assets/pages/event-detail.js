@@ -34,7 +34,7 @@ import { diffObjects } from '../diff.js';
 import { BASE_STYLE, BASE_ATTRIBUTION_OPTS, ensureBasemap, deferInteraction } from '../basemap.js';
 
 /**
- * The Event.detail oneof's protojson field names (grid.proto fields 20–30).
+ * The Event.detail oneof's protojson field names (grid.proto fields 20–27 and 31; 28–30 are reserved).
  * Exactly one may be present on an event; protojson uses the lowerCamelCase
  * proto field name as the JSON key.
  */
@@ -50,6 +50,7 @@ export const DETAIL_FIELDS = [
   'airQuality',
   'mesh',
   'announcement',
+  'burnStatus',
 ];
 
 /**

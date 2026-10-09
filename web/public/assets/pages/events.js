@@ -38,6 +38,7 @@ export const LAYER_OPTIONS = [
   'air_quality',
   'mesh',
   'announcement',
+  'burn_status',
 ];
 
 /** EventStatus values the `status` param accepts (repeatable). */
