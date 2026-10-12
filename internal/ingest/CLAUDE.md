@@ -475,8 +475,14 @@ From 2026-10-03 to a restart on 2026-10-09 ~09:00 UTC, the mesh layer logged
 activations a day), relay-link discovery ran at 1-5 an hour against ~150 an
 hour after the restart, and `/api/v1/sources` said `meshcore OK` throughout.
 CoreScope, reading the same gomesh broker, showed the SIERRA repeaters
-advertising normally all week. The root cause of the silence is not
-established, but the likeliest one was reproduced the same day. The client id
+advertising normally all week. **Root cause (confirmed afterwards from that
+process's own log):** an agent's local smoke-test server, started at 2026-10-03
+02:40 UTC on a scratch port with mesh enabled, survived its teardown and ran
+until 2026-10-09 08:45 UTC. Its log shows the broker dropping its session
+146-169 times a day for the whole window, as the session moved back and forth
+between it and production. A second leaked smoke-test server repeated it
+2026-10-09 08:45-15:30 UTC (51 drops). The mechanism, reproduced the same day,
+is below. The client id
 was a fixed `data.sierragridteam.org`, committed in `prefab.yaml`, and gomesh
 ACCEPTS a connection with no credentials (it just delivers nothing to it). A
 local build run with that config was accepted under production's id and then

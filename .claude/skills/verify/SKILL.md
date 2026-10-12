@@ -26,12 +26,15 @@ Server listens on **http://localhost:8181**. OpenAI key is required or the
 server exits at startup.
 
 ## Drive
+(The old `/api/v1/weather|hazards|situation|roads` routes were removed in the
+gRPC-gateway migration; these are the current ones. `jq` is not installed —
+pipe to `python3 -m json.tool`.)
 ```bash
-curl -s localhost:8181/api/v1/weather | jq .
-curl -s localhost:8181/api/v1/weather/alerts
-curl -s localhost:8181/api/v1/hazards/ebbetts-pass/weather_alert.geojson
-curl -s localhost:8181/api/v1/situation/ebbetts-pass
-curl -s localhost:8181/api/v1/roads
+curl -s localhost:8181/api/v1/sources
+curl -s localhost:8181/api/v1/events?layer=road_incident
+curl -s localhost:8181/api/v1/conditions
+curl -s localhost:8181/api/v1/places/ebbetts-pass/summary
+curl -s localhost:8181/api/v1/places/ebbetts-pass/map/road_segment.geojson
 ```
 Logs are structured JSON in `server.log` — grep for upstream fetches, e.g.
 `grep "Fetched NWS zone alerts" server.log`, `grep -c "Processing weather
@@ -60,6 +63,13 @@ make proto   # then: git status api/ — only files for protos you edited should
 ```
 
 ## Gotchas
+- **Run local servers with `PF__GRID__MESHCORE__ENABLED=false`, and confirm
+  teardown by PORT, not by the kill command's exit.** A smoke-test server that
+  survived its kill loop ran for six days (2026-10-03 to 10-09) and kept
+  production's mesh feed deaf the whole time — see "A deaf broker" in
+  `internal/ingest/CLAUDE.md`. After killing, `curl -m2 localhost:<port>` for
+  every port you used must get no answer. Leave mesh on only when the change
+  under test is the mesh client, and then only on a current build.
 - **Never run a server binary built from before 2026-10-09 with mesh enabled
   (`grid.meshcore.enabled: true` is the committed default).** Those builds
   connect to the production MQTT broker as `data.sierragridteam.org`, which is
