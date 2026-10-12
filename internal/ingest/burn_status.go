@@ -215,7 +215,16 @@ func (n *BurnStatusNormalizer) Poll(ctx context.Context, prior Prior) (*PollResu
 	for id, err := range n.reporterHealth() {
 		perSource[id] = err
 	}
-	return &PollResult{Events: events, PerSource: perSource}, nil
+	// Force-write every event. Each line's observation is outside the content
+	// hash (its message names the date), so a newer reading of the same answer is
+	// hash-equal and the scheduler would otherwise skip it, leaving the stored
+	// event on its first observation forever. Two events an hour, so no
+	// coalescing; the store's refresh path is a no-op when nothing changed.
+	force := make([]string, 0, len(events))
+	for _, ev := range events {
+		force = append(force, ev.GetId())
+	}
+	return &PollResult{Events: events, PerSource: perSource, ForceWrite: force}, nil
 }
 
 // reporterHealth maps each burn.line reporter's state onto its source row. A

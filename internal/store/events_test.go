@@ -1001,3 +1001,64 @@ func TestUpsertPersistsMeshTelemetryOnHashEqual(t *testing.T) {
 	assert.InDelta(t, 3.97, got.GetMesh().GetTelemetry().GetAdmin().GetBatteryVolts().GetValue(), 0.001,
 		"a telemetry-less poll must not wipe the last known sample")
 }
+
+// A burn status event's per-line observation (message, transcript, confidence,
+// call time) and CAL FIRE's observation stamp are excluded from the content hash
+// — the line's message names the date, so hashing it would mint a revision a
+// day. That makes this hash-equal path the ONLY thing that can persist a newer
+// reading of the same answer. Without it the event kept its first observation
+// forever: production served the 2026-10-09 call through 10-12 while daily
+// readings landed, and burnday.ersn.net, reading observation.observedAt as its
+// "as of", told residents the data was stale.
+func TestUpsertPersistsBurnObservationOnHashEqual(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	seedSource(t, s, "burnline")
+
+	mk := func(msg string, at time.Time, conf int32) *gridv1.Event {
+		return &gridv1.Event{
+			Id:         "burn:calaveras-county",
+			Layer:      gridv1.Layer_BURN_STATUS,
+			Severity:   gridv1.Severity_INFO,
+			Status:     gridv1.EventStatus_ACTIVE,
+			Headline:   "Calaveras County — no-burn day",
+			Provenance: &gridv1.Provenance{SourceId: "burnline", FetchedAt: timestamppb.New(at)},
+			ObservedAt: timestamppb.New(at),
+			Detail: &gridv1.Event_BurnStatus{BurnStatus: &gridv1.BurnStatusDetail{
+				BurnDay:           gridv1.BurnDay_BURN_DAY_NO,
+				Permission:        gridv1.BurnPermission_BURN_PERMISSION_PROHIBITED,
+				CalfireObservedAt: timestamppb.New(at),
+				BurnLines: []*gridv1.BurnLineReading{{
+					Id: "calaveras-apcd", BurnDay: gridv1.BurnDay_BURN_DAY_NO,
+					Observation: &gridv1.BurnObservation{Message: msg, Confidence: conf, ObservedAt: timestamppb.New(at)},
+				}},
+			}},
+		}
+	}
+	day1 := mk("Today, October 9th, is not a burn day", baseTime, 95)
+	_, err := s.UpsertEvent(ctx, day1)
+	require.NoError(t, err)
+
+	next := baseTime.Add(24 * time.Hour)
+	day2 := mk("Today, October 10th, is not a burn day", next, 91)
+	res, err := s.UpsertEvent(ctx, day2)
+	require.NoError(t, err)
+	assert.Equal(t, UpsertResult{Changed: false, Revision: 1}, res, "a new reading of the same answer must not mint a revision")
+	assert.Equal(t, 1, revisionCount(t, s, "burn:calaveras-county"))
+
+	got, err := s.GetEvent(ctx, "burn:calaveras-county")
+	require.NoError(t, err)
+	obs := got.GetBurnStatus().GetBurnLines()[0].GetObservation()
+	assert.Equal(t, "Today, October 10th, is not a burn day", obs.GetMessage(), "fresh message persisted")
+	assert.Equal(t, int32(91), obs.GetConfidence())
+	assert.True(t, obs.GetObservedAt().AsTime().Equal(next), "fresh call time persisted")
+	assert.True(t, got.GetBurnStatus().GetCalfireObservedAt().AsTime().Equal(next))
+	assert.True(t, got.GetObservedAt().AsTime().Equal(next), "event as-of follows the reading")
+	assert.True(t, got.GetProvenance().GetFetchedAt().AsTime().Equal(next))
+	assert.Equal(t, uint32(1), got.GetRevision())
+
+	// The observed_at index column is re-derived from the blob, not left behind.
+	var col int64
+	require.NoError(t, s.db.QueryRow(`SELECT observed_at FROM events WHERE id = ?`, "burn:calaveras-county").Scan(&col))
+	assert.Equal(t, next.Unix(), col, "index column follows the blob")
+}
