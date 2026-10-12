@@ -521,7 +521,23 @@ func (s *Store) refreshEventPlaces(tx *sql.Tx, ev *gridv1.Event) error {
 	telChanged := ev.GetMesh().GetTelemetry() != nil && stored.GetMesh() != nil &&
 		!proto.Equal(stored.GetMesh().GetTelemetry(), ev.GetMesh().GetTelemetry())
 
-	if !placesChanged && !enhChanged && !telChanged {
+	// Burn status's volatile block, excluded from the hash for the same reason as
+	// mesh telemetry: each line's observation names the date ("Today, October
+	// 10th, is not a burn day"), so it changes daily while the ANSWER does not.
+	// A newer reading of the same answer is therefore hash-equal and lands here,
+	// and this is the only thing that persists it. Without it the event kept its
+	// FIRST observation forever (2026-10-09 → 10-12 in production while daily
+	// readings landed), and consumers reading observation.observedAt as "as of"
+	// declared fresh data stale. The event's own observed_at / fetched_at follow
+	// the reading, since they are the "as of" the API documents.
+	burnChanged := false
+	if in, have := ev.GetBurnStatus(), stored.GetBurnStatus(); in != nil && have != nil {
+		burnChanged = !proto.Equal(burnVolatile(in), burnVolatile(have)) ||
+			!proto.Equal(ev.GetObservedAt(), stored.GetObservedAt()) ||
+			!proto.Equal(ev.GetProvenance().GetFetchedAt(), stored.GetProvenance().GetFetchedAt())
+	}
+
+	if !placesChanged && !enhChanged && !telChanged && !burnChanged {
 		return nil
 	}
 	if placesChanged {
@@ -539,9 +555,29 @@ func (s *Store) refreshEventPlaces(tx *sql.Tx, ev *gridv1.Event) error {
 	if telChanged {
 		stored.GetMesh().Telemetry = ev.GetMesh().GetTelemetry()
 	}
+	if burnChanged {
+		// The incoming burn detail differs from the stored one ONLY in the
+		// hash-excluded fields (the hashes are equal), so taking it wholesale
+		// persists the fresh observations without touching the answer.
+		stored.Detail = &gridv1.Event_BurnStatus{BurnStatus: ev.GetBurnStatus()}
+		stored.ObservedAt = ev.GetObservedAt()
+		if stored.Provenance != nil && ev.GetProvenance() != nil {
+			stored.Provenance.FetchedAt = ev.GetProvenance().GetFetchedAt()
+		}
+	}
 	newBlob, err := proto.Marshal(stored)
 	if err != nil {
 		return fmt.Errorf("store: marshal event %s for refresh: %w", ev.GetId(), err)
+	}
+	// Columns are indexes re-derived from the blob on every write (see
+	// internal/store/CLAUDE.md): the burn refresh moves observed_at, so the
+	// observed_at column moves with it. For every other refresh it is unchanged.
+	if stored.GetObservedAt() != nil {
+		if _, err := tx.Exec(`UPDATE events SET proto = ?, observed_at = ? WHERE id = ?`,
+			newBlob, stored.GetObservedAt().AsTime().Unix(), ev.GetId()); err != nil {
+			return fmt.Errorf("store: update event %s for refresh: %w", ev.GetId(), err)
+		}
+		return nil
 	}
 	if _, err := tx.Exec(`UPDATE events SET proto = ? WHERE id = ?`, newBlob, ev.GetId()); err != nil {
 		return fmt.Errorf("store: update event %s for refresh: %w", ev.GetId(), err)
@@ -854,4 +890,15 @@ func unionSorted(a, b []string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// burnVolatile returns just the hash-excluded part of a burn status detail —
+// CAL FIRE's observation stamp and each line's observation, in line order — so
+// the hash-equal refresh can tell whether a newer reading arrived.
+func burnVolatile(b *gridv1.BurnStatusDetail) *gridv1.BurnStatusDetail {
+	v := &gridv1.BurnStatusDetail{CalfireObservedAt: b.GetCalfireObservedAt()}
+	for _, l := range b.GetBurnLines() {
+		v.BurnLines = append(v.BurnLines, &gridv1.BurnLineReading{Id: l.GetId(), Observation: l.GetObservation()})
+	}
+	return v
 }

@@ -51,6 +51,23 @@ hash differs from the stored one. Zeroed fields and the reason each is excluded:
   node's **stable identity** (pubkey, role, name), its **location** (geometry is
   hashed — movement is meaningful), or a **status** flip. The volatile metrics ride
   forward untouched across polls, exactly like `summary`/`enhancement`.
+- `burn_status` per-line `observation` + `calfire_observed_at` (BURN_STATUS
+  only) — the burn line's message names the date, so it changes daily while the
+  ANSWER does not; hashed, it would mint a revision a day. The lines' `burn_day`
+  and the facets stay hashed: a changed answer IS the transition.
+
+**Every hash-excluded field needs a way back into the blob**, or it freezes at
+whatever was current the last time something hashed changed. The hash-equal
+path (`refreshEventPlaces`) persists, without a revision: place_ids, a fresh
+enhancement/summary, mesh telemetry, and burn status's observations (plus the
+burn event's `observed_at`/`fetched_at`, which follow the reading). The
+scheduler skips hash-equal events entirely unless the poller lists them in
+`PollResult.ForceWrite`, so a poller with such a field must list them — mesh
+does (coalesced), burn does (every event; two an hour). Burn status shipped
+without this and served its first observation from 2026-10-09 to 10-12 while
+daily readings landed; burnday.ersn.net read the frozen call time and told
+residents the data was stale. If you exclude a new field from the hash, add it
+to that path and to the poller's ForceWrite in the same change.
 
 `NeedsUpdate` is the read-only pre-check the scheduler uses for the budget
 decision; `UpsertEvent` re-computes the hash itself from the event **as passed**
@@ -75,7 +92,8 @@ equals what the next poll's `ContentHash` yields.
 Two different questions, do not conflate:
 
 - `observed_at` (blob + index column, caller-owned) — *when the content was
-  observed*. Moves only on a content change or a transition.
+  observed*. Moves only on a content change or a transition — except burn
+  status, where it follows each new reading (see the hash-equal path above).
 - `last_seen_at` (column only, `TouchSeen`) — *when a successful poll last
   included this event*, **coalesced**: the scheduler passes a staleness cutoff
   and only rows whose stamp is older than the coalescing window

@@ -690,3 +690,14 @@ func TestBurnPoll_NoReporterRowsWhenPushDisabled(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, res.PerSource)
 }
+
+// Every burn event is listed for a forced write. Its observation is outside the
+// content hash, so the scheduler would otherwise skip the hash-equal event and a
+// newer reading of the same answer would never reach the store (the event served
+// its first observation forever). Two events an hour; no coalescing needed.
+func TestBurnPoll_ForceWritesEveryEvent(t *testing.T) {
+	n := newBurnNormalizer(stdCfg(), &fakeCalfireBurn{rows: suspendedRows()}, freshLine("red"))
+	res, err := n.Poll(context.Background(), &scriptedPrior{})
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"burn:calaveras-county", "burn:tuolumne-county"}, res.ForceWrite)
+}
