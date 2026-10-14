@@ -43,12 +43,18 @@ type Properties struct {
 	SeverityRank int    `json:"severityRank"`
 	Headline     string `json:"headline"`
 	Description  string `json:"description,omitempty"`
-	Status       string `json:"status,omitempty"`
-	Effective    string `json:"effective,omitempty"`
-	Expires      string `json:"expires,omitempty"`
-	UpdatedAt    string `json:"updatedAt,omitempty"`
-	AreaLabel    string `json:"areaLabel,omitempty"`
-	Source       Source `json:"source"`
+	// Summary is the event's AI-written plain-language summary, the same value
+	// as Event.summary on /api/v1/events. Omitted (never "") when the event has
+	// none, so a client can fall back to description. SummaryEnhanced is set
+	// alongside it when a model wrote it, so a client can label it as such.
+	Summary         string           `json:"summary,omitempty"`
+	SummaryEnhanced *SummaryEnhanced `json:"summaryEnhanced,omitempty"`
+	Status          string           `json:"status,omitempty"`
+	Effective       string           `json:"effective,omitempty"`
+	Expires         string           `json:"expires,omitempty"`
+	UpdatedAt       string           `json:"updatedAt,omitempty"`
+	AreaLabel       string           `json:"areaLabel,omitempty"`
+	Source          Source           `json:"source"`
 
 	// Per-kind typed blocks (exactly one populated).
 	Incident     *IncidentProps     `json:"incident,omitempty"`
@@ -64,6 +70,12 @@ type Properties struct {
 	Power        *PowerProps        `json:"power,omitempty"`
 	MessageSign  *MessageSignProps  `json:"messageSign,omitempty"`
 	Camera       *CameraProps       `json:"camera,omitempty"`
+}
+
+// SummaryEnhanced is the minimal provenance of a machine-written summary: when
+// the model ran. The model name and its I/O stay on /api/v1/events.
+type SummaryEnhanced struct {
+	EnhancedAt string `json:"enhancedAt,omitempty"`
 }
 
 // Source identifies the upstream feed a feature came from.
@@ -121,6 +133,13 @@ type WeatherProps struct {
 	Event  string   `json:"event,omitempty"`
 	Source string   `json:"source,omitempty"` // NWS | OPENWEATHERMAP
 	Zones  []string `json:"zones,omitempty"`
+	// NWS CAP fields, verbatim (same values as weatherAlert.* on /api/v1/events).
+	// NWSSeverity is NWS's own vocabulary (Extreme..Minor), distinct from the
+	// unified envelope severity. Instruction is never paraphrased.
+	NWSSeverity string `json:"nwsSeverity,omitempty"`
+	Certainty   string `json:"certainty,omitempty"`
+	Urgency     string `json:"urgency,omitempty"`
+	Instruction string `json:"instruction,omitempty"`
 }
 
 // FireWeatherProps is the fire_weather kind block. On the region banner it carries

@@ -232,9 +232,52 @@ func TestProjectEvents_WeatherAlert_ZonelessNullGeometry(t *testing.T) {
 	    "effective": "2026-07-04T10:00:00Z",
 	    "expires": "2026-07-04T20:00:00Z",
 	    "source": {"id": "nws", "name": "NWS Sacramento CA"},
-	    "weather": {"event": "Red Flag Warning", "source": "NWS", "zones": ["CAZ064"]}
+	    "weather": {
+	      "event": "Red Flag Warning", "source": "NWS", "zones": ["CAZ064"],
+	      "nwsSeverity": "Severe", "certainty": "Likely", "urgency": "Expected",
+	      "instruction": "Avoid outdoor burning."
+	    }
 	  }
 	}`, featJSON(t, feats[0]))
+}
+
+// An enhanced summary rides on every layer's feature, beside (never instead
+// of) the description, with a provenance marker; an event without one omits
+// both keys entirely so a client falls back to description.
+func TestProjectEvents_SummaryOnFeature(t *testing.T) {
+	enhanced := &gridv1.Event{
+		Id:          "wx:urn:oid:2.49.0.1.840.0.abc",
+		Layer:       gridv1.Layer_WEATHER_ALERT,
+		Status:      gridv1.EventStatus_ACTIVE,
+		Headline:    "Red Flag Warning",
+		Description: "...RED FLAG WARNING IN EFFECT...",
+		Summary:     "Strong winds and very low relative humidity.",
+		Enhancement: &gridv1.Enhancement{Model: "m", EnhancedAt: ts("2026-10-14T03:00:00Z")},
+		Detail:      &gridv1.Event_WeatherAlert{WeatherAlert: &gridv1.WeatherAlertDetail{}},
+	}
+	raw := &gridv1.Event{
+		Id:       "wx:raw",
+		Layer:    gridv1.Layer_WEATHER_ALERT,
+		Status:   gridv1.EventStatus_ACTIVE,
+		Headline: "Wind Advisory",
+		Detail:   &gridv1.Event_WeatherAlert{WeatherAlert: &gridv1.WeatherAlertDetail{}},
+	}
+	feats := ProjectEvents(hazards.LayerWeatherAlert, []*gridv1.Event{enhanced, raw})
+	require.Len(t, feats, 2)
+
+	var got struct {
+		Properties map[string]any `json:"properties"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(featJSON(t, feats[0])), &got))
+	p := got.Properties
+	assert.Equal(t, "Strong winds and very low relative humidity.", p["summary"])
+	assert.Equal(t, "...RED FLAG WARNING IN EFFECT...", p["description"])
+	assert.Equal(t, map[string]any{"enhancedAt": "2026-10-14T03:00:00Z"}, p["summaryEnhanced"])
+
+	got.Properties = nil
+	require.NoError(t, json.Unmarshal([]byte(featJSON(t, feats[1])), &got))
+	assert.NotContains(t, got.Properties, "summary")
+	assert.NotContains(t, got.Properties, "summaryEnhanced")
 }
 
 func TestProjectEvents_Earthquake_UpdatedAtRule(t *testing.T) {
@@ -380,6 +423,7 @@ func TestProjectEvents_RoadIncident_SourceBlockPerFeed(t *testing.T) {
 	    "severityRank": 3,
 	    "headline": "Vehicle fire on Hwy 4",
 	    "description": "Vehicle fire blocking the right lane",
+	    "summary": "Vehicle fire blocking the right lane",
 	    "status": "ACTIVE",
 	    "effective": "2026-07-04T06:24:00Z",
 	    "updatedAt": "2026-07-04T07:00:00Z",
