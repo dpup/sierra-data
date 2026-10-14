@@ -675,6 +675,13 @@ closures are deliberately never enhanced, see above).
   times — all of those are typed fields on the same record. Prompt policy cannot
   be unit-tested; `TestNWSEnhancerLive` (skipped unless `NWS_ENHANCE_LIVE=1`)
   runs the real prompt against a real product and asserts these.
+- **The summary never mentions the instructions and never uses day-relative
+  time** (policies 3 and 6, 2026-10-14). The instruction is a structured field
+  on `/events` and on the map feature, and a stored summary carries forward for
+  the alert's whole life, so "tonight" goes wrong the next morning. When the
+  alert's timing is only day-relative, the summary leaves timing out rather than
+  computing clock times: that would be the model asserting a fact.
+  `TestNWSEnhancerLiveRelativeTiming` runs the Red Flag Warning that prompted it.
 
 ## Burn status: ambient state whose VALUE is the revision history
 

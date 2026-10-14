@@ -46,17 +46,29 @@ type NWSEnhancer interface {
 // displays. The reader of a regional summary is answering one question: does
 // this affect me, here, today. Zone rosters and timestamps do not help them
 // answer it, and they crowded out the part that did.
+//
+// Rules 3, 6, 9 and 10 were tightened 2026-10-14 on feedback from the /live map
+// (sierragridteam.org). Rule 3 used to tell the model to say "the alert includes
+// instructions — consult the original", but no link to the original exists and
+// the instruction is now a structured field on both /events and the map layer,
+// so the sentence only pointed at nothing. Rule 6 allowed the alert's own
+// relative words, which let "tonight" through; a stored summary carries forward
+// for the life of the alert, so day-relative words go wrong the next morning.
+// Timing stays in the alert's own weekday words rather than model-computed
+// clock times: computing them would be the model asserting a fact (rule 1).
 const NWSSystemPrompt = `You condense National Weather Service alerts for a local hazard dashboard.
 
 Policy — enhancement translates, never asserts:
 1. Your summary may contain no place, number, or instruction not present in the alert text or the supplied place-name list.
 2. The place-name list is the only permitted external knowledge: use it to translate forecast-zone references into named local places. Never introduce a place that is in neither the alert nor the list.
-3. Never paraphrase directives. If the alert instructs people to do something, say the alert includes instructions and that readers should consult the original; do not restate, reword, or summarize the instruction itself.
+3. Never paraphrase directives. Leave the alert's instructions out of your summary entirely: do not restate, reword, or summarize them, and do not mention that the alert has instructions or point the reader to the original — the instructions are displayed verbatim alongside your summary.
 4. Write at most 2 sentences and at most 320 characters, unwrapping the hard-wrapped ALL-CAPS "* WHAT/WHERE/WHEN/IMPACTS" blocks into prose. Lead with the hazard itself and what it means on the ground — the reader is deciding whether this affects them where they are, today.
 5. Never reproduce forecast-zone or fire-zone identifiers, zone numbers, or their elevation bands. A supplied place name lies inside the affected area — that is where the reader is, and it is why the name was supplied — so name it rather than describing the region generically. Only where no place name is supplied may you fall back to the alert's own general terms for the area.
-6. Do not restate the issuing office, the time the alert was issued, or when it expires — all three are displayed alongside your summary. Give timing only in the alert's own relative words ("late Wednesday night through Thursday evening"), and only if it fits.
+6. Do not restate the issuing office, the time the alert was issued, or when it expires — all three are displayed alongside your summary. Give timing only by weekday, in the alert's own words ("late Wednesday night through Thursday evening"), and only if it fits. Never use words relative to the current day ("today", "tonight", "tomorrow", "this afternoon"): your summary is read on later days, when they are wrong. If either end of the alert's timing is given only in such words, leave timing out of your summary entirely — do not just delete the relative word and keep the rest ("from midnight to 10 AM Friday" is wrong: which midnight?).
 7. The headline, which names the product, is displayed directly above your summary. Do not open with the product's name or restate the headline — start with the hazard itself, and add what the headline does not say.
-8. Add no advice, speculation, or urgency the alert does not itself state.`
+8. Add no advice, speculation, or urgency the alert does not itself state.
+9. Keep the alert's qualifiers ("possible", "up to", "portions of", "locally"): never widen a number, an area, or a likelihood beyond what the alert says.
+10. Write plain sentences for the general public. Spell out abbreviations and jargon ("relative humidity", not "RH"). No exclamation marks.`
 
 // NWSSummarySchema is the structured-output contract: exactly one required
 // string field, so a well-formed response can never be missing the summary.
@@ -68,7 +80,7 @@ var NWSSummarySchema = openai.ChatCompletionResponseFormatJSONSchema{
 		"properties": {
 			"summary": {
 				"type": "string",
-				"description": "At most 2 sentences and at most 320 characters, condensing the alert per the policy. No zone identifiers, no timestamps, no repetition of the headline."
+				"description": "At most 2 sentences and at most 320 characters, condensing the alert per the policy. No zone identifiers, no timestamps, no day-relative words, no instructions, no repetition of the headline."
 			}
 		},
 		"required": ["summary"],

@@ -125,8 +125,12 @@ func projectWeatherAlert(ev *gridv1.Event) hazards.Feature {
 		// The shipped block carried the api.AlertSource enum name; every stored
 		// weather alert is NWS-sourced (OpenWeatherMap alerts were removed
 		// 2026-07-04), so this is a projection constant.
-		Source: "NWS",
-		Zones:  d.GetZones(),
+		Source:      "NWS",
+		Zones:       d.GetZones(),
+		NWSSeverity: d.GetNwsSeverity(),
+		Certainty:   d.GetCertainty(),
+		Urgency:     d.GetUrgency(),
+		Instruction: d.GetInstruction(),
 	}
 	return feature(ev, p)
 }
@@ -389,7 +393,21 @@ func baseProps(ev *gridv1.Event, layer, kind string) hazards.Properties {
 		SeverityRank: int(ev.GetSeverity().Number()),
 		Headline:     ev.GetHeadline(),
 		AreaLabel:    ev.GetAreaLabel(),
+		Summary:      ev.GetSummary(),
+		// Provenance only labels a summary that exists: an enhancement that
+		// produced no summary has nothing on the feature to badge.
+		SummaryEnhanced: summaryEnhanced(ev),
 	}
+}
+
+// summaryEnhanced is the feature-level marker that the summary was written by a
+// model, or nil when there is no summary or it did not come from a model.
+func summaryEnhanced(ev *gridv1.Event) *hazards.SummaryEnhanced {
+	e := ev.GetEnhancement()
+	if ev.GetSummary() == "" || e == nil {
+		return nil
+	}
+	return &hazards.SummaryEnhanced{EnhancedAt: rfc3339(e.GetEnhancedAt())}
 }
 
 // feature wraps props with the event's geometry as an RFC 7946 Feature.

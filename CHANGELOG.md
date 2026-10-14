@@ -14,6 +14,46 @@ throughout; errors are gRPC-standard `{code, codeName, message, details}`). The
 by a snake_case `/v1` surface on 2026-07-05, which was in turn folded back onto the
 proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 
+## 2026-10-14
+
+### Map features carry the AI `summary`; weather alerts carry the NWS CAP fields
+
+**Additive only.** No existing key changes or disappears.
+
+- **`properties.summary`** on every `/api/v1/places/{place}/map/{layer}.geojson`
+  feature whose event has an AI-written summary. It is the same value as
+  `summary` on `/api/v1/events`. The key is **omitted** (never `""`) when there
+  is none, so fall back to `properties.description`, which is unchanged.
+- **`properties.summaryEnhanced: { "enhancedAt": "<RFC 3339>" }`** is present
+  alongside a machine-written summary, so a client can label it. The model name
+  and the model's input and output stay on `/api/v1/events` (`enhancement`).
+- **`weather_alert` features**: `properties.weather` gains `nwsSeverity`,
+  `certainty`, `urgency` and `instruction`, the same values as
+  `weatherAlert.*` on `/api/v1/events`. `instruction` is NWS's text verbatim.
+- **`road_incident` features**: `properties.description` was already the AI
+  narrative for CHP incidents (the raw original is only on `/api/v1/events`),
+  so `summary` there usually repeats `description`. Do not render both.
+
+Today the summarized layers are `weather_alert` and CHP incidents on
+`road_incident`. A layer enhanced later gets the same keys with no further
+change.
+
+**Weather-alert summaries are written differently from this date forward.**
+Existing summaries are kept until their alert changes.
+
+- They no longer mention the alert's instructions ("the alert includes
+  instructions, consult the original"). Render `weather.instruction` /
+  `weatherAlert.instruction` instead.
+- They no longer use day-relative words ("tonight", "today"). Timing appears
+  only in the alert's own weekday terms, and is left out when the alert gives
+  it only relative to the issue day. Use `effective`/`expires`.
+- They spell out abbreviations ("relative humidity", not "RH"), keep the alert's
+  qualifiers ("possible", "portions of"), and use no exclamation marks.
+
+A place-scoped event list already exists as a query parameter:
+`GET /api/v1/events?place=ebbetts-pass&layer=weather_alert`. There is no
+`/api/v1/places/{place}/events` path.
+
 ## 2026-10-09
 
 ### Mesh: values change on every `MESH` event, and `meshcore` health now reports a deaf broker
