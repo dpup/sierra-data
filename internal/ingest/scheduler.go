@@ -29,6 +29,26 @@ const maxStartJitter = 90 * time.Second
 type PollerSpec struct {
 	Normalizer Normalizer
 	Interval   time.Duration
+	// Wake, when set, runs an extra tick as soon as it receives, on top of the
+	// interval. It is for a pushed source whose data has already landed: the
+	// burn line is read once a day and staged by the push endpoint, and with a
+	// 1h interval the event lagged the reading by up to an hour. The extra tick
+	// runs on this poller's own goroutine, so the single-writer rule and
+	// pollerState are unchanged. Signal it with a non-blocking send on a
+	// 1-buffered channel (see NewWake), so a burst of signals is one tick.
+	Wake <-chan struct{}
+}
+
+// NewWake returns a channel for PollerSpec.Wake and the function that signals
+// it. The signal never blocks: a wake already pending absorbs another one.
+func NewWake() (<-chan struct{}, func()) {
+	ch := make(chan struct{}, 1)
+	return ch, func() {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
+	}
 }
 
 // MeshMaintenance configures the periodic compaction + prune of the MeshCore
@@ -66,6 +86,7 @@ type Scheduler struct {
 	budgetPerTick int
 	meshMaint     MeshMaintenance
 	now           func() time.Time // injectable for lifecycle tests
+	startJitter   time.Duration    // maxStartJitter; tests set 0
 }
 
 // NewScheduler builds a scheduler over the given store.
@@ -79,6 +100,7 @@ func NewScheduler(st *store.Store, cfg SchedulerConfig) *Scheduler {
 		budgetPerTick: cfg.BudgetPerTick,
 		meshMaint:     cfg.MeshMaintenance,
 		now:           time.Now,
+		startJitter:   maxStartJitter,
 	}
 }
 
@@ -195,10 +217,12 @@ func (s *Scheduler) safeMeshMaintenance(ctx context.Context) {
 func (s *Scheduler) run(ctx context.Context, spec PollerSpec) {
 	// Goroutine-local across this poller's whole life; see pollerState.
 	st := &pollerState{}
-	select {
-	case <-ctx.Done():
-		return
-	case <-time.After(rand.N(maxStartJitter)):
+	if s.startJitter > 0 {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(rand.N(s.startJitter)):
+		}
 	}
 	s.safeTick(ctx, spec, st)
 
@@ -210,6 +234,8 @@ func (s *Scheduler) run(ctx context.Context, spec PollerSpec) {
 			logging.Infow(ctx, "Ingest poller stopping", "sources", spec.Normalizer.SourceIDs())
 			return
 		case <-ticker.C:
+			s.safeTick(ctx, spec, st)
+		case <-spec.Wake: // nil channel (no Wake) never receives
 			s.safeTick(ctx, spec, st)
 		}
 	}

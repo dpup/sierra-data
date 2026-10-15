@@ -818,3 +818,44 @@ func TestTickCoalescesTouchSeen(t *testing.T) {
 	sched.tick(ctx, spec, ps)
 	assert.Equal(t, now.Unix(), lastSeen(), "a tick past the window must refresh the stamp")
 }
+
+// signalNormalizer reports each Poll on a channel, so a test can wait for a
+// tick from another goroutine without racing on a counter.
+type signalNormalizer struct{ polled chan struct{} }
+
+func (n *signalNormalizer) SourceIDs() []string { return []string{"burnline"} }
+func (n *signalNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult, error) {
+	n.polled <- struct{}{}
+	return &PollResult{}, nil
+}
+
+// A wake runs a tick now rather than on the next interval: the burn line's
+// pushed reading otherwise waited up to an hour to reach its event.
+func TestSchedulerWakeRunsAnExtraTick(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "grid.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { st.Close() })
+
+	n := &signalNormalizer{polled: make(chan struct{}, 4)}
+	wake, signal := NewWake()
+	s := NewScheduler(st, SchedulerConfig{Pollers: []PollerSpec{{
+		Normalizer: n, Interval: time.Hour, Wake: wake,
+	}}})
+	s.startJitter = 0
+	ctx, cancel := context.WithCancel(testCtx())
+	t.Cleanup(cancel)
+	s.Start(ctx)
+
+	waitPoll := func(what string) {
+		t.Helper()
+		select {
+		case <-n.polled:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("no poll: %s", what)
+		}
+	}
+	waitPoll("initial tick")
+	signal()
+	signal() // coalesces with the pending one: never blocks the caller
+	waitPoll("woken tick")
+}

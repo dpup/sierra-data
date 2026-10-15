@@ -165,6 +165,9 @@ type Registry struct {
 	// once-daily reading cannot live in an in-memory buffer like mesh's.
 	burn      BurnStore
 	burnLines map[string]bool
+	// burnAccepted, when set, is called after a burn report is staged (see
+	// WithBurnAccepted). Must not block.
+	burnAccepted func()
 
 	// mesh holds the latest full set per reporter: reporterID -> nodeID -> report.
 	// A report REPLACES its reporter's map wholesale, because a report is that
@@ -204,6 +207,13 @@ func WithBurnLines(st BurnStore, lineIDs []string) Option {
 			r.burnLines[strings.ToLower(strings.TrimSpace(id))] = true
 		}
 	}
+}
+
+// WithBurnAccepted registers fn to run after each accepted burn.line report —
+// the server uses it to wake the burn poller (ingest.PollerSpec.Wake). fn runs
+// on the request goroutine, outside the registry lock, and must not block.
+func WithBurnAccepted(fn func()) Option {
+	return func(r *Registry) { r.burnAccepted = fn }
 }
 
 func NewRegistry(cfg config.IngestConfig, opts ...Option) (*Registry, error) {

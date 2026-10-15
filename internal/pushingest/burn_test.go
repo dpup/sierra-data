@@ -242,3 +242,25 @@ func TestRestoreBurnHealth_UnattributedRows(t *testing.T) {
 		assert.Equal(t, ReporterUnknown, h.State, h.ID)
 	}
 }
+
+// An accepted report fires the hook (which wakes the burn poller); a rejected
+// one does not, since nothing new was staged.
+func TestBurnStream_AcceptedReportFiresHook(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "grid.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { st.Close() })
+	calls := 0
+	r, err := NewRegistry(config.IngestConfig{Reporters: []config.Reporter{{
+		ID: "burn-line", TokenSha256: TokenHash(testToken),
+		Streams: []string{BurnStream}, MinInterval: time.Nanosecond,
+	}}}, WithBurnLines(st, []string{"calaveras-apcd"}), WithBurnAccepted(func() { calls++ }))
+	require.NoError(t, err)
+
+	w := post(r, testToken, BurnStream, burnBody(reading("not-a-line", "red", burnObserved)))
+	require.NotEqual(t, http.StatusAccepted, w.Code)
+	assert.Equal(t, 0, calls)
+
+	w = post(r, testToken, BurnStream, burnBody(reading("calaveras-apcd", "red", burnObserved)))
+	require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
+	assert.Equal(t, 1, calls)
+}

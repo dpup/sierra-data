@@ -801,6 +801,14 @@ a day. Each staged row records its `reporter_id` (migrationV8), and
 `pushingest.Registry.RestoreBurnHealth` restores the last-accepted time from
 those rows at startup.
 
+**An accepted push wakes the burn poller.** The push only stages a row; the
+event is rebuilt on the poller's tick, which is hourly, so a reading (and a
+manual re-run) used to wait up to an hour to show. `pushingest.WithBurnAccepted`
+signals `PollerSpec.Wake` (`NewWake`), and the poller runs an extra tick on its
+own goroutine — same single writer, same `pollerState`. That tick also refetches
+CAL FIRE's Akamai-fronted page, which is acceptable at one or two pushes a day;
+the reporter's rate limit bounds anything more.
+
 ### Not a map layer, and place attachment without geometry
 
 These events carry **no geometry** — burn status is an administrative fact about
