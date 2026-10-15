@@ -19,10 +19,11 @@ const BurnStream = "burn.line"
 // burnSchemaVersion is the payload contract this handler understands.
 const burnSchemaVersion = 1
 
-// BurnStore is the write side the burn.line stream needs (satisfied by
-// *store.Store).
+// BurnStore is what the burn.line stream needs (satisfied by *store.Store):
+// the write side, plus the read side RestoreBurnHealth uses at startup.
 type BurnStore interface {
 	PutBurnReading(ctx context.Context, r store.BurnReading) error
+	BurnReadings(ctx context.Context) (map[string]store.BurnReading, error)
 }
 
 // burnPayload is one report. Request bodies are snake_case here, matching
@@ -142,6 +143,7 @@ func (r *Registry) ingestBurn(ctx context.Context, rep *reporter, body []byte, m
 			Confidence: in.Confidence,
 			ObservedAt: observed,
 			ReceivedAt: now,
+			ReporterID: rep.cfg.ID,
 		}); err != nil {
 			// A store failure is OURS, not the reporter's: fail the request so it
 			// retries, rather than 202-ing a reading we did not keep.
@@ -162,4 +164,48 @@ func (r *Registry) ingestBurn(ctx context.Context, rep *reporter, body []byte, m
 	r.mu.Unlock()
 
 	return accepted, warnings, nil
+}
+
+// RestoreBurnHealth sets each burn.line reporter's last-accepted time from the
+// staged readings, so a restart does not forget that it reported.
+//
+// Reporter health is otherwise in-memory. That is harmless for a mesh monitor,
+// which reports again within minutes, but the burn line pushes once a day: every
+// deploy turned its /sources row to "no report received yet" (STALE) for up to
+// a day while the readings it had delivered were stored and current.
+//
+// A row staged before the reporter id was recorded (migrationV8) is credited
+// only when exactly one reporter is granted burn.line — then it can only have
+// come from that one. With several, an unattributed row is ignored rather than
+// guessed. Call once at startup, before the endpoint takes traffic.
+func (r *Registry) RestoreBurnHealth(ctx context.Context) error {
+	if r == nil || r.burn == nil {
+		return nil
+	}
+	rows, err := r.burn.BurnReadings(ctx)
+	if err != nil {
+		return err
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var granted []*reporter
+	byID := make(map[string]*reporter)
+	for _, rep := range r.order {
+		if rep.streams[BurnStream] {
+			granted = append(granted, rep)
+			byID[rep.cfg.ID] = rep
+		}
+	}
+	for _, row := range rows {
+		rep := byID[row.ReporterID]
+		if row.ReporterID == "" && len(granted) == 1 {
+			rep = granted[0]
+		}
+		if rep == nil || !row.ReceivedAt.After(rep.lastAcceptedAt) {
+			continue
+		}
+		rep.lastAcceptedAt = row.ReceivedAt
+	}
+	return nil
 }

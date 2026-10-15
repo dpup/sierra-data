@@ -215,6 +215,11 @@ func main() {
 		logging.Errorw(ctx, "Invalid grid.ingest configuration", "error", err)
 		log.Fatalf("Invalid grid.ingest configuration: %v", err)
 	}
+	// Reporter health is in-memory; without this every deploy reports the
+	// once-a-day burn-line reporter as never having reported until its next run.
+	if err := pushRegistry.RestoreBurnHealth(ctx); err != nil {
+		logging.Warnw(ctx, "Could not restore burn reporter health", "error", err)
+	}
 
 	// Burn status (optional): per-county residential burning status from two
 	// independent authorities — the county air district's burn line and CAL

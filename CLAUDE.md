@@ -424,9 +424,8 @@ survives as a legacy alias):
   several counties (list them all and it is dialed ONCE). A county's lines merge
   taking the MOST RESTRICTIVE answer; each line's own answer stays visible in
   `burnStatus.burnLines[]`.
-- Calaveras is dialed today. Tuolumne's number (209-533-5598) is published on its
-  event but not dialed (`enabled: false`), so it carries the CAL FIRE facet with
-  `burnDay` UNKNOWN. **`prefab.yaml` is the single source of truth** — the
+- Both Calaveras (209-754-6600) and Tuolumne (209-533-5598, enabled 2026-10-15)
+  are dialed. **`prefab.yaml` is the single source of truth** — the
   workflow enumerates no numbers, it just runs the tool, so adding or enabling a
   line is one edit in one file.
 
