@@ -163,6 +163,11 @@ func (r *Registry) ingestBurn(ctx context.Context, rep *reporter, body []byte, m
 	rep.reports++
 	r.mu.Unlock()
 
+	// Wake the burn poller so the event reflects the reading now, not on the
+	// next hourly tick. Outside the lock; the hook must not block.
+	if r.burnAccepted != nil {
+		r.burnAccepted()
+	}
 	return accepted, warnings, nil
 }
 

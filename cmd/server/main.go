@@ -209,8 +209,12 @@ func main() {
 	for _, l := range appConfig.Grid.Burn.Lines {
 		burnLineIDs = append(burnLineIDs, l.ID)
 	}
+	// An accepted burn reading wakes the burn poller, so the event shows it
+	// right away instead of on the next hourly tick.
+	burnWake, wakeBurn := ingest.NewWake()
 	pushRegistry, err := pushingest.NewRegistry(appConfig.Grid.Ingest,
-		pushingest.WithBurnLines(gridStore, burnLineIDs))
+		pushingest.WithBurnLines(gridStore, burnLineIDs),
+		pushingest.WithBurnAccepted(wakeBurn))
 	if err != nil {
 		logging.Errorw(ctx, "Invalid grid.ingest configuration", "error", err)
 		log.Fatalf("Invalid grid.ingest configuration: %v", err)
@@ -233,6 +237,7 @@ func main() {
 			Normalizer: ingest.NewBurnStatusNormalizer(appConfig, calfireburn.NewClient(), gridStore,
 				storePlaceIndex{gridStore}, burnReporters(pushRegistry)),
 			Interval: gridPollInterval(appConfig, "burnline", "calfire-burn"),
+			Wake:     burnWake,
 		})
 	}
 

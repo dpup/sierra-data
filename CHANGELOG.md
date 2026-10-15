@@ -26,6 +26,9 @@ YES/NO/MARGINAL. `permission` can now be `BURN_PERMISSION_ALLOWED` for Tuolumne
 when CAL FIRE also permits it. Until that first reading lands, the `burnline`
 source in `/api/v1/sources` reports "no reading has been pushed" for Tuolumne.
 
+A pushed reading now reaches `burn:<county>` within seconds of the daily run,
+instead of on the burn poller's next hourly tick.
+
 The `burn-line` reporter row in `/api/v1/sources` no longer reads STALE ("no
 report received yet") for up to a day after each deploy. The server now restores
 the reporter's last report time from the stored readings at startup.
