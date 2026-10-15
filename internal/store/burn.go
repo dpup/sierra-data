@@ -21,7 +21,10 @@ type BurnReading struct {
 	Transcript string    // cleaned transcript of the recording
 	Confidence int32     // 0-100, the extraction model's own confidence
 	ObservedAt time.Time // when the burn line was CALLED — the freshness signal
-	ReceivedAt time.Time // when the push was accepted (diagnostic only)
+	ReceivedAt time.Time // when the push was accepted (restores reporter health on restart)
+	// ReporterID is the push reporter that delivered it ("" on rows staged
+	// before migrationV8). It lets a restart restore that reporter's health.
+	ReporterID string
 }
 
 // PutBurnReading stores the latest reading for a line, replacing any previous
@@ -46,15 +49,16 @@ func (s *Store) PutBurnReading(ctx context.Context, r BurnReading) error {
 	}
 	return s.inTx(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, `
-			INSERT INTO burn_readings (line_id, status, message, transcript, confidence, observed_at, received_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?)
+			INSERT INTO burn_readings (line_id, status, message, transcript, confidence, observed_at, received_at, reporter_id)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(line_id) DO UPDATE SET
 			  status = excluded.status, message = excluded.message,
 			  transcript = excluded.transcript, confidence = excluded.confidence,
-			  observed_at = excluded.observed_at, received_at = excluded.received_at
+			  observed_at = excluded.observed_at, received_at = excluded.received_at,
+			  reporter_id = excluded.reporter_id
 			WHERE excluded.observed_at >= burn_readings.observed_at`,
 			strings.ToLower(r.LineID), r.Status, r.Message, r.Transcript, r.Confidence,
-			r.ObservedAt.Unix(), received.Unix())
+			r.ObservedAt.Unix(), received.Unix(), r.ReporterID)
 		if err != nil {
 			return fmt.Errorf("store: put burn reading %s: %w", r.LineID, err)
 		}
@@ -67,7 +71,7 @@ func (s *Store) PutBurnReading(ctx context.Context, r BurnReading) error {
 // that as "nothing pushed yet", not as an error.
 func (s *Store) BurnReadings(ctx context.Context) (map[string]BurnReading, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT line_id, status, message, transcript, confidence, observed_at, received_at
+		SELECT line_id, status, message, transcript, confidence, observed_at, received_at, reporter_id
 		FROM burn_readings`)
 	if err != nil {
 		return nil, fmt.Errorf("store: burn readings: %w", err)
@@ -79,7 +83,7 @@ func (s *Store) BurnReadings(ctx context.Context) (map[string]BurnReading, error
 		var r BurnReading
 		var observed, received int64
 		if err := rows.Scan(&r.LineID, &r.Status, &r.Message, &r.Transcript,
-			&r.Confidence, &observed, &received); err != nil {
+			&r.Confidence, &observed, &received, &r.ReporterID); err != nil {
 			return nil, fmt.Errorf("store: scan burn reading: %w", err)
 		}
 		r.ObservedAt = time.Unix(observed, 0).UTC()

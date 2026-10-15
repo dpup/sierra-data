@@ -791,7 +791,15 @@ judge), never the last published answer's.
 deliberately `enabled && phone != "" && id != ""` rather than just the presence
 of a number. Publishing a county's number so readers can call it must not, by
 itself, flip that county's source unhealthy for a reading we never ask for.
-Tuolumne is the live example.
+Tuolumne was the live example until it was enabled on 2026-10-15.
+
+**The reporter's health survives a restart; the push registry's does not by
+default.** Reporter health (`/sources` row `burn-line`) is in-memory, which is
+fine for a mesh monitor that reports every few minutes but meant every deploy
+read the once-a-day burn reporter as "no report received yet" (STALE) for up to
+a day. Each staged row records its `reporter_id` (migrationV8), and
+`pushingest.Registry.RestoreBurnHealth` restores the last-accepted time from
+those rows at startup.
 
 ### Not a map layer, and place attachment without geometry
 

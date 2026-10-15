@@ -14,6 +14,22 @@ throughout; errors are gRPC-standard `{code, codeName, message, details}`). The
 by a snake_case `/v1` surface on 2026-07-05, which was in turn folded back onto the
 proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 
+## 2026-10-15
+
+### Burn status: Tuolumne's burn line is now read daily
+
+**No field or shape changes.** `burn:tuolumne-county` has carried `burnDay:
+BURN_DAY_UNKNOWN` because its line (209-533-5598) was published but not dialed.
+It is now dialed with Calaveras's line in the daily run, so from the first run
+after deploy its `burnLines[0]` carries an `observation` and `burnDay` becomes
+YES/NO/MARGINAL. `permission` can now be `BURN_PERMISSION_ALLOWED` for Tuolumne
+when CAL FIRE also permits it. Until that first reading lands, the `burnline`
+source in `/api/v1/sources` reports "no reading has been pushed" for Tuolumne.
+
+The `burn-line` reporter row in `/api/v1/sources` no longer reads STALE ("no
+report received yet") for up to a day after each deploy. The server now restores
+the reporter's last report time from the stored readings at startup.
+
 ## 2026-10-14
 
 ### Map features carry the AI `summary`; weather alerts carry the NWS CAP fields

@@ -186,3 +186,59 @@ func TestBurnStream_RetryDoesNotRegress(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "green", rows["calaveras-apcd"].Status, "an older retry must not displace a newer reading")
 }
+
+// A restart must not forget that the burn line reported: it pushes once a day,
+// so in-memory-only health read "no report received yet" (STALE) for up to a
+// day after every deploy, while its reading sat current in the store.
+func TestBurnStream_HealthSurvivesRestart(t *testing.T) {
+	r, st := burnRegistry(t)
+	w := post(r, testToken, BurnStream, burnBody(reading("calaveras-apcd", "red", burnObserved)))
+	require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
+	before := r.Health(BurnStream)[0]
+	require.Equal(t, ReporterOK, before.State)
+
+	// A fresh registry over the same store is a restarted process.
+	restarted, err := NewRegistry(config.IngestConfig{Reporters: []config.Reporter{{
+		ID: "burn-line", TokenSha256: TokenHash(testToken),
+		Streams: []string{BurnStream}, StaleAfter: 30 * time.Hour,
+	}}}, WithBurnLines(st, []string{"calaveras-apcd"}))
+	require.NoError(t, err)
+	assert.Equal(t, ReporterUnknown, restarted.Health(BurnStream)[0].State)
+
+	require.NoError(t, restarted.RestoreBurnHealth(context.Background()))
+	after := restarted.Health(BurnStream)[0]
+	assert.Equal(t, ReporterOK, after.State)
+	assert.Equal(t, before.LastAcceptedAt.Unix(), after.LastAcceptedAt.Unix())
+}
+
+// Rows staged before the reporter id was recorded are credited only when one
+// reporter could have sent them; with two, nothing is guessed.
+func TestRestoreBurnHealth_UnattributedRows(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "grid.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { st.Close() })
+	received := time.Now().Add(-3 * time.Hour).Truncate(time.Second)
+	require.NoError(t, st.PutBurnReading(context.Background(), store.BurnReading{
+		LineID: "calaveras-apcd", Status: "red", ObservedAt: received, ReceivedAt: received,
+	}))
+
+	rep := func(id, token string) config.Reporter {
+		return config.Reporter{ID: id, TokenSha256: TokenHash(token),
+			Streams: []string{BurnStream}, StaleAfter: 30 * time.Hour}
+	}
+	one, err := NewRegistry(config.IngestConfig{Reporters: []config.Reporter{rep("burn-line", "a")}},
+		WithBurnLines(st, []string{"calaveras-apcd"}))
+	require.NoError(t, err)
+	require.NoError(t, one.RestoreBurnHealth(context.Background()))
+	assert.Equal(t, ReporterOK, one.Health(BurnStream)[0].State)
+	assert.True(t, received.Equal(one.Health(BurnStream)[0].LastAcceptedAt))
+
+	two, err := NewRegistry(config.IngestConfig{Reporters: []config.Reporter{
+		rep("burn-line", "a"), rep("backup", "b")}},
+		WithBurnLines(st, []string{"calaveras-apcd"}))
+	require.NoError(t, err)
+	require.NoError(t, two.RestoreBurnHealth(context.Background()))
+	for _, h := range two.Health(BurnStream) {
+		assert.Equal(t, ReporterUnknown, h.State, h.ID)
+	}
+}

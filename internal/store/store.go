@@ -203,11 +203,18 @@ CREATE TABLE burn_readings (
   received_at  INTEGER NOT NULL      -- when we accepted the push (diagnostic only)
 )`
 
+// migrationV8 records which push reporter delivered a burn reading. Reporter
+// health (last accepted report) is otherwise in-memory only, so every deploy
+// reset the once-a-day burn-line reporter to "no report received yet" and its
+// /sources row read STALE for up to a day while its readings were fine.
+// pushingest.Registry.RestoreBurnHealth reads this back at startup.
+const migrationV8 = `ALTER TABLE burn_readings ADD COLUMN reporter_id TEXT NOT NULL DEFAULT ''`
+
 // migrations[i] is the DDL for schema version i+1. Applied versions are
 // recorded in schema_migrations; already-applied versions are skipped, so
 // Open is idempotent across restarts and an existing dev DB at an older
 // version picks up only the missing migrations.
-var migrations = []string{schemaV1, migrationV2, migrationV3, migrationV4, migrationV5, migrationV6, migrationV7}
+var migrations = []string{schemaV1, migrationV2, migrationV3, migrationV4, migrationV5, migrationV6, migrationV7, migrationV8}
 
 // ErrNotFound is returned by point lookups (GetEvent, GetPlace) when no row
 // matches. Callers map it to a 404.

@@ -617,13 +617,11 @@ grid:
         phone: "+12097546600"
         counties: ["calaveras-county"]
         enabled: true
-      # Tuolumne's line is PUBLISHED but not DIALED. Flip `enabled` to start
-      # reading it — no code change, no CI change.
       - id: "tuolumne-apcd"
         name: "Tuolumne County APCD burn line"
         phone: "+12095335598"
         counties: ["tuolumne-county"]
-        enabled: false
+        enabled: true
 
   # Authenticated push ingest — POST /api/v1/ingest/{stream}, the one write
   # surface on this API. Not mounted unless a reporter is configured. Only the
