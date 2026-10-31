@@ -409,12 +409,15 @@ survives as a legacy alias):
   API** (Calaveras: 209-754-6600). `cmd/burn-line` places a recorded call via
   Twilio, transcribes it with Whisper, and extracts the status with a
   structured-output chat call.
-- **It runs from CI, not the server** (`.github/workflows/burn-line.yml`, daily
-  at 14:00 UTC) and PUSHES the readings to `POST /api/v1/ingest/burn.line` in ONE
+- **It runs from CI, not the server** (`.github/workflows/burn-line.yml`) and PUSHES the readings to `POST /api/v1/ingest/burn.line` in ONE
   batched report (the endpoint rate-limits per reporter, so a push per line would
   429 everything after the first). A phone call costs
   money and must happen once a day; a scheduled workflow has those semantics, a
-  restarting server does not.
+  restarting server does not. The cron fires **hourly** because GitHub runs
+  schedules 3–8h late; `-not-before=06:30` makes each run dial only lines with
+  no reading since 6:30am Pacific (checked against the public API), so the first
+  run after 6:30 reads the day and the rest no-op. A failing line (usually
+  "busy") is retried in-run, then by the next hourly run.
 - The value can therefore be wrong in ways an API cannot (a `confidence` and the
   cleaned transcript ride along), and a stopped pipeline is INVISIBLE except by
   age — `grid.burn.burnDayStaleAfter` (36h, one missed run plus slack) turns an

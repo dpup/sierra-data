@@ -21,6 +21,9 @@
 //	burn-line -endpoint https://data.sierragridteam.org/api/v1/ingest/burn.line
 //	burn-line -line calaveras-apcd      # just one line
 //	burn-line -dry-run                  # call and extract, print, do not push
+//	burn-line -not-before 06:30 ...     # scheduled mode: skip lines already
+//	                                    # read this morning; before 06:30
+//	                                    # Pacific, dial nothing
 //
 // Credentials come from the environment:
 //
@@ -52,12 +55,15 @@ import (
 
 func main() {
 	var (
-		endpoint = flag.String("endpoint", "", "Grid burn.line ingest endpoint, e.g. https://host/api/v1/ingest/burn.line (required unless -dry-run)")
-		only     = flag.String("line", "", "dial only this line id (default: every enabled line)")
-		model    = flag.String("model", openai.GPT4o, "chat model for extraction")
-		hangUp   = flag.Duration("hangup-after", 90*time.Second, "how long to stay on each line")
-		timeout  = flag.Duration("timeout", 10*time.Minute, "deadline per line")
-		dryRun   = flag.Bool("dry-run", false, "call and extract, print the readings, do not push")
+		endpoint  = flag.String("endpoint", "", "Grid burn.line ingest endpoint, e.g. https://host/api/v1/ingest/burn.line (required unless -dry-run)")
+		only      = flag.String("line", "", "dial only this line id (default: every enabled line)")
+		model     = flag.String("model", openai.GPT4o, "chat model for extraction")
+		hangUp    = flag.Duration("hangup-after", 90*time.Second, "how long to stay on each line")
+		timeout   = flag.Duration("timeout", 10*time.Minute, "deadline per line")
+		dryRun    = flag.Bool("dry-run", false, "call and extract, print the readings, do not push")
+		attempts  = flag.Int("attempts", 3, "tries per line before giving up on it")
+		retryGap  = flag.Duration("retry-wait", 2*time.Minute, "wait between tries of one line")
+		notBefore = flag.String("not-before", "", "scheduled mode, Pacific HH:MM: dial nothing before it, and skip lines already read since it today")
 	)
 	flag.Parse()
 
@@ -79,6 +85,44 @@ func main() {
 	}
 	if len(lines) == 0 {
 		fatal("no enabled burn lines in grid.burn.lines")
+	}
+
+	// Scheduled mode. The workflow fires hourly because GitHub runs schedules
+	// hours late; this turns all those runs into one morning read per line.
+	if *notBefore != "" {
+		start, err := dayStart(time.Now(), *notBefore)
+		if err != nil {
+			fatal("%v", err)
+		}
+		if time.Now().Before(start) {
+			fmt.Printf("Before %s Pacific (%s): too early to read today's line, nothing to do.\n",
+				*notBefore, start.Format(time.RFC3339))
+			return
+		}
+		if *endpoint == "" {
+			fatal("-not-before needs -endpoint, to see which lines were already read")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		observed, err := lineObservations(ctx, *endpoint)
+		cancel()
+		if err != nil {
+			// Not knowing costs at most a duplicate call, while skipping would
+			// cost the day's reading. Dial.
+			fmt.Fprintf(os.Stderr, "could not check existing readings, dialing every line: %v\n", err)
+		}
+		var due []config.BurnLine
+		for _, l := range lines {
+			if at, ok := observed[strings.ToLower(l.ID)]; ok && !at.Before(start) {
+				fmt.Printf("%s: already read today at %s, skipping\n", l.ID, at.In(pacific).Format("15:04 MST"))
+				continue
+			}
+			due = append(due, l)
+		}
+		if len(due) == 0 {
+			fmt.Printf("Every line already read today, nothing to do.\n")
+			return
+		}
+		lines = due
 	}
 
 	sid := mustEnv("TWILIO_ACCOUNT_SID")
@@ -118,12 +162,11 @@ func main() {
 	var readings []pushReading
 	for _, l := range lines {
 		fmt.Printf("\n=== %s (%s) — %s\n", l.ID, l.Phone, strings.Join(l.Counties, ", "))
-		r, err := read(l, tw, ai, runOpts{
+		r, err := readWithRetry(l, tw, ai, runOpts{
 			from: from, twiml: twiml, model: *model,
 			hangUp: *hangUp, timeout: *timeout,
-		})
+		}, *attempts, *retryGap)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "  FAILED: %v\n", err)
 			failed = append(failed, l.ID)
 			continue
 		}
@@ -162,6 +205,32 @@ func main() {
 type runOpts struct {
 	from, twiml, model string
 	hangUp, timeout    time.Duration
+}
+
+// readWithRetry reads one line, retrying any failure.
+//
+// Retried blindly rather than by error class: the common failure is the line
+// answering "busy" (other callers, the same morning), but a dropped call, an
+// empty recording or a Whisper/OpenAI blip are equally transient, and every
+// failure mode is a few cents at most. A line that fails every attempt is left
+// for the next scheduled run.
+func readWithRetry(l config.BurnLine, tw *twilio.Client, ai *openai.Client, o runOpts, attempts int, wait time.Duration) (*burnline.Reading, error) {
+	if attempts < 1 {
+		attempts = 1
+	}
+	var err error
+	for i := 1; i <= attempts; i++ {
+		var r *burnline.Reading
+		if r, err = read(l, tw, ai, o); err == nil {
+			return r, nil
+		}
+		fmt.Fprintf(os.Stderr, "  attempt %d/%d FAILED: %v\n", i, attempts, err)
+		if i < attempts {
+			fmt.Printf("  retrying in %s\n", wait)
+			time.Sleep(wait)
+		}
+	}
+	return nil, err
 }
 
 // read dials one line and returns its reading.
