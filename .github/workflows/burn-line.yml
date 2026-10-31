@@ -1,5 +1,5 @@
-# Calls each configured county burn line once a day and PUSHES the reading to
-# The Grid.
+# Reads each configured county burn line once a day, as early in the morning as
+# GitHub allows, and PUSHES the reading to The Grid.
 #
 # Why this lives in CI rather than in the server: placing a phone call costs
 # money and must happen exactly once a day. A long-running server would re-dial
@@ -16,21 +16,25 @@
 # Before dialing, the tool preflights the endpoint (`?preflight=true`): a bad
 # token, a missing grant or a server outage fails the run before any paid call.
 #
-# A failure pushes NOTHING — deliberately. The previous reading then ages past
-# the server's freshness gate (grid.burn.burnDayStaleAfter, 36h) and the burn-day
-# facet reads UNKNOWN, which consumers render as "call the line". That is why
-# 36h allows one missed run: a single failure is absorbed, two in a row is
-# visible on /api/v1/sources.
+# A failed line pushes NOTHING — deliberately. The tool retries it a few times
+# in-run (the usual failure is the line answering "busy"), then leaves it to the
+# next hourly run. If it is never read, the previous reading ages past the
+# server's freshness gate (grid.burn.burnDayStaleAfter, 36h) and the burn-day
+# facet reads UNKNOWN, which consumers render as "call the line".
 name: Burn line
 
 on:
   schedule:
-    # 14:23 UTC — ~6:30am PST / 7:30am PDT. The districts decide the day early,
-    # and people burn in the morning, so read it before they do. Off the hour on
-    # purpose: GitHub delays top-of-the-hour schedules the most, and "0 14" ran
-    # at 18:07-19:08 UTC on 2026-10-09..11, i.e. 11am-noon PDT. GitHub still
-    # gives no guarantee; a run that lands late is merely late, never doubled.
-    - cron: "23 14 * * *"
+    # HOURLY, not daily: a single daily slot cannot hit the morning. GitHub ran
+    # "23 14" (7:23am PDT) at 17:20-22:10 UTC every day of 2026-10-12..29 —
+    # 3 to 8 hours late, i.e. after noon, so the day's reading showed as
+    # yesterday's for half the day. The tool's -not-before makes the extra runs
+    # free: before 06:30 Pacific it dials nothing, and after it, it dials only
+    # the lines with no reading since 06:30 today (it asks the public API), so
+    # whichever run lands first after 06:30 reads the day and the rest no-op.
+    # The window starts at 2am PT so a run delayed by a few hours still lands
+    # near 6:30am. Off the hour because GitHub delays :00 schedules the most.
+    - cron: "23 9-23 * * *"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -56,9 +60,9 @@ jobs:
     # endpoint; a real one without it fails fast, before dialing).
     if: vars.GRID_INGEST_ENDPOINT != '' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    # Each line is bounded by the tool's own -timeout (10m); this caps the job
-    # if something hangs outside a call.
-    timeout-minutes: 30
+    # Each attempt is bounded by the tool's own -timeout (10m) and a line is
+    # tried up to 3 times; this caps the job if something hangs outside a call.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
 
@@ -78,8 +82,11 @@ jobs:
       # CI-on/config-off just gets 400s from the endpoint.
       #
       # Lines are independent inside the tool — one being unreachable does not
-      # stop the others — and it exits non-zero if ANY failed, so a single bad
-      # line is visible without losing the good ones.
+      # stop the others — and it exits non-zero if ANY failed after its retries,
+      # so a single bad line is visible without losing the good ones.
+      #
+      # Only scheduled runs pass -not-before. A manual run always dials, so it
+      # stays the way to force a fresh read.
       - name: Read burn lines and push
         env:
           TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
@@ -92,4 +99,5 @@ jobs:
           ./bin/burn-line \
             -endpoint="${{ vars.GRID_INGEST_ENDPOINT }}" \
             ${{ inputs.line && format('-line={0}', inputs.line) || '' }} \
-            ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && '-dry-run' || '' }}
+            ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && '-dry-run' || '' }} \
+            ${{ github.event_name == 'schedule' && '-not-before=06:30' || '' }}

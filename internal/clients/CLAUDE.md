@@ -407,7 +407,11 @@ the workflow enumerates no phone numbers — one source of truth, and no CI edit
 that can drift from config in either direction.
 Placing a phone call costs money and must happen exactly once a day; a
 long-running server would re-dial on every restart unless carefully guarded,
-whereas a scheduled workflow has those semantics for free.
+whereas a scheduled workflow has those semantics for free. The workflow fires
+hourly (GitHub lands any one slot 3–8h late) and passes `-not-before=06:30`, which
+dials only lines whose last reading on `/api/v1/events?layer=burn_status` predates
+6:30am Pacific today, so the extra runs cost nothing. Each line is tried
+`-attempts` (3) times, `-retry-wait` (2m) apart.
 
 Three behaviours are deliberate:
 
