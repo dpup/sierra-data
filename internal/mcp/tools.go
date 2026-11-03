@@ -103,9 +103,12 @@ func (s *Server) registerTools() []tool {
 				"MeshCore mesh-node presence is layer \"mesh\" (legacy alias \"network\"): one INFO row per " +
 				"node, the node's name in headline/areaLabel and its pubkey + radio telemetry in detail. To " +
 				"find or check a specific node (e.g. one named \"SIERRA…\"), list layer=mesh — unscoped is " +
-				"fine, the mesh spans places — and match the name in the rows; a node's observedAt is when the " +
-				"Grid last heard it (the trustworthy freshness signal — detail.mesh.telemetry.lastAdvertAt " +
-				"is the node's self-reported advert time and is diagnostic only, clocks skew). Absence of a " +
+				"fine, the mesh spans places — and match the name in the rows. Freshness is the later of " +
+				"mesh.telemetry.lastRelayedAt (a packet the node relayed last reached the Grid) and " +
+				"mesh.telemetry.lastHeardAt (its own advert did), both the Grid's clock; NOT observedAt, " +
+				"which moves only when the node's identity, position or reachability changes and can be " +
+				"days old for a node that is talking now. mesh.telemetry.lastAdvertAt is the node's " +
+				"self-reported advert time and is diagnostic only (clocks skew). Absence of a " +
 				"node here is not proof it's down. Raise limit (max 200) and follow " +
 				"nextPageToken to get the full set. (grid_situation already gives per-domain active counts " +
 				"for a single place.)",

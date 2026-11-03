@@ -14,6 +14,59 @@ throughout; errors are gRPC-standard `{code, codeName, message, details}`). The
 by a snake_case `/v1` surface on 2026-07-05, which was in turn folded back onto the
 proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 
+## 2026-11-03
+
+### Mesh nodes: when a node last advertised, and when it last relayed
+
+**Additive only.** No existing key changes or disappears.
+
+- **`mesh.telemetry.lastHeardAt`** (RFC 3339) on every `layer=mesh` event from
+  `/api/v1/events` and `/api/v1/events/{id}`: when the Grid last received the
+  node's own advert, on the Grid's clock.
+- **`mesh.telemetry.lastRelayedAt`** (RFC 3339): when the Grid last received a
+  flood-routed packet of any type (message, ack, path, another node's advert)
+  that carried this node's hash as a relay hop. A backbone repeater adverts
+  every day or two and relays all day, so for a repeater this is usually the
+  fresher of the two.
+- **`mesh_node` and `mesh_link` map features**: `properties.mesh.lastHeardAt`
+  and `properties.mesh.lastRelayedAt`, the same values. Omitted when none is
+  on record.
+
+Both are `null` when none is on record. That means unknown, not down. Both
+start filling at deploy. `lastHeardAt` appears on the first tick for nodes whose
+recent adverts are in the observation store, and otherwise on the node's next
+advert. `lastRelayedAt` appears with the first relayed packet seen after deploy,
+which takes seconds to minutes for an active repeater.
+
+**Migration: stop reading `observedAt` as "last heard".** The docs, the `/mesh`
+roster and the MCP tool descriptions all said a mesh event's `observedAt` was
+when the Grid last heard the node. It is not. It moves only when something in
+the node's revision changes (name, role, position, reachability), so a repeater
+that kept advertising the same thing showed an `observedAt` days old. On
+2026-11-03, eight SIERRA repeaters read 2026-10-31. Four of them (Columbia,
+Forest Meadows, Lilac Park, Snowshoe Lake) had relayed flood traffic in the
+previous two hours, and Lilac Park had advertised three times since. Use the later of `lastRelayedAt` and `lastHeardAt`.
+`observedAt` itself is unchanged. The map features' `updatedAt` is still the
+last revision.
+
+Relay attribution is deliberately conservative:
+
+- Only **flood-routed** packets count. A direct-routed packet's path is the
+  route it still has to travel, so a node listed there may never have heard it.
+  (CoreScope counts those hops, which is why it can show a node "relaying"
+  while the operator monitor reports it unreachable.)
+- A hop is credited only when its hash prefix matches exactly **one** known
+  node, and only for 2- and 3-byte hashes. A 1-byte hash could belong to a
+  relayer the Grid has never seen, so it is never credited, and a node that
+  only appears on 1-byte paths has no `lastRelayedAt`. (CoreScope resolves
+  those by geography; we do not.)
+- Relay paths are not signed. These fields are display evidence only: they
+  never change a node's `status` or keep a node from expiring.
+
+The values are filled in when the event is served, not stored in it, so they
+never create a revision and never appear in `/history` or
+`/api/v1/events/{id}/history`.
+
 ## 2026-10-15
 
 ### Burn status: Tuolumne's burn line is now read daily

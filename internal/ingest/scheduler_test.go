@@ -3,6 +3,7 @@ package ingest
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -858,4 +859,34 @@ func TestSchedulerWakeRunsAnExtraTick(t *testing.T) {
 	signal()
 	signal() // coalesces with the pending one: never blocks the caller
 	waitPoll("woken tick")
+}
+
+// Mesh activity lands in the store on the tick that produced it, with the
+// observations, and never as event content.
+func TestTickPersistsMeshActivity(t *testing.T) {
+	ctx := testCtx()
+	st := newSchedStore(t)
+	seedSchedSources(t, st, "meshcore")
+	at := time.Date(2026, 11, 3, 6, 0, 0, 0, time.UTC)
+	key := "ab07" + strings.Repeat("0", 60)
+
+	ev := schedEvent("meshcore:"+key, "meshcore", gridv1.Layer_MESH)
+	fn := &fakeNormalizer{ids: []string{"meshcore"}, result: &PollResult{
+		Events:           []*gridv1.Event{ev},
+		MeshObservations: []store.MeshObservation{{PubKey: key, HeardAt: at}},
+		MeshActivity:     []store.MeshActivity{{PubKey: key, LastHeardAt: at, LastRelayedAt: at.Add(time.Minute)}},
+	}}
+	sched := NewScheduler(st, SchedulerConfig{})
+	sched.tick(ctx, PollerSpec{Normalizer: fn, Interval: time.Minute}, &pollerState{})
+
+	got, err := st.MeshActivityFor(ctx, []string{key})
+	require.NoError(t, err)
+	assert.Equal(t, store.MeshActivity{PubKey: key, LastHeardAt: at, LastRelayedAt: at.Add(time.Minute)}, got[key])
+	n, err := st.CountMeshObservations(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, 1, n)
+
+	stored, err := st.GetEvent(ctx, "meshcore:"+key)
+	require.NoError(t, err)
+	assert.Nil(t, stored.GetMesh().GetTelemetry().GetLastRelayedAt(), "activity is never written into the blob")
 }

@@ -345,13 +345,14 @@ place-scoped query, which is the one failure this service must not have.
 
 ## The mesh tables are measurements, not records
 
-Three tables hang off the mesh subsystem and none of them is proto-blob
+Four tables hang off the mesh subsystem and none of them is proto-blob
 canonical, because none of them holds event content:
 
 | table | holds | if lost |
 | --- | --- | --- |
 | `mesh_observations` | one row per received advert (Tier 0) | re-accumulates from the live MQTT feed |
 | `mesh_link_rollup` | per-link-per-day topology (Tier 1) | recompute from Tier 0 |
+| `mesh_activity` | per node: last advert received, last relay seen | re-accumulates within minutes for any node that is talking |
 | `mesh_telemetry` | one row per accepted monitor report | **gone forever** |
 
 That last row is why `mesh_telemetry` gets a generous retention default (a year)
@@ -379,6 +380,29 @@ Two details that look optional and are not:
 No Tier 1 rollup here yet, deliberately: ~864 rows/day for nine nodes is 315k
 rows a year. `mesh_link_rollup` exists because the advert firehose is orders of
 magnitude larger. Adding one is additive when node count × cadence earns it.
+
+### `mesh_activity` is the one thing the API reads from outside a blob
+
+`telemetry.last_heard_at` and `last_relayed_at` are served on every current
+MESH event but never stored in it. They move every few seconds; carrying them
+in the blob would rewrite every node's proto on every tick, which is the
+EFS-commit cost `TouchSeen`'s coalescing exists to avoid, and the "every
+hash-excluded field needs a way back into the blob" rule above would then mean
+a ForceWrite of ~600 events a minute. So the ingest tick upserts one tiny row
+per node whose clocks moved (`RecordMeshTick`, in the SAME transaction as the
+observation insert: one commit, not two), and `gridapi.overlayMeshActivity`
+stamps them on at read time.
+
+Three rules keep that honest:
+
+- **Merge by MAX.** A write never moves a clock backwards, so a replay after a
+  restart, or a late drain, is a no-op rather than a regression.
+- **Validators must see it.** The overlay changes a response body without a
+  revision, so `DataVersion` and `EventVersion` cannot. `MeshActivityVersion`
+  (an in-process counter bumped per write) is folded into the `ListEvents` tag
+  whenever the query can return MESH events, and `GetEvent` folds in the node's
+  own row. Leaving it out serves a 304 with a stale "last relayed".
+- **History is not overlaid.** A revision is a snapshot of what was stored.
 
 ## Migration ladder
 

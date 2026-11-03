@@ -27,10 +27,21 @@ type fakeMeshRegistry struct {
 	connected int
 	down      int
 	obs       []meshcore.Observation
+	// relays is what the next DrainRelays returns (then cleared); knownSeen
+	// records the extra keys the normalizer offered for resolution.
+	relays    map[string]time.Time
+	knownSeen []string
 }
 
 func (f *fakeMeshRegistry) Snapshot() []meshcore.NodeState            { return f.nodes }
 func (f *fakeMeshRegistry) DrainObservations() []meshcore.Observation { return f.obs }
+
+func (f *fakeMeshRegistry) DrainRelays(known []string) map[string]time.Time {
+	f.knownSeen = known
+	out := f.relays
+	f.relays = nil
+	return out
+}
 
 func (f *fakeMeshRegistry) Brokers() []meshcore.BrokerHealth {
 	var out []meshcore.BrokerHealth

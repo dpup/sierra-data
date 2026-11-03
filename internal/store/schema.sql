@@ -83,3 +83,7 @@ CREATE TABLE subscriptions (         -- phase 2, anticipated
 --   mesh_observations  Tier 0 append-only reception firehose (short-lived)
 --   mesh_link_rollup   Tier 1 per-link-per-day topology history
 --   mesh_meta          KV for the compaction watermark
+--
+-- v9 (store.go migrationV9) adds mesh_activity: per node, our receive time of
+-- its last advert and of the last packet it relayed. Read-time overlay onto
+-- telemetry.last_heard_at / last_relayed_at; never part of the event blob.

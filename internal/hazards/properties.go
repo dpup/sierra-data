@@ -205,6 +205,13 @@ type MeshProps struct {
 	RSSI     *int32   `json:"rssi,omitempty"`
 	HopCount *uint32  `json:"hopCount,omitempty"`
 	Gateways []string `json:"gateways,omitempty"` // observers that heard the node
+	// LastHeardAt is when we last received the node's own advert; LastRelayedAt
+	// when we last received a flood packet it relayed. Both RFC 3339, our clock,
+	// omitted when none is on record. These, not the feature's updatedAt (the
+	// last REVISION), say whether a node is talking now. See the MeshTelemetry
+	// proto for what counts as a relay.
+	LastHeardAt   string `json:"lastHeardAt,omitempty"`
+	LastRelayedAt string `json:"lastRelayedAt,omitempty"`
 	// InRegion is set ONLY on the mesh_link topology layer: true for a node inside
 	// the queried place, false for a 1-hop neighbour pulled in because it links to
 	// one. Nil (omitted) on the plain mesh_node layer, where every node is in-place.

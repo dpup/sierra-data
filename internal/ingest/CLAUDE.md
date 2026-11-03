@@ -559,6 +559,63 @@ would both mint a revision and confuse the per-source sweep, which diffs
 records an ERROR, not a success — `RecordAttempt(nil)` would paint a monitor that
 was never set up as a healthy feed.
 
+### Two activity clocks, and why `observedAt` is not one (2026-11)
+
+Until 2026-11 the `/mesh` roster, the API docs and the MCP tool text all called
+a mesh event's `observedAt` "when the Grid last heard it". It is not: it is
+hash-zeroed and persists only with a revision, so it moves when a node's
+identity, position or reachability changes and at no other time. A repeater
+advertising the same thing every day sat at "3 days ago" while it relayed every
+minute, and that is what "the mesh data isn't up to date" turned out to be. The
+subscriber was fine; relay links for the same nodes were minutes old.
+
+Two clocks replace it, both OUR receive times, both read-time only (the store's
+`mesh_activity` table, overlaid by `gridapi`; see `internal/store/CLAUDE.md`):
+
+- **`last_heard_at`**: the node's own advert reached us. From
+  `NodeState.ReceivedAt`, which is deliberately NOT `LastHeardAt`: `Seed`
+  backs `LastHeardAt` with the store's `last_seen_at` when it has no reception
+  on record, which is right for presence and wrong as an answer to "when did
+  we hear it".
+- **`last_relayed_at`**: a packet that named the node as a relay hop reached
+  us. Adverts are ~7% of the feed and a backbone repeater adverts every day or
+  two, so this is the clock that says a repeater is up now. Measured on a 2-hour
+  sample (2026-11-03): flood packets named Camp Connell as a hop 435 times
+  against 33 adverts.
+
+`meshActivity` (in `Poll`) emits only the clocks that advanced, only for the
+nodes the layer covers (this tick's merged nodes plus the store's live mesh
+events), and only on a successful poll; the relay buffer waits otherwise.
+
+Relay attribution has three rules, all of them about not overclaiming:
+
+1. **Flood only** (`FrameHeader.RelayHops`). A flood path is appended by each
+   repeater before it retransmits, so every hop has forwarded the packet. A
+   DIRECT path is the source route still to travel; each repeater strips itself
+   as it forwards. Observed live: one direct request heard as `[2cfe ab07]`,
+   then `[ab07]`, then `[]`. A hop in a direct path may never have heard the
+   packet, and that is exactly the shape of a monitor repeatedly trying to log
+   into a repeater it cannot reach. CoreScope counts direct hops, which is why
+   it can show Eagle One relaying while the monitor reports it unreachable.
+   TRACE frames are excluded too: their path field is SNR samples.
+2. **Unique match, over the widest catalog** (`Registry.DrainRelays`). A hop
+   resolves only to the single known key carrying its prefix, over every node
+   the registry holds PLUS the store's mesh event keys. The extra keys rescue a
+   repeater that adverts less often than the registry retains nodes, and add
+   collision evidence. The same rule as relay links, with one addition: a
+   **1-byte hop is never credited** (`minRelayHopHex`). Unique-match only
+   guards against collisions among nodes we know; a relayer we have never
+   catalogued whose byte matches one known node would hand it the traffic and
+   make a dead repeater look alive. A local replay with a 208-node catalog
+   did exactly that to BigPrather and Eagle One, which no 2-byte flood path
+   named. (Relay LINKS still resolve 1-byte hops; a wrong edge is a
+   topology smudge, a wrong relay time is a false liveness claim.)
+3. **Display only.** Nothing signs a path, and anyone can publish to these
+   brokers. Relay evidence never feeds `Snapshot`, presence, or the sweep. A
+   node that relays all day but stops advertising still expires (unless a
+   monitor reports it); making relays count as presence would hand lifecycle to
+   unauthenticated bytes.
+
 ## Lane closures: one event per window, from CWWP2 (`lane_closure.go`)
 
 With `roads.caltransFeeds.cwwp2.laneClosureDistricts` set, Caltrans closures come

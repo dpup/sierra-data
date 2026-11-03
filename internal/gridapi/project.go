@@ -226,15 +226,17 @@ func projectNetwork(ev *gridv1.Event) hazards.Feature {
 	p.UpdatedAt = rfc3339(ev.GetObservedAt())
 	p.Source = hazards.Source{ID: "meshcore", Name: "MeshCore Mesh", URL: safeURL(ev.GetCanonicalUrl()), Attribution: "MeshCore community mesh"}
 	p.Mesh = &hazards.MeshProps{
-		PublicKey:    d.GetPublicKey(),
-		NodeType:     d.GetNodeType(),
-		Name:         d.GetName(),
-		SNR:          wrapDouble(t.GetSnr()),
-		RSSI:         wrapInt32(t.GetRssi()),
-		HopCount:     wrapUint32(t.GetHopCount()),
-		Gateways:     t.GetGateways(),
-		Reachability: meshReachability(d.GetReachability()),
-		Admin:        meshAdminProps(t.GetAdmin()),
+		PublicKey:     d.GetPublicKey(),
+		NodeType:      d.GetNodeType(),
+		Name:          d.GetName(),
+		SNR:           wrapDouble(t.GetSnr()),
+		RSSI:          wrapInt32(t.GetRssi()),
+		HopCount:      wrapUint32(t.GetHopCount()),
+		Gateways:      t.GetGateways(),
+		LastHeardAt:   rfc3339(t.GetLastHeardAt()),
+		LastRelayedAt: rfc3339(t.GetLastRelayedAt()),
+		Reachability:  meshReachability(d.GetReachability()),
+		Admin:         meshAdminProps(t.GetAdmin()),
 	}
 	return feature(ev, p)
 }

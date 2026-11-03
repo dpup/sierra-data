@@ -370,6 +370,13 @@ survives as a legacy alias):
   receiving observer and path; `/api/observers`, `/api/mqtt/status`. If it sees
   adverts our store does not, the problem is ours. Each mesh event's
   `canonicalUrl` is the node's CoreScope page (`grid.meshcore.nodeUrl`).
+  CoreScope's "last relayed" also counts DIRECT-route hops (a route still to be
+  travelled), so it can read fresher than ours by design; compare adverts.
+- **A node's freshness is `telemetry.lastRelayedAt` / `lastHeardAt`, never
+  `observedAt`** (which moves only with a revision). Both are read-time overlays
+  from the store's `mesh_activity` table; relays come from the flood path of
+  EVERY packet type, not just adverts. See "Two activity clocks" in
+  `internal/ingest/CLAUDE.md`.
 
 **PG&E ArcGIS** (`ags.pge.esriemcs.com`, the `POWER` layer):
 - Keyless and public, but **entirely undocumented** — no contract, no version,

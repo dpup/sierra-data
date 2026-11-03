@@ -212,6 +212,7 @@ func (s *Service) queryNetworkEvents(ctx context.Context, placeID string) ([]*gr
 		}
 		q.PageToken = next
 	}
+	s.overlayMeshActivity(ctx, out)
 	return out, nil
 }
 

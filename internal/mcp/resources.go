@@ -46,8 +46,13 @@ list broadly and processing the rows yourself:
   grid_events with layer=mesh (legacy alias "network"); unscoped is fine, the
   mesh spans places. Each row is one node: name in headline/areaLabel, pubkey +
   radio telemetry in detail. Match the node by name (e.g. "SIERRA…"). Freshness
-  is the row's observedAt = when the Grid last heard it; detail.mesh.telemetry.lastAdvertAt
-  is the node's own advert stamp and is diagnostic only (node clocks skew). A
+  is mesh.telemetry.lastRelayedAt (when a packet the node RELAYED last reached the
+  Grid; for a repeater this is near-constant) and mesh.telemetry.lastHeardAt
+  (when its own advert last did); take the later. Both are the Grid's clock and
+  null means none on record, not "down". NOT the row's observedAt, which only
+  moves when the node's identity, position or reachability changes, so it can
+  be days old for a node that is talking now. mesh.telemetry.lastAdvertAt is
+  the node's own advert stamp and is diagnostic only (node clocks skew). A
   node missing from the list is not proof it's down.
 
 ## Map layers (URLs for a maps client — not data to reason over)

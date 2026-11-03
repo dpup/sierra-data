@@ -436,7 +436,7 @@ if you already run a bridge you can forward its messages unchanged:
 
 | Field | | |
 |---|---|---|
-| `packet_type` | required | The MeshCore payload type. Only `4` (ADVERT) is used; anything else is accepted and ignored, so forwarding your whole RX log is fine. |
+| `packet_type` | required | The MeshCore payload type. Only `4` (ADVERT) updates a node. Every other type is accepted, and a FLOOD-routed one also credits the repeaters in its path with a relay (`telemetry.lastRelayedAt`), so forwarding your whole RX log is useful, not just harmless. |
 | `raw` | required | The full over-the-air frame as hex — header, path and payload, exactly as the radio received it. A `meshcore://<hex>` link (what the map's uploader builds from the same bytes) is accepted too. |
 | `SNR`, `RSSI` | optional | Your radio's reading for this reception, dB and dBm. Numbers or strings, as the bridges send them. |
 | `origin_id` | optional | The receiving radio's public key, if it differs from `observer`. |
@@ -455,8 +455,9 @@ share a connection or use two radios.
 
 `202` as for the other stream. `accepted` counts **adverts applied**, not
 packets received — a report of fifty text messages and no adverts is accepted
-with `accepted: 0`, which is your signal that what you are sending is not
-useful. A packet the Grid could not use is a warning naming its index and why
+with `accepted: 0`. Those messages still credit relays if they were
+flood-routed, but an `accepted` that stays at 0 for a day means no advert is
+getting through, which is usually a sign you are forwarding the wrong thing. A packet the Grid could not use is a warning naming its index and why
 (`malformed`: not hex, or not a decodable advert frame; `rejected`: the node's
 signature did not verify). Up to 25 are listed, then a count.
 

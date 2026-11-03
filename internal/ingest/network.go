@@ -7,6 +7,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
@@ -76,6 +77,10 @@ type MeshRegistry interface {
 	// DrainObservations returns the receptions buffered since the last drain
 	// (cleared), for the append-only relay-observation store (Tier 0).
 	DrainObservations() []meshcore.Observation
+	// DrainRelays returns, per full key, the latest reception of a flood packet
+	// that named the node as a relay hop since the last drain (cleared). Hops
+	// resolve on a unique prefix match over the registry's nodes plus `known`.
+	DrainRelays(known []string) map[string]time.Time
 	// ResolvePrefix maps a pubkey prefix to a full key on a unique match.
 	ResolvePrefix(prefix string) (string, bool)
 }
@@ -116,6 +121,13 @@ type NetworkNormalizer struct {
 	// used to attribute a node's provenance to the MQTT server's operator.
 	brokerOps map[string]config.MeshcoreBroker
 	now       func() time.Time
+
+	// activityMu guards activity: the clocks this normalizer last handed the
+	// store, so a tick writes only the nodes whose activity moved. Empty after
+	// a restart, which costs one full write; the store's MAX merge makes that
+	// harmless.
+	activityMu sync.Mutex
+	activity   map[string]store.MeshActivity
 }
 
 // NewNetworkNormalizer wires the normalizer to its inputs. Either may be nil,
@@ -293,6 +305,7 @@ func (n *NetworkNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult,
 		ForceWrite:           forceWrite,
 		Superseded:           supersededIDs(promotions),
 		MeshObservations:     n.drainObservations(),
+		MeshActivity:         n.meshActivity(merged, prior),
 		MeshTelemetry:        meshTelemetrySamples(events, now),
 		MeshTelemetryRenames: promotions,
 		PerSource:            perSource,
@@ -301,6 +314,76 @@ func (n *NetworkNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult,
 		result.SweepSuppress = append(result.SweepSuppress, meshSourceID)
 	}
 	return result, nil
+}
+
+// meshActivity returns the activity clocks that advanced this tick, for the
+// nodes this layer covers: the in-region nodes of this tick, plus every node
+// the store holds as a live mesh event (a quiet repeater can drop out of the
+// snapshot between its adverts while relaying all day).
+//
+// Two clocks, two sources. last_heard_at is the registry's ReceivedAt (a real
+// advert reception, never the seed's last_seen_at fallback); last_relayed_at
+// is the latest flood packet that named the node as a hop. Relay hops resolve
+// against the registry's whole catalog plus the store's keys (see
+// meshcore.Registry.DrainRelays), and only then are cut down to the covered
+// set, so a global collision still blocks a local attribution.
+//
+// The relay buffer drains here, on a successful poll only: on a hard error
+// Poll returns before this, and the evidence waits for the next tick.
+func (n *NetworkNormalizer) meshActivity(merged map[string]*mergedNode, prior Prior) []store.MeshActivity {
+	covered := n.fullKeyCatalog(merged, prior)
+	coveredSet := make(map[string]bool, len(covered))
+	for _, k := range covered {
+		coveredSet[k] = true
+	}
+	var relays map[string]time.Time
+	if n.registry != nil {
+		relays = n.registry.DrainRelays(covered)
+	}
+
+	now := make(map[string]store.MeshActivity, len(coveredSet))
+	for k, m := range merged {
+		if m.mqtt != nil && !m.mqtt.ReceivedAt.IsZero() && coveredSet[k] {
+			now[k] = store.MeshActivity{PubKey: k, LastHeardAt: m.mqtt.ReceivedAt}
+		}
+	}
+	for k, t := range relays {
+		if !coveredSet[k] {
+			continue
+		}
+		a := now[k]
+		a.PubKey, a.LastRelayedAt = k, t
+		now[k] = a
+	}
+
+	n.activityMu.Lock()
+	defer n.activityMu.Unlock()
+	if n.activity == nil {
+		n.activity = make(map[string]store.MeshActivity, len(now))
+	}
+	var out []store.MeshActivity
+	for k, a := range now {
+		prev := n.activity[k]
+		next := store.MeshActivity{
+			PubKey:        k,
+			LastHeardAt:   laterOf(prev.LastHeardAt, a.LastHeardAt),
+			LastRelayedAt: laterOf(prev.LastRelayedAt, a.LastRelayedAt),
+		}
+		if next.LastHeardAt.Equal(prev.LastHeardAt) && next.LastRelayedAt.Equal(prev.LastRelayedAt) {
+			continue
+		}
+		n.activity[k] = next
+		out = append(out, next)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].PubKey < out[j].PubKey })
+	return out
+}
+
+func laterOf(a, b time.Time) time.Time {
+	if b.After(a) {
+		return b
+	}
+	return a
 }
 
 // brokerDelivery counts the brokers that are delivering and, when any

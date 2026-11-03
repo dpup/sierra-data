@@ -650,7 +650,7 @@ const MESH_DOCS = {
 };
 
 const MESH_KNOWN = ['publicKey', 'nodeType', 'name', 'telemetry', 'reachability'];
-const MESH_TELEMETRY_KNOWN = ['snr', 'rssi', 'hopCount', 'gateways', 'lastAdvertAt', 'admin'];
+const MESH_TELEMETRY_KNOWN = ['snr', 'rssi', 'hopCount', 'gateways', 'lastAdvertAt', 'admin', 'lastHeardAt', 'lastRelayedAt'];
 const MESH_ADMIN_KNOWN = [
   'reporterId', 'reportedAt', 'lastSuccessAt', 'lastAttemptAt',
   'batteryVolts', 'batteryPercent', 'batteryPercentSource', 'temperatureC', 'humidity',
@@ -739,6 +739,28 @@ function renderMeshDetail(body, m) {
   kvRow(idl, 'reachability', reachabilityValue(m.reachability), MESH_DOCS.reachability);
   body.append(idl);
 
+  /* ---- last activity ---- */
+  // First, and shown whatever else is missing: "is this node talking right
+  // now" is the question most readers came with, and the event's observedAt
+  // cannot answer it (it moves only when something hashed changes). A node no
+  // bridge has heard advertise can still be relaying all day.
+  const act = subGroup(
+    body,
+    'Last activity',
+    'When something from this node last reached us, on our clock. Last heard is its own ' +
+      'advert. Last relayed is any flood-routed packet that carried its hash in the path ' +
+      '(messages, acks, other nodes’ adverts), which for a backbone repeater is near-constant ' +
+      'while its own adverts come a day or two apart. A relay hop is matched by key prefix: one ' +
+      'that two known nodes share is credited to neither, and a 1-byte hop is never credited, so ' +
+      'a node seen only on 1-byte paths shows no relay time. Neither value is part of the revision.'
+  );
+  act.append(
+    metricGrid([
+      timeReading('Last heard', t.lastHeardAt, { absent: 'none on record' }),
+      timeReading('Last relayed', t.lastRelayedAt, { absent: 'none on record' }),
+    ])
+  );
+
   /* ---- heard by the mesh ---- */
   // Heard at all? The signal fields are wrapper types on the wire precisely so
   // this question has an answer: they are null, not 0, for a node an operator's
@@ -757,8 +779,8 @@ function renderMeshDetail(body, m) {
     heard
       ? 'What the community MQTT bridges heard of this node’s last advert. These values are ' +
         'excluded from the content hash, so a new advert refreshes them without creating a ' +
-        'revision. The advert time is stamped by the node’s own unsynchronized clock; “heard” ' +
-        'elsewhere on this page is the event’s observedAt.'
+        'revision. The advert time is stamped by the node’s own unsynchronized clock; when we ' +
+        'last heard it, on ours, is under Last activity above.'
       : ''
   );
   if (!heard) {

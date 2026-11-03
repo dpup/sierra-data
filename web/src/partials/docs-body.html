@@ -143,7 +143,7 @@ Content-Type: application/json
       <tr><td class="mono">roadIncident</td><td class="wrap mono">logNumber (string), impact, duration (string), metadata (map&lt;string,string&gt;), closure (Caltrans only: windowId, district, closureId, logNumber, route, direction, facility, closureType, workType, lanesClosed, totalLanes, estimatedDelayMinutes, closureDuration, plannedStart, plannedEnd, endIndefinite, setUpAt, beginLocation, endLocation, begin, end)</td></tr>
       <tr><td class="mono">power</td><td class="wrap mono">outageId, cause (string), customersAffected (int32), crewStatus (string), estimatedRestoration (timestamp); PSPS adds eventId, eventName, timePeriod, stage (Watch | Warning, as string), medicalBaselineAffected (int32), deEnergizationStart, deEnergizationEnd, allClear (timestamp). <strong>estimatedRestoration, deEnergizationEnd and allClear are ESTIMATES PG&amp;E routinely overruns</strong> — they are deliberately not mapped onto <code>expires</code>, so never use them to hide an event.</td></tr>
       <tr><td class="mono">burnStatus</td><td class="wrap mono">burnDay (BURN_DAY_UNKNOWN | _YES | _NO | _MARGINAL), calfireStatus (CALFIRE_BURN_STATUS_UNKNOWN | CALFIRE_BURNING_SUSPENDED | CALFIRE_PERMIT_REQUIRED | CALFIRE_NO_PERMIT_REQUIRED), permission (BURN_PERMISSION_UNKNOWN | _ALLOWED | _PROHIBITED), calfireEffective, calfireObservedAt (timestamp), calfireArea (string), burnLines[] { id, name, phone (string), burnDay, observation { message, transcript (string), confidence (int32), observedAt (timestamp) } }. <strong>burnLines is a LIST</strong> — a county can have more than one recorded line, and one air-district line can speak for several counties. The top-level burnDay is their merge (most restrictive wins); render the per-line answers when they differ. A line we publish but do not read still appears, with burnDay UNKNOWN and its phone populated, so you can always offer the number. <strong>permission is deliberately pessimistic</strong> — PROHIBITED is conclusive from either authority alone, but ALLOWED needs BOTH facets known and permissive; anything else is UNKNOWN. Render UNKNOWN as "call the burn line", never as a green light. <strong>BURN_DAY_MARGINAL means ELEVATION-RESTRICTED</strong> (a burn day only above a stated elevation, typically 3500 ft) — only <code class="inline">observation.message</code> carries the threshold. The burn-day facet is a transcription of a recorded county phone line, not an API, so <code class="inline">observation.confidence</code> is a model's confidence and <code class="inline">burnLinePhone</code> should always be offered next to it.</td></tr>
-      <tr><td class="mono">mesh</td><td class="wrap mono">publicKey (hex string), nodeType (companion | repeater | room_server | sensor), name (string), telemetry { snr (double), rssi (int32), hopCount (uint32), path (repeated string — relay hops as repeater pubkey-prefix hashes), pathNodes (repeated string — path resolved to full node public keys, parallel to path), gateways (repeated string), lastAdvertAt (timestamp) }</td></tr>
+      <tr><td class="mono">mesh</td><td class="wrap mono">publicKey (hex string), nodeType (companion | repeater | room_server | sensor), name (string), reachability (MESH_REACHABILITY_UNSPECIFIED | REACHABLE | UNREACHABLE), telemetry { snr (double), rssi (int32), hopCount (uint32), gateways (repeated string), lastAdvertAt (timestamp), lastHeardAt (timestamp), lastRelayedAt (timestamp), admin { … } }. Relay paths are not on the event: they are per reception, served as topology at <code class="inline">/api/v1/mesh/links</code>.</td></tr>
     </tbody>
   </table></div>
   <p class="small muted">
@@ -153,11 +153,16 @@ Content-Type: application/json
     stream). The <code class="inline">mesh</code> block's
     <code class="inline">telemetry</code> is the last-heard signal state and is
     volatile — it never mints a new event revision (only a node's identity,
-    role, name, location, or status does). For "when did this node last
-    advertise", the trustworthy answer is the event's
-    <code class="inline">observedAt</code> (when the Grid last heard it);
-    <code class="inline">telemetry.lastAdvertAt</code> is the node's
-    self-reported stamp and is diagnostic only (mesh node clocks skew). The <code class="inline">burnStatus</code> block's
+    role, name, location, reachability, or status does). For "is this node
+    talking", read <code class="inline">telemetry.lastRelayedAt</code> (when a
+    flood packet it relayed last reached the Grid) and
+    <code class="inline">telemetry.lastHeardAt</code> (when its own advert
+    did): both the Grid's clock, filled in when the event is served rather than
+    stored in it, null when none is on record. Not the event's
+    <code class="inline">observedAt</code>, which moves only with a revision
+    and can be days old for a node relaying right now; and not
+    <code class="inline">telemetry.lastAdvertAt</code>, the node's
+    self-reported stamp, diagnostic only (mesh node clocks skew). The <code class="inline">burnStatus</code> block's
     <code class="inline">observation</code> is volatile in the same way: the
     county line's message names the date, so it changes daily even when the
     answer does not, and it never mints a revision. Slots are also reserved for

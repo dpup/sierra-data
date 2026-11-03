@@ -31,8 +31,8 @@ const (
 type MeshObservation struct {
 	PubKey    string
 	HeardAt   time.Time
-	Broker    string    // MQTT server URL the advert arrived on
-	Gateway   string    // origin/gateway that reported it
+	Broker    string // MQTT server URL the advert arrived on
+	Gateway   string // origin/gateway that reported it
 	SNR       float64
 	RSSI      int32
 	HopCount  uint32
@@ -46,29 +46,31 @@ type MeshObservation struct {
 // single-writer discipline holds. Path/PathNodes are stored comma-joined (the
 // hop lists, parallel; compaction splits them back). An empty batch is a no-op.
 func (s *Store) InsertMeshObservations(ctx context.Context, obs []MeshObservation) error {
+	return s.RecordMeshTick(ctx, obs, nil)
+}
+
+func insertMeshObservations(ctx context.Context, tx *sql.Tx, obs []MeshObservation) error {
 	if len(obs) == 0 {
 		return nil
 	}
-	return s.inTx(ctx, func(tx *sql.Tx) error {
-		stmt, err := tx.PrepareContext(ctx, `
-			INSERT INTO mesh_observations
-			  (pubkey, heard_at, broker, gateway, snr, rssi, hop_count, path, path_nodes)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-		if err != nil {
-			return fmt.Errorf("store: prepare mesh observation insert: %w", err)
+	stmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO mesh_observations
+		  (pubkey, heard_at, broker, gateway, snr, rssi, hop_count, path, path_nodes)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return fmt.Errorf("store: prepare mesh observation insert: %w", err)
+	}
+	defer stmt.Close()
+	for _, o := range obs {
+		if _, err := stmt.ExecContext(ctx,
+			o.PubKey, o.HeardAt.Unix(), o.Broker, o.Gateway,
+			o.SNR, o.RSSI, o.HopCount,
+			strings.Join(o.Path, ","), strings.Join(o.PathNodes, ","),
+		); err != nil {
+			return fmt.Errorf("store: insert mesh observation %s: %w", o.PubKey, err)
 		}
-		defer stmt.Close()
-		for _, o := range obs {
-			if _, err := stmt.ExecContext(ctx,
-				o.PubKey, o.HeardAt.Unix(), o.Broker, o.Gateway,
-				o.SNR, o.RSSI, o.HopCount,
-				strings.Join(o.Path, ","), strings.Join(o.PathNodes, ","),
-			); err != nil {
-				return fmt.Errorf("store: insert mesh observation %s: %w", o.PubKey, err)
-			}
-		}
-		return nil
-	})
+	}
+	return nil
 }
 
 // MeshNodeHeardTimes returns, per node public key, the recent advert receive

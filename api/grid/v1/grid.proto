@@ -337,6 +337,35 @@ message MeshTelemetry {
   // moves on every report: hashed, a 5-minute reporting cadence would mint ~288
   // revisions per node per day and say nothing.
   MeshAdminTelemetry admin = 8;
+
+  // When WE last received one of this node's own adverts (our clock, not the
+  // node's: compare last_advert_at). This is the answer to "when did the node
+  // last speak". The event's observed_at is NOT: it moves only when something
+  // hashed changes (identity, position, reachability), so a node advertising
+  // the same thing every day kept an observed_at days old.
+  //
+  // Read-time only. Filled from the store's mesh_activity table when the event
+  // is served and never written into the event blob, so it mints no revision
+  // and costs no blob rewrite. Null when no advert has been received since
+  // activity tracking began.
+  google.protobuf.Timestamp last_heard_at = 9;
+
+  // When we last received a packet that this node had RELAYED: its key's hash
+  // appeared as a hop in the path of a FLOOD-routed packet of any type
+  // (messages, acks, path returns, adverts). A backbone repeater adverts every
+  // day or two but relays constantly, so this, not last_heard_at, is what says
+  // a repeater is up right now.
+  //
+  // Two limits, both deliberate. Hops are attributed only on a UNIQUE prefix
+  // match against the known node catalog (the relay-link rule), and only for 2-
+  // and 3-byte hashes: a 1-byte hash could belong to a relayer we have never
+  // catalogued, so a node relaying only on 1-byte paths gets no relay time.
+  // And direct-routed packets never count: their path is the route still to be
+  // travelled, not the one travelled, so a hop there may never have heard the
+  // packet. The path is not signed, so this is display evidence only: it never
+  // affects a node's presence or lifecycle. Read-time only, like
+  // last_heard_at; null when no relay has been attributed.
+  google.protobuf.Timestamp last_relayed_at = 10;
 }
 
 // MeshAdminTelemetry is one sample read off a node's own admin interface by an

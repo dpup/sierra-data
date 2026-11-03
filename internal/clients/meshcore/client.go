@@ -98,6 +98,22 @@ type Observation struct {
 // oldest receptions are dropped to bound memory.
 const maxObsBuffer = 100000
 
+// minRelayHopHex is the shortest hop hash (in hex) that can earn a node relay
+// credit: 2 bytes. A 1-byte hash names one of 256 buckets, and the unique-match
+// rule only protects against collisions among nodes we KNOW. A relayer missing
+// from the catalog (it never advertised to a bridge, or was pruned) whose byte
+// happens to match exactly one known node would hand that node its traffic,
+// and a dead repeater would read as relaying. With a few thousand known nodes
+// a 1-byte hop almost never resolves anyway; with 65,536 buckets the stray
+// match is rare. Measured on a replay with a 208-node catalog: 1-byte hops
+// credited two SIERRA repeaters that no 2-byte flood path named.
+const minRelayHopHex = 4
+
+// maxRelayHops caps the DISTINCT hop hashes buffered between drains. A tick
+// sees a few thousand at most (one per active repeater per hash size); past
+// the cap a new hash is dropped while the ones already held keep updating.
+const maxRelayHops = 200000
+
 // NodeState is a snapshot of one mesh node's presence.
 type NodeState struct {
 	PubKey      string
@@ -120,6 +136,13 @@ type NodeState struct {
 	Gateways     []string
 	LastAdvertAt time.Time // sender-stamped
 	LastHeardAt  time.Time // our receive time
+	// ReceivedAt is our receive time of the node's last advert that was actually
+	// RECEIVED: live, or replayed at Seed from the observation store. Unlike
+	// LastHeardAt it is never a fallback. Seed backs LastHeardAt with the store's
+	// last_seen_at when it has no reception on record, which is right for
+	// presence (keep the node until its window passes) and wrong as an answer
+	// to "when did we last hear it". Zero means no reception on record.
+	ReceivedAt time.Time
 }
 
 type nodeEntry struct {
@@ -196,6 +219,12 @@ type Registry struct {
 	// last buffered time per (pubkey,gateway) for the SpamFloor. Both guarded by mu.
 	obsBuf  []Observation
 	obsGate map[string]time.Time
+
+	// relayBuf maps each relay-hop hash (lowercase hex) seen since the last
+	// drain to the latest reception naming it. Hashes, not keys: resolving a
+	// hop needs the whole catalog, so it waits for DrainRelays, as an
+	// observation's PathNodes waits for DrainObservations. Guarded by mu.
+	relayBuf map[string]time.Time
 
 	now func() time.Time // injectable clock for tests
 }
@@ -296,6 +325,9 @@ func (r *Registry) Seed(nodes []SeedNode) {
 			e.recordCadence(t)
 			if t.After(last) {
 				last = t
+			}
+			if t.After(e.ReceivedAt) {
+				e.ReceivedAt = t
 			}
 		}
 		e.LastHeardAt = last
@@ -531,11 +563,29 @@ func (r *Registry) IngestEnvelope(payload []byte, source, defaultGateway string)
 
 // ingestPacket applies one decoded envelope to the registry. Split out from the
 // transport plumbing so it is unit-testable without a broker.
+//
+// Every packet type is read for its relay path (recordRelaysLocked); only an
+// ADVERT goes on to update a node. Adverts are ~7% of the feed, and the rest is
+// where a quiet backbone repeater shows up: measured on 2026-11-03, a flood
+// packet named Camp Connell as a relay hop ~13 times for every advert that did.
 func (r *Registry) ingestPacket(env *packetEnvelope, source, defaultGateway string) (PacketOutcome, error) {
+	rawHex := strings.TrimPrefix(strings.TrimSpace(env.Raw), "meshcore://")
 	if env.PacketType.int() != packetTypeAdvert {
+		// Best effort, and it never changes the outcome: a packet we do not
+		// ingest is Ignored whether or not its framing parsed. Decoding only
+		// the header and path keeps this cheap on a firehose of every type.
+		if raw, err := hex.DecodeString(rawHex); err == nil {
+			if h, err := DecodeFrameHeader(raw); err == nil {
+				if hops := h.RelayHops(); len(hops) > 0 {
+					now := r.now()
+					r.mu.Lock()
+					r.recordRelaysLocked(hops, now)
+					r.mu.Unlock()
+				}
+			}
+		}
 		return PacketIgnored, nil
 	}
-	rawHex := strings.TrimPrefix(strings.TrimSpace(env.Raw), "meshcore://")
 	raw, err := hex.DecodeString(rawHex)
 	if err != nil {
 		return PacketMalformed, fmt.Errorf("raw is not hex: %w", err)
@@ -556,6 +606,12 @@ func (r *Registry) ingestPacket(env *packetEnvelope, source, defaultGateway stri
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	// An accepted advert's own path is relay evidence like any other packet's
+	// (DecodeFrame already parsed it; the header is re-read only for the route).
+	if h, err := DecodeFrameHeader(raw); err == nil {
+		r.recordRelaysLocked(h.RelayHops(), now)
+	}
 
 	e := r.nodes[adv.PubKey]
 	if e == nil {
@@ -593,6 +649,7 @@ func (r *Registry) ingestPacket(env *packetEnvelope, source, defaultGateway stri
 	e.HopCount = uint32(adv.HopCount)
 	e.LastAdvertAt = adv.Timestamp // node-reported; unreliable clock, diagnostic only
 	e.LastHeardAt = now            // our receive time — the trustworthy clock
+	e.ReceivedAt = now             // a real reception, never a seed fallback
 	e.recordCadence(now)           // per-node advert-interval estimate (drives Snapshot's window)
 	if gw != "" {
 		e.gateways[gw] = struct{}{}
@@ -640,6 +697,74 @@ func (r *Registry) allowObservationLocked(pubkey, gateway string, now time.Time)
 	}
 	r.obsGate[key] = now
 	return true
+}
+
+// recordRelaysLocked notes that each hop hash was named as a relay at t.
+// Caller holds r.mu.
+func (r *Registry) recordRelaysLocked(hops []string, t time.Time) {
+	if len(hops) == 0 {
+		return
+	}
+	if r.relayBuf == nil {
+		r.relayBuf = make(map[string]time.Time)
+	}
+	for _, h := range hops {
+		if len(h) < minRelayHopHex {
+			continue
+		}
+		prev, ok := r.relayBuf[h]
+		if !ok && len(r.relayBuf) >= maxRelayHops {
+			continue
+		}
+		if t.After(prev) {
+			r.relayBuf[h] = t
+		}
+	}
+}
+
+// DrainRelays returns, per node public key, the latest time a packet was
+// received with that node as a relay hop since the last drain, and clears the
+// buffer. Called once per scheduler tick (single reader).
+//
+// A hop resolves on the same UNIQUE-match rule as resolvePath, over every node
+// the registry holds PLUS `known`: full keys the caller knows from elsewhere
+// (the store's mesh events). The extra keys matter both ways. A repeater that
+// adverts less often than the registry retains nodes is pruned from memory
+// while still relaying all day, and without its key the hop would resolve to
+// nothing; and every key added is one more chance to see that a prefix is
+// ambiguous, which keeps a hop from being pinned on the wrong node.
+//
+// Hashes that resolve to nothing (unknown, or shared by two known nodes) are
+// dropped, and 1-byte hashes never get this far (see minRelayHopHex).
+func (r *Registry) DrainRelays(known []string) map[string]time.Time {
+	r.mu.Lock()
+	buf := r.relayBuf
+	r.relayBuf = nil
+	keys := make(map[string]struct{}, len(r.nodes)+len(known))
+	for pk := range r.nodes {
+		keys[pk] = struct{}{}
+	}
+	r.mu.Unlock()
+	if len(buf) == 0 {
+		return nil
+	}
+	for _, pk := range known {
+		if pk = strings.ToLower(pk); pk != "" {
+			keys[pk] = struct{}{}
+		}
+	}
+	idx := prefixIndex(keys)
+	out := make(map[string]time.Time)
+	for hop, t := range buf {
+		cands := idx[hop]
+		if len(cands) != 1 {
+			continue
+		}
+		if t.After(out[cands[0]]) {
+			out[cands[0]] = t
+		}
+	}
+	return out
 }
 
 // DrainObservations returns the receptions buffered since the last drain and
@@ -713,8 +838,18 @@ var prefixLens = []int{2, 4, 6}
 // lengths) to the pubkeys carrying them, for relay-hop resolution. A hop resolves
 // only on a UNIQUE match (see resolvePath). Caller holds r.mu.
 func (r *Registry) prefixIndexLocked() map[string][]string {
-	idx := make(map[string][]string, len(r.nodes)*len(prefixLens))
+	keys := make(map[string]struct{}, len(r.nodes))
 	for pk := range r.nodes {
+		keys[pk] = struct{}{}
+	}
+	return prefixIndex(keys)
+}
+
+// prefixIndex maps every key's 1/2/3-byte hex prefixes to the keys carrying
+// them. Keys must be distinct (a set), or one node would collide with itself.
+func prefixIndex(keys map[string]struct{}) map[string][]string {
+	idx := make(map[string][]string, len(keys)*len(prefixLens))
+	for pk := range keys {
 		for _, n := range prefixLens {
 			if len(pk) >= n {
 				idx[pk[:n]] = append(idx[pk[:n]], pk)
