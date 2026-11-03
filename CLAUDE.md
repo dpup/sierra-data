@@ -385,8 +385,11 @@ survives as a legacy alias):
   only when exactly one relay-capable node fits it: a unique 2+ byte prefix,
   or for a 1-byte hop the one known NEIGHBOUR of the next hop along (anchored
   at the observer) that carries the byte. The graph is learned only from
-  unambiguous paths and seeded from 30 days of links
-  (`internal/clients/meshcore/relay.go`).
+  unambiguous paths, and rebuilt at boot by replaying the stored raw
+  receptions (48h) through the same rule — never from the link rollup, whose
+  edges the older resolver pinned on 1-byte prefixes
+  (`internal/clients/meshcore/relay.go`). Only a catalogued relay-capable node
+  is credited, and an MQTT broker URL is never an observer anchor.
 
 **PG&E ArcGIS** (`ags.pge.esriemcs.com`, the `POWER` layer):
 - Keyless and public, but **entirely undocumented** — no contract, no version,

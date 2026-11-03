@@ -703,20 +703,35 @@ func seedMeshRegistry(ctx context.Context, reg *meshcore.Registry, st *store.Sto
 	reg.Seed(seeds)
 	logging.Infow(ctx, "MeshCore: rehydrated node presence from store", "nodes", len(seeds))
 
-	// The neighbour graph that resolves 1-byte relay hops (meshcore/relay.go):
-	// the last 30 days of stored links, so a restart does not forget who is
-	// next to whom and stop crediting half the traffic until it re-learns.
-	links, err := st.MeshLinks(ctx, time.Now().Add(-30*24*time.Hour))
+	// The neighbour graph that resolves 1-byte relay hops (meshcore/relay.go),
+	// so a restart does not stop crediting half the traffic until it re-learns.
+	// Rebuilt from the raw receptions (Tier 0, observationRetention) through the
+	// live rule, NOT from the link rollup: rollup edges were resolved by the
+	// older rule that matches 1-byte hops on prefix, which is exactly the
+	// misattribution the graph exists to avoid.
+	obs, err := st.MeshObservationPaths(ctx, time.Now().Add(-meshcore.AdjacencyRetention))
 	if err != nil {
-		logging.Warnw(ctx, "MeshCore: neighbour-graph rehydration skipped — reading links failed", "error", err)
+		logging.Warnw(ctx, "MeshCore: neighbour-graph rehydration skipped — reading receptions failed", "error", err)
 		return
 	}
-	seedLinks := make([]meshcore.SeedLink, 0, len(links))
-	for _, l := range links {
-		seedLinks = append(seedLinks, meshcore.SeedLink{A: l.A, B: l.B, LastSeen: l.LastSeen})
+	paths := seedPaths(obs)
+	reg.SeedPaths(paths, nil)
+	logging.Infow(ctx, "MeshCore: rehydrated neighbour graph from store", "paths", len(paths))
+}
+
+// seedPaths turns stored advert receptions into neighbour-graph seed paths.
+// A stored gateway equal to the broker is the broker-URL fallback, which every
+// radio on that broker shares, so it is no anchor (see meshcore.relayObserver).
+func seedPaths(obs []store.MeshObservation) []meshcore.SeedPath {
+	paths := make([]meshcore.SeedPath, 0, len(obs))
+	for _, o := range obs {
+		sp := meshcore.SeedPath{Hops: o.Path, Observer: o.Gateway, Sender: o.PubKey, At: o.HeardAt}
+		if o.Gateway == o.Broker {
+			sp.Observer = ""
+		}
+		paths = append(paths, sp)
 	}
-	reg.SeedLinks(seedLinks)
-	logging.Infow(ctx, "MeshCore: rehydrated neighbour graph from store", "links", len(seedLinks))
+	return paths
 }
 
 // gridSourceSeeds builds the source registry rows: ids + tuning from

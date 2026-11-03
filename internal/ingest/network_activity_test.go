@@ -76,6 +76,15 @@ func TestPollEmitsMeshActivity(t *testing.T) {
 	res, err = n.Poll(testCtx(), prior)
 	require.NoError(t, err)
 	assert.Empty(t, res.MeshActivity)
+
+	// A failed write makes the next tick re-send what the store may lack,
+	// even though nothing moved.
+	require.NotNil(t, res.MeshActivityUnwritten)
+	res.MeshActivityUnwritten()
+	reg.relays = nil
+	res, err = n.Poll(testCtx(), prior)
+	require.NoError(t, err)
+	assert.Equal(t, []store.MeshActivity{{PubKey: heard, LastHeardAt: at.Add(-time.Hour)}}, res.MeshActivity)
 }
 
 // On a hard error the relay evidence is not drained: it waits for a tick

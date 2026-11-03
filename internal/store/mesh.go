@@ -108,6 +108,37 @@ func (s *Store) MeshNodeHeardTimes(ctx context.Context, maxPerNode int) (map[str
 	return out, nil
 }
 
+// MeshObservationPaths returns the stored receptions heard at or after since
+// that carry a relay path, oldest first, with Path split back into hops
+// (PathNodes is left empty: it was resolved by whatever rule was current when
+// the row was written, and a caller re-resolving the path must not inherit
+// that). Seeds the relay neighbour graph at boot.
+func (s *Store) MeshObservationPaths(ctx context.Context, since time.Time) ([]MeshObservation, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT pubkey, heard_at, broker, gateway, path FROM mesh_observations
+		WHERE heard_at >= ? AND path != '' ORDER BY heard_at`, since.Unix())
+	if err != nil {
+		return nil, fmt.Errorf("store: reading observation paths: %w", err)
+	}
+	defer rows.Close()
+	var out []MeshObservation
+	for rows.Next() {
+		var o MeshObservation
+		var heard int64
+		var path string
+		if err := rows.Scan(&o.PubKey, &heard, &o.Broker, &o.Gateway, &path); err != nil {
+			return nil, fmt.Errorf("store: scanning observation path: %w", err)
+		}
+		o.HeardAt = time.Unix(heard, 0).UTC()
+		o.Path = splitList(path)
+		out = append(out, o)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: iterating observation paths: %w", err)
+	}
+	return out, nil
+}
+
 // CountMeshObservations returns the number of rows in mesh_observations. A test
 // and diagnostic aid (the write path has no reader yet); cheap enough for the
 // volumes involved.

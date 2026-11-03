@@ -27,8 +27,11 @@ import (
 //     resolves 1-byte hops, and it narrows ~5 same-byte candidates to the
 //     handful of nodes that have actually been heard next to the anchor.
 //
-// The neighbour graph is learned ONLY from rule 1 (and seeded from the store's
-// link rollup), never from rule 2, so an inference cannot reinforce itself.
+// The neighbour graph is learned ONLY from rule 1, never from rule 2, so an
+// inference cannot reinforce itself. That includes the boot seed: SeedPaths
+// replays the store's raw receptions through rule 1, rather than loading the
+// link rollup, whose edges were resolved by the older unique-prefix rule that
+// does match 1-byte hops (the "3c" -> San Benito misattribution below).
 //
 // Measured on a 2-hour, 3,000-packet capture: rule 2 agreed with CoreScope's
 // resolver on 97% of the hops both resolved, and in every disagreement
@@ -44,10 +47,12 @@ type KnownNode struct {
 	Role   string
 }
 
-// SeedLink is one stored relay link, for SeedLinks.
-type SeedLink struct {
-	A, B     string
-	LastSeen time.Time
+// SeedPath is one stored reception's relay path, for SeedPaths.
+type SeedPath struct {
+	Hops     []string // lowercase hex, sender -> observer order
+	Observer string   // the radio that heard the last hop; "" if unknown
+	Sender   string   // the advert's sender
+	At       time.Time
 }
 
 const (
@@ -55,9 +60,9 @@ const (
 	// sees a few hundred); past it new paths are dropped and known ones still
 	// update.
 	maxRelayPaths = 50000
-	// adjacencyRetention is how long a neighbour link stays usable without
-	// being seen again. Matches the link-rollup window SeedLinks is fed from.
-	adjacencyRetention = 30 * 24 * time.Hour
+	// AdjacencyRetention is how long a neighbour link stays usable without
+	// being seen again.
+	AdjacencyRetention = 30 * 24 * time.Hour
 	// fullKeyHex is a full public key's hex length; only full keys can be
 	// credited (an observer id may be a prefix or a name).
 	fullKeyHex = 64
@@ -92,7 +97,7 @@ func (r *Registry) recordRelaysLocked(hops []string, observer, sender string, t 
 	if len(hops) == 0 && sender == "" {
 		return
 	}
-	observer = strings.ToLower(strings.TrimSpace(observer))
+	observer = anchorKey(observer)
 	sender = strings.ToLower(sender)
 	key := observer + "|" + sender + "|" + strings.Join(hops, ",")
 	if r.relayBuf == nil {
@@ -111,17 +116,46 @@ func (r *Registry) recordRelaysLocked(hops []string, observer, sender string, t 
 	r.relayBuf[key] = e
 }
 
-// SeedLinks loads stored relay links into the neighbour graph. Call at boot,
-// before Connect; links older than adjacencyRetention are skipped.
-func (r *Registry) SeedLinks(links []SeedLink) {
+// SeedPaths rebuilds the neighbour graph from stored receptions, so a restart
+// does not stop crediting 1-byte hops until the graph re-learns. Each path is
+// resolved by rule 1 against the registry's catalog plus `known`, exactly as
+// live traffic is, and only what that pins down is learned. Call at boot,
+// after Seed and before Connect.
+func (r *Registry) SeedPaths(paths []SeedPath, known []KnownNode) {
 	now := r.now()
+	idx := relayIndex(r.relayRoles(known))
 	r.adjMu.Lock()
 	defer r.adjMu.Unlock()
-	for _, l := range links {
-		if now.Sub(l.LastSeen) <= adjacencyRetention {
-			r.addEdgeLocked(strings.ToLower(l.A), strings.ToLower(l.B), l.LastSeen)
+	for _, sp := range paths {
+		if now.Sub(sp.At) > AdjacencyRetention {
+			continue
+		}
+		p := relayPath{hops: sp.Hops, observer: anchorKey(sp.Observer), sender: strings.ToLower(sp.Sender)}
+		r.learnLocked(p, resolveByPrefix(p.hops, idx), sp.At)
+	}
+}
+
+// relayRoles is the resolution catalog: every node the registry holds, plus
+// `known` for keys it does not.
+func (r *Registry) relayRoles(known []KnownNode) map[string]string {
+	r.mu.Lock()
+	roles := make(map[string]string, len(r.nodes)+len(known))
+	for pk, e := range r.nodes {
+		roles[pk] = e.Role
+	}
+	r.mu.Unlock()
+	for _, k := range known {
+		pk := strings.ToLower(k.PubKey)
+		if _, ok := roles[pk]; pk != "" && !ok {
+			roles[pk] = k.Role
 		}
 	}
+	return roles
+}
+
+// anchorKey normalizes an observer id for the graph.
+func anchorKey(observer string) string {
+	return strings.ToLower(strings.TrimSpace(observer))
 }
 
 func (r *Registry) addEdgeLocked(a, b string, t time.Time) {
@@ -159,17 +193,8 @@ func (r *Registry) DrainRelays(known []KnownNode) map[string]time.Time {
 	r.mu.Lock()
 	buf := r.relayBuf
 	r.relayBuf = nil
-	roles := make(map[string]string, len(r.nodes)+len(known))
-	for pk, e := range r.nodes {
-		roles[pk] = e.Role
-	}
 	r.mu.Unlock()
-	for _, k := range known {
-		pk := strings.ToLower(k.PubKey)
-		if _, ok := roles[pk]; pk != "" && !ok {
-			roles[pk] = k.Role
-		}
-	}
+	roles := r.relayRoles(known)
 
 	r.adjMu.Lock()
 	r.pruneAdjacencyLocked(now)
@@ -276,7 +301,11 @@ func (r *Registry) resolveByNeighboursLocked(p relayPath, res []string, roles ma
 					if nb == pick || len(nb) != fullKeyHex || !strings.HasPrefix(nb, p.hops[i]) {
 						continue
 					}
-					if role, ok := roles[nb]; ok && !canRelay(role) {
+					// Only a catalogued relay-capable node can be credited. The
+					// graph also holds observers (often companions we never
+					// heard advertise), and an unverified pick here would go on
+					// to anchor the next hop inward.
+					if role, ok := roles[nb]; !ok || !canRelay(role) {
 						continue
 					}
 					pick = nb
@@ -294,7 +323,7 @@ func (r *Registry) resolveByNeighboursLocked(p relayPath, res []string, roles ma
 func (r *Registry) pruneAdjacencyLocked(now time.Time) {
 	for a, m := range r.adj {
 		for b, t := range m {
-			if now.Sub(t) > adjacencyRetention {
+			if now.Sub(t) > AdjacencyRetention {
 				delete(m, b)
 			}
 		}

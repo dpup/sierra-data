@@ -230,8 +230,8 @@ type Registry struct {
 	// adj is the neighbour graph DrainRelays resolves ambiguous hops against:
 	// node (or observer) key -> neighbour key -> when the link was last seen.
 	// Learned only from hops a prefix pinned down unambiguously, and seeded at
-	// boot from the store's link rollup (SeedLinks). Guarded by adjMu: only
-	// DrainRelays and SeedLinks touch it, so the MQTT path never waits on it.
+	// boot from the store's raw receptions (SeedPaths). Guarded by adjMu: only
+	// DrainRelays and SeedPaths touch it, so the MQTT path never waits on it.
 	adjMu sync.Mutex
 	adj   map[string]map[string]time.Time
 
@@ -334,19 +334,23 @@ func (r *Registry) Seed(nodes []SeedNode) {
 			e.HasLocation = true
 			e.Lat, e.Lng = sn.Lat, sn.Lng
 		}
-		last := sn.LastHeard
 		for _, t := range sn.HeardTimes {
 			e.recordCadence(t)
-			if t.After(last) {
-				last = t
-			}
 			if t.After(e.ReceivedAt) {
 				e.ReceivedAt = t
 			}
 		}
-		e.LastHeardAt = last
 		if sn.LastReceived.After(e.ReceivedAt) {
 			e.ReceivedAt = sn.LastReceived
+		}
+		// The advert window runs from the last real advert. last_seen_at is
+		// only a fallback for a node with no reception on record: it advances
+		// while relays alone keep a node present, so using it whenever it is
+		// later would turn a few hours of relay presence into a whole advert
+		// window (up to GraceCeil) at every restart.
+		e.LastHeardAt = e.ReceivedAt
+		if e.LastHeardAt.IsZero() {
+			e.LastHeardAt = sn.LastHeard
 		}
 		if sn.LastRelayed.After(e.LastRelayedAt) {
 			e.LastRelayedAt = sn.LastRelayed
@@ -598,9 +602,8 @@ func (r *Registry) ingestPacket(env *packetEnvelope, source, defaultGateway stri
 			if h, err := DecodeFrameHeader(raw); err == nil {
 				if hops := h.RelayHops(); len(hops) > 0 {
 					now := r.now()
-					observer := firstNonEmpty(env.OriginID, env.Origin, defaultGateway, source)
 					r.mu.Lock()
-					r.recordRelaysLocked(hops, observer, "", now)
+					r.recordRelaysLocked(hops, relayObserver(env, defaultGateway), "", now)
 					r.mu.Unlock()
 				}
 			}
@@ -634,7 +637,7 @@ func (r *Registry) ingestPacket(env *packetEnvelope, source, defaultGateway stri
 	// zero-hop flood advert still teaches the graph that this observer hears
 	// the sender directly.
 	if h, err := DecodeFrameHeader(raw); err == nil && (h.RouteType == routeFlood || h.RouteType == routeTransportFlood) {
-		r.recordRelaysLocked(h.RelayHops(), gw, adv.PubKey, now)
+		r.recordRelaysLocked(h.RelayHops(), relayObserver(env, defaultGateway), adv.PubKey, now)
 	}
 
 	e := r.nodes[adv.PubKey]
@@ -877,6 +880,15 @@ func resolvePath(hops []string, idx map[string][]string) []string {
 		}
 	}
 	return res
+}
+
+// relayObserver is the radio that heard a packet, as a neighbour-graph anchor:
+// the envelope's own id, else the push reporter's (one radio per reporter).
+// Unlike the gateway it never falls back to the MQTT broker URL, which every
+// radio on that broker shares: as an anchor it would make the union of all
+// their neighbours look "heard directly" by one observer.
+func relayObserver(env *packetEnvelope, defaultGateway string) string {
+	return firstNonEmpty(env.OriginID, env.Origin, defaultGateway)
 }
 
 // Close disconnects every broker.

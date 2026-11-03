@@ -63,3 +63,21 @@ func TestRecordMeshTickWritesBothInOneCall(t *testing.T) {
 	require.NoError(t, s.InsertMeshObservations(ctx, []MeshObservation{{PubKey: "ab07cd", HeardAt: at.Add(time.Minute)}}))
 	assert.Equal(t, v1, s.MeshActivityVersion())
 }
+
+// The boot seed re-resolves stored paths itself, so it gets hops, never the
+// PathNodes some older resolver wrote.
+func TestMeshObservationPaths(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	at := time.Date(2026, 11, 3, 6, 0, 0, 0, time.UTC)
+	require.NoError(t, s.InsertMeshObservations(ctx, []MeshObservation{
+		{PubKey: "old", HeardAt: at.Add(-time.Hour), Path: []string{"aa"}},
+		{PubKey: "direct", HeardAt: at.Add(time.Minute)},
+		{PubKey: "ab07cd", HeardAt: at, Broker: "wss://b", Gateway: "gw",
+			Path: []string{"2c", "fe"}, PathNodes: []string{"", "fe99"}},
+	}))
+	got, err := s.MeshObservationPaths(ctx, at)
+	require.NoError(t, err)
+	assert.Equal(t, []MeshObservation{{PubKey: "ab07cd", HeardAt: at, Broker: "wss://b", Gateway: "gw",
+		Path: []string{"2c", "fe"}}}, got)
+}

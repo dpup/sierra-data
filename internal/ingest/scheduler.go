@@ -461,6 +461,9 @@ func (s *Scheduler) tick(ctx context.Context, spec PollerSpec, st *pollerState) 
 		if err := s.store.RecordMeshTick(ctx, result.MeshObservations, result.MeshActivity); err != nil {
 			logging.Errorw(ctx, "Ingest tick: mesh observation insert failed",
 				"count", len(result.MeshObservations), "activity", len(result.MeshActivity), "error", err)
+			if result.MeshActivityUnwritten != nil {
+				result.MeshActivityUnwritten()
+			}
 		}
 	}
 	// Renames run BEFORE the insert: a node promoted from a prefix to its full

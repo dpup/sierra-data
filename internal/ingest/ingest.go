@@ -92,6 +92,11 @@ type PollResult struct {
 	// read time. See store.RecordMeshTick and the mesh section of
 	// internal/ingest/CLAUDE.md.
 	MeshActivity []store.MeshActivity
+	// MeshActivityUnwritten, when set, is called if MeshActivity could not be
+	// written. The normalizer sends only clocks that moved since what it last
+	// handed over, so it must forget that on a failed write, or a node that
+	// goes quiet right after would keep the older time in the store for good.
+	MeshActivityUnwritten func()
 	// MeshTelemetry is this tick's monitor samples, appended to the mesh telemetry
 	// archive in the same writer context as MeshObservations above. They are
 	// MEASUREMENTS, not event content: the event carries the latest sample, this

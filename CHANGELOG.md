@@ -64,8 +64,8 @@ Relay attribution is deliberately conservative:
   its prefix alone. It fits only when exactly one of the *known neighbours* of
   the next hop along carries that byte: the observer that reported the packet
   heard its last hop directly, and an advert's sender transmitted to its
-  first. Neighbours are learned only from unambiguous 2+ byte paths and the
-  last 30 days of stored links. A node seen only on 1-byte paths next to
+  first. Neighbours are learned only from unambiguous 2+ byte paths, live or
+  replayed from the last 48h of stored receptions at boot. A node seen only on 1-byte paths next to
   nodes it has never been linked to gets no `lastRelayedAt`. On a 3,000-packet
   capture this agreed with CoreScope on 97% of the hops both resolved.
 - Relay paths are not signed. A relay can keep a node the Grid already knows

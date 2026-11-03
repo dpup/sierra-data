@@ -264,7 +264,9 @@ func TestDrainRelaysByNeighbours(t *testing.T) {
 	t.Run("two neighbours with the byte resolve to neither", func(t *testing.T) {
 		r, k := newReg(t)
 		twin := twinOf(k["A"])
-		r.SeedLinks([]SeedLink{{A: "obs-A", B: twin, LastSeen: base}})
+		// A 3-byte path teaches obs-A next to the twin (2 bytes would collide).
+		r.SeedPaths([]SeedPath{{Hops: []string{twin[:6]}, Observer: "obs-A", At: base}},
+			[]KnownNode{{PubKey: twin, Role: RoleRepeater}})
 		send(r, "obs-A", 1, hop(t, k["A"], 1))
 		assert.Empty(t, r.DrainRelays([]KnownNode{{PubKey: twin, Role: RoleRepeater}}))
 	})
@@ -289,22 +291,64 @@ func TestDrainRelaysByNeighbours(t *testing.T) {
 		assert.False(t, learned)
 	})
 
-	t.Run("seeded links resolve from boot, and expire", func(t *testing.T) {
+	t.Run("seeded paths resolve from boot, and expire", func(t *testing.T) {
 		r := NewRegistry(Config{})
 		r.now = func() time.Time { return base }
 		a := strings.Repeat("ab", 32)
-		r.SeedLinks([]SeedLink{
-			{A: "obs-x", B: a, LastSeen: base.Add(-24 * time.Hour)},
-			{A: "obs-y", B: a, LastSeen: base.Add(-31 * 24 * time.Hour)},
-		})
+		known := []KnownNode{{PubKey: a, Role: RoleRepeater}}
+		r.SeedPaths([]SeedPath{
+			{Hops: []string{"abab"}, Observer: "obs-x", At: base.Add(-24 * time.Hour)},
+			{Hops: []string{"abab"}, Observer: "obs-y", At: base.Add(-31 * 24 * time.Hour)},
+		}, known)
 		send(r, "obs-x", 1, []byte{0xab})
 		send(r, "obs-y", 1, []byte{0xab})
-		got := r.DrainRelays([]KnownNode{{PubKey: a, Role: RoleRepeater}})
-		assert.Equal(t, map[string]time.Time{a: base}, got, "the 31-day-old link was never loaded")
+		got := r.DrainRelays(known)
+		assert.Equal(t, map[string]time.Time{a: base}, got, "the 31-day-old path was never learned")
 
 		r.now = func() time.Time { return base.Add(30*24*time.Hour - 23*time.Hour) }
 		send(r, "obs-x", 1, []byte{0xab})
-		assert.Empty(t, r.DrainRelays([]KnownNode{{PubKey: a, Role: RoleRepeater}}), "and a link unseen for 30 days is pruned")
+		assert.Empty(t, r.DrainRelays(known), "and a link unseen for 30 days is pruned")
+	})
+
+	t.Run("a seeded path resolves by rule 1 only", func(t *testing.T) {
+		// The link rollup this replaces held edges the old resolver pinned on
+		// a "unique" 1-byte prefix. A stored 1-byte path must teach nothing.
+		r := NewRegistry(Config{})
+		r.now = func() time.Time { return base }
+		a := strings.Repeat("ab", 32)
+		known := []KnownNode{{PubKey: a, Role: RoleRepeater}}
+		r.SeedPaths([]SeedPath{{Hops: []string{"ab"}, Observer: "obs-x", At: base}}, known)
+		send(r, "obs-x", 1, []byte{0xab})
+		assert.Empty(t, r.DrainRelays(known))
+	})
+
+	t.Run("only a catalogued relay can be credited", func(t *testing.T) {
+		// obs is in the graph (it heard A directly), but it is an observer, not
+		// a relay we know of.
+		r, k := newReg(t)
+		obs := k["A"][:2] + strings.Repeat("0", 62)
+		send(r, obs, 2, hop(t, k["A"], 2))
+		r.DrainRelays(nil)
+		// obs-A anchors A; the hop before A carries obs's byte, and obs is A's
+		// only neighbour with it.
+		send(r, "obs-A", 1, hop(t, obs, 1), hop(t, k["A"], 1))
+		got := r.DrainRelays(nil)
+		assert.Contains(t, got, k["A"])
+		assert.NotContains(t, got, obs)
+	})
+
+	t.Run("a broker URL is never an anchor", func(t *testing.T) {
+		r, k := newReg(t)
+		// No origin_id: every radio on the broker would share this "observer".
+		frame := rawFrame(t, routeFlood, ptTxtMsg, 2, [][]byte{hop(t, k["A"], 2)}, []byte{1})
+		b, err := json.Marshal(map[string]any{"packet_type": ptTxtMsg, "raw": hex.EncodeToString(frame)})
+		require.NoError(t, err)
+		r.IngestEnvelope(b, "wss://broker", "")
+		require.Equal(t, map[string]time.Time{k["A"]: base}, r.DrainRelays(nil))
+		r.adjMu.Lock()
+		_, learned := r.adj["wss://broker"]
+		r.adjMu.Unlock()
+		assert.False(t, learned)
 	})
 
 	t.Run("an advert's sender anchors its first hop", func(t *testing.T) {
@@ -358,6 +402,14 @@ func TestRegistryReceivedAt(t *testing.T) {
 	assert.Equal(t, base.Add(-20*time.Hour), got["aa"].ReceivedAt, "replayed receptions are real")
 	assert.True(t, got["bb"].ReceivedAt.IsZero(), "a last_seen_at fallback is not a reception")
 	assert.Equal(t, base.Add(-time.Hour), got["bb"].LastHeardAt, "presence still uses the fallback")
+
+	// last_seen_at advances while relays alone keep a node present, so it must
+	// not stretch the advert window when a real reception is on record.
+	r.Seed([]SeedNode{{PubKey: "cc", HasLocation: true, Lat: 38, Lng: -120,
+		LastHeard: base.Add(-time.Hour), LastReceived: base.Add(-150 * time.Hour)}})
+	for _, n := range r.Snapshot() {
+		assert.NotEqual(t, "cc", n.PubKey, "advert 150h ago is outside the 100h floor")
+	}
 
 	_, priv, err := ed25519.GenerateKey(nil)
 	require.NoError(t, err)

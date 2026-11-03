@@ -310,14 +310,15 @@ func (n *NetworkNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult,
 		perSource[meshSourceID] = brokerErr
 	}
 	result := &PollResult{
-		Events:               events,
-		ForceWrite:           forceWrite,
-		Superseded:           supersededIDs(promotions),
-		MeshObservations:     n.drainObservations(),
-		MeshActivity:         n.meshActivity(merged, prior, relays),
-		MeshTelemetry:        meshTelemetrySamples(events, now),
-		MeshTelemetryRenames: promotions,
-		PerSource:            perSource,
+		Events:                events,
+		ForceWrite:            forceWrite,
+		Superseded:            supersededIDs(promotions),
+		MeshObservations:      n.drainObservations(),
+		MeshActivity:          n.meshActivity(merged, prior, relays),
+		MeshActivityUnwritten: n.forgetMeshActivity,
+		MeshTelemetry:         meshTelemetrySamples(events, now),
+		MeshTelemetryRenames:  promotions,
+		PerSource:             perSource,
 	}
 	if snap.SuppressSweep {
 		result.SweepSuppress = append(result.SweepSuppress, meshSourceID)
@@ -383,6 +384,15 @@ func (n *NetworkNormalizer) meshActivity(merged map[string]*mergedNode, prior Pr
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].PubKey < out[j].PubKey })
 	return out
+}
+
+// forgetMeshActivity drops the record of what the store holds, after a failed
+// write, so the next tick re-sends every covered node's clocks. The store
+// merges by MAX, so a re-send is harmless.
+func (n *NetworkNormalizer) forgetMeshActivity() {
+	n.activityMu.Lock()
+	n.activity = nil
+	n.activityMu.Unlock()
 }
 
 func laterOf(a, b time.Time) time.Time {

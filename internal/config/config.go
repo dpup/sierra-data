@@ -520,8 +520,6 @@ type MeshcoreConfig struct {
 // three of the mesh source's 60s poll.
 const DefaultMeshcoreSilenceAfter = 15 * time.Minute
 
-// Silence is SilenceAfter with the default applied. A negative configured value
-// disables the check and is returned as-is (the registry treats <= 0 as off).
 // RelayPresenceWindow resolves RelayPresence: GraceFloor (or its 3h default)
 // when unset, 0 (disabled) when negative.
 func (m MeshcoreConfig) RelayPresenceWindow() time.Duration {
@@ -537,6 +535,8 @@ func (m MeshcoreConfig) RelayPresenceWindow() time.Duration {
 	}
 }
 
+// Silence is SilenceAfter with the default applied. A negative configured value
+// disables the check and is returned as-is (the registry treats <= 0 as off).
 func (m MeshcoreConfig) Silence() time.Duration {
 	if m.SilenceAfter != 0 {
 		return m.SilenceAfter

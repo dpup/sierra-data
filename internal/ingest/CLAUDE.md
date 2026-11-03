@@ -616,9 +616,15 @@ Relay attribution has four rules, all of them about not overclaiming:
    anchors, a hop resolves to the ONE known neighbour of the adjacent resolved
    hop that carries its byte, and resolution walks inward until it stalls on
    an ambiguity. Neighbours are learned ONLY from unambiguous (rule 1) paths,
-   never from an inference, so an error cannot reinforce itself, and seeded at
-   boot from 30 days of `mesh_link_rollup` (`SeedLinks`; links unseen for 30
-   days are pruned). On a 3,000-packet capture it agreed with CoreScope's
+   never from an inference, so an error cannot reinforce itself. At boot the
+   graph is rebuilt by replaying the Tier 0 receptions (`observationRetention`,
+   48h) through rule 1 (`SeedPaths`), NOT from `mesh_link_rollup`: rollup edges
+   were resolved by the older unique-prefix rule, which matches 1-byte hops
+   and so holds exactly the misattributions this graph avoids (links unseen
+   for 30 days are pruned). Rule 2 credits only a catalogued relay-capable
+   node (the graph also holds observers), and a packet with no `origin_id`
+   gets no observer anchor rather than the broker URL every radio on that
+   broker shares. On a 3,000-packet capture it agreed with CoreScope's
    resolver on 97% of hops both resolved; in every disagreement CoreScope's
    pick had never been seen next to that anchor. It also showed the byte is
    usually someone else's: `3c`, Lake Alpine's, was San Benito Repeater (near
