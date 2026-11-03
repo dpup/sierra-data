@@ -14,6 +14,31 @@ throughout; errors are gRPC-standard `{code, codeName, message, details}`). The
 by a snake_case `/v1` surface on 2026-07-05, which was in turn folded back onto the
 proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 
+## 2026-11-03 (later)
+
+### Mesh nodes: an operator monitor is additional data, not a source of nodes
+
+**Behavior change, no field changes.** `layer=mesh` events now come only from
+the mesh itself (signed adverts, relays, forwarded packets). An operator
+monitor's reports (`mesh.repeater`) add `mesh.reachability` and
+`mesh.telemetry.admin` to those nodes but no longer define them:
+
+- **No event is created from a monitor report alone.** Existing events for
+  nodes no advert ever announced (ids keyed by a key PREFIX rather than a full
+  64-hex public key) will go `EXPIRED` after the usual grace. A monitor still
+  keeps a known node `ACTIVE` between its adverts while it is reaching it.
+- **`mesh.name` / `mesh.nodeType` are the node's own advert**, not the
+  monitor's label (e.g. `SIERRA Eagle One 🦅`, not `SIERRA Eagle One`).
+- **`mesh.reachability` and `telemetry.admin` no longer blank when the monitor
+  goes quiet** (including after every server deploy). The last values stay,
+  with their own `admin.reportedAt`, until the monitor reports again or has
+  been silent about two hours. Expect far fewer mesh revisions that flip
+  reachability to `MESH_REACHABILITY_UNSPECIFIED` and back.
+
+Migration: none required. If you treated a prefix-keyed mesh id as a node,
+it will expire; the same node appears under its full-key id once its advert
+is heard.
+
 ## 2026-11-03
 
 ### Mesh nodes: when a node last advertised, when it last relayed, and relays keep it ACTIVE

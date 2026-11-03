@@ -295,23 +295,25 @@ func TestReporterStateTransitions(t *testing.T) {
 	assert.Equal(t, ReporterOK, r.Health(MeshStream)[0].State)
 
 	// STALE: silent, but plausibly coming back. Contribute nothing (replaying a
-	// silent monitor's last set would fabricate liveness) but suppress the sweep
-	// (the nodes are missing for OUR reason).
+	// silent monitor's last set would fabricate liveness), and flag it so the
+	// normalizer carries the last readings forward. It does NOT suppress the
+	// sweep: a monitor is additional data, and its silence must not freeze the
+	// whole mesh layer's lifecycle.
 	r.now = func() time.Time { return base.Add(31 * time.Minute) }
 	assert.Equal(t, ReporterStale, r.Health(MeshStream)[0].State)
 	snap := r.MeshReports()
 	assert.Empty(t, snap.Reports)
-	assert.True(t, snap.SuppressSweep)
+	assert.False(t, snap.SuppressSweep)
+	assert.True(t, snap.MonitorSilent)
 	assert.Zero(t, snap.Live)
 
-	// DEAD: silent long enough that we must admit we no longer know. Suppression
-	// ends so the layer's lifecycle is not frozen forever by a monitor that is
-	// never coming back.
+	// DEAD: silent long enough that we must admit we no longer know, so its
+	// readings stop riding forward.
 	r.now = func() time.Time { return base.Add(30*time.Minute*reporterDeadMultiple + time.Minute) }
 	assert.Equal(t, ReporterDead, r.Health(MeshStream)[0].State)
 	snap = r.MeshReports()
 	assert.Empty(t, snap.Reports)
-	assert.False(t, snap.SuppressSweep)
+	assert.False(t, snap.MonitorSilent)
 }
 
 func TestMalformedReportsAgeTheReporter(t *testing.T) {

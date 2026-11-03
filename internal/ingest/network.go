@@ -289,10 +289,22 @@ func (n *NetworkNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult,
 		m.pushed = append(m.pushed, rep)
 	}
 
+	// A monitor is ADDITIONAL data, never what makes a node exist. Its reports
+	// decorate a node the mesh is presenting this tick; on their own they hold
+	// one only while the monitor is reaching it right now, and only one a
+	// signed advert already established (a full key with a stored event). A
+	// prefix nobody has heard advertise, or a node the monitor can no longer
+	// reach and the mesh no longer shows, is left to the sweep like any other.
+	for key, m := range merged {
+		if m.mqtt == nil && !n.monitorHolds(m, prior, now) {
+			delete(merged, key)
+		}
+	}
+
 	events := make([]*gridv1.Event, 0, len(merged))
 	var forceWrite []string
 	for _, m := range merged {
-		ev := n.buildEvent(m, now, prior)
+		ev := n.buildEvent(m, now, prior, snap.MonitorSilent)
 		events = append(events, ev)
 		if n.shouldPersistTelemetry(ev, prior, now) {
 			forceWrite = append(forceWrite, ev.GetId())
@@ -487,7 +499,24 @@ func (n *NetworkNormalizer) reporterHealth(snap pushingest.MeshSnapshot) map[str
 // would let two inputs that disagree flip the winner every tick and mint a
 // revision each time. A signed advert beats a monitor's reading; among monitors,
 // configured priority then reporter id.
-func (n *NetworkNormalizer) buildEvent(m *mergedNode, now time.Time, prior Prior) *gridv1.Event {
+// monitorHolds reports whether a node no advert or relay is presenting this
+// tick stays present on a monitor's word alone: the mesh established it (a
+// full key we already hold as an event, which only an advert can mint), and a
+// monitor reached it successfully within the unreachable window.
+func (n *NetworkNormalizer) monitorHolds(m *mergedNode, prior Prior, now time.Time) bool {
+	if len(m.key) != meshPubKeyHex || priorByID(prior, meshSourceID+":"+m.key) == nil {
+		return false
+	}
+	window := n.cfg.Grid.Ingest.UnreachableAfterOrDefault()
+	for _, r := range m.pushed {
+		if !r.LastSuccess.IsZero() && now.Sub(r.LastSuccess) <= window {
+			return true
+		}
+	}
+	return false
+}
+
+func (n *NetworkNormalizer) buildEvent(m *mergedNode, now time.Time, prior Prior, monitorSilent bool) *gridv1.Event {
 	reports := slices.Clone(m.pushed)
 	sort.Slice(reports, func(i, j int) bool {
 		if reports[i].Priority != reports[j].Priority {
@@ -496,9 +525,16 @@ func (n *NetworkNormalizer) buildEvent(m *mergedNode, now time.Time, prior Prior
 		return reports[i].ReporterID < reports[j].ReporterID
 	})
 
+	// Identity is the advert's. Without one this tick, the stored identity
+	// (which an advert set) rides forward; a monitor's label fills in only
+	// where neither exists. Preferring the label flipped a node's name on
+	// every restart ("SIERRA Eagle One" vs the advert's "SIERRA Eagle One 🦅").
 	name, nodeType := "", ""
+	stored := priorByID(prior, meshSourceID+":"+m.key).GetMesh()
 	if m.mqtt != nil {
 		name, nodeType = m.mqtt.Name, m.mqtt.Role
+	} else {
+		name, nodeType = stored.GetName(), stored.GetNodeType()
 	}
 	for _, r := range reports {
 		if name == "" {
@@ -592,13 +628,25 @@ func (n *NetworkNormalizer) buildEvent(m *mergedNode, now time.Time, prior Prior
 	if len(brokers) == 0 {
 		keepPriorAttribution(ev, prior)
 	}
-	ev.Detail = &gridv1.Event_Mesh{Mesh: &gridv1.MeshDetail{
+	detail := &gridv1.MeshDetail{
 		PublicKey:    m.key,
 		NodeType:     nodeType,
 		Name:         name,
 		Reachability: n.reachability(reports, now),
-		Telemetry:    meshTelemetry(m.mqtt, reports, priorByID(prior, ev.GetId()).GetMesh().GetTelemetry()),
-	}}
+		Telemetry:    meshTelemetry(m.mqtt, reports, stored.GetTelemetry()),
+	}
+	// A silent monitor (restarted process, or a STALE reporter) says nothing
+	// about this node, and nothing new is not nothing: its last readings ride
+	// forward rather than blanking, which minted a revision on every node it
+	// monitors at every deploy. A live monitor that no longer lists the node,
+	// or a DEAD one, does clear them.
+	if len(reports) == 0 && monitorSilent {
+		detail.Reachability = stored.GetReachability()
+		if detail.Telemetry.GetAdmin() == nil {
+			detail.Telemetry.Admin = stored.GetTelemetry().GetAdmin()
+		}
+	}
+	ev.Detail = &gridv1.Event_Mesh{Mesh: detail}
 	return ev
 }
 

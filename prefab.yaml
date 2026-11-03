@@ -644,8 +644,10 @@ grid:
         name: "SIERRA Dorrington MeshCore Gateway"
         tokenSha256: "a98b7eeb3909f89723fce0290b92d6773aa1bb0d64ab18cf5ae2e2824fc0c3de"
         streams: ["mesh.repeater"]
-        # Silence past this degrades this row on /api/v1/sources AND suppresses
-        # the mesh disappearance sweep (absence must not read as departure).
+        # Silence past this degrades this row on /api/v1/sources. It does NOT
+        # pause the mesh disappearance sweep: a monitor is additional data on
+        # nodes the mesh establishes, so while it is silent its last readings
+        # ride forward and the mesh alone decides presence.
         staleAfter: "60m"
         minInterval: "30s"
         # Breaks ties when two monitors disagree about a node's identity.

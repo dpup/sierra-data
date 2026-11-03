@@ -26,6 +26,13 @@ temperature, airtime, packet counters — and, uniquely, it can report that it
 is ambiguous and everything downstream has to treat it that way. A failed login
 attempt is not ambiguous. That is the most valuable thing you send.
 
+**What your reports do not do.** They add to a node the mesh itself has
+established: one whose signed advert the Grid has heard. They never create a
+node, never rename one (the name is the node's own advert), and never decide on
+their own that a node is gone. While your monitor reaches a known node, that
+keeps it on the map between its adverts; a node the Grid has never heard
+advertise is not published from your reports alone.
+
 ---
 
 ## The request
@@ -232,10 +239,9 @@ Two things follow:
   resolves when exactly one known node carries it. If two do, it resolves to
   neither — attaching your battery reading to the wrong repeater is worse than
   leaving it unattached.
-- **A node we only know by prefix has a provisional id.** Once an MQTT bridge
-  hears it and supplies the full key, its id changes and the provisional record
-  is retired. If you build anything that stores Grid event ids, don't assume
-  they're permanent for a node that has never been heard on the mesh backbone.
+- **A prefix nobody has heard advertise matches nothing**, and your report for
+  it is not published until a bridge (or a `mesh.packet` forwarder) hears the
+  node's advert and supplies its full key.
 
 Ids are case-insensitive; we lowercase them.
 
@@ -275,12 +281,11 @@ a sustained outage registers exactly once.
 The rate limit is measured from your last **accepted** report, so a rejected
 request never locks you out of retrying.
 
-**If you stop reporting**, the Grid does not start retiring your nodes
-immediately. It treats your silence as *our* missing information, not evidence
-that the nodes left — so their records are held rather than expired. That
-protection lasts about two hours at the default settings, because a monitor that
-never comes back must not freeze the record permanently. Planned downtime longer
-than that is worth a heads-up.
+**If you stop reporting**, your last readings stay on each node (with their
+own timestamps) rather than being blanked, and whether a node is on the map
+goes back to what the mesh itself shows. Your silence is never read as nodes
+leaving, and never holds them either. After about two hours of silence at the
+default settings your readings are dropped, because by then we no longer know.
 
 ---
 

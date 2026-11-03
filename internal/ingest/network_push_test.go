@@ -90,34 +90,110 @@ func pushNormalizer(t *testing.T, reg MeshRegistry, snap pushingest.MeshSnapshot
 	return n
 }
 
-// TestPushOnlyNodeBecomesAnEvent covers the case the feature exists for: a quiet
-// backbone repeater that no MQTT bridge hears, which only an operator's monitor
-// can see.
-func TestPushOnlyNodeBecomesAnEvent(t *testing.T) {
+// established is a store holding the node a signed advert once announced:
+// the only kind of node a monitor's report may hold present on its own.
+func established() *fakePrior {
+	return &fakePrior{events: []*gridv1.Event{storedMeshEvent(fullKey, nil)}}
+}
+
+// A monitor is additional data. It never brings a node into existence: not by
+// a prefix nobody has heard advertise, and not by a full key we hold no event
+// for. Until 2026-11 it did, and a monitor's word alone defined nodes,
+// identities and reachability.
+func TestMonitorNeverCreatesANode(t *testing.T) {
+	for _, id := range []string{keyPrefix, fullKey} {
+		n := pushNormalizer(t, nil, pushingest.MeshSnapshot{
+			Live:    1,
+			Reports: []pushingest.MeshNodeReport{report(id, "SIERRA Arnold Summit", pollNow)},
+		})
+		res, err := n.Poll(testCtx(), &fakePrior{})
+		require.NoError(t, err)
+		assert.Empty(t, res.Events, "report for %s", id)
+	}
+}
+
+// A node the mesh established (a stored event) that no advert or relay is
+// presenting this tick stays present while a monitor is reaching it NOW, with
+// the monitor's readings on it.
+func TestMonitorHoldsAnEstablishedNode(t *testing.T) {
 	n := pushNormalizer(t, nil, pushingest.MeshSnapshot{
 		Live:    1,
 		Reports: []pushingest.MeshNodeReport{report(keyPrefix, "SIERRA Arnold Summit", pollNow)},
 	})
-	res, err := n.Poll(testCtx(), &fakePrior{})
+	res, err := n.Poll(testCtx(), established())
 	require.NoError(t, err)
 	require.Len(t, res.Events, 1)
 
 	ev := res.Events[0]
-	assert.Equal(t, "meshcore:"+keyPrefix, ev.GetId(), "unresolved prefix keys the event")
-	assert.Equal(t, gridv1.Layer_MESH, ev.GetLayer())
-	assert.Equal(t, gridv1.Severity_INFO, ev.GetSeverity())
-	assert.Equal(t, "SIERRA Arnold Summit (repeater)", ev.GetHeadline())
+	assert.Equal(t, "meshcore:"+fullKey, ev.GetId(), "the prefix resolves to the stored event")
 	// Every mesh event stays on the `meshcore` source whichever input heard it: a
 	// source_id that flipped as inputs came and went would mint a revision and
 	// confuse the per-source sweep.
 	assert.Equal(t, "meshcore", ev.GetProvenance().GetSourceId())
-	assert.Nil(t, ev.GetGeometry(), "a report carries no coordinates and we do not invent them")
-
 	admin := ev.GetMesh().GetTelemetry().GetAdmin()
 	require.NotNil(t, admin)
 	assert.InDelta(t, 4.14, admin.GetBatteryVolts().GetValue(), 0.001)
 	assert.Equal(t, int64(150305), admin.GetPacketsSent())
 	assert.Equal(t, gridv1.MeshReachability_REACHABLE, ev.GetMesh().GetReachability())
+
+	t.Run("not one it cannot reach", func(t *testing.T) {
+		n := pushNormalizer(t, nil, pushingest.MeshSnapshot{
+			Live: 1,
+			Reports: []pushingest.MeshNodeReport{
+				report(keyPrefix, "SIERRA Arnold Summit", pollNow.Add(-2*config.DefaultIngestUnreachableAfter))},
+		})
+		res, err := n.Poll(testCtx(), established())
+		require.NoError(t, err)
+		assert.Empty(t, res.Events, "neither the mesh nor the monitor shows it: the sweep decides")
+	})
+}
+
+// A silent monitor (a restart, or a STALE reporter) says nothing about a node,
+// so its last readings ride forward rather than blanking. Blanking minted a
+// revision on every monitored node at every deploy.
+func TestSilentMonitorCarriesReadingsForward(t *testing.T) {
+	reg := &fakeMeshRegistry{connected: 1, nodes: []meshcore.NodeState{{
+		PubKey: fullKey, Role: meshcore.RoleRepeater, Name: "SIERRA Arnold Summit",
+		HasLocation: true, Lat: 38.1, Lng: -120.4, LastHeardAt: pollNow,
+	}}}
+	stored := storedMeshEvent(fullKey, tsProto(pollNow.Add(-time.Hour)))
+	stored.GetMesh().Reachability = gridv1.MeshReachability_UNREACHABLE
+	prior := &fakePrior{events: []*gridv1.Event{stored}}
+
+	n := pushNormalizer(t, reg, pushingest.MeshSnapshot{MonitorSilent: true})
+	res, err := n.Poll(testCtx(), prior)
+	require.NoError(t, err)
+	require.Len(t, res.Events, 1)
+	mesh := res.Events[0].GetMesh()
+	assert.Equal(t, gridv1.MeshReachability_UNREACHABLE, mesh.GetReachability())
+	assert.True(t, proto.Equal(stored.GetMesh().GetTelemetry().GetAdmin(), mesh.GetTelemetry().GetAdmin()))
+
+	t.Run("a live monitor that no longer lists the node clears them", func(t *testing.T) {
+		n := pushNormalizer(t, reg, pushingest.MeshSnapshot{Live: 1})
+		res, err := n.Poll(testCtx(), prior)
+		require.NoError(t, err)
+		mesh := res.Events[0].GetMesh()
+		assert.Equal(t, gridv1.MeshReachability_MESH_REACHABILITY_UNSPECIFIED, mesh.GetReachability())
+		assert.Nil(t, mesh.GetTelemetry().GetAdmin())
+	})
+}
+
+// Identity is the advert's. With no advert this tick the stored identity
+// rides forward; the monitor's label is not allowed to rename the node (it
+// did, on every restart: "SIERRA Eagle One" over the advert's "SIERRA Eagle One 🦅").
+func TestMonitorLabelNeverRenamesANode(t *testing.T) {
+	stored := storedMeshEvent(fullKey, nil)
+	stored.GetMesh().Name = "SIERRA Eagle One 🦅"
+	stored.GetMesh().NodeType = meshcore.RoleRepeater
+	n := pushNormalizer(t, nil, pushingest.MeshSnapshot{
+		Live:    1,
+		Reports: []pushingest.MeshNodeReport{report(keyPrefix, "SIERRA Eagle One", pollNow)},
+	})
+	res, err := n.Poll(testCtx(), &fakePrior{events: []*gridv1.Event{stored}})
+	require.NoError(t, err)
+	require.Len(t, res.Events, 1)
+	assert.Equal(t, "SIERRA Eagle One 🦅", res.Events[0].GetMesh().GetName())
+	assert.Equal(t, meshcore.RoleRepeater, res.Events[0].GetMesh().GetNodeType())
 }
 
 // TestPushOnlyTickKeepsStoredPosition pins the rule that a tick which learns
@@ -198,7 +274,7 @@ func TestMonitorOnlyNodePublishesNoSignalReadings(t *testing.T) {
 		Reports: []pushingest.MeshNodeReport{report(keyPrefix, "SIERRA BigPratherMeadow", pollNow)},
 	})
 
-	res, err := n.Poll(testCtx(), &fakePrior{})
+	res, err := n.Poll(testCtx(), established())
 	require.NoError(t, err)
 	require.Len(t, res.Events, 1)
 
@@ -244,7 +320,7 @@ func TestPushAndMQTTDeduplicateToOneEvent(t *testing.T) {
 func TestAmbiguousPrefixDoesNotMerge(t *testing.T) {
 	// Two known nodes share the reported prefix. Attaching a repeater's battery
 	// reading to the WRONG repeater is worse than leaving it unattached, so the
-	// report stays on its own prefix-keyed event.
+	// report attaches to neither (and, being no node of its own, mints none).
 	reg := &fakeMeshRegistry{connected: 1, nodes: []meshcore.NodeState{
 		{PubKey: keyPrefix + "1111111111111111111111111111111111111111111111aa", Role: meshcore.RoleRepeater,
 			HasLocation: true, Lat: 38.1, Lng: -120.4, LastHeardAt: pollNow},
@@ -257,13 +333,10 @@ func TestAmbiguousPrefixDoesNotMerge(t *testing.T) {
 	})
 	res, err := n.Poll(testCtx(), &fakePrior{})
 	require.NoError(t, err)
-	assert.Len(t, res.Events, 3, "two adverts plus the unresolved report")
-
-	ids := map[string]bool{}
+	require.Len(t, res.Events, 2, "the two adverts, and no event for the unresolved report")
 	for _, ev := range res.Events {
-		ids[ev.GetId()] = true
+		assert.Nil(t, ev.GetMesh().GetTelemetry().GetAdmin(), "%s: attached to neither", ev.GetId())
 	}
-	assert.True(t, ids["meshcore:"+keyPrefix], "the report keeps its own prefix id")
 }
 
 // TestPrefixResolvesAgainstStoredEvents covers the MQTT-down / MQTT-disabled
@@ -317,7 +390,11 @@ func TestReachabilityHysteresis(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			n := pushNormalizer(t, nil, pushingest.MeshSnapshot{
+			reg := &fakeMeshRegistry{connected: 1, nodes: []meshcore.NodeState{{
+				PubKey: fullKey, Role: meshcore.RoleRepeater,
+				HasLocation: true, Lat: 38.1, Lng: -120.4, LastHeardAt: pollNow,
+			}}}
+			n := pushNormalizer(t, reg, pushingest.MeshSnapshot{
 				Live: 1,
 				Reports: []pushingest.MeshNodeReport{report(keyPrefix, "N", tc.success, func(r *pushingest.MeshNodeReport) {
 					r.LastAttempt = tc.attempt
@@ -351,7 +428,7 @@ func TestTelemetryChurnMintsNoRevision(t *testing.T) {
 		Live:    1,
 		Reports: []pushingest.MeshNodeReport{report(keyPrefix, "Arnold", pollNow)},
 	})
-	res1, err := first.Poll(testCtx(), &fakePrior{})
+	res1, err := first.Poll(testCtx(), established())
 	require.NoError(t, err)
 
 	// Same node, a later report: every counter has moved and the battery drifted.
@@ -363,7 +440,7 @@ func TestTelemetryChurnMintsNoRevision(t *testing.T) {
 			r.ReportedAt = pollNow.Add(5 * time.Minute)
 		})},
 	})
-	res2, err := second.Poll(testCtx(), &fakePrior{})
+	res2, err := second.Poll(testCtx(), established())
 	require.NoError(t, err)
 
 	assert.Equal(t, store.ContentHash(res1.Events[0]), store.ContentHash(res2.Events[0]),
@@ -373,14 +450,18 @@ func TestTelemetryChurnMintsNoRevision(t *testing.T) {
 // TestReachabilityIsHashed is the deliberate exception to the rule above: a
 // repeater going down IS history.
 func TestReachabilityIsHashed(t *testing.T) {
-	up := pushNormalizer(t, nil, pushingest.MeshSnapshot{
+	reg := &fakeMeshRegistry{connected: 1, nodes: []meshcore.NodeState{{
+		PubKey: fullKey, Role: meshcore.RoleRepeater,
+		HasLocation: true, Lat: 38.1, Lng: -120.4, LastHeardAt: pollNow,
+	}}}
+	up := pushNormalizer(t, reg, pushingest.MeshSnapshot{
 		Live:    1,
 		Reports: []pushingest.MeshNodeReport{report(keyPrefix, "Arnold", pollNow)},
 	})
 	resUp, err := up.Poll(testCtx(), &fakePrior{})
 	require.NoError(t, err)
 
-	down := pushNormalizer(t, nil, pushingest.MeshSnapshot{
+	down := pushNormalizer(t, reg, pushingest.MeshSnapshot{
 		Live: 1,
 		Reports: []pushingest.MeshNodeReport{
 			report(keyPrefix, "Arnold", pollNow.Add(-2*config.DefaultIngestUnreachableAfter))},
@@ -396,17 +477,22 @@ func TestForceWriteCoalescesTelemetryPersistence(t *testing.T) {
 	interval := config.DefaultIngestTelemetryPersistInterval
 
 	t.Run("new event is not forced", func(t *testing.T) {
-		n := pushNormalizer(t, nil, pushingest.MeshSnapshot{
+		reg := &fakeMeshRegistry{connected: 1, nodes: []meshcore.NodeState{{
+			PubKey: fullKey, Role: meshcore.RoleRepeater,
+			HasLocation: true, Lat: 38.1, Lng: -120.4, LastHeardAt: pollNow,
+		}}}
+		n := pushNormalizer(t, reg, pushingest.MeshSnapshot{
 			Live:    1,
 			Reports: []pushingest.MeshNodeReport{report(keyPrefix, "Arnold", pollNow)},
 		})
 		res, err := n.Poll(testCtx(), &fakePrior{})
 		require.NoError(t, err)
+		require.Len(t, res.Events, 1)
 		assert.Empty(t, res.ForceWrite, "a new event takes the normal write path anyway")
 	})
 
 	t.Run("fresh stored sample is not rewritten", func(t *testing.T) {
-		stored := storedMeshEvent(keyPrefix, tsProto(pollNow.Add(-interval/2)))
+		stored := storedMeshEvent(fullKey, tsProto(pollNow.Add(-interval/2)))
 		n := pushNormalizer(t, nil, pushingest.MeshSnapshot{
 			Live:    1,
 			Reports: []pushingest.MeshNodeReport{report(keyPrefix, "Arnold", pollNow)},
@@ -417,7 +503,7 @@ func TestForceWriteCoalescesTelemetryPersistence(t *testing.T) {
 	})
 
 	t.Run("stale stored sample is rewritten", func(t *testing.T) {
-		stored := storedMeshEvent(keyPrefix, tsProto(pollNow.Add(-interval-time.Minute)))
+		stored := storedMeshEvent(fullKey, tsProto(pollNow.Add(-interval-time.Minute)))
 		n := pushNormalizer(t, nil, pushingest.MeshSnapshot{
 			Live:    1,
 			Reports: []pushingest.MeshNodeReport{report(keyPrefix, "Arnold", pollNow)},
@@ -426,18 +512,18 @@ func TestForceWriteCoalescesTelemetryPersistence(t *testing.T) {
 		require.NoError(t, err)
 		// Without this the hash-equal event would be skipped by shouldUpsert and
 		// the battery reading would never reach the store at all.
-		assert.Equal(t, []string{"meshcore:" + keyPrefix}, res.ForceWrite)
+		assert.Equal(t, []string{"meshcore:" + fullKey}, res.ForceWrite)
 	})
 
 	t.Run("first sample for an existing node is rewritten", func(t *testing.T) {
-		stored := storedMeshEvent(keyPrefix, nil)
+		stored := storedMeshEvent(fullKey, nil)
 		n := pushNormalizer(t, nil, pushingest.MeshSnapshot{
 			Live:    1,
 			Reports: []pushingest.MeshNodeReport{report(keyPrefix, "Arnold", pollNow)},
 		})
 		res, err := n.Poll(testCtx(), &fakePrior{events: []*gridv1.Event{stored}})
 		require.NoError(t, err)
-		assert.Equal(t, []string{"meshcore:" + keyPrefix}, res.ForceWrite)
+		assert.Equal(t, []string{"meshcore:" + fullKey}, res.ForceWrite)
 	})
 }
 
@@ -456,14 +542,14 @@ func TestFailLoudAcrossInputs(t *testing.T) {
 			SuppressSweep: true,
 			Reports:       []pushingest.MeshNodeReport{report(keyPrefix, "Arnold", pollNow)},
 		})
-		res, err := n.Poll(testCtx(), &fakePrior{})
+		res, err := n.Poll(testCtx(), established())
 		require.NoError(t, err)
 		assert.Len(t, res.Events, 1)
 		// The nodes missing from this snapshot are missing for our reason.
 		assert.Equal(t, []string{"meshcore"}, res.SweepSuppress)
 	})
 
-	t.Run("a stale reporter suppresses the sweep", func(t *testing.T) {
+	t.Run("a stale forwarder suppresses the sweep", func(t *testing.T) {
 		reg := &fakeMeshRegistry{connected: 1, nodes: []meshcore.NodeState{{
 			PubKey: fullKey, Role: meshcore.RoleRepeater,
 			HasLocation: true, Lat: 38.1, Lng: -120.4, LastHeardAt: pollNow,
@@ -498,7 +584,7 @@ func TestDeafBrokerFailsTheMeshSource(t *testing.T) {
 			Reporters: []pushingest.ReporterHealth{{ID: "alan-pi", State: pushingest.ReporterOK}},
 			Reports:   []pushingest.MeshNodeReport{report(keyPrefix, "SIERRA Arnold Summit", pollNow)},
 		})
-		res, err := n.Poll(testCtx(), &fakePrior{})
+		res, err := n.Poll(testCtx(), established())
 		require.NoError(t, err, "a live monitor is still an input")
 
 		require.Len(t, res.Events, 1)

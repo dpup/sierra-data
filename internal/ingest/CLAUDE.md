@@ -422,24 +422,44 @@ splits, and both halves matter:
 
 - **Every input dead** (no broker delivering AND no reporter fresh) ⇒ hard
   error, exactly as before.
-- **Some input degraded** ⇒ emit what we have, and keep the sweep off. The
+- **Some mesh input degraded** ⇒ emit what we have, and keep the sweep off. The
   nodes missing from this snapshot are missing for OUR reason. A degraded
-  REPORTER does it with `SweepSuppress["meshcore"]` (its own source row carries
-  its health); a degraded BROKER with `PerSource["meshcore"]` (next section).
+  BROKER does it with `PerSource["meshcore"]` (next section); a STALE packet
+  FORWARDER with `SweepSuppress["meshcore"]` (bounded: DEAD at
+  `4 × staleAfter` stops suppressing). A monitor is not a mesh input, so it
+  never does (below).
 
-A silent reporter contributes NOTHING to the snapshot (replaying its last set
-would refresh `last_seen_at` and fabricate liveness for nodes nobody has checked
-in hours) while suppressing the sweep (its silence must not read as departure).
-Those two are not in tension — they are the same honesty applied to the two
-different questions.
+### A monitor is additional data, never canonical (2026-11-03)
 
-Suppression is **bounded**: `pushingest` ages a reporter OK → STALE (suppress,
-this is probably a blip) → DEAD (stop suppressing, at `4 × staleAfter`). A
-monitor that never comes back must not freeze the layer's lifecycle forever. The
-bound is acceptable only because `meshcore` is an `expire` source — nodes reach
-EXPIRED, the "we lost track of this" terminus, not the fabricated all-clear that
-RESOLVED would be — and because mesh presence is ambient INFO. **Do not copy this
-bound onto a life-safety layer.**
+A `mesh.repeater` monitor decorates nodes the MESH establishes (signed adverts,
+relay credit, `mesh.packet` forwards). It used to be canonical in four ways,
+each of which bit:
+
+- **It created nodes.** A report for any id minted an event, prefix-keyed if
+  unresolved. Now a report never creates one. It can hold a node present that no
+  advert or relay is presenting this tick only if the node is mesh-established
+  (a full key with a stored event) AND the monitor reached it within the
+  unreachable window (`monitorHolds`). An unreachable node the mesh no longer
+  shows goes to the sweep like any other.
+- **Its silence froze the whole layer.** A STALE monitor suppressed the sweep
+  for every `meshcore` node, so one Pi going quiet stopped ~600 nodes from ever
+  expiring. It no longer suppresses anything.
+- **Its absence blanked readings.** Reachability is hashed and was computed only
+  from current reports, so every restart (reporter UNKNOWN until it next posts)
+  and every STALE spell flipped every monitored node to UNSPECIFIED and minted a
+  revision, then another when the monitor came back. While the monitor is
+  silent (`MeshSnapshot.MonitorSilent`: STALE or UNKNOWN) a node with no report
+  now carries its stored reachability and admin block forward. A live monitor
+  that stops listing a node, or a DEAD one, clears them.
+- **Its label renamed nodes.** With no advert this tick the monitor's name won,
+  so a node flipped between "SIERRA Eagle One" and its advert's
+  "SIERRA Eagle One 🦅". The stored (advert-set) identity now rides forward and
+  a monitor's label only fills a node that has none.
+
+A silent reporter still contributes NOTHING to the snapshot: replaying its last
+set would refresh `last_seen_at` and fabricate liveness for nodes nobody has
+checked in hours. Carrying its last READINGS is different: they keep their own
+timestamps (`admin.reportedAt`) and assert nothing about presence.
 
 ### A deaf broker fails the `meshcore` source (2026-10-09)
 
@@ -535,9 +555,9 @@ What it changes in `Poll`:
 - **Fail-loud counts three things**: no broker delivering, no monitor live, no
   forwarder live ⇒ hard error. A forwarder being live does not excuse a deaf
   broker: that is still a `PerSource["meshcore"]` failure.
-- **A STALE forwarder suppresses the sweep**, like a stale monitor: the nodes
-  only it heard are about to age out of the snapshot for OUR reason. Bounded
-  the same way (DEAD stops suppressing).
+- **A STALE forwarder suppresses the sweep**: the nodes only it heard are about
+  to age out of the snapshot for OUR reason. Bounded (DEAD stops suppressing).
+  Unlike a monitor, a forwarder is a mesh input, the same as a broker.
 - **A forwarder contributes no `Reports`** — its packets are already in the
   registry — so `buildEvent`'s report-side rules (prefix resolution,
   reachability, admin telemetry) never see it.
