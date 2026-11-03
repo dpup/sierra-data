@@ -374,12 +374,27 @@ survives as a legacy alias):
   broker session.
 - **Cross-check the feed with CoreScope** (`corescope.stonekitty.net`, open
   source: Kpa-clawbot/CoreScope): a keyless analyzer subscribed to the same
-  gomesh broker. `/api/nodes/{pubkey}` lists a node's recent adverts with every
-  receiving observer and path; `/api/observers`, `/api/mqtt/status`. If it sees
-  adverts our store does not, the problem is ours. Each mesh event's
-  `canonicalUrl` is the node's CoreScope page (`grid.meshcore.nodeUrl`).
-  CoreScope's "last relayed" also counts DIRECT-route hops (a route still to be
-  travelled), so it can read fresher than ours by design; compare adverts.
+  gomesh broker. `/api/nodes?limit=5000` is every node with `last_heard` (ANY
+  packet, not just adverts), `last_relayed` and `relay_count_24h`, the list to
+  diff against ours; `/api/nodes/{pubkey}` lists a node's recent adverts with
+  every receiving observer and path; `/api/packets?limit=N` is recent packets
+  with `route_type` (0/1 flood, 2/3 direct), `path_json` and `observer_name`;
+  `/api/observers`, `/api/mqtt/status`. If it sees activity our store does not,
+  the problem is ours. Each mesh event's `canonicalUrl` is the node's CoreScope
+  page (`grid.meshcore.nodeUrl`). Both sides count direct-route hops, but
+  CoreScope also resolves 1-byte hops more freely than we do, so it still reads
+  fresher for nodes that relay only as 1-byte hops.
+- **Sniff the broker yourself** with `./bin/test-meshcore` (env-configured, see
+  its header): `MC_TOPICS='meshcore/<IATA>/#'` narrows to one observer region,
+  `MC_OUT` captures JSONL, and its own client id never collides with the
+  server's session. The subscriber credentials are in the operator's hands,
+  never in the repo.
+- **Don't diagnose from the first ~10 minutes after a deploy.** The old task
+  keeps ingesting until it stops, so packets in that window may have been
+  handled by the old code: Eagle One's direct-route sightings at 22:17 on
+  2026-11-03 looked uncredited and were simply pre-cutover. After every deploy
+  a mesh reporter (alanpi) also reads "no report received yet" until its next
+  push: mesh reporter health is in memory only (burn's is persisted).
 - **A node's freshness is `telemetry.lastRelayedAt` / `lastHeardAt`, never
   `observedAt`** (which moves only with a revision). Both are read-time overlays
   from the store's `mesh_activity` table; relays come from the flood path of
@@ -445,7 +460,10 @@ survives as a legacy alias):
   schedules 3–8h late; `-not-before=06:30` makes each run dial only lines with
   no reading since 6:30am Pacific (checked against the public API), so the first
   run after 6:30 reads the day and the rest no-op. A failing line (usually
-  "busy") is retried in-run, then by the next hourly run.
+  "busy") is retried in-run, then by the next hourly run. **In practice GitHub
+  started only ~2 of the ~15 hourly runs a day** (2026-11-01..03), so the morning
+  read lands ~9–11am Pacific, not 7. The dependable fix is an external cron
+  calling `workflow_dispatch` (dispatches start immediately); not done yet.
 - The value can therefore be wrong in ways an API cannot (a `confidence` and the
   cleaned transcript ride along), and a stopped pipeline is INVISIBLE except by
   age — `grid.burn.burnDayStaleAfter` (36h, one missed run plus slack) turns an

@@ -449,6 +449,16 @@ expired a node its hops stopped resolving at all.
   now. Credited by prefix only (never a 1-byte hop) and never taught to the
   neighbour graph, since the hops' order relative to the observer is unknown.
 
+After the deploy (23:08, an hour in): agreement 467, EXPIRED-but-active-on-
+CoreScope down from 221 to ~210 after a burst of revivals settled, "no activity
+on record" down from 69 to 15. What remains is nodes that relay ONLY as 1-byte
+hops (Lake Alpine, Hathaway Pines): they resolve through the neighbour graph
+(rule 2) or not at all. Resolving them more freely, the way CoreScope does, is
+the next lever and trades some misattribution for coverage; decide on a day or
+more of data. To measure, diff CoreScope's `/api/nodes?limit=5000` (geofence,
+`min(last_heard, last_relayed)` < 24h) against our ACTIVE/EXPIRED mesh events'
+`lastHeardAt`/`lastRelayedAt`.
+
 ### A monitor is additional data, never canonical (2026-11-03)
 
 A `mesh.repeater` monitor decorates nodes the MESH establishes (signed adverts,
