@@ -78,7 +78,7 @@ const examples = [
   ['"What are road and weather conditions on Ebbetts Pass?"', 'grid_conditions { "location": "ebbetts-pass" }'],
   ['"I\'m at 38.03, -120.40 — what hazards affect me?"', 'grid_situation { "location": "38.03,-120.40" }'],
   ['"Which data feeds are currently down?"', 'grid_sources { }'],
-  ['"When did the SIERRA mesh node last check in?"', 'grid_events { "layer": "mesh" } → match the node by name; use its observedAt (last heard)'],
+  ['"When did the SIERRA mesh node last check in?"', 'grid_events { "layer": "mesh" } → match the node by name; use the later of mesh.telemetry.lastRelayedAt and lastHeardAt (not observedAt)'],
 ];
 ---
 <Shell

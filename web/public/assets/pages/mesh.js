@@ -101,7 +101,7 @@ export async function initMeshPage() {
     if (reach === 'UNREACHABLE') unreachableCount++;
     // hopCount is NOT defaulted to 0 here: absent telemetry must stay absent so
     // the roster can render "—". (The map's own paint still treats it as 0.)
-    nodes.set(pk, { lng: c.lng, lat: c.lat, role, name: n.name || '', snr: t.snr, hop: t.hopCount, gw: (t.gateways || []).length, reach, admin: t.admin || null, ev, telemetry: t });
+    nodes.set(pk, { lng: c.lng, lat: c.lat, role, name: n.name || '', snr: t.snr, hop: t.hopCount, gw: (t.gateways || []).length, reach, admin: t.admin || null, ev, telemetry: t, activity: lastActivity(t) });
     roleCounts[role] = (roleCounts[role] || 0) + 1;
     nodeFeatures.push({
       type: 'Feature',
@@ -116,6 +116,8 @@ export async function initMeshPage() {
         // is null, and the match below would then have to spell both cases.
         reach: monitored ? reach : '',
         gauges: gaugeSummary(t.admin),
+        heardAt: t.lastHeardAt || '',
+        relayedAt: t.lastRelayedAt || '',
       },
     });
   }
@@ -276,6 +278,10 @@ export async function initMeshPage() {
       if (p.snr !== undefined && p.snr !== null) add('SNR', p.snr + ' dB');
       add('hops', p.hop === undefined || p.hop === null ? null : hopCell(p.hop));
       add('gateways', p.gw);
+      // Our clock, both. Absent is left out like every other row here; the
+      // roster names it.
+      if (p.relayedAt) add('last relayed', relAge(Date.now() - Date.parse(p.relayedAt)));
+      if (p.heardAt) add('last advert', relAge(Date.now() - Date.parse(p.heardAt)));
       // Only where a monitor watches this node. An unwatched node says nothing
       // here rather than "unknown" — the roster's Monitor column is where the
       // absence is named, and a popup that names every absence is a wall.
@@ -315,8 +321,9 @@ export async function initMeshPage() {
  * life-safety — a habit of writing 0 for unknown is how a 0 ends up somewhere
  * that matters.
  *
- * "Heard" is the event's observedAt, not telemetry.lastAdvertAt: the latter is
- * stamped by the node's own unsynchronized clock and can be days out.
+ * "Heard" is the node's latest activity on OUR clock (see lastActivity), never
+ * telemetry.lastAdvertAt, which the node stamps from its own unsynchronized
+ * clock and can be days out, and never the event's observedAt.
  *
  * @param {Map<string, Object>} nodes keyed by public key
  */
@@ -384,6 +391,49 @@ function monitorCell(n) {
   return td;
 }
 
+/**
+ * A node's most recent activity, from the two clocks the API overlays on its
+ * telemetry: lastRelayedAt (a flood packet it relayed reached us) and
+ * lastHeardAt (its own advert reached us). Both are our receive times.
+ *
+ * NOT the event's observedAt. That moves only when something hashed changes
+ * (identity, position, reachability), so a repeater advertising the same thing
+ * every day sat in this column as "3 days ago" while it relayed every minute.
+ * Falling back to it when neither clock is set would put that lie back, so a
+ * node with neither is an absence, named.
+ *
+ * @param {Object} t MeshTelemetry (protojson)
+ * @returns {{at: string, kind: string, ms: number, heard: string, relayed: string}}
+ */
+export function lastActivity(t) {
+  const parse = (s) => (s ? Date.parse(s) : NaN);
+  const heard = (t && t.lastHeardAt) || '';
+  const relayed = (t && t.lastRelayedAt) || '';
+  const h = parse(heard);
+  const r = parse(relayed);
+  if (Number.isNaN(h) && Number.isNaN(r)) return { at: '', kind: '', ms: -Infinity, heard, relayed };
+  if (Number.isNaN(h) || (!Number.isNaN(r) && r >= h)) return { at: relayed, kind: 'relayed', ms: r, heard, relayed };
+  return { at: heard, kind: 'advert', ms: h, heard, relayed };
+}
+
+/** The roster's Heard cell: the latest activity, and the other clock under it. */
+function activityCell(a) {
+  const td = el('td');
+  if (!a.at) {
+    td.append(absentValue({ text: 'no activity on record', cls: 'absent-empty' }));
+    return td;
+  }
+  td.append(timeCell(a.at));
+  // Kept to ~22 characters: the cell is nowrap and its width is set by the
+  // absolute time above, so anything longer is clipped mid-word.
+  const kind = a.kind === 'relayed' ? 'relay' : 'advert';
+  const otherKind = a.kind === 'relayed' ? 'advert' : 'relay';
+  const other = a.kind === 'relayed' ? a.heard : a.relayed;
+  const tail = other ? `${otherKind} ${relAge(Date.now() - Date.parse(other))}` : `no ${otherKind} seen`;
+  td.append(el('div', 'cell-sub', `${kind} · ${tail}`));
+  return td;
+}
+
 export function hopCell(hop) {
   if (hop === undefined || hop === null || hop === '' || Number.isNaN(Number(hop))) return '—';
   const n = Number(hop);
@@ -395,11 +445,8 @@ function renderNodeTable(nodes) {
   if (!tbody) return;
   tbody.textContent = '';
 
-  const rows = [...nodes.entries()].sort((a, b) => {
-    const ta = Date.parse((a[1].ev && a[1].ev.observedAt) || 0) || 0;
-    const tb = Date.parse((b[1].ev && b[1].ev.observedAt) || 0) || 0;
-    return tb - ta; // most recently heard first
-  });
+  // Most recently active first; nodes with no activity on record last.
+  const rows = [...nodes.entries()].sort((a, b) => b[1].activity.ms - a[1].activity.ms);
 
   if (!rows.length) {
     const tr = el('tr');
@@ -449,10 +496,7 @@ function renderNodeTable(nodes) {
     // legend) a bare "2" was the one value you had to look up to read.
     tr.append(el('td', 'num', hopCell(n.hop)));
 
-    const heard = (n.ev && n.ev.observedAt) || '';
-    const heardCell = el('td');
-    heardCell.append(timeCell(heard));
-    tr.append(heardCell);
+    tr.append(activityCell(n.activity));
 
     ['Node', 'Type', 'Monitor', 'SNR / RSSI', 'Hops', 'Heard'].forEach((lbl, i) => {
       if (tr.children[i]) tr.children[i].dataset.label = lbl;

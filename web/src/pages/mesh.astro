@@ -134,10 +134,16 @@ import PageHead from '../components/PageHead.astro';
         <div class="rail-block">
           <div class="rail-label alert">Which clock</div>
           <p>
-            To ask when a node last spoke, read the event's
-            <code class="inline">observedAt</code> — not
-            <code class="inline">telemetry.lastAdvertAt</code>, which the node stamps from its own
-            unsynchronized clock.
+            <span class="mono">Heard</span> is the later of
+            <code class="inline">telemetry.lastRelayedAt</code> (a packet the node relayed reached
+            us) and <code class="inline">telemetry.lastHeardAt</code> (its own advert did), both on
+            our clock. A backbone repeater adverts every day or two and relays all day, so the
+            first is usually the fresher.
+          </p>
+          <p>
+            Not the event's <code class="inline">observedAt</code>, which moves only when something
+            hashed changes, and not <code class="inline">telemetry.lastAdvertAt</code>, which the
+            node stamps from its own unsynchronized clock.
           </p>
         </div>
       </aside>

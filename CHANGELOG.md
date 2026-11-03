@@ -14,6 +14,89 @@ throughout; errors are gRPC-standard `{code, codeName, message, details}`). The
 by a snake_case `/v1` surface on 2026-07-05, which was in turn folded back onto the
 proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 
+## 2026-11-03
+
+### Mesh nodes: when a node last advertised, when it last relayed, and relays keep it ACTIVE
+
+**No field changes or disappears; two fields are added, and more mesh nodes
+stay `ACTIVE`.** See "Relays keep a node ACTIVE" below.
+
+- **`mesh.telemetry.lastHeardAt`** (RFC 3339) on every `layer=mesh` event from
+  `/api/v1/events` and `/api/v1/events/{id}`: when the Grid last received the
+  node's own advert, on the Grid's clock.
+- **`mesh.telemetry.lastRelayedAt`** (RFC 3339): when the Grid last received a
+  flood-routed packet of any type (message, ack, path, another node's advert)
+  that carried this node's hash as a relay hop. A backbone repeater adverts
+  every day or two and relays all day, so for a repeater this is usually the
+  fresher of the two.
+- **`mesh_node` and `mesh_link` map features**: `properties.mesh.lastHeardAt`
+  and `properties.mesh.lastRelayedAt`, the same values. Omitted when none is
+  on record.
+
+Both are `null` when none is on record. That means unknown, not down. Both
+start filling at deploy. `lastHeardAt` appears on the first tick for nodes whose
+recent adverts are in the observation store, and otherwise on the node's next
+advert. `lastRelayedAt` appears with the first relayed packet seen after deploy,
+which takes seconds to minutes for an active repeater.
+
+**Migration: stop reading `observedAt` as "last heard".** The docs, the `/mesh`
+roster and the MCP tool descriptions all said a mesh event's `observedAt` was
+when the Grid last heard the node. It is not. It moves only when something in
+the node's revision changes (name, role, position, reachability), so a repeater
+that kept advertising the same thing showed an `observedAt` days old. On
+2026-11-03, eight SIERRA repeaters read 2026-10-31. Four of them (Columbia,
+Forest Meadows, Lilac Park, Snowshoe Lake) had relayed flood traffic in the
+previous two hours, and Lilac Park had advertised three times since. Use the
+later of `lastRelayedAt` and `lastHeardAt`.
+`observedAt` itself is unchanged. The map features' `updatedAt` is still the
+last revision.
+
+Relay attribution is deliberately conservative:
+
+- Only **flood-routed** packets count. A direct-routed packet's path is the
+  route it still has to travel, so a node listed there may never have heard it.
+  (CoreScope counts those hops, which is why it can show a node "relaying"
+  while the operator monitor reports it unreachable.)
+- A hop is credited to a node only when exactly **one** candidate fits, and
+  only repeaters and room servers are candidates (companions never relay).
+  A 2- or 3-byte hash fits when exactly one known node carries it. A 1-byte
+  hash (one of 256 values, shared by about five repeaters each) never fits on
+  its prefix alone. It fits only when exactly one of the *known neighbours* of
+  the next hop along carries that byte: the observer that reported the packet
+  heard its last hop directly, and an advert's sender transmitted to its
+  first. Neighbours are learned only from unambiguous 2+ byte paths, live or
+  replayed from the last 48h of stored receptions at boot. A node seen only on 1-byte paths next to
+  nodes it has never been linked to gets no `lastRelayedAt`. On a 3,000-packet
+  capture this agreed with CoreScope on 97% of the hops both resolved.
+- Relay paths are not signed. A relay can keep a node the Grid already knows
+  `ACTIVE` (below), but it never creates a node or changes its name, role or
+  position. Those still come only from the node's signed advert.
+
+**Relays keep a node ACTIVE.** A mesh node used to stay `ACTIVE` only for a
+window after each advert, and `EXPIRED` two hours after that. Repeaters advert
+every 12 to 48 hours, so they expired between adverts while relaying all day:
+in the week to 2026-11-03, 384 repeaters expired and 338 came back, 134 of
+them more than once. Now a relay attributed to a node keeps it present for
+`grid.meshcore.relayPresence` (14h), the same floor one advert buys. Expect:
+
+- More `ACTIVE` mesh nodes, and far fewer `ACTIVE` → `EXPIRED` → `ACTIVE`
+  cycles in `/history` and `/api/v1/events/{id}/history`.
+- A node that only relays shows `observedAt` at its last relay when it is
+  revived. Its signal fields (`snr`, `rssi`, `hopCount`, `gateways`,
+  `lastAdvertAt`) are its last advert's, unchanged.
+- An `EXPIRED` node can come back `ACTIVE` on a relay alone, as a new revision.
+
+**Fixed: zeroed signal after a restart.** For a node not re-heard since the
+last deploy, `mesh.telemetry` came out as `snr: 0, rssi: 0, hopCount: 0` with
+`lastAdvertAt: null`, which reads as "heard direct at 0 dB". The node's last
+real reading is now kept. A block already stored in that zeroed shape is
+replaced with nulls the next time the node is written, at the latest on the
+next deploy.
+
+The values are filled in when the event is served, not stored in it, so they
+never create a revision and never appear in `/history` or
+`/api/v1/events/{id}/history`.
+
 ## 2026-10-15
 
 ### Burn status: Tuolumne's burn line is now read daily

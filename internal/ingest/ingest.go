@@ -84,6 +84,19 @@ type PollResult struct {
 	// presence upserts, never touching the revisioned event path. See
 	// docs/design/mesh-topology-design.md.
 	MeshObservations []store.MeshObservation
+	// MeshActivity is each node's activity clocks that ADVANCED this tick: when
+	// we last received its own advert, and when we last received a packet it
+	// relayed. Written in the same transaction as MeshObservations (one commit)
+	// and merged by MAX, so a replay never moves a clock backwards. It is not
+	// event content, so it never reaches the event blob; the API overlays it at
+	// read time. See store.RecordMeshTick and the mesh section of
+	// internal/ingest/CLAUDE.md.
+	MeshActivity []store.MeshActivity
+	// MeshActivityUnwritten, when set, is called if MeshActivity could not be
+	// written. The normalizer sends only clocks that moved since what it last
+	// handed over, so it must forget that on a failed write, or a node that
+	// goes quiet right after would keep the older time in the store for good.
+	MeshActivityUnwritten func()
 	// MeshTelemetry is this tick's monitor samples, appended to the mesh telemetry
 	// archive in the same writer context as MeshObservations above. They are
 	// MEASUREMENTS, not event content: the event carries the latest sample, this

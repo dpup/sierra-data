@@ -370,6 +370,26 @@ survives as a legacy alias):
   receiving observer and path; `/api/observers`, `/api/mqtt/status`. If it sees
   adverts our store does not, the problem is ours. Each mesh event's
   `canonicalUrl` is the node's CoreScope page (`grid.meshcore.nodeUrl`).
+  CoreScope's "last relayed" also counts DIRECT-route hops (a route still to be
+  travelled), so it can read fresher than ours by design; compare adverts.
+- **A node's freshness is `telemetry.lastRelayedAt` / `lastHeardAt`, never
+  `observedAt`** (which moves only with a revision). Both are read-time overlays
+  from the store's `mesh_activity` table; relays come from the flood path of
+  EVERY packet type, not just adverts. See "Two activity clocks" in
+  `internal/ingest/CLAUDE.md`.
+- **A relay is presence** (`grid.meshcore.relayPresence`, default the 14h
+  `graceFloor`): a node stays in the snapshot, and so ACTIVE, while relays are
+  attributed to it, not only for a window after each advert. It can only extend
+  a node a signed advert established. Ambient INFO only; see "Relay presence"
+  in `internal/ingest/CLAUDE.md` before copying it anywhere. A hop is credited
+  only when exactly one relay-capable node fits it: a unique 2+ byte prefix,
+  or for a 1-byte hop the one known NEIGHBOUR of the next hop along (anchored
+  at the observer) that carries the byte. The graph is learned only from
+  unambiguous paths, and rebuilt at boot by replaying the stored raw
+  receptions (48h) through the same rule — never from the link rollup, whose
+  edges the older resolver pinned on 1-byte prefixes
+  (`internal/clients/meshcore/relay.go`). Only a catalogued relay-capable node
+  is credited, and an MQTT broker URL is never an observer anchor.
 
 **PG&E ArcGIS** (`ags.pge.esriemcs.com`, the `POWER` layer):
 - Keyless and public, but **entirely undocumented** — no contract, no version,

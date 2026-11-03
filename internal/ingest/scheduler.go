@@ -457,10 +457,13 @@ func (s *Scheduler) tick(ctx context.Context, spec PollerSpec, st *pollerState) 
 	// telemetry never blocks presence ingest. Reached only on a successful poll
 	// (a hard Poll error returned above), so our outage never writes stale rows.
 	obsStart := time.Now()
-	if len(result.MeshObservations) > 0 {
-		if err := s.store.InsertMeshObservations(ctx, result.MeshObservations); err != nil {
+	if len(result.MeshObservations) > 0 || len(result.MeshActivity) > 0 {
+		if err := s.store.RecordMeshTick(ctx, result.MeshObservations, result.MeshActivity); err != nil {
 			logging.Errorw(ctx, "Ingest tick: mesh observation insert failed",
-				"count", len(result.MeshObservations), "error", err)
+				"count", len(result.MeshObservations), "activity", len(result.MeshActivity), "error", err)
+			if result.MeshActivityUnwritten != nil {
+				result.MeshActivityUnwritten()
+			}
 		}
 	}
 	// Renames run BEFORE the insert: a node promoted from a prefix to its full
@@ -544,6 +547,7 @@ func (s *Scheduler) tick(ctx context.Context, spec PollerSpec, st *pollerState) 
 		"priorMs", priorDur.Milliseconds(), "pollMs", pollDur.Milliseconds(),
 		"upsertMs", upsertDur.Milliseconds(), "touchSeenMs", touchDur.Milliseconds(), "touched", touched,
 		"observationsMs", obsDur.Milliseconds(), "observations", len(result.MeshObservations),
+		"meshActivity", len(result.MeshActivity),
 		"sweepMs", sweepDur.Milliseconds(), "healthMs", healthDur.Milliseconds(),
 		"totalMs", time.Since(priorStart).Milliseconds())
 }

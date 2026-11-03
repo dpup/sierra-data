@@ -2191,7 +2191,36 @@ type MeshTelemetry struct {
 	// ContentHash zeroes, because every field of it is a counter or a gauge that
 	// moves on every report: hashed, a 5-minute reporting cadence would mint ~288
 	// revisions per node per day and say nothing.
-	Admin         *MeshAdminTelemetry `protobuf:"bytes,8,opt,name=admin,proto3" json:"admin,omitempty"`
+	Admin *MeshAdminTelemetry `protobuf:"bytes,8,opt,name=admin,proto3" json:"admin,omitempty"`
+	// When WE last received one of this node's own adverts (our clock, not the
+	// node's: compare last_advert_at). This is the answer to "when did the node
+	// last speak". The event's observed_at is NOT: it moves only when something
+	// hashed changes (identity, position, reachability), so a node advertising
+	// the same thing every day kept an observed_at days old.
+	//
+	// Read-time only. Filled from the store's mesh_activity table when the event
+	// is served and never written into the event blob, so it mints no revision
+	// and costs no blob rewrite. Null when no advert has been received since
+	// activity tracking began.
+	LastHeardAt *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=last_heard_at,json=lastHeardAt,proto3" json:"last_heard_at,omitempty"`
+	// When we last received a packet that this node had RELAYED: its key's hash
+	// appeared as a hop in the path of a FLOOD-routed packet of any type
+	// (messages, acks, path returns, adverts). A backbone repeater adverts every
+	// day or two but relays constantly, so this, not last_heard_at, is what says
+	// a repeater is up right now.
+	//
+	// Two limits, both deliberate. A hop is credited only when exactly one
+	// relay-capable node fits it: a 2- or 3-byte hash by unique prefix, a 1-byte
+	// hash only as the one known neighbour of the next hop along (the observer
+	// heard the last hop directly) that carries the byte. A node seen only on
+	// 1-byte paths beside nodes it has never been linked to gets no relay time.
+	// And direct-routed packets never count: their path is the route still to be
+	// travelled, not the one travelled, so a hop there may never have heard the
+	// packet. A relay also keeps an already-known node PRESENT (ACTIVE) for
+	// grid.meshcore.relayPresence after it, the way an advert does; it never
+	// creates a node or changes its identity or position. Read-time only, like
+	// last_heard_at; null when no relay has been attributed.
+	LastRelayedAt *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=last_relayed_at,json=lastRelayedAt,proto3" json:"last_relayed_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2264,6 +2293,20 @@ func (x *MeshTelemetry) GetLastAdvertAt() *timestamppb.Timestamp {
 func (x *MeshTelemetry) GetAdmin() *MeshAdminTelemetry {
 	if x != nil {
 		return x.Admin
+	}
+	return nil
+}
+
+func (x *MeshTelemetry) GetLastHeardAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.LastHeardAt
+	}
+	return nil
+}
+
+func (x *MeshTelemetry) GetLastRelayedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.LastRelayedAt
 	}
 	return nil
 }
@@ -5762,14 +5805,17 @@ const file_grid_proto_rawDesc = "" +
 	"\tnode_type\x18\x02 \x01(\tR\bnodeType\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x124\n" +
 	"\ttelemetry\x18\x04 \x01(\v2\x16.grid.v1.MeshTelemetryR\ttelemetry\x12=\n" +
-	"\freachability\x18\x05 \x01(\x0e2\x19.grid.v1.MeshReachabilityR\freachability\"\xda\x02\n" +
+	"\freachability\x18\x05 \x01(\x0e2\x19.grid.v1.MeshReachabilityR\freachability\"\xde\x03\n" +
 	"\rMeshTelemetry\x12.\n" +
 	"\x03snr\x18\x01 \x01(\v2\x1c.google.protobuf.DoubleValueR\x03snr\x12/\n" +
 	"\x04rssi\x18\x02 \x01(\v2\x1b.google.protobuf.Int32ValueR\x04rssi\x129\n" +
 	"\thop_count\x18\x03 \x01(\v2\x1c.google.protobuf.UInt32ValueR\bhopCount\x12\x1a\n" +
 	"\bgateways\x18\x05 \x03(\tR\bgateways\x12@\n" +
 	"\x0elast_advert_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\flastAdvertAt\x121\n" +
-	"\x05admin\x18\b \x01(\v2\x1b.grid.v1.MeshAdminTelemetryR\x05adminJ\x04\b\x04\x10\x05J\x04\b\a\x10\bR\x04pathR\n" +
+	"\x05admin\x18\b \x01(\v2\x1b.grid.v1.MeshAdminTelemetryR\x05admin\x12>\n" +
+	"\rlast_heard_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\vlastHeardAt\x12B\n" +
+	"\x0flast_relayed_at\x18\n" +
+	" \x01(\v2\x1a.google.protobuf.TimestampR\rlastRelayedAtJ\x04\b\x04\x10\x05J\x04\b\a\x10\bR\x04pathR\n" +
 	"path_nodes\"\xae\n" +
 	"\n" +
 	"\x12MeshAdminTelemetry\x12\x1f\n" +
@@ -6279,104 +6325,106 @@ var file_grid_proto_depIdxs = []int32{
 	74,  // 39: grid.v1.MeshTelemetry.hop_count:type_name -> google.protobuf.UInt32Value
 	71,  // 40: grid.v1.MeshTelemetry.last_advert_at:type_name -> google.protobuf.Timestamp
 	26,  // 41: grid.v1.MeshTelemetry.admin:type_name -> grid.v1.MeshAdminTelemetry
-	71,  // 42: grid.v1.MeshAdminTelemetry.reported_at:type_name -> google.protobuf.Timestamp
-	71,  // 43: grid.v1.MeshAdminTelemetry.last_success_at:type_name -> google.protobuf.Timestamp
-	71,  // 44: grid.v1.MeshAdminTelemetry.last_attempt_at:type_name -> google.protobuf.Timestamp
-	72,  // 45: grid.v1.MeshAdminTelemetry.battery_volts:type_name -> google.protobuf.DoubleValue
-	72,  // 46: grid.v1.MeshAdminTelemetry.battery_percent:type_name -> google.protobuf.DoubleValue
-	72,  // 47: grid.v1.MeshAdminTelemetry.temperature_c:type_name -> google.protobuf.DoubleValue
-	72,  // 48: grid.v1.MeshAdminTelemetry.humidity:type_name -> google.protobuf.DoubleValue
-	72,  // 49: grid.v1.MeshAdminTelemetry.pressure:type_name -> google.protobuf.DoubleValue
-	73,  // 50: grid.v1.MeshAdminTelemetry.noise_floor_dbm:type_name -> google.protobuf.Int32Value
-	72,  // 51: grid.v1.MeshAdminTelemetry.last_snr_db:type_name -> google.protobuf.DoubleValue
-	73,  // 52: grid.v1.MeshAdminTelemetry.last_rssi_dbm:type_name -> google.protobuf.Int32Value
-	73,  // 53: grid.v1.MeshAdminTelemetry.tx_queue_len:type_name -> google.protobuf.Int32Value
-	71,  // 54: grid.v1.PowerDetail.estimated_restoration:type_name -> google.protobuf.Timestamp
-	71,  // 55: grid.v1.PowerDetail.de_energization_start:type_name -> google.protobuf.Timestamp
-	71,  // 56: grid.v1.PowerDetail.de_energization_end:type_name -> google.protobuf.Timestamp
-	71,  // 57: grid.v1.PowerDetail.all_clear:type_name -> google.protobuf.Timestamp
-	6,   // 58: grid.v1.BurnStatusDetail.burn_day:type_name -> grid.v1.BurnDay
-	7,   // 59: grid.v1.BurnStatusDetail.calfire_status:type_name -> grid.v1.CalfireBurnStatus
-	8,   // 60: grid.v1.BurnStatusDetail.permission:type_name -> grid.v1.BurnPermission
-	71,  // 61: grid.v1.BurnStatusDetail.calfire_effective:type_name -> google.protobuf.Timestamp
-	29,  // 62: grid.v1.BurnStatusDetail.burn_lines:type_name -> grid.v1.BurnLineReading
-	71,  // 63: grid.v1.BurnStatusDetail.calfire_observed_at:type_name -> google.protobuf.Timestamp
-	6,   // 64: grid.v1.BurnLineReading.burn_day:type_name -> grid.v1.BurnDay
-	30,  // 65: grid.v1.BurnLineReading.observation:type_name -> grid.v1.BurnObservation
-	71,  // 66: grid.v1.BurnObservation.observed_at:type_name -> google.protobuf.Timestamp
-	9,   // 67: grid.v1.EventList.events:type_name -> grid.v1.Event
-	71,  // 68: grid.v1.EventRevision.observed_at:type_name -> google.protobuf.Timestamp
-	71,  // 69: grid.v1.EventRevision.ingested_at:type_name -> google.protobuf.Timestamp
-	9,   // 70: grid.v1.EventRevision.event:type_name -> grid.v1.Event
-	32,  // 71: grid.v1.EventRevisionList.revisions:type_name -> grid.v1.EventRevision
-	16,  // 72: grid.v1.PlaceList.places:type_name -> grid.v1.Place
-	15,  // 73: grid.v1.SourceList.sources:type_name -> grid.v1.Source
-	71,  // 74: grid.v1.GetMeshTelemetryRequest.from:type_name -> google.protobuf.Timestamp
-	71,  // 75: grid.v1.GetMeshTelemetryRequest.to:type_name -> google.protobuf.Timestamp
-	71,  // 76: grid.v1.MeshTelemetryArchive.from:type_name -> google.protobuf.Timestamp
-	71,  // 77: grid.v1.MeshTelemetryArchive.to:type_name -> google.protobuf.Timestamp
-	38,  // 78: grid.v1.MeshTelemetryArchive.coverage:type_name -> grid.v1.MeshTelemetryCoverage
-	75,  // 79: grid.v1.MeshTelemetryArchive.cadence_seconds:type_name -> google.protobuf.Int64Value
-	71,  // 80: grid.v1.MeshTelemetryArchive.reboots:type_name -> google.protobuf.Timestamp
-	39,  // 81: grid.v1.MeshTelemetryArchive.samples:type_name -> grid.v1.MeshTelemetrySample
-	71,  // 82: grid.v1.MeshTelemetryCoverage.from:type_name -> google.protobuf.Timestamp
-	71,  // 83: grid.v1.MeshTelemetryCoverage.to:type_name -> google.protobuf.Timestamp
-	26,  // 84: grid.v1.MeshTelemetrySample.reading:type_name -> grid.v1.MeshAdminTelemetry
-	71,  // 85: grid.v1.MeshTelemetrySample.received_at:type_name -> google.protobuf.Timestamp
-	71,  // 86: grid.v1.PlaceSummary.generated_at:type_name -> google.protobuf.Timestamp
-	42,  // 87: grid.v1.PlaceSummary.summary:type_name -> grid.v1.SummaryStats
-	44,  // 88: grid.v1.PlaceSummary.domains:type_name -> grid.v1.SummaryDomain
-	46,  // 89: grid.v1.PlaceSummary.sources:type_name -> grid.v1.SummarySourceHealth
-	70,  // 90: grid.v1.SummaryStats.severity_counts:type_name -> grid.v1.SummaryStats.SeverityCountsEntry
-	73,  // 91: grid.v1.SummaryStats.active_evacuations:type_name -> google.protobuf.Int32Value
-	43,  // 92: grid.v1.SummaryStats.top_events:type_name -> grid.v1.SummaryTopEvent
-	45,  // 93: grid.v1.SummaryDomain.headlines:type_name -> grid.v1.SummaryDomainHeadline
-	71,  // 94: grid.v1.SummarySourceHealth.last_success_at:type_name -> google.protobuf.Timestamp
-	54,  // 95: grid.v1.ResolvePlaceResponse.query:type_name -> grid.v1.ResolveQuery
-	16,  // 96: grid.v1.ResolvePlaceResponse.places:type_name -> grid.v1.Place
-	57,  // 97: grid.v1.ScannerList.scanners:type_name -> grid.v1.Scanner
-	12,  // 98: grid.v1.Camera.location:type_name -> grid.v1.LatLng
-	60,  // 99: grid.v1.CameraList.cameras:type_name -> grid.v1.Camera
-	71,  // 100: grid.v1.CameraList.last_source_update:type_name -> google.protobuf.Timestamp
-	71,  // 101: grid.v1.ForecastPeriod.time:type_name -> google.protobuf.Timestamp
-	71,  // 102: grid.v1.WeatherForecast.issued_at:type_name -> google.protobuf.Timestamp
-	65,  // 103: grid.v1.WeatherForecast.periods:type_name -> grid.v1.ForecastPeriod
-	71,  // 104: grid.v1.WeatherForecast.peak_wind_gust_at:type_name -> google.protobuf.Timestamp
-	63,  // 105: grid.v1.Conditions.weather:type_name -> grid.v1.WeatherConditions
-	64,  // 106: grid.v1.Conditions.fire_weather:type_name -> grid.v1.FireWeatherConditions
-	71,  // 107: grid.v1.Conditions.last_updated:type_name -> google.protobuf.Timestamp
-	66,  // 108: grid.v1.Conditions.forecast:type_name -> grid.v1.WeatherForecast
-	47,  // 109: grid.v1.GridService.ListEvents:input_type -> grid.v1.ListEventsRequest
-	48,  // 110: grid.v1.GridService.GetEvent:input_type -> grid.v1.GetEventRequest
-	49,  // 111: grid.v1.GridService.GetEventHistory:input_type -> grid.v1.GetEventHistoryRequest
-	50,  // 112: grid.v1.GridService.ListHistory:input_type -> grid.v1.ListHistoryRequest
-	51,  // 113: grid.v1.GridService.ListPlaces:input_type -> grid.v1.ListPlacesRequest
-	53,  // 114: grid.v1.GridService.ResolvePlace:input_type -> grid.v1.ResolvePlaceRequest
-	52,  // 115: grid.v1.GridService.GetPlace:input_type -> grid.v1.GetPlaceRequest
-	40,  // 116: grid.v1.GridService.GetPlaceSummary:input_type -> grid.v1.GetPlaceSummaryRequest
-	56,  // 117: grid.v1.GridService.ListScanners:input_type -> grid.v1.ListScannersRequest
-	59,  // 118: grid.v1.GridService.ListCameras:input_type -> grid.v1.ListCamerasRequest
-	62,  // 119: grid.v1.GridService.GetConditions:input_type -> grid.v1.GetConditionsRequest
-	68,  // 120: grid.v1.GridService.ListSources:input_type -> grid.v1.ListSourcesRequest
-	36,  // 121: grid.v1.GridService.GetMeshTelemetry:input_type -> grid.v1.GetMeshTelemetryRequest
-	31,  // 122: grid.v1.GridService.ListEvents:output_type -> grid.v1.EventList
-	9,   // 123: grid.v1.GridService.GetEvent:output_type -> grid.v1.Event
-	33,  // 124: grid.v1.GridService.GetEventHistory:output_type -> grid.v1.EventRevisionList
-	33,  // 125: grid.v1.GridService.ListHistory:output_type -> grid.v1.EventRevisionList
-	34,  // 126: grid.v1.GridService.ListPlaces:output_type -> grid.v1.PlaceList
-	55,  // 127: grid.v1.GridService.ResolvePlace:output_type -> grid.v1.ResolvePlaceResponse
-	16,  // 128: grid.v1.GridService.GetPlace:output_type -> grid.v1.Place
-	41,  // 129: grid.v1.GridService.GetPlaceSummary:output_type -> grid.v1.PlaceSummary
-	58,  // 130: grid.v1.GridService.ListScanners:output_type -> grid.v1.ScannerList
-	61,  // 131: grid.v1.GridService.ListCameras:output_type -> grid.v1.CameraList
-	67,  // 132: grid.v1.GridService.GetConditions:output_type -> grid.v1.Conditions
-	35,  // 133: grid.v1.GridService.ListSources:output_type -> grid.v1.SourceList
-	37,  // 134: grid.v1.GridService.GetMeshTelemetry:output_type -> grid.v1.MeshTelemetryArchive
-	122, // [122:135] is the sub-list for method output_type
-	109, // [109:122] is the sub-list for method input_type
-	109, // [109:109] is the sub-list for extension type_name
-	109, // [109:109] is the sub-list for extension extendee
-	0,   // [0:109] is the sub-list for field type_name
+	71,  // 42: grid.v1.MeshTelemetry.last_heard_at:type_name -> google.protobuf.Timestamp
+	71,  // 43: grid.v1.MeshTelemetry.last_relayed_at:type_name -> google.protobuf.Timestamp
+	71,  // 44: grid.v1.MeshAdminTelemetry.reported_at:type_name -> google.protobuf.Timestamp
+	71,  // 45: grid.v1.MeshAdminTelemetry.last_success_at:type_name -> google.protobuf.Timestamp
+	71,  // 46: grid.v1.MeshAdminTelemetry.last_attempt_at:type_name -> google.protobuf.Timestamp
+	72,  // 47: grid.v1.MeshAdminTelemetry.battery_volts:type_name -> google.protobuf.DoubleValue
+	72,  // 48: grid.v1.MeshAdminTelemetry.battery_percent:type_name -> google.protobuf.DoubleValue
+	72,  // 49: grid.v1.MeshAdminTelemetry.temperature_c:type_name -> google.protobuf.DoubleValue
+	72,  // 50: grid.v1.MeshAdminTelemetry.humidity:type_name -> google.protobuf.DoubleValue
+	72,  // 51: grid.v1.MeshAdminTelemetry.pressure:type_name -> google.protobuf.DoubleValue
+	73,  // 52: grid.v1.MeshAdminTelemetry.noise_floor_dbm:type_name -> google.protobuf.Int32Value
+	72,  // 53: grid.v1.MeshAdminTelemetry.last_snr_db:type_name -> google.protobuf.DoubleValue
+	73,  // 54: grid.v1.MeshAdminTelemetry.last_rssi_dbm:type_name -> google.protobuf.Int32Value
+	73,  // 55: grid.v1.MeshAdminTelemetry.tx_queue_len:type_name -> google.protobuf.Int32Value
+	71,  // 56: grid.v1.PowerDetail.estimated_restoration:type_name -> google.protobuf.Timestamp
+	71,  // 57: grid.v1.PowerDetail.de_energization_start:type_name -> google.protobuf.Timestamp
+	71,  // 58: grid.v1.PowerDetail.de_energization_end:type_name -> google.protobuf.Timestamp
+	71,  // 59: grid.v1.PowerDetail.all_clear:type_name -> google.protobuf.Timestamp
+	6,   // 60: grid.v1.BurnStatusDetail.burn_day:type_name -> grid.v1.BurnDay
+	7,   // 61: grid.v1.BurnStatusDetail.calfire_status:type_name -> grid.v1.CalfireBurnStatus
+	8,   // 62: grid.v1.BurnStatusDetail.permission:type_name -> grid.v1.BurnPermission
+	71,  // 63: grid.v1.BurnStatusDetail.calfire_effective:type_name -> google.protobuf.Timestamp
+	29,  // 64: grid.v1.BurnStatusDetail.burn_lines:type_name -> grid.v1.BurnLineReading
+	71,  // 65: grid.v1.BurnStatusDetail.calfire_observed_at:type_name -> google.protobuf.Timestamp
+	6,   // 66: grid.v1.BurnLineReading.burn_day:type_name -> grid.v1.BurnDay
+	30,  // 67: grid.v1.BurnLineReading.observation:type_name -> grid.v1.BurnObservation
+	71,  // 68: grid.v1.BurnObservation.observed_at:type_name -> google.protobuf.Timestamp
+	9,   // 69: grid.v1.EventList.events:type_name -> grid.v1.Event
+	71,  // 70: grid.v1.EventRevision.observed_at:type_name -> google.protobuf.Timestamp
+	71,  // 71: grid.v1.EventRevision.ingested_at:type_name -> google.protobuf.Timestamp
+	9,   // 72: grid.v1.EventRevision.event:type_name -> grid.v1.Event
+	32,  // 73: grid.v1.EventRevisionList.revisions:type_name -> grid.v1.EventRevision
+	16,  // 74: grid.v1.PlaceList.places:type_name -> grid.v1.Place
+	15,  // 75: grid.v1.SourceList.sources:type_name -> grid.v1.Source
+	71,  // 76: grid.v1.GetMeshTelemetryRequest.from:type_name -> google.protobuf.Timestamp
+	71,  // 77: grid.v1.GetMeshTelemetryRequest.to:type_name -> google.protobuf.Timestamp
+	71,  // 78: grid.v1.MeshTelemetryArchive.from:type_name -> google.protobuf.Timestamp
+	71,  // 79: grid.v1.MeshTelemetryArchive.to:type_name -> google.protobuf.Timestamp
+	38,  // 80: grid.v1.MeshTelemetryArchive.coverage:type_name -> grid.v1.MeshTelemetryCoverage
+	75,  // 81: grid.v1.MeshTelemetryArchive.cadence_seconds:type_name -> google.protobuf.Int64Value
+	71,  // 82: grid.v1.MeshTelemetryArchive.reboots:type_name -> google.protobuf.Timestamp
+	39,  // 83: grid.v1.MeshTelemetryArchive.samples:type_name -> grid.v1.MeshTelemetrySample
+	71,  // 84: grid.v1.MeshTelemetryCoverage.from:type_name -> google.protobuf.Timestamp
+	71,  // 85: grid.v1.MeshTelemetryCoverage.to:type_name -> google.protobuf.Timestamp
+	26,  // 86: grid.v1.MeshTelemetrySample.reading:type_name -> grid.v1.MeshAdminTelemetry
+	71,  // 87: grid.v1.MeshTelemetrySample.received_at:type_name -> google.protobuf.Timestamp
+	71,  // 88: grid.v1.PlaceSummary.generated_at:type_name -> google.protobuf.Timestamp
+	42,  // 89: grid.v1.PlaceSummary.summary:type_name -> grid.v1.SummaryStats
+	44,  // 90: grid.v1.PlaceSummary.domains:type_name -> grid.v1.SummaryDomain
+	46,  // 91: grid.v1.PlaceSummary.sources:type_name -> grid.v1.SummarySourceHealth
+	70,  // 92: grid.v1.SummaryStats.severity_counts:type_name -> grid.v1.SummaryStats.SeverityCountsEntry
+	73,  // 93: grid.v1.SummaryStats.active_evacuations:type_name -> google.protobuf.Int32Value
+	43,  // 94: grid.v1.SummaryStats.top_events:type_name -> grid.v1.SummaryTopEvent
+	45,  // 95: grid.v1.SummaryDomain.headlines:type_name -> grid.v1.SummaryDomainHeadline
+	71,  // 96: grid.v1.SummarySourceHealth.last_success_at:type_name -> google.protobuf.Timestamp
+	54,  // 97: grid.v1.ResolvePlaceResponse.query:type_name -> grid.v1.ResolveQuery
+	16,  // 98: grid.v1.ResolvePlaceResponse.places:type_name -> grid.v1.Place
+	57,  // 99: grid.v1.ScannerList.scanners:type_name -> grid.v1.Scanner
+	12,  // 100: grid.v1.Camera.location:type_name -> grid.v1.LatLng
+	60,  // 101: grid.v1.CameraList.cameras:type_name -> grid.v1.Camera
+	71,  // 102: grid.v1.CameraList.last_source_update:type_name -> google.protobuf.Timestamp
+	71,  // 103: grid.v1.ForecastPeriod.time:type_name -> google.protobuf.Timestamp
+	71,  // 104: grid.v1.WeatherForecast.issued_at:type_name -> google.protobuf.Timestamp
+	65,  // 105: grid.v1.WeatherForecast.periods:type_name -> grid.v1.ForecastPeriod
+	71,  // 106: grid.v1.WeatherForecast.peak_wind_gust_at:type_name -> google.protobuf.Timestamp
+	63,  // 107: grid.v1.Conditions.weather:type_name -> grid.v1.WeatherConditions
+	64,  // 108: grid.v1.Conditions.fire_weather:type_name -> grid.v1.FireWeatherConditions
+	71,  // 109: grid.v1.Conditions.last_updated:type_name -> google.protobuf.Timestamp
+	66,  // 110: grid.v1.Conditions.forecast:type_name -> grid.v1.WeatherForecast
+	47,  // 111: grid.v1.GridService.ListEvents:input_type -> grid.v1.ListEventsRequest
+	48,  // 112: grid.v1.GridService.GetEvent:input_type -> grid.v1.GetEventRequest
+	49,  // 113: grid.v1.GridService.GetEventHistory:input_type -> grid.v1.GetEventHistoryRequest
+	50,  // 114: grid.v1.GridService.ListHistory:input_type -> grid.v1.ListHistoryRequest
+	51,  // 115: grid.v1.GridService.ListPlaces:input_type -> grid.v1.ListPlacesRequest
+	53,  // 116: grid.v1.GridService.ResolvePlace:input_type -> grid.v1.ResolvePlaceRequest
+	52,  // 117: grid.v1.GridService.GetPlace:input_type -> grid.v1.GetPlaceRequest
+	40,  // 118: grid.v1.GridService.GetPlaceSummary:input_type -> grid.v1.GetPlaceSummaryRequest
+	56,  // 119: grid.v1.GridService.ListScanners:input_type -> grid.v1.ListScannersRequest
+	59,  // 120: grid.v1.GridService.ListCameras:input_type -> grid.v1.ListCamerasRequest
+	62,  // 121: grid.v1.GridService.GetConditions:input_type -> grid.v1.GetConditionsRequest
+	68,  // 122: grid.v1.GridService.ListSources:input_type -> grid.v1.ListSourcesRequest
+	36,  // 123: grid.v1.GridService.GetMeshTelemetry:input_type -> grid.v1.GetMeshTelemetryRequest
+	31,  // 124: grid.v1.GridService.ListEvents:output_type -> grid.v1.EventList
+	9,   // 125: grid.v1.GridService.GetEvent:output_type -> grid.v1.Event
+	33,  // 126: grid.v1.GridService.GetEventHistory:output_type -> grid.v1.EventRevisionList
+	33,  // 127: grid.v1.GridService.ListHistory:output_type -> grid.v1.EventRevisionList
+	34,  // 128: grid.v1.GridService.ListPlaces:output_type -> grid.v1.PlaceList
+	55,  // 129: grid.v1.GridService.ResolvePlace:output_type -> grid.v1.ResolvePlaceResponse
+	16,  // 130: grid.v1.GridService.GetPlace:output_type -> grid.v1.Place
+	41,  // 131: grid.v1.GridService.GetPlaceSummary:output_type -> grid.v1.PlaceSummary
+	58,  // 132: grid.v1.GridService.ListScanners:output_type -> grid.v1.ScannerList
+	61,  // 133: grid.v1.GridService.ListCameras:output_type -> grid.v1.CameraList
+	67,  // 134: grid.v1.GridService.GetConditions:output_type -> grid.v1.Conditions
+	35,  // 135: grid.v1.GridService.ListSources:output_type -> grid.v1.SourceList
+	37,  // 136: grid.v1.GridService.GetMeshTelemetry:output_type -> grid.v1.MeshTelemetryArchive
+	124, // [124:137] is the sub-list for method output_type
+	111, // [111:124] is the sub-list for method input_type
+	111, // [111:111] is the sub-list for extension type_name
+	111, // [111:111] is the sub-list for extension extendee
+	0,   // [0:111] is the sub-list for field type_name
 }
 
 func init() { file_grid_proto_init() }

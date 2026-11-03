@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -210,11 +211,32 @@ CREATE TABLE burn_readings (
 // pushingest.Registry.RestoreBurnHealth reads this back at startup.
 const migrationV8 = `ALTER TABLE burn_readings ADD COLUMN reporter_id TEXT NOT NULL DEFAULT ''`
 
+// migrationV9 adds mesh_activity: per node, when we last received one of its
+// own adverts and when we last received a packet it had relayed. Both are OUR
+// receive times (unix seconds; 0 = never).
+//
+// They live outside the event blob because they move every few seconds and
+// the blob is canonical: carrying them there would mean rewriting a node's
+// whole proto (and its revision row's neighbours in the page cache) on every
+// tick for every node, the cost TouchSeen's coalescing exists to avoid. Here a
+// tick is one small upsert per node whose activity advanced, in the same
+// transaction as the observation insert, and the API stamps the values onto
+// the event at read time (telemetry.last_heard_at / last_relayed_at).
+//
+// A measurement, not a record: if lost it re-accumulates from the live feed
+// within minutes for any node that is actually talking.
+const migrationV9 = `
+CREATE TABLE mesh_activity (
+  pubkey          TEXT PRIMARY KEY,           -- full public key, lowercase hex
+  last_heard_at   INTEGER NOT NULL DEFAULT 0, -- our receive time of its last advert
+  last_relayed_at INTEGER NOT NULL DEFAULT 0  -- our receive time of the last packet it relayed
+) WITHOUT ROWID`
+
 // migrations[i] is the DDL for schema version i+1. Applied versions are
 // recorded in schema_migrations; already-applied versions are skipped, so
 // Open is idempotent across restarts and an existing dev DB at an older
 // version picks up only the missing migrations.
-var migrations = []string{schemaV1, migrationV2, migrationV3, migrationV4, migrationV5, migrationV6, migrationV7, migrationV8}
+var migrations = []string{schemaV1, migrationV2, migrationV3, migrationV4, migrationV5, migrationV6, migrationV7, migrationV8, migrationV9}
 
 // ErrNotFound is returned by point lookups (GetEvent, GetPlace) when no row
 // matches. Callers map it to a 404.
@@ -248,6 +270,11 @@ type Store struct {
 	// upserts and so would otherwise never recompute event->place attachments
 	// for a place seeded after an event first arrived. Guarded by mu.
 	placesVersion uint64
+
+	// meshActivityVersion changes whenever mesh_activity is written. Read-path
+	// ETag validators fold it in for responses that carry mesh activity: the
+	// table moves without minting a revision, so DataVersion cannot see it.
+	meshActivityVersion atomic.Int64
 }
 
 // PlacesVersion returns a counter that changes whenever the place set changes.

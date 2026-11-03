@@ -164,7 +164,12 @@ func (g *GridServer) ListEvents(ctx context.Context, req *gridv1.ListEventsReque
 	if err != nil {
 		return nil, internalErr(ctx, err)
 	}
-	tag := weakListTag(g.placesVersion+"."+strconv.FormatInt(dv, 10),
+	version := g.placesVersion + "." + strconv.FormatInt(dv, 10)
+	if layersIncludeMesh(eq.Layers) {
+		// Mesh activity is overlaid at read time and moves without a revision.
+		version += ".m" + strconv.FormatInt(g.svc.Store.MeshActivityVersion(), 10)
+	}
+	tag := weakListTag(version,
 		req.GetPlace(), strings.Join(req.GetLayer(), ","), strings.Join(req.GetStatus(), ","),
 		req.GetSeverityMin(), req.GetSince(),
 		strconv.Itoa(int(req.GetPageSize())), req.GetPageToken(), strconv.FormatBool(req.GetEnhancementIo()))
@@ -177,6 +182,7 @@ func (g *GridServer) ListEvents(ctx context.Context, req *gridv1.ListEventsReque
 		return nil, tokenOrInternal(ctx, err)
 	}
 	stripEventsIO(events, req.GetEnhancementIo())
+	g.svc.overlayMeshActivity(ctx, events)
 	return &gridv1.EventList{Events: events, NextPageToken: next}, nil
 }
 
@@ -195,7 +201,19 @@ func (g *GridServer) GetEvent(ctx context.Context, req *gridv1.GetEventRequest) 
 	// re-attaches this event to different places (place_ids live in the body but
 	// can change without a revision bump — see store.refreshEventPlaces) doesn't
 	// serve a stale 304.
-	if err := etag.Guard(ctx, etag.Weak(fmt.Sprintf("%s:%s:%d:%t", g.placesVersion, req.GetId(), rev, req.GetEnhancementIo()))); err != nil {
+	tag := fmt.Sprintf("%s:%s:%d:%t", g.placesVersion, req.GetId(), rev, req.GetEnhancementIo())
+	// A mesh node's activity clocks are overlaid from outside the blob and move
+	// without a revision, so they are part of the validator. One primary-key
+	// read, reused for the overlay below.
+	var activity map[string]store.MeshActivity
+	if native, ok := strings.CutPrefix(req.GetId(), meshActivityPrefix); ok {
+		if activity, err = g.svc.Store.MeshActivityFor(ctx, []string{native}); err != nil {
+			logError(ctx, "gridapi: reading mesh activity", err)
+			activity = nil
+		}
+		tag += ":" + meshActivityTag(activity[strings.ToLower(native)])
+	}
+	if err := etag.Guard(ctx, etag.Weak(tag)); err != nil {
 		return nil, err // 304 Not Modified — the blob load below is skipped
 	}
 	ev, err := g.svc.Store.GetEvent(ctx, req.GetId())
@@ -206,6 +224,7 @@ func (g *GridServer) GetEvent(ctx context.Context, req *gridv1.GetEventRequest) 
 		return nil, internalErr(ctx, err)
 	}
 	stripEventsIO([]*gridv1.Event{ev}, req.GetEnhancementIo())
+	applyMeshActivity([]*gridv1.Event{ev}, activity)
 	return ev, nil
 }
 

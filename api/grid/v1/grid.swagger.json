@@ -1491,6 +1491,16 @@
         "admin": {
           "$ref": "#/definitions/v1MeshAdminTelemetry",
           "description": "The last sample pushed by an operator-run monitor that logs into the node's\nadmin interface (internal/pushingest). Nested HERE, inside the block\nContentHash zeroes, because every field of it is a counter or a gauge that\nmoves on every report: hashed, a 5-minute reporting cadence would mint ~288\nrevisions per node per day and say nothing."
+        },
+        "lastHeardAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When WE last received one of this node's own adverts (our clock, not the\nnode's: compare last_advert_at). This is the answer to \"when did the node\nlast speak\". The event's observed_at is NOT: it moves only when something\nhashed changes (identity, position, reachability), so a node advertising\nthe same thing every day kept an observed_at days old.\n\nRead-time only. Filled from the store's mesh_activity table when the event\nis served and never written into the event blob, so it mints no revision\nand costs no blob rewrite. Null when no advert has been received since\nactivity tracking began."
+        },
+        "lastRelayedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When we last received a packet that this node had RELAYED: its key's hash\nappeared as a hop in the path of a FLOOD-routed packet of any type\n(messages, acks, path returns, adverts). A backbone repeater adverts every\nday or two but relays constantly, so this, not last_heard_at, is what says\na repeater is up right now.\n\nTwo limits, both deliberate. A hop is credited only when exactly one\nrelay-capable node fits it: a 2- or 3-byte hash by unique prefix, a 1-byte\nhash only as the one known neighbour of the next hop along (the observer\nheard the last hop directly) that carries the byte. A node seen only on\n1-byte paths beside nodes it has never been linked to gets no relay time.\nAnd direct-routed packets never count: their path is the route still to be\ntravelled, not the one travelled, so a hop there may never have heard the\npacket. A relay also keeps an already-known node PRESENT (ACTIVE) for\ngrid.meshcore.relayPresence after it, the way an advert does; it never\ncreates a node or changes its identity or position. Read-time only, like\nlast_heard_at; null when no relay has been attributed."
         }
       },
       "description": "MeshTelemetry is the volatile, per-advert signal state. It is deliberately\ngrouped into one sub-message so store.ContentHash can zero the whole field:\nnone of it mints a revision."

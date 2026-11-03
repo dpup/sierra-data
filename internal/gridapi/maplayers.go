@@ -202,6 +202,7 @@ func (s *Service) serveEventLayer(w http.ResponseWriter, r *http.Request, place 
 		}
 		q.PageToken = next
 	}
+	s.overlayMeshActivity(ctx, events)
 
 	sources, err := s.Store.ListSources(ctx)
 	if err != nil {

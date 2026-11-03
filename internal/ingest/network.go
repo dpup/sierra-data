@@ -7,6 +7,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
@@ -76,6 +77,11 @@ type MeshRegistry interface {
 	// DrainObservations returns the receptions buffered since the last drain
 	// (cleared), for the append-only relay-observation store (Tier 0).
 	DrainObservations() []meshcore.Observation
+	// DrainRelays returns, per full key, the latest reception of a flood packet
+	// the node relayed since the last drain (cleared). Hops resolve by unique
+	// prefix (2+ bytes) or against the learned neighbour graph, over the
+	// registry's nodes plus `known`; see internal/clients/meshcore/relay.go.
+	DrainRelays(known []meshcore.KnownNode) map[string]time.Time
 	// ResolvePrefix maps a pubkey prefix to a full key on a unique match.
 	ResolvePrefix(prefix string) (string, bool)
 }
@@ -116,6 +122,13 @@ type NetworkNormalizer struct {
 	// used to attribute a node's provenance to the MQTT server's operator.
 	brokerOps map[string]config.MeshcoreBroker
 	now       func() time.Time
+
+	// activityMu guards activity: the clocks this normalizer last handed the
+	// store, so a tick writes only the nodes whose activity moved. Empty after
+	// a restart, which costs one full write; the store's MAX merge makes that
+	// harmless.
+	activityMu sync.Mutex
+	activity   map[string]store.MeshActivity
 }
 
 // NewNetworkNormalizer wires the normalizer to its inputs. Either may be nil,
@@ -219,16 +232,24 @@ func (n *NetworkNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult,
 		brokers = n.registry.Brokers()
 	}
 	delivering, brokerErr := brokerDelivery(brokers)
-	if n.registry != nil && (delivering > 0 || snap.PacketLive > 0) {
-		nodes = n.registry.Snapshot()
-	}
-
 	if delivering == 0 && snap.Live == 0 && snap.PacketLive == 0 {
 		err := fmt.Errorf("meshcore: no broker delivering and no reporter live; not asserting node disappearance")
 		if brokerErr != nil {
 			err = fmt.Errorf("%w (%v)", err, brokerErr)
 		}
 		return nil, err
+	}
+
+	// Relays drain BEFORE the snapshot: DrainRelays stamps each resolved node,
+	// and a relay is presence (see meshcore.Registry.presentLocked), so this
+	// tick's relays must count in this tick's snapshot. Resolution uses the
+	// store's mesh keys as well as the registry's own.
+	var relays map[string]time.Time
+	if n.registry != nil {
+		relays = n.registry.DrainRelays(knownMeshNodes(prior))
+	}
+	if n.registry != nil && (delivering > 0 || snap.PacketLive > 0) {
+		nodes = n.registry.Snapshot()
 	}
 
 	merged := make(map[string]*mergedNode, len(nodes)+len(snap.Reports))
@@ -289,18 +310,96 @@ func (n *NetworkNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult,
 		perSource[meshSourceID] = brokerErr
 	}
 	result := &PollResult{
-		Events:               events,
-		ForceWrite:           forceWrite,
-		Superseded:           supersededIDs(promotions),
-		MeshObservations:     n.drainObservations(),
-		MeshTelemetry:        meshTelemetrySamples(events, now),
-		MeshTelemetryRenames: promotions,
-		PerSource:            perSource,
+		Events:                events,
+		ForceWrite:            forceWrite,
+		Superseded:            supersededIDs(promotions),
+		MeshObservations:      n.drainObservations(),
+		MeshActivity:          n.meshActivity(merged, prior, relays),
+		MeshActivityUnwritten: n.forgetMeshActivity,
+		MeshTelemetry:         meshTelemetrySamples(events, now),
+		MeshTelemetryRenames:  promotions,
+		PerSource:             perSource,
 	}
 	if snap.SuppressSweep {
 		result.SweepSuppress = append(result.SweepSuppress, meshSourceID)
 	}
 	return result, nil
+}
+
+// meshActivity returns the activity clocks that advanced this tick, for the
+// nodes this layer covers: the in-region nodes of this tick, plus every node
+// the store holds as a live mesh event (a quiet repeater can drop out of the
+// snapshot between its adverts while relaying all day).
+//
+// Two clocks, two sources. last_heard_at is the registry's ReceivedAt (a real
+// advert reception, never the seed's last_seen_at fallback); last_relayed_at
+// is the latest flood packet that named the node as a hop. Relay hops resolve
+// against the registry's whole catalog plus the store's keys (see
+// meshcore.Registry.DrainRelays), and only then are cut down to the covered
+// set, so a global collision still blocks a local attribution.
+//
+// `relays` is this tick's DrainRelays, taken in Poll before the snapshot (a
+// relay is presence too) and only on a successful poll: on a hard error Poll
+// returns first, and the evidence waits for the next tick.
+func (n *NetworkNormalizer) meshActivity(merged map[string]*mergedNode, prior Prior, relays map[string]time.Time) []store.MeshActivity {
+	covered := n.fullKeyCatalog(merged, prior)
+	coveredSet := make(map[string]bool, len(covered))
+	for _, k := range covered {
+		coveredSet[k] = true
+	}
+
+	now := make(map[string]store.MeshActivity, len(coveredSet))
+	for k, m := range merged {
+		if m.mqtt != nil && !m.mqtt.ReceivedAt.IsZero() && coveredSet[k] {
+			now[k] = store.MeshActivity{PubKey: k, LastHeardAt: m.mqtt.ReceivedAt}
+		}
+	}
+	for k, t := range relays {
+		if !coveredSet[k] {
+			continue
+		}
+		a := now[k]
+		a.PubKey, a.LastRelayedAt = k, t
+		now[k] = a
+	}
+
+	n.activityMu.Lock()
+	defer n.activityMu.Unlock()
+	if n.activity == nil {
+		n.activity = make(map[string]store.MeshActivity, len(now))
+	}
+	var out []store.MeshActivity
+	for k, a := range now {
+		prev := n.activity[k]
+		next := store.MeshActivity{
+			PubKey:        k,
+			LastHeardAt:   laterOf(prev.LastHeardAt, a.LastHeardAt),
+			LastRelayedAt: laterOf(prev.LastRelayedAt, a.LastRelayedAt),
+		}
+		if next.LastHeardAt.Equal(prev.LastHeardAt) && next.LastRelayedAt.Equal(prev.LastRelayedAt) {
+			continue
+		}
+		n.activity[k] = next
+		out = append(out, next)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].PubKey < out[j].PubKey })
+	return out
+}
+
+// forgetMeshActivity drops the record of what the store holds, after a failed
+// write, so the next tick re-sends every covered node's clocks. The store
+// merges by MAX, so a re-send is harmless.
+func (n *NetworkNormalizer) forgetMeshActivity() {
+	n.activityMu.Lock()
+	n.activity = nil
+	n.activityMu.Unlock()
+}
+
+func laterOf(a, b time.Time) time.Time {
+	if b.After(a) {
+		return b
+	}
+	return a
 }
 
 // brokerDelivery counts the brokers that are delivering and, when any
@@ -470,7 +569,9 @@ func (n *NetworkNormalizer) buildEvent(m *mergedNode, now time.Time, prior Prior
 	// telemetry.lastAdvertAt (diagnostic; reveals the skew).
 	observed := time.Time{}
 	if m.mqtt != nil {
-		observed = m.mqtt.LastHeardAt
+		// The latest evidence that the node is there: its advert, or a relay
+		// (which alone can keep it present; see Registry.presentLocked).
+		observed = laterOf(m.mqtt.LastHeardAt, m.mqtt.LastRelayedAt)
 	}
 	for _, r := range reports {
 		// A successful admin read proves the node is alive; where a monitor has
@@ -496,7 +597,7 @@ func (n *NetworkNormalizer) buildEvent(m *mergedNode, now time.Time, prior Prior
 		NodeType:     nodeType,
 		Name:         name,
 		Reachability: n.reachability(reports, now),
-		Telemetry:    meshTelemetry(m.mqtt, reports),
+		Telemetry:    meshTelemetry(m.mqtt, reports, priorByID(prior, ev.GetId()).GetMesh().GetTelemetry()),
 	}}
 	return ev
 }
@@ -543,18 +644,36 @@ func (n *NetworkNormalizer) reachability(reports []pushingest.MeshNodeReport, no
 // store.ContentHash, so none of it mints a revision — which is exactly why the
 // counters and gauges an operator monitor reports belong in it, and exactly why
 // persisting it needs PollResult.ForceWrite (see shouldPersistTelemetry).
-func meshTelemetry(mqtt *meshcore.NodeState, reports []pushingest.MeshNodeReport) *gridv1.MeshTelemetry {
+func meshTelemetry(mqtt *meshcore.NodeState, reports []pushingest.MeshNodeReport, stored *gridv1.MeshTelemetry) *gridv1.MeshTelemetry {
 	t := &gridv1.MeshTelemetry{}
-	// The signal block is set ONLY where an MQTT bridge actually heard the node.
-	// These are wrapper types precisely so that this `if` is visible on the wire:
-	// a node an operator monitors but the mesh has never heard reports no SNR,
-	// not 0 dB, and no hop count, not "heard direct".
-	if mqtt != nil {
+	// The signal block is set ONLY from a real reading. These are wrapper types
+	// precisely so that this `if` is visible on the wire: a node an operator
+	// monitors but the mesh has never heard reports no SNR, not 0 dB, and no hop
+	// count, not "heard direct".
+	//
+	// "A registry entry" is not a reading. A node seeded from the store at boot
+	// (or kept present by relays alone) has zero values in these fields, and
+	// until 2026-11 they went out as 0 dB / 0 hops, and the first tick after
+	// every restart (a full reconcile) wrote them over the node's real stored
+	// reading. HasSignal marks an advert this process received; without one,
+	// the stored reading rides forward, the way stablePosition carries a
+	// position: nothing new is not nothing.
+	switch {
+	case mqtt != nil && mqtt.HasSignal:
 		t.Snr = wrapperspb.Double(mqtt.SNR)
 		t.Rssi = wrapperspb.Int32(mqtt.RSSI)
 		t.HopCount = wrapperspb.UInt32(mqtt.HopCount)
 		t.Gateways = mqtt.Gateways
 		t.LastAdvertAt = tsProto(mqtt.LastAdvertAt)
+	case stored.GetLastAdvertAt() != nil:
+		// Only a stored block stamped with its advert is a reading. The zeroed
+		// blocks the bug above wrote carry no stamp, and are dropped here
+		// rather than carried, which heals them on the next write.
+		t.Snr = stored.GetSnr()
+		t.Rssi = stored.GetRssi()
+		t.HopCount = stored.GetHopCount()
+		t.Gateways = stored.GetGateways()
+		t.LastAdvertAt = stored.GetLastAdvertAt()
 	}
 	// The freshest successful sample wins; reports arrive pre-sorted by
 	// precedence, so an equal timestamp resolves to the higher-priority monitor.
@@ -755,6 +874,22 @@ func (n *NetworkNormalizer) fullKeyCatalog(merged map[string]*mergedNode, prior 
 	}
 	slices.Sort(keys)
 	return slices.Compact(keys)
+}
+
+// knownMeshNodes offers the store's live mesh nodes (full keys, with their
+// roles) to relay resolution: a candidate it can credit, and one more chance to
+// see that a prefix is shared.
+func knownMeshNodes(prior Prior) []meshcore.KnownNode {
+	if prior == nil {
+		return nil
+	}
+	var out []meshcore.KnownNode
+	for _, ev := range prior.ForSource(meshSourceID) {
+		if native, ok := strings.CutPrefix(ev.GetId(), meshSourceID+":"); ok && len(native) == meshPubKeyHex {
+			out = append(out, meshcore.KnownNode{PubKey: native, Role: ev.GetMesh().GetNodeType()})
+		}
+	}
+	return out
 }
 
 // resolveUnique returns the single catalog entry carrying a prefix. Two matches

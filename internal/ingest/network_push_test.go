@@ -219,7 +219,7 @@ func TestPushAndMQTTDeduplicateToOneEvent(t *testing.T) {
 	reg := &fakeMeshRegistry{connected: 1, nodes: []meshcore.NodeState{{
 		PubKey: fullKey, Role: meshcore.RoleRepeater, Name: "Arnold Summit",
 		HasLocation: true, Lat: 38.137412, Lng: -120.457934,
-		SNR: 4.5, RSSI: -93, LastHeardAt: pollNow.Add(-time.Minute),
+		SNR: 4.5, RSSI: -93, LastHeardAt: pollNow.Add(-time.Minute), HasSignal: true,
 	}}}
 	// The monitor knows the node only by an 8-byte prefix of its public key.
 	n := pushNormalizer(t, reg, pushingest.MeshSnapshot{
@@ -595,7 +595,7 @@ func TestPollProjectsTelemetrySamples(t *testing.T) {
 	reg := &fakeMeshRegistry{connected: 1, nodes: []meshcore.NodeState{{
 		PubKey: fullKey, Role: meshcore.RoleRepeater, Name: "Arnold Summit",
 		HasLocation: true, Lat: 38.137412, Lng: -120.457934,
-		SNR: 4.5, RSSI: -93, LastHeardAt: pollNow.Add(-time.Minute),
+		SNR: 4.5, RSSI: -93, LastHeardAt: pollNow.Add(-time.Minute), HasSignal: true,
 	}}}
 	n := pushNormalizer(t, reg, pushingest.MeshSnapshot{
 		Live:    1,

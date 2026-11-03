@@ -74,6 +74,12 @@ type Config struct {
 	// clock can see that. <= 0 disables the check, leaving "session open" as the
 	// only test.
 	SilenceAfter time.Duration
+	// RelayPresence keeps a node in Snapshot for this long after a relay was
+	// attributed to it (DrainRelays), as well as for its advert window. <= 0
+	// disables relay presence. A relay only extends a node the registry already
+	// holds: identity and position always come from a signed advert (live, or
+	// seeded from the store).
+	RelayPresence time.Duration
 }
 
 // Observation is one received advert, captured for the relay-topology store
@@ -120,6 +126,22 @@ type NodeState struct {
 	Gateways     []string
 	LastAdvertAt time.Time // sender-stamped
 	LastHeardAt  time.Time // our receive time
+	// ReceivedAt is our receive time of the node's last advert that was actually
+	// RECEIVED: live, or replayed at Seed from the observation store. Unlike
+	// LastHeardAt it is never a fallback. Seed backs LastHeardAt with the store's
+	// last_seen_at when it has no reception on record, which is right for
+	// presence (keep the node until its window passes) and wrong as an answer
+	// to "when did we last hear it". Zero means no reception on record.
+	ReceivedAt time.Time
+	// LastRelayedAt is our receive time of the latest packet attributed to this
+	// node as a relay hop (see DrainRelays). It extends presence by
+	// RelayPresence; it never touches identity, position or signal.
+	LastRelayedAt time.Time
+	// HasSignal reports whether SNR/RSSI/HopCount/Gateways/LastAdvertAt hold a
+	// reading from an advert THIS process received. A node known only from Seed
+	// (or kept present by relays alone) has none, and its zero values are not
+	// readings: 0 hops would claim "heard direct".
+	HasSignal bool
 }
 
 type nodeEntry struct {
@@ -197,6 +219,22 @@ type Registry struct {
 	obsBuf  []Observation
 	obsGate map[string]time.Time
 
+	// relayBuf holds each flood path received since the last drain (with the
+	// observer that heard it and, for an advert, its sender), keyed to dedupe
+	// the many observers of one packet, at its latest reception. Paths, not
+	// hop hashes: resolving a 1-byte hop needs the hops around it. Resolution
+	// waits for DrainRelays, as an observation's PathNodes waits for
+	// DrainObservations. Guarded by mu.
+	relayBuf map[string]relayEntry
+
+	// adj is the neighbour graph DrainRelays resolves ambiguous hops against:
+	// node (or observer) key -> neighbour key -> when the link was last seen.
+	// Learned only from hops a prefix pinned down unambiguously, and seeded at
+	// boot from the store's raw receptions (SeedPaths). Guarded by adjMu: only
+	// DrainRelays and SeedPaths touch it, so the MQTT path never waits on it.
+	adjMu sync.Mutex
+	adj   map[string]map[string]time.Time
+
 	now func() time.Time // injectable clock for tests
 }
 
@@ -265,6 +303,11 @@ type SeedNode struct {
 	// immediately after boot, not just the GraceFloor.
 	LastHeard  time.Time
 	HeardTimes []time.Time
+	// LastReceived / LastRelayed restore the activity clocks (the store's
+	// mesh_activity row), so relay presence and "last heard" survive a restart
+	// instead of re-accumulating. Zero = none on record.
+	LastReceived time.Time
+	LastRelayed  time.Time
 }
 
 // Seed rehydrates node presence from persisted state. Call ONCE before Connect
@@ -291,14 +334,27 @@ func (r *Registry) Seed(nodes []SeedNode) {
 			e.HasLocation = true
 			e.Lat, e.Lng = sn.Lat, sn.Lng
 		}
-		last := sn.LastHeard
 		for _, t := range sn.HeardTimes {
 			e.recordCadence(t)
-			if t.After(last) {
-				last = t
+			if t.After(e.ReceivedAt) {
+				e.ReceivedAt = t
 			}
 		}
-		e.LastHeardAt = last
+		if sn.LastReceived.After(e.ReceivedAt) {
+			e.ReceivedAt = sn.LastReceived
+		}
+		// The advert window runs from the last real advert. last_seen_at is
+		// only a fallback for a node with no reception on record: it advances
+		// while relays alone keep a node present, so using it whenever it is
+		// later would turn a few hours of relay presence into a whole advert
+		// window (up to GraceCeil) at every restart.
+		e.LastHeardAt = e.ReceivedAt
+		if e.LastHeardAt.IsZero() {
+			e.LastHeardAt = sn.LastHeard
+		}
+		if sn.LastRelayed.After(e.LastRelayedAt) {
+			e.LastRelayedAt = sn.LastRelayed
+		}
 	}
 }
 
@@ -531,11 +587,29 @@ func (r *Registry) IngestEnvelope(payload []byte, source, defaultGateway string)
 
 // ingestPacket applies one decoded envelope to the registry. Split out from the
 // transport plumbing so it is unit-testable without a broker.
+//
+// Every packet type is read for its relay path (recordRelaysLocked); only an
+// ADVERT goes on to update a node. Adverts are ~7% of the feed, and the rest is
+// where a quiet backbone repeater shows up: measured on 2026-11-03, a flood
+// packet named Camp Connell as a relay hop ~13 times for every advert that did.
 func (r *Registry) ingestPacket(env *packetEnvelope, source, defaultGateway string) (PacketOutcome, error) {
+	rawHex := strings.TrimPrefix(strings.TrimSpace(env.Raw), "meshcore://")
 	if env.PacketType.int() != packetTypeAdvert {
+		// Best effort, and it never changes the outcome: a packet we do not
+		// ingest is Ignored whether or not its framing parsed. Decoding only
+		// the header and path keeps this cheap on a firehose of every type.
+		if raw, err := hex.DecodeString(rawHex); err == nil {
+			if h, err := DecodeFrameHeader(raw); err == nil {
+				if hops := h.RelayHops(); len(hops) > 0 {
+					now := r.now()
+					r.mu.Lock()
+					r.recordRelaysLocked(hops, relayObserver(env, defaultGateway), "", now)
+					r.mu.Unlock()
+				}
+			}
+		}
 		return PacketIgnored, nil
 	}
-	rawHex := strings.TrimPrefix(strings.TrimSpace(env.Raw), "meshcore://")
 	raw, err := hex.DecodeString(rawHex)
 	if err != nil {
 		return PacketMalformed, fmt.Errorf("raw is not hex: %w", err)
@@ -556,6 +630,15 @@ func (r *Registry) ingestPacket(env *packetEnvelope, source, defaultGateway stri
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	// An accepted advert's own path is relay evidence like any other packet's
+	// (DecodeFrame already parsed it; the header is re-read only for the route).
+	// Its sender is known (and signed), which anchors the first hop; a
+	// zero-hop flood advert still teaches the graph that this observer hears
+	// the sender directly.
+	if h, err := DecodeFrameHeader(raw); err == nil && (h.RouteType == routeFlood || h.RouteType == routeTransportFlood) {
+		r.recordRelaysLocked(h.RelayHops(), relayObserver(env, defaultGateway), adv.PubKey, now)
+	}
 
 	e := r.nodes[adv.PubKey]
 	if e == nil {
@@ -593,6 +676,8 @@ func (r *Registry) ingestPacket(env *packetEnvelope, source, defaultGateway stri
 	e.HopCount = uint32(adv.HopCount)
 	e.LastAdvertAt = adv.Timestamp // node-reported; unreliable clock, diagnostic only
 	e.LastHeardAt = now            // our receive time — the trustworthy clock
+	e.ReceivedAt = now             // a real reception, never a seed fallback
+	e.HasSignal = true             // the signal fields above are this advert's
 	e.recordCadence(now)           // per-node advert-interval estimate (drives Snapshot's window)
 	if gw != "" {
 		e.gateways[gw] = struct{}{}
@@ -677,7 +762,7 @@ func (r *Registry) Snapshot() []NodeState {
 
 	out := make([]NodeState, 0, len(r.nodes))
 	for _, e := range r.nodes {
-		if now.Sub(e.LastHeardAt) > r.presenceWindow(e) {
+		if !r.presentLocked(e, now) {
 			continue
 		}
 		ns := e.NodeState
@@ -686,6 +771,18 @@ func (r *Registry) Snapshot() []NodeState {
 		out = append(out, ns)
 	}
 	return out
+}
+
+// presentLocked reports whether a node is present: its last advert within its
+// cadence window, OR a relay attributed to it within RelayPresence. The relay
+// half is what keeps a backbone repeater on the map between adverts that come
+// a day or more apart while it forwards traffic all day. Caller holds r.mu.
+func (r *Registry) presentLocked(e *nodeEntry, now time.Time) bool {
+	if now.Sub(e.LastHeardAt) <= r.presenceWindow(e) {
+		return true
+	}
+	return r.cfg.RelayPresence > 0 && !e.LastRelayedAt.IsZero() &&
+		now.Sub(e.LastRelayedAt) <= r.cfg.RelayPresence
 }
 
 // presenceWindow is how long a node stays present after its last advert:
@@ -713,8 +810,18 @@ var prefixLens = []int{2, 4, 6}
 // lengths) to the pubkeys carrying them, for relay-hop resolution. A hop resolves
 // only on a UNIQUE match (see resolvePath). Caller holds r.mu.
 func (r *Registry) prefixIndexLocked() map[string][]string {
-	idx := make(map[string][]string, len(r.nodes)*len(prefixLens))
+	keys := make(map[string]struct{}, len(r.nodes))
 	for pk := range r.nodes {
+		keys[pk] = struct{}{}
+	}
+	return prefixIndex(keys)
+}
+
+// prefixIndex maps every key's 1/2/3-byte hex prefixes to the keys carrying
+// them. Keys must be distinct (a set), or one node would collide with itself.
+func prefixIndex(keys map[string]struct{}) map[string][]string {
+	idx := make(map[string][]string, len(keys)*len(prefixLens))
+	for pk := range keys {
 		for _, n := range prefixLens {
 			if len(pk) >= n {
 				idx[pk[:n]] = append(idx[pk[:n]], pk)
@@ -775,6 +882,15 @@ func resolvePath(hops []string, idx map[string][]string) []string {
 	return res
 }
 
+// relayObserver is the radio that heard a packet, as a neighbour-graph anchor:
+// the envelope's own id, else the push reporter's (one radio per reporter).
+// Unlike the gateway it never falls back to the MQTT broker URL, which every
+// radio on that broker shares: as an anchor it would make the union of all
+// their neighbours look "heard directly" by one observer.
+func relayObserver(env *packetEnvelope, defaultGateway string) string {
+	return firstNonEmpty(env.OriginID, env.Origin, defaultGateway)
+}
+
 // Close disconnects every broker.
 func (r *Registry) Close() {
 	r.mu.Lock()
@@ -793,7 +909,13 @@ func (r *Registry) pruneLocked(now time.Time) {
 		return
 	}
 	for k, e := range r.nodes {
-		if now.Sub(e.LastHeardAt) > r.cfg.RetainFor {
+		// A node that keeps relaying keeps its identity in memory, or relay
+		// presence would end RetainFor after its last advert.
+		last := e.LastHeardAt
+		if e.LastRelayedAt.After(last) {
+			last = e.LastRelayedAt
+		}
+		if now.Sub(last) > r.cfg.RetainFor {
 			delete(r.nodes, k)
 		}
 	}

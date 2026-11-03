@@ -27,10 +27,21 @@ type fakeMeshRegistry struct {
 	connected int
 	down      int
 	obs       []meshcore.Observation
+	// relays is what the next DrainRelays returns (then cleared); knownSeen
+	// records the extra keys the normalizer offered for resolution.
+	relays    map[string]time.Time
+	knownSeen []meshcore.KnownNode
 }
 
 func (f *fakeMeshRegistry) Snapshot() []meshcore.NodeState            { return f.nodes }
 func (f *fakeMeshRegistry) DrainObservations() []meshcore.Observation { return f.obs }
+
+func (f *fakeMeshRegistry) DrainRelays(known []meshcore.KnownNode) map[string]time.Time {
+	f.knownSeen = known
+	out := f.relays
+	f.relays = nil
+	return out
+}
 
 func (f *fakeMeshRegistry) Brokers() []meshcore.BrokerHealth {
 	var out []meshcore.BrokerHealth
@@ -67,7 +78,7 @@ func TestNetworkPollBuildsEvents(t *testing.T) {
 			{ // in-region repeater with location
 				PubKey: "aa11bb22cc33", Role: meshcore.RoleRepeater, Name: "Murphys Ridge",
 				HasLocation: true, Lat: 38.137412, Lng: -120.457934,
-				SNR: 4.5, RSSI: -93, HopCount: 2,
+				SNR: 4.5, RSSI: -93, HopCount: 2, HasSignal: true,
 				Gateways:     []string{"ag loft rpt"},
 				LastAdvertAt: time.Unix(1_782_400_000, 0).UTC(),            // node clock (skewed/untrusted)
 				LastHeardAt:  time.Date(2026, 7, 20, 9, 0, 0, 0, time.UTC), // our receive time

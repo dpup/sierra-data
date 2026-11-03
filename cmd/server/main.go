@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 	_ "time/tzdata" // Embed the IANA tz database so America/Los_Angeles resolves in minimal containers
 
@@ -595,6 +596,7 @@ func meshcoreClientConfig(cfg *config.Config) meshcore.Config {
 		GraceFloor:            mc.GraceFloor,
 		GraceCeil:             graceCeil,
 		SilenceAfter:          mc.Silence(),
+		RelayPresence:         mc.RelayPresenceWindow(),
 	}
 }
 
@@ -657,6 +659,19 @@ func seedMeshRegistry(ctx context.Context, reg *meshcore.Registry, st *store.Sto
 		logging.Warnw(ctx, "MeshCore: cadence rehydration skipped — reading heard times failed", "error", err)
 		heard = nil
 	}
+	// The activity clocks, so relay presence and "last heard" pick up where the
+	// last process left off rather than re-accumulating from nothing.
+	keys := make([]string, 0, len(events))
+	for _, se := range events {
+		if pk := se.Event.GetMesh().GetPublicKey(); pk != "" {
+			keys = append(keys, pk)
+		}
+	}
+	activity, err := st.MeshActivityFor(ctx, keys)
+	if err != nil {
+		logging.Warnw(ctx, "MeshCore: activity rehydration skipped — reading mesh activity failed", "error", err)
+		activity = nil
+	}
 	seeds := make([]meshcore.SeedNode, 0, len(events))
 	for _, se := range events {
 		d := se.Event.GetMesh()
@@ -671,6 +686,9 @@ func seedMeshRegistry(ctx context.Context, reg *meshcore.Registry, st *store.Sto
 			HeardTimes: heard[pk],
 			LastHeard:  se.LastSeenAt,
 		}
+		if a, ok := activity[strings.ToLower(pk)]; ok {
+			sn.LastReceived, sn.LastRelayed = a.LastHeardAt, a.LastRelayedAt
+		}
 		if c := se.Event.GetGeometry().GetCentroid(); c != nil {
 			sn.HasLocation = true
 			sn.Lat, sn.Lng = c.GetLat(), c.GetLng()
@@ -684,6 +702,36 @@ func seedMeshRegistry(ctx context.Context, reg *meshcore.Registry, st *store.Sto
 	}
 	reg.Seed(seeds)
 	logging.Infow(ctx, "MeshCore: rehydrated node presence from store", "nodes", len(seeds))
+
+	// The neighbour graph that resolves 1-byte relay hops (meshcore/relay.go),
+	// so a restart does not stop crediting half the traffic until it re-learns.
+	// Rebuilt from the raw receptions (Tier 0, observationRetention) through the
+	// live rule, NOT from the link rollup: rollup edges were resolved by the
+	// older rule that matches 1-byte hops on prefix, which is exactly the
+	// misattribution the graph exists to avoid.
+	obs, err := st.MeshObservationPaths(ctx, time.Now().Add(-meshcore.AdjacencyRetention))
+	if err != nil {
+		logging.Warnw(ctx, "MeshCore: neighbour-graph rehydration skipped — reading receptions failed", "error", err)
+		return
+	}
+	paths := seedPaths(obs)
+	reg.SeedPaths(paths, nil)
+	logging.Infow(ctx, "MeshCore: rehydrated neighbour graph from store", "paths", len(paths))
+}
+
+// seedPaths turns stored advert receptions into neighbour-graph seed paths.
+// A stored gateway equal to the broker is the broker-URL fallback, which every
+// radio on that broker shares, so it is no anchor (see meshcore.relayObserver).
+func seedPaths(obs []store.MeshObservation) []meshcore.SeedPath {
+	paths := make([]meshcore.SeedPath, 0, len(obs))
+	for _, o := range obs {
+		sp := meshcore.SeedPath{Hops: o.Path, Observer: o.Gateway, Sender: o.PubKey, At: o.HeardAt}
+		if o.Gateway == o.Broker {
+			sp.Observer = ""
+		}
+		paths = append(paths, sp)
+	}
+	return paths
 }
 
 // gridSourceSeeds builds the source registry rows: ids + tuning from

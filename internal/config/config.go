@@ -496,6 +496,15 @@ type MeshcoreConfig struct {
 	// silence check (a closed session still fails the source) and is returned
 	// verbatim, the same explicit-opt-out rule as PowerConfig.OutageStaleAfter.
 	SilenceAfter time.Duration `koanf:"silenceAfter"`
+	// RelayPresence is how long a RELAY keeps a node present: a flood packet
+	// whose path names the node (exactly one fitting candidate; see
+	// internal/clients/meshcore/relay.go) counts toward
+	// presence the way an advert does, for this long. Unset means GraceFloor,
+	// so one relay buys a node what one advert of unknown cadence does; a
+	// negative value turns relay presence off. Relays can keep a node whose
+	// identity a signed advert established; they never create, move or rename
+	// one. See "Relay presence" in internal/ingest/CLAUDE.md.
+	RelayPresence time.Duration `koanf:"relayPresence"`
 	// NodeURL is the template for each node event's canonical_url, with
 	// `{publicKey}` replaced by the node's full 64-hex public key: the node's
 	// own page on a packet analyzer that reads the same broker feed we do, so a
@@ -510,6 +519,21 @@ type MeshcoreConfig struct {
 // far outside any lull and still catches a dead subscription within a tick or
 // three of the mesh source's 60s poll.
 const DefaultMeshcoreSilenceAfter = 15 * time.Minute
+
+// RelayPresenceWindow resolves RelayPresence: GraceFloor (or its 3h default)
+// when unset, 0 (disabled) when negative.
+func (m MeshcoreConfig) RelayPresenceWindow() time.Duration {
+	switch {
+	case m.RelayPresence < 0:
+		return 0
+	case m.RelayPresence > 0:
+		return m.RelayPresence
+	case m.GraceFloor > 0:
+		return m.GraceFloor
+	default:
+		return 3 * time.Hour
+	}
+}
 
 // Silence is SilenceAfter with the default applied. A negative configured value
 // disables the check and is returned as-is (the registry treats <= 0 as off).

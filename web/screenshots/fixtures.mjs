@@ -240,17 +240,18 @@ const EVENTS = [
 // rather than zero — the distinction the whole fail-loud contract turns on).
 // The other three have no monitor at all, which is the common case and must
 // render as "no monitor watches this node", never as a row of zeros.
+// `heard`/`relayed` are minutes ago for telemetry.lastHeardAt/lastRelayedAt.
 const MESH_NODES = [
-  { pk: 'a1b2c3d4e5f6a7b8', name: 'Murphys Repeater', role: 'repeater', lat: 38.138, lng: -120.461, snr: 9, rssi: -94, hop: 0, gw: 20, reach: 'REACHABLE' },
-  { pk: 'b2c3d4e5f6a7b8c9', name: 'Arnold Hilltop', role: 'repeater', lat: 38.255, lng: -120.352, snr: 6, rssi: -101, hop: 1, gw: 2, reach: 'UNREACHABLE' },
-  { pk: 'c3d4e5f6a7b8c9d0', name: 'Bear Valley Room', role: 'room_server', lat: 38.481, lng: -120.043, snr: 4, rssi: -108, hop: 2, gw: 1 },
-  { pk: 'd4e5f6a7b8c9d0e1', name: 'Avery Companion', role: 'companion', lat: 38.196, lng: -120.366, snr: 3, rssi: -112, hop: 2, gw: 0 },
+  { pk: 'a1b2c3d4e5f6a7b8', name: 'Murphys Repeater', role: 'repeater', lat: 38.138, lng: -120.461, snr: 9, rssi: -94, hop: 0, gw: 20, reach: 'REACHABLE', heard: 300, relayed: 1 },
+  { pk: 'b2c3d4e5f6a7b8c9', name: 'Arnold Hilltop', role: 'repeater', lat: 38.255, lng: -120.352, snr: 6, rssi: -101, hop: 1, gw: 2, reach: 'UNREACHABLE', heard: 1500, relayed: 2 },
+  { pk: 'c3d4e5f6a7b8c9d0', name: 'Bear Valley Room', role: 'room_server', lat: 38.481, lng: -120.043, snr: 4, rssi: -108, hop: 2, gw: 1, heard: 40 },
+  { pk: 'd4e5f6a7b8c9d0e1', name: 'Avery Companion', role: 'companion', lat: 38.196, lng: -120.366, snr: 3, rssi: -112, hop: 2, gw: 0, heard: 12 },
   { pk: 'e5f6a7b8c9d0e1f2', name: 'Dorrington Sensor', role: 'sensor', lat: 38.306, lng: -120.281, snr: 2, rssi: -118, hop: 3, gw: 0 },
   // Monitor-only: no bridge has ever heard it, so every signal field is null on
   // the wire (they are wrapper types for exactly this case) — never 0. This is
   // three of the nine live monitored repeaters, and the shape that shipped as
   // "0 dB, heard direct" before the wrappers landed.
-  { pk: 'f6a7b8c9d0e1f2a3', name: 'Big Prather Meadow', role: 'repeater', lat: 38.222, lng: -120.401, unheard: true, gw: 0, reach: 'REACHABLE' },
+  { pk: 'f6a7b8c9d0e1f2a3', name: 'Big Prather Meadow', role: 'repeater', lat: 38.222, lng: -120.401, unheard: true, gw: 0, reach: 'REACHABLE', relayed: 3 },
 ];
 
 // Gateway/broker public keys, as the bridges report them: full 64-char hex.
@@ -311,6 +312,13 @@ const MESH_EVENTS = MESH_NODES.map((n, i) => ({
       gateways: MESH_GATEWAY_KEYS.slice(0, n.gw),
       lastAdvertAt: n.unheard ? null : ago(5 + i * 7),
       admin: MESH_ADMIN[n.pk] || null,
+      // The activity clocks the API overlays at read time (our clock). Every
+      // combination is here: both (Murphys, Arnold), advert only (the room and
+      // the companion), relay only (Big Prather: a repeater no bridge hears
+      // advertise but that relays all day), and NEITHER (Dorrington), which
+      // must render as an absence and never fall back to observedAt.
+      lastHeardAt: n.heard == null ? null : ago(n.heard),
+      lastRelayedAt: n.relayed == null ? null : ago(n.relayed),
     },
   },
   geometry: { centroid: { lat: n.lat, lng: n.lng },

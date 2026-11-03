@@ -31,8 +31,8 @@ const (
 type MeshObservation struct {
 	PubKey    string
 	HeardAt   time.Time
-	Broker    string    // MQTT server URL the advert arrived on
-	Gateway   string    // origin/gateway that reported it
+	Broker    string // MQTT server URL the advert arrived on
+	Gateway   string // origin/gateway that reported it
 	SNR       float64
 	RSSI      int32
 	HopCount  uint32
@@ -46,29 +46,31 @@ type MeshObservation struct {
 // single-writer discipline holds. Path/PathNodes are stored comma-joined (the
 // hop lists, parallel; compaction splits them back). An empty batch is a no-op.
 func (s *Store) InsertMeshObservations(ctx context.Context, obs []MeshObservation) error {
+	return s.RecordMeshTick(ctx, obs, nil)
+}
+
+func insertMeshObservations(ctx context.Context, tx *sql.Tx, obs []MeshObservation) error {
 	if len(obs) == 0 {
 		return nil
 	}
-	return s.inTx(ctx, func(tx *sql.Tx) error {
-		stmt, err := tx.PrepareContext(ctx, `
-			INSERT INTO mesh_observations
-			  (pubkey, heard_at, broker, gateway, snr, rssi, hop_count, path, path_nodes)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-		if err != nil {
-			return fmt.Errorf("store: prepare mesh observation insert: %w", err)
+	stmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO mesh_observations
+		  (pubkey, heard_at, broker, gateway, snr, rssi, hop_count, path, path_nodes)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return fmt.Errorf("store: prepare mesh observation insert: %w", err)
+	}
+	defer stmt.Close()
+	for _, o := range obs {
+		if _, err := stmt.ExecContext(ctx,
+			o.PubKey, o.HeardAt.Unix(), o.Broker, o.Gateway,
+			o.SNR, o.RSSI, o.HopCount,
+			strings.Join(o.Path, ","), strings.Join(o.PathNodes, ","),
+		); err != nil {
+			return fmt.Errorf("store: insert mesh observation %s: %w", o.PubKey, err)
 		}
-		defer stmt.Close()
-		for _, o := range obs {
-			if _, err := stmt.ExecContext(ctx,
-				o.PubKey, o.HeardAt.Unix(), o.Broker, o.Gateway,
-				o.SNR, o.RSSI, o.HopCount,
-				strings.Join(o.Path, ","), strings.Join(o.PathNodes, ","),
-			); err != nil {
-				return fmt.Errorf("store: insert mesh observation %s: %w", o.PubKey, err)
-			}
-		}
-		return nil
-	})
+	}
+	return nil
 }
 
 // MeshNodeHeardTimes returns, per node public key, the recent advert receive
@@ -102,6 +104,37 @@ func (s *Store) MeshNodeHeardTimes(ctx context.Context, maxPerNode int) (map[str
 				out[pk] = ts[len(ts)-maxPerNode:] // keep the most recent
 			}
 		}
+	}
+	return out, nil
+}
+
+// MeshObservationPaths returns the stored receptions heard at or after since
+// that carry a relay path, oldest first, with Path split back into hops
+// (PathNodes is left empty: it was resolved by whatever rule was current when
+// the row was written, and a caller re-resolving the path must not inherit
+// that). Seeds the relay neighbour graph at boot.
+func (s *Store) MeshObservationPaths(ctx context.Context, since time.Time) ([]MeshObservation, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT pubkey, heard_at, broker, gateway, path FROM mesh_observations
+		WHERE heard_at >= ? AND path != '' ORDER BY heard_at`, since.Unix())
+	if err != nil {
+		return nil, fmt.Errorf("store: reading observation paths: %w", err)
+	}
+	defer rows.Close()
+	var out []MeshObservation
+	for rows.Next() {
+		var o MeshObservation
+		var heard int64
+		var path string
+		if err := rows.Scan(&o.PubKey, &heard, &o.Broker, &o.Gateway, &path); err != nil {
+			return nil, fmt.Errorf("store: scanning observation path: %w", err)
+		}
+		o.HeardAt = time.Unix(heard, 0).UTC()
+		o.Path = splitList(path)
+		out = append(out, o)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: iterating observation paths: %w", err)
 	}
 	return out, nil
 }
