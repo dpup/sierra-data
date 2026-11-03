@@ -381,7 +381,12 @@ survives as a legacy alias):
   `graceFloor`): a node stays in the snapshot, and so ACTIVE, while relays are
   attributed to it, not only for a window after each advert. It can only extend
   a node a signed advert established. Ambient INFO only; see "Relay presence"
-  in `internal/ingest/CLAUDE.md` before copying it anywhere.
+  in `internal/ingest/CLAUDE.md` before copying it anywhere. A hop is credited
+  only when exactly one relay-capable node fits it: a unique 2+ byte prefix,
+  or for a 1-byte hop the one known NEIGHBOUR of the next hop along (anchored
+  at the observer) that carries the byte. The graph is learned only from
+  unambiguous paths and seeded from 30 days of links
+  (`internal/clients/meshcore/relay.go`).
 
 **PG&E ArcGIS** (`ags.pge.esriemcs.com`, the `POWER` layer):
 - Keyless and public, but **entirely undocumented** — no contract, no version,

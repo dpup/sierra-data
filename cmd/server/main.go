@@ -702,6 +702,21 @@ func seedMeshRegistry(ctx context.Context, reg *meshcore.Registry, st *store.Sto
 	}
 	reg.Seed(seeds)
 	logging.Infow(ctx, "MeshCore: rehydrated node presence from store", "nodes", len(seeds))
+
+	// The neighbour graph that resolves 1-byte relay hops (meshcore/relay.go):
+	// the last 30 days of stored links, so a restart does not forget who is
+	// next to whom and stop crediting half the traffic until it re-learns.
+	links, err := st.MeshLinks(ctx, time.Now().Add(-30*24*time.Hour))
+	if err != nil {
+		logging.Warnw(ctx, "MeshCore: neighbour-graph rehydration skipped — reading links failed", "error", err)
+		return
+	}
+	seedLinks := make([]meshcore.SeedLink, 0, len(links))
+	for _, l := range links {
+		seedLinks = append(seedLinks, meshcore.SeedLink{A: l.A, B: l.B, LastSeen: l.LastSeen})
+	}
+	reg.SeedLinks(seedLinks)
+	logging.Infow(ctx, "MeshCore: rehydrated neighbour graph from store", "links", len(seedLinks))
 }
 
 // gridSourceSeeds builds the source registry rows: ids + tuning from

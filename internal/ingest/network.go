@@ -78,9 +78,10 @@ type MeshRegistry interface {
 	// (cleared), for the append-only relay-observation store (Tier 0).
 	DrainObservations() []meshcore.Observation
 	// DrainRelays returns, per full key, the latest reception of a flood packet
-	// that named the node as a relay hop since the last drain (cleared). Hops
-	// resolve on a unique prefix match over the registry's nodes plus `known`.
-	DrainRelays(known []string) map[string]time.Time
+	// the node relayed since the last drain (cleared). Hops resolve by unique
+	// prefix (2+ bytes) or against the learned neighbour graph, over the
+	// registry's nodes plus `known`; see internal/clients/meshcore/relay.go.
+	DrainRelays(known []meshcore.KnownNode) map[string]time.Time
 	// ResolvePrefix maps a pubkey prefix to a full key on a unique match.
 	ResolvePrefix(prefix string) (string, bool)
 }
@@ -245,7 +246,7 @@ func (n *NetworkNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult,
 	// store's mesh keys as well as the registry's own.
 	var relays map[string]time.Time
 	if n.registry != nil {
-		relays = n.registry.DrainRelays(n.fullKeyCatalog(nil, prior))
+		relays = n.registry.DrainRelays(knownMeshNodes(prior))
 	}
 	if n.registry != nil && (delivering > 0 || snap.PacketLive > 0) {
 		nodes = n.registry.Snapshot()
@@ -863,6 +864,22 @@ func (n *NetworkNormalizer) fullKeyCatalog(merged map[string]*mergedNode, prior 
 	}
 	slices.Sort(keys)
 	return slices.Compact(keys)
+}
+
+// knownMeshNodes offers the store's live mesh nodes (full keys, with their
+// roles) to relay resolution: a candidate it can credit, and one more chance to
+// see that a prefix is shared.
+func knownMeshNodes(prior Prior) []meshcore.KnownNode {
+	if prior == nil {
+		return nil
+	}
+	var out []meshcore.KnownNode
+	for _, ev := range prior.ForSource(meshSourceID) {
+		if native, ok := strings.CutPrefix(ev.GetId(), meshSourceID+":"); ok && len(native) == meshPubKeyHex {
+			out = append(out, meshcore.KnownNode{PubKey: native, Role: ev.GetMesh().GetNodeType()})
+		}
+	}
+	return out
 }
 
 // resolveUnique returns the single catalog entry carrying a prefix. Two matches

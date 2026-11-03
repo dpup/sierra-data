@@ -497,7 +497,8 @@ type MeshcoreConfig struct {
 	// verbatim, the same explicit-opt-out rule as PowerConfig.OutageStaleAfter.
 	SilenceAfter time.Duration `koanf:"silenceAfter"`
 	// RelayPresence is how long a RELAY keeps a node present: a flood packet
-	// whose path names the node (2+ byte hash, unique match) counts toward
+	// whose path names the node (exactly one fitting candidate; see
+	// internal/clients/meshcore/relay.go) counts toward
 	// presence the way an advert does, for this long. Unset means GraceFloor,
 	// so one relay buys a node what one advert of unknown cadence does; a
 	// negative value turns relay presence off. Relays can keep a node whose

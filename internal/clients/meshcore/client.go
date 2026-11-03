@@ -104,22 +104,6 @@ type Observation struct {
 // oldest receptions are dropped to bound memory.
 const maxObsBuffer = 100000
 
-// minRelayHopHex is the shortest hop hash (in hex) that can earn a node relay
-// credit: 2 bytes. A 1-byte hash names one of 256 buckets, and the unique-match
-// rule only protects against collisions among nodes we KNOW. A relayer missing
-// from the catalog (it never advertised to a bridge, or was pruned) whose byte
-// happens to match exactly one known node would hand that node its traffic,
-// and a dead repeater would read as relaying. With a few thousand known nodes
-// a 1-byte hop almost never resolves anyway; with 65,536 buckets the stray
-// match is rare. Measured on a replay with a 208-node catalog: 1-byte hops
-// credited two SIERRA repeaters that no 2-byte flood path named.
-const minRelayHopHex = 4
-
-// maxRelayHops caps the DISTINCT hop hashes buffered between drains. A tick
-// sees a few thousand at most (one per active repeater per hash size); past
-// the cap a new hash is dropped while the ones already held keep updating.
-const maxRelayHops = 200000
-
 // NodeState is a snapshot of one mesh node's presence.
 type NodeState struct {
 	PubKey      string
@@ -235,11 +219,21 @@ type Registry struct {
 	obsBuf  []Observation
 	obsGate map[string]time.Time
 
-	// relayBuf maps each relay-hop hash (lowercase hex) seen since the last
-	// drain to the latest reception naming it. Hashes, not keys: resolving a
-	// hop needs the whole catalog, so it waits for DrainRelays, as an
-	// observation's PathNodes waits for DrainObservations. Guarded by mu.
-	relayBuf map[string]time.Time
+	// relayBuf holds each flood path received since the last drain (with the
+	// observer that heard it and, for an advert, its sender), keyed to dedupe
+	// the many observers of one packet, at its latest reception. Paths, not
+	// hop hashes: resolving a 1-byte hop needs the hops around it. Resolution
+	// waits for DrainRelays, as an observation's PathNodes waits for
+	// DrainObservations. Guarded by mu.
+	relayBuf map[string]relayEntry
+
+	// adj is the neighbour graph DrainRelays resolves ambiguous hops against:
+	// node (or observer) key -> neighbour key -> when the link was last seen.
+	// Learned only from hops a prefix pinned down unambiguously, and seeded at
+	// boot from the store's link rollup (SeedLinks). Guarded by adjMu: only
+	// DrainRelays and SeedLinks touch it, so the MQTT path never waits on it.
+	adjMu sync.Mutex
+	adj   map[string]map[string]time.Time
 
 	now func() time.Time // injectable clock for tests
 }
@@ -604,8 +598,9 @@ func (r *Registry) ingestPacket(env *packetEnvelope, source, defaultGateway stri
 			if h, err := DecodeFrameHeader(raw); err == nil {
 				if hops := h.RelayHops(); len(hops) > 0 {
 					now := r.now()
+					observer := firstNonEmpty(env.OriginID, env.Origin, defaultGateway, source)
 					r.mu.Lock()
-					r.recordRelaysLocked(hops, now)
+					r.recordRelaysLocked(hops, observer, "", now)
 					r.mu.Unlock()
 				}
 			}
@@ -635,8 +630,11 @@ func (r *Registry) ingestPacket(env *packetEnvelope, source, defaultGateway stri
 
 	// An accepted advert's own path is relay evidence like any other packet's
 	// (DecodeFrame already parsed it; the header is re-read only for the route).
-	if h, err := DecodeFrameHeader(raw); err == nil {
-		r.recordRelaysLocked(h.RelayHops(), now)
+	// Its sender is known (and signed), which anchors the first hop; a
+	// zero-hop flood advert still teaches the graph that this observer hears
+	// the sender directly.
+	if h, err := DecodeFrameHeader(raw); err == nil && (h.RouteType == routeFlood || h.RouteType == routeTransportFlood) {
+		r.recordRelaysLocked(h.RelayHops(), gw, adv.PubKey, now)
 	}
 
 	e := r.nodes[adv.PubKey]
@@ -724,85 +722,6 @@ func (r *Registry) allowObservationLocked(pubkey, gateway string, now time.Time)
 	}
 	r.obsGate[key] = now
 	return true
-}
-
-// recordRelaysLocked notes that each hop hash was named as a relay at t.
-// Caller holds r.mu.
-func (r *Registry) recordRelaysLocked(hops []string, t time.Time) {
-	if len(hops) == 0 {
-		return
-	}
-	if r.relayBuf == nil {
-		r.relayBuf = make(map[string]time.Time)
-	}
-	for _, h := range hops {
-		if len(h) < minRelayHopHex {
-			continue
-		}
-		prev, ok := r.relayBuf[h]
-		if !ok && len(r.relayBuf) >= maxRelayHops {
-			continue
-		}
-		if t.After(prev) {
-			r.relayBuf[h] = t
-		}
-	}
-}
-
-// DrainRelays returns, per node public key, the latest time a packet was
-// received with that node as a relay hop since the last drain, and clears the
-// buffer. Called once per scheduler tick (single reader).
-//
-// A hop resolves on the same UNIQUE-match rule as resolvePath, over every node
-// the registry holds PLUS `known`: full keys the caller knows from elsewhere
-// (the store's mesh events). The extra keys matter both ways. A repeater that
-// adverts less often than the registry retains nodes is pruned from memory
-// while still relaying all day, and without its key the hop would resolve to
-// nothing; and every key added is one more chance to see that a prefix is
-// ambiguous, which keeps a hop from being pinned on the wrong node.
-//
-// Hashes that resolve to nothing (unknown, or shared by two known nodes) are
-// dropped, and 1-byte hashes never get this far (see minRelayHopHex).
-func (r *Registry) DrainRelays(known []string) map[string]time.Time {
-	r.mu.Lock()
-	buf := r.relayBuf
-	r.relayBuf = nil
-	keys := make(map[string]struct{}, len(r.nodes)+len(known))
-	for pk := range r.nodes {
-		keys[pk] = struct{}{}
-	}
-	r.mu.Unlock()
-	if len(buf) == 0 {
-		return nil
-	}
-	for _, pk := range known {
-		if pk = strings.ToLower(pk); pk != "" {
-			keys[pk] = struct{}{}
-		}
-	}
-	idx := prefixIndex(keys)
-	out := make(map[string]time.Time)
-	for hop, t := range buf {
-		cands := idx[hop]
-		if len(cands) != 1 {
-			continue
-		}
-		if t.After(out[cands[0]]) {
-			out[cands[0]] = t
-		}
-	}
-
-	// Stamp the nodes we hold, for relay presence (Snapshot) and retention
-	// (pruneLocked). A key known only from `known` stays unstamped: with no
-	// advert-established identity in memory there is nothing to keep present.
-	r.mu.Lock()
-	for pk, t := range out {
-		if e := r.nodes[pk]; e != nil && t.After(e.LastRelayedAt) {
-			e.LastRelayedAt = t
-		}
-	}
-	r.mu.Unlock()
-	return out
 }
 
 // DrainObservations returns the receptions buffered since the last drain and

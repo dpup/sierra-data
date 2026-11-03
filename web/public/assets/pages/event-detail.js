@@ -750,9 +750,10 @@ function renderMeshDetail(body, m) {
     'When something from this node last reached us, on our clock. Last heard is its own ' +
       'advert. Last relayed is any flood-routed packet that carried its hash in the path ' +
       '(messages, acks, other nodes’ adverts), which for a backbone repeater is near-constant ' +
-      'while its own adverts come a day or two apart. A relay hop is matched by key prefix: one ' +
-      'that two known nodes share is credited to neither, and a 1-byte hop is never credited, so ' +
-      'a node seen only on 1-byte paths shows no relay time. Neither value is part of the revision.'
+      'while its own adverts come a day or two apart. A relay hop is credited only when exactly ' +
+      'one node fits it: by key prefix, or for a 1-byte hop, as the one known neighbour of the ' +
+      'next hop along that carries the byte. A hop two nodes fit is credited to neither. Neither ' +
+      'value is part of the revision.'
   );
   act.append(
     metricGrid([

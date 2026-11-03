@@ -57,11 +57,17 @@ Relay attribution is deliberately conservative:
   route it still has to travel, so a node listed there may never have heard it.
   (CoreScope counts those hops, which is why it can show a node "relaying"
   while the operator monitor reports it unreachable.)
-- A hop is credited only when its hash prefix matches exactly **one** known
-  node, and only for 2- and 3-byte hashes. A 1-byte hash could belong to a
-  relayer the Grid has never seen, so it is never credited, and a node that
-  only appears on 1-byte paths has no `lastRelayedAt`. (CoreScope resolves
-  those by geography; we do not.)
+- A hop is credited to a node only when exactly **one** candidate fits, and
+  only repeaters and room servers are candidates (companions never relay).
+  A 2- or 3-byte hash fits when exactly one known node carries it. A 1-byte
+  hash (one of 256 values, shared by about five repeaters each) never fits on
+  its prefix alone. It fits only when exactly one of the *known neighbours* of
+  the next hop along carries that byte: the observer that reported the packet
+  heard its last hop directly, and an advert's sender transmitted to its
+  first. Neighbours are learned only from unambiguous 2+ byte paths and the
+  last 30 days of stored links. A node seen only on 1-byte paths next to
+  nodes it has never been linked to gets no `lastRelayedAt`. On a 3,000-packet
+  capture this agreed with CoreScope on 97% of the hops both resolved.
 - Relay paths are not signed. A relay can keep a node the Grid already knows
   `ACTIVE` (below), but it never creates a node or changes its name, role or
   position. Those still come only from the node's signed advert.

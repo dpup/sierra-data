@@ -38,8 +38,13 @@ func rawFrame(t *testing.T, routeType, payloadType byte, hashSize int, hops [][]
 
 func packetJSON(t *testing.T, packetType int, frame []byte) []byte {
 	t.Helper()
+	return packetJSONFrom(t, "gw", packetType, frame)
+}
+
+func packetJSONFrom(t *testing.T, observer string, packetType int, frame []byte) []byte {
+	t.Helper()
 	b, err := json.Marshal(map[string]any{
-		"origin_id":   "gw",
+		"origin_id":   observer,
 		"packet_type": packetType,
 		"raw":         hex.EncodeToString(frame),
 	})
@@ -172,8 +177,10 @@ func TestRegistryRelayFromAcceptedAdvertPathOnly(t *testing.T) {
 func TestDrainRelaysResolution(t *testing.T) {
 	base := time.Date(2026, 11, 3, 6, 0, 0, 0, time.UTC)
 	r, connell, snowshoe := relayRegistry(t, base)
+	// "far" is an observer that has never heard either repeater directly, so
+	// only rule 1 (a unique 2+ byte prefix) can resolve what it reports.
 	send := func(hashSize int, hops ...[]byte) {
-		r.IngestEnvelope(packetJSON(t, ptTxtMsg, rawFrame(t, routeFlood, ptTxtMsg, hashSize, hops, []byte{1})), "broker-a", "")
+		r.IngestEnvelope(packetJSONFrom(t, "far", ptTxtMsg, rawFrame(t, routeFlood, ptTxtMsg, hashSize, hops, []byte{1})), "broker-a", "")
 	}
 
 	t.Run("a pruned repeater still resolves through a known key", func(t *testing.T) {
@@ -181,33 +188,156 @@ func TestDrainRelaysResolution(t *testing.T) {
 		send(2, hop(t, pruned, 2))
 		assert.Empty(t, r.DrainRelays(nil), "unknown to the registry: unresolved")
 		send(2, hop(t, pruned, 2))
-		assert.Equal(t, map[string]time.Time{pruned: base}, r.DrainRelays([]string{pruned}))
+		assert.Equal(t, map[string]time.Time{pruned: base}, r.DrainRelays([]KnownNode{{PubKey: pruned, Role: RoleRepeater}}))
 	})
 
 	t.Run("a known key that shares a prefix makes the hop ambiguous", func(t *testing.T) {
-		third := "00"
-		if connell[4:6] == third {
-			third = "01"
-		}
-		twin := connell[:4] + third + connell[6:]
 		send(2, hop(t, connell, 2))
-		assert.Empty(t, r.DrainRelays([]string{twin}), "two candidates: attribute to neither")
+		assert.Empty(t, r.DrainRelays([]KnownNode{{PubKey: twinOf(connell), Role: RoleRepeater}}), "two candidates: attribute to neither")
+	})
+
+	t.Run("a companion cannot relay, so it is no twin", func(t *testing.T) {
+		send(2, hop(t, connell, 2))
+		assert.Contains(t, r.DrainRelays([]KnownNode{{PubKey: twinOf(connell), Role: RoleCompanion}}), connell)
 	})
 
 	t.Run("a known key the registry also holds is not its own twin", func(t *testing.T) {
 		send(2, hop(t, snowshoe, 2))
-		assert.Contains(t, r.DrainRelays([]string{snowshoe, connell}), snowshoe)
+		assert.Contains(t, r.DrainRelays([]KnownNode{{PubKey: snowshoe}, {PubKey: connell}}), snowshoe)
 	})
 
-	t.Run("a 1-byte hop never earns credit, even when it is unique", func(t *testing.T) {
-		send(1, hop(t, connell, 1))
-		assert.Empty(t, r.DrainRelays(nil), "an unknown relayer could share the byte")
+	t.Run("a 1-byte hop does not resolve by prefix, even when unique", func(t *testing.T) {
+		// Not "far": the 2-byte paths above proved far hears Camp Connell
+		// directly, which is exactly the anchor rule 2 would use.
+		r.IngestEnvelope(packetJSONFrom(t, "stranger", ptTxtMsg,
+			rawFrame(t, routeFlood, ptTxtMsg, 1, [][]byte{hop(t, connell, 1)}, []byte{1})), "broker-a", "")
+		assert.Empty(t, r.DrainRelays(nil), "nothing anchors it: an uncatalogued relayer could share the byte")
 	})
 
 	t.Run("3-byte hops resolve; unmatched hops drop", func(t *testing.T) {
 		send(3, hop(t, connell, 3), []byte{0x99, 0x99, 0x99})
 		assert.Equal(t, map[string]time.Time{connell: base}, r.DrainRelays(nil))
 	})
+}
+
+// Rule 2: a hop resolves to the ONE known neighbour of an adjacent resolved
+// hop (or anchor) that carries its prefix. This is what credits 1-byte hops.
+func TestDrainRelaysByNeighbours(t *testing.T) {
+	base := time.Date(2026, 11, 3, 6, 0, 0, 0, time.UTC)
+	newReg := func(t *testing.T) (*Registry, map[string]string) {
+		r := NewRegistry(Config{})
+		r.now = func() time.Time { return base }
+		keys := map[string]string{}
+		for _, name := range []string{"A", "B", "C"} {
+			pub, priv, err := ed25519.GenerateKey(nil)
+			require.NoError(t, err)
+			payload := buildAdvert(t, priv, 2, &[2]float64{38.3, -120.2}, name, 1_700_000_000)
+			_, err = r.IngestEnvelope(envelopeJSON(t, 4, payload, 4, -90, "obs-"+name), "broker-a", "")
+			require.NoError(t, err)
+			keys[name] = hex.EncodeToString(pub)
+		}
+		r.DrainRelays(nil) // learn: obs-X hears X directly (zero-hop adverts)
+		return r, keys
+	}
+	send := func(r *Registry, observer string, hashSize int, hops ...[]byte) {
+		r.IngestEnvelope(packetJSONFrom(t, observer, ptTxtMsg, rawFrame(t, routeFlood, ptTxtMsg, hashSize, hops, []byte{1})), "broker-a", "")
+	}
+
+	t.Run("the observer anchors the last hop", func(t *testing.T) {
+		r, k := newReg(t)
+		send(r, "obs-A", 1, hop(t, k["A"], 1))
+		assert.Equal(t, map[string]time.Time{k["A"]: base}, r.DrainRelays(nil))
+		send(r, "obs-B", 1, hop(t, k["A"], 1))
+		assert.Empty(t, r.DrainRelays(nil), "obs-B has never heard A: no anchor, no credit")
+	})
+
+	t.Run("resolution walks inward from the anchor along learned links", func(t *testing.T) {
+		r, k := newReg(t)
+		// A 2-byte path teaches B next to A (and A next to obs-A).
+		send(r, "obs-A", 2, hop(t, k["B"], 2), hop(t, k["A"], 2))
+		r.DrainRelays(nil)
+		r.now = func() time.Time { return base.Add(time.Minute) }
+		send(r, "obs-A", 1, hop(t, k["B"], 1), hop(t, k["A"], 1))
+		assert.Equal(t, map[string]time.Time{k["A"]: base.Add(time.Minute), k["B"]: base.Add(time.Minute)}, r.DrainRelays(nil))
+	})
+
+	t.Run("two neighbours with the byte resolve to neither", func(t *testing.T) {
+		r, k := newReg(t)
+		twin := twinOf(k["A"])
+		r.SeedLinks([]SeedLink{{A: "obs-A", B: twin, LastSeen: base}})
+		send(r, "obs-A", 1, hop(t, k["A"], 1))
+		assert.Empty(t, r.DrainRelays([]KnownNode{{PubKey: twin, Role: RoleRepeater}}))
+	})
+
+	t.Run("an inference never teaches the graph", func(t *testing.T) {
+		r, k := newReg(t)
+		// D's 1-byte advert, relayed by A, heard by obs-A. A resolves by rule 2
+		// through obs-A. Learning from that would add D next to A, a link no
+		// unambiguous path ever showed.
+		_, priv, err := ed25519.GenerateKey(nil)
+		require.NoError(t, err)
+		pub := priv.Public().(ed25519.PublicKey)
+		payload := buildAdvert(t, priv, 1, &[2]float64{38.2, -120.3}, "D", 1_700_000_000)
+		out, err := r.IngestEnvelope(packetJSONFrom(t, "obs-A", 4,
+			rawFrame(t, routeFlood, payloadTypeAdvert, 1, [][]byte{hop(t, k["A"], 1)}, payload)), "broker-a", "")
+		require.NoError(t, err)
+		require.Equal(t, PacketAccepted, out)
+		assert.Equal(t, map[string]time.Time{k["A"]: base}, r.DrainRelays(nil))
+		r.adjMu.Lock()
+		_, learned := r.adj[k["A"]][hex.EncodeToString(pub)]
+		r.adjMu.Unlock()
+		assert.False(t, learned)
+	})
+
+	t.Run("seeded links resolve from boot, and expire", func(t *testing.T) {
+		r := NewRegistry(Config{})
+		r.now = func() time.Time { return base }
+		a := strings.Repeat("ab", 32)
+		r.SeedLinks([]SeedLink{
+			{A: "obs-x", B: a, LastSeen: base.Add(-24 * time.Hour)},
+			{A: "obs-y", B: a, LastSeen: base.Add(-31 * 24 * time.Hour)},
+		})
+		send(r, "obs-x", 1, []byte{0xab})
+		send(r, "obs-y", 1, []byte{0xab})
+		got := r.DrainRelays([]KnownNode{{PubKey: a, Role: RoleRepeater}})
+		assert.Equal(t, map[string]time.Time{a: base}, got, "the 31-day-old link was never loaded")
+
+		r.now = func() time.Time { return base.Add(30*24*time.Hour - 23*time.Hour) }
+		send(r, "obs-x", 1, []byte{0xab})
+		assert.Empty(t, r.DrainRelays([]KnownNode{{PubKey: a, Role: RoleRepeater}}), "and a link unseen for 30 days is pruned")
+	})
+
+	t.Run("an advert's sender anchors its first hop", func(t *testing.T) {
+		r, k := newReg(t)
+		_, priv, err := ed25519.GenerateKey(nil)
+		require.NoError(t, err)
+		payload := buildAdvert(t, priv, 1, &[2]float64{38.2, -120.3}, "D", 1_700_000_000)
+		advert := func(observer string, hashSize int) {
+			out, err := r.IngestEnvelope(packetJSONFrom(t, observer, 4,
+				rawFrame(t, routeFlood, payloadTypeAdvert, hashSize, [][]byte{hop(t, k["B"], hashSize)}, payload)), "broker-a", "")
+			require.NoError(t, err)
+			require.Equal(t, PacketAccepted, out)
+		}
+		// A 2-byte advert from D relayed by B teaches D next to B.
+		advert("somewhere", 2)
+		r.DrainRelays(nil)
+		// The same advert at 1 byte, from an observer with no links: only the
+		// signed sender anchors the hop.
+		r.now = func() time.Time { return base.Add(time.Minute) }
+		advert("nobody", 1)
+		assert.Equal(t, map[string]time.Time{k["B"]: base.Add(time.Minute)}, r.DrainRelays(nil))
+
+		send(r, "nobody", 1, hop(t, k["B"], 1))
+		assert.Empty(t, r.DrainRelays(nil), "a message's sender is unknown: nothing anchors it")
+	})
+}
+
+func twinOf(key string) string {
+	third := "00"
+	if key[4:6] == third {
+		third = "01"
+	}
+	return key[:4] + third + key[6:]
 }
 
 // ReceivedAt answers "when did we last hear it", so unlike LastHeardAt it is
@@ -300,7 +430,7 @@ func TestRegistryRelayPresence(t *testing.T) {
 		stranger := "e4f1" + strings.Repeat("0", 60)
 		r.IngestEnvelope(packetJSON(t, ptTxtMsg,
 			rawFrame(t, routeFlood, ptTxtMsg, 2, [][]byte{hop(t, stranger, 2)}, []byte{1})), "broker-a", "")
-		assert.Contains(t, r.DrainRelays([]string{stranger}), stranger, "its activity still resolves")
+		assert.Contains(t, r.DrainRelays([]KnownNode{{PubKey: stranger, Role: RoleRepeater}}), stranger, "its activity still resolves")
 		for _, n := range r.Snapshot() {
 			assert.NotEqual(t, stranger, n.PubKey, "no advert-established identity to keep present")
 		}

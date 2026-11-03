@@ -356,10 +356,11 @@ message MeshTelemetry {
   // day or two but relays constantly, so this, not last_heard_at, is what says
   // a repeater is up right now.
   //
-  // Two limits, both deliberate. Hops are attributed only on a UNIQUE prefix
-  // match against the known node catalog (the relay-link rule), and only for 2-
-  // and 3-byte hashes: a 1-byte hash could belong to a relayer we have never
-  // catalogued, so a node relaying only on 1-byte paths gets no relay time.
+  // Two limits, both deliberate. A hop is credited only when exactly one
+  // relay-capable node fits it: a 2- or 3-byte hash by unique prefix, a 1-byte
+  // hash only as the one known neighbour of the next hop along (the observer
+  // heard the last hop directly) that carries the byte. A node seen only on
+  // 1-byte paths beside nodes it has never been linked to gets no relay time.
   // And direct-routed packets never count: their path is the route still to be
   // travelled, not the one travelled, so a hop there may never have heard the
   // packet. A relay also keeps an already-known node PRESENT (ACTIVE) for

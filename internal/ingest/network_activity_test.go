@@ -51,7 +51,7 @@ func TestPollEmitsMeshActivity(t *testing.T) {
 
 	res, err := n.Poll(testCtx(), prior)
 	require.NoError(t, err)
-	assert.Equal(t, []string{quiet}, reg.knownSeen,
+	assert.Equal(t, []meshcore.KnownNode{{PubKey: quiet}}, reg.knownSeen,
 		"the store's keys are offered for resolution, so a pruned repeater still resolves")
 
 	got := activityByKey(res.MeshActivity)

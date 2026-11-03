@@ -587,7 +587,7 @@ Two clocks replace it, both OUR receive times, both read-time only (the store's
 nodes the layer covers (this tick's merged nodes plus the store's live mesh
 events), and only on a successful poll; the relay buffer waits otherwise.
 
-Relay attribution has three rules, all of them about not overclaiming:
+Relay attribution has four rules, all of them about not overclaiming:
 
 1. **Flood only** (`FrameHeader.RelayHops`). A flood path is appended by each
    repeater before it retransmits, so every hop has forwarded the packet. A
@@ -602,15 +602,34 @@ Relay attribution has three rules, all of them about not overclaiming:
    resolves only to the single known key carrying its prefix, over every node
    the registry holds PLUS the store's mesh event keys. The extra keys rescue a
    repeater that adverts less often than the registry retains nodes, and add
-   collision evidence. The same rule as relay links, with one addition: a
-   **1-byte hop is never credited** (`minRelayHopHex`). Unique-match only
-   guards against collisions among nodes we know; a relayer we have never
-   catalogued whose byte matches one known node would hand it the traffic and
-   make a dead repeater look alive. A local replay with a 208-node catalog
-   did exactly that to BigPrather and Eagle One, which no 2-byte flood path
-   named. (Relay LINKS still resolve 1-byte hops; a wrong edge is a
-   topology smudge, a wrong relay time is a false liveness claim.)
-3. **Presence, never identity.** See "Relay presence" below.
+   collision evidence. Only relay-capable roles are candidates (companions and
+   sensors never forward). **A 1-byte hop never resolves on its prefix**:
+   about 45% of flood traffic near SIERRA uses 1-byte hops, each byte is shared
+   by ~5 of ~1,000 repeaters, and a byte "unique" among the nodes we know is as
+   likely a relayer we have never catalogued. A local replay with a 208-node
+   catalog credited BigPrather and Eagle One that way, which no 2-byte path
+   named. (Relay LINKS still resolve 1-byte hops by bare uniqueness; a wrong
+   edge is a topology smudge, a wrong relay time is a false liveness claim.)
+3. **A 1-byte hop resolves against the neighbour graph** (`meshcore/relay.go`,
+   rule 2). The observer that reported a packet heard its LAST hop directly,
+   and an advert's signed sender transmitted to its FIRST. Starting from those
+   anchors, a hop resolves to the ONE known neighbour of the adjacent resolved
+   hop that carries its byte, and resolution walks inward until it stalls on
+   an ambiguity. Neighbours are learned ONLY from unambiguous (rule 1) paths,
+   never from an inference, so an error cannot reinforce itself, and seeded at
+   boot from 30 days of `mesh_link_rollup` (`SeedLinks`; links unseen for 30
+   days are pruned). On a 3,000-packet capture it agreed with CoreScope's
+   resolver on 97% of hops both resolved; in every disagreement CoreScope's
+   pick had never been seen next to that anchor. It also showed the byte is
+   usually someone else's: `3c`, Lake Alpine's, was San Benito Repeater (near
+   Hollister) in 1,378 paths and a candidate for Lake Alpine in 25.
+
+   Geography was tried first and rejected. Real links reach 289 km (p95 141
+   km), so a radius tight enough to separate candidates excludes true
+   relayers, which is worse than ambiguity: the wrong survivor gets credited.
+   At 250 km nearly every SIERRA byte has 3-6 twins, and 113 repeaters
+   advertise no position at all, so geography cannot rule them out.
+4. **Presence, never identity.** See "Relay presence" below.
 
 ### Relay presence (2026-11)
 
