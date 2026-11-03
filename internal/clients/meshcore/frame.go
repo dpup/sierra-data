@@ -115,6 +115,23 @@ func (h FrameHeader) RelayHops() []string {
 	return h.Path
 }
 
+// RouteHops returns a DIRECT-routed frame's remaining source route: the
+// repeaters the packet is about to travel through. Unlike RelayHops these did
+// not necessarily handle THIS packet, but the route was learned from a recent
+// flood and is in use now, which is good evidence each hop is on the air. It
+// is credited as liveness only, by prefix only (never a 1-byte hop), and never
+// teaches the neighbour graph: the hops' order relative to the observer is
+// unknown. nil for flood frames and TRACE.
+func (h FrameHeader) RouteHops() []string {
+	if h.RouteType == routeFlood || h.RouteType == routeTransportFlood {
+		return nil
+	}
+	if h.PayloadType == payloadTypeTrace {
+		return nil
+	}
+	return h.Path
+}
+
 // DecodeFrame parses a full MeshCore over-the-air packet (a bridge `raw`
 // payload), strips the transport header/path, and decodes the ADVERT payload.
 // It returns an error for non-advert frames or structurally invalid framing;

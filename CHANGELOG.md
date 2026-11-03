@@ -16,6 +16,16 @@ proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 
 ## 2026-11-03 (later)
 
+### Mesh nodes: relays bring expired repeaters back
+
+More `layer=mesh` events are `ACTIVE`. A repeater that advertises only every
+few days but relays traffic all day no longer expires between adverts: relay
+evidence (including a direct-routed packet's remaining route) within
+`relayPresence` (14h) brings an `EXPIRED` node back to `ACTIVE`, with its
+stored name and position, and `mesh.telemetry.lastRelayedAt` set. Expect a
+one-time wave of `EXPIRED` -> `ACTIVE` revisions after deploy (about 200 nodes
+on 2026-11-03), mostly in the Bay Area part of the geofence.
+
 ### Mesh nodes: an operator monitor is additional data, not a source of nodes
 
 **Behavior change, no field changes.** `layer=mesh` events now come only from

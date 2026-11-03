@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
 	"testing"
 	"time"
 
@@ -80,4 +81,21 @@ func TestMeshObservationPaths(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []MeshObservation{{PubKey: "ab07cd", HeardAt: at, Broker: "wss://b", Gateway: "gw",
 		Path: []string{"2c", "fe"}}}, got)
+}
+
+func TestEventsBySourceAndStatus(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedSource(t, s, "meshcore")
+	for _, id := range []string{"meshcore:a", "meshcore:b"} {
+		ev := &gridv1.Event{Id: id, Layer: gridv1.Layer_MESH, Status: gridv1.EventStatus_ACTIVE,
+			Provenance: &gridv1.Provenance{SourceId: "meshcore"}}
+		_, err := s.UpsertEvent(ctx, ev)
+		require.NoError(t, err)
+	}
+	require.NoError(t, s.TransitionEvents(ctx, []string{"meshcore:b"}, gridv1.EventStatus_EXPIRED, time.Now()))
+	got, err := s.EventsBySourceAndStatus(ctx, "meshcore", gridv1.EventStatus_EXPIRED)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, "meshcore:b", got[0].GetId())
 }

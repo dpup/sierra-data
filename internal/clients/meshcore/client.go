@@ -226,6 +226,10 @@ type Registry struct {
 	// waits for DrainRelays, as an observation's PathNodes waits for
 	// DrainObservations. Guarded by mu.
 	relayBuf map[string]relayEntry
+	// routeBuf holds each direct-routed packet's remaining source route since
+	// the last drain (see FrameHeader.RouteHops). Guarded by mu; drained with
+	// relayBuf.
+	routeBuf map[string]relayEntry
 
 	// adj is the neighbour graph DrainRelays resolves ambiguous hops against:
 	// node (or observer) key -> neighbour key -> when the link was last seen.
@@ -604,6 +608,11 @@ func (r *Registry) ingestPacket(env *packetEnvelope, source, defaultGateway stri
 					now := r.now()
 					r.mu.Lock()
 					r.recordRelaysLocked(hops, relayObserver(env, defaultGateway), "", now)
+					r.mu.Unlock()
+				} else if hops := h.RouteHops(); len(hops) > 0 {
+					now := r.now()
+					r.mu.Lock()
+					r.recordRouteLocked(hops, now)
 					r.mu.Unlock()
 				}
 			}

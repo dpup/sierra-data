@@ -116,6 +116,26 @@ func (r *Registry) recordRelaysLocked(hops []string, observer, sender string, t 
 	r.relayBuf[key] = e
 }
 
+// recordRouteLocked buffers a direct-routed packet's remaining source route
+// (see FrameHeader.RouteHops). Caller holds r.mu.
+func (r *Registry) recordRouteLocked(hops []string, t time.Time) {
+	key := strings.Join(hops, ",")
+	if r.routeBuf == nil {
+		r.routeBuf = make(map[string]relayEntry)
+	}
+	e, ok := r.routeBuf[key]
+	if !ok {
+		if len(r.routeBuf) >= maxRelayPaths {
+			return
+		}
+		e.path = relayPath{hops: slices.Clone(hops)}
+	}
+	if t.After(e.at) {
+		e.at = t
+	}
+	r.routeBuf[key] = e
+}
+
 // SeedPaths rebuilds the neighbour graph from stored receptions, so a restart
 // does not stop crediting 1-byte hops until the graph re-learns. Each path is
 // resolved by rule 1 against the registry's catalog plus `known`, exactly as
@@ -193,12 +213,14 @@ func (r *Registry) DrainRelays(known []KnownNode) map[string]time.Time {
 	r.mu.Lock()
 	buf := r.relayBuf
 	r.relayBuf = nil
+	routes := r.routeBuf
+	r.routeBuf = nil
 	r.mu.Unlock()
 	roles := r.relayRoles(known)
 
 	r.adjMu.Lock()
 	r.pruneAdjacencyLocked(now)
-	if len(buf) == 0 {
+	if len(buf) == 0 && len(routes) == 0 {
 		r.adjMu.Unlock()
 		return nil
 	}
@@ -215,6 +237,14 @@ func (r *Registry) DrainRelays(known []KnownNode) map[string]time.Time {
 		resolved = append(resolved, res)
 	}
 	out := make(map[string]time.Time)
+	// Direct routes: rule 1 only, learning nothing (see FrameHeader.RouteHops).
+	for _, e := range routes {
+		for _, pk := range resolveByPrefix(e.path.hops, idx) {
+			if pk != "" && e.at.After(out[pk]) {
+				out[pk] = e.at
+			}
+		}
+	}
 	for i, e := range entries {
 		res := resolved[i]
 		r.resolveByNeighboursLocked(e.path, res, roles)

@@ -293,8 +293,11 @@ func main() {
 			}
 		}
 		pollers = append(pollers, ingest.PollerSpec{
-			Normalizer: ingest.NewNetworkNormalizer(appConfig, meshcoreReg, meshPush),
-			Interval:   gridPollInterval(appConfig, meshSources...),
+			Normalizer: ingest.NewNetworkNormalizer(appConfig, meshcoreReg, meshPush).
+				WithCatalog(func(ctx context.Context) ([]*gridv1.Event, error) {
+					return gridStore.EventsBySourceAndStatus(ctx, "meshcore", gridv1.EventStatus_EXPIRED)
+				}),
+			Interval: gridPollInterval(appConfig, meshSources...),
 		})
 	}
 

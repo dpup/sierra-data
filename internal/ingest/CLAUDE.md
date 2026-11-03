@@ -429,6 +429,26 @@ splits, and both halves matter:
   `4 × staleAfter` stops suppressing). A monitor is not a mesh input, so it
   never does (below).
 
+### Liveness is read liberally: relays revive EXPIRED nodes (2026-11-03)
+
+Our view of the mesh is a few sensors (brokers, forwarders), and people compare
+it with CoreScope. On 2026-11-03 CoreScope showed 839 nodes in our geofence
+active within 24h; we agreed on 407, and 221 we had EXPIRED. 204 of those were
+relaying, some thousands of packets a day, but advertised only every 3-4 days,
+past `graceCeil` (72h). Relay presence (#37) could not reach them: only
+registry nodes and ACTIVE events were relay candidates, so once the sweep
+expired a node its hops stopped resolving at all.
+
+- **Expired nodes are relay candidates** (`WithCatalog`, the store's EXPIRED
+  `meshcore` events, cached 10m). A relay credited within `relayPresence` makes
+  the node present again from its stored identity and position (geofence
+  still applies), and `noteRelays` keeps the credit across ticks for the whole
+  window. A relay still never INTRODUCES a node: an unknown key credits nothing.
+- **Direct routes count as liveness** (`FrameHeader.RouteHops`): a direct
+  frame's remaining source route was learned from a recent flood and is in use
+  now. Credited by prefix only (never a 1-byte hop) and never taught to the
+  neighbour graph, since the hops' order relative to the observer is unknown.
+
 ### A monitor is additional data, never canonical (2026-11-03)
 
 A `mesh.repeater` monitor decorates nodes the MESH establishes (signed adverts,
