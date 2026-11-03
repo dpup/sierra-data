@@ -74,6 +74,12 @@ type Config struct {
 	// clock can see that. <= 0 disables the check, leaving "session open" as the
 	// only test.
 	SilenceAfter time.Duration
+	// RelayPresence keeps a node in Snapshot for this long after a relay was
+	// attributed to it (DrainRelays), as well as for its advert window. <= 0
+	// disables relay presence. A relay only extends a node the registry already
+	// holds: identity and position always come from a signed advert (live, or
+	// seeded from the store).
+	RelayPresence time.Duration
 }
 
 // Observation is one received advert, captured for the relay-topology store
@@ -143,6 +149,15 @@ type NodeState struct {
 	// presence (keep the node until its window passes) and wrong as an answer
 	// to "when did we last hear it". Zero means no reception on record.
 	ReceivedAt time.Time
+	// LastRelayedAt is our receive time of the latest packet attributed to this
+	// node as a relay hop (see DrainRelays). It extends presence by
+	// RelayPresence; it never touches identity, position or signal.
+	LastRelayedAt time.Time
+	// HasSignal reports whether SNR/RSSI/HopCount/Gateways/LastAdvertAt hold a
+	// reading from an advert THIS process received. A node known only from Seed
+	// (or kept present by relays alone) has none, and its zero values are not
+	// readings: 0 hops would claim "heard direct".
+	HasSignal bool
 }
 
 type nodeEntry struct {
@@ -294,6 +309,11 @@ type SeedNode struct {
 	// immediately after boot, not just the GraceFloor.
 	LastHeard  time.Time
 	HeardTimes []time.Time
+	// LastReceived / LastRelayed restore the activity clocks (the store's
+	// mesh_activity row), so relay presence and "last heard" survive a restart
+	// instead of re-accumulating. Zero = none on record.
+	LastReceived time.Time
+	LastRelayed  time.Time
 }
 
 // Seed rehydrates node presence from persisted state. Call ONCE before Connect
@@ -331,6 +351,12 @@ func (r *Registry) Seed(nodes []SeedNode) {
 			}
 		}
 		e.LastHeardAt = last
+		if sn.LastReceived.After(e.ReceivedAt) {
+			e.ReceivedAt = sn.LastReceived
+		}
+		if sn.LastRelayed.After(e.LastRelayedAt) {
+			e.LastRelayedAt = sn.LastRelayed
+		}
 	}
 }
 
@@ -650,6 +676,7 @@ func (r *Registry) ingestPacket(env *packetEnvelope, source, defaultGateway stri
 	e.LastAdvertAt = adv.Timestamp // node-reported; unreliable clock, diagnostic only
 	e.LastHeardAt = now            // our receive time — the trustworthy clock
 	e.ReceivedAt = now             // a real reception, never a seed fallback
+	e.HasSignal = true             // the signal fields above are this advert's
 	e.recordCadence(now)           // per-node advert-interval estimate (drives Snapshot's window)
 	if gw != "" {
 		e.gateways[gw] = struct{}{}
@@ -764,6 +791,17 @@ func (r *Registry) DrainRelays(known []string) map[string]time.Time {
 			out[cands[0]] = t
 		}
 	}
+
+	// Stamp the nodes we hold, for relay presence (Snapshot) and retention
+	// (pruneLocked). A key known only from `known` stays unstamped: with no
+	// advert-established identity in memory there is nothing to keep present.
+	r.mu.Lock()
+	for pk, t := range out {
+		if e := r.nodes[pk]; e != nil && t.After(e.LastRelayedAt) {
+			e.LastRelayedAt = t
+		}
+	}
+	r.mu.Unlock()
 	return out
 }
 
@@ -802,7 +840,7 @@ func (r *Registry) Snapshot() []NodeState {
 
 	out := make([]NodeState, 0, len(r.nodes))
 	for _, e := range r.nodes {
-		if now.Sub(e.LastHeardAt) > r.presenceWindow(e) {
+		if !r.presentLocked(e, now) {
 			continue
 		}
 		ns := e.NodeState
@@ -811,6 +849,18 @@ func (r *Registry) Snapshot() []NodeState {
 		out = append(out, ns)
 	}
 	return out
+}
+
+// presentLocked reports whether a node is present: its last advert within its
+// cadence window, OR a relay attributed to it within RelayPresence. The relay
+// half is what keeps a backbone repeater on the map between adverts that come
+// a day or more apart while it forwards traffic all day. Caller holds r.mu.
+func (r *Registry) presentLocked(e *nodeEntry, now time.Time) bool {
+	if now.Sub(e.LastHeardAt) <= r.presenceWindow(e) {
+		return true
+	}
+	return r.cfg.RelayPresence > 0 && !e.LastRelayedAt.IsZero() &&
+		now.Sub(e.LastRelayedAt) <= r.cfg.RelayPresence
 }
 
 // presenceWindow is how long a node stays present after its last advert:
@@ -928,7 +978,13 @@ func (r *Registry) pruneLocked(now time.Time) {
 		return
 	}
 	for k, e := range r.nodes {
-		if now.Sub(e.LastHeardAt) > r.cfg.RetainFor {
+		// A node that keeps relaying keeps its identity in memory, or relay
+		// presence would end RetainFor after its last advert.
+		last := e.LastHeardAt
+		if e.LastRelayedAt.After(last) {
+			last = e.LastRelayedAt
+		}
+		if now.Sub(last) > r.cfg.RetainFor {
 			delete(r.nodes, k)
 		}
 	}

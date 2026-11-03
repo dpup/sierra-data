@@ -231,16 +231,24 @@ func (n *NetworkNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult,
 		brokers = n.registry.Brokers()
 	}
 	delivering, brokerErr := brokerDelivery(brokers)
-	if n.registry != nil && (delivering > 0 || snap.PacketLive > 0) {
-		nodes = n.registry.Snapshot()
-	}
-
 	if delivering == 0 && snap.Live == 0 && snap.PacketLive == 0 {
 		err := fmt.Errorf("meshcore: no broker delivering and no reporter live; not asserting node disappearance")
 		if brokerErr != nil {
 			err = fmt.Errorf("%w (%v)", err, brokerErr)
 		}
 		return nil, err
+	}
+
+	// Relays drain BEFORE the snapshot: DrainRelays stamps each resolved node,
+	// and a relay is presence (see meshcore.Registry.presentLocked), so this
+	// tick's relays must count in this tick's snapshot. Resolution uses the
+	// store's mesh keys as well as the registry's own.
+	var relays map[string]time.Time
+	if n.registry != nil {
+		relays = n.registry.DrainRelays(n.fullKeyCatalog(nil, prior))
+	}
+	if n.registry != nil && (delivering > 0 || snap.PacketLive > 0) {
+		nodes = n.registry.Snapshot()
 	}
 
 	merged := make(map[string]*mergedNode, len(nodes)+len(snap.Reports))
@@ -305,7 +313,7 @@ func (n *NetworkNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult,
 		ForceWrite:           forceWrite,
 		Superseded:           supersededIDs(promotions),
 		MeshObservations:     n.drainObservations(),
-		MeshActivity:         n.meshActivity(merged, prior),
+		MeshActivity:         n.meshActivity(merged, prior, relays),
 		MeshTelemetry:        meshTelemetrySamples(events, now),
 		MeshTelemetryRenames: promotions,
 		PerSource:            perSource,
@@ -328,17 +336,14 @@ func (n *NetworkNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult,
 // meshcore.Registry.DrainRelays), and only then are cut down to the covered
 // set, so a global collision still blocks a local attribution.
 //
-// The relay buffer drains here, on a successful poll only: on a hard error
-// Poll returns before this, and the evidence waits for the next tick.
-func (n *NetworkNormalizer) meshActivity(merged map[string]*mergedNode, prior Prior) []store.MeshActivity {
+// `relays` is this tick's DrainRelays, taken in Poll before the snapshot (a
+// relay is presence too) and only on a successful poll: on a hard error Poll
+// returns first, and the evidence waits for the next tick.
+func (n *NetworkNormalizer) meshActivity(merged map[string]*mergedNode, prior Prior, relays map[string]time.Time) []store.MeshActivity {
 	covered := n.fullKeyCatalog(merged, prior)
 	coveredSet := make(map[string]bool, len(covered))
 	for _, k := range covered {
 		coveredSet[k] = true
-	}
-	var relays map[string]time.Time
-	if n.registry != nil {
-		relays = n.registry.DrainRelays(covered)
 	}
 
 	now := make(map[string]store.MeshActivity, len(coveredSet))
@@ -553,7 +558,9 @@ func (n *NetworkNormalizer) buildEvent(m *mergedNode, now time.Time, prior Prior
 	// telemetry.lastAdvertAt (diagnostic; reveals the skew).
 	observed := time.Time{}
 	if m.mqtt != nil {
-		observed = m.mqtt.LastHeardAt
+		// The latest evidence that the node is there: its advert, or a relay
+		// (which alone can keep it present; see Registry.presentLocked).
+		observed = laterOf(m.mqtt.LastHeardAt, m.mqtt.LastRelayedAt)
 	}
 	for _, r := range reports {
 		// A successful admin read proves the node is alive; where a monitor has
@@ -579,7 +586,7 @@ func (n *NetworkNormalizer) buildEvent(m *mergedNode, now time.Time, prior Prior
 		NodeType:     nodeType,
 		Name:         name,
 		Reachability: n.reachability(reports, now),
-		Telemetry:    meshTelemetry(m.mqtt, reports),
+		Telemetry:    meshTelemetry(m.mqtt, reports, priorByID(prior, ev.GetId()).GetMesh().GetTelemetry()),
 	}}
 	return ev
 }
@@ -626,18 +633,36 @@ func (n *NetworkNormalizer) reachability(reports []pushingest.MeshNodeReport, no
 // store.ContentHash, so none of it mints a revision — which is exactly why the
 // counters and gauges an operator monitor reports belong in it, and exactly why
 // persisting it needs PollResult.ForceWrite (see shouldPersistTelemetry).
-func meshTelemetry(mqtt *meshcore.NodeState, reports []pushingest.MeshNodeReport) *gridv1.MeshTelemetry {
+func meshTelemetry(mqtt *meshcore.NodeState, reports []pushingest.MeshNodeReport, stored *gridv1.MeshTelemetry) *gridv1.MeshTelemetry {
 	t := &gridv1.MeshTelemetry{}
-	// The signal block is set ONLY where an MQTT bridge actually heard the node.
-	// These are wrapper types precisely so that this `if` is visible on the wire:
-	// a node an operator monitors but the mesh has never heard reports no SNR,
-	// not 0 dB, and no hop count, not "heard direct".
-	if mqtt != nil {
+	// The signal block is set ONLY from a real reading. These are wrapper types
+	// precisely so that this `if` is visible on the wire: a node an operator
+	// monitors but the mesh has never heard reports no SNR, not 0 dB, and no hop
+	// count, not "heard direct".
+	//
+	// "A registry entry" is not a reading. A node seeded from the store at boot
+	// (or kept present by relays alone) has zero values in these fields, and
+	// until 2026-11 they went out as 0 dB / 0 hops, and the first tick after
+	// every restart (a full reconcile) wrote them over the node's real stored
+	// reading. HasSignal marks an advert this process received; without one,
+	// the stored reading rides forward, the way stablePosition carries a
+	// position: nothing new is not nothing.
+	switch {
+	case mqtt != nil && mqtt.HasSignal:
 		t.Snr = wrapperspb.Double(mqtt.SNR)
 		t.Rssi = wrapperspb.Int32(mqtt.RSSI)
 		t.HopCount = wrapperspb.UInt32(mqtt.HopCount)
 		t.Gateways = mqtt.Gateways
 		t.LastAdvertAt = tsProto(mqtt.LastAdvertAt)
+	case stored.GetLastAdvertAt() != nil:
+		// Only a stored block stamped with its advert is a reading. The zeroed
+		// blocks the bug above wrote carry no stamp, and are dropped here
+		// rather than carried, which heals them on the next write.
+		t.Snr = stored.GetSnr()
+		t.Rssi = stored.GetRssi()
+		t.HopCount = stored.GetHopCount()
+		t.Gateways = stored.GetGateways()
+		t.LastAdvertAt = stored.GetLastAdvertAt()
 	}
 	// The freshest successful sample wins; reports arrive pre-sorted by
 	// precedence, so an equal timestamp resolves to the higher-priority monitor.

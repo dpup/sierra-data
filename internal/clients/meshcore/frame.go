@@ -102,8 +102,9 @@ func DecodeFrameHeader(raw []byte) (FrameHeader, error) {
 // live: one direct request heard as [2cfe ab07], then [ab07], then []. And a
 // TRACE frame's path holds SNR samples, not hashes.
 //
-// The path is not signed, by anyone. It is evidence for a display, never for a
-// node's presence.
+// The path is not signed, by anyone. It can extend the presence of a node a
+// signed advert already established (Config.RelayPresence); it can never
+// introduce one, or say where it is or what it is called.
 func (h FrameHeader) RelayHops() []string {
 	if h.RouteType != routeFlood && h.RouteType != routeTransportFlood {
 		return nil

@@ -10,6 +10,8 @@ import (
 	"github.com/dpup/sierra-data/internal/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/types/known/timestamppb"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 func activityByKey(acts []store.MeshActivity) map[string]store.MeshActivity {
@@ -49,7 +51,7 @@ func TestPollEmitsMeshActivity(t *testing.T) {
 
 	res, err := n.Poll(testCtx(), prior)
 	require.NoError(t, err)
-	assert.ElementsMatch(t, []string{heard, seeded, quiet}, reg.knownSeen,
+	assert.Equal(t, []string{quiet}, reg.knownSeen,
 		"the store's keys are offered for resolution, so a pruned repeater still resolves")
 
 	got := activityByKey(res.MeshActivity)
@@ -85,4 +87,69 @@ func TestPollKeepsRelaysOnHardError(t *testing.T) {
 	_, err := n.Poll(testCtx(), &fakePrior{})
 	require.Error(t, err)
 	assert.NotNil(t, reg.relays, "not drained")
+}
+
+// A node in the snapshot without a reading of its own (seeded at boot, or
+// kept present by relays) must not publish 0 dB / 0 hops. Until 2026-11 the
+// first tick after every restart wrote those zeros over the stored reading.
+func TestUnheardNodeCarriesStoredSignal(t *testing.T) {
+	at := time.Date(2026, 11, 3, 6, 0, 0, 0, time.UTC)
+	key := strings.Repeat("a2", 32)
+	node := meshcore.NodeState{
+		PubKey: key, Role: meshcore.RoleRepeater, Name: "SIERRA Lilac Park",
+		HasLocation: true, Lat: 38.25, Lng: -120.34,
+		LastHeardAt: at.Add(-20 * time.Hour), LastRelayedAt: at.Add(-time.Minute),
+		// HasSignal false: SNR/RSSI/HopCount are zero values, not a reading.
+	}
+	stored := func(tel *gridv1.MeshTelemetry) *fakePrior {
+		ev := storedMeshEvent(key, nil)
+		ev.GetMesh().Telemetry = tel
+		return &fakePrior{events: []*gridv1.Event{ev}}
+	}
+	poll := func(prior Prior) *gridv1.Event {
+		n := NewNetworkNormalizer(testConfig(), &fakeMeshRegistry{connected: 1, nodes: []meshcore.NodeState{node}}, nil)
+		res, err := n.Poll(testCtx(), prior)
+		require.NoError(t, err)
+		require.Len(t, res.Events, 1)
+		return res.Events[0]
+	}
+
+	t.Run("the stored reading rides forward", func(t *testing.T) {
+		ev := poll(stored(&gridv1.MeshTelemetry{
+			Snr: wrapperspb.Double(6.5), Rssi: wrapperspb.Int32(-101), HopCount: wrapperspb.UInt32(3),
+			Gateways: []string{"gw"}, LastAdvertAt: timestamppb.New(at.Add(-20 * time.Hour)),
+		}))
+		tel := ev.GetMesh().GetTelemetry()
+		assert.InDelta(t, 6.5, tel.GetSnr().GetValue(), 1e-9)
+		assert.EqualValues(t, 3, tel.GetHopCount().GetValue())
+		assert.Equal(t, []string{"gw"}, tel.GetGateways())
+		assert.Equal(t, at.Add(-time.Minute), ev.GetObservedAt().AsTime(), "observed is the latest evidence: the relay")
+	})
+
+	t.Run("a zeroed block with no advert stamp is the old bug, and is dropped", func(t *testing.T) {
+		ev := poll(stored(&gridv1.MeshTelemetry{
+			Snr: wrapperspb.Double(0), Rssi: wrapperspb.Int32(0), HopCount: wrapperspb.UInt32(0),
+		}))
+		tel := ev.GetMesh().GetTelemetry()
+		assert.Nil(t, tel.GetSnr())
+		assert.Nil(t, tel.GetHopCount(), "not 0 hops: never heard direct")
+	})
+
+	t.Run("nothing stored, nothing claimed", func(t *testing.T) {
+		tel := poll(&fakePrior{}).GetMesh().GetTelemetry()
+		assert.Nil(t, tel.GetSnr())
+		assert.Nil(t, tel.GetRssi())
+		assert.Nil(t, tel.GetHopCount())
+	})
+
+	t.Run("a live reading always wins", func(t *testing.T) {
+		live := node
+		live.HasSignal, live.SNR, live.HopCount = true, 9, 1
+		n := NewNetworkNormalizer(testConfig(), &fakeMeshRegistry{connected: 1, nodes: []meshcore.NodeState{live}}, nil)
+		res, err := n.Poll(testCtx(), stored(&gridv1.MeshTelemetry{
+			Snr: wrapperspb.Double(6.5), LastAdvertAt: timestamppb.New(at.Add(-20 * time.Hour)),
+		}))
+		require.NoError(t, err)
+		assert.InDelta(t, 9, res.Events[0].GetMesh().GetTelemetry().GetSnr().GetValue(), 1e-9)
+	})
 }

@@ -610,11 +610,60 @@ Relay attribution has three rules, all of them about not overclaiming:
    did exactly that to BigPrather and Eagle One, which no 2-byte flood path
    named. (Relay LINKS still resolve 1-byte hops; a wrong edge is a
    topology smudge, a wrong relay time is a false liveness claim.)
-3. **Display only.** Nothing signs a path, and anyone can publish to these
-   brokers. Relay evidence never feeds `Snapshot`, presence, or the sweep. A
-   node that relays all day but stops advertising still expires (unless a
-   monitor reports it); making relays count as presence would hand lifecycle to
-   unauthenticated bytes.
+3. **Presence, never identity.** See "Relay presence" below.
+
+### Relay presence (2026-11)
+
+A relay counts toward presence. `Registry.presentLocked`: a node is in the
+snapshot if its last advert is within its cadence window OR a relay was
+attributed to it within `grid.meshcore.relayPresence` (unset = `graceFloor`,
+so one relay buys what one advert of unknown cadence does; negative = off).
+Retention (`pruneLocked`) counts relays too, or the node's identity would be
+pruned from memory `graceCeil` after its last advert while it was still
+relaying.
+
+Why: repeaters advert every 12-48h (Eagle One's last advert was 12 days old
+on 2026-11-03), so between adverts one fell out of the snapshot and EXPIRED
+two hours later while it forwarded traffic all day. In the week to
+2026-11-03, 384 repeaters expired, 338 of them came back, and 134 did it two
+or more times; SIERRA Pinebrook Rptr, Pinebrook Tree (twice), Dorrington Obs
+and Mission Outpost among them. The SIERRA repeaters Alan's monitor reports
+never expired: the monitor was the only thing holding them up. That churn is
+what "the mesh looks dead" was.
+
+The trust line moved, deliberately, and it is drawn here:
+
+- **A relay can only extend a node the registry already holds**, and the
+  registry holds a node only from a signed advert (live, or seeded from the
+  store at boot). A hop that resolves only through the store's keys
+  (`DrainRelays`' `known`) gets activity, not presence. So a relay cannot
+  create a node, and it cannot say where one is or what it is called: every
+  hashed field still comes from an advert.
+- **It can keep a dead node ACTIVE.** Paths are unsigned and anyone can
+  publish to these brokers, so a forged flood packet, or an uncatalogued live
+  relayer sharing a node's 2-byte prefix (~1 in 65,536 per unknown node),
+  holds a node up for one window per packet. That is the price, accepted
+  because mesh presence is ambient INFO (excluded from `mode`, counts and top
+  events). **Do not copy relay presence onto a layer that matters for
+  safety.**
+- **Revival is a revision.** A node EXPIRED in the store but still in the
+  registry comes back ACTIVE on a relay, through the ordinary
+  status-change path.
+
+Two things had to change with it, both latent bugs that relay presence would
+have made constant:
+
+- **`NodeState.HasSignal`.** A seeded node's SNR/RSSI/hops are zero values,
+  not a reading, and `meshTelemetry` used to publish them: 0 dB, 0 hops
+  ("heard direct"). Worse, the first tick after every restart is a full
+  reconcile, and the hash-equal path wrote those zeros over the node's real
+  stored reading (Lilac Park's revision 64 carries `snr: 0, rssi: 0,
+  hopCount: 0, lastAdvertAt: null`). Now the signal block comes from a live
+  advert, or the stored block rides forward. A stored block with no
+  `lastAdvertAt` is that bug's signature and is dropped, not carried.
+- **Relays drain before the snapshot** in `Poll`, so this tick's relays count
+  in this tick's presence. `observedAt` for a node is the later of its advert
+  and its last relay.
 
 ## Lane closures: one event per window, from CWWP2 (`lane_closure.go`)
 

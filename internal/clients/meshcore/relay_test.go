@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"encoding/hex"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -142,7 +143,7 @@ func TestRegistryRecordsRelaysFromEveryPacketType(t *testing.T) {
 		snowshoe: base.Add(3 * time.Minute),
 	}, got)
 	assert.Empty(t, r.DrainRelays(nil), "drain clears the buffer")
-	assert.Len(t, r.Snapshot(), 2, "relay evidence adds no node and changes no presence")
+	assert.Len(t, r.Snapshot(), 2, "relay evidence adds no node")
 }
 
 func TestRegistryRelayFromAcceptedAdvertPathOnly(t *testing.T) {
@@ -238,4 +239,89 @@ func TestRegistryReceivedAt(t *testing.T) {
 			assert.Equal(t, base.Add(time.Minute), n.ReceivedAt)
 		}
 	}
+}
+
+// Relay presence: a node whose adverts are a day apart stays present while it
+// forwards traffic, and drops out RelayPresence after it stops.
+func TestRegistryRelayPresence(t *testing.T) {
+	base := time.Date(2026, 11, 3, 6, 0, 0, 0, time.UTC)
+	newReg := func(relayPresence time.Duration) (*Registry, string) {
+		r := NewRegistry(Config{GraceFloor: time.Hour, GraceCeil: 2 * time.Hour,
+			RetainFor: 3 * time.Hour, RelayPresence: relayPresence})
+		r.now = func() time.Time { return base }
+		pub, priv, err := ed25519.GenerateKey(nil)
+		require.NoError(t, err)
+		payload := buildAdvert(t, priv, 2, &[2]float64{38.3, -120.2}, "Camp Connell", 1_700_000_000)
+		r.ingestRaw(envelopeJSON(t, 4, payload, 4, -90, "gw"), "broker-a")
+		return r, hex.EncodeToString(pub)
+	}
+	present := func(r *Registry) bool { return len(r.Snapshot()) == 1 }
+	relayAt := func(r *Registry, pk string, at time.Time) {
+		r.now = func() time.Time { return at }
+		r.IngestEnvelope(packetJSON(t, ptTxtMsg,
+			rawFrame(t, routeFlood, ptTxtMsg, 2, [][]byte{hop(t, pk, 2)}, []byte{1})), "broker-a", "")
+		r.DrainRelays(nil)
+	}
+
+	t.Run("a relay keeps a node present past its advert window", func(t *testing.T) {
+		r, pk := newReg(2 * time.Hour)
+		r.now = func() time.Time { return base.Add(90 * time.Minute) }
+		require.False(t, present(r), "advert window (1h) has passed")
+
+		relayAt(r, pk, base.Add(90*time.Minute))
+		assert.True(t, present(r), "relayed just now")
+		got := r.Snapshot()[0]
+		assert.Equal(t, base.Add(90*time.Minute), got.LastRelayedAt)
+		assert.Equal(t, "Camp Connell", got.Name, "identity is the advert's")
+
+		r.now = func() time.Time { return base.Add(90*time.Minute + 2*time.Hour) }
+		assert.True(t, present(r), "inclusive at the window's edge")
+		r.now = func() time.Time { return base.Add(90*time.Minute + 2*time.Hour + time.Second) }
+		assert.False(t, present(r), "relays stopped: gone after RelayPresence")
+	})
+
+	t.Run("a relaying node is retained past RetainFor since its advert", func(t *testing.T) {
+		r, pk := newReg(2 * time.Hour)
+		for at := base.Add(time.Hour); at.Before(base.Add(6 * time.Hour)); at = at.Add(time.Hour) {
+			relayAt(r, pk, at)
+			require.True(t, present(r), "relaying hourly at %s", at.Sub(base))
+		}
+	})
+
+	t.Run("disabled, a relay is only activity", func(t *testing.T) {
+		r, pk := newReg(0)
+		r.now = func() time.Time { return base.Add(90 * time.Minute) }
+		relayAt(r, pk, base.Add(90*time.Minute))
+		assert.False(t, present(r))
+	})
+
+	t.Run("a key known only from the store is never made present", func(t *testing.T) {
+		r, _ := newReg(2 * time.Hour)
+		stranger := "e4f1" + strings.Repeat("0", 60)
+		r.IngestEnvelope(packetJSON(t, ptTxtMsg,
+			rawFrame(t, routeFlood, ptTxtMsg, 2, [][]byte{hop(t, stranger, 2)}, []byte{1})), "broker-a", "")
+		assert.Contains(t, r.DrainRelays([]string{stranger}), stranger, "its activity still resolves")
+		for _, n := range r.Snapshot() {
+			assert.NotEqual(t, stranger, n.PubKey, "no advert-established identity to keep present")
+		}
+	})
+}
+
+// Seed restores both activity clocks, so relay presence and "last heard"
+// survive a restart; a seeded node carries no signal reading of its own.
+func TestRegistrySeedRestoresActivity(t *testing.T) {
+	base := time.Date(2026, 11, 3, 6, 0, 0, 0, time.UTC)
+	r := NewRegistry(Config{GraceFloor: time.Hour, GraceCeil: 2 * time.Hour, RetainFor: 4 * time.Hour, RelayPresence: 2 * time.Hour})
+	r.now = func() time.Time { return base }
+	r.Seed([]SeedNode{{
+		PubKey: "aa", HasLocation: true, Lat: 38, Lng: -120,
+		LastHeard:    base.Add(-3 * time.Hour), // last_seen_at: past the advert window
+		LastReceived: base.Add(-5 * time.Hour),
+		LastRelayed:  base.Add(-30 * time.Minute),
+	}})
+	nodes := r.Snapshot()
+	require.Len(t, nodes, 1, "present on the restored relay clock alone")
+	assert.Equal(t, base.Add(-5*time.Hour), nodes[0].ReceivedAt)
+	assert.Equal(t, base.Add(-30*time.Minute), nodes[0].LastRelayedAt)
+	assert.False(t, nodes[0].HasSignal, "a seeded node's zero SNR is not a reading")
 }

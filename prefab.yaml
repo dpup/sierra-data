@@ -709,6 +709,12 @@ grid:
     cadenceK: 3
     graceFloor: "14h"
     graceCeil: "72h"
+    # A RELAY counts toward presence too: a flood packet whose path names a node
+    # (2+ byte hash, unique match) keeps it in the snapshot for this long, the
+    # same floor one advert buys. The SIERRA backbone adverts every 12-48h but
+    # relays all day, and without this it expired between adverts. A relay can
+    # only extend a node a signed advert established. Negative turns it off.
+    relayPresence: "14h"
     # Relay-topology store (docs/design/mesh-topology-design.md). Every received advert is
     # kept as an append-only observation (Tier 0); a maintenance tick folds those
     # into a per-link-per-day rollup (Tier 1) and prunes. spamFloor caps the raw

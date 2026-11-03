@@ -377,6 +377,11 @@ survives as a legacy alias):
   from the store's `mesh_activity` table; relays come from the flood path of
   EVERY packet type, not just adverts. See "Two activity clocks" in
   `internal/ingest/CLAUDE.md`.
+- **A relay is presence** (`grid.meshcore.relayPresence`, default the 14h
+  `graceFloor`): a node stays in the snapshot, and so ACTIVE, while relays are
+  attributed to it, not only for a window after each advert. It can only extend
+  a node a signed advert established. Ambient INFO only; see "Relay presence"
+  in `internal/ingest/CLAUDE.md` before copying it anywhere.
 
 **PG&E ArcGIS** (`ags.pge.esriemcs.com`, the `POWER` layer):
 - Keyless and public, but **entirely undocumented** — no contract, no version,

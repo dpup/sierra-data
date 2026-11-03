@@ -2215,8 +2215,9 @@ type MeshTelemetry struct {
 	// catalogued, so a node relaying only on 1-byte paths gets no relay time.
 	// And direct-routed packets never count: their path is the route still to be
 	// travelled, not the one travelled, so a hop there may never have heard the
-	// packet. The path is not signed, so this is display evidence only: it never
-	// affects a node's presence or lifecycle. Read-time only, like
+	// packet. A relay also keeps an already-known node PRESENT (ACTIVE) for
+	// grid.meshcore.relayPresence after it, the way an advert does; it never
+	// creates a node or changes its identity or position. Read-time only, like
 	// last_heard_at; null when no relay has been attributed.
 	LastRelayedAt *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=last_relayed_at,json=lastRelayedAt,proto3" json:"last_relayed_at,omitempty"`
 	unknownFields protoimpl.UnknownFields

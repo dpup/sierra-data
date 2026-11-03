@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 	_ "time/tzdata" // Embed the IANA tz database so America/Los_Angeles resolves in minimal containers
 
@@ -595,6 +596,7 @@ func meshcoreClientConfig(cfg *config.Config) meshcore.Config {
 		GraceFloor:            mc.GraceFloor,
 		GraceCeil:             graceCeil,
 		SilenceAfter:          mc.Silence(),
+		RelayPresence:         mc.RelayPresenceWindow(),
 	}
 }
 
@@ -657,6 +659,19 @@ func seedMeshRegistry(ctx context.Context, reg *meshcore.Registry, st *store.Sto
 		logging.Warnw(ctx, "MeshCore: cadence rehydration skipped — reading heard times failed", "error", err)
 		heard = nil
 	}
+	// The activity clocks, so relay presence and "last heard" pick up where the
+	// last process left off rather than re-accumulating from nothing.
+	keys := make([]string, 0, len(events))
+	for _, se := range events {
+		if pk := se.Event.GetMesh().GetPublicKey(); pk != "" {
+			keys = append(keys, pk)
+		}
+	}
+	activity, err := st.MeshActivityFor(ctx, keys)
+	if err != nil {
+		logging.Warnw(ctx, "MeshCore: activity rehydration skipped — reading mesh activity failed", "error", err)
+		activity = nil
+	}
 	seeds := make([]meshcore.SeedNode, 0, len(events))
 	for _, se := range events {
 		d := se.Event.GetMesh()
@@ -670,6 +685,9 @@ func seedMeshRegistry(ctx context.Context, reg *meshcore.Registry, st *store.Sto
 			Name:       d.GetName(),
 			HeardTimes: heard[pk],
 			LastHeard:  se.LastSeenAt,
+		}
+		if a, ok := activity[strings.ToLower(pk)]; ok {
+			sn.LastReceived, sn.LastRelayed = a.LastHeardAt, a.LastRelayedAt
 		}
 		if c := se.Event.GetGeometry().GetCentroid(); c != nil {
 			sn.HasLocation = true
