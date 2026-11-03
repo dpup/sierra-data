@@ -353,6 +353,14 @@ survives as a legacy alias):
   `requireValidSignature` on. For local testing, self-host a broker + a publishing
   observer (Cisien/meshcoretomqtt) rather than waiting on access.
 - Architecture: a long-lived subscriber (`meshcore.Registry`) buffers node state;
+  **Liveness is read liberally** (people compare us with CoreScope): relay
+  credit, including a direct-routed packet's remaining route, revives an
+  EXPIRED node from its stored identity for `relayPresence`.
+  **An operator monitor (`mesh.repeater`, e.g. alanpi) is additional data,
+  never canonical**: it decorates mesh-established nodes, never creates or
+  renames one, never pauses the sweep, and its last readings ride forward
+  while it is silent (see "A monitor is additional data" in
+  `internal/ingest/CLAUDE.md`).
   `ingest.NetworkNormalizer` serves a snapshot on each scheduler tick (a push
   source wrapped as a poller). Lifecycle is `disappearance: expire` (no goodbye
   packet). **A configured broker that is not delivering fails the `meshcore`

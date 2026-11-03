@@ -71,15 +71,23 @@ type MeshSnapshot struct {
 	// Reports holds the buffered reports from reporters that are currently OK.
 	// A STALE or DEAD reporter's reports are deliberately EXCLUDED: replaying a
 	// silent monitor's last set would refresh last_seen_at and fabricate liveness
-	// for nodes nobody has checked on in hours. Absence here is honest; what must
-	// not follow from it is a disappearance verdict, which is what SuppressSweep
-	// below prevents.
+	// for nodes nobody has checked on in hours. Absence here is honest, and it
+	// does not blank anything either: the normalizer carries the last readings
+	// forward while the monitor is silent (MonitorSilent).
 	Reports []MeshNodeReport
 	// Reporters is every configured mesh reporter's health, for the source rows.
 	Reporters []ReporterHealth
-	// SuppressSweep is true while any reporter is STALE — silent, but not long
-	// enough to give up on. See reporterDeadMultiple.
+	// SuppressSweep is true while a mesh.packet forwarder is STALE. A forwarder
+	// is a door for mesh evidence (signed adverts), like a broker, so nodes only
+	// it heard would age out for OUR reason. A mesh.repeater monitor never sets
+	// it: monitors are additional data, not presence (see MonitorSilent).
 	SuppressSweep bool
+	// MonitorSilent is true while a mesh.repeater monitor is STALE or has not
+	// reported since this process started. The normalizer then carries each
+	// node's last monitor readings (reachability, admin telemetry) forward
+	// instead of blanking them, so a restart or a monitor hiccup mints no
+	// revision. A DEAD monitor's readings are dropped: by then we no longer know.
+	MonitorSilent bool
 	// Live counts reporters currently OK. Zero means push contributes nothing
 	// this tick, which (with no MQTT broker connected) is what makes the poll
 	// fail loud rather than report an empty mesh.
@@ -90,8 +98,8 @@ type MeshSnapshot struct {
 	// is a door into the MeshCore registry, not a source of reports: its packets
 	// are already in the registry by the time the normalizer looks, so a live
 	// forwarder keeps the registry's Snapshot in play when no MQTT broker is
-	// connected, and a STALE one sets SuppressSweep like a stale monitor does —
-	// the nodes only it heard are about to age out for OUR reason.
+	// connected, and a STALE one sets SuppressSweep — the nodes only it heard
+	// are about to age out for OUR reason.
 	PacketReporters []ReporterHealth
 	PacketLive      int
 }
@@ -240,13 +248,16 @@ func (r *Registry) MeshReports() MeshSnapshot {
 				for _, nr := range r.mesh[rep.cfg.ID] {
 					snap.Reports = append(snap.Reports, nr)
 				}
-			case ReporterStale:
-				// Silent, but plausibly coming back: contribute nothing, and stop
-				// the sweep from reading that silence as nodes having left.
-				snap.SuppressSweep = true
-			case ReporterDead, ReporterUnknown:
-				// DEAD: silent long enough that we must admit we no longer know.
-				// UNKNOWN: never configured up, so it has no nodes to protect.
+			case ReporterStale, ReporterUnknown:
+				// Silent (or not heard from since this process started):
+				// contribute nothing. Deliberately NOT a sweep suppression: a
+				// monitor is additional data about nodes the mesh establishes,
+				// never what keeps the layer's lifecycle alive, so its silence
+				// must not freeze every mesh node's expiry. The normalizer
+				// carries its last readings forward instead (MonitorSilent).
+				snap.MonitorSilent = true
+			case ReporterDead:
+				// Silent long enough that we must admit we no longer know.
 			}
 		}
 		if rep.streams[MeshPacketStream] {

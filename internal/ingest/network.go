@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dpup/prefab/logging"
+
 	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
 	"github.com/dpup/sierra-data/internal/clients/meshcore"
 	"github.com/dpup/sierra-data/internal/config"
@@ -129,6 +131,37 @@ type NetworkNormalizer struct {
 	// harmless.
 	activityMu sync.Mutex
 	activity   map[string]store.MeshActivity
+
+	// expired lists the mesh nodes the sweep has expired (see MeshCatalog),
+	// cached for expiredTTL. relaySeen is each node's latest relay credit,
+	// kept across ticks so relay presence outlives one drain. Both are only
+	// touched from Poll, which the scheduler never runs concurrently, and are
+	// guarded anyway.
+	catalog    MeshCatalog
+	livenessMu sync.Mutex
+	expired    map[string]*gridv1.Event
+	expiredAt  time.Time
+	relaySeen  map[string]time.Time
+}
+
+// MeshCatalog lists the stored mesh events that are no longer ACTIVE.
+//
+// Our view of the mesh is a handful of sensors, so liveness is read
+// liberally: a node CoreScope shows relaying all day must not read as gone
+// here because its adverts are days apart. An EXPIRED node keeps its identity
+// (key, name, role, position, all from its signed advert), and relay evidence
+// for it within grid.meshcore.relayPresence brings it back.
+type MeshCatalog func(ctx context.Context) ([]*gridv1.Event, error)
+
+// expiredTTL bounds how stale the expired-node catalog may be. A node that
+// expires is still in the registry or the store's active set when it does, so
+// a few minutes' lag only delays reviving a node that expired just now.
+const expiredTTL = 10 * time.Minute
+
+// WithCatalog lets relay evidence revive expired nodes (see MeshCatalog).
+func (n *NetworkNormalizer) WithCatalog(c MeshCatalog) *NetworkNormalizer {
+	n.catalog = c
+	return n
 }
 
 // NewNetworkNormalizer wires the normalizer to its inputs. Either may be nil,
@@ -175,9 +208,10 @@ func (n *NetworkNormalizer) SourceIDs() []string {
 // event. Keyed by the event's native id: the full public key when known, the
 // reported prefix when not.
 type mergedNode struct {
-	key    string // full pubkey, or the prefix when unresolved
-	mqtt   *meshcore.NodeState
-	pushed []pushingest.MeshNodeReport
+	key       string // full pubkey, or the prefix when unresolved
+	mqtt      *meshcore.NodeState
+	pushed    []pushingest.MeshNodeReport
+	relayedAt time.Time // latest relay credit within relayPresence (noteRelays)
 }
 
 // Poll implements Normalizer.
@@ -244,10 +278,13 @@ func (n *NetworkNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult,
 	// and a relay is presence (see meshcore.Registry.presentLocked), so this
 	// tick's relays must count in this tick's snapshot. Resolution uses the
 	// store's mesh keys as well as the registry's own.
+	expired := n.expiredNodes(ctx)
+	prior = withExpired(prior, expired)
 	var relays map[string]time.Time
 	if n.registry != nil {
-		relays = n.registry.DrainRelays(knownMeshNodes(prior))
+		relays = n.registry.DrainRelays(append(knownMeshNodes(prior), knownExpired(expired)...))
 	}
+	relaySeen := n.noteRelays(relays, now)
 	if n.registry != nil && (delivering > 0 || snap.PacketLive > 0) {
 		nodes = n.registry.Snapshot()
 	}
@@ -289,10 +326,40 @@ func (n *NetworkNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult,
 		m.pushed = append(m.pushed, rep)
 	}
 
+	// A monitor is ADDITIONAL data, never what makes a node exist. Its reports
+	// decorate a node the mesh is presenting this tick; on their own they hold
+	// one only while the monitor is reaching it right now, and only one a
+	// signed advert already established (a full key with a stored event). A
+	// prefix nobody has heard advertise, or a node the monitor can no longer
+	// reach and the mesh no longer shows, is left to the sweep like any other.
+	for key, m := range merged {
+		if m.mqtt == nil && !n.monitorHolds(m, prior, now) {
+			delete(merged, key)
+		}
+	}
+
+	// Relay presence for nodes the registry is not presenting: pruned from
+	// memory, or already EXPIRED. The registry's own relay presence covers the
+	// nodes it holds; this covers the ones it forgot, from their stored
+	// identity, so a repeater that adverts every few days but relays all day
+	// stays on the map.
+	for key, at := range relaySeen {
+		if merged[key] != nil {
+			merged[key].relayedAt = at
+			continue
+		}
+		stored := priorByID(prior, meshSourceID+":"+key)
+		c := stored.GetGeometry().GetCentroid()
+		if stored == nil || c == nil || !inAnyBounds(c.GetLat(), c.GetLng(), boxes) {
+			continue
+		}
+		merged[key] = &mergedNode{key: key, relayedAt: at}
+	}
+
 	events := make([]*gridv1.Event, 0, len(merged))
 	var forceWrite []string
 	for _, m := range merged {
-		ev := n.buildEvent(m, now, prior)
+		ev := n.buildEvent(m, now, prior, snap.MonitorSilent)
 		events = append(events, ev)
 		if n.shouldPersistTelemetry(ev, prior, now) {
 			forceWrite = append(forceWrite, ev.GetId())
@@ -384,6 +451,99 @@ func (n *NetworkNormalizer) meshActivity(merged map[string]*mergedNode, prior Pr
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].PubKey < out[j].PubKey })
 	return out
+}
+
+// expiredNodes returns the expired-node catalog by public key, refreshed at
+// most every expiredTTL. A failed refresh keeps the previous list: this only
+// widens liveness, so stale is better than none.
+func (n *NetworkNormalizer) expiredNodes(ctx context.Context) map[string]*gridv1.Event {
+	if n.catalog == nil {
+		return nil
+	}
+	n.livenessMu.Lock()
+	defer n.livenessMu.Unlock()
+	now := n.now()
+	if n.expired != nil && now.Sub(n.expiredAt) < expiredTTL {
+		return n.expired
+	}
+	evs, err := n.catalog(ctx)
+	if err != nil {
+		logging.Warnw(ctx, "MeshCore: reading expired nodes failed; keeping the last list", "error", err)
+		return n.expired
+	}
+	out := make(map[string]*gridv1.Event, len(evs))
+	for _, ev := range evs {
+		if k, ok := strings.CutPrefix(ev.GetId(), meshSourceID+":"); ok && len(k) == meshPubKeyHex {
+			out[k] = ev
+		}
+	}
+	n.expired, n.expiredAt = out, now
+	return out
+}
+
+// noteRelays folds this tick's relay credits into relaySeen and returns the
+// nodes credited within relayPresence.
+func (n *NetworkNormalizer) noteRelays(relays map[string]time.Time, now time.Time) map[string]time.Time {
+	window := n.cfg.Grid.Meshcore.RelayPresenceWindow()
+	n.livenessMu.Lock()
+	defer n.livenessMu.Unlock()
+	if n.relaySeen == nil {
+		n.relaySeen = make(map[string]time.Time, len(relays))
+	}
+	for k, t := range relays {
+		if t.After(n.relaySeen[k]) {
+			n.relaySeen[k] = t
+		}
+	}
+	out := make(map[string]time.Time, len(n.relaySeen))
+	for k, t := range n.relaySeen {
+		if window <= 0 || now.Sub(t) > window {
+			delete(n.relaySeen, k)
+			continue
+		}
+		out[k] = t
+	}
+	return out
+}
+
+// knownExpired offers expired nodes to relay resolution, so their hops
+// resolve (and a twin among them still blocks a wrong attribution).
+func knownExpired(expired map[string]*gridv1.Event) []meshcore.KnownNode {
+	out := make([]meshcore.KnownNode, 0, len(expired))
+	for k, ev := range expired {
+		out = append(out, meshcore.KnownNode{PubKey: k, Role: ev.GetMesh().GetNodeType()})
+	}
+	return out
+}
+
+// expiredPrior answers ByID from the expired catalog where the active set has
+// no such event, so a revived node rebuilds from its stored identity and
+// position. ForSource stays the ACTIVE set: the sweep and the activity
+// coverage are about live events.
+type expiredPrior struct {
+	Prior
+	expired map[string]*gridv1.Event
+}
+
+func withExpired(p Prior, expired map[string]*gridv1.Event) Prior {
+	if len(expired) == 0 {
+		return p
+	}
+	return &expiredPrior{Prior: p, expired: expired}
+}
+
+func (p *expiredPrior) ByID(id string) *gridv1.Event {
+	if ev := priorByID(p.Prior, id); ev != nil {
+		return ev
+	}
+	if k, ok := strings.CutPrefix(id, meshSourceID+":"); ok {
+		return p.expired[k]
+	}
+	return nil
+}
+
+func (p *expiredPrior) ForSource(src string) []*gridv1.Event {
+	return priorForSource(p.Prior, src)
 }
 
 // forgetMeshActivity drops the record of what the store holds, after a failed
@@ -487,7 +647,24 @@ func (n *NetworkNormalizer) reporterHealth(snap pushingest.MeshSnapshot) map[str
 // would let two inputs that disagree flip the winner every tick and mint a
 // revision each time. A signed advert beats a monitor's reading; among monitors,
 // configured priority then reporter id.
-func (n *NetworkNormalizer) buildEvent(m *mergedNode, now time.Time, prior Prior) *gridv1.Event {
+// monitorHolds reports whether a node no advert or relay is presenting this
+// tick stays present on a monitor's word alone: the mesh established it (a
+// full key we already hold as an event, which only an advert can mint), and a
+// monitor reached it successfully within the unreachable window.
+func (n *NetworkNormalizer) monitorHolds(m *mergedNode, prior Prior, now time.Time) bool {
+	if len(m.key) != meshPubKeyHex || priorByID(prior, meshSourceID+":"+m.key) == nil {
+		return false
+	}
+	window := n.cfg.Grid.Ingest.UnreachableAfterOrDefault()
+	for _, r := range m.pushed {
+		if !r.LastSuccess.IsZero() && now.Sub(r.LastSuccess) <= window {
+			return true
+		}
+	}
+	return false
+}
+
+func (n *NetworkNormalizer) buildEvent(m *mergedNode, now time.Time, prior Prior, monitorSilent bool) *gridv1.Event {
 	reports := slices.Clone(m.pushed)
 	sort.Slice(reports, func(i, j int) bool {
 		if reports[i].Priority != reports[j].Priority {
@@ -496,9 +673,16 @@ func (n *NetworkNormalizer) buildEvent(m *mergedNode, now time.Time, prior Prior
 		return reports[i].ReporterID < reports[j].ReporterID
 	})
 
+	// Identity is the advert's. Without one this tick, the stored identity
+	// (which an advert set) rides forward; a monitor's label fills in only
+	// where neither exists. Preferring the label flipped a node's name on
+	// every restart ("SIERRA Eagle One" vs the advert's "SIERRA Eagle One 🦅").
 	name, nodeType := "", ""
+	stored := priorByID(prior, meshSourceID+":"+m.key).GetMesh()
 	if m.mqtt != nil {
 		name, nodeType = m.mqtt.Name, m.mqtt.Role
+	} else {
+		name, nodeType = stored.GetName(), stored.GetNodeType()
 	}
 	for _, r := range reports {
 		if name == "" {
@@ -567,11 +751,11 @@ func (n *NetworkNormalizer) buildEvent(m *mergedNode, now time.Time, prior Prior
 	// orders and `since`-filters on — is OUR receive time, never the
 	// node-reported advert timestamp. The node's stamp is kept only in
 	// telemetry.lastAdvertAt (diagnostic; reveals the skew).
-	observed := time.Time{}
+	observed := m.relayedAt
 	if m.mqtt != nil {
 		// The latest evidence that the node is there: its advert, or a relay
 		// (which alone can keep it present; see Registry.presentLocked).
-		observed = laterOf(m.mqtt.LastHeardAt, m.mqtt.LastRelayedAt)
+		observed = laterOf(observed, laterOf(m.mqtt.LastHeardAt, m.mqtt.LastRelayedAt))
 	}
 	for _, r := range reports {
 		// A successful admin read proves the node is alive; where a monitor has
@@ -592,13 +776,25 @@ func (n *NetworkNormalizer) buildEvent(m *mergedNode, now time.Time, prior Prior
 	if len(brokers) == 0 {
 		keepPriorAttribution(ev, prior)
 	}
-	ev.Detail = &gridv1.Event_Mesh{Mesh: &gridv1.MeshDetail{
+	detail := &gridv1.MeshDetail{
 		PublicKey:    m.key,
 		NodeType:     nodeType,
 		Name:         name,
 		Reachability: n.reachability(reports, now),
-		Telemetry:    meshTelemetry(m.mqtt, reports, priorByID(prior, ev.GetId()).GetMesh().GetTelemetry()),
-	}}
+		Telemetry:    meshTelemetry(m.mqtt, reports, stored.GetTelemetry()),
+	}
+	// A silent monitor (restarted process, or a STALE reporter) says nothing
+	// about this node, and nothing new is not nothing: its last readings ride
+	// forward rather than blanking, which minted a revision on every node it
+	// monitors at every deploy. A live monitor that no longer lists the node,
+	// or a DEAD one, does clear them.
+	if len(reports) == 0 && monitorSilent {
+		detail.Reachability = stored.GetReachability()
+		if detail.Telemetry.GetAdmin() == nil {
+			detail.Telemetry.Admin = stored.GetTelemetry().GetAdmin()
+		}
+	}
+	ev.Detail = &gridv1.Event_Mesh{Mesh: detail}
 	return ev
 }
 

@@ -375,6 +375,41 @@ func (s *Store) ActiveEventsBySource(ctx context.Context, sourceID string) ([]St
 	return out, rows.Err()
 }
 
+// EventsBySourceAndStatus returns a source's events in the given statuses,
+// ordered by id. The mesh normalizer reads its EXPIRED nodes this way: a node
+// the mesh once announced stays a known identity (key, name, position) that
+// relay evidence can bring back, after the sweep has expired it.
+func (s *Store) EventsBySourceAndStatus(ctx context.Context, sourceID string, statuses ...gridv1.EventStatus) ([]*gridv1.Event, error) {
+	if len(statuses) == 0 {
+		return nil, nil
+	}
+	args := []any{sourceID}
+	for _, st := range statuses {
+		args = append(args, int32(st))
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT proto FROM events
+		WHERE source_id = ? AND status IN (`+placeholders(len(statuses))+`)
+		ORDER BY id`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("store: events by source %s: %w", sourceID, err)
+	}
+	defer rows.Close()
+	var out []*gridv1.Event
+	for rows.Next() {
+		var blob []byte
+		if err := rows.Scan(&blob); err != nil {
+			return nil, fmt.Errorf("store: scan event: %w", err)
+		}
+		ev := &gridv1.Event{}
+		if err := proto.Unmarshal(blob, ev); err != nil {
+			return nil, fmt.Errorf("store: unmarshal event: %w", err)
+		}
+		out = append(out, ev)
+	}
+	return out, rows.Err()
+}
+
 // GetEvent returns the current revision of an event, or ErrNotFound.
 func (s *Store) GetEvent(ctx context.Context, id string) (*gridv1.Event, error) {
 	var blob []byte

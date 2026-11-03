@@ -135,20 +135,41 @@ func TestRegistryRecordsRelaysFromEveryPacketType(t *testing.T) {
 	r.IngestEnvelope(packetJSON(t, ptGrpTxt,
 		rawFrame(t, routeFlood, ptGrpTxt, 2, [][]byte{hop(t, snowshoe, 2), hop(t, connell, 2)}, []byte{0xcc})), "broker-a", "")
 
-	// Direct and TRACE frames naming them later must not move either time.
+	// A TRACE path is SNR samples: it names nobody.
 	r.now = func() time.Time { return base.Add(9 * time.Minute) }
-	r.IngestEnvelope(packetJSON(t, ptTxtMsg,
-		rawFrame(t, 0x02, ptTxtMsg, 2, [][]byte{hop(t, snowshoe, 2), hop(t, connell, 2)}, []byte{0x01})), "broker-a", "")
 	r.IngestEnvelope(packetJSON(t, ptTrace,
 		rawFrame(t, routeFlood, ptTrace, 2, [][]byte{hop(t, snowshoe, 2)}, []byte{0x01})), "broker-a", "")
+	// A direct frame's remaining route is in use now: liveness for each hop
+	// that resolves by prefix.
+	r.now = func() time.Time { return base.Add(7 * time.Minute) }
+	r.IngestEnvelope(packetJSON(t, ptTxtMsg,
+		rawFrame(t, 0x02, ptTxtMsg, 2, [][]byte{hop(t, snowshoe, 2)}, []byte{0x01})), "broker-a", "")
 
 	got := r.DrainRelays(nil)
 	assert.Equal(t, map[string]time.Time{
 		connell:  base.Add(3 * time.Minute),
-		snowshoe: base.Add(3 * time.Minute),
+		snowshoe: base.Add(7 * time.Minute),
 	}, got)
 	assert.Empty(t, r.DrainRelays(nil), "drain clears the buffer")
 	assert.Len(t, r.Snapshot(), 2, "relay evidence adds no node")
+}
+
+// A direct route credits by prefix only, and teaches the graph nothing: we do
+// not know where the observer sits relative to the route.
+func TestDirectRouteCreditsByPrefixOnly(t *testing.T) {
+	base := time.Date(2026, 11, 3, 6, 0, 0, 0, time.UTC)
+	r, connell, snowshoe := relayRegistry(t, base)
+	r.IngestEnvelope(packetJSONFrom(t, "obs-direct", ptTxtMsg,
+		rawFrame(t, 0x02, ptTxtMsg, 1, [][]byte{hop(t, connell, 1)}, []byte{0x01})), "broker-a", "")
+	assert.Empty(t, r.DrainRelays(nil), "a 1-byte hop never resolves by prefix")
+
+	r.IngestEnvelope(packetJSONFrom(t, "obs-direct", ptTxtMsg,
+		rawFrame(t, 0x02, ptTxtMsg, 2, [][]byte{hop(t, snowshoe, 2), hop(t, connell, 2)}, []byte{0x01})), "broker-a", "")
+	assert.Equal(t, map[string]time.Time{connell: base, snowshoe: base}, r.DrainRelays(nil))
+	r.adjMu.Lock()
+	defer r.adjMu.Unlock()
+	assert.NotContains(t, r.adj, "obs-direct", "nothing learned from a direct route")
+	assert.NotContains(t, r.adj[connell], snowshoe)
 }
 
 func TestRegistryRelayFromAcceptedAdvertPathOnly(t *testing.T) {
