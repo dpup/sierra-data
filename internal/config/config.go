@@ -20,6 +20,48 @@ type Config struct {
 	Weather      WeatherConfig      `koanf:"weather"`
 	Hazards      HazardsConfig      `koanf:"hazards"`
 	Grid         GridConfig         `koanf:"grid"`
+	// MeshRelay is read only by cmd/mesh-relay, a separate process that loads
+	// this same prefab.yaml. It lives on Config so ValidateEnvOverrides polices
+	// PF__MESH_RELAY__* exactly like every other namespace.
+	MeshRelay MeshRelayConfig `koanf:"meshRelay"`
+}
+
+// MeshRelayConfig is the meshRelay section: the SIERRA Mesh Relay
+// (internal/meshrelay). Zero durations and rates take the relay's defaults.
+type MeshRelayConfig struct {
+	// Port the relay listens on (prefab's server.port belongs to the Grid).
+	Port int `koanf:"port"`
+	// DBPath is the relay's OWN SQLite file — never grid.db.
+	DBPath      string        `koanf:"dbPath"`
+	LockTimeout time.Duration `koanf:"lockTimeout"`
+	// ClientIPHeader names the header carrying the real client IP behind the
+	// reverse proxy (X-Forwarded-For uses its rightmost entry). Empty uses the
+	// socket address, which behind a proxy makes every client look the same to
+	// the auth lockout.
+	ClientIPHeader string `koanf:"clientIpHeader"`
+	// Admins are bootstrap admins: name + SHA-256 of the token, never the
+	// token. A bad hash is fatal at startup.
+	Admins []MeshRelayAdmin `koanf:"admins"`
+	// DebugPayloadGateways log frame payloads for these gateways. Never in prod.
+	DebugPayloadGateways []string `koanf:"debugPayloadGateways"`
+
+	LeaseDuration    time.Duration `koanf:"leaseDuration"`
+	LeaseIdleTimeout time.Duration `koanf:"leaseIdleTimeout"`
+	LeaseWarning     time.Duration `koanf:"leaseWarning"`
+	MaxLeaseTotal    time.Duration `koanf:"maxLeaseTotal"`
+	HelloTimeout     time.Duration `koanf:"helloTimeout"`
+	PingInterval     time.Duration `koanf:"pingInterval"`
+	FrameRate        float64       `koanf:"frameRate"`
+	FrameBurst       float64       `koanf:"frameBurst"`
+	AuthFailLimit    int           `koanf:"authFailLimit"`
+	AuthFailWindow   time.Duration `koanf:"authFailWindow"`
+	AuthLockout      time.Duration `koanf:"authLockout"`
+}
+
+// MeshRelayAdmin is one bootstrap admin.
+type MeshRelayAdmin struct {
+	Name        string `koanf:"name"`
+	TokenSHA256 string `koanf:"tokenSha256"`
 }
 
 // GridConfig holds the grid event store + ingest scheduler configuration
@@ -807,6 +849,39 @@ func (c Coordinates) ToProto() *api.Coordinates {
 // ToProto converts WeatherLocation to protobuf Coordinates
 func (w WeatherLocation) ToProto() *api.Coordinates {
 	return w.Coordinates.ToProto()
+}
+
+// LoadMeshRelayConfig loads only the meshRelay section, for cmd/mesh-relay. It
+// applies the same env-override check as LoadConfig.
+func LoadMeshRelayConfig() *MeshRelayConfig {
+	if err := ValidateEnvOverrides(os.Environ()); err != nil {
+		log.Fatalf("Invalid configuration: %v", err)
+	}
+	cfg := &MeshRelayConfig{}
+	if err := prefab.Config.Unmarshal("meshRelay", cfg); err != nil {
+		log.Fatalf("Failed to unmarshal meshRelay section: %v", err)
+	}
+	return cfg
+}
+
+// RegisterPrefabNamespaces registers this repo's top-level config namespaces
+// with prefab's key validator. They live in prefab.yaml but aren't prefab's own
+// keys, so without this prefab logs every one as an unknown key on startup.
+// Both processes that read prefab.yaml (cmd/server and cmd/mesh-relay) call it,
+// since each sees the other's section. Registered as namespace prefixes —
+// prefab's HasRegisteredPrefix allows any key beneath a registered namespace.
+// Must run before prefab.New (which validates on build).
+func RegisterPrefabNamespaces() {
+	for _, ns := range []string{
+		"grid", "roads", "weather", "hazards",
+		"openai", "openweather", "googleRoutes", "google_routes", "meshRelay",
+	} {
+		prefab.RegisterConfigKey(prefab.ConfigKeyInfo{
+			Key:         ns,
+			Description: "The Grid application config namespace (see internal/config)",
+			Type:        "object",
+		})
+	}
 }
 
 // LoadConfig loads configuration using Prefab's config system

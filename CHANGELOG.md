@@ -14,6 +14,27 @@ throughout; errors are gRPC-standard `{code, codeName, message, details}`). The
 by a snake_case `/v1` surface on 2026-07-05, which was in turn folded back onto the
 proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 
+## 2026-11-04
+
+### New service: the SIERRA Mesh Relay (`/mesh/relay/*`)
+
+A separate process (`cmd/mesh-relay`), not part of `/api/v1`: nothing in the Grid
+API changes, and no existing response shape moves. It is the meeting point for
+MeshCore gateway bridges at volunteers' houses and the authenticated clients
+that use a node through them. Every route that reaches a node needs a bearer
+token; the only unauthenticated routes are `/mesh/relay/healthz` and a static
+status-page shell that holds no data.
+
+- `wss://…/mesh/relay/{gateway}/dial` — bridges (`sierra-mesh-bridge.v1`)
+- `wss://…/mesh/relay/{gateway}` — clients (`sierra-mesh-client.v1`), one
+  exclusive lease per gateway; admins may add `?preempt=1`
+- `https://…/mesh/relay/api/…` — admin JSON API (snake_case, its own spec):
+  gateways, client tokens, leases, metrics
+
+Wire protocol: `docs/mesh-relay-wireprotocol.md`. Service spec and
+implementation notes: `docs/mesh-relay-server.md`. Deploying it needs a
+reverse-proxy rule routing `/mesh/relay/*` to the relay's own service.
+
 ## 2026-11-03 (later)
 
 ### Mesh nodes: relays bring expired repeaters back

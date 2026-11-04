@@ -582,6 +582,11 @@ make ecs-deploy  # Update ECS service with latest image
 4. Triggers ECS service deployment
 5. Waits for deployment to complete
 
+If the task definition also runs the mesh relay sidecar (an image from the
+`sierra-mesh-relay` ECR repository; see `docs/mesh-relay-server.md`), `ecs-deploy`
+detects it, builds and pushes the relay image (`make ecr-push-relay`), and
+updates both containers. Images are matched by repository, not container order.
+
 **Prerequisites:**
 - AWS CLI configured with appropriate permissions
 - Docker installed locally

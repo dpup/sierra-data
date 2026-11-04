@@ -1,0 +1,152 @@
+# Handoff: SIERRA Mesh Relay (data server)
+
+*For the agent working on the SIERRA data server. Read `mesh-relay-wireprotocol.md` (this directory) first. It's the canonical wire spec, shared with the bridge repo.*
+
+## What we're building
+
+SIERRA is setting up several MeshCore gateways at volunteers' houses. Each gateway is a stock MeshCore companion radio plus a bridge program. The bridge dials **out** to this relay over WebSocket. Nothing connects in to the houses, so this works behind CGNAT and needs no router changes.
+
+The relay is the meeting point. Bridges attach to it, and authenticated clients reach a node through it. Later, the relay will also poll repeaters for telemetry. That's out of scope now, but the design leaves room for it.
+
+## Hard requirements
+
+1. **No public path to a node.** Every route to a node needs a valid token. No anonymous endpoint, no debug backdoor, no open TCP port that reaches a node.
+2. **Separate process.** Run the relay as its own service, routed at `/mesh/relay/*` by the existing reverse proxy. A relay crash or restart must not affect the hazard and news feeds, and vice versa.
+3. **Don't log payloads.** Binary frames can contain private messages and channel secrets (`CHANNEL_INFO` returns the 16-byte key). Log metadata only: sizes, counts, timing. A per-gateway debug flag that logs payloads is fine if it's off by default and logged when turned on.
+4. **Store tokens hashed.** Show a token once, when it's created, then keep only a hash (SHA-256 is fine for 32 random bytes).
+
+## Scope: phase 1 (build now)
+
+### Bridge endpoint
+
+`wss://data.sierragridteam.org/mesh/relay/<gateway>/dial`. Implement it as the protocol spec describes:
+
+- Authenticate the token against `<gateway>`, then require `hello` within 10 s and send `welcome`.
+- Allow one active bridge session per gateway. A new valid session replaces the old one (close the old one with 4009).
+- Track per gateway: online/offline, last seen, agent version/os/arch, link kind, node state, node pubkey, the last `stats`.
+- **Pubkey pinning:** store the first pubkey reported per gateway, or the one set by an admin. On a mismatch, mark the gateway `mismatch` and refuse client leases until an admin accepts the new key.
+
+### Client endpoint
+
+`wss://data.sierragridteam.org/mesh/relay/<gateway>` with a client token.
+
+- **One lease per gateway at a time.** The companion protocol supports only one app session per node, so this is exclusive. If a lease is already held, reject with close 4029.
+- Lease length: 30 min by default, renewable with `renew`. It also expires after 10 min with no frames in either direction.
+- When the gateway is offline, accept the upgrade, send `gateway_status` (offline), and close. Don't hang.
+- Forward binary frames unchanged in both directions between the lease holder and the bridge. Send `attach`/`detach` to the bridge.
+- Admins can preempt a lease: send the holder `lease_ending` with reason `preempted`, then hand the lease over.
+- Audit log: who held which gateway's lease, from when to when, frame counts.
+
+### Roles
+
+Keep this simple. A static config file or a small table is fine for v1.
+
+| Role | Can |
+|---|---|
+| `admin` | Everything, including creating gateways, issuing and revoking tokens, accepting pubkey changes, preempting leases |
+| `operator` | Take leases on any gateway, view status |
+| `agent` | Take leases (for Elmer, meshcore-mcp, future pollers), view status |
+
+### Admin API
+
+JSON over HTTPS under `/mesh/relay/api/`. Requires an `admin` or `operator` token (`admin` for anything that changes state).
+
+| Method & path | Does |
+|---|---|
+| `POST /gateways` `{name, expected_pubkey?, notes?}` | Create a gateway. Returns its bridge token **once**. |
+| `GET /gateways` | List with status: online, last seen, agent version, link, node state and pubkey, current lease |
+| `GET /gateways/<name>` | Detail, including recent connect/disconnect events and last `stats` |
+| `POST /gateways/<name>/rotate-token` | New bridge token (returned once). Old one stops working, and the live session is closed with 4001. |
+| `POST /gateways/<name>/accept-pubkey` | Accept the node's current pubkey after a mismatch |
+| `POST /gateways/<name>/relink` | Send `relink` to the bridge |
+| `DELETE /gateways/<name>` | Revoke and remove |
+| `POST /clients` `{name, role}` / `DELETE /clients/<name>` | Issue and revoke client tokens |
+| `GET /leases` | Current and recent leases (audit) |
+
+A minimal read-only status page (gateways, online/offline, last seen) is a nice-to-have and is useful during the pilot.
+
+### Operational details
+
+- **Proxy:** WebSocket upgrade must work through the existing reverse proxy. Idle timeout has to be well over 25 s (the ping interval). If the site is behind Cloudflare, WebSockets are supported there, with a ~100 s idle limit that the pings keep us under.
+- **Limits:** Max binary message 512 bytes. Per-connection rate limit, for example 50 frames/s. Lock out repeated auth failures by source IP.
+- **Restarts:** Bridges reconnect on their own with backoff. Leases don't survive a relay restart; clients reconnect.
+- **Metrics:** gateways online, sessions, leases, frames/s, auth failures.
+
+## Phase 2 (design for it, don't build yet): remote access from any MeshCore client
+
+Goal: someone with the official MeshCore app or meshcore-cli can use a remote gateway as if it were their own companion radio. Those clients speak raw TCP to port 5000 with **no authentication**, so we can't just open a port.
+
+Two options. Leave room for both in the design.
+
+1. **Local shim (works with phase 1 as-is).** The bridge program has a client mode, `meshbridge connect <gateway>`. It listens on `127.0.0.1:5000` on the user's machine and tunnels to the client endpoint with their token. meshcore-cli and desktop apps connect to localhost. No relay changes needed.
+2. **Pinned TCP lease (for phones).** An authenticated user requests a session through the API or the status page. The relay opens a TCP port from a small pool, for example 40000–40099. It accepts connections **only from the requester's current public IP**, allows one connection, closes after 10 min idle or 2 h max, and is fully audited. Before committing to this, check:
+   - Can the data server expose a raw TCP port range? (Cloudflare's normal proxy doesn't carry raw TCP. It needs direct origin exposure or Cloudflare Spectrum.)
+   - Does the official MeshCore app accept an arbitrary `host:port` for a TCP companion?
+
+   Please report back on both questions.
+
+## Phase 3 (later): polling and telemetry
+
+The relay will run its own internal client that takes short leases to poll repeaters for status, telemetry, and neighbours, and stores the results. Build the lease manager so an internal client can hold a lease just like an external one, with a priority flag so polling can wait for a human session. Nothing else is needed for this now.
+
+## Acceptance tests for phase 1
+
+1. A bridge with a valid token connects, sends `hello`, and gets `welcome`. The gateway shows online in `GET /gateways` within 2 s.
+2. Bad token → 401. A valid token for a different gateway → 401, or 4002 after upgrade.
+3. A second bridge with the same token takes over, and the first gets 4009.
+4. A client with an `operator` token gets a lease and exchanges binary frames end to end with a fake node behind a test bridge. A second client gets 4029.
+5. Lease idle timeout and admin preemption both send `lease_ending` and close cleanly.
+6. A pubkey change marks the gateway `mismatch` and blocks leases until `accept-pubkey`.
+7. Kill the relay process: the data server's other endpoints are unaffected. After restart, the bridge is back online within its backoff window.
+8. No payload bytes appear in logs at the default log level.
+
+A fake bridge and fake node for testing will exist in the bridge repo (`meshbridge`). Until then, a small test client that speaks the protocol is enough.
+
+## Open questions for you
+
+- What stack does the data server use, and does the relay fit as a sibling service there?
+- Where should gateway, token, and lease state live: the existing database or the relay's own store?
+- The phase 2 feasibility questions above.
+
+---
+
+## Implementation (data server, 2026-11-04)
+
+Phase 1 is built: `cmd/mesh-relay` (binary) and `internal/meshrelay` (package). The acceptance tests are `internal/meshrelay/relay_test.go`. They run a real HTTP server with a fake bridge and a fake echo node, and they cover tests 1–6 and 8, plus token rotation, deletion, revocation, frame limits, auth lockout, and restart.
+
+### Answers to the open questions
+
+- **Stack.** Go on prefab, like the Grid, but as a separate binary, image target (`docker build --target relay`) and process. `cmd/server` doesn't import the relay package, so a crash in one process can't take down the other. Prefab owns the relay's HTTP server, config, logging, errors and lifecycle: the relay is a prefab plugin, and the admin API runs on prefab JSON handlers. Prefab has no websocket support, so the two websocket endpoints are plain handlers on prefab's mux, built on gorilla/websocket. Prefab's gzip wrapper passes the connection hijack through, and the tests dial with `Accept-Encoding: gzip` to cover that.
+- **State.** The relay has its own SQLite file (`meshRelay.dbPath`; `PF__MESH_RELAY__DB_PATH=/data/relay.db` in the image). It never writes to `grid.db`. The file holds gateways (bridge token hash, pinned or mismatched pubkey, last hello and stats, last seen), gateway events, client token hashes, and the lease audit log. It uses the TRUNCATE journal mode and takes an exclusive flock, the same as the grid store. During a rolling deploy, a second instance waits up to 90 s for the first to exit.
+- **Phase 2 feasibility:**
+  - **Raw TCP port range.** An ALB carries only HTTP(S). An NLB listener covers one port, an NLB allows at most 50 listeners, and an ECS service can attach at most 5 target groups. Neither limit can be raised, so an NLB can't reach 40000–40099 on one service. Cloudflare's normal proxy doesn't carry raw TCP. Spectrum does, including port ranges, but only on the Enterprise plan as a paid add-on. The workable option is a Fargate task with a public IP and a security group that opens the range. Fargate can't hold an Elastic IP, so the task needs a DNS-only (grey-cloud) record that it updates on every start.
+  - **The official app.** It has a Wi-Fi/TCP connection type, and guides tell users to type in the radio's IP. No source confirms that it accepts a hostname or a port other than 5000, or says which platforms support it. Someone needs to test this on iOS and Android before we commit to option 2. meshcore-cli does accept any host and port (`-t host -p port`), so option 1 (the local shim) works for meshcore-cli now.
+  - **Recommendation.** Ship option 1 first. Treat option 2 as blocked until the app test is done.
+
+### Decisions the spec left open
+
+- **Admin bootstrap.** Bootstrap admins are listed in `meshRelay.admins` in `prefab.yaml` as a name plus the token's SHA-256. They exist so there's an admin before the clients table has any rows, and the API can't revoke them. Mint one with `make relay-token NAME=<you>`. It works the same way as push-ingest reporters: the token is printed once, only its hash is committed, and a malformed entry stops the relay at startup.
+- **Configuration.** The rest of the config lives in `prefab.yaml` under `meshRelay:` too: port, db path, client IP header, lease, ping, rate and lockout timings, and the payload-debug list. Override any key with `PF__MESH_RELAY__*`. A misspelled override stops the relay at startup with a "did you mean" message.
+- **API status codes.** The admin API is served through prefab JSON handlers, so a successful call returns 200, including creates and deletes. Errors use the `/api/v1` envelope `{code, codeName, message}` and map to 401, 403, 404, 409 or 429.
+- **Roles on `GET`.** All three roles can read status (`GET /gateways`, `/gateways/<name>`, `/leases`, `/metrics`), following the roles table. Every change of state, and `GET /clients`, needs `admin`.
+- **Leases need a verified node.** A lease is granted only when the node is `connected` and reports the pinned key. The first key is pinned when the relay first sees it, or at create time with `expected_pubkey`. A mismatch reported mid-lease ends the lease. If the node goes back to the pinned key, the mismatch clears on its own.
+- **A bridge drop ends the lease** (`gateway_offline`). When a session is replaced (4009), the lease moves to the new session instead.
+- **Preemption.** An admin connects with `?preempt=1`. The lease manager also has a `Priority` field, so the phase 3 poller (`PriorityBackground`) gives way to any human or agent session.
+- **The rate limit throttles.** See the wire spec. Disconnecting would cut off a healthy bridge whenever its node dumps a contact list.
+- **Auth lockout.** 10 failures from one IP within 10 min lock that IP out for 15 min (HTTP 429) on every relay route. Behind the proxy, set `meshRelay.clientIpHeader` to `X-Forwarded-For`. The relay image sets this by default. The relay uses the rightmost entry, which is the one the proxy appended. Without this setting, every client looks like the proxy and one bad bridge would lock everyone out.
+- **Payload debug.** `meshRelay.debugPayloadGateways` logs frames as hex at debug level for the gateways listed. It's off by default, and the relay logs a warning at startup for each gateway listed.
+- **Metrics.** `GET /mesh/relay/api/metrics` returns JSON counters, and the relay logs a `relay metrics` line every minute with per-minute rates.
+
+### Deployment requirements
+
+These apply wherever the relay runs.
+
+- **Run it as its own process,** separate from the Grid server. If both run in one orchestration unit (one pod or task), make sure a relay failure can't stop or restart the Grid. In particular, don't let a failing relay health check mark the shared unit unhealthy.
+- **Run exactly one instance.** Bridge sessions and leases live in memory, so two relays would split bridges from their clients.
+- **Give it persistent storage for `relay.db`** (`PF__MESH_RELAY__DB_PATH`). This must be its own file, never `grid.db`.
+- **Route `/mesh/relay` and `/mesh/relay/*` to the relay** at the reverse proxy, without stripping the prefix. The proxy must support WebSocket upgrades and have an idle timeout well over the 25 s ping interval.
+- **Set `meshRelay.clientIpHeader`** to the header your proxy uses to pass the client IP. `X-Forwarded-For` (rightmost entry) is the image default.
+- **Health endpoint:** `/mesh/relay/healthz`.
+- **Commit at least one admin hash** to `meshRelay.admins` (`make relay-token NAME=<you>`) before the first deploy. Then create gateways with `POST /mesh/relay/api/gateways` and hand each bridge token to its host.
+
+`make ecs-deploy` deploys the relay with the server when the task definition includes a relay container (see the README).

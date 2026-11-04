@@ -779,3 +779,26 @@ grid:
         # brokers.
         operator: "gomesh.dev"
         operatorUrl: "https://www.gomesh.dev/"
+
+# SIERRA Mesh Relay — a SEPARATE process (cmd/mesh-relay) that reads this same
+# file; the Grid server ignores this section. Gateways and client tokens live in
+# the relay's own database, not here. See docs/mesh-relay-server.md.
+# Lease/ping/rate/lockout timings default in code (internal/meshrelay Config);
+# override with leaseDuration, leaseIdleTimeout, maxLeaseTotal, pingInterval,
+# frameRate, authFailLimit, authLockout, ...
+meshRelay:
+  port: 8090
+  # The relay's OWN database, never grid.db. Production: PF__MESH_RELAY__DB_PATH.
+  dbPath: "./data/relay.db"
+  lockTimeout: "90s"
+  # Behind the ALB, X-Forwarded-For (PF__MESH_RELAY__CLIENT_IP_HEADER): the auth
+  # lockout is per client IP, and without this every client is the proxy.
+  clientIpHeader: ""
+  # Bootstrap admins: the token's SHA-256 only, like ingest reporters — safe to
+  # commit. Mint with `make relay-token NAME=<you>`.
+  admins:
+    - name: dpup
+      tokenSha256: "4db6119e97884368b25b30362eea0fe5ab435d8b6137218348cb354e986383f4"
+  # Gateways whose frame payloads are logged. Payloads carry private messages
+  # and channel keys: never set this in production.
+  debugPayloadGateways: []
