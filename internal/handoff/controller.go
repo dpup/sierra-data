@@ -114,6 +114,7 @@ type Controller struct {
 	ln     net.Listener
 	server *http.Server
 	now    func() time.Time
+	fail   chan error // Fail's signal to Run; buffered 1
 }
 
 // New validates opts and returns a controller in its initial state. It does
@@ -122,7 +123,7 @@ func New(ctx context.Context, svc Service, opts Options) (*Controller, error) {
 	c := &Controller{
 		svc: svc, opts: opts, ctx: logging.EnsureLogger(ctx),
 		instanceID: randomID(), startedAt: time.Now(), now: time.Now,
-		state: StateActivating,
+		state: StateActivating, fail: make(chan error, 1),
 	}
 	if opts.Standby {
 		c.state = StateStandby
@@ -210,12 +211,16 @@ func (c *Controller) Run(ctx context.Context) int {
 	}
 
 	var sig os.Signal
+	var fatal error
 wait:
 	for {
 		select {
 		case sig = <-sigs:
 			break wait
 		case <-ctx.Done():
+			break wait
+		case fatal = <-c.fail:
+			logging.Errorw(c.ctx, "Service failed; shutting down", "error", fatal, "state", c.State())
 			break wait
 		case <-bootDone:
 			bootDone = nil
@@ -233,8 +238,11 @@ wait:
 		}
 	}()
 	code := c.shutdown()
+	if fatal != nil {
+		code = 1 // released or not, a failed service exits non-zero
+	}
 	if ex, ok := c.svc.(Exiter); ok {
-		exitCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		exitCtx, cancel := context.WithTimeout(c.ctx, 5*time.Second)
 		ex.Exit(exitCtx)
 		cancel()
 	}
@@ -242,6 +250,17 @@ wait:
 	logging.Infow(c.ctx, "Process exiting", "service", c.opts.Service, "state", c.State(),
 		"databaseHeld", c.Held(), "exitCode", code)
 	return code
+}
+
+// Fail tells the controller the service can no longer serve (its production
+// server stopped after activation). Run then quiesces, as on SIGTERM, and
+// exits 1: the pre-handoff main's log.Fatalf("Server failed") behaviour, but
+// with the database released first. Only the first call counts.
+func (c *Controller) Fail(err error) {
+	select {
+	case c.fail <- err:
+	default:
+	}
 }
 
 // shutdown drives whatever state we are in to QUIESCED (or as far as it can).
@@ -326,7 +345,11 @@ func (c *Controller) beginLocked(kind, origin, id string) (*Operation, context.C
 	op := &Operation{ID: id, Kind: kind, Origin: origin, Status: opRunning, StartedAt: c.now()}
 	c.op = op
 	c.opDone = make(chan struct{})
-	ctx := context.Background()
+	// Derived from c.ctx, never context.Background(): the service logs
+	// through this context, and prefab's logging panics on a context with no
+	// logger. (It shipped that way once; the first mesh log line at boot
+	// crash-looped production.)
+	ctx := c.ctx
 	switch kind {
 	case "activate":
 		c.state = StateActivating
@@ -356,7 +379,7 @@ func (c *Controller) finishLocked(op *Operation, err error) {
 func (c *Controller) runActivate(ctx context.Context, op *Operation) error {
 	start := time.Now()
 	logging.Infow(c.ctx, "Activation started", "operationId", op.ID, "origin", op.Origin)
-	err := c.svc.Activate(ctx)
+	err := c.callService("activation", func() error { return c.svc.Activate(ctx) })
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -396,7 +419,7 @@ func (c *Controller) runActivate(ctx context.Context, op *Operation) error {
 func (c *Controller) runQuiesce(op *Operation) {
 	start := time.Now()
 	logging.Infow(c.ctx, "Quiescence started", "operationId", op.ID, "origin", op.Origin)
-	err := c.svc.Quiesce(context.Background())
+	err := c.callService("quiescence", func() error { return c.svc.Quiesce(c.ctx) })
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -412,6 +435,20 @@ func (c *Controller) runQuiesce(op *Operation) {
 	c.finishLocked(op, nil)
 	logging.Infow(c.ctx, "Quiescence complete; database ownership released",
 		"operationId", op.ID, "duration", time.Since(start))
+}
+
+// callService runs one service step, turning a panic into an error. A panic
+// leaves unknown resources open, so it wraps ErrStillHeld: the state machine
+// then counts the database as held (activation: QUIESCING, failed) instead of
+// either crashing the process or claiming a release that did not happen.
+func (c *Controller) callService(what string, f func() error) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			logging.Errorw(c.ctx, "Panic during "+what, "panic", fmt.Sprint(r), "stack", string(debug.Stack()))
+			err = fmt.Errorf("panic during %s: %v: %w", what, r, ErrStillHeld)
+		}
+	}()
+	return f()
 }
 
 // fenceLocked moves STANDBY straight to QUIESCED: a standby that was never

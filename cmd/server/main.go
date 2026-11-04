@@ -69,6 +69,7 @@ func main() {
 		logging.Errorw(ctx, "Invalid deployment control configuration", "error", err)
 		log.Fatalf("Invalid deployment control configuration: %v", err)
 	}
+	app.onFatal = ctrl.Fail
 	os.Exit(ctrl.Run(ctx))
 }
 

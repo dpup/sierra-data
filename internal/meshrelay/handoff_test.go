@@ -74,3 +74,21 @@ type nopHolder struct{}
 func (nopHolder) Deliver([]byte) {}
 func (nopHolder) Notify(any)     {}
 func (nopHolder) End(string)     {}
+
+// Stopped before prefab got round to Init (a cancelled activation): a late
+// Init must not start the loop against what may be a closed store.
+func TestStopBeforeInitPreventsTheLoop(t *testing.T) {
+	st, err := OpenStore(context.Background(), filepath.Join(t.TempDir(), "relay.db"), time.Second)
+	require.NoError(t, err)
+	r := New(context.Background(), Config{}, st)
+	require.NoError(t, r.Stop(context.Background()))
+	require.NoError(t, st.Close())
+
+	require.NoError(t, r.Init(context.Background(), nil))
+	select {
+	case <-r.stopped:
+	default:
+		t.Fatal("a halted relay's Init must not leave a loop running")
+	}
+	require.NoError(t, r.Shutdown(context.Background()), "and Shutdown still works")
+}

@@ -166,10 +166,17 @@ func (s *Scheduler) Stop(grace, timeout time.Duration) error {
 	case <-time.After(grace):
 	}
 	s.cancel()
-	select {
+	if timeout > 0 {
+		select {
+		case <-done:
+			return nil
+		case <-time.After(timeout):
+		}
+	}
+	select { // a stop that finished at the deadline still counts
 	case <-done:
 		return nil
-	case <-time.After(timeout):
+	default:
 		return fmt.Errorf("ingest: scheduler goroutines still running %s after cancellation", timeout)
 	}
 }

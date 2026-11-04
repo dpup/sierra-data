@@ -43,9 +43,11 @@ type ControlConfig struct {
 	// before cancelling them (default 10s). It is downtime during a handoff,
 	// so keep it short.
 	DrainTimeout time.Duration `koanf:"drainTimeout"`
-	// WorkerStopTimeout bounds how long quiescence waits for background
-	// database users after cancelling them (default 15s). Past it the release
-	// FAILS and the database counts as held.
+	// WorkerStopTimeout is the one budget quiescence gives every background
+	// database user to stop (default 10s, including a 2s grace before a running
+	// ingest tick is cancelled). Past it the release FAILS and the database
+	// counts as held. With DrainTimeout the worst case is 20s, inside ECS's
+	// default 30s stop timeout.
 	WorkerStopTimeout time.Duration `koanf:"workerStopTimeout"`
 }
 
@@ -62,7 +64,7 @@ func (c ControlConfig) WorkerStop() time.Duration {
 	if c.WorkerStopTimeout > 0 {
 		return c.WorkerStopTimeout
 	}
-	return 15 * time.Second
+	return 10 * time.Second
 }
 
 // Enabled reports whether the control listener should run.

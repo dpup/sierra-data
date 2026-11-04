@@ -170,20 +170,20 @@ func (g *Gate) Drain(grace, cancelWait time.Duration) DrainResult {
 }
 
 func waitClosed(ch <-chan struct{}, d time.Duration) bool {
-	if d <= 0 {
+	if d > 0 {
+		t := time.NewTimer(d)
+		defer t.Stop()
 		select {
 		case <-ch:
 			return true
-		default:
-			return false
+		case <-t.C:
 		}
 	}
-	t := time.NewTimer(d)
-	defer t.Stop()
+	// Timed out (or no budget): a channel that closed meanwhile still counts.
 	select {
 	case <-ch:
 		return true
-	case <-t.C:
+	default:
 		return false
 	}
 }
