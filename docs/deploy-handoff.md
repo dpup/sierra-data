@@ -119,17 +119,26 @@ terminate the old task and confirm it is gone.
 
 | Endpoint | Auth | |
 |---|---|---|
-| `GET /status` | none | state, `prepared`, `ready`, `databaseHeld`, `standby`, identity (`instanceId`, `pid`, `hostname`, `revision`, `startedAt`), the current/last `operation`, `activatedBy`, `quiescedBy` |
+| `GET /status` | none | state, `prepared`, `ready`, `databaseHeld`, `standby`, identity (`instanceId`, `pid`, `hostname`, `revision`, `startedAt`), the current/last `operation`, `activatedBy`, `quiescedBy`, and `ecs` (below) |
 | `GET /livez` | none | 200 whenever the process and its control plane are up, standby included |
 | `GET /readyz` | none | 200 only when ACTIVE; 503 otherwise |
-| `POST /activate` | bearer | body `{"operationId": "..."}` |
-| `POST /quiesce` | bearer | body `{"operationId": "..."}` |
+| `POST /activate` | bearer | body `{"operationId": "...", "expectedInstanceId": "..."}` |
+| `POST /quiesce` | bearer | body `{"operationId": "...", "expectedInstanceId": "..."}` |
 
 Mutating calls take `Authorization: Bearer <token>` (401 without it). Both run
 asynchronously: `202 Accepted` with the operation, then poll `/status` until
 the operation's `status` is `succeeded` or `failed` (`error` says why). Every
-response carries `state` and `operation`; conflicts carry
+response carries `state`, `instanceId` and `operation`; conflicts carry
 `error: {code, message}` with HTTP 409.
+
+**`expectedInstanceId` addresses one process incarnation.** Every process
+gets a random `instanceId` at start; a container restart comes back at the
+same IP and port with a new one. When the field is set and does not match,
+the command is refused with 409 `instance_mismatch` **before** anything else
+is considered, in every state, idempotent replays included, so a delayed
+command meant for a previous incarnation can never activate or quiesce its
+successor. Read `instanceId` from `/status` and send it on every command; it
+is optional only so a hand-run command still works.
 
 | state | `POST /activate` | `POST /quiesce` |
 |---|---|---|
@@ -143,6 +152,26 @@ response carries `state` and `operation`; conflicts carry
 
 Use one operation id per deployment step (`<deploy>-release`,
 `<deploy>-activate`), and reuse it on retries of the same request.
+
+### ECS identity (`/status.ecs`)
+
+On ECS the process reads the task metadata endpoint (v4,
+`ECS_CONTAINER_METADATA_URI_V4`) and reports `taskArn`, `cluster`, `family`,
+`revision`, `availabilityZone`, `containerName`, `containerArn`, `dockerId`,
+`containerStartedAt` and `restartCount`.
+
+- `boundToProcess: true` means the metadata describes THIS process: ECS's
+  container start time is at most 2 minutes before the process started (5s
+  clock skew allowed after). Metadata can lag a container restart; until it
+  is bound, the process re-reads it every 2s for up to 2 minutes, and
+  `reason` says why it is not bound. Only trust `restartCount` from a bound
+  reading.
+- `restartCount` is `null` when ECS does not report it (it is expected only
+  for containers with a restart policy): unknown, never 0. **Confirm on a real
+  Fargate container restart that it is present and increments** before the
+  coordinator relies on it.
+- Off ECS (local runs) or with the endpoint unreachable: `available: false`
+  with a `reason`. Nothing else depends on it.
 
 ## SIGTERM
 
@@ -168,11 +197,14 @@ database ended released (process exit releases the lock regardless).
 ```
 start replacement task with --standby
   wait: GET new:/livez == 200 and /status.state == STANDBY
-POST old:/quiesce  {"operationId": "D-release"}        (Grid AND relay)
+  record each process's /status.instanceId (old and new, Grid and relay)
+POST old:/quiesce  {"operationId": "D-release", "expectedInstanceId": OLD}   (Grid AND relay)
   wait: old /status.state == QUIESCED and databaseHeld == false   (both)
   on failure or timeout: do NOT activate; terminate the old task and confirm
   it has stopped, then continue
-POST new:/activate {"operationId": "D-activate"}       (both)
+POST new:/activate {"operationId": "D-activate", "expectedInstanceId": NEW}  (both)
+  409 instance_mismatch: the process restarted since it was recorded; re-read
+  /status and decide again (never retry blindly with the new id)
   wait: new /status.state == ACTIVE (operation succeeded), /readyz == 200
   on failure: the new task is back in STANDBY, released; see rollback
 switch load-balancer traffic to the new task; verify production health
