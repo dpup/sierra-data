@@ -67,6 +67,46 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -ldflags="-s -w" -o /sierra-server ./cmd/server
 
 ###############################################################################
+# Mesh relay image (docker build --target relay) — a SEPARATE service
+###############################################################################
+# The relay is its own process with its own database so a relay crash or deploy
+# never touches the hazard feeds (see internal/meshrelay). It does not embed the
+# site, so this build skips the Node stage entirely. These stages sit BEFORE the
+# server's final stage so a plain `docker build` still produces the server.
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS relay-builder
+WORKDIR /app
+ENV GOTOOLCHAIN=local
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -ldflags="-s -w" -o /mesh-relay ./cmd/mesh-relay
+
+FROM alpine:3.19 AS relay
+RUN apk add --no-cache ca-certificates tzdata && apk upgrade && \
+    addgroup -S sierra && adduser -S sierra -G sierra && \
+    mkdir -p /data && chown sierra:sierra /data
+WORKDIR /app
+COPY --from=relay-builder /mesh-relay /app/mesh-relay
+# The relay runs on prefab like the Grid and reads the same prefab.yaml (its
+# meshRelay section: port, admins, timings). No secrets live in it.
+COPY --from=relay-builder /app/prefab.yaml /app/prefab.yaml
+# Gateways, client token hashes and the lease audit log. Its OWN file — never
+# point this at grid.db (both processes take an exclusive lock on their file).
+# Note the underscore: PF__MESH_RELAY__DB_PATH -> meshRelay.dbPath.
+VOLUME ["/data"]
+ENV PF__MESH_RELAY__DB_PATH=/data/relay.db \
+    PF__MESH_RELAY__CLIENT_IP_HEADER=X-Forwarded-For \
+    PF__SERVER__HOST=0.0.0.0
+USER sierra
+EXPOSE 8090
+HEALTHCHECK --interval=30s --timeout=3s --start-period=120s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:8090/mesh/relay/healthz || exit 1
+ENTRYPOINT ["/app/mesh-relay"]
+
+###############################################################################
 # Stage 3: Final lightweight runtime image
 ###############################################################################
 FROM alpine:3.19

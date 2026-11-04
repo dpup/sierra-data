@@ -1,0 +1,457 @@
+package meshrelay
+
+import (
+	_ "embed"
+	"encoding/json"
+	stderrors "errors"
+	"net/http"
+	"strconv"
+	"time"
+
+	"github.com/dpup/prefab"
+	"github.com/dpup/prefab/errors"
+	"github.com/dpup/prefab/logging"
+	"google.golang.org/grpc/codes"
+)
+
+// PathPrefix is where the reverse proxy routes the relay. The proxy does not
+// strip it, so every route below carries it.
+const PathPrefix = "/mesh/relay"
+
+const maxAPIBody = 16 << 10
+
+//go:embed status.html
+var statusPage []byte
+
+// ServerOptions implements prefab.OptionProvider, so prefab.WithPlugin(relay)
+// alone mounts everything: the websocket endpoints, healthz and the status page
+// as plain HTTP handlers, and the admin API as prefab JSON handlers (so errors
+// share the {code, codeName, message} envelope of /api/v1). Being a plugin is
+// what gives prefab the relay's lifecycle (Init/Shutdown in relay.go).
+//
+// Patterns are Go ServeMux patterns; prefab registers them on its mux as-is.
+// The websocket handlers rely on prefab's gzip wrapper passing http.Hijacker
+// through, which it does (relay_test.go dials with Accept-Encoding: gzip).
+func (r *Relay) ServerOptions() []prefab.ServerOption {
+	p := PathPrefix
+	api := p + "/api"
+	return []prefab.ServerOption{
+		prefab.WithHTTPHandlerFunc("GET "+p+"/healthz", func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "text/plain")
+			_, _ = w.Write([]byte("ok\n"))
+		}),
+		// The status page is a static shell: it holds no data and fetches
+		// /api/gateways with a token the viewer pastes in. Nothing about the
+		// gateways is public.
+		prefab.WithHTTPHandlerFunc("GET "+p+"/{$}", func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Header().Set("Cache-Control", "no-store")
+			w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'")
+			_, _ = w.Write(statusPage)
+		}),
+		prefab.WithHTTPHandlerFunc("GET "+p, func(w http.ResponseWriter, req *http.Request) {
+			http.Redirect(w, req, p+"/", http.StatusMovedPermanently)
+		}),
+		prefab.WithHTTPHandlerFunc("GET "+p+"/{gateway}/dial", r.handleBridge),
+		prefab.WithHTTPHandlerFunc("GET "+p+"/{gateway}", r.handleClient),
+
+		prefab.WithJSONHandler("GET "+api+"/gateways", r.viewer(r.apiListGateways)),
+		prefab.WithJSONHandler("POST "+api+"/gateways", r.admin(r.apiCreateGateway)),
+		prefab.WithJSONHandler("GET "+api+"/gateways/{name}", r.viewer(r.apiGetGateway)),
+		prefab.WithJSONHandler("DELETE "+api+"/gateways/{name}", r.admin(r.apiDeleteGateway)),
+		prefab.WithJSONHandler("POST "+api+"/gateways/{name}/rotate-token", r.admin(r.apiRotateToken)),
+		prefab.WithJSONHandler("POST "+api+"/gateways/{name}/accept-pubkey", r.admin(r.apiAcceptPubkey)),
+		prefab.WithJSONHandler("POST "+api+"/gateways/{name}/relink", r.admin(r.apiRelink)),
+		prefab.WithJSONHandler("GET "+api+"/clients", r.admin(r.apiListClients)),
+		prefab.WithJSONHandler("POST "+api+"/clients", r.admin(r.apiCreateClient)),
+		prefab.WithJSONHandler("DELETE "+api+"/clients/{name}", r.admin(r.apiDeleteClient)),
+		prefab.WithJSONHandler("GET "+api+"/leases", r.viewer(r.apiLeases)),
+		prefab.WithJSONHandler("GET "+api+"/metrics", r.viewer(r.apiMetrics)),
+	}
+}
+
+// apiHandler is an admin API handler with the authenticated caller.
+type apiHandler func(req *http.Request, who *ClientRecord) (any, error)
+
+// viewer admits any client role: the roles table gives admin, operator and
+// agent alike "view status".
+func (r *Relay) viewer(h apiHandler) prefab.JSONHandler { return r.authed(h, false) }
+
+// admin admits only admins: everything that changes state.
+func (r *Relay) admin(h apiHandler) prefab.JSONHandler { return r.authed(h, true) }
+
+func (r *Relay) authed(h apiHandler, adminOnly bool) prefab.JSONHandler {
+	return func(req *http.Request) (any, error) {
+		ip := r.clientIP(req)
+		if r.lockout.isLocked(ip, r.now()) {
+			return nil, errors.NewC("too many authentication failures", codes.ResourceExhausted)
+		}
+		who, err := r.authClient(req)
+		if stderrors.Is(err, ErrNotFound) {
+			r.m.authFailures.Add(1)
+			r.lockout.fail(ip, r.now())
+			logging.Infow(r.ctx, "auth failed", "kind", "api", "ip", ip, "path", req.URL.Path)
+			return nil, errors.NewC("a client token is required", codes.Unauthenticated)
+		}
+		if err != nil {
+			return nil, errors.Wrap(err, 0)
+		}
+		if adminOnly && who.Role != RoleAdmin {
+			return nil, errors.NewC("admin role required", codes.PermissionDenied)
+		}
+		if req.Method != http.MethodGet {
+			logging.Infow(r.ctx, "admin action", "client", who.Name, "method", req.Method, "path", req.URL.Path)
+		}
+		return h(req, who)
+	}
+}
+
+func decodeBody(req *http.Request, v any) error {
+	dec := json.NewDecoder(http.MaxBytesReader(nil, req.Body, maxAPIBody))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(v); err != nil {
+		return errors.NewC("bad request body: "+err.Error(), codes.InvalidArgument)
+	}
+	return nil
+}
+
+// storeErr maps a store error to an API error.
+func storeErr(err error, notFound string) error {
+	switch {
+	case stderrors.Is(err, ErrNotFound):
+		return errors.NewC(notFound, codes.NotFound)
+	case stderrors.Is(err, ErrExists):
+		return errors.NewC("already exists", codes.AlreadyExists)
+	}
+	return errors.Wrap(err, 0)
+}
+
+// conflict is a request that is valid but does not apply to the current state.
+func conflict(msg string) error {
+	return errors.NewC(msg, codes.FailedPrecondition).WithHTTPStatusCode(http.StatusConflict)
+}
+
+// oneTimeNote rides along with every response that carries a fresh token.
+const oneTimeNote = "this token is shown once; the relay keeps only its hash"
+
+// GatewayStatus is one gateway in GET /gateways.
+type GatewayStatus struct {
+	Name           string        `json:"name"`
+	Notes          string        `json:"notes,omitempty"`
+	Online         bool          `json:"online"`
+	Session        string        `json:"session,omitempty"`
+	ConnectedAt    *time.Time    `json:"connected_at,omitempty"`
+	LastSeen       *time.Time    `json:"last_seen,omitempty"`
+	Agent          *Agent        `json:"agent,omitempty"`
+	Link           *Link         `json:"link,omitempty"`
+	Node           *NodeInfo     `json:"node,omitempty"`
+	PubkeyStatus   string        `json:"pubkey_status"` // unpinned | pinned | mismatch
+	PinnedPubkey   string        `json:"pinned_pubkey,omitempty"`
+	MismatchPubkey string        `json:"mismatch_pubkey,omitempty"`
+	Lease          *LeaseSummary `json:"lease,omitempty"`
+	Stats          *Stats        `json:"stats,omitempty"`
+	StatsAt        *time.Time    `json:"stats_at,omitempty"`
+	CreatedAt      time.Time     `json:"created_at"`
+}
+
+// LeaseSummary is a live lease.
+type LeaseSummary struct {
+	ID        string    `json:"id"`
+	Gateway   string    `json:"gateway"`
+	Client    string    `json:"client"`
+	Role      Role      `json:"role"`
+	StartedAt time.Time `json:"started_at"`
+	ExpiresAt time.Time `json:"expires_at"`
+	// FramesToNode / FramesFromNode so far.
+	FramesToNode   int64 `json:"frames_to_node"`
+	FramesFromNode int64 `json:"frames_from_node"`
+}
+
+func timePtr(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	t = t.UTC()
+	return &t
+}
+
+func leaseSummaryLocked(l *Lease) *LeaseSummary {
+	return &LeaseSummary{ID: l.ID, Gateway: l.Gateway, Client: l.Client, Role: l.Role,
+		StartedAt: l.started.UTC(), ExpiresAt: l.expires.UTC(),
+		FramesToNode: l.framesTo.Load(), FramesFromNode: l.framesFrom.Load()}
+}
+
+// status merges a persisted row with live state: a live session's values win,
+// otherwise the last ones the store recorded.
+func (r *Relay) status(rec *GatewayRecord) GatewayStatus {
+	st := GatewayStatus{Name: rec.Name, Notes: rec.Notes, CreatedAt: rec.CreatedAt,
+		PinnedPubkey: rec.PinnedPubkey, MismatchPubkey: rec.MismatchPubkey,
+		LastSeen: timePtr(rec.LastSeen), Stats: rec.LastStats, StatsAt: timePtr(rec.LastStatsAt)}
+	if h := rec.LastHello; h != nil {
+		a, l := h.Agent, h.Link
+		st.Agent, st.Link = &a, &l
+	}
+	r.mu.Lock()
+	if g := r.gws[rec.Name]; g != nil {
+		if g.bridge != nil {
+			st.Online, st.Session = true, g.bridge.id
+			st.ConnectedAt = timePtr(g.connectedAt)
+			n := g.node
+			st.Node = &n
+			if g.hello != nil {
+				a, l := g.hello.Agent, g.hello.Link
+				st.Agent, st.Link = &a, &l
+			}
+		}
+		if !g.lastSeen.IsZero() {
+			st.LastSeen = timePtr(g.lastSeen)
+		}
+		if g.stats != nil {
+			s := *g.stats
+			st.Stats, st.StatsAt = &s, timePtr(g.statsAt)
+		}
+		if g.lease != nil {
+			st.Lease = leaseSummaryLocked(g.lease)
+		}
+	}
+	r.mu.Unlock()
+	if st.Node == nil && rec.LastHello != nil {
+		// Offline: report the last node identity, but not as connected.
+		n := rec.LastHello.Node
+		n.State = NodeDisconnected
+		st.Node = &n
+	}
+	switch {
+	case rec.MismatchPubkey != "":
+		st.PubkeyStatus = "mismatch"
+	case rec.PinnedPubkey != "":
+		st.PubkeyStatus = "pinned"
+	default:
+		st.PubkeyStatus = "unpinned"
+	}
+	return st
+}
+
+func (r *Relay) apiListGateways(_ *http.Request, _ *ClientRecord) (any, error) {
+	recs, err := r.store.Gateways()
+	if err != nil {
+		return nil, errors.Wrap(err, 0)
+	}
+	out := make([]GatewayStatus, 0, len(recs))
+	for _, rec := range recs {
+		out = append(out, r.status(rec))
+	}
+	return map[string]any{"gateways": out}, nil
+}
+
+func (r *Relay) apiGetGateway(req *http.Request, _ *ClientRecord) (any, error) {
+	rec, err := r.store.Gateway(req.PathValue("name"))
+	if err != nil {
+		return nil, storeErr(err, "unknown gateway")
+	}
+	events, err := r.store.GatewayEvents(rec.Name, 50)
+	if err != nil {
+		return nil, errors.Wrap(err, 0)
+	}
+	return struct {
+		GatewayStatus
+		Events []GatewayEvent `json:"events"`
+	}{r.status(rec), events}, nil
+}
+
+func (r *Relay) apiCreateGateway(req *http.Request, who *ClientRecord) (any, error) {
+	var body struct {
+		Name           string `json:"name"`
+		ExpectedPubkey string `json:"expected_pubkey"`
+		Notes          string `json:"notes"`
+	}
+	if err := decodeBody(req, &body); err != nil {
+		return nil, err
+	}
+	if !ValidGatewayName(body.Name) {
+		return nil, errors.NewC("gateway name must match [a-z0-9-]{3,40} and not be reserved", codes.InvalidArgument)
+	}
+	pinned := ""
+	if body.ExpectedPubkey != "" {
+		pk, ok := NormalizePubkey(body.ExpectedPubkey)
+		if !ok {
+			return nil, errors.NewC("expected_pubkey must be 64 hex characters", codes.InvalidArgument)
+		}
+		pinned = pk
+	}
+	tok, err := MintToken(BridgeTokenPrefix)
+	if err != nil {
+		return nil, errors.Wrap(err, 0)
+	}
+	if err := r.store.CreateGateway(body.Name, TokenHash(tok), pinned, body.Notes, r.now()); err != nil {
+		return nil, storeErr(err, "")
+	}
+	r.event(body.Name, "created", who.Name)
+	rec, err := r.store.Gateway(body.Name)
+	if err != nil {
+		return nil, errors.Wrap(err, 0)
+	}
+	return map[string]any{"gateway": r.status(rec), "bridge_token": tok, "note": oneTimeNote}, nil
+}
+
+func (r *Relay) apiRotateToken(req *http.Request, who *ClientRecord) (any, error) {
+	rec, err := r.store.Gateway(req.PathValue("name"))
+	if err != nil {
+		return nil, storeErr(err, "unknown gateway")
+	}
+	tok, err := MintToken(BridgeTokenPrefix)
+	if err != nil {
+		return nil, errors.Wrap(err, 0)
+	}
+	if err := r.store.SetGatewayToken(rec.Name, TokenHash(tok)); err != nil {
+		return nil, errors.Wrap(err, 0)
+	}
+	closed := r.closeBridge(rec.Name, CloseBadToken, "token rotated")
+	r.event(rec.Name, "token_rotated", who.Name)
+	return map[string]any{"bridge_token": tok, "closed_session": closed, "note": oneTimeNote}, nil
+}
+
+func (r *Relay) apiAcceptPubkey(req *http.Request, who *ClientRecord) (any, error) {
+	name := req.PathValue("name")
+	r.pubkeyMu.Lock()
+	defer r.pubkeyMu.Unlock()
+	rec, err := r.store.Gateway(name)
+	if err != nil {
+		return nil, storeErr(err, "unknown gateway")
+	}
+	if rec.MismatchPubkey == "" {
+		return nil, conflict("the gateway has no pubkey mismatch to accept")
+	}
+	accepted := rec.MismatchPubkey
+	if err := r.store.SetPubkeys(name, accepted, ""); err != nil {
+		return nil, errors.Wrap(err, 0)
+	}
+	r.mu.Lock()
+	if g := r.gws[name]; g != nil {
+		g.pinned, g.mismatch = accepted, ""
+	}
+	r.mu.Unlock()
+	r.event(name, "pubkey_accepted", accepted+" by "+who.Name)
+	logging.Infow(r.ctx, "pubkey change accepted", "gateway", name, "pubkey", accepted, "by", who.Name)
+	rec.PinnedPubkey, rec.MismatchPubkey = accepted, ""
+	return map[string]any{"gateway": r.status(rec)}, nil
+}
+
+func (r *Relay) apiRelink(req *http.Request, who *ClientRecord) (any, error) {
+	rec, err := r.store.Gateway(req.PathValue("name"))
+	if err != nil {
+		return nil, storeErr(err, "unknown gateway")
+	}
+	r.mu.Lock()
+	g := r.gws[rec.Name]
+	sent := g != nil && g.bridge != nil && g.bridge.conn.sendJSON(typeOnlyMsg{Type: "relink"})
+	r.mu.Unlock()
+	if !sent {
+		return nil, conflict("the gateway's bridge is not connected")
+	}
+	r.event(rec.Name, "relink", who.Name)
+	return map[string]any{"sent": true}, nil
+}
+
+func (r *Relay) apiDeleteGateway(req *http.Request, who *ClientRecord) (any, error) {
+	name := req.PathValue("name")
+	if err := r.store.DeleteGateway(name); err != nil {
+		return nil, storeErr(err, "unknown gateway")
+	}
+	// The token is gone from the store, so the bridge cannot reconnect; end the
+	// live session and any lease now.
+	r.mu.Lock()
+	if g := r.gws[name]; g != nil {
+		if g.lease != nil {
+			r.endLeaseLocked(g.lease, ReasonRevoked, true)
+		}
+		if g.bridge != nil {
+			g.bridge.conn.close(CloseBadToken, "gateway removed")
+		}
+		delete(r.gws, name)
+	}
+	r.mu.Unlock()
+	logging.Infow(r.ctx, "gateway removed", "gateway", name, "by", who.Name)
+	return map[string]any{"deleted": name}, nil
+}
+
+// --- clients ----------------------------------------------------------------
+
+func (r *Relay) apiListClients(_ *http.Request, _ *ClientRecord) (any, error) {
+	out, err := r.store.Clients()
+	if err != nil {
+		return nil, errors.Wrap(err, 0)
+	}
+	for _, name := range sortedNames(r.cfg.BootstrapAdmins) {
+		out = append(out, ClientRecord{Name: name, Role: RoleAdmin, Bootstrap: true})
+	}
+	return map[string]any{"clients": out}, nil
+}
+
+func (r *Relay) apiCreateClient(req *http.Request, who *ClientRecord) (any, error) {
+	var body struct {
+		Name string `json:"name"`
+		Role string `json:"role"`
+	}
+	if err := decodeBody(req, &body); err != nil {
+		return nil, err
+	}
+	if !ValidClientName(body.Name) {
+		return nil, errors.NewC("client name must be a lowercase slug", codes.InvalidArgument)
+	}
+	if _, isBootstrap := r.cfg.BootstrapAdmins[body.Name]; isBootstrap {
+		return nil, errors.NewC("that name is a bootstrap admin", codes.AlreadyExists)
+	}
+	role, err := ParseRole(body.Role)
+	if err != nil {
+		return nil, errors.NewC(err.Error(), codes.InvalidArgument)
+	}
+	tok, err := MintToken(ClientTokenPrefix)
+	if err != nil {
+		return nil, errors.Wrap(err, 0)
+	}
+	if err := r.store.CreateClient(body.Name, role, TokenHash(tok), r.now()); err != nil {
+		return nil, storeErr(err, "")
+	}
+	logging.Infow(r.ctx, "client token issued", "client", body.Name, "role", role, "by", who.Name)
+	return map[string]any{"client": body.Name, "role": role, "token": tok, "note": oneTimeNote}, nil
+}
+
+func (r *Relay) apiDeleteClient(req *http.Request, who *ClientRecord) (any, error) {
+	name := req.PathValue("name")
+	if _, isBootstrap := r.cfg.BootstrapAdmins[name]; isBootstrap {
+		return nil, conflict("bootstrap admins are configured, not issued; remove it from meshRelay.admins")
+	}
+	if err := r.store.DeleteClient(name); err != nil {
+		return nil, storeErr(err, "unknown client")
+	}
+	ended := r.EndLeasesFor(name, ReasonRevoked)
+	logging.Infow(r.ctx, "client token revoked", "client", name, "by", who.Name, "leases_ended", ended)
+	return map[string]any{"deleted": name, "leases_ended": ended}, nil
+}
+
+// --- leases & metrics -------------------------------------------------------
+
+func (r *Relay) apiLeases(req *http.Request, _ *ClientRecord) (any, error) {
+	limit := 100
+	if v, err := strconv.Atoi(req.URL.Query().Get("limit")); err == nil && v > 0 && v <= 1000 {
+		limit = v
+	}
+	recent, err := r.store.RecentLeases(limit)
+	if err != nil {
+		return nil, errors.Wrap(err, 0)
+	}
+	current := []*LeaseSummary{}
+	r.mu.Lock()
+	for _, name := range sortedNames(r.gws) {
+		if l := r.gws[name].lease; l != nil {
+			current = append(current, leaseSummaryLocked(l))
+		}
+	}
+	r.mu.Unlock()
+	return map[string]any{"current": current, "recent": recent}, nil
+}
+
+func (r *Relay) apiMetrics(_ *http.Request, _ *ClientRecord) (any, error) {
+	return r.Metrics(), nil
+}

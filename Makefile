@@ -1,5 +1,5 @@
 # Live Data API Server - Build, Test, and Deployment Tasks
-.PHONY: ingest-token test-pge test-llm burn-line-dry-run build test proto proto-tools clean server tools site site-modules site-ensure site-install site-dev site-shots site-shots-mock check-wiring run dev lint fmt docker docker-build docker-run docker-run-dev docker-push docker-clean deploy install help test-meshcore
+.PHONY: test-mesh-relay mesh-relay run-relay relay-token docker-build-relay ecr-push-relay ingest-token test-pge test-llm burn-line-dry-run build test proto proto-tools clean server tools site site-modules site-ensure site-install site-dev site-shots site-shots-mock check-wiring run dev lint fmt docker docker-build docker-run docker-run-dev docker-push docker-clean deploy install help test-meshcore
 
 # Go parameters
 GOCMD=go
@@ -34,12 +34,16 @@ TEST_MESHCORE_BINARY=$(BUILD_DIR)/test-meshcore
 TEST_PGE_BINARY=$(BUILD_DIR)/test-pge
 TEST_LLM_BINARY=$(BUILD_DIR)/test-llm
 BURN_LINE_BINARY=$(BUILD_DIR)/burn-line
+MESH_RELAY_BINARY=$(BUILD_DIR)/mesh-relay
+TEST_MESH_RELAY_BINARY=$(BUILD_DIR)/test-mesh-relay
 TEST_GEO_UTILS_BINARY=$(BUILD_DIR)/test-geo-utils
 TEST_ALERT_ENHANCER_BINARY=$(BUILD_DIR)/test-alert-enhancer
 TEST_ROUTE_MATCHER_BINARY=$(BUILD_DIR)/test-route-matcher
 
 # Docker parameters
 DOCKER_IMAGE_NAME=sierra-data
+# The mesh relay's image (Dockerfile --target relay), its own ECR repository.
+RELAY_IMAGE_NAME?=sierra-mesh-relay
 DOCKER_TAG?=latest
 DOCKER_REGISTRY?=
 
@@ -49,7 +53,7 @@ all: build
 ## Build Targets
 
 # Build everything (protobuf generation + server + CLI tools)
-build: proto server tools
+build: proto server tools mesh-relay
 
 # Build main server only
 server: $(SERVER_BINARY)
@@ -59,8 +63,35 @@ server: $(SERVER_BINARY)
 $(SERVER_BINARY): proto site-ensure
 	$(GOBUILD) -o $(SERVER_BINARY) ./$(CMD_DIR)/server
 
+# Mesh relay: a SEPARATE service (own process, own SQLite file). It does not
+# embed the site, so it needs neither Node nor site-ensure.
+mesh-relay:
+	$(GOBUILD) -o $(MESH_RELAY_BINARY) ./$(CMD_DIR)/mesh-relay
+
+# Run the relay in the foreground (prefab.yaml meshRelay: port 8090, db
+# ./data/relay.db). Add yourself to meshRelay.admins (see relay-token) to use
+# the admin API.
+run-relay: mesh-relay
+	./$(MESH_RELAY_BINARY)
+
+# End-to-end check of a RUNNING relay over the wire protocol (fake bridge + fake
+# node + client, on a throwaway gateway). Needs an admin token:
+#   make test-mesh-relay TOKEN="$$DPUP_RELAY" [RELAY_URL=https://data.sierragridteam.org]
+# The binary also has bridge/client modes for manual testing; see its --help.
+# Always rebuilt (Go's cache makes it instant): bin/ is shared with the dev
+# container, so an existing file may be a binary for another OS/arch.
+$(TEST_MESH_RELAY_BINARY): FORCE
+	$(GOBUILD) -o $(TEST_MESH_RELAY_BINARY) ./$(CMD_DIR)/test-mesh-relay
+
+test-mesh-relay: $(TEST_MESH_RELAY_BINARY)
+	@./$(TEST_MESH_RELAY_BINARY) -url "$(or $(RELAY_URL),http://localhost:8090)" -token "$(TOKEN)"
+
+# Mint a bootstrap admin token for the relay: make relay-token NAME=dpup
+relay-token:
+	@$(GOCMD) run ./$(CMD_DIR)/mesh-relay token -name="$(or $(NAME),$(USER))"
+
 # Build CLI testing tools only
-tools: $(TEST_GOOGLE_BINARY) $(TEST_CALTRANS_BINARY) $(TEST_WEATHER_BINARY) $(TEST_MESHCORE_BINARY) $(TEST_PGE_BINARY) $(TEST_LLM_BINARY) $(BURN_LINE_BINARY)
+tools: $(TEST_GOOGLE_BINARY) $(TEST_CALTRANS_BINARY) $(TEST_WEATHER_BINARY) $(TEST_MESHCORE_BINARY) $(TEST_PGE_BINARY) $(TEST_LLM_BINARY) $(BURN_LINE_BINARY) $(TEST_MESH_RELAY_BINARY)
 
 $(TEST_GOOGLE_BINARY): proto
 	$(GOBUILD) -o $(TEST_GOOGLE_BINARY) ./$(CMD_DIR)/test-google
@@ -511,6 +542,22 @@ docker-build: proto test
 		-t $(DOCKER_IMAGE_NAME):$(DOCKER_TAG) .
 	@echo "✅ Docker image built: $(DOCKER_IMAGE_NAME):$(DOCKER_TAG)"
 
+# The relay image: same Dockerfile, its own target (no site, no API keys).
+docker-build-relay:
+	docker build --platform linux/amd64 --target relay -t $(RELAY_IMAGE_NAME):$(DOCKER_TAG) .
+	@echo "✅ Docker image built: $(RELAY_IMAGE_NAME):$(DOCKER_TAG)"
+
+# Login to ECR and push the relay image (to its own repository).
+ecr-push-relay: docker-build-relay
+	@if [ -z "$(DOCKER_REGISTRY)" ]; then \
+		echo "⚠️  DOCKER_REGISTRY not set. Set with: make ecr-push-relay DOCKER_REGISTRY=your-ecr-registry"; \
+		exit 1; \
+	fi
+	aws ecr get-login-password --region $$(echo $(DOCKER_REGISTRY) | cut -d'.' -f4) | docker login --username AWS --password-stdin $(DOCKER_REGISTRY)
+	docker tag $(RELAY_IMAGE_NAME):$(DOCKER_TAG) $(DOCKER_REGISTRY)/$(RELAY_IMAGE_NAME):$(DOCKER_TAG)
+	docker push $(DOCKER_REGISTRY)/$(RELAY_IMAGE_NAME):$(DOCKER_TAG)
+	@echo "✅ Docker image pushed: $(DOCKER_REGISTRY)/$(RELAY_IMAGE_NAME):$(DOCKER_TAG)"
+
 # Run Docker container with environment variables
 docker-run: docker-build
 	@echo "Running Docker container: $(DOCKER_IMAGE_NAME):$(DOCKER_TAG)"
@@ -576,8 +623,25 @@ ecs-deploy: ecr-push
 	@echo "Task Definition: $(ECS_TASK_DEFINITION)"
 	@echo "Updating task definition with new image..."
 	aws ecs describe-task-definition --task-definition $(ECS_TASK_DEFINITION) --query 'taskDefinition' > /tmp/task-def.json
-	@# Update the image in the task definition
-	cat /tmp/task-def.json | jq --arg IMAGE "$(DOCKER_REGISTRY)/$(DOCKER_IMAGE_NAME):$(DOCKER_TAG)" '.containerDefinitions[0].image = $$IMAGE | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .placementConstraints, .compatibilities, .registeredAt, .registeredBy)' > /tmp/new-task-def.json
+	@# The task may also hold the mesh relay sidecar (docs/mesh-relay-server.md).
+	@# If any container runs the relay image, build and push it too, so both
+	@# containers deploy from the same commit.
+	@if jq -e --arg R "$(DOCKER_REGISTRY)/$(RELAY_IMAGE_NAME):" \
+		'any(.containerDefinitions[]; .image | startswith($$R))' /tmp/task-def.json > /dev/null; then \
+		echo "Task has a mesh relay container; building and pushing $(RELAY_IMAGE_NAME)..."; \
+		$(MAKE) ecr-push-relay || exit 1; \
+	fi
+	@# Update images by REPOSITORY, not by position: with a sidecar,
+	@# containerDefinitions[0] is not necessarily the server. A single-container
+	@# task keeps the old behaviour. Fails (jq -e) if no container got the server image.
+	jq -e --arg SREPO "$(DOCKER_REGISTRY)/$(DOCKER_IMAGE_NAME):" --arg SERVER "$(DOCKER_REGISTRY)/$(DOCKER_IMAGE_NAME):$(DOCKER_TAG)" \
+		--arg RREPO "$(DOCKER_REGISTRY)/$(RELAY_IMAGE_NAME):" --arg RELAY "$(DOCKER_REGISTRY)/$(RELAY_IMAGE_NAME):$(DOCKER_TAG)" \
+		'.containerDefinitions |= (if length == 1 then map(.image = $$SERVER) else map( \
+			if (.image | startswith($$SREPO)) then .image = $$SERVER \
+			elif (.image | startswith($$RREPO)) then .image = $$RELAY else . end) end) \
+		| if any(.containerDefinitions[]; .image == $$SERVER) then . else error("no container in the task definition runs " + $$SREPO + "*; refusing to deploy") end \
+		| del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .placementConstraints, .compatibilities, .registeredAt, .registeredBy)' \
+		/tmp/task-def.json > /tmp/new-task-def.json
 	@echo "Registering new task definition..."
 	aws ecs register-task-definition --cli-input-json file:///tmp/new-task-def.json --query 'taskDefinition.taskDefinitionArn' --output text > /tmp/new-task-arn.txt
 	@echo "Updating service to use new task definition..."
@@ -636,6 +700,7 @@ help:
 	@echo "  clean       - Clean build artifacts"
 	@echo ""
 	@echo "Operations targets:"
+	@echo "  relay-token NAME=id - Mint a mesh-relay bootstrap admin token (prints the meshRelay.admins entry)"
 	@echo "  ingest-token [REPORTER=id] [NAME=\"...\"] - Mint a push-ingest credential;"
 	@echo "                with REPORTER it writes the hash into prefab.yaml (rotates if it exists)"
 	@echo ""
@@ -652,6 +717,8 @@ help:
 	@echo "Development targets:"
 	@echo "  run         - Run server (blocks until stopped with Ctrl+C)"
 	@echo "  run-bg      - Run server in background (stops existing server first)"
+	@echo "  run-relay   - Run the mesh relay in the foreground on :8090 (separate service)"
+	@echo "  test-mesh-relay TOKEN=smc_... [RELAY_URL=url] - E2E check of a running mesh relay"
 	@echo "  stop        - Stop background server (handles orphaned processes)"
 	@echo "  test-server - Quick server startup test (3 seconds)"
 	@echo "  dev         - Run server in development mode with auto-restart"
@@ -660,9 +727,11 @@ help:
 	@echo ""
 	@echo "Docker targets:"
 	@echo "  docker-build     - Build Docker container image"
+	@echo "  docker-build-relay - Build the mesh relay image (Dockerfile --target relay)"
 	@echo "  docker-run       - Run Docker container with API keys from environment"
 	@echo "  docker-run-dev   - Run Docker container with mounted config for development"
 	@echo "  ecr-push         - Login to ECR and push Docker image"
+	@echo "  ecr-push-relay   - Login to ECR and push the mesh relay image (RELAY_IMAGE_NAME)"
 	@echo "  docker-push      - Push Docker image to registry (set DOCKER_REGISTRY)"
 	@echo "  docker-clean     - Clean up Docker artifacts and containers"
 	@echo ""
@@ -675,3 +744,6 @@ help:
 	@echo "Utility targets:"
 	@echo "  deps        - Update Go dependencies"
 	@echo "  help        - Show this help message"
+
+# Forces a file target to rebuild every time.
+FORCE:

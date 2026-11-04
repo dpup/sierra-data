@@ -26,10 +26,12 @@ Last updated: 2026-07-06
 ├── bin/                        # Compiled binaries
 ├── cmd/                       # CLI applications
 │   ├── server/                # Main API server (main.go, site.go, gridadapter.go)
+│   ├── mesh-relay/            # SIERRA Mesh Relay — a SEPARATE service (see below)
 │   ├── test-google/           # Google Routes API testing tool
 │   ├── test-caltrans/         # Caltrans data testing tool
 │   ├── test-weather/          # Weather API testing tool
-│   └── test-pge/              # PG&E outage/PSPS testing tool (+ freshness probe)
+│   ├── test-pge/              # PG&E outage/PSPS testing tool (+ freshness probe)
+│   └── test-mesh-relay/       # Mesh relay E2E tool (+ manual bridge/client modes)
 ├── internal/                  # Private application code
 │   ├── services/              # gRPC service implementations
 │   ├── clients/               # External API clients
@@ -41,6 +43,7 @@ Last updated: 2026-07-06
 │   ├── pushingest/            # Authenticated push ingest (POST /api/v1/ingest/{stream})
 │   ├── gridapi/               # /api/v1 GridService impl (gRPC) + hand-built GeoJSON
 │   ├── places/                # Grid place directory seeder (areas/counties/towns/corridors)
+│   ├── meshrelay/             # Mesh Relay: bridge/client websockets, leases, admin API, own SQLite
 │   └── lib/                   # Shared libraries (incl. lib/geojson: geometry + PIP)
 ├── data/places/               # Checked-in Census county polygons (counties.geojson)
 ├── site/                      # Embedded data.sierragridteam.org static site (served at /)
@@ -649,6 +652,39 @@ restart rehydrates events + history with no re-fetch. The in-memory TTL caches
 (`internal/cache`) remain on the read path for the roads/weather/hazards services
 — they are not the source of truth. See `internal/store/CLAUDE.md` and
 `internal/ingest/CLAUDE.md` before touching the store or a poller.
+
+## Mesh Relay (separate service)
+
+`cmd/mesh-relay` + `internal/meshrelay`: the meeting point for MeshCore gateway
+bridges at volunteers' houses (they dial OUT over WSS) and the authenticated
+clients that use a node through them, at `/mesh/relay/*`. **It is not part of
+the Grid server process and must stay that way**: its own binary, its own image
+target (`docker build --target relay`), its own SQLite file (`meshRelay.dbPath`, never `grid.db`), and
+`cmd/server` never imports it — a relay crash must not touch the hazard feeds.
+**It is still a prefab app**: prefab owns its HTTP server, config (the
+`meshRelay:` section of the shared `prefab.yaml`, `PF__MESH_RELAY__*`, checked
+by `ValidateEnvOverrides`), logging, errors, and lifecycle — the `Relay` is a
+prefab plugin (`OptionProvider` mounts its routes; `Init`/`Shutdown` run its
+loop and close the hijacked websockets prefab's drain can't see). Admin API
+routes are prefab JSON handlers (the `/api/v1` error envelope); the websockets
+are plain handlers using gorilla/websocket (prefab has no websocket support;
+its gzip wrapper passes `Hijack` through). Both processes read `prefab.yaml`,
+so a new top-level namespace goes in `config.RegisterPrefabNamespaces`. `make
+mesh-relay`, `make run-relay` (:8090), `make relay-token NAME=<you>` (prints a
+`meshRelay.admins` entry — hash only, safe to commit), `make test-mesh-relay
+TOKEN=<admin> [RELAY_URL=...]` (E2E over the wire against a running relay — an
+independent protocol implementation, not the relay's own types; its test runs
+the same scenario in-process, so tool and relay can't drift).
+
+Invariants: no unauthenticated route reaches a node (only `/healthz` and a
+data-free status shell are public); **never log frame payloads** (they carry
+private messages and channel keys — `CHANNEL_INFO` returns the secret); tokens
+are stored as SHA-256 only and shown once; one exclusive lease per gateway, and
+only onto a node that reports its pinned pubkey. The frame path never touches
+the DB (audit writes are queued). Wire protocol:
+`docs/mesh-relay-wireprotocol.md` — **shared verbatim with the bridge repo
+(meshbridge); change it in both**. Service spec, decisions and the deploy
+checklist: `docs/mesh-relay-server.md`.
 
 ## Performance & Monitoring
 
