@@ -70,6 +70,8 @@ type Options struct {
 	// Standby starts in STANDBY and waits for POST /activate. Without it the
 	// process activates at boot, as it always has.
 	Standby bool
+	// ECSMetadataURI overrides ECS_CONTAINER_METADATA_URI_V4 (tests).
+	ECSMetadataURI string
 }
 
 // Operation is one activation or quiescence.
@@ -115,6 +117,10 @@ type Controller struct {
 	server *http.Server
 	now    func() time.Time
 	fail   chan error // Fail's signal to Run; buffered 1
+
+	ecs           ECSIdentity // guarded by mu; see watchECSIdentity
+	ecsRetryFor   time.Duration
+	ecsRetryEvery time.Duration
 }
 
 // New validates opts and returns a controller in its initial state. It does
@@ -124,6 +130,8 @@ func New(ctx context.Context, svc Service, opts Options) (*Controller, error) {
 		svc: svc, opts: opts, ctx: logging.EnsureLogger(ctx),
 		instanceID: randomID(), startedAt: time.Now(), now: time.Now,
 		state: StateActivating, fail: make(chan error, 1),
+		ecs:         ECSIdentity{Reason: "not read yet"},
+		ecsRetryFor: 2 * time.Minute, ecsRetryEvery: 2 * time.Second,
 	}
 	if opts.Standby {
 		c.state = StateStandby
@@ -184,6 +192,9 @@ func (c *Controller) Run(ctx context.Context) int {
 		logging.Errorw(c.ctx, "Control listener failed", "error", err)
 		return 1
 	}
+	ecsCtx, stopECS := context.WithCancel(c.ctx)
+	defer stopECS()
+	go c.watchECSIdentity(ecsCtx)
 	if c.ln != nil {
 		c.server = &http.Server{Handler: c.routes(), ReadHeaderTimeout: 5 * time.Second}
 		go func() {
@@ -467,6 +478,13 @@ func (c *Controller) fenceLocked(origin string) {
 
 type opRequest struct {
 	OperationID string `json:"operationId"`
+	// ExpectedInstanceID, when set, must equal this process's instanceId or
+	// the command is refused (409 instance_mismatch) before any transition.
+	// A restarted container comes back at the same IP and port with a new
+	// instanceId, so this is what stops a delayed command meant for the
+	// previous process from acting on its successor. The coordinator always
+	// sends it; a hand-run command may omit it.
+	ExpectedInstanceID string `json:"expectedInstanceId"`
 }
 
 type apiError struct {
@@ -490,12 +508,15 @@ type StatusDoc struct {
 	Operation    *Operation `json:"operation,omitempty"`
 	ActivatedBy  string     `json:"activatedBy,omitempty"`
 	QuiescedBy   string     `json:"quiescedBy,omitempty"`
+	// ECS is the ECS task/container this process runs in (see ECSIdentity).
+	ECS ECSIdentity `json:"ecs"`
 }
 
 type opResponse struct {
-	State     State      `json:"state"`
-	Operation *Operation `json:"operation,omitempty"`
-	Error     *apiError  `json:"error,omitempty"`
+	State      State      `json:"state"`
+	InstanceID string     `json:"instanceId"`
+	Operation  *Operation `json:"operation,omitempty"`
+	Error      *apiError  `json:"error,omitempty"`
 }
 
 // Status snapshots the controller.
@@ -507,6 +528,7 @@ func (c *Controller) Status() StatusDoc {
 		Ready: c.state == StateActive, DatabaseHeld: c.held, Standby: c.opts.Standby,
 		InstanceID: c.instanceID, PID: os.Getpid(), Hostname: c.hostname, Revision: c.revision,
 		StartedAt: c.startedAt, ActivatedBy: c.activatedBy, QuiescedBy: c.quiescedBy,
+		ECS: c.ecs,
 	}
 	if c.op != nil {
 		op := *c.op
@@ -542,7 +564,7 @@ func (c *Controller) authed(h func(http.ResponseWriter, string)) http.HandlerFun
 		tok, ok := strings.CutPrefix(auth, "Bearer ")
 		sum := sha256.Sum256([]byte(strings.TrimSpace(tok)))
 		if !ok || subtle.ConstantTimeCompare(sum[:], c.tok) != 1 {
-			writeJSON(w, http.StatusUnauthorized, opResponse{State: c.State(),
+			writeJSON(w, http.StatusUnauthorized, opResponse{State: c.State(), InstanceID: c.instanceID,
 				Error: &apiError{Code: "unauthenticated", Message: "a valid deployment token is required"}})
 			return
 		}
@@ -550,14 +572,27 @@ func (c *Controller) authed(h func(http.ResponseWriter, string)) http.HandlerFun
 		body, _ := io.ReadAll(io.LimitReader(r.Body, 4096))
 		if len(strings.TrimSpace(string(body))) > 0 {
 			if err := json.Unmarshal(body, &req); err != nil {
-				writeJSON(w, http.StatusBadRequest, opResponse{State: c.State(),
-					Error: &apiError{Code: "bad_request", Message: "body must be {\"operationId\": \"...\"}"}})
+				writeJSON(w, http.StatusBadRequest, opResponse{State: c.State(), InstanceID: c.instanceID,
+					Error: &apiError{Code: "bad_request",
+						Message: "body must be {\"operationId\": \"...\", \"expectedInstanceId\": \"...\"}"}})
 				return
 			}
 		}
 		if len(req.OperationID) > 128 {
-			writeJSON(w, http.StatusBadRequest, opResponse{State: c.State(),
+			writeJSON(w, http.StatusBadRequest, opResponse{State: c.State(), InstanceID: c.instanceID,
 				Error: &apiError{Code: "bad_request", Message: "operationId is too long"}})
+			return
+		}
+		// Before any state is read for a transition: a command addressed to a
+		// different incarnation never reaches the handlers, not even as an
+		// idempotent replay.
+		if req.ExpectedInstanceID != "" && req.ExpectedInstanceID != c.instanceID {
+			logging.Warnw(c.ctx, "Refused a control command addressed to another process incarnation",
+				"path", r.URL.Path, "operationId", req.OperationID,
+				"expectedInstanceId", req.ExpectedInstanceID, "instanceId", c.instanceID)
+			writeJSON(w, http.StatusConflict, opResponse{State: c.State(), InstanceID: c.instanceID,
+				Error: &apiError{Code: "instance_mismatch",
+					Message: "expectedInstanceId " + req.ExpectedInstanceID + " is not this process (" + c.instanceID + ")"}})
 			return
 		}
 		h(w, req.OperationID)
@@ -637,7 +672,7 @@ func (c *Controller) replyLocked(w http.ResponseWriter, code int) {
 		cp := *c.op
 		op = &cp
 	}
-	writeJSON(w, code, opResponse{State: c.state, Operation: op})
+	writeJSON(w, code, opResponse{State: c.state, InstanceID: c.instanceID, Operation: op})
 }
 
 func (c *Controller) conflictLocked(w http.ResponseWriter, code, msg string) {
@@ -646,7 +681,7 @@ func (c *Controller) conflictLocked(w http.ResponseWriter, code, msg string) {
 		cp := *c.op
 		op = &cp
 	}
-	writeJSON(w, http.StatusConflict, opResponse{State: c.state, Operation: op,
+	writeJSON(w, http.StatusConflict, opResponse{State: c.state, InstanceID: c.instanceID, Operation: op,
 		Error: &apiError{Code: code, Message: msg}})
 }
 
