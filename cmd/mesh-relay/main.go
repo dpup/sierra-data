@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -63,6 +64,7 @@ func main() {
 		logging.Errorw(ctx, "Invalid deployment control configuration", "error", err)
 		log.Fatalf("Invalid deployment control configuration: %v", err)
 	}
+	app.onFatal = ctrl.Fail
 	os.Exit(ctrl.Run(ctx))
 }
 
@@ -76,6 +78,9 @@ type relayApp struct {
 	dbPath      string
 	lockTimeout time.Duration
 	port        int
+
+	// onFatal is the controller's Fail (main sets it).
+	onFatal func(error)
 
 	mu         sync.Mutex
 	store      *meshrelay.Store
@@ -111,17 +116,24 @@ func prepareRelay(ctx context.Context, relayCfg *config.MeshRelayConfig) (*relay
 // Activate opens relay.db and starts serving. A failure releases what it
 // opened (see gridApp.Activate for the same contract).
 func (a *relayApp) Activate(actx context.Context) (err error) {
+	// The lock wait logs through actx; see gridApp.Activate.
+	actx = handoff.WithLoggerOf(actx, a.ctx)
 	start := time.Now()
 	a.mu.Lock()
 	a.store, a.relay = nil, nil
 	a.quiesced = struct{ gate, sessions, drained, store bool }{}
 	a.mu.Unlock()
 	defer func() {
+		// A panic is a failed activation like any other: release what was
+		// opened rather than leave it running behind a "held" status.
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic during activation: %v\n%s", r, debug.Stack())
+		}
 		if err == nil {
 			return
 		}
 		logging.Warnw(a.ctx, "Activation failed; releasing what it opened", "error", err)
-		if qerr := a.Quiesce(context.Background()); qerr != nil {
+		if qerr := a.Quiesce(a.ctx); qerr != nil {
 			err = fmt.Errorf("%w (and releasing it failed: %w: %w)", err, handoff.ErrStillHeld, qerr)
 		}
 	}()
@@ -150,19 +162,34 @@ func (a *relayApp) Activate(actx context.Context) (err error) {
 		// prefab drives its Init/Shutdown.
 		prefab.WithPlugin(relay),
 	)
+	// Our listener must be the one WaitListening finds.
+	if err := handoff.PortFree(a.port); err != nil {
+		return err
+	}
 	done := make(chan struct{})
+	var serverErr error
 	a.mu.Lock()
 	a.serverDone = done
 	a.mu.Unlock()
 	go func() {
-		if err := server.Start(); err != nil {
-			logging.Errorw(a.ctx, "Relay server failed", "error", err)
+		serverErr = server.Start()
+		if serverErr != nil {
+			logging.Errorw(a.ctx, "Relay server failed", "error", serverErr)
 		}
 		close(done)
 	}()
 	if err := handoff.WaitListening(actx, a.port, done, 15*time.Second); err != nil {
 		return fmt.Errorf("relay listener: %w", err)
 	}
+	// prefab's Start returns nil only after its own SIGTERM shutdown; an error
+	// later means the relay stopped serving while holding relay.db, which the
+	// pre-handoff main treated as fatal.
+	go func() {
+		<-done
+		if serverErr != nil && a.onFatal != nil {
+			a.onFatal(fmt.Errorf("relay server stopped: %w", serverErr))
+		}
+	}()
 	logging.Infow(a.ctx, "Relay serving", "port", a.port, "activation", time.Since(start))
 	return nil
 }
@@ -181,7 +208,7 @@ func (a *relayApp) Quiesce(_ context.Context) error {
 
 	if a.relay != nil && !a.quiesced.sessions {
 		t := time.Now()
-		ctx, cancel := context.WithTimeout(context.Background(), a.control.WorkerStop())
+		ctx, cancel := context.WithTimeout(a.ctx, a.control.WorkerStop())
 		err := a.relay.Stop(ctx)
 		cancel()
 		if err != nil {

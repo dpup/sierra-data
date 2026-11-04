@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dpup/prefab/logging"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -459,4 +460,90 @@ func TestOptionsValidation(t *testing.T) {
 	assert.Error(t, err)
 	_, err = New(context.Background(), &fakeService{}, Options{Addr: ":0"})
 	assert.Error(t, err, "a control plane without a token would be unauthenticated")
+}
+
+// loggingService logs through the contexts the controller hands it, as the
+// real services do. prefab's logging panics on a context without a logger,
+// which is how a context.Background()-based activation context crash-looped
+// production the first time this shipped.
+type loggingService struct{ fakeService }
+
+func (s *loggingService) Activate(ctx context.Context) error {
+	logging.Infow(ctx, "test: activating through the handed-in context")
+	return s.fakeService.Activate(ctx)
+}
+
+func (s *loggingService) Quiesce(ctx context.Context) error {
+	logging.Infow(ctx, "test: quiescing through the handed-in context")
+	return s.fakeService.Quiesce(ctx)
+}
+
+func (s *loggingService) Exit(ctx context.Context) {
+	logging.Infow(ctx, "test: exiting through the handed-in context")
+	s.fakeService.Exit(ctx)
+}
+
+func TestServiceContextsCarryTheLogger(t *testing.T) {
+	ctx := logging.With(context.Background(), logging.NewDevLogger())
+	for _, standby := range []bool{false, true} {
+		svc := &loggingService{}
+		c, err := New(ctx, svc, Options{Service: "test", Addr: "127.0.0.1:0",
+			TokenSha256: tokenHash(testToken), Standby: standby})
+		require.NoError(t, err)
+		require.NoError(t, c.Listen())
+		runCtx, cancel := context.WithCancel(context.Background())
+		exit := make(chan int, 1)
+		go func() { exit <- c.Run(runCtx) }()
+		if standby {
+			h := &harness{t: t, c: c, base: "http://" + c.ControlAddr()}
+			h.waitFor(func(StatusDoc) bool { return true })
+			code, _ := h.post("/activate", testToken, "a1")
+			require.Equal(t, http.StatusAccepted, code)
+		}
+		require.Eventually(t, func() bool { return c.State() == StateActive }, 5*time.Second, 5*time.Millisecond)
+		cancel()
+		assert.Equal(t, 0, <-exit, "standby=%v: activate, quiesce and exit all logged without panicking", standby)
+		assert.True(t, svc.exited.Load())
+	}
+}
+
+type panickingService struct{ fakeService }
+
+func (s *panickingService) Activate(context.Context) error { panic("boom in activation") }
+
+func TestPanicDuringActivationCountsAsHeld(t *testing.T) {
+	svc := &panickingService{}
+	h := start(t, &svc.fakeService, true)
+	h.c.svc = svc
+	code, _ := h.post("/activate", testToken, "a1")
+	require.Equal(t, http.StatusAccepted, code)
+	d := h.waitFor(func(d StatusDoc) bool { return d.Operation != nil && d.Operation.Status == "failed" })
+	assert.Equal(t, StateQuiescing, d.State, "unknown resources may be open: not STANDBY")
+	assert.True(t, d.DatabaseHeld)
+	assert.Contains(t, d.Operation.Error, "boom in activation")
+}
+
+func TestPanicDuringBootActivationExitsNonZero(t *testing.T) {
+	c, err := New(context.Background(), &panickingService{}, Options{Service: "test"})
+	require.NoError(t, err)
+	assert.Equal(t, 1, c.Run(context.Background()))
+}
+
+// A service whose production server dies after activation calls Fail: the
+// controller quiesces (releasing the database) and the process exits 1, as
+// the pre-handoff main's log.Fatalf("Server failed") did.
+func TestFailQuiescesAndExitsNonZero(t *testing.T) {
+	svc := &fakeService{}
+	h := start(t, svc, false)
+	h.waitFor(func(d StatusDoc) bool { return d.State == StateActive })
+	h.c.Fail(errors.New("listener died"))
+	select {
+	case <-h.done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Fail did not end Run")
+	}
+	assert.Equal(t, 1, h.exitCode)
+	_, q := svc.counts()
+	assert.Equal(t, 1, q, "the database was released before exit")
+	assert.False(t, svc.open.Load())
 }

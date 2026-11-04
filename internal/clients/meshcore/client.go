@@ -199,6 +199,8 @@ func (e *nodeEntry) recordCadence(t time.Time) {
 type Registry struct {
 	cfg     Config
 	baseCtx context.Context
+	// connectRetry overrides the 30s broker retry interval (tests only).
+	connectRetry time.Duration
 
 	// instance is a random per-process suffix appended to every MQTT client id.
 	// A broker allows one session per client id and closes the older one when a
@@ -259,8 +261,11 @@ func NewRegistry(cfg Config) *Registry {
 		cfg.RetainFor = cfg.GraceCeil
 	}
 	return &Registry{
-		cfg:      cfg,
-		baseCtx:  context.Background(),
+		cfg: cfg,
+		// A logger-carrying default: Connect replaces it, but a registry fed
+		// only by mesh.packet forwards never calls Connect, and its drop
+		// warnings log through baseCtx (prefab logging panics without one).
+		baseCtx:  logging.EnsureLogger(context.Background()),
 		instance: newInstanceSuffix(),
 		nodes:    make(map[string]*nodeEntry),
 		obsGate:  make(map[string]time.Time),
@@ -395,7 +400,7 @@ func (r *Registry) buildClient(ctx context.Context, idx int, b Broker, link *bro
 		SetClientID(clientID).
 		SetAutoReconnect(true).
 		SetConnectRetry(true).
-		SetConnectRetryInterval(30 * time.Second).
+		SetConnectRetryInterval(r.retryInterval()).
 		SetConnectTimeout(15 * time.Second).
 		SetKeepAlive(60 * time.Second).
 		SetCleanSession(true)
@@ -891,6 +896,13 @@ func resolvePath(hops []string, idx map[string][]string) []string {
 	return res
 }
 
+func (r *Registry) retryInterval() time.Duration {
+	if r.connectRetry > 0 {
+		return r.connectRetry
+	}
+	return 30 * time.Second
+}
+
 // relayObserver is the radio that heard a packet, as a neighbour-graph anchor:
 // the envelope's own id, else the push reporter's (one radio per reporter).
 // Unlike the gateway it never falls back to the MQTT broker URL, which every
@@ -900,13 +912,18 @@ func relayObserver(env *packetEnvelope, defaultGateway string) string {
 	return firstNonEmpty(env.OriginID, env.Origin, defaultGateway)
 }
 
-// Close disconnects every broker.
+// Close disconnects every broker, including one still connecting or
+// reconnecting: paho's Disconnect ends the retry loop in those states too, so
+// a quiesced Grid (internal/handoff) never rejoins the feed. It disconnects
+// unconditionally rather than relying on IsConnected, which with connect
+// retry on reports true while paho is still trying (the quirk behind "A deaf
+// broker" in internal/ingest/CLAUDE.md).
 func (r *Registry) Close() {
 	r.mu.Lock()
 	clients := r.clients
 	r.mu.Unlock()
 	for _, c := range clients {
-		if c != nil && c.IsConnected() {
+		if c != nil {
 			c.Disconnect(250)
 		}
 	}

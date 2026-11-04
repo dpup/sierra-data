@@ -43,7 +43,7 @@ as before, and SIGTERM runs the same quiescence described below before exit.
 | `meshRelay.control.port` | `PF__MESH_RELAY__CONTROL__PORT` | 8091 | relay control listener (both containers share the task's network namespace, so the ports differ) |
 | `meshRelay.control.tokenSha256` | `PF__MESH_RELAY__CONTROL__TOKEN_SHA256` | empty (off) | |
 | `*.control.drainTimeout` | | 10s | in-flight request grace before cancellation; this is downtime |
-| `*.control.workerStopTimeout` | | 15s | how long to wait for background database users after cancelling them; past it the release FAILS |
+| `*.control.workerStopTimeout` | | 10s | one budget for every background database user to stop (a running ingest tick gets 2s, then is cancelled); past it the release FAILS. With `drainTimeout`, a quiesce takes at most ~20s, inside ECS's default 30s stop timeout |
 
 The control listener runs only when `tokenSha256` is set, with or without
 `--standby`. `--standby` without it refuses to start (a standby nobody can
@@ -78,9 +78,13 @@ STANDBY ──activate──▶ ACTIVATING ──ok──▶ ACTIVE ──quiesc
   process stays alive (so the platform can clean it up whenever) and never
   reopens its database.
 
-A failed activation releases what it opened and returns to STANDBY. If it
-cannot release, it goes to QUIESCING with a failed operation and
-`databaseHeld: true` instead.
+A failed activation (including a panic during it) releases what it opened
+and returns to STANDBY. If it cannot release, it goes to QUIESCING with a
+failed operation and `databaseHeld: true` instead. Activation also refuses to
+start when its production port is already bound, so it can never report
+ACTIVE on the strength of another process's listener; and the lock wait ends
+as soon as the activation is cancelled (SIGTERM), rather than after
+`lockTimeout`.
 
 ## Quiescence contract
 
@@ -151,6 +155,10 @@ The same quiescence runs on SIGTERM in every state, then the process exits:
 | ACTIVE | quiesce, then exit 0 (or 1 if the release failed) |
 | QUIESCING | wait for it; retry once if it failed; exit 0/1 |
 | QUIESCED | exit 0 |
+
+If the production server stops on its own after activation (prefab's
+`Start` returns an error), the process quiesces and exits 1, the same as a
+fatal server error before handoff, but with the database released first.
 
 A second signal exits immediately with 1. The exit code is 0 only when the
 database ended released (process exit releases the lock regardless).

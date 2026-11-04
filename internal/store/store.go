@@ -305,6 +305,7 @@ type openConfig struct {
 	cacheSizeMB    int
 	maxOpenConns   int
 	lockTimeout    time.Duration
+	lockCtx        context.Context // ends a lock wait early; nil = wait the full timeout
 }
 
 // journalModeSynchronous maps a journal mode to the synchronous level that
@@ -370,6 +371,14 @@ func WithLockTimeout(d time.Duration) Option {
 			c.lockTimeout = d
 		}
 	}
+}
+
+// WithLockContext makes Open's lock wait end as soon as ctx does. A handoff
+// activation (internal/handoff) passes its context so a SIGTERM during the
+// wait aborts it at once, instead of holding shutdown for up to lockTimeout
+// (90s, longer than ECS's 30s stop timeout).
+func WithLockContext(ctx context.Context) Option {
+	return func(c *openConfig) { c.lockCtx = ctx }
 }
 
 // WithMaxOpenConns bounds concurrent connections (and so multiplies the
@@ -446,7 +455,11 @@ func Open(path string, opts ...Option) (*Store, error) {
 	// process death — no stale lock. (This coordinates within one kernel; a writer
 	// on a separate host reaching the file via the mount can still slip past — for
 	// that, don't share the db path.)
-	lockFile, err := acquireDBLock(path, cfg.lockTimeout)
+	lockCtx := cfg.lockCtx
+	if lockCtx == nil {
+		lockCtx = context.Background()
+	}
+	lockFile, err := acquireDBLock(lockCtx, path, cfg.lockTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -537,7 +550,7 @@ var lockAcquireTimeout = DefaultLockTimeout
 // kernel on Close or if the process dies, so there is no stale lock to clean up.
 // It waits up to lockAcquireTimeout for a contended lock (deploy drain window)
 // before giving up.
-func acquireDBLock(dbPath string, timeout time.Duration) (*os.File, error) {
+func acquireDBLock(ctx context.Context, dbPath string, timeout time.Duration) (*os.File, error) {
 	lockPath := dbPath + ".lock"
 	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
@@ -575,7 +588,12 @@ func acquireDBLock(dbPath string, timeout time.Duration) (*os.File, error) {
 				"(normal during a deploy while the previous task drains)", dbPath, timeout)
 			announced = true
 		}
-		time.Sleep(250 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			f.Close()
+			return nil, fmt.Errorf("store: stopped waiting for the database lock on %q: %w", dbPath, ctx.Err())
+		case <-time.After(250 * time.Millisecond):
+		}
 	}
 	// Record our pid for humans inspecting the lock file (best-effort).
 	if err := f.Truncate(0); err == nil {

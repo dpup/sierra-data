@@ -1,14 +1,18 @@
 package meshcore
 
 import (
+	"context"
 	"crypto/ed25519"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/dpup/prefab/logging"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -480,4 +484,44 @@ func TestIngestEnvelopeOutcomes(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, PacketAccepted, out)
 	})
+}
+
+// A registry that never Connects (fed only by mesh.packet forwards) must still
+// be able to log: prefab's logging panics on a context with no logger, and the
+// drop paths log through baseCtx.
+func TestRegistryLogsWithoutConnect(t *testing.T) {
+	r := NewRegistry(Config{})
+	assert.NotPanics(t, func() { r.ingestRaw([]byte("not json"), "broker-x") })
+}
+
+// Close must stop a client that is still trying to reach its broker, or a
+// quiesced Grid (internal/handoff) whose broker was down at release time would
+// keep retrying and rejoin the feed when it came back. Pins the behaviour
+// whatever paho's IsConnected reports mid-retry.
+func TestCloseStopsReconnectingClients(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer ln.Close()
+	var attempts atomic.Int32
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			attempts.Add(1)
+			c.Close() // not a broker: every connect fails and paho retries
+		}
+	}()
+
+	r := NewRegistry(Config{Brokers: []Broker{{URL: "tcp://" + ln.Addr().String()}}})
+	r.connectRetry = 20 * time.Millisecond
+	require.NoError(t, r.Connect(logging.EnsureLogger(context.Background())))
+	require.Eventually(t, func() bool { return attempts.Load() >= 2 }, 5*time.Second, 5*time.Millisecond,
+		"the client should be retrying against the dead broker")
+
+	r.Close()
+	settled := attempts.Load()
+	time.Sleep(300 * time.Millisecond) // ~15 retry intervals
+	assert.LessOrEqual(t, attempts.Load()-settled, int32(1), "no retries after Close (one may already be in flight)")
 }

@@ -122,8 +122,9 @@ type Relay struct {
 	debug   map[string]bool
 	m       metrics
 
-	lifeMu  sync.Mutex         // guards cancel: Init runs on prefab's goroutine, Stop on the handoff's
+	lifeMu  sync.Mutex         // guards cancel and halted: Init runs on prefab's goroutine, Stop on the handoff's
 	cancel  context.CancelFunc // stops Run; set by Init
+	halted  bool               // Stop ran; a late Init must not start Run
 	stopped chan struct{}      // closed when Run returns
 }
 
@@ -145,6 +146,14 @@ func (r *Relay) Name() string { return PluginName }
 func (r *Relay) Init(ctx context.Context, _ *prefab.Registry) error {
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	r.lifeMu.Lock()
+	if r.halted {
+		// Stopped before prefab got round to Init (a cancelled activation):
+		// the store may already be closed, so the loop must never start.
+		r.lifeMu.Unlock()
+		cancel()
+		close(r.stopped)
+		return nil
+	}
 	r.cancel = cancel
 	r.lifeMu.Unlock()
 	go func() {
@@ -178,9 +187,12 @@ func (r *Relay) Shutdown(ctx context.Context) error {
 // own Shutdown on SIGTERM. A relay whose loop never started has nothing to
 // stop.
 func (r *Relay) Stop(ctx context.Context) error {
-	cancel := r.runCancel()
+	r.lifeMu.Lock()
+	r.halted = true
+	cancel := r.cancel
+	r.lifeMu.Unlock()
 	if cancel == nil {
-		return nil
+		return nil // never started, and now never will
 	}
 	cancel()
 	select {

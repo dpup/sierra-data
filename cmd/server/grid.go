@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -59,6 +60,13 @@ type gridApp struct {
 	hazards        *hazards.Service
 	nwsEnhancer    ingest.NWSEnhancer
 	model          string
+
+	// onFatal is the controller's Fail: the production server stopping after
+	// activation is fatal, as it was before handoff (main sets it).
+	onFatal func(error)
+	// activateHook, when set, runs at named points in Activate (tests inject
+	// failures and panics there).
+	activateHook func(stage string)
 
 	// Active: set by Activate, torn down by Quiesce.
 	mu         sync.Mutex
@@ -154,6 +162,10 @@ func prepareGrid(ctx context.Context, appConfig *config.Config) (*gridApp, error
 // held.
 func (a *gridApp) Activate(actx context.Context) (err error) {
 	ctx := a.ctx
+	// Everything below logs through actx too; carry the process logger on it
+	// whatever the caller passed (a logger-less context panics in prefab's
+	// logging, which once crash-looped production at the first mesh log line).
+	actx = handoff.WithLoggerOf(actx, ctx)
 	appConfig := a.cfg
 	activateStart := time.Now()
 
@@ -167,11 +179,16 @@ func (a *gridApp) Activate(actx context.Context) (err error) {
 	a.runCancel = runCancel
 	a.mu.Unlock()
 	defer func() {
+		// A panic is a failed activation like any other: release what was
+		// opened rather than leave it running behind a "held" status.
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic during activation: %v\n%s", r, debug.Stack())
+		}
 		if err == nil {
 			return
 		}
 		logging.Warnw(ctx, "Activation failed; releasing what it opened", "error", err)
-		if qerr := a.Quiesce(context.Background()); qerr != nil {
+		if qerr := a.Quiesce(ctx); qerr != nil {
 			err = fmt.Errorf("%w (and releasing it failed: %w: %w)", err, handoff.ErrStillHeld, qerr)
 		}
 	}()
@@ -185,6 +202,8 @@ func (a *gridApp) Activate(actx context.Context) (err error) {
 		store.WithCacheSizeMB(appConfig.Grid.CacheSizeMB),
 		store.WithMaxOpenConns(appConfig.Grid.MaxOpenConns),
 		store.WithLockTimeout(appConfig.Grid.LockTimeout),
+		// A SIGTERM during the lock wait ends it at once.
+		store.WithLockContext(actx),
 		store.WithWildfireProximity(appConfig.Grid.Wildfire.PlaceBuffer()))
 	if err != nil {
 		return fmt.Errorf("open grid store %s: %w", appConfig.Grid.DBPath, err)
@@ -192,6 +211,7 @@ func (a *gridApp) Activate(actx context.Context) (err error) {
 	a.mu.Lock()
 	a.store = gridStore
 	a.mu.Unlock()
+	a.hook("store-opened")
 
 	// Pragmas are per-connection, so this log line is the only place the store's
 	// effective configuration is observable from outside the process.
@@ -508,6 +528,12 @@ func (a *gridApp) Activate(actx context.Context) (err error) {
 	logging.Infow(ctx, "Server initialization complete, starting HTTP services",
 		"activation", time.Since(activateStart), "sinceProcessStart", time.Since(processStart))
 
+	// Our listener must be the one WaitListening finds: refuse to start on a
+	// port something else already holds.
+	port := prefab.ConfigInt("server.port")
+	if err := handoff.PortFree(port); err != nil {
+		return err
+	}
 	done := make(chan struct{})
 	a.mu.Lock()
 	a.server, a.serverDone = server, done
@@ -521,7 +547,7 @@ func (a *gridApp) Activate(actx context.Context) (err error) {
 		a.mu.Unlock()
 		close(done)
 	}()
-	if err := handoff.WaitListening(actx, prefab.ConfigInt("server.port"), done, 15*time.Second); err != nil {
+	if err := handoff.WaitListening(actx, port, done, 15*time.Second); err != nil {
 		a.mu.Lock()
 		serr := a.serverErr
 		a.mu.Unlock()
@@ -530,7 +556,25 @@ func (a *gridApp) Activate(actx context.Context) (err error) {
 		}
 		return fmt.Errorf("production listener: %w", err)
 	}
+	// prefab's Start returns nil only after its own SIGTERM shutdown. An error
+	// after this point means production stopped serving while we still hold
+	// grid.db, which the pre-handoff main treated as fatal.
+	go func() {
+		<-done
+		a.mu.Lock()
+		serr := a.serverErr
+		a.mu.Unlock()
+		if serr != nil && a.onFatal != nil {
+			a.onFatal(fmt.Errorf("production server stopped: %w", serr))
+		}
+	}()
 	return nil
+}
+
+func (a *gridApp) hook(stage string) {
+	if a.activateHook != nil {
+		a.activateHook(stage)
+	}
 }
 
 // Quiesce releases grid.db. In order: stop admitting and drain requests, stop
@@ -558,9 +602,13 @@ func (a *gridApp) Quiesce(_ context.Context) error {
 	}
 	a.quiesced.drained = true
 
+	// One budget for every background worker, so the worst case (drain +
+	// this) stays inside ECS's default 30s stop timeout.
+	workersDeadline := time.Now().Add(ctl.WorkerStop())
+
 	if !a.quiesced.workers && a.scheduler != nil {
 		t := time.Now()
-		if err := a.scheduler.Stop(2*time.Second, ctl.WorkerStop()); err != nil {
+		if err := a.scheduler.Stop(2*time.Second, max(time.Until(workersDeadline)-2*time.Second, 0)); err != nil {
 			logging.Errorw(ctx, "Quiesce: ingest scheduler did not stop", "error", err, "duration", time.Since(t))
 			return err
 		}
@@ -582,9 +630,7 @@ func (a *gridApp) Quiesce(_ context.Context) error {
 		}
 		bgDone := make(chan struct{})
 		go func() { a.bg.Wait(); close(bgDone) }()
-		select {
-		case <-bgDone:
-		case <-time.After(ctl.WorkerStop()):
+		if !handoff.WaitClosed(bgDone, max(time.Until(workersDeadline), 100*time.Millisecond)) {
 			err := fmt.Errorf("background store readers still running %s after cancellation", ctl.WorkerStop())
 			logging.Errorw(ctx, "Quiesce: background work did not stop", "error", err)
 			return err

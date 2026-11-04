@@ -278,3 +278,20 @@ func TestClosedStoreReleasesTheLockAndRefusesQueries(t *testing.T) {
 	_, err = s.UpsertEvent(ctx, testEvent("usgs:x", gridv1.Severity_MINOR, gridv1.EventStatus_ACTIVE, "x"))
 	assert.Error(t, err, "nor write to it")
 }
+
+// A lock wait ends when its context does (WithLockContext): a SIGTERM during a
+// handoff activation must not sit out the full lockTimeout.
+func TestOpenLockWaitHonoursContext(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "grid.db")
+	holder, err := Open(path)
+	require.NoError(t, err)
+	defer holder.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(50*time.Millisecond, cancel)
+	start := time.Now()
+	_, err = Open(path, WithLockTimeout(time.Minute), WithLockContext(ctx))
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Less(t, time.Since(start), 5*time.Second, "the wait ended with the context, not the minute")
+}
