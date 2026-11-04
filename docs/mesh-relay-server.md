@@ -135,6 +135,7 @@ Phase 1 is built: `cmd/mesh-relay` (binary) and `internal/meshrelay` (package). 
 - **The rate limit throttles.** See the wire spec. Disconnecting would cut off a healthy bridge whenever its node dumps a contact list.
 - **Auth lockout.** 10 failures from one IP within 10 min lock that IP out for 15 min (HTTP 429) on every relay route. Behind the proxy, set `meshRelay.clientIpHeader` to `X-Forwarded-For`. The relay image sets this by default. The relay uses the rightmost entry, which is the one the proxy appended. Without this setting, every client looks like the proxy and one bad bridge would lock everyone out.
 - **Payload debug.** `meshRelay.debugPayloadGateways` logs frames as hex at debug level for the gateways listed. It's off by default, and the relay logs a warning at startup for each gateway listed.
+- **Public status.** `GET /mesh/relay/api/status` needs no token and feeds the public site's `/relay` page. For each gateway it reports name, whether it's online, node state, whether a session could start now, whether one is in use and by what kind of client (the holder's role, never its name), bridge version and link kind, and last seen. It never includes pubkeys, node names, notes, lease holder names, the bridge's OS, or link detail. Gateway names are public through it, so choose names that don't pinpoint a house.
 - **Metrics.** `GET /mesh/relay/api/metrics` returns JSON counters, and the relay logs a `relay metrics` line every minute with per-minute rates.
 
 ### Deployment requirements

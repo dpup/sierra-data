@@ -1,7 +1,8 @@
 // api.js — the single network surface of data.sierragridteam.org.
 //
-// Every data fetch on this site is a same-origin browser GET of a /api/v1/* path
-// through this module. Each request is recorded in `requests` and announced
+// Every data fetch on this site is a same-origin browser GET through this
+// module: a /api/v1/* path, or the mesh relay's public /mesh/relay/api/status
+// (a separate service behind the same origin; see pages/relay.js). Each request is recorded in `requests` and announced
 // via a "grid:api-request" CustomEvent so the shared footer can render the
 // live "requests behind this page" log. No other module performs network I/O.
 //

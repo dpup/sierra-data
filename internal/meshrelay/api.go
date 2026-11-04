@@ -1,7 +1,6 @@
 package meshrelay
 
 import (
-	_ "embed"
 	"encoding/json"
 	stderrors "errors"
 	"net/http"
@@ -20,11 +19,8 @@ const PathPrefix = "/mesh/relay"
 
 const maxAPIBody = 16 << 10
 
-//go:embed status.html
-var statusPage []byte
-
 // ServerOptions implements prefab.OptionProvider, so prefab.WithPlugin(relay)
-// alone mounts everything: the websocket endpoints, healthz and the status page
+// alone mounts everything: the websocket endpoints, healthz and the root redirect
 // as plain HTTP handlers, and the admin API as prefab JSON handlers (so errors
 // share the {code, codeName, message} envelope of /api/v1). Being a plugin is
 // what gives prefab the relay's lifecycle (Init/Shutdown in relay.go).
@@ -40,21 +36,16 @@ func (r *Relay) ServerOptions() []prefab.ServerOption {
 			w.Header().Set("Content-Type", "text/plain")
 			_, _ = w.Write([]byte("ok\n"))
 		}),
-		// The status page is a static shell: it holds no data and fetches
-		// /api/gateways with a token the viewer pastes in. Nothing about the
-		// gateways is public.
-		prefab.WithHTTPHandlerFunc("GET "+p+"/{$}", func(w http.ResponseWriter, _ *http.Request) {
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.Header().Set("Cache-Control", "no-store")
-			w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'")
-			_, _ = w.Write(statusPage)
-		}),
-		prefab.WithHTTPHandlerFunc("GET "+p, func(w http.ResponseWriter, req *http.Request) {
-			http.Redirect(w, req, p+"/", http.StatusMovedPermanently)
-		}),
+		// The relay's own root has no page: status lives on the public site's
+		// /relay (served by the Grid, same origin), so send people there.
+		prefab.WithHTTPHandlerFunc("GET "+p+"/{$}", toSiteStatus),
+		prefab.WithHTTPHandlerFunc("GET "+p, toSiteStatus),
 		prefab.WithHTTPHandlerFunc("GET "+p+"/{gateway}/dial", r.handleBridge),
 		prefab.WithHTTPHandlerFunc("GET "+p+"/{gateway}", r.handleClient),
 
+		// The one unauthenticated API route: a deliberately minimal view for the
+		// public site's /relay page. See apiPublicStatus for what it withholds.
+		prefab.WithJSONHandler("GET "+api+"/status", r.apiPublicStatus),
 		prefab.WithJSONHandler("GET "+api+"/gateways", r.viewer(r.apiListGateways)),
 		prefab.WithJSONHandler("POST "+api+"/gateways", r.admin(r.apiCreateGateway)),
 		prefab.WithJSONHandler("GET "+api+"/gateways/{name}", r.viewer(r.apiGetGateway)),
@@ -68,6 +59,13 @@ func (r *Relay) ServerOptions() []prefab.ServerOption {
 		prefab.WithJSONHandler("GET "+api+"/leases", r.viewer(r.apiLeases)),
 		prefab.WithJSONHandler("GET "+api+"/metrics", r.viewer(r.apiMetrics)),
 	}
+}
+
+// SiteStatusPath is the public site's relay page, which renders /api/status.
+const SiteStatusPath = "/relay"
+
+func toSiteStatus(w http.ResponseWriter, req *http.Request) {
+	http.Redirect(w, req, SiteStatusPath, http.StatusFound)
 }
 
 // apiHandler is an admin API handler with the authenticated caller.
@@ -230,6 +228,76 @@ func (r *Relay) status(rec *GatewayRecord) GatewayStatus {
 		st.PubkeyStatus = "unpinned"
 	}
 	return st
+}
+
+// PublicGateway is one gateway in the public status. It answers "can this
+// gateway be used right now, and when was it last heard" and nothing else.
+type PublicGateway struct {
+	Name string `json:"name"`
+	// Online: a bridge session is attached.
+	Online bool `json:"online"`
+	// NodeState is the node behind the bridge: connected | disconnected |
+	// mismatch. A pubkey the relay has not verified reads as mismatch. Absent
+	// while the bridge is offline (the relay cannot know).
+	NodeState string `json:"node_state,omitempty"`
+	// Ready: a lease could be granted on this gateway's node.
+	Ready bool `json:"ready"`
+	// InUse: someone holds the lease. Never who: InUseRole says only what
+	// kind of client (admin | operator | agent), so someone waiting can tell an
+	// automated session from a person's. A client's name would publish when a
+	// person is on which gateway, and polling would make a history of it.
+	InUse          bool       `json:"in_use"`
+	InUseRole      Role       `json:"in_use_role,omitempty"`
+	ConnectedSince *time.Time `json:"connected_since,omitempty"`
+	LastSeen       *time.Time `json:"last_seen,omitempty"`
+	AgentVersion   string     `json:"agent_version,omitempty"`
+	LinkKind       string     `json:"link_kind,omitempty"`
+}
+
+// apiPublicStatus is GET /mesh/relay/api/status, the public status board.
+//
+// It withholds everything that is not needed to say whether a gateway works:
+// notes, pubkeys, node names, the bridge's OS and link detail (a serial port
+// or a LAN address), stats, the lease holder's identity (only its role is
+// shown) and the event log.
+// A gateway's node pubkey would tie it to the node's own adverts, which can
+// carry a location — and a gateway sits at a volunteer's house.
+func (r *Relay) apiPublicStatus(_ *http.Request) (any, error) {
+	recs, err := r.store.Gateways()
+	if err != nil {
+		return nil, errors.Wrap(err, 0)
+	}
+	out := make([]PublicGateway, 0, len(recs))
+	r.mu.Lock()
+	for _, rec := range recs {
+		pg := PublicGateway{Name: rec.Name, LastSeen: timePtr(rec.LastSeen)}
+		if h := rec.LastHello; h != nil {
+			pg.AgentVersion, pg.LinkKind = h.Agent.Version, h.Link.Kind
+		}
+		if g := r.gws[rec.Name]; g != nil {
+			if !g.lastSeen.IsZero() {
+				pg.LastSeen = timePtr(g.lastSeen)
+			}
+			if g.bridge != nil {
+				pg.Online = true
+				pg.ConnectedSince = timePtr(g.connectedAt)
+				pg.NodeState = g.node.State
+				if g.node.State == NodeConnected && !r.usableLocked(g) {
+					pg.NodeState = NodeMismatch
+				}
+				pg.Ready = r.usableLocked(g)
+				if g.hello != nil {
+					pg.AgentVersion, pg.LinkKind = g.hello.Agent.Version, g.hello.Link.Kind
+				}
+			}
+			if g.lease != nil {
+				pg.InUse, pg.InUseRole = true, g.lease.Role
+			}
+		}
+		out = append(out, pg)
+	}
+	r.mu.Unlock()
+	return map[string]any{"generated_at": r.now().UTC(), "gateways": out}, nil
 }
 
 func (r *Relay) apiListGateways(_ *http.Request, _ *ClientRecord) (any, error) {

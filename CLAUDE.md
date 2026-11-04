@@ -676,8 +676,10 @@ TOKEN=<admin> [RELAY_URL=...]` (E2E over the wire against a running relay — an
 independent protocol implementation, not the relay's own types; its test runs
 the same scenario in-process, so tool and relay can't drift).
 
-Invariants: no unauthenticated route reaches a node (only `/healthz` and a
-data-free status shell are public); **never log frame payloads** (they carry
+Invariants: no unauthenticated route reaches a node (only `/healthz` and
+`GET /mesh/relay/api/status` are public — the
+last feeds the site's `/relay` page and withholds pubkeys, node names, notes and
+lease holders, because a gateway sits at a volunteer's house); **never log frame payloads** (they carry
 private messages and channel keys — `CHANNEL_INFO` returns the secret); tokens
 are stored as SHA-256 only and shown once; one exclusive lease per gateway, and
 only onto a node that reports its pinned pubkey. The frame path never touches

@@ -40,6 +40,7 @@ const NAV = [
   { key: 'map', label: 'Map', href: '/map', hint: '/map', group: 'EXPLORE', crumb: 'Map' },
   { key: 'roads', label: 'Roads', href: '/roads', hint: '/roads', group: 'EXPLORE', crumb: 'Roads' },
   { key: 'mesh', label: 'Mesh', href: '/mesh', hint: '/mesh', group: 'EXPLORE', crumb: 'Mesh' },
+  { key: 'relay', label: 'Relay', href: '/relay', hint: '/mesh/relay', group: 'EXPLORE', crumb: 'Relay' },
   { key: 'places', label: 'Places', href: '/places', hint: '/places', group: 'EXPLORE', crumb: 'Places' },
   { key: 'sources', label: 'Sources', href: '/sources', hint: '/sources', group: 'EXPLORE', crumb: 'Sources' },
   { key: 'history', label: 'History', href: '/history', hint: '/history', group: 'EXPLORE', crumb: 'History' },
@@ -136,7 +137,7 @@ const here = (NAV.find((n) => n.key === current) || {}).crumb || 'The Grid';
           <summary>View the <span class="request-count" id="req-count">0</span> request(s) behind this page</summary>
           <div class="request-log-list" id="req-log-list"></div>
         </details>
-        <p class="footer-line">Signal Integrity &amp; Emergency Radio Response Alliance · P.O. Box 2071, Murphys, CA 95247 · a volunteer 501(c)(3). Every value on this site is a browser fetch of the public /api/v1 API — replay any of them yourself.</p>
+        <p class="footer-line">Signal Integrity &amp; Emergency Radio Response Alliance · P.O. Box 2071, Murphys, CA 95247 · a volunteer 501(c)(3). Every value on this site is a browser fetch of a public API — replay any of them yourself.</p>
       </div>
     </footer>
   </div>

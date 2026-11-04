@@ -30,6 +30,7 @@ const PAGES = [
   ['map', '/map.html?place=ebbetts-pass&layer=wildfire'],
   ['roads', '/roads.html?place=ebbetts-pass'],
   ['mesh', '/mesh.html'],
+  ['relay', '/relay.html'],
   ['places', '/places.html'],
   ['sources', '/sources.html'],
   ['history', '/history.html'],
@@ -251,7 +252,7 @@ async function main() {
     await ctx.route('**/*', async (route) => {
       const u = new URL(route.request().url());
       const same = u.host === `localhost:${port}`;
-      if (same && /^\/(api\/)?v1\//.test(u.pathname)) {
+      if (same && /^\/((api\/)?v1|mesh\/relay\/api)\//.test(u.pathname)) {
         const d = routeFor(u.pathname, u.searchParams);
         return route.fulfill({ status: d === null ? 404 : 200, contentType: 'application/json', body: JSON.stringify(d ?? {}) });
       }

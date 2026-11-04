@@ -856,20 +856,65 @@ func TestNoPayloadInLogs(t *testing.T) {
 	assert.NotContains(t, logs, op)
 }
 
-func TestStatusPageAndHealth(t *testing.T) {
+// The public status board: no token, and nothing beyond "does it work".
+func TestPublicStatus(t *testing.T) {
+	h := newHarness(t, Config{})
+	code, out := h.api("POST", "/gateways", h.admin, map[string]any{"name": "gw-a", "notes": "behind the barn"})
+	require.Equal(t, http.StatusOK, code)
+	tok := out["bridge_token"].(string)
+	h.createGateway("gw-b")
+	b := h.bridge("gw-a", tok, pubkeyA)
+	op := h.createClient("casey-holder", RoleOperator)
+	c := h.client("gw-a", op, "")
+	expectControl(t, c, "lease")
+
+	code, st := h.api("GET", "/status", "", nil)
+	require.Equal(t, http.StatusOK, code, "no token needed")
+	gws := st["gateways"].([]any)
+	require.Len(t, gws, 2)
+	a, bb := gws[0].(map[string]any), gws[1].(map[string]any)
+	assert.Equal(t, "gw-a", a["name"])
+	assert.Equal(t, true, a["online"])
+	assert.Equal(t, true, a["ready"])
+	assert.Equal(t, true, a["in_use"])
+	assert.Equal(t, string(RoleOperator), a["in_use_role"], "the holder's role, never its name")
+	assert.Nil(t, bb["in_use_role"])
+	assert.Equal(t, NodeConnected, a["node_state"])
+	assert.Equal(t, "0.3.1", a["agent_version"])
+	assert.Equal(t, false, bb["online"])
+	assert.Nil(t, bb["node_state"], "an offline gateway's node state is unknown, not disconnected")
+
+	raw := mustJSON(st)
+	for _, secret := range []string{pubkeyA, "behind the barn", "casey-holder", "/dev/ttyACM0", "SIERRA-GW-", "linux", "arm64"} {
+		assert.NotContains(t, raw, `"`+secret, "public status must not expose %q", secret)
+		assert.NotContains(t, raw, secret+`"`, "public status must not expose %q", secret)
+	}
+
+	// A node reporting an unpinned key is not ready, and says so.
+	require.NoError(t, b.ws.WriteJSON(map[string]any{"type": "node_status", "state": "connected", "pubkey": pubkeyB}))
+	eventually(t, 2*time.Second, func() bool {
+		_, st := h.api("GET", "/status", "", nil)
+		g := st["gateways"].([]any)[0].(map[string]any)
+		return g["node_state"] == NodeMismatch && g["ready"] == false
+	}, "mismatch not reflected in public status")
+}
+
+func TestHealthAndRootRedirect(t *testing.T) {
 	h := newHarness(t, Config{})
 	resp, err := http.Get(h.base + PathPrefix + "/healthz")
 	require.NoError(t, err)
 	resp.Body.Close()
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
-	h.createGateway("secret-house")
-	resp, err = http.Get(h.base + PathPrefix + "/")
-	require.NoError(t, err)
-	body, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
-	assert.NotContains(t, string(body), "secret-house", "the status page shell carries no data")
+	// The relay has no page of its own: its root points at the site's /relay.
+	noFollow := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	for _, p := range []string{PathPrefix, PathPrefix + "/"} {
+		resp, err := noFollow.Get(h.base + p)
+		require.NoError(t, err)
+		resp.Body.Close()
+		assert.Equal(t, http.StatusFound, resp.StatusCode, p)
+		assert.Equal(t, SiteStatusPath, resp.Header.Get("Location"), p)
+	}
 }
 
 func TestConfigFrom(t *testing.T) {
