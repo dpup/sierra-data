@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -106,31 +105,23 @@ func TestOmittedInstanceIDStillWorks(t *testing.T) {
 
 // --- ECS identity ---------------------------------------------------------------
 
-// fakeECS serves the two v4 metadata documents. startedAt returns the
-// container start time for the n-th container request (to model lag).
+// fakeECS serves the two v4 metadata documents. container returns the
+// container document for the n-th container request (to model a restart).
 type fakeECS struct {
 	calls     atomic.Int32
-	startedAt func(n int) *time.Time
-	restarts  *int
+	fail      atomic.Bool
+	container func(n int) map[string]any
 }
 
-func (f *fakeECS) handler(t *testing.T) http.Handler {
+func (f *fakeECS) handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if f.fail.Load() {
+			http.Error(w, "agent unavailable", http.StatusInternalServerError)
+			return
+		}
 		switch r.URL.Path {
 		case "/v4/abc":
-			n := int(f.calls.Add(1))
-			doc := map[string]any{
-				"DockerId": "cafe01", "Name": "grid", "DockerName": "ecs-sierra-grid",
-				"ContainerARN": "arn:aws:ecs:us-east-1:1:container/project-hub/t1/c1",
-				"KnownStatus":  "RUNNING",
-			}
-			if ts := f.startedAt(n); ts != nil {
-				doc["StartedAt"] = ts.Format(time.RFC3339Nano)
-			}
-			if f.restarts != nil {
-				doc["RestartCount"] = *f.restarts
-			}
-			_ = json.NewEncoder(w).Encode(doc)
+			_ = json.NewEncoder(w).Encode(f.container(int(f.calls.Add(1))))
 		case "/v4/abc/task":
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"Cluster": "project-hub", "TaskARN": "arn:aws:ecs:us-east-1:1:task/project-hub/t1",
@@ -143,6 +134,19 @@ func (f *fakeECS) handler(t *testing.T) http.Handler {
 	})
 }
 
+// containerDoc is a v4 container document. restarts < 0 omits RestartCount.
+func containerDoc(startedAt time.Time, restarts int) map[string]any {
+	doc := map[string]any{
+		"DockerId": "cafe01", "Name": "relay", "DockerName": "ecs-sierra-relay",
+		"ContainerARN": "arn:aws:ecs:us-east-1:1:container/project-hub/t1/c1",
+		"KnownStatus":  "RUNNING", "StartedAt": startedAt.Format(time.RFC3339Nano),
+	}
+	if restarts >= 0 {
+		doc["RestartCount"] = restarts
+	}
+	return doc
+}
+
 func startECS(t *testing.T, uri string) (*Controller, *harness) {
 	t.Helper()
 	t.Setenv(ecsMetadataEnv, "")
@@ -151,8 +155,7 @@ func startECS(t *testing.T, uri string) (*Controller, *harness) {
 		ECSMetadataURI: uri,
 	})
 	require.NoError(t, err)
-	c.ecsRetryEvery = 10 * time.Millisecond
-	c.ecsRetryFor = 3 * time.Second
+	c.ecsRefreshEvery = 10 * time.Millisecond
 	require.NoError(t, c.Listen())
 	ctx, cancel := context.WithCancel(context.Background())
 	h := &harness{t: t, c: c, base: "http://" + c.ControlAddr(), cancel: cancel, done: make(chan struct{})}
@@ -161,64 +164,97 @@ func startECS(t *testing.T, uri string) (*Controller, *harness) {
 	return c, h
 }
 
-func TestStatusReportsBoundECSIdentity(t *testing.T) {
-	two := 2
-	f := &fakeECS{restarts: &two}
-	base := time.Now() // the process starts just after this
-	f.startedAt = func(int) *time.Time { ts := base.Add(-3 * time.Second); return &ts }
-	srv := httptest.NewServer(f.handler(t))
+func rawStatus(t *testing.T, h *harness) string {
+	t.Helper()
+	resp, err := http.Get(h.base + "/status")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	return string(raw)
+}
+
+func TestStatusReportsECSIdentity(t *testing.T) {
+	started := time.Now().Add(-time.Minute)
+	f := &fakeECS{container: func(int) map[string]any { return containerDoc(started, 2) }}
+	srv := httptest.NewServer(f.handler())
 	defer srv.Close()
 	_, h := startECS(t, srv.URL+"/v4/abc")
 
-	d := h.waitFor(func(d StatusDoc) bool { return d.ECS.BoundToProcess })
-	assert.True(t, d.ECS.Available)
+	d := h.waitFor(func(d StatusDoc) bool { return d.ECS.Available })
 	assert.Equal(t, "arn:aws:ecs:us-east-1:1:task/project-hub/t1", d.ECS.TaskARN)
 	assert.Equal(t, "project-hub", d.ECS.Cluster)
 	assert.Equal(t, "sierra-data", d.ECS.Family)
 	assert.Equal(t, "42", d.ECS.Revision)
 	assert.Equal(t, "us-east-1b", d.ECS.AvailabilityZone)
-	assert.Equal(t, "grid", d.ECS.ContainerName)
+	assert.Equal(t, "relay", d.ECS.ContainerName)
 	assert.Equal(t, "cafe01", d.ECS.DockerID)
 	require.NotNil(t, d.ECS.RestartCount)
 	assert.Equal(t, 2, *d.ECS.RestartCount)
+	require.NotNil(t, d.ECS.FetchedAt)
 	assert.Empty(t, d.ECS.Reason)
+	assert.Empty(t, d.ECS.LastError)
 }
 
 func TestUnreportedRestartCountIsNullNotZero(t *testing.T) {
-	f := &fakeECS{}
-	base := time.Now()
-	f.startedAt = func(int) *time.Time { ts := base.Add(-time.Second); return &ts }
-	srv := httptest.NewServer(f.handler(t))
+	f := &fakeECS{container: func(int) map[string]any { return containerDoc(time.Now(), -1) }}
+	srv := httptest.NewServer(f.handler())
 	defer srv.Close()
 	_, h := startECS(t, srv.URL+"/v4/abc")
-	h.waitFor(func(d StatusDoc) bool { return d.ECS.BoundToProcess })
-
-	resp, err := http.Get(h.base + "/status")
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
-	assert.Contains(t, string(raw), `"restartCount":null`, "unknown must read as unknown, never as 0 restarts")
+	h.waitFor(func(d StatusDoc) bool { return d.ECS.Available })
+	assert.Contains(t, rawStatus(t, h), `"restartCount":null`, "unknown must read as unknown, never as 0 restarts")
 }
 
-// ECS can lag a container restart: metadata still describing the previous
-// incarnation is not bound, and is re-read until it catches up.
-func TestStaleECSMetadataIsRetriedUntilBound(t *testing.T) {
-	f := &fakeECS{}
-	base := time.Now()
-	f.startedAt = func(n int) *time.Time {
-		ts := base.Add(-time.Second)
+// The regression from project-hub docs/sierra-control-runtime-check.md: on a
+// Fargate in-place restart, ECS kept the ORIGINAL container start time (102s
+// before the new process) and only RestartCount moved. The first version
+// accepted the predecessor's reading as "bound" from start-time proximity and
+// stopped reading after one call. Now nothing is inferred from the timestamp,
+// and reading never stops: a restart count that moves after the first read
+// must reach /status.
+func TestRecentPredecessorMetadataIsNotTrustedAndKeepsRefreshing(t *testing.T) {
+	originalStart := time.Now().Add(-90 * time.Second) // what Fargate kept reporting
+	f := &fakeECS{container: func(n int) map[string]any {
 		if n <= 3 {
-			ts = base.Add(-time.Hour) // the previous incarnation's start
+			return containerDoc(originalStart, 0) // ECS has not caught up with the restart
 		}
-		return &ts
-	}
-	srv := httptest.NewServer(f.handler(t))
+		return containerDoc(originalStart, 1)
+	}}
+	srv := httptest.NewServer(f.handler())
 	defer srv.Close()
 	_, h := startECS(t, srv.URL+"/v4/abc")
 
-	d := h.waitFor(func(d StatusDoc) bool { return d.ECS.BoundToProcess })
-	assert.GreaterOrEqual(t, int(f.calls.Load()), 4, "the stale readings were retried")
-	assert.Empty(t, d.ECS.Reason)
+	d := h.waitFor(func(d StatusDoc) bool { return d.ECS.RestartCount != nil && *d.ECS.RestartCount == 1 })
+	assert.GreaterOrEqual(t, int(f.calls.Load()), 4, "reading continued past the first reading")
+	assert.Equal(t, originalStart.UTC().Truncate(time.Microsecond), d.ECS.ContainerStartedAt.UTC().Truncate(time.Microsecond),
+		"the start time is reported as ECS gives it, not interpreted")
+	raw := rawStatus(t, h)
+	assert.NotContains(t, raw, "boundToProcess", "no field may claim the metadata identifies this process")
+	assert.NotContains(t, raw, "bound")
+
+	before := f.calls.Load()
+	time.Sleep(100 * time.Millisecond)
+	assert.Greater(t, f.calls.Load(), before, "it keeps refreshing for the life of the process")
+}
+
+// A failed refresh keeps the last good reading, marked stale.
+func TestFailedRefreshKeepsLastGoodReading(t *testing.T) {
+	f := &fakeECS{container: func(int) map[string]any { return containerDoc(time.Now(), 3) }}
+	srv := httptest.NewServer(f.handler())
+	defer srv.Close()
+	_, h := startECS(t, srv.URL+"/v4/abc")
+	good := h.waitFor(func(d StatusDoc) bool { return d.ECS.Available })
+
+	f.fail.Store(true)
+	d := h.waitFor(func(d StatusDoc) bool { return d.ECS.LastError != "" })
+	assert.True(t, d.ECS.Available, "the last good reading is still reported")
+	assert.Equal(t, good.ECS.TaskARN, d.ECS.TaskARN)
+	require.NotNil(t, d.ECS.RestartCount)
+	assert.Equal(t, 3, *d.ECS.RestartCount)
+	assert.Contains(t, d.ECS.LastError, "HTTP 500")
+	assert.True(t, d.ECS.LastAttemptAt.After(*d.ECS.FetchedAt), "a reader can see the values are older than the last attempt")
+
+	f.fail.Store(false)
+	h.waitFor(func(d StatusDoc) bool { return d.ECS.LastError == "" })
 }
 
 func TestECSUnavailableIsExplicit(t *testing.T) {
@@ -226,7 +262,6 @@ func TestECSUnavailableIsExplicit(t *testing.T) {
 		_, h := startECS(t, "")
 		d := h.waitFor(func(d StatusDoc) bool { return d.ECS.Reason != "not read yet" })
 		assert.False(t, d.ECS.Available)
-		assert.False(t, d.ECS.BoundToProcess)
 		assert.Contains(t, d.ECS.Reason, ecsMetadataEnv)
 		assert.Nil(t, d.ECS.RestartCount)
 	})
@@ -237,30 +272,6 @@ func TestECSUnavailableIsExplicit(t *testing.T) {
 		d := h.waitFor(func(d StatusDoc) bool { return d.ECS.Reason != "not read yet" })
 		assert.False(t, d.ECS.Available)
 		assert.True(t, strings.HasPrefix(d.ECS.Reason, "container metadata:"), d.ECS.Reason)
+		assert.Equal(t, d.ECS.Reason, d.ECS.LastError)
 	})
-}
-
-func TestECSBindWindow(t *testing.T) {
-	proc := time.Date(2026, 11, 4, 20, 0, 0, 0, time.UTC)
-	for _, tc := range []struct {
-		name    string
-		started time.Time
-		bound   bool
-	}{
-		{"just before the process", proc.Add(-5 * time.Second), true},
-		{"at the window edge", proc.Add(-ecsBindWindow), true},
-		{"before the window: a previous incarnation", proc.Add(-ecsBindWindow - time.Second), false},
-		{"within clock skew after", proc.Add(ecsBindSkew), true},
-		{"after the process", proc.Add(ecsBindSkew + time.Second), false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			ts := tc.started
-			srv := httptest.NewServer((&fakeECS{startedAt: func(int) *time.Time { return &ts }}).handler(t))
-			defer srv.Close()
-			id := fetchECSIdentity(context.Background(), srv.URL+"/v4/abc", proc, proc.Add(time.Minute))
-			assert.True(t, id.Available)
-			assert.Equal(t, tc.bound, id.BoundToProcess, id.Reason)
-			assert.Equal(t, tc.bound, id.Reason == "", fmt.Sprintf("an unbound reading says why: %q", id.Reason))
-		})
-	}
 }

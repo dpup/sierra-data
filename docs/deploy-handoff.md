@@ -156,22 +156,39 @@ Use one operation id per deployment step (`<deploy>-release`,
 ### ECS identity (`/status.ecs`)
 
 On ECS the process reads the task metadata endpoint (v4,
-`ECS_CONTAINER_METADATA_URI_V4`) and reports `taskArn`, `cluster`, `family`,
-`revision`, `availabilityZone`, `containerName`, `containerArn`, `dockerId`,
-`containerStartedAt` and `restartCount`.
+`ECS_CONTAINER_METADATA_URI_V4`) every 10 seconds for its whole life and
+reports the raw values: `taskArn`, `cluster`, `family`, `revision`,
+`availabilityZone`, `containerName`, `containerArn`, `dockerId`,
+`containerStartedAt`, `restartCount`, with `fetchedAt` (when those values
+were read), `lastAttemptAt` and `lastError`. Nothing is inferred from them.
 
-- `boundToProcess: true` means the metadata describes THIS process: ECS's
-  container start time is at most 2 minutes before the process started (5s
-  clock skew allowed after). Metadata can lag a container restart; until it
-  is bound, the process re-reads it every 2s for up to 2 minutes, and
-  `reason` says why it is not bound. Only trust `restartCount` from a bound
-  reading.
-- `restartCount` is `null` when ECS does not report it (it is expected only
-  for containers with a restart policy): unknown, never 0. **Confirm on a real
-  Fargate container restart that it is present and increments** before the
-  coordinator relies on it.
-- Off ECS (local runs) or with the endpoint unreachable: `available: false`
-  with a `reason`. Nothing else depends on it.
+**The metadata does not identify the process; `instanceId` does.** On a
+Fargate in-place container restart (restart policy), ECS kept
+`containerStartedAt`, `dockerId` and `containerArn` unchanged, and only
+`restartCount` advanced (0 → 1; observed 2026-11-04, project-hub
+`docs/sierra-control-runtime-check.md`). An earlier version derived a
+`boundToProcess` flag from start-time proximity; that accepted a
+predecessor's metadata and has been removed. So the binding contract is the
+coordinator's, using three pieces of evidence together:
+
+1. **Which task and container answered:** `taskArn` + `containerName` match
+   the target the coordinator addressed.
+2. **Whether ECS restarted it:** `restartCount` compared with the value the
+   coordinator recorded for the previous owner. A larger count means an
+   in-place restart since. It is only as fresh as `fetchedAt`, and ECS may lag
+   a restart, so read it again rather than trusting one sample.
+3. **Which process it is:** `instanceId`, pinned on every command with
+   `expectedInstanceId`. This is the only process-generation proof.
+
+None of these authorizes activation on its own, and none replaces a confirmed
+release (or confirmed termination) of the previous owner.
+
+- `restartCount` is `null` when ECS does not report it (no restart policy):
+  unknown, never 0.
+- A failed refresh keeps the last good values with `lastError` set and an
+  `lastAttemptAt` later than `fetchedAt`; treat them as that old.
+- Off ECS (local runs) or before any successful read: `available: false` with
+  a `reason`. Nothing else depends on it.
 
 ## SIGTERM
 

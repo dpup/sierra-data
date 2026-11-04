@@ -118,9 +118,8 @@ type Controller struct {
 	now    func() time.Time
 	fail   chan error // Fail's signal to Run; buffered 1
 
-	ecs           ECSIdentity // guarded by mu; see watchECSIdentity
-	ecsRetryFor   time.Duration
-	ecsRetryEvery time.Duration
+	ecs             ECSIdentity // guarded by mu; see watchECSIdentity
+	ecsRefreshEvery time.Duration
 }
 
 // New validates opts and returns a controller in its initial state. It does
@@ -130,8 +129,8 @@ func New(ctx context.Context, svc Service, opts Options) (*Controller, error) {
 		svc: svc, opts: opts, ctx: logging.EnsureLogger(ctx),
 		instanceID: randomID(), startedAt: time.Now(), now: time.Now,
 		state: StateActivating, fail: make(chan error, 1),
-		ecs:         ECSIdentity{Reason: "not read yet"},
-		ecsRetryFor: 2 * time.Minute, ecsRetryEvery: 2 * time.Second,
+		ecs:             ECSIdentity{Reason: "not read yet"},
+		ecsRefreshEvery: 10 * time.Second,
 	}
 	if opts.Standby {
 		c.state = StateStandby

@@ -12,17 +12,22 @@ import (
 	"github.com/dpup/prefab/logging"
 )
 
-// ECSIdentity is the ECS task and container this process runs in, as /status
-// reports it. A deployment coordinator uses it to tell an ECS container
-// restart (same task, same IP and port, new process) from a new task, and to
-// prove which task answered.
+// ECSIdentity is ECS's description of the task and container this process
+// runs in, as /status reports it: raw metadata, refreshed for the life of the
+// process, with nothing inferred from it.
 //
-// It is read from the ECS task metadata endpoint (v4) by this process after
-// it started, and BoundToProcess says whether it is known to describe THIS
-// incarnation: the container's ECS start time falls just before the
-// process's own. Until then (metadata lags a restart) the controller keeps
-// re-reading it. Without ECS (local runs) Available is false with a reason.
+// It does NOT identify the process. On Fargate an in-place container restart
+// (the restart policy) keeps containerStartedAt, dockerId and containerArn
+// unchanged; only restartCount advances (observed 2026-11-04, project-hub
+// docs/sierra-control-runtime-check.md). An earlier version claimed a
+// "boundToProcess" from container start time and stopped reading; that
+// accepted a predecessor's metadata. The process generation is instanceId,
+// which the expectedInstanceId guard enforces. What this adds is which task
+// and container answered, and ECS's restart count at FetchedAt: meaningful
+// only compared with a predecessor the coordinator recorded, and never on its
+// own grounds for activation.
 type ECSIdentity struct {
+	// Available is true once a reading has succeeded. Reason says why not.
 	Available bool   `json:"available"`
 	Reason    string `json:"reason,omitempty"`
 
@@ -32,29 +37,27 @@ type ECSIdentity struct {
 	Revision         string `json:"revision,omitempty"`
 	AvailabilityZone string `json:"availabilityZone,omitempty"`
 
-	ContainerName      string     `json:"containerName,omitempty"`
-	ContainerARN       string     `json:"containerArn,omitempty"`
-	DockerID           string     `json:"dockerId,omitempty"`
+	ContainerName string `json:"containerName,omitempty"`
+	ContainerARN  string `json:"containerArn,omitempty"`
+	DockerID      string `json:"dockerId,omitempty"`
+	// ContainerStartedAt is ECS's container start time. It does NOT advance
+	// on an in-place restart, so it says nothing about this process.
 	ContainerStartedAt *time.Time `json:"containerStartedAt,omitempty"`
 	// RestartCount is how many times ECS has restarted this container under
-	// its restart policy. Null when ECS does not report it (no restart policy,
-	// or a platform that omits it): unknown, never zero.
+	// its restart policy, as of FetchedAt. Null when ECS does not report it
+	// (no restart policy): unknown, never zero.
 	RestartCount *int `json:"restartCount"`
 
-	BoundToProcess bool       `json:"boundToProcess"`
-	FetchedAt      *time.Time `json:"fetchedAt,omitempty"`
+	// FetchedAt is when the values above were read. LastAttemptAt and
+	// LastError describe the most recent refresh; on an error the values are
+	// the last good reading, as old as FetchedAt.
+	FetchedAt     *time.Time `json:"fetchedAt,omitempty"`
+	LastAttemptAt *time.Time `json:"lastAttemptAt,omitempty"`
+	LastError     string     `json:"lastError,omitempty"`
 }
 
-const (
-	// ecsMetadataEnv is set by the ECS agent in every container.
-	ecsMetadataEnv = "ECS_CONTAINER_METADATA_URI_V4"
-	// ecsBindWindow is how long before the process start the container may
-	// have started and still count as this incarnation (image entrypoint,
-	// Go runtime start, config load).
-	ecsBindWindow = 2 * time.Minute
-	// ecsBindSkew tolerates clock skew between the agent and the container.
-	ecsBindSkew = 5 * time.Second
-)
+// ecsMetadataEnv is set by the ECS agent in every container.
+const ecsMetadataEnv = "ECS_CONTAINER_METADATA_URI_V4"
 
 // ecsContainerDoc and ecsTaskDoc are the fields read from the v4 endpoint's
 // ${URI} and ${URI}/task responses.
@@ -74,39 +77,23 @@ type ecsTaskDoc struct {
 	AvailabilityZone string `json:"AvailabilityZone"`
 }
 
-// fetchECSIdentity reads the metadata endpoint once.
-func fetchECSIdentity(ctx context.Context, uri string, processStart, now time.Time) ECSIdentity {
-	if uri == "" {
-		return ECSIdentity{Reason: ecsMetadataEnv + " is not set (not running on ECS)"}
-	}
+// readECSIdentity reads the metadata endpoint once.
+func readECSIdentity(ctx context.Context, uri string, now time.Time) (ECSIdentity, error) {
 	var c ecsContainerDoc
 	if err := getJSON(ctx, uri, &c); err != nil {
-		return ECSIdentity{Reason: "container metadata: " + err.Error()}
+		return ECSIdentity{}, fmt.Errorf("container metadata: %w", err)
 	}
 	var t ecsTaskDoc
 	if err := getJSON(ctx, uri+"/task", &t); err != nil {
-		return ECSIdentity{Reason: "task metadata: " + err.Error()}
+		return ECSIdentity{}, fmt.Errorf("task metadata: %w", err)
 	}
-	id := ECSIdentity{
+	return ECSIdentity{
 		Available: true, TaskARN: t.TaskARN, Cluster: t.Cluster, Family: t.Family,
 		Revision: t.Revision, AvailabilityZone: t.AvailabilityZone,
 		ContainerName: c.Name, ContainerARN: c.ContainerARN, DockerID: c.DockerID,
-		ContainerStartedAt: c.StartedAt, RestartCount: c.RestartCount, FetchedAt: &now,
-	}
-	switch {
-	case c.StartedAt == nil:
-		id.Reason = "ECS reports no container start time, so the metadata cannot be tied to this process"
-	case c.StartedAt.Before(processStart.Add(-ecsBindWindow)):
-		id.Reason = fmt.Sprintf("ECS reports the container started at %s, well before this process (%s): "+
-			"the metadata may describe a previous incarnation",
-			c.StartedAt.UTC().Format(time.RFC3339), processStart.UTC().Format(time.RFC3339))
-	case c.StartedAt.After(processStart.Add(ecsBindSkew)):
-		id.Reason = fmt.Sprintf("ECS reports the container started at %s, after this process (%s)",
-			c.StartedAt.UTC().Format(time.RFC3339), processStart.UTC().Format(time.RFC3339))
-	default:
-		id.BoundToProcess = true
-	}
-	return id
+		ContainerStartedAt: c.StartedAt, RestartCount: c.RestartCount,
+		FetchedAt: &now, LastAttemptAt: &now,
+	}, nil
 }
 
 func getJSON(ctx context.Context, url string, v any) error {
@@ -127,32 +114,66 @@ func getJSON(ctx context.Context, url string, v any) error {
 	return json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(v)
 }
 
-// watchECSIdentity reads the metadata until it is bound to this process (or
-// is definitively unavailable), publishing each reading to /status. ECS can
-// lag a container restart, so an unbound reading is retried for a while.
+// watchECSIdentity keeps /status.ecs current for the life of the process. It
+// never stops on a "good enough" reading: ECS can lag a container restart,
+// and the restart count is the one field that moves.
 func (c *Controller) watchECSIdentity(ctx context.Context) {
 	uri := c.opts.ECSMetadataURI
 	if uri == "" {
 		uri = os.Getenv(ecsMetadataEnv)
 	}
-	deadline := c.now().Add(c.ecsRetryFor)
-	for {
-		id := fetchECSIdentity(ctx, uri, c.startedAt, c.now())
+	if uri == "" {
 		c.mu.Lock()
-		c.ecs = id
+		c.ecs = ECSIdentity{Reason: ecsMetadataEnv + " is not set (not running on ECS)"}
 		c.mu.Unlock()
-		if uri == "" || id.BoundToProcess || !c.now().Before(deadline) {
-			if uri != "" {
-				logging.Infow(c.ctx, "ECS identity", "available", id.Available, "bound", id.BoundToProcess,
-					"taskArn", id.TaskARN, "container", id.ContainerName, "restartCount", id.RestartCount,
-					"reason", id.Reason)
-			}
-			return
+		return
+	}
+	for {
+		now := c.now()
+		id, err := readECSIdentity(ctx, uri, now)
+		c.mu.Lock()
+		prev := c.ecs
+		switch {
+		case err == nil:
+			c.ecs = id
+		case prev.Available:
+			// Keep the last good reading; say it is stale and why.
+			prev.LastAttemptAt, prev.LastError = &now, err.Error()
+			c.ecs = prev
+		default:
+			c.ecs = ECSIdentity{Reason: err.Error(), LastAttemptAt: &now, LastError: err.Error()}
 		}
+		c.mu.Unlock()
+		logECSChange(c.ctx, prev, id, err)
+
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(c.ecsRetryEvery):
+		case <-time.After(c.ecsRefreshEvery):
 		}
 	}
+}
+
+// logECSChange logs the first reading, any change of identity or restart
+// count, and the transitions into and out of failing. Not every refresh.
+func logECSChange(ctx context.Context, prev, cur ECSIdentity, err error) {
+	switch {
+	case err != nil && prev.LastError == "":
+		logging.Warnw(ctx, "ECS metadata read failed", "error", err, "haveLastGood", prev.Available)
+	case err != nil:
+		// still failing; already logged
+	case !prev.Available || prev.TaskARN != cur.TaskARN || prev.ContainerARN != cur.ContainerARN ||
+		prev.DockerID != cur.DockerID || !sameCount(prev.RestartCount, cur.RestartCount):
+		logging.Infow(ctx, "ECS identity", "taskArn", cur.TaskARN, "container", cur.ContainerName,
+			"dockerId", cur.DockerID, "restartCount", cur.RestartCount)
+	case prev.LastError != "":
+		logging.Infow(ctx, "ECS metadata read recovered", "taskArn", cur.TaskARN)
+	}
+}
+
+func sameCount(a, b *int) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }
