@@ -63,8 +63,8 @@ func (r *Relay) handleClient(w http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		return
 	}
-	r.sessions.Add(1)
-	defer r.sessions.Done()
+	r.sessionStart()
+	defer r.sessionEnd()
 	c := newConn(ws, r.cfg.PingInterval)
 	r.m.clientConns.Add(1)
 	defer r.m.clientConns.Add(-1)

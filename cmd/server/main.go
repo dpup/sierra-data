@@ -2,53 +2,47 @@ package main
 
 import (
 	"context"
+	"flag"
+	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 	"time"
 	_ "time/tzdata" // Embed the IANA tz database so America/Los_Angeles resolves in minimal containers
 
-	"github.com/dpup/prefab"
 	"github.com/dpup/prefab/logging"
-	"github.com/dpup/prefab/plugins/etag"
-	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
-	"google.golang.org/grpc"
 
 	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
-	"github.com/dpup/sierra-data/internal/cache"
-	"github.com/dpup/sierra-data/internal/clients/calfire"
-	"github.com/dpup/sierra-data/internal/clients/calfireburn"
 	"github.com/dpup/sierra-data/internal/clients/caloes"
 	"github.com/dpup/sierra-data/internal/clients/caltrans"
-	"github.com/dpup/sierra-data/internal/clients/census"
-	"github.com/dpup/sierra-data/internal/clients/cwwp2"
-	"github.com/dpup/sierra-data/internal/clients/firis"
-	"github.com/dpup/sierra-data/internal/clients/google"
 	"github.com/dpup/sierra-data/internal/clients/meshcore"
-	"github.com/dpup/sierra-data/internal/clients/nws"
 	"github.com/dpup/sierra-data/internal/clients/pge"
-	"github.com/dpup/sierra-data/internal/clients/usgs"
-	"github.com/dpup/sierra-data/internal/clients/weather"
 	"github.com/dpup/sierra-data/internal/config"
-	"github.com/dpup/sierra-data/internal/gridapi"
-	"github.com/dpup/sierra-data/internal/hazards"
+	"github.com/dpup/sierra-data/internal/handoff"
 	"github.com/dpup/sierra-data/internal/ingest"
-	"github.com/dpup/sierra-data/internal/lib/alerts"
 	"github.com/dpup/sierra-data/internal/lib/geojson"
-	"github.com/dpup/sierra-data/internal/mcp"
-	"github.com/dpup/sierra-data/internal/places"
 	"github.com/dpup/sierra-data/internal/pushingest"
-	"github.com/dpup/sierra-data/internal/services"
 	"github.com/dpup/sierra-data/internal/store"
 )
 
+// The Grid's lifecycle is internal/handoff's: prepare (no database), then
+// ACTIVE either at boot or, with --standby, when a deployment coordinator
+// says so; SIGTERM in any state quiesces before exit.
+//
+//	sierra-server             # activate at boot (the default, as always)
+//	sierra-server --standby   # prepare, then wait on the control port for POST /activate
 func main() {
+	standby := flag.Bool("standby", false,
+		"start in STANDBY: prepare without opening grid.db and wait for POST /activate on the control port")
+	flag.Parse()
+
 	// Initialize structured logging
 	logger := logging.NewProdLogger()
 	ctx := logging.With(context.Background(), logger)
 
-	logging.Info(ctx, "Starting The Grid (S.I.E.R.R.A data service)")
+	logging.Infow(ctx, "Starting The Grid (S.I.E.R.R.A data service)", "standby", *standby)
 
 	// Load configuration using Prefab's config system
 	appConfig := config.LoadConfig()
@@ -59,382 +53,23 @@ func main() {
 	// there still surface. Must run before prefab.New (which validates on build).
 	config.RegisterPrefabNamespaces()
 
-	// Initialize cache. Periodic cleanup evicts very-stale entries so keys that
-	// are never overwritten (content-hash AI-enhancement entries) don't
-	// accumulate forever.
-	cacheInstance := cache.NewCache()
-	cacheInstance.StartPeriodicCleanup(ctx, time.Hour)
-
-	// Initialize external API clients using top-level client configurations
-	googleClient := google.NewClient(appConfig.GoogleRoutes.APIKey)
-	caltransClient := caltrans.NewFeedParser()
-	cwCfg := appConfig.Roads.CaltransFeeds.CWWP2
-	cwClient := cwwp2.NewClient()
-	if cwCfg.BaseURL != "" {
-		cwClient.BaseURL = cwCfg.BaseURL
-	}
-	if cwCfg.StaleAfter > 0 {
-		cwClient.StaleAfter = cwCfg.StaleAfter
-	}
-	if len(cwCfg.ChainControlDistricts) > 0 {
-		caltransClient.UseCWWP2ChainControls(cwClient, cwCfg.ChainControlDistricts)
-	}
-	weatherClient := weather.NewClient(appConfig.OpenWeather.APIKey)
-	nwsClient := nws.NewClient(appConfig.Weather.NWS.UserAgent)
-
-	// Initialize OpenAI enhancer with caching (required for service)
-	if appConfig.OpenAI.APIKey == "" {
-		logging.Error(ctx, "OpenAI API key is required in configuration for incident enhancement")
-		log.Fatal("OpenAI API key is required in configuration for incident enhancement")
-	}
-
-	model := appConfig.OpenAI.Model
-
-	// Create OpenAI enhancer (caching is integrated directly in services).
-	// Weather alerts are NWS-sourced with authoritative wording and are not
-	// AI-enhanced; only road alerts use the enhancer.
-	alertEnhancer := alerts.NewAlertEnhancer(appConfig.OpenAI.APIKey, model)
-
-	logging.Infow(ctx, "OpenAI enhancement enabled", "model", model, "caching", "content-based")
-
-	// Initialize gRPC services
-	roadsService := services.NewRoadsService(googleClient, caltransClient, cacheInstance, appConfig, alertEnhancer)
-	// Segment status reads CWWP2 lane closures (set-up windows only) when
-	// laneClosureDistricts is set, so it agrees with the road_incident layer.
-	roadsService.UseCWWP2LaneClosures(cwClient)
-	weatherService := services.NewWeatherService(weatherClient, nwsClient, cacheInstance, appConfig)
-
-	logging.Infow(ctx, "Live Data API Server starting",
-		"roads_monitored", len(appConfig.Roads.MonitoredRoads),
-		"weather_locations", len(appConfig.Weather.Locations))
-
-	// Start periodic refresh to maintain cache warmth (replaces complex cache warmer)
-	periodicRefresh := services.NewPeriodicRefreshService(roadsService, weatherService, appConfig)
-	if err := periodicRefresh.StartPeriodicRefresh(ctx); err != nil {
-		logging.Errorw(ctx, "Failed to start periodic refresh", "error", err)
-	}
-
-	// Grid event store + ingest scheduler (docs/design/v2-implementation-plan.md):
-	// normalized hazard events persisted with revision history, per-source
-	// health, and the place directory — the /api/v1 foundation.
-	if appConfig.Grid.DBPath == "" {
-		logging.Error(ctx, "grid.dbPath is required (default ./data/grid.db in prefab.yaml)")
-		log.Fatal("grid.dbPath is required (default ./data/grid.db in prefab.yaml)")
-	}
-	gridStore, err := store.Open(appConfig.Grid.DBPath,
-		store.WithJournalMode(appConfig.Grid.JournalMode),
-		store.WithCacheSizeMB(appConfig.Grid.CacheSizeMB),
-		store.WithMaxOpenConns(appConfig.Grid.MaxOpenConns),
-		store.WithLockTimeout(appConfig.Grid.LockTimeout),
-		store.WithWildfireProximity(appConfig.Grid.Wildfire.PlaceBuffer()))
+	app, err := prepareGrid(ctx, appConfig)
 	if err != nil {
-		logging.Errorw(ctx, "Failed to open grid store", "path", appConfig.Grid.DBPath, "error", err)
-		log.Fatalf("Failed to open grid store: %v", err)
-	}
-	defer gridStore.Close()
-
-	// Pragmas are per-connection, so this log line is the only place the store's
-	// effective configuration is observable from outside the process.
-	if st, err := gridStore.Settings(); err == nil {
-		logging.Infow(ctx, "Grid store opened",
-			"path", appConfig.Grid.DBPath, "journalMode", st.JournalMode,
-			"synchronous", st.Synchronous, "cacheSizeKB", st.CacheSizeKB,
-			"maxOpenConns", st.MaxOpenConns)
+		logging.Errorw(ctx, "Grid preparation failed", "error", err)
+		log.Fatalf("Grid preparation failed: %v", err)
 	}
 
-	seedStart := time.Now()
-	if err := gridStore.SeedSources(ctx, gridSourceSeeds(appConfig)); err != nil {
-		logging.Errorw(ctx, "Failed to seed grid sources", "error", err)
-		log.Fatalf("Failed to seed grid sources: %v", err)
+	opts := handoff.Options{Service: "grid", Standby: *standby}
+	if ctl := appConfig.Grid.Control; ctl.Enabled() {
+		opts.Addr = fmt.Sprintf(":%d", ctl.Port)
+		opts.TokenSha256 = ctl.TokenSha256
 	}
-	retireOrphanedSources(ctx, gridStore)
-	if err := places.Seed(ctx, gridStore, appConfig); err != nil {
-		logging.Errorw(ctx, "Failed to seed grid places", "error", err)
-		log.Fatalf("Failed to seed grid places: %v", err)
-	}
-	logging.Infow(ctx, "Seeded grid sources and places", "duration", time.Since(seedStart))
-
-	// Index statistics. Without them the place-scoped event query walks every
-	// attachment a place has ever had (see store.Analyze). They persist in the
-	// database file, so only a database that has never been analyzed needs a
-	// synchronous ANALYZE here (cheap: it is new or small). Otherwise the
-	// previous process's statistics stand, and the scheduler refreshes them
-	// shortly after boot: a full ANALYZE measured 59.5s on the EFS store, and
-	// running it before the listener opened was most of a deploy's 502 window.
-	// Fail-soft either way: stale stats make queries slow, never wrong.
-	var statsRefreshFirstAfter time.Duration
-	if has, err := gridStore.HasStatistics(ctx); err == nil && has {
-		statsRefreshFirstAfter = bootStatsRefreshDelay
-		logging.Infow(ctx, "Using persisted grid store statistics; refresh deferred",
-			"refreshIn", bootStatsRefreshDelay)
-	} else {
-		analyzeStart := time.Now()
-		if err := gridStore.Analyze(ctx); err != nil {
-			logging.Warnw(ctx, "Failed to refresh grid store statistics; place-scoped queries may be slow",
-				"error", err)
-		} else {
-			logging.Infow(ctx, "Refreshed grid store statistics", "duration", time.Since(analyzeStart))
-		}
-	}
-
-	// Hazard condition-layer projector: gridapi calls BuildLayer for the live
-	// condition layers (road_segment, chain_control, fire_weather,
-	// message_sign). The event layers are projected from the grid store by
-	// gridapi itself.
-	hazardsService := hazards.NewServiceWithAPIs(appConfig, roadsService, weatherService, caltransClient, cacheInstance)
-	hazardsService.UseMessageSigns(cwClient, cwCfg.MessageSignDistricts)
-
-	// NWS weather-alert enhancement is optional: nil when disabled or keyless
-	// (the scheduler then serves raw alerts — enhancement never gates ingest).
-	var nwsEnhancer ingest.NWSEnhancer
-	if appConfig.Grid.Enhancement.Enabled {
-		nwsEnhancer = ingest.NewNWSEnhancer(appConfig.OpenAI)
-	}
-
-	// One poller per upstream scope; weather_alert and road_incident reuse the
-	// services' cached, budgeted pipelines (plan decision 6).
-	roadIncidents := ingest.NewRoadIncidentNormalizer(appConfig, roadsService)
-	pollers := []ingest.PollerSpec{
-		{Normalizer: ingest.NewEarthquakeNormalizer(appConfig, usgs.NewClient()), Interval: gridPollInterval(appConfig, "usgs")},
-		{Normalizer: ingest.NewWildfireNormalizer(appConfig, calfire.NewClient(), firis.NewClient()), Interval: gridPollInterval(appConfig, "calfire", "firis")},
-		{Normalizer: ingest.NewEvacuationNormalizer(appConfig, caloes.NewClient()), Interval: gridPollInterval(appConfig, "caloes")},
-		{Normalizer: ingest.NewWeatherAlertNormalizer(appConfig, weatherService), Interval: gridPollInterval(appConfig, "nws")},
-		// chp alone, or chp + caltrans when lane closures still come from
-		// lcs2way.kml (see RoadIncidentNormalizer.SourceIDs).
-		{Normalizer: roadIncidents, Interval: gridPollInterval(appConfig, roadIncidents.SourceIDs()...)},
-		{Normalizer: ingest.NewPowerNormalizer(appConfig, pge.NewClient()), Interval: gridPollInterval(appConfig, "pge", "psps")},
-	}
-	// Caltrans lane closures from CWWP2, scheduled windows included. Its own
-	// poller on the caltrans interval rather than the CHP one: the two district
-	// files are ~5 MB together, uncompressed, and the portal does not gzip.
-	if len(appConfig.Roads.CaltransFeeds.CWWP2.LaneClosureDistricts) > 0 {
-		pollers = append(pollers, ingest.PollerSpec{
-			Normalizer: ingest.NewLaneClosureNormalizer(appConfig, cwClient),
-			Interval:   gridPollInterval(appConfig, "caltrans"),
-		})
-	}
-
-	// Authenticated push ingest (optional): operator-run monitors POST to
-	// /api/v1/ingest/{stream}. A bad reporter block is FATAL rather than skipped —
-	// a typo'd token hash would otherwise present as a monitor that silently never
-	// authenticates, which is indistinguishable from a wrong token at the client
-	// and could go unnoticed for weeks.
-	burnLineIDs := make([]string, 0, len(appConfig.Grid.Burn.Lines))
-	for _, l := range appConfig.Grid.Burn.Lines {
-		burnLineIDs = append(burnLineIDs, l.ID)
-	}
-	// An accepted burn reading wakes the burn poller, so the event shows it
-	// right away instead of on the next hourly tick.
-	burnWake, wakeBurn := ingest.NewWake()
-	pushRegistry, err := pushingest.NewRegistry(appConfig.Grid.Ingest,
-		pushingest.WithBurnLines(gridStore, burnLineIDs),
-		pushingest.WithBurnAccepted(wakeBurn))
+	ctrl, err := handoff.New(ctx, app, opts)
 	if err != nil {
-		logging.Errorw(ctx, "Invalid grid.ingest configuration", "error", err)
-		log.Fatalf("Invalid grid.ingest configuration: %v", err)
+		logging.Errorw(ctx, "Invalid deployment control configuration", "error", err)
+		log.Fatalf("Invalid deployment control configuration: %v", err)
 	}
-	// Reporter health is in-memory; without this every deploy reports the
-	// once-a-day burn-line reporter as never having reported until its next run.
-	if err := pushRegistry.RestoreBurnHealth(ctx); err != nil {
-		logging.Warnw(ctx, "Could not restore burn reporter health", "error", err)
-	}
-
-	// Burn status (optional): per-county residential burning status from two
-	// independent authorities — the county air district's burn line and CAL
-	// FIRE's seasonal suspension. Ambient state, polled a couple of times a day.
-	if len(appConfig.Grid.Burn.Counties) > 0 {
-		// The burn-day facet is PUSHED (the `burn.line` stream on
-		// /api/v1/ingest): the normalizer reads the staging table the push
-		// handler writes, rather than fetching an upstream. CAL FIRE is still a
-		// real fetch.
-		pollers = append(pollers, ingest.PollerSpec{
-			Normalizer: ingest.NewBurnStatusNormalizer(appConfig, calfireburn.NewClient(), gridStore,
-				storePlaceIndex{gridStore}, burnReporters(pushRegistry)),
-			Interval: gridPollInterval(appConfig, "burnline", "calfire-burn"),
-			Wake:     burnWake,
-		})
-	}
-
-	// Mesh-node presence (optional). TWO possible inputs, and the poller runs if
-	// EITHER is configured: the MeshCore MQTT subscriber (community bridges,
-	// broadcast adverts) and the push-ingest buffer (operator monitors reading
-	// repeater admin interfaces). The NetworkNormalizer merges them into one event
-	// per node on the scheduler's tick.
-	//
-	// The MeshCore registry itself has two doors: the MQTT brokers, and the
-	// mesh.packet push stream, through which an operator's companion radio
-	// forwards the raw adverts it hears (a companion in Arnold hears SIERRA
-	// nodes no MQTT observer does). Either door justifies the registry; only
-	// the brokers need a connection.
-	var meshcoreReg ingest.MeshRegistry
-	mqttEnabled := appConfig.Grid.Meshcore.Enabled && len(appConfig.Grid.Meshcore.Brokers) > 0
-	packetReporters := pushRegistry.ReporterIDs(pushingest.MeshPacketStream)
-	if mqttEnabled || len(packetReporters) > 0 {
-		reg := meshcore.NewRegistry(meshcoreClientConfig(appConfig))
-		// Rehydrate presence from the persisted store BEFORE connecting, so a
-		// deploy doesn't drop the whole mesh to "unknown" (and let the sweep expire
-		// the slow SIERRA repeaters) until every node re-adverts.
-		if seedMeshRegistry(ctx, reg, gridStore) {
-			// The neighbour graph is rebuilt in the background: replaying 48h
-			// of receptions measured 14.4s over EFS, and nothing needs it
-			// before the listener opens. See seedMeshNeighbours.
-			go seedMeshNeighbours(ctx, reg, gridStore)
-		}
-		if mqttEnabled {
-			if err := reg.Connect(ctx); err != nil {
-				logging.Errorw(ctx, "Failed to start MeshCore subscriber", "error", err)
-			} else {
-				defer reg.Close()
-				logging.Infow(ctx, "MeshCore subscriber started", "brokers", len(appConfig.Grid.Meshcore.Brokers))
-			}
-		}
-		if len(packetReporters) > 0 {
-			pushRegistry.SetPacketSink(reg)
-			logging.Infow(ctx, "MeshCore packet forwarding enabled", "reporters", packetReporters)
-		}
-		meshcoreReg = reg
-	}
-	var meshPush ingest.MeshPushSource
-	if pushRegistry.Enabled() {
-		meshPush = pushRegistry
-		logging.Infow(ctx, "Push ingest enabled",
-			"reporters", pushRegistry.ReporterIDs(pushingest.MeshStream),
-			"packetReporters", packetReporters)
-	}
-	if meshcoreReg != nil || meshPush != nil {
-		meshSources := []string{"meshcore"}
-		seen := map[string]bool{"meshcore": true}
-		for _, id := range append(pushRegistry.ReporterIDs(pushingest.MeshStream), packetReporters...) {
-			if !seen[id] {
-				seen[id] = true
-				meshSources = append(meshSources, id)
-			}
-		}
-		pollers = append(pollers, ingest.PollerSpec{
-			Normalizer: ingest.NewNetworkNormalizer(appConfig, meshcoreReg, meshPush).
-				WithCatalog(func(ctx context.Context) ([]*gridv1.Event, error) {
-					return gridStore.EventsBySourceAndStatus(ctx, "meshcore", gridv1.EventStatus_EXPIRED)
-				}),
-			Interval: gridPollInterval(appConfig, meshSources...),
-		})
-	}
-
-	scheduler := ingest.NewScheduler(gridStore, ingest.SchedulerConfig{
-		Pollers:         pollers,
-		Tuning:          appConfig.Grid.Sources,
-		Enhancer:        nwsEnhancer,
-		EnhancerModel:   model,
-		BudgetPerTick:   appConfig.Grid.Enhancement.BudgetPerTick,
-		MeshMaintenance: meshMaintenanceConfig(appConfig),
-
-		StatsRefreshFirstAfter: statsRefreshFirstAfter,
-	})
-	scheduler.Start(ctx)
-
-	// Grid API service: backs the /api/v1 GridService RPCs and the hand-built
-	// summary + .geojson gateway routes (the census geocoder powers
-	// /api/v1/places:resolve?address=).
-	censusClient := census.NewClient()
-	gridapiService := gridapi.NewService(gridStore, weatherService, censusClient, appConfig, hazardsService)
-
-	// Caltrans CCTV camera directory (GET /api/v1/cameras). The lists are
-	// near-static, so they refresh in the background and a request never waits
-	// on Caltrans. Without districts the RPC answers UNAVAILABLE.
-	if cams := appConfig.Roads.CaltransFeeds.CWWP2.Cameras; len(cams.Districts) > 0 {
-		camClient := cwwp2.NewClient()
-		if base := appConfig.Roads.CaltransFeeds.CWWP2.BaseURL; base != "" {
-			camClient.BaseURL = base
-		}
-		cameraService := services.NewCameraService(camClient, cams.Districts, cams.RefreshInterval)
-		go cameraService.Run(ctx)
-		gridapiService.Cameras = cameraService
-		logging.Infow(ctx, "Camera directory enabled",
-			"districts", cams.Districts, "nearMeters", cams.Near())
-	}
-
-	// MCP endpoint (docs/design/mcp-design.md): read-only tools for LLM agents over
-	// Streamable HTTP. The tools call the /api/v1 surface in-process against the
-	// gRPC-Gateway mux, which only exists after prefab.New wires the gateway — so
-	// MCP holds a deferred handler we point at that mux below.
-	gatewayMux := &deferredHandler{}
-	mcpHandler := mcp.NewHandler(gatewayMux)
-
-	// GridService: the proto-defined /api/v1 entity/query surface over
-	// gRPC-Gateway (docs/design/grpc-gateway-migration-plan.md). Gateway annotations
-	// mount under /api/, which Prefab already serves.
-	gridServer := gridapi.NewGridServer(gridapiService)
-
-	// Prefab server. gRPC + gateway serve the /api/v1 GridService; MCP and the
-	// static site are plain HTTP handlers.
-	server := prefab.New(
-		prefab.WithContext(ctx),
-		prefab.WithGRPCReflection(),
-		// Cache-Control: public, max-age=30 on every (read-only) GridService
-		// response — the freshness lifetime that complements the ETag revalidation
-		// below. Restores what the hand-built /v1 handlers set before the migration.
-		prefab.WithGRPCInterceptor(gridapi.CacheControlInterceptor(30)),
-		// Conditional GET (ETag/If-None-Match -> 304) for RPCs that call
-		// etag.Guard — event detail (revision), the event/history lists
-		// (DataVersion + filters), and places (per-process nonce) — so a match
-		// skips the expensive load. The hand-built .geojson route bypasses the
-		// gRPC interceptor and keeps its own body-hash ETag. (GetPlaceSummary is
-		// not yet guarded.)
-		prefab.WithPlugin(etag.Plugin()),
-		prefab.WithGRPCService(&gridv1.GridService_ServiceDesc, gridServer),
-		prefab.WithGRPCGateway(func(ctx context.Context, mux *runtime.ServeMux, endpoint string, opts []grpc.DialOption) error {
-			if err := gridv1.RegisterGridServiceHandlerFromEndpoint(ctx, mux, endpoint, opts); err != nil {
-				return err
-			}
-			// Mount the hand-built .geojson endpoint on the same mux (summary is
-			// now the GetPlaceSummary RPC).
-			if err := gridServer.RegisterGatewayRoutes(mux); err != nil {
-				return err
-			}
-			// The one WRITE route on /api/v1, mounted only when a reporter is
-			// configured so the default build has no write surface at all. It is
-			// hand-mounted rather than proto-defined because it takes a foreign
-			// document verbatim (whatever shape a monitor already produces), and
-			// deliberately bypasses the ETag/Cache-Control interceptors, which
-			// exist for GETs.
-			//
-			// CORS keeps this browser-unreachable cross-origin: corsAllowMethods is
-			// [GET], so the POST preflight is denied — the same property that
-			// protects /mcp. Do not add POST to that list.
-			if pushRegistry.Enabled() {
-				if err := mux.HandlePath("POST", "/api/v1/ingest/{stream}",
-					func(w http.ResponseWriter, r *http.Request, pp map[string]string) {
-						pushRegistry.ServeStream(w, r, pp["stream"])
-					}); err != nil {
-					return err
-				}
-			}
-			// Point MCP at the fully-wired gateway so its tools query /api/v1
-			// in-process (same mux prefab serves at /api/).
-			gatewayMux.h = mux
-			return nil
-		}),
-		prefab.WithHTTPHandlerFunc("/mcp", mcpHandler.ServeHTTP),
-		// Publish the generated OpenAPI spec for /api/v1 (protoc-gen-openapiv2).
-		// Exact path, so it wins over the gateway's /api/ subtree mount.
-		prefab.WithHTTPHandlerFunc("/api/openapi.json", func(w http.ResponseWriter, _ *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			w.Header().Set("Cache-Control", "public, max-age=300")
-			_, _ = w.Write(gridv1.OpenAPISpec)
-		}),
-		prefab.WithHTTPHandlerFunc("/", siteHandler),
-	)
-
-	// Everything above runs before the listener opens, so during a deploy it
-	// is time the load balancer has no healthy target. Keep it short, and keep
-	// it measured.
-	logging.Infow(ctx, "Server initialization complete, starting HTTP services",
-		"sinceProcessStart", time.Since(processStart))
-
-	// Start the server (blocks until shutdown)
-	if err := server.Start(); err != nil {
-		logging.Errorw(ctx, "Server failed", "error", err)
-		log.Fatalf("Server failed: %v", err)
-	}
+	os.Exit(ctrl.Run(ctx))
 }
 
 // deferredHandler is an http.Handler whose delegate is set after construction.

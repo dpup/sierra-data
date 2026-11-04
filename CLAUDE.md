@@ -688,6 +688,24 @@ the DB (audit writes are queued). Wire protocol:
 (meshbridge); change it in both**. Service spec, decisions and the deploy
 checklist: `docs/mesh-relay-server.md`.
 
+## Deploy handoff (standby startup)
+
+Both binaries share one lifecycle, `internal/handoff`:
+`STANDBY → ACTIVATING → ACTIVE → QUIESCING → QUIESCED`. Default (no flag)
+activates at boot as always; `--standby` prepares without opening the
+database and waits for an authenticated `POST /activate` on a private control
+port (Grid `grid.control.port` 8081, relay `meshRelay.control.port` 8091; off
+unless `control.tokenSha256` is set). `POST /quiesce` (and SIGTERM, in every
+state) stops admitting, drains, stops every background database user, closes
+the store and releases its lock. Rules that keep it to one writer: ownership
+is never inferred from a timeout or an unhealthy predecessor; QUIESCED never
+reactivates; a release that cannot complete stays QUIESCING with
+`databaseHeld: true`. A new background goroutine that touches the store must
+be stopped and waited for in `gridApp.Quiesce` (or the scheduler's `Stop`),
+and a new production route must go through the admission gate. Coordinator
+guide, API table, first-migration and rollback notes:
+`docs/deploy-handoff.md`.
+
 ## Performance & Monitoring
 
 **Response Time Targets**:
