@@ -554,6 +554,11 @@ node screenshots/metrics.mjs --pages docs --widths 1440
 
 # The Map screen's fail-loud mount rule, driven rather than photographed.
 node screenshots/map-contract.mjs
+
+# The Relay screen: relay down (first load / after a good read) and zero
+# gateways, each asserted. /relay reads the mesh relay, a separate service, so
+# "relay unreachable" must read as UNKNOWN, never as every gateway offline.
+node screenshots/relay-contract.mjs
 ```
 
 `map-contract.mjs` exists because the defects the review found on that screen

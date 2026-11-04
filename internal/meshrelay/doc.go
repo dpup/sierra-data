@@ -30,8 +30,10 @@
 // # Invariants
 //
 //   - No unauthenticated path reaches a node. Every route that forwards frames
-//     authenticates a bearer token first; the only public routes are /healthz
-//     and the (data-free) status page shell.
+//     authenticates a bearer token first. The only public routes are /healthz
+//     and /api/status, a deliberately
+//     minimal board for the public site (see apiPublicStatus for what it
+//     withholds, and why).
 //   - Payloads are never logged. Binary frames carry private messages and
 //     channel secrets (CHANNEL_INFO returns the 16-byte key). Log sizes,
 //     counts and timing only. The one exception is the per-gateway debug list

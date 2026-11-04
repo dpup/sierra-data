@@ -534,6 +534,24 @@ const GEOJSON = {
   },
 };
 
+// ---- mesh relay ------------------------------------------------------------
+const RELAY_STATUS = {
+  generated_at: ago(0),
+  gateways: [
+    { name: 'north-ridge', online: true, node_state: 'connected', ready: true, in_use: true, in_use_role: 'agent',
+      connected_since: ago(260), last_seen: ago(0), agent_version: '0.3.1', link_kind: 'serial' },
+    { name: 'east-meadow', online: true, node_state: 'connected', ready: true, in_use: false,
+      connected_since: ago(1900), last_seen: ago(0), agent_version: '0.3.1', link_kind: 'tcp' },
+    { name: 'south-creek', online: true, node_state: 'disconnected', ready: false, in_use: false,
+      connected_since: ago(45), last_seen: ago(1), agent_version: '0.3.0', link_kind: 'serial' },
+    { name: 'west-hollow', online: true, node_state: 'mismatch', ready: false, in_use: false,
+      connected_since: ago(12), last_seen: ago(0), agent_version: '0.3.1', link_kind: 'serial' },
+    { name: 'pine-flat', online: false, ready: false, in_use: false,
+      last_seen: ago(3 * 60 + 20), agent_version: '0.2.4', link_kind: 'serial' },
+    { name: 'oak-knoll', online: false, ready: false, in_use: false },
+  ],
+};
+
 // ---- router --------------------------------------------------------------
 
 function eventsFor(params) {
@@ -581,6 +599,10 @@ function historyFor() {
  * @returns {object|null}
  */
 export function routeFor(pathname, params) {
+  // The mesh relay's public status (a separate service, snake_case). One of
+  // each state, so every row treatment is on screen.
+  if (pathname === '/mesh/relay/api/status') return RELAY_STATUS;
+
   // Strip the /api prefix the gateway mounts under; accept both /api/v1 and /v1.
   const p = pathname.replace(/^\/api/, '');
 

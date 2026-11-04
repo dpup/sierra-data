@@ -11,7 +11,7 @@
 // Modes:
 //
 //	e2e     (default) full scenario against a throwaway gateway "e2e-<hex>":
-//	        bridge hello/welcome, status, lease, frame round trip, busy (4029),
+//	        bridge hello/welcome, status (admin and public), lease, frame round trip, busy (4029),
 //	        renew, relink, audit, session replacement (4009), pubkey mismatch +
 //	        accept, token rotation (4001), delete. Needs an ADMIN token. It
 //	        cleans up its gateway, and makes exactly two failed auth attempts,
@@ -394,6 +394,38 @@ func runE2E(base, token string, keep bool) int {
 			time.Sleep(100 * time.Millisecond)
 		}
 		return "", fmt.Errorf("online=%v pubkey_status=%q", st.Online, st.PubkeyStatus)
+	})
+	r.step("public status: listed, ready, no pubkey", func() (string, error) {
+		resp, err := (&http.Client{Timeout: timeout}).Get(base + prefix + "/api/status")
+		if err != nil {
+			return "", err
+		}
+		defer resp.Body.Close()
+		raw, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode != 200 {
+			return "", fmt.Errorf("HTTP %d without a token", resp.StatusCode)
+		}
+		if bytes.Contains(raw, []byte(keyA)) {
+			return "", errors.New("public status exposes the node pubkey")
+		}
+		var out struct {
+			Gateways []struct {
+				Name  string `json:"name"`
+				Ready bool   `json:"ready"`
+			} `json:"gateways"`
+		}
+		if err := json.Unmarshal(raw, &out); err != nil {
+			return "", err
+		}
+		for _, g := range out.Gateways {
+			if g.Name == gw {
+				if !g.Ready {
+					return "", errors.New("listed but not ready")
+				}
+				return fmt.Sprintf("%d gateway(s) listed", len(out.Gateways)), nil
+			}
+		}
+		return "", fmt.Errorf("%s not listed", gw)
 	})
 	if !r.step("client lease; bridge gets attach", func() (string, error) {
 		var err error

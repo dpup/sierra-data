@@ -14,6 +14,25 @@ throughout; errors are gRPC-standard `{code, codeName, message, details}`). The
 by a snake_case `/v1` surface on 2026-07-05, which was in turn folded back onto the
 proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
 
+## 2026-11-04 (later)
+
+### Mesh relay: public gateway status, and a `/relay` page
+
+New, unauthenticated: `GET /mesh/relay/api/status`, served by the mesh relay
+(not the Grid; snake_case like the rest of the relay API). One entry per SIERRA
+gateway: `name`, `online` (a bridge is attached), `node_state`
+(`connected | disconnected | mismatch`, absent while offline because it is then
+unknown), `ready` (a session could start now), `in_use`, `in_use_role` (the holder's
+role — `admin | operator | agent` — never its name), `connected_since`,
+`last_seen`, `agent_version`, `link_kind`, plus `generated_at`.
+
+It deliberately carries no pubkeys, node names, notes, lease holders, bridge OS
+or link detail: a gateway sits at a volunteer's house, and a node key would tie
+it to the node's own (possibly located) adverts.
+
+The site's new `/relay` page renders it. A failed read is "gateway status
+unknown", never "all gateways offline".
+
 ## 2026-11-04
 
 ### New service: the SIERRA Mesh Relay (`/mesh/relay/*`)

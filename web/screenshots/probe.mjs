@@ -57,7 +57,7 @@ const ctx = await browser.newContext({ viewport: { width, height: 1000 } });
 await ctx.route('**/*', async (route) => {
   const url = new URL(route.request().url());
   const same = url.host === `localhost:${port}`;
-  if (same && /^\/(api\/)?v1\//.test(url.pathname)) {
+  if (same && /^\/((api\/)?v1|mesh\/relay\/api)\//.test(url.pathname)) {
     const data = routeFor(url.pathname, url.searchParams);
     if (data === null) return route.fulfill({ status: 404, contentType: 'application/json', body: '{}' });
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(data) });

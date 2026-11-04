@@ -52,6 +52,7 @@ const PAGES = [
   { name: 'map-suppressed', url: '/map.html?place=ebbetts-pass&layer=evacuation' },
   { name: 'roads', url: '/roads.html?place=ebbetts-pass' },
   { name: 'mesh', url: '/mesh.html' },
+  { name: 'relay', url: '/relay.html' },
   { name: 'places', url: '/places.html' },
   { name: 'place-detail', url: '/places.html?place=ebbetts-pass' },
   { name: 'sources', url: '/sources.html' },
@@ -135,7 +136,7 @@ async function main() {
     await context.route('**/*', async (route) => {
       const url = new URL(route.request().url());
       const sameOrigin = url.host === `localhost:${port}`;
-      if (sameOrigin && /^\/(api\/)?v1\//.test(url.pathname)) {
+      if (sameOrigin && /^\/((api\/)?v1|mesh\/relay\/api)\//.test(url.pathname)) {
         const data = routeFor(url.pathname, url.searchParams);
         if (data === null) {
           apiMisses.add(url.pathname);
