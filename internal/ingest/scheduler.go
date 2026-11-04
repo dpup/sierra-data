@@ -72,6 +72,11 @@ type SchedulerConfig struct {
 	EnhancerModel   string          // stamped into Enhancement.model on enhanced events
 	BudgetPerTick   int             // max Enhance calls (attempts, not successes) per tick
 	MeshMaintenance MeshMaintenance // relay-observation compaction + prune (Interval 0 = off)
+	// StatsRefreshFirstAfter, when positive, runs the first ANALYZE after this
+	// delay instead of after a full statsRefreshInterval. cmd/server sets it when
+	// boot kept the persisted statistics rather than analyzing synchronously, so
+	// a run of deploys less than 6h apart still refreshes them.
+	StatsRefreshFirstAfter time.Duration
 }
 
 // Scheduler drives the ingest pollers: one goroutine per PollerSpec, each
@@ -85,6 +90,7 @@ type Scheduler struct {
 	enhancerModel string
 	budgetPerTick int
 	meshMaint     MeshMaintenance
+	statsFirst    time.Duration    // first stats refresh; 0 = statsRefreshInterval
 	now           func() time.Time // injectable for lifecycle tests
 	startJitter   time.Duration    // maxStartJitter; tests set 0
 }
@@ -99,6 +105,7 @@ func NewScheduler(st *store.Store, cfg SchedulerConfig) *Scheduler {
 		enhancerModel: cfg.EnhancerModel,
 		budgetPerTick: cfg.BudgetPerTick,
 		meshMaint:     cfg.MeshMaintenance,
+		statsFirst:    cfg.StatsRefreshFirstAfter,
 		now:           time.Now,
 		startJitter:   maxStartJitter,
 	}
@@ -132,8 +139,9 @@ const touchSeenCoalesce = 10 * time.Minute
 // statsRefreshInterval is how often index statistics are recomputed. Not a
 // tuning knob, so deliberately not in config: it exists only so the query
 // planner's picture of the ACTIVE-vs-dead skew keeps up as the store grows.
-// The boot ANALYZE (cmd/server) does the initial pass; this keeps it current on
-// a long-lived process.
+// Boot (cmd/server) analyzes synchronously only when the database has no
+// statistics yet; otherwise it keeps the persisted ones and this loop's first
+// pass comes early (SchedulerConfig.StatsRefreshFirstAfter).
 const statsRefreshInterval = 6 * time.Hour
 
 // runStatsRefresh periodically recomputes SQLite index statistics. Without
@@ -148,13 +156,18 @@ func (s *Scheduler) runStatsRefresh(ctx context.Context) {
 			logging.Errorw(ctx, "Stats refresh: recovered from panic", "error", r)
 		}
 	}()
-	ticker := time.NewTicker(statsRefreshInterval)
-	defer ticker.Stop()
+	first := statsRefreshInterval
+	if s.statsFirst > 0 {
+		first = s.statsFirst
+	}
+	timer := time.NewTimer(first)
+	defer timer.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-timer.C:
+			timer.Reset(statsRefreshInterval)
 			start := s.now()
 			if err := s.store.Analyze(ctx); err != nil {
 				logging.Errorw(ctx, "Stats refresh: ANALYZE failed", "error", err)

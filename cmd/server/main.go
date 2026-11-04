@@ -142,6 +142,7 @@ func main() {
 			"maxOpenConns", st.MaxOpenConns)
 	}
 
+	seedStart := time.Now()
 	if err := gridStore.SeedSources(ctx, gridSourceSeeds(appConfig)); err != nil {
 		logging.Errorw(ctx, "Failed to seed grid sources", "error", err)
 		log.Fatalf("Failed to seed grid sources: %v", err)
@@ -151,17 +152,29 @@ func main() {
 		logging.Errorw(ctx, "Failed to seed grid places", "error", err)
 		log.Fatalf("Failed to seed grid places: %v", err)
 	}
-	// Refresh index statistics after seeding. Without them the place-scoped
-	// event query walks every attachment a place has ever had (see
-	// store.Analyze). Fail-soft and timed: stale stats make queries slow, but a
-	// failure here must never keep the service from starting, and the duration
-	// is worth watching because this runs before the listener opens.
-	analyzeStart := time.Now()
-	if err := gridStore.Analyze(ctx); err != nil {
-		logging.Warnw(ctx, "Failed to refresh grid store statistics; place-scoped queries may be slow",
-			"error", err)
+	logging.Infow(ctx, "Seeded grid sources and places", "duration", time.Since(seedStart))
+
+	// Index statistics. Without them the place-scoped event query walks every
+	// attachment a place has ever had (see store.Analyze). They persist in the
+	// database file, so only a database that has never been analyzed needs a
+	// synchronous ANALYZE here (cheap: it is new or small). Otherwise the
+	// previous process's statistics stand, and the scheduler refreshes them
+	// shortly after boot: a full ANALYZE measured 59.5s on the EFS store, and
+	// running it before the listener opened was most of a deploy's 502 window.
+	// Fail-soft either way: stale stats make queries slow, never wrong.
+	var statsRefreshFirstAfter time.Duration
+	if has, err := gridStore.HasStatistics(ctx); err == nil && has {
+		statsRefreshFirstAfter = bootStatsRefreshDelay
+		logging.Infow(ctx, "Using persisted grid store statistics; refresh deferred",
+			"refreshIn", bootStatsRefreshDelay)
 	} else {
-		logging.Infow(ctx, "Refreshed grid store statistics", "duration", time.Since(analyzeStart))
+		analyzeStart := time.Now()
+		if err := gridStore.Analyze(ctx); err != nil {
+			logging.Warnw(ctx, "Failed to refresh grid store statistics; place-scoped queries may be slow",
+				"error", err)
+		} else {
+			logging.Infow(ctx, "Refreshed grid store statistics", "duration", time.Since(analyzeStart))
+		}
 	}
 
 	// Hazard condition-layer projector: gridapi calls BuildLayer for the live
@@ -261,7 +274,12 @@ func main() {
 		// Rehydrate presence from the persisted store BEFORE connecting, so a
 		// deploy doesn't drop the whole mesh to "unknown" (and let the sweep expire
 		// the slow SIERRA repeaters) until every node re-adverts.
-		seedMeshRegistry(ctx, reg, gridStore)
+		if seedMeshRegistry(ctx, reg, gridStore) {
+			// The neighbour graph is rebuilt in the background: replaying 48h
+			// of receptions measured 14.4s over EFS, and nothing needs it
+			// before the listener opens. See seedMeshNeighbours.
+			go seedMeshNeighbours(ctx, reg, gridStore)
+		}
 		if mqttEnabled {
 			if err := reg.Connect(ctx); err != nil {
 				logging.Errorw(ctx, "Failed to start MeshCore subscriber", "error", err)
@@ -308,6 +326,8 @@ func main() {
 		EnhancerModel:   model,
 		BudgetPerTick:   appConfig.Grid.Enhancement.BudgetPerTick,
 		MeshMaintenance: meshMaintenanceConfig(appConfig),
+
+		StatsRefreshFirstAfter: statsRefreshFirstAfter,
 	})
 	scheduler.Start(ctx)
 
@@ -404,7 +424,11 @@ func main() {
 		prefab.WithHTTPHandlerFunc("/", siteHandler),
 	)
 
-	logging.Info(ctx, "Server initialization complete, starting HTTP services")
+	// Everything above runs before the listener opens, so during a deploy it
+	// is time the load balancer has no healthy target. Keep it short, and keep
+	// it measured.
+	logging.Infow(ctx, "Server initialization complete, starting HTTP services",
+		"sinceProcessStart", time.Since(processStart))
 
 	// Start the server (blocks until shutdown)
 	if err := server.Start(); err != nil {
@@ -623,21 +647,35 @@ func meshMaintenanceConfig(cfg *config.Config) ingest.MeshMaintenance {
 	}
 }
 
+// bootStatsRefreshDelay is when the first background ANALYZE runs after a boot
+// that kept the persisted statistics: late enough to stay off the first ticks'
+// full reconcile, soon enough that frequent deploys never leave them stale for
+// long. The refresh holds the store's writer mutex for its whole run.
+const bootStatsRefreshDelay = 10 * time.Minute
+
+// processStart anchors the boot-duration log line.
+var processStart = time.Now()
+
 // seedMeshRegistry rehydrates the MeshCore Registry from the persisted store so
 // node presence survives a restart. It seeds every ACTIVE/SCHEDULED network node
 // (identity + location + last-seen) and replays each node's recent advert times
 // (from the observation store) to reconstruct its cadence, so the per-node
 // presence window is right immediately after boot. Best-effort: a store read
 // failure logs and leaves the Registry to refill from live adverts (the prior
-// behavior), never blocks startup.
-func seedMeshRegistry(ctx context.Context, reg *meshcore.Registry, st *store.Store) {
+// behavior), never blocks startup. It reports whether any node was seeded.
+//
+// This half stays synchronous, before Connect and before the scheduler's first
+// mesh tick: a snapshot missing the seeded nodes would let the sweep start
+// expiring the slow SIERRA repeaters.
+func seedMeshRegistry(ctx context.Context, reg *meshcore.Registry, st *store.Store) bool {
+	start := time.Now()
 	events, err := st.ActiveEventsBySource(ctx, "meshcore")
 	if err != nil {
 		logging.Warnw(ctx, "MeshCore: presence rehydration skipped — loading active nodes failed", "error", err)
-		return
+		return false
 	}
 	if len(events) == 0 {
-		return
+		return false
 	}
 	heard, err := st.MeshNodeHeardTimes(ctx, 40)
 	if err != nil {
@@ -686,14 +724,26 @@ func seedMeshRegistry(ctx context.Context, reg *meshcore.Registry, st *store.Sto
 		seeds = append(seeds, sn)
 	}
 	reg.Seed(seeds)
-	logging.Infow(ctx, "MeshCore: rehydrated node presence from store", "nodes", len(seeds))
+	logging.Infow(ctx, "MeshCore: rehydrated node presence from store",
+		"nodes", len(seeds), "duration", time.Since(start))
+	return len(seeds) > 0
+}
 
-	// The neighbour graph that resolves 1-byte relay hops (meshcore/relay.go),
-	// so a restart does not stop crediting half the traffic until it re-learns.
-	// Rebuilt from the raw receptions (Tier 0, observationRetention) through the
-	// live rule, NOT from the link rollup: rollup edges were resolved by the
-	// older rule that matches 1-byte hops on prefix, which is exactly the
-	// misattribution the graph exists to avoid.
+// seedMeshNeighbours rebuilds the neighbour graph that resolves 1-byte relay
+// hops (meshcore/relay.go), so a restart does not stop crediting half the
+// traffic until it re-learns. Rebuilt from the raw receptions (Tier 0,
+// observationRetention) through the live rule, NOT from the link rollup: rollup
+// edges were resolved by the older rule that matches 1-byte hops on prefix,
+// which is exactly the misattribution the graph exists to avoid.
+//
+// It runs in the background, after the listener is up. That is safe because
+// SeedPaths and live learning share adjMu and an edge keeps its latest time,
+// so the order they interleave in does not matter. Until it finishes, a 1-byte
+// hop that only the stored graph could resolve goes uncredited: relay credit
+// for those nodes resumes a few seconds late, and their presence is already
+// held by the synchronous seed above. Mesh presence is ambient INFO.
+func seedMeshNeighbours(ctx context.Context, reg *meshcore.Registry, st *store.Store) {
+	start := time.Now()
 	obs, err := st.MeshObservationPaths(ctx, time.Now().Add(-meshcore.AdjacencyRetention))
 	if err != nil {
 		logging.Warnw(ctx, "MeshCore: neighbour-graph rehydration skipped — reading receptions failed", "error", err)
@@ -701,7 +751,8 @@ func seedMeshRegistry(ctx context.Context, reg *meshcore.Registry, st *store.Sto
 	}
 	paths := seedPaths(obs)
 	reg.SeedPaths(paths, nil)
-	logging.Infow(ctx, "MeshCore: rehydrated neighbour graph from store", "paths", len(paths))
+	logging.Infow(ctx, "MeshCore: rehydrated neighbour graph from store",
+		"paths", len(paths), "duration", time.Since(start))
 }
 
 // seedPaths turns stored advert receptions into neighbour-graph seed paths.

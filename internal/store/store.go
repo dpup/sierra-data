@@ -663,6 +663,32 @@ func (s *Store) Analyze(ctx context.Context) error {
 	return nil
 }
 
+// HasStatistics reports whether sqlite_stat1 already holds statistics for the
+// tables behind the place-scoped event query (events, event_places). The stats
+// live in the database file, so a restart inherits whatever the last ANALYZE
+// computed: boot only needs a synchronous ANALYZE when they are missing (a new
+// or never-analyzed database), and can otherwise defer the refresh — a full
+// ANALYZE measured 59.5 s on production's EFS-backed store, all of it before
+// the listener opened.
+func (s *Store) HasStatistics(ctx context.Context) (bool, error) {
+	var exists bool
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sqlite_stat1')`,
+	).Scan(&exists); err != nil {
+		return false, fmt.Errorf("store: checking for sqlite_stat1: %w", err)
+	}
+	if !exists {
+		return false, nil
+	}
+	var tables int
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(DISTINCT tbl) FROM sqlite_stat1 WHERE tbl IN ('events', 'event_places')`,
+	).Scan(&tables); err != nil {
+		return false, fmt.Errorf("store: reading sqlite_stat1: %w", err)
+	}
+	return tables == 2, nil
+}
+
 func (s *Store) migrate() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
