@@ -890,3 +890,30 @@ func TestTickPersistsMeshActivity(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, stored.GetMesh().GetTelemetry().GetLastRelayedAt(), "activity is never written into the blob")
 }
+
+// When boot kept the persisted statistics, the first background ANALYZE comes
+// after StatsRefreshFirstAfter rather than a full statsRefreshInterval, so
+// deploys less than 6h apart cannot leave the statistics stale indefinitely.
+func TestSchedulerEarlyFirstStatsRefresh(t *testing.T) {
+	ctx, cancel := context.WithCancel(testCtx())
+	t.Cleanup(cancel)
+	st := newSchedStore(t)
+	seedSchedSources(t, st, "usgs")
+	require.NoError(t, st.UpsertPlace(ctx, &gridv1.Place{
+		Id: "area:calaveras", Kind: gridv1.PlaceKind_AREA, Name: "Calaveras County", Slug: "calaveras",
+	}))
+	ev := schedEvent("usgs:q", "usgs", gridv1.Layer_EARTHQUAKE)
+	ev.PlaceIds = []string{"area:calaveras"}
+	_, err := st.UpsertEvent(ctx, ev)
+	require.NoError(t, err)
+
+	has, err := st.HasStatistics(ctx)
+	require.NoError(t, err)
+	require.False(t, has)
+
+	NewScheduler(st, SchedulerConfig{StatsRefreshFirstAfter: 10 * time.Millisecond}).Start(ctx)
+	assert.Eventually(t, func() bool {
+		has, err := st.HasStatistics(ctx)
+		return err == nil && has
+	}, 5*time.Second, 10*time.Millisecond, "the first stats refresh should run after StatsRefreshFirstAfter")
+}

@@ -281,10 +281,20 @@ whether readers block on the writer and whether the durability reasoning in
 
 ## Index statistics are REQUIRED, not tuning (`Analyze`)
 
-`Store.Analyze` runs `ANALYZE`. It is called at boot (`cmd/server`) and every
-`statsRefreshInterval` (6 h) by the ingest scheduler, and it is **load-bearing**:
-without stats the place-scoped event query degrades without bound as the store
-ages.
+`Store.Analyze` runs `ANALYZE`. The ingest scheduler calls it every
+`statsRefreshInterval` (6 h), and it is **load-bearing**: without stats the
+place-scoped event query degrades without bound as the store ages.
+
+**Boot does not analyze unless it has to.** The statistics live in
+`sqlite_stat1`, inside the database file, so a restart inherits the last run's.
+`cmd/server` analyzes synchronously only when `HasStatistics` says the file has
+none for `events`/`event_places` (a new database, where it is cheap); otherwise
+the scheduler's first refresh runs 10 minutes after boot
+(`SchedulerConfig.StatsRefreshFirstAfter`). The unconditional boot ANALYZE
+measured **59.5 s on the production EFS store**, all of it before the listener
+opened, and it was most of a deploy's 502 window. `TestStatisticsSurviveReopen`
+pins the property this relies on. Each refresh holds the writer mutex for its
+whole run, so on EFS ingest writes wait out that minute.
 
 The query is `FROM events e JOIN event_places ep ON … ep.place_id = ? WHERE
 e.status IN (ACTIVE, SCHEDULED)`. **`event_places` attachments are deliberately

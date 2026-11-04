@@ -671,7 +671,10 @@ Relay attribution has four rules, all of them about not overclaiming:
    48h) through rule 1 (`SeedPaths`), NOT from `mesh_link_rollup`: rollup edges
    were resolved by the older unique-prefix rule, which matches 1-byte hops
    and so holds exactly the misattributions this graph avoids (links unseen
-   for 30 days are pruned). Rule 2 credits only a catalogued relay-capable
+   for 30 days are pruned). The rebuild runs in the background, off the
+   path to the listener (it took 14.4s over EFS; node presence is still
+   seeded synchronously), so for those seconds a 1-byte hop only the stored graph
+   could resolve goes uncredited. Rule 2 credits only a catalogued relay-capable
    node (the graph also holds observers), and a packet with no `origin_id`
    gets no observer anchor rather than the broker URL every radio on that
    broker shares. On a 3,000-packet capture it agreed with CoreScope's

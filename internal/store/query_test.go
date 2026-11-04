@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -362,14 +363,57 @@ const placeScopedEventsSQL = `SELECT e.proto, e.severity, e.observed_at, e.id FR
 func TestPlaceScopedEventsDoesNotWalkDeadAttachments(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
+	const live = 20
+	seedDeadAttachmentSkew(t, s, live)
+
+	require.NoError(t, s.Analyze(ctx))
+	assertPlaceScopedPlanDrivesFromActive(t, s)
+
+	// And the query must still be correct: only the live ones come back.
+	got, _, err := s.QueryEvents(ctx, EventQuery{PlaceID: "county:calaveras", PageSize: 500})
+	require.NoError(t, err)
+	assert.Len(t, got, live, "only ACTIVE/SCHEDULED events belong in a default place query")
+}
+
+// TestStatisticsSurviveReopen pins what lets boot skip the synchronous ANALYZE
+// (cmd/server): sqlite_stat1 lives in the database file, so a reopened store
+// plans the place-scoped query correctly without analyzing again, and
+// HasStatistics tells a never-analyzed database apart.
+func TestStatisticsSurviveReopen(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "grid.db")
+	s, err := Open(path)
+	require.NoError(t, err)
+
+	has, err := s.HasStatistics(ctx)
+	require.NoError(t, err)
+	assert.False(t, has, "a new database has no statistics")
+
+	seedDeadAttachmentSkew(t, s, 20)
+	require.NoError(t, s.Analyze(ctx))
+	require.NoError(t, s.Close())
+
+	s, err = Open(path)
+	require.NoError(t, err)
+	t.Cleanup(func() { s.Close() })
+	has, err = s.HasStatistics(ctx)
+	require.NoError(t, err)
+	assert.True(t, has, "statistics persist in the file across a reopen")
+	assertPlaceScopedPlanDrivesFromActive(t, s)
+}
+
+// seedDeadAttachmentSkew reproduces the production skew: a small live set and
+// a large dead one, all attached to the same place.
+func seedDeadAttachmentSkew(t *testing.T, s *Store, live int) {
+	t.Helper()
+	ctx := context.Background()
 	seedSource(t, s, "usgs")
 	require.NoError(t, s.UpsertPlace(ctx, testPlace(
 		"county:calaveras", "calaveras", "Calaveras County",
 		gridv1.PlaceKind_COUNTY, polyGeometry(38.0, -120.9, 38.5, -120.0))))
 
-	// The production skew: a small live set, a large dead one, all attached to
-	// the same place. The planner only picks the good plan once it can see this.
-	const live, dead = 20, 400
+	// The planner only picks the good plan once it can see this.
+	const dead = 400
 	var deadIDs []string
 	for i := 0; i < live+dead; i++ {
 		ev := testEvent(fmt.Sprintf("usgs:e%04d", i), gridv1.Severity_MINOR,
@@ -388,9 +432,12 @@ func TestPlaceScopedEventsDoesNotWalkDeadAttachments(t *testing.T) {
 	require.NoError(t, s.db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM event_places WHERE place_id = ?`, "county:calaveras").Scan(&attached))
 	require.Equal(t, live+dead, attached, "dead attachments must survive a transition")
+}
 
-	require.NoError(t, s.Analyze(ctx))
-
+// assertPlaceScopedPlanDrivesFromActive checks the join order of the
+// place-scoped event query on a store seeded by seedDeadAttachmentSkew.
+func assertPlaceScopedPlanDrivesFromActive(t *testing.T, s *Store) {
+	t.Helper()
 	plan := planFor(t, s, placeScopedEventsSQL, "county:calaveras",
 		int32(gridv1.EventStatus_ACTIVE), int32(gridv1.EventStatus_SCHEDULED), 51)
 
@@ -411,9 +458,4 @@ func TestPlaceScopedEventsDoesNotWalkDeadAttachments(t *testing.T) {
 	assert.NotContains(t, plan, "sqlite_autoindex_events_1",
 		"reaching events by primary key means one wide-row fetch per attachment,\n"+
 			"including every dead one. Plan was:\n%s", plan)
-
-	// And the query must still be correct: only the live ones come back.
-	got, _, err := s.QueryEvents(ctx, EventQuery{PlaceID: "county:calaveras", PageSize: 500})
-	require.NoError(t, err)
-	assert.Len(t, got, live, "only ACTIVE/SCHEDULED events belong in a default place query")
 }
