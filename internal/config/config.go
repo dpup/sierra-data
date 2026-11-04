@@ -26,11 +26,57 @@ type Config struct {
 	MeshRelay MeshRelayConfig `koanf:"meshRelay"`
 }
 
+// ControlConfig is a process's deployment-control listener: the private API
+// a deployment coordinator uses to hand database ownership from one task to
+// the next (internal/handoff, docs/deploy-handoff.md). It is off unless
+// TokenSha256 is set, and --standby refuses to start without it.
+type ControlConfig struct {
+	// Port of the control listener (Grid 8081, relay 8091). Never route it
+	// from the public load balancer.
+	Port int `koanf:"port"`
+	// TokenSha256 is the hex SHA-256 of the deployment token that POST
+	// /activate and /quiesce require. Only the hash is configured; the token
+	// lives with the coordinator. PF__GRID__CONTROL__TOKEN_SHA256 /
+	// PF__MESH_RELAY__CONTROL__TOKEN_SHA256.
+	TokenSha256 string `koanf:"tokenSha256"`
+	// DrainTimeout is how long quiescence lets in-flight requests finish
+	// before cancelling them (default 10s). It is downtime during a handoff,
+	// so keep it short.
+	DrainTimeout time.Duration `koanf:"drainTimeout"`
+	// WorkerStopTimeout bounds how long quiescence waits for background
+	// database users after cancelling them (default 15s). Past it the release
+	// FAILS and the database counts as held.
+	WorkerStopTimeout time.Duration `koanf:"workerStopTimeout"`
+}
+
+// Drain is DrainTimeout with its default.
+func (c ControlConfig) Drain() time.Duration {
+	if c.DrainTimeout > 0 {
+		return c.DrainTimeout
+	}
+	return 10 * time.Second
+}
+
+// WorkerStop is WorkerStopTimeout with its default.
+func (c ControlConfig) WorkerStop() time.Duration {
+	if c.WorkerStopTimeout > 0 {
+		return c.WorkerStopTimeout
+	}
+	return 15 * time.Second
+}
+
+// Enabled reports whether the control listener should run.
+func (c ControlConfig) Enabled() bool { return c.TokenSha256 != "" }
+
 // MeshRelayConfig is the meshRelay section: the SIERRA Mesh Relay
 // (internal/meshrelay). Zero durations and rates take the relay's defaults.
 type MeshRelayConfig struct {
 	// Port the relay listens on (prefab's server.port belongs to the Grid).
 	Port int `koanf:"port"`
+	// Control is the relay's deployment-control plane (internal/handoff). Its
+	// port must differ from the Grid's: both containers share a task's network
+	// namespace.
+	Control ControlConfig `koanf:"control"`
 	// DBPath is the relay's OWN SQLite file — never grid.db.
 	DBPath      string        `koanf:"dbPath"`
 	LockTimeout time.Duration `koanf:"lockTimeout"`
@@ -93,7 +139,9 @@ type GridConfig struct {
 	// deploys drain slowly. 0 => store.DefaultLockTimeout. Keep the Dockerfile
 	// HEALTHCHECK start-period above this: the listener does not open until the
 	// lock is acquired.
-	LockTimeout time.Duration           `koanf:"lockTimeout"`
+	LockTimeout time.Duration `koanf:"lockTimeout"`
+	// Control is the Grid's deployment-control plane (internal/handoff).
+	Control     ControlConfig           `koanf:"control"`
 	Enhancement GridEnhancement         `koanf:"enhancement"`
 	Sources     map[string]SourceTuning `koanf:"sources"`
 	Meshcore    MeshcoreConfig          `koanf:"meshcore"`

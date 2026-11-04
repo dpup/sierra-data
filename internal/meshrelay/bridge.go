@@ -71,8 +71,8 @@ func (r *Relay) handleBridge(w http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		return // Upgrade already wrote the error
 	}
-	r.sessions.Add(1)
-	defer r.sessions.Done()
+	r.sessionStart()
+	defer r.sessionEnd()
 	s := &bridgeSession{
 		id: randomID("s_"), gateway: name, conn: newConn(ws, r.cfg.PingInterval),
 		limiter: newRateLimiter(r.cfg.FrameRate, r.cfg.FrameBurst),
@@ -115,7 +115,9 @@ func (r *Relay) serveBridge(s *bridgeSession, ip string) {
 		s.conn.close(1011, "internal error")
 		return
 	}
-	r.attachBridge(s, &h, pinned, mismatch)
+	if !r.attachBridge(s, &h, pinned, mismatch) {
+		return // the relay is shutting down; attachBridge closed it
+	}
 	logging.Infow(ctx, "bridge connected", "ip", ip, "agent", h.Agent.Name, "version", h.Agent.Version,
 		"os", h.Agent.OS, "arch", h.Agent.Arch, "link", h.Link.Kind, "node_state", h.Node.State)
 
@@ -250,9 +252,16 @@ func (r *Relay) gwLocked(name string) *gwState {
 }
 
 // attachBridge makes s the gateway's live session, replacing any older one.
-func (r *Relay) attachBridge(s *bridgeSession, h *helloMsg, pinned, mismatch string) {
+// It refuses (closing s, returning false) once shutdown has begun: the close
+// sweep has already run and would never see this session.
+func (r *Relay) attachBridge(s *bridgeSession, h *helloMsg, pinned, mismatch string) bool {
 	now := r.now()
 	r.mu.Lock()
+	if r.stopping {
+		r.mu.Unlock()
+		s.conn.close(CloseGoingAway, "relay restarting")
+		return false
+	}
 	g := r.gwLocked(s.gateway)
 	old := g.bridge
 	g.bridge, g.hello, g.node = s, h, h.Node
@@ -284,6 +293,7 @@ func (r *Relay) attachBridge(s *bridgeSession, h *helloMsg, pinned, mismatch str
 	r.event(s.gateway, "connect", s.id)
 	hc := *h
 	r.audit("hello", func(st *Store) error { return st.recordHello(s.gateway, &hc, now) })
+	return true
 }
 
 // updateNode applies a node_status from the current session.

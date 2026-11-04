@@ -395,6 +395,15 @@ grid:
   # default is 300s) and the service's minimumHealthyPercent.
   lockTimeout: "90s"
 
+  # Deployment control (internal/handoff, docs/deploy-handoff.md): a private
+  # listener a deploy coordinator uses to hand grid.db from the old task to a
+  # replacement started with --standby. OFF until tokenSha256 is set (the hash
+  # only; the token stays with the coordinator), and --standby refuses to start
+  # without it. Never route this port from the public load balancer.
+  control:
+    port: 8081
+    tokenSha256: ""
+
   # Wildfire geography. Fire is the ONLY layer with its own, wider geography:
   # every other source matters where it happens, but a fire outside the coverage
   # footprint is a threat TO it — it moves, it closes the roads out, and an hour
@@ -788,6 +797,11 @@ grid:
 # frameRate, authFailLimit, authLockout, ...
 meshRelay:
   port: 8090
+  # Deployment control for relay.db; same contract as grid.control. Its own
+  # port: both containers share the task's network namespace.
+  control:
+    port: 8091
+    tokenSha256: ""
   # The relay's OWN database, never grid.db. Production: PF__MESH_RELAY__DB_PATH.
   dbPath: "./data/relay.db"
   lockTimeout: "90s"

@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -916,4 +917,84 @@ func TestSchedulerEarlyFirstStatsRefresh(t *testing.T) {
 		has, err := st.HasStatistics(ctx)
 		return err == nil && has
 	}, 5*time.Second, 10*time.Millisecond, "the first stats refresh should run after StatsRefreshFirstAfter")
+}
+
+// blockingNormalizer's Poll blocks until its context ends (or, with
+// ignoreCancel, until release is closed), so a test can hold a tick open.
+type blockingNormalizer struct {
+	started      chan struct{}
+	release      chan struct{}
+	ignoreCancel bool
+	polls        atomic.Int32
+}
+
+func (n *blockingNormalizer) SourceIDs() []string { return []string{"usgs"} }
+func (n *blockingNormalizer) Poll(ctx context.Context, _ Prior) (*PollResult, error) {
+	n.polls.Add(1)
+	select {
+	case n.started <- struct{}{}:
+	default:
+	}
+	if n.ignoreCancel {
+		<-n.release
+		return &PollResult{}, nil
+	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-n.release:
+		return &PollResult{}, nil
+	}
+}
+
+// Stop is the handoff's "background database users have stopped": a tick in
+// progress past the grace is cancelled, every goroutine is waited for, and
+// nothing polls afterwards.
+func TestSchedulerStopCancelsAnInProgressTickAndWaits(t *testing.T) {
+	st := newSchedStore(t)
+	seedSchedSources(t, st, "usgs")
+	n := &blockingNormalizer{started: make(chan struct{}, 1), release: make(chan struct{})}
+	s := NewScheduler(st, SchedulerConfig{
+		Pollers:         []PollerSpec{{Normalizer: n, Interval: 10 * time.Millisecond}},
+		MeshMaintenance: MeshMaintenance{Interval: time.Hour},
+	})
+	s.startJitter = 0
+	s.Start(testCtx())
+	select {
+	case <-n.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("poller never ticked")
+	}
+
+	start := time.Now()
+	require.NoError(t, s.Stop(50*time.Millisecond, 5*time.Second))
+	assert.Less(t, time.Since(start), 2*time.Second, "the blocked tick is cancelled after the grace, not waited out")
+	polls := n.polls.Load()
+	time.Sleep(50 * time.Millisecond)
+	assert.Equal(t, polls, n.polls.Load(), "no tick after Stop returns")
+	require.NoError(t, s.Stop(0, time.Second), "Stop is idempotent")
+}
+
+// A tick that ignores cancellation is a database user still running: Stop
+// must say so rather than report a release that did not happen.
+func TestSchedulerStopReportsAGoroutineThatWillNotStop(t *testing.T) {
+	st := newSchedStore(t)
+	seedSchedSources(t, st, "usgs")
+	n := &blockingNormalizer{started: make(chan struct{}, 1), release: make(chan struct{}), ignoreCancel: true}
+	s := NewScheduler(st, SchedulerConfig{Pollers: []PollerSpec{{Normalizer: n, Interval: time.Hour}}})
+	s.startJitter = 0
+	s.Start(testCtx())
+	<-n.started
+
+	err := s.Stop(10*time.Millisecond, 50*time.Millisecond)
+	require.Error(t, err)
+	close(n.release)
+	require.NoError(t, s.Stop(0, 5*time.Second), "a retry waits again and succeeds once it has stopped")
+}
+
+// Never started is nothing to stop (a failed activation tears down before
+// the scheduler exists).
+func TestSchedulerStopBeforeStart(t *testing.T) {
+	s := NewScheduler(newSchedStore(t), SchedulerConfig{})
+	require.NoError(t, s.Stop(0, 0))
 }

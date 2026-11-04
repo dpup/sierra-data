@@ -28,36 +28,56 @@ const maxAPIBody = 16 << 10
 // Patterns are Go ServeMux patterns; prefab registers them on its mux as-is.
 // The websocket handlers rely on prefab's gzip wrapper passing http.Hijacker
 // through, which it does (relay_test.go dials with Accept-Encoding: gzip).
+//
+// Every route goes through the relay's admission gate, so a handoff that
+// closes it stops admitting everything at once, healthz included (a load
+// balancer should stop routing here). A websocket counts as in flight until
+// its handler returns.
 func (r *Relay) ServerOptions() []prefab.ServerOption {
 	p := PathPrefix
 	api := p + "/api"
+	h := r.gate.HandlerFunc
+	j := r.gatedJSON
 	return []prefab.ServerOption{
-		prefab.WithHTTPHandlerFunc("GET "+p+"/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		prefab.WithHTTPHandlerFunc("GET "+p+"/healthz", h(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "text/plain")
 			_, _ = w.Write([]byte("ok\n"))
-		}),
+		})),
 		// The relay's own root has no page: status lives on the public site's
 		// /relay (served by the Grid, same origin), so send people there.
 		prefab.WithHTTPHandlerFunc("GET "+p+"/{$}", toSiteStatus),
 		prefab.WithHTTPHandlerFunc("GET "+p, toSiteStatus),
-		prefab.WithHTTPHandlerFunc("GET "+p+"/{gateway}/dial", r.handleBridge),
-		prefab.WithHTTPHandlerFunc("GET "+p+"/{gateway}", r.handleClient),
+		prefab.WithHTTPHandlerFunc("GET "+p+"/{gateway}/dial", h(r.handleBridge)),
+		prefab.WithHTTPHandlerFunc("GET "+p+"/{gateway}", h(r.handleClient)),
 
 		// The one unauthenticated API route: a deliberately minimal view for the
 		// public site's /relay page. See apiPublicStatus for what it withholds.
-		prefab.WithJSONHandler("GET "+api+"/status", r.apiPublicStatus),
-		prefab.WithJSONHandler("GET "+api+"/gateways", r.viewer(r.apiListGateways)),
-		prefab.WithJSONHandler("POST "+api+"/gateways", r.admin(r.apiCreateGateway)),
-		prefab.WithJSONHandler("GET "+api+"/gateways/{name}", r.viewer(r.apiGetGateway)),
-		prefab.WithJSONHandler("DELETE "+api+"/gateways/{name}", r.admin(r.apiDeleteGateway)),
-		prefab.WithJSONHandler("POST "+api+"/gateways/{name}/rotate-token", r.admin(r.apiRotateToken)),
-		prefab.WithJSONHandler("POST "+api+"/gateways/{name}/accept-pubkey", r.admin(r.apiAcceptPubkey)),
-		prefab.WithJSONHandler("POST "+api+"/gateways/{name}/relink", r.admin(r.apiRelink)),
-		prefab.WithJSONHandler("GET "+api+"/clients", r.admin(r.apiListClients)),
-		prefab.WithJSONHandler("POST "+api+"/clients", r.admin(r.apiCreateClient)),
-		prefab.WithJSONHandler("DELETE "+api+"/clients/{name}", r.admin(r.apiDeleteClient)),
-		prefab.WithJSONHandler("GET "+api+"/leases", r.viewer(r.apiLeases)),
-		prefab.WithJSONHandler("GET "+api+"/metrics", r.viewer(r.apiMetrics)),
+		prefab.WithJSONHandler("GET "+api+"/status", j(r.apiPublicStatus)),
+		prefab.WithJSONHandler("GET "+api+"/gateways", j(r.viewer(r.apiListGateways))),
+		prefab.WithJSONHandler("POST "+api+"/gateways", j(r.admin(r.apiCreateGateway))),
+		prefab.WithJSONHandler("GET "+api+"/gateways/{name}", j(r.viewer(r.apiGetGateway))),
+		prefab.WithJSONHandler("DELETE "+api+"/gateways/{name}", j(r.admin(r.apiDeleteGateway))),
+		prefab.WithJSONHandler("POST "+api+"/gateways/{name}/rotate-token", j(r.admin(r.apiRotateToken))),
+		prefab.WithJSONHandler("POST "+api+"/gateways/{name}/accept-pubkey", j(r.admin(r.apiAcceptPubkey))),
+		prefab.WithJSONHandler("POST "+api+"/gateways/{name}/relink", j(r.admin(r.apiRelink))),
+		prefab.WithJSONHandler("GET "+api+"/clients", j(r.admin(r.apiListClients))),
+		prefab.WithJSONHandler("POST "+api+"/clients", j(r.admin(r.apiCreateClient))),
+		prefab.WithJSONHandler("DELETE "+api+"/clients/{name}", j(r.admin(r.apiDeleteClient))),
+		prefab.WithJSONHandler("GET "+api+"/leases", j(r.viewer(r.apiLeases))),
+		prefab.WithJSONHandler("GET "+api+"/metrics", j(r.viewer(r.apiMetrics))),
+	}
+}
+
+// gatedJSON puts a JSON handler behind the admission gate.
+func (r *Relay) gatedJSON(h prefab.JSONHandler) prefab.JSONHandler {
+	return func(req *http.Request) (any, error) {
+		ctx, done, ok := r.gate.Enter(req.Context())
+		if !ok {
+			return nil, errors.NewC("the relay is handing over to a new instance; retry", codes.Unavailable).
+				WithHTTPStatusCode(http.StatusServiceUnavailable)
+		}
+		defer done()
+		return h(req.WithContext(ctx))
 	}
 }
 

@@ -257,3 +257,24 @@ func TestOpenJournalMode(t *testing.T) {
 		t.Fatal("Open with an unsupported journal mode must error")
 	}
 }
+
+// Released means released (internal/handoff): once a store is closed, the
+// lock is free for the next owner straight away, and the closed store refuses
+// every query rather than reaching the file.
+func TestClosedStoreReleasesTheLockAndRefusesQueries(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "grid.db")
+	s, err := Open(path)
+	require.NoError(t, err)
+	seedSource(t, s, "usgs")
+	require.NoError(t, s.Close())
+
+	next, err := Open(path, WithLockTimeout(100*time.Millisecond))
+	require.NoError(t, err, "the next owner must not wait for the lock")
+	defer next.Close()
+
+	_, _, err = s.QueryEvents(ctx, EventQuery{PageSize: 10})
+	assert.Error(t, err, "a released store must not query the database")
+	_, err = s.UpsertEvent(ctx, testEvent("usgs:x", gridv1.Severity_MINOR, gridv1.EventStatus_ACTIVE, "x"))
+	assert.Error(t, err, "nor write to it")
+}

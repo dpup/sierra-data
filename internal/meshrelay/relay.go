@@ -3,6 +3,7 @@ package meshrelay
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -10,6 +11,8 @@ import (
 
 	"github.com/dpup/prefab"
 	"github.com/dpup/prefab/logging"
+
+	"github.com/dpup/sierra-data/internal/handoff"
 )
 
 // Config tunes the relay. Zero values take the defaults in withDefaults.
@@ -50,6 +53,10 @@ type Config struct {
 	DebugPayloadGateways []string
 	// TickInterval drives lease expiry checks (1s).
 	TickInterval time.Duration
+	// SessionDrainTimeout is how long shutdown waits for every websocket
+	// handler to return after closing them (5s). A handoff counts sessions
+	// still open past it as a failed release.
+	SessionDrainTimeout time.Duration
 }
 
 func (c Config) withDefaults() Config {
@@ -67,6 +74,7 @@ func (c Config) withDefaults() Config {
 	def(&c.AuthFailWindow, 10*time.Minute)
 	def(&c.AuthLockout, 15*time.Minute)
 	def(&c.TickInterval, time.Second)
+	def(&c.SessionDrainTimeout, 5*time.Second)
 	if c.FrameRate == 0 {
 		c.FrameRate = 50
 	}
@@ -99,13 +107,22 @@ type Relay struct {
 	auditMu     sync.RWMutex // guards auditClosed against a send on the closed channel
 	auditClosed bool
 	// sessions counts live websocket handlers, so shutdown can let them record
-	// their disconnects before the audit writer stops.
-	sessions sync.WaitGroup
+	// their disconnects before the audit writer stops. liveSessions is the
+	// same count, readable.
+	sessions     sync.WaitGroup
+	liveSessions atomic.Int64
+	// stopping (guarded by mu) refuses new leases and bridge attachments once
+	// shutdown has begun, so nothing slips in behind the close sweep.
+	stopping bool
+	// gate admits the relay's routes; closing it is how a handoff stops
+	// admitting (see internal/handoff). New gives every relay an open one.
+	gate *handoff.Gate
 
 	lockout *ipLockout
 	debug   map[string]bool
 	m       metrics
 
+	lifeMu  sync.Mutex         // guards cancel: Init runs on prefab's goroutine, Stop on the handoff's
 	cancel  context.CancelFunc // stops Run; set by Init
 	stopped chan struct{}      // closed when Run returns
 }
@@ -127,7 +144,9 @@ func (r *Relay) Name() string { return PluginName }
 // background loop (audit writer, lease ticker, metrics) with the server.
 func (r *Relay) Init(ctx context.Context, _ *prefab.Registry) error {
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	r.lifeMu.Lock()
 	r.cancel = cancel
+	r.lifeMu.Unlock()
 	go func() {
 		defer close(r.stopped)
 		r.Run(runCtx)
@@ -139,10 +158,11 @@ func (r *Relay) Init(ctx context.Context, _ *prefab.Registry) error {
 // hijacked websockets, so this is what closes them: every lease ends with
 // relay_shutdown, every bridge gets 1001, and the audit queue is flushed.
 func (r *Relay) Shutdown(ctx context.Context) error {
-	if r.cancel == nil {
+	cancel := r.runCancel()
+	if cancel == nil {
 		return nil
 	}
-	r.cancel()
+	cancel()
 	select {
 	case <-r.stopped:
 		return nil
@@ -150,6 +170,45 @@ func (r *Relay) Shutdown(ctx context.Context) error {
 		return ctx.Err()
 	}
 }
+
+// Stop is the handoff's form of Shutdown: it waits for the loop to finish
+// (sessions closed, audit queue flushed and stopped) and reports any session
+// that outlived SessionDrainTimeout as an error, because a session still
+// running is a possible store user. Idempotent, and safe alongside prefab's
+// own Shutdown on SIGTERM. A relay whose loop never started has nothing to
+// stop.
+func (r *Relay) Stop(ctx context.Context) error {
+	cancel := r.runCancel()
+	if cancel == nil {
+		return nil
+	}
+	cancel()
+	select {
+	case <-r.stopped:
+	case <-ctx.Done():
+		return fmt.Errorf("meshrelay: stop: %w", ctx.Err())
+	}
+	if n := r.liveSessions.Load(); n > 0 {
+		return fmt.Errorf("meshrelay: %d websocket session(s) still open after %s", n, r.cfg.SessionDrainTimeout)
+	}
+	return nil
+}
+
+// Gate is the admission gate in front of every relay route.
+func (r *Relay) Gate() *handoff.Gate { return r.gate }
+
+func (r *Relay) runCancel() context.CancelFunc {
+	r.lifeMu.Lock()
+	defer r.lifeMu.Unlock()
+	return r.cancel
+}
+
+// LiveSessions is the number of websocket handlers still running.
+func (r *Relay) LiveSessions() int64 { return r.liveSessions.Load() }
+
+// sessionStart / sessionEnd bracket a websocket handler.
+func (r *Relay) sessionStart() { r.sessions.Add(1); r.liveSessions.Add(1) }
+func (r *Relay) sessionEnd()   { r.liveSessions.Add(-1); r.sessions.Done() }
 
 // scoped returns ctx with a logger carrying the given fields.
 func scoped(ctx context.Context, kv ...any) context.Context {
@@ -200,6 +259,7 @@ func New(ctx context.Context, cfg Config, st *Store) *Relay {
 		auditCh: make(chan func(*Store) error, 1024),
 		lockout: newIPLockout(cfg.AuthFailLimit, cfg.AuthFailWindow, cfg.AuthLockout),
 		debug:   map[string]bool{},
+		gate:    handoff.NewGate(),
 	}
 	for _, g := range cfg.DebugPayloadGateways {
 		r.debug[g] = true
@@ -228,14 +288,20 @@ func (r *Relay) Run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			start := time.Now()
 			r.shutdown()
-			// prefab allows ~2s for the whole shutdown; leave room to flush.
-			waitTimeout(&r.sessions, 1500*time.Millisecond)
+			// Sessions record their disconnects through the audit queue, so
+			// the writer stops only after they have returned (or the bound).
+			waitTimeout(&r.sessions, r.cfg.SessionDrainTimeout)
+			sessionsDone := time.Now()
 			r.auditMu.Lock()
 			r.auditClosed = true
 			close(r.auditCh)
 			r.auditMu.Unlock()
 			r.auditWG.Wait()
+			logging.Infow(r.ctx, "Relay sessions closed and audit queue flushed",
+				"sessionDrain", sessionsDone.Sub(start), "auditFlush", time.Since(sessionsDone),
+				"sessionsStillOpen", r.liveSessions.Load())
 			return
 		case <-tick.C:
 			r.tickLeases()
@@ -299,6 +365,7 @@ func (r *Relay) event(gw, kind, detail string) {
 
 func (r *Relay) shutdown() {
 	r.mu.Lock()
+	r.stopping = true
 	var leases []*Lease
 	var bridges []*bridgeSession
 	for _, g := range r.gws {
@@ -405,6 +472,9 @@ func (r *Relay) Acquire(req LeaseRequest) (*Lease, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	g := r.gws[req.Gateway]
+	if r.stopping {
+		return nil, &UnavailableError{Status: r.gatewayStatusLocked(g), Code: ReasonShutdown}
+	}
 	if g == nil || g.bridge == nil {
 		return nil, &UnavailableError{Status: r.gatewayStatusLocked(g), Code: "gateway_offline"}
 	}

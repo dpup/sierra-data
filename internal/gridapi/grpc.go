@@ -33,11 +33,18 @@ import (
 // to match the rest of the surface. Call from a prefab.WithGRPCGateway callback
 // after registering the GridService handler. (The place summary is now the
 // GetPlaceSummary RPC.)
-func (g *GridServer) RegisterGatewayRoutes(mux *runtime.ServeMux) error {
+//
+// wrap, when non-nil, wraps each route; cmd/server passes the handoff
+// admission gate, since these routes reach the store without going through
+// the gRPC interceptor.
+func (g *GridServer) RegisterGatewayRoutes(mux *runtime.ServeMux, wrap func(runtime.HandlerFunc) runtime.HandlerFunc) error {
+	if wrap == nil {
+		wrap = func(h runtime.HandlerFunc) runtime.HandlerFunc { return h }
+	}
 	if err := mux.HandlePath("GET", "/api/v1/places/{place}/map/{layer}",
-		func(w http.ResponseWriter, r *http.Request, pp map[string]string) {
+		wrap(func(w http.ResponseWriter, r *http.Request, pp map[string]string) {
 			g.svc.serveMapLayer(w, r, pp["place"], strings.TrimSuffix(pp["layer"], ".geojson"))
-		}); err != nil {
+		})); err != nil {
 		return err
 	}
 	// The MeshCore relay topology — a global, windowed weighted edge list derived
@@ -47,9 +54,9 @@ func (g *GridServer) RegisterGatewayRoutes(mux *runtime.ServeMux) error {
 	// generated contract, the reflection entry and the OpenAPI row like every
 	// other read. Hand-building is for geometry.)
 	return mux.HandlePath("GET", "/api/v1/mesh/links",
-		func(w http.ResponseWriter, r *http.Request, _ map[string]string) {
+		wrap(func(w http.ResponseWriter, r *http.Request, _ map[string]string) {
 			g.svc.serveMeshLinks(w, r)
-		})
+		}))
 }
 
 // notFoundErr / invalidErr / internalErr map store/parse failures to grpc status

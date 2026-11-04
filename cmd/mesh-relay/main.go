@@ -7,8 +7,11 @@
 // the HTTP server, config (prefab.yaml's meshRelay section, PF__MESH_RELAY__*
 // overrides), logging, and the relay's lifecycle (it is a prefab plugin).
 //
-//	mesh-relay                    # serve
+//	mesh-relay                    # serve (activate at boot)
+//	mesh-relay --standby          # prepare; wait on the control port for POST /activate
 //	mesh-relay token -name dpup   # mint a bootstrap admin token + its hash
+//
+// The lifecycle is internal/handoff's, like the Grid's.
 package main
 
 import (
@@ -17,12 +20,14 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/dpup/prefab"
 	"github.com/dpup/prefab/logging"
 
 	"github.com/dpup/sierra-data/internal/config"
+	"github.com/dpup/sierra-data/internal/handoff"
 	"github.com/dpup/sierra-data/internal/meshrelay"
 )
 
@@ -33,59 +38,195 @@ func main() {
 		mintAdmin(os.Args[2:])
 		return
 	}
+	fs := flag.NewFlagSet("mesh-relay", flag.ExitOnError)
+	standby := fs.Bool("standby", false,
+		"start in STANDBY: prepare without opening relay.db and wait for POST /activate on the control port")
+	_ = fs.Parse(os.Args[1:])
 
 	ctx := logging.With(context.Background(), logging.NewProdLogger())
-	logging.Info(ctx, "Starting the SIERRA Mesh Relay")
+	logging.Infow(ctx, "Starting the SIERRA Mesh Relay", "standby", *standby)
 
 	relayCfg := config.LoadMeshRelayConfig()
 	config.RegisterPrefabNamespaces()
 
-	cfg, err := meshrelay.ConfigFrom(*relayCfg)
+	app, err := prepareRelay(ctx, relayCfg)
 	if err != nil {
 		log.Fatalf("Invalid meshRelay config: %v", err)
+	}
+	opts := handoff.Options{Service: "mesh-relay", Standby: *standby}
+	if ctl := relayCfg.Control; ctl.Enabled() {
+		opts.Addr = fmt.Sprintf(":%d", ctl.Port)
+		opts.TokenSha256 = ctl.TokenSha256
+	}
+	ctrl, err := handoff.New(ctx, app, opts)
+	if err != nil {
+		logging.Errorw(ctx, "Invalid deployment control configuration", "error", err)
+		log.Fatalf("Invalid deployment control configuration: %v", err)
+	}
+	os.Exit(ctrl.Run(ctx))
+}
+
+// relayApp is the relay as internal/handoff drives it: prepareRelay checks
+// config and opens nothing; Activate opens relay.db and serves; Quiesce
+// closes every session, flushes the audit queue and releases relay.db.
+type relayApp struct {
+	ctx         context.Context
+	cfg         meshrelay.Config
+	control     config.ControlConfig
+	dbPath      string
+	lockTimeout time.Duration
+	port        int
+
+	mu         sync.Mutex
+	store      *meshrelay.Store
+	relay      *meshrelay.Relay
+	serverDone chan struct{}
+	quiesced   struct{ gate, sessions, drained, store bool }
+}
+
+func prepareRelay(ctx context.Context, relayCfg *config.MeshRelayConfig) (*relayApp, error) {
+	cfg, err := meshrelay.ConfigFrom(*relayCfg)
+	if err != nil {
+		return nil, err
 	}
 	if len(cfg.BootstrapAdmins) == 0 {
 		logging.Warn(ctx, "No bootstrap admins configured (meshRelay.admins); the admin API is unusable "+
 			"until the clients table has an admin")
 	}
-	dbPath := relayCfg.DBPath
-	if dbPath == "" {
-		dbPath = "./data/relay.db"
+	a := &relayApp{ctx: ctx, cfg: cfg, control: relayCfg.Control,
+		dbPath: relayCfg.DBPath, lockTimeout: relayCfg.LockTimeout, port: relayCfg.Port}
+	if a.dbPath == "" {
+		a.dbPath = "./data/relay.db"
 	}
-	lockTimeout := relayCfg.LockTimeout
-	if lockTimeout <= 0 {
-		lockTimeout = 90 * time.Second
+	if a.lockTimeout <= 0 {
+		a.lockTimeout = 90 * time.Second
 	}
-	port := relayCfg.Port
-	if port == 0 {
-		port = defaultPort
+	if a.port == 0 {
+		a.port = defaultPort
 	}
+	logging.Infow(ctx, "Relay prepared (no database opened)", "path", a.dbPath, "port", a.port)
+	return a, nil
+}
 
-	// Opened before the server so the listener only opens once the lock is
-	// held — the same rolling-deploy behaviour as the grid store.
-	st, err := meshrelay.OpenStore(ctx, dbPath, lockTimeout)
+// Activate opens relay.db and starts serving. A failure releases what it
+// opened (see gridApp.Activate for the same contract).
+func (a *relayApp) Activate(actx context.Context) (err error) {
+	start := time.Now()
+	a.mu.Lock()
+	a.store, a.relay = nil, nil
+	a.quiesced = struct{ gate, sessions, drained, store bool }{}
+	a.mu.Unlock()
+	defer func() {
+		if err == nil {
+			return
+		}
+		logging.Warnw(a.ctx, "Activation failed; releasing what it opened", "error", err)
+		if qerr := a.Quiesce(context.Background()); qerr != nil {
+			err = fmt.Errorf("%w (and releasing it failed: %w: %w)", err, handoff.ErrStillHeld, qerr)
+		}
+	}()
+
+	// The listener only opens once the lock is held. The lock is a second
+	// line of defence: activation itself is the coordinator's decision.
+	st, err := meshrelay.OpenStore(actx, a.dbPath, a.lockTimeout)
 	if err != nil {
-		logging.Errorw(ctx, "Failed to open relay store", "path", dbPath, "error", err)
-		log.Fatalf("Failed to open relay store: %v", err)
+		return fmt.Errorf("open relay store %s: %w", a.dbPath, err)
 	}
-	defer st.Close()
-	logging.Infow(ctx, "Relay store opened", "path", dbPath)
+	a.mu.Lock()
+	a.store = st
+	a.mu.Unlock()
+	logging.Infow(a.ctx, "Relay store opened", "path", a.dbPath, "duration", time.Since(start))
 
-	relay := meshrelay.New(ctx, cfg, st)
+	relay := meshrelay.New(a.ctx, a.cfg, st)
+	a.mu.Lock()
+	a.relay = relay
+	a.mu.Unlock()
 	server := prefab.New(
-		prefab.WithContext(ctx),
+		prefab.WithContext(a.ctx),
 		// meshRelay.port, not server.port: both processes read the same
 		// prefab.yaml, and server.port is the Grid's.
-		prefab.WithPort(port),
+		prefab.WithPort(a.port),
 		// The relay is a plugin: it mounts its own routes (OptionProvider) and
 		// prefab drives its Init/Shutdown.
 		prefab.WithPlugin(relay),
 	)
-
-	if err := server.Start(); err != nil {
-		logging.Errorw(ctx, "Relay server failed", "error", err)
-		log.Fatalf("Relay server failed: %v", err)
+	done := make(chan struct{})
+	a.mu.Lock()
+	a.serverDone = done
+	a.mu.Unlock()
+	go func() {
+		if err := server.Start(); err != nil {
+			logging.Errorw(a.ctx, "Relay server failed", "error", err)
+		}
+		close(done)
+	}()
+	if err := handoff.WaitListening(actx, a.port, done, 15*time.Second); err != nil {
+		return fmt.Errorf("relay listener: %w", err)
 	}
+	logging.Infow(a.ctx, "Relay serving", "port", a.port, "activation", time.Since(start))
+	return nil
+}
+
+// Quiesce releases relay.db: stop admitting, close every session (leases end
+// with relay_shutdown, bridges get 1001) and flush the audit queue, drain the
+// admin API, then close the store.
+func (a *relayApp) Quiesce(_ context.Context) error {
+	start := time.Now()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.relay != nil && !a.quiesced.gate {
+		a.relay.Gate().Close()
+	}
+	a.quiesced.gate = true
+
+	if a.relay != nil && !a.quiesced.sessions {
+		t := time.Now()
+		ctx, cancel := context.WithTimeout(context.Background(), a.control.WorkerStop())
+		err := a.relay.Stop(ctx)
+		cancel()
+		if err != nil {
+			logging.Errorw(a.ctx, "Quiesce: relay sessions did not close", "error", err,
+				"liveSessions", a.relay.LiveSessions(), "duration", time.Since(t))
+			return err
+		}
+		logging.Infow(a.ctx, "Quiesce: relay sessions closed, audit queue flushed", "duration", time.Since(t))
+	}
+	a.quiesced.sessions = true
+
+	if a.relay != nil && !a.quiesced.drained {
+		res := a.relay.Gate().Drain(a.control.Drain(), 2*time.Second)
+		logging.Infow(a.ctx, "Quiesce: request drain complete",
+			"inFlight", res.InFlight, "cancelled", res.Cancelled, "remaining", res.Remaining,
+			"duration", res.Duration)
+	}
+	a.quiesced.drained = true
+
+	if a.store != nil && !a.quiesced.store {
+		t := time.Now()
+		if err := a.store.Close(); err != nil {
+			logging.Errorw(a.ctx, "Quiesce: relay store close failed", "error", err)
+			return fmt.Errorf("close relay store: %w", err)
+		}
+		logging.Infow(a.ctx, "Quiesce: relay store closed and lock released", "duration", time.Since(t))
+	}
+	a.quiesced.store = true
+	logging.Infow(a.ctx, "Quiesce: relay.db ownership released", "duration", time.Since(start))
+	return nil
+}
+
+// Exit waits for prefab's own SIGTERM shutdown to finish.
+func (a *relayApp) Exit(ctx context.Context) {
+	a.mu.Lock()
+	done := a.serverDone
+	a.mu.Unlock()
+	if done != nil {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			logging.Warnw(a.ctx, "Relay HTTP server did not stop before exit")
+		}
+	}
+	logging.Info(a.ctx, "Shutdown complete")
 }
 
 // mintAdmin prints a bootstrap admin token and the config entry for its hash.

@@ -2,8 +2,10 @@ package ingest
 
 import (
 	"context"
+	"fmt"
 	"math/rand/v2"
 	"runtime/debug"
+	"sync"
 	"time"
 
 	"github.com/dpup/prefab/errors"
@@ -90,9 +92,16 @@ type Scheduler struct {
 	enhancerModel string
 	budgetPerTick int
 	meshMaint     MeshMaintenance
-	statsFirst    time.Duration    // first stats refresh; 0 = statsRefreshInterval
-	now           func() time.Time // injectable for lifecycle tests
-	startJitter   time.Duration    // maxStartJitter; tests set 0
+	statsFirst    time.Duration // first stats refresh; 0 = statsRefreshInterval
+
+	// Lifecycle (Start/Stop). stopCh asks the loops to exit between ticks;
+	// cancel aborts a tick in progress; wg counts every goroutine Start ran.
+	stopCh      chan struct{}
+	cancel      context.CancelFunc
+	wg          sync.WaitGroup
+	stopOnce    sync.Once
+	now         func() time.Time // injectable for lifecycle tests
+	startJitter time.Duration    // maxStartJitter; tests set 0
 }
 
 // NewScheduler builds a scheduler over the given store.
@@ -115,16 +124,58 @@ func NewScheduler(st *store.Store, cfg SchedulerConfig) *Scheduler {
 // initial delay (0..maxStartJitter), ticks immediately, then on its interval
 // until ctx is cancelled.
 func (s *Scheduler) Start(ctx context.Context) {
+	ctx, s.cancel = context.WithCancel(ctx)
+	s.stopCh = make(chan struct{})
+	goTracked := func(f func()) {
+		s.wg.Add(1)
+		go func() { defer s.wg.Done(); f() }()
+	}
 	for _, spec := range s.pollers {
-		go s.run(ctx, spec)
+		goTracked(func() { s.run(ctx, spec) })
 	}
 	if s.meshMaint.Interval > 0 {
-		go s.runMeshMaintenance(ctx)
+		goTracked(func() { s.runMeshMaintenance(ctx) })
 	}
-	go s.runStatsRefresh(ctx)
+	goTracked(func() { s.runStatsRefresh(ctx) })
 	logging.Infow(ctx, "Ingest scheduler started", "pollers", len(s.pollers),
 		"meshMaintenance", s.meshMaint.Interval > 0)
 }
+
+// Stop ends every goroutine Start launched and waits for them, so that once
+// it returns nil the scheduler will never touch the store again (the
+// handoff's "background database users have stopped" step).
+//
+// The loops exit between ticks. A tick already running gets grace to finish
+// on its own, because a completed tick is the cleanest state to hand over;
+// after that its context is cancelled. That is safe by the fail-loud design:
+// a cancelled fetch is a failed poll, which writes and sweeps nothing, and a
+// cancelled write rolls its transaction back. A running ANALYZE (up to a
+// minute on EFS) is the usual reason to need the cancel. Stop returns an
+// error if a goroutine is still running timeout after the cancel. Calling it
+// again after an error waits again.
+func (s *Scheduler) Stop(grace, timeout time.Duration) error {
+	if s.stopCh == nil {
+		return nil // never started
+	}
+	s.stopOnce.Do(func() { close(s.stopCh) })
+	done := make(chan struct{})
+	go func() { s.wg.Wait(); close(done) }()
+	select {
+	case <-done:
+		return nil
+	case <-time.After(grace):
+	}
+	s.cancel()
+	select {
+	case <-done:
+		return nil
+	case <-time.After(timeout):
+		return fmt.Errorf("ingest: scheduler goroutines still running %s after cancellation", timeout)
+	}
+}
+
+// stopping is closed by Stop; nil (never receives) before Start.
+func (s *Scheduler) stopping() <-chan struct{} { return s.stopCh }
 
 // touchSeenCoalesce is how stale a row's last_seen_at must be before TouchSeen
 // rewrites it. The stamp only feeds expire graces (smallest configured: 2h for
@@ -166,6 +217,8 @@ func (s *Scheduler) runStatsRefresh(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-s.stopping():
+			return
 		case <-timer.C:
 			timer.Reset(statsRefreshInterval)
 			start := s.now()
@@ -189,6 +242,8 @@ func (s *Scheduler) runMeshMaintenance(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			return
+		case <-s.stopping():
 			return
 		case <-ticker.C:
 			s.safeMeshMaintenance(ctx)
@@ -234,6 +289,8 @@ func (s *Scheduler) run(ctx context.Context, spec PollerSpec) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-s.stopping():
+			return
 		case <-time.After(rand.N(s.startJitter)):
 		}
 	}
@@ -244,6 +301,9 @@ func (s *Scheduler) run(ctx context.Context, spec PollerSpec) {
 	for {
 		select {
 		case <-ctx.Done():
+			logging.Infow(ctx, "Ingest poller stopping", "sources", spec.Normalizer.SourceIDs())
+			return
+		case <-s.stopping():
 			logging.Infow(ctx, "Ingest poller stopping", "sources", spec.Normalizer.SourceIDs())
 			return
 		case <-ticker.C:
