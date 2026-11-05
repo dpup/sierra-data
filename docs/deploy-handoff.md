@@ -40,7 +40,7 @@ as before, and SIGTERM runs the same quiescence described below before exit.
 |---|---|---|---|
 | `grid.control.port` | `PF__GRID__CONTROL__PORT` | 8081 | Grid control listener |
 | `grid.control.tokenSha256` | `PF__GRID__CONTROL__TOKEN_SHA256` | empty (off) | hex SHA-256 of the deployment token |
-| `meshRelay.control.port` | `PF__MESH_RELAY__CONTROL__PORT` | 8091 | relay control listener (both containers share the task's network namespace, so the ports differ) |
+| `meshRelay.control.port` | `PF__MESH_RELAY__CONTROL__PORT` | 8091 | relay control listener (must differ from the Grid's whenever the two processes share a network namespace) |
 | `meshRelay.control.tokenSha256` | `PF__MESH_RELAY__CONTROL__TOKEN_SHA256` | empty (off) | |
 | `*.control.drainTimeout` | | 10s | in-flight request grace before cancellation; this is downtime |
 | `*.control.workerStopTimeout` | | 10s | one budget for every background database user to stop (a running ingest tick gets 2s, then is cancelled); past it the release FAILS. With `drainTimeout`, a quiesce takes at most ~20s, inside ECS's default 30s stop timeout |
@@ -165,8 +165,8 @@ were read), `lastAttemptAt` and `lastError`. Nothing is inferred from them.
 **The metadata does not identify the process; `instanceId` does.** On a
 Fargate in-place container restart (restart policy), ECS kept
 `containerStartedAt`, `dockerId` and `containerArn` unchanged, and only
-`restartCount` advanced (0 → 1; observed 2026-11-04, project-hub
-`docs/sierra-control-runtime-check.md`). An earlier version derived a
+`restartCount` advanced (0 → 1; observed in a Fargate restart test on
+2026-11-04). An earlier version derived a
 `boundToProcess` flag from start-time proximity; that accepted a
 predecessor's metadata and has been removed. So the binding contract is the
 coordinator's, using three pieces of evidence together:

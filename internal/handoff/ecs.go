@@ -18,8 +18,8 @@ import (
 //
 // It does NOT identify the process. On Fargate an in-place container restart
 // (the restart policy) keeps containerStartedAt, dockerId and containerArn
-// unchanged; only restartCount advances (observed 2026-11-04, project-hub
-// docs/sierra-control-runtime-check.md). An earlier version claimed a
+// unchanged; only restartCount advances (observed on a Fargate restart test,
+// 2026-11-04). An earlier version claimed a
 // "boundToProcess" from container start time and stopped reading; that
 // accepted a predecessor's metadata. The process generation is instanceId,
 // which the expectedInstanceId guard enforces. What this adds is which task

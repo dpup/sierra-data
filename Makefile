@@ -1,5 +1,5 @@
 # Live Data API Server - Build, Test, and Deployment Tasks
-.PHONY: test-mesh-relay mesh-relay run-relay relay-token docker-build-relay ecr-push-relay ingest-token test-pge test-llm burn-line-dry-run build test proto proto-tools clean server tools site site-modules site-ensure site-install site-dev site-shots site-shots-mock check-wiring run dev lint fmt docker docker-build docker-run docker-run-dev docker-push docker-clean deploy install help test-meshcore
+.PHONY: test-mesh-relay mesh-relay run-relay relay-token docker-build-relay ecr-push ecr-push-grid ecr-push-relay ingest-token test-pge test-llm burn-line-dry-run build test proto proto-tools clean server tools site site-modules site-ensure site-install site-dev site-shots site-shots-mock check-wiring run dev lint fmt docker docker-build docker-run docker-run-dev docker-push docker-clean deploy install help test-meshcore
 
 # Go parameters
 GOCMD=go
@@ -579,10 +579,14 @@ docker-run-dev: docker-build
 		--name sierra-server-dev \
 		$(DOCKER_IMAGE_NAME):$(DOCKER_TAG)
 
-# Login to ECR and push Docker image
-ecr-push: docker-build
+# Build and push both images without starting a deployment.
+ecr-push: ecr-push-grid ecr-push-relay
+	@echo "✅ Both images pushed to $(DOCKER_REGISTRY) as :$(DOCKER_TAG)"
+
+# Login to ECR and push the Grid server image.
+ecr-push-grid: docker-build
 	@if [ -z "$(DOCKER_REGISTRY)" ]; then \
-		echo "⚠️  DOCKER_REGISTRY not set. Set with: make ecr-push DOCKER_REGISTRY=your-ecr-registry"; \
+		echo "⚠️  DOCKER_REGISTRY not set. Set with: make ecr-push-grid DOCKER_REGISTRY=your-ecr-registry"; \
 		exit 1; \
 	fi
 	@echo "Logging into ECR..."
@@ -603,53 +607,23 @@ docker-push: docker-build
 	docker push $(DOCKER_REGISTRY)/$(DOCKER_IMAGE_NAME):$(DOCKER_TAG)
 	@echo "✅ Docker image pushed: $(DOCKER_REGISTRY)/$(DOCKER_IMAGE_NAME):$(DOCKER_TAG)"
 
-# Deploy to ECS (update existing service with latest image)
-ecs-deploy: ecr-push
-	@if [ -z "$(ECS_CLUSTER)" ]; then \
-		echo "⚠️  ECS_CLUSTER not set. Set with: make ecs-deploy ECS_CLUSTER=your-cluster"; \
-		exit 1; \
-	fi
-	@if [ -z "$(ECS_SERVICE)" ]; then \
-		echo "⚠️  ECS_SERVICE not set. Set with: make ecs-deploy ECS_SERVICE=your-service"; \
-		exit 1; \
-	fi
-	@if [ -z "$(ECS_TASK_DEFINITION)" ]; then \
-		echo "⚠️  ECS_TASK_DEFINITION not set. Set with: make ecs-deploy ECS_TASK_DEFINITION=your-task-def"; \
-		exit 1; \
-	fi
-	@echo "Deploying $(DOCKER_REGISTRY)/$(DOCKER_IMAGE_NAME):$(DOCKER_TAG) to ECS..."
-	@echo "Cluster: $(ECS_CLUSTER)"
-	@echo "Service: $(ECS_SERVICE)"
-	@echo "Task Definition: $(ECS_TASK_DEFINITION)"
-	@echo "Updating task definition with new image..."
-	aws ecs describe-task-definition --task-definition $(ECS_TASK_DEFINITION) --query 'taskDefinition' > /tmp/task-def.json
-	@# The task may also hold the mesh relay sidecar (docs/mesh-relay-server.md).
-	@# If any container runs the relay image, build and push it too, so both
-	@# containers deploy from the same commit.
-	@if jq -e --arg R "$(DOCKER_REGISTRY)/$(RELAY_IMAGE_NAME):" \
-		'any(.containerDefinitions[]; .image | startswith($$R))' /tmp/task-def.json > /dev/null; then \
-		echo "Task has a mesh relay container; building and pushing $(RELAY_IMAGE_NAME)..."; \
-		$(MAKE) ecr-push-relay || exit 1; \
-	fi
-	@# Update images by REPOSITORY, not by position: with a sidecar,
-	@# containerDefinitions[0] is not necessarily the server. A single-container
-	@# task keeps the old behaviour. Fails (jq -e) if no container got the server image.
-	jq -e --arg SREPO "$(DOCKER_REGISTRY)/$(DOCKER_IMAGE_NAME):" --arg SERVER "$(DOCKER_REGISTRY)/$(DOCKER_IMAGE_NAME):$(DOCKER_TAG)" \
-		--arg RREPO "$(DOCKER_REGISTRY)/$(RELAY_IMAGE_NAME):" --arg RELAY "$(DOCKER_REGISTRY)/$(RELAY_IMAGE_NAME):$(DOCKER_TAG)" \
-		'.containerDefinitions |= (if length == 1 then map(.image = $$SERVER) else map( \
-			if (.image | startswith($$SREPO)) then .image = $$SERVER \
-			elif (.image | startswith($$RREPO)) then .image = $$RELAY else . end) end) \
-		| if any(.containerDefinitions[]; .image == $$SERVER) then . else error("no container in the task definition runs " + $$SREPO + "*; refusing to deploy") end \
-		| del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .placementConstraints, .compatibilities, .registeredAt, .registeredBy)' \
-		/tmp/task-def.json > /tmp/new-task-def.json
-	@echo "Registering new task definition..."
-	aws ecs register-task-definition --cli-input-json file:///tmp/new-task-def.json --query 'taskDefinition.taskDefinitionArn' --output text > /tmp/new-task-arn.txt
-	@echo "Updating service to use new task definition..."
-	aws ecs update-service --cluster $(ECS_CLUSTER) --service $(ECS_SERVICE) --task-definition $$(cat /tmp/new-task-arn.txt) --force-new-deployment --no-cli-pager --query 'service.taskDefinition' --output text
-	@echo "Waiting for deployment to complete..."
-	aws ecs wait services-stable --cluster $(ECS_CLUSTER) --services $(ECS_SERVICE)
-	@echo "✅ Deployment completed successfully!"
-	@rm -f /tmp/task-def.json /tmp/new-task-def.json /tmp/new-task-arn.txt
+# Deployment is coordinated by the AWS endpoint. The repository client discovers
+# both ECR repositories there; AWS credentials are the only deployment config.
+# Use the commit tag by default, keeping explicit non-latest DOCKER_TAG values.
+.PHONY: ecs-deploy ecs-status ecs-rollback test-deploy-client
+# Refuses a working tree with uncommitted tracked changes (they would ship under
+# the commit's tag); ALLOW_DIRTY=1 overrides.
+ecs-deploy: test-deploy-client
+	python3 scripts/deploy.py deploy --build --wait --tag "$(if $(filter latest,$(DOCKER_TAG)),$(shell git rev-parse --short=12 HEAD),$(DOCKER_TAG))"$(if $(ALLOW_DIRTY), --allow-dirty)
+
+ecs-status:
+	python3 scripts/deploy.py status$(if $(JSON), --json)
+
+ecs-rollback:
+	python3 scripts/deploy.py rollback --wait
+
+test-deploy-client:
+	python3 -m unittest discover -s scripts -p 'test_deploy.py' -v
 
 # Clean up Docker artifacts
 docker-clean:
@@ -730,13 +704,17 @@ help:
 	@echo "  docker-build-relay - Build the mesh relay image (Dockerfile --target relay)"
 	@echo "  docker-run       - Run Docker container with API keys from environment"
 	@echo "  docker-run-dev   - Run Docker container with mounted config for development"
-	@echo "  ecr-push         - Login to ECR and push Docker image"
+	@echo "  ecr-push         - Login to ECR and push both images"
+	@echo "  ecr-push-grid    - Login to ECR and push the Grid server image"
 	@echo "  ecr-push-relay   - Login to ECR and push the mesh relay image (RELAY_IMAGE_NAME)"
 	@echo "  docker-push      - Push Docker image to registry (set DOCKER_REGISTRY)"
 	@echo "  docker-clean     - Clean up Docker artifacts and containers"
 	@echo ""
 	@echo "Deployment targets:"
-	@echo "  ecs-deploy  - Deploy latest image to ECS (set ECS_CLUSTER, ECS_SERVICE, ECS_TASK_DEFINITION)"
+	@echo "  ecs-deploy  - Build/push both images and wait for coordinated deployment (AWS credentials required)"
+	@echo "  ecs-status  - Summarise coordinator ownership and deployment progress (JSON=1 for the raw document)"
+	@echo "  ecs-rollback - Deploy the previous image pair through the coordinator"
+	@echo "  test-deploy-client - Test the self-contained deployment client"
 	@echo "  docker      - Alias for docker-build"
 	@echo "  deploy      - Deploy to configured environment"
 	@echo "  install     - Install CLI tools to system PATH"

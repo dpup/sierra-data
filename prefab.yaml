@@ -798,7 +798,7 @@ grid:
 meshRelay:
   port: 8090
   # Deployment control for relay.db; same contract as grid.control. Its own
-  # port: both containers share the task's network namespace.
+  # port whenever the two processes share a network namespace.
   control:
     port: 8091
     tokenSha256: ""

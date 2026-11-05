@@ -76,8 +76,8 @@ type MeshRelayConfig struct {
 	// Port the relay listens on (prefab's server.port belongs to the Grid).
 	Port int `koanf:"port"`
 	// Control is the relay's deployment-control plane (internal/handoff). Its
-	// port must differ from the Grid's: both containers share a task's network
-	// namespace.
+	// port must differ from the Grid's whenever the two processes share a
+	// network namespace.
 	Control ControlConfig `koanf:"control"`
 	// DBPath is the relay's OWN SQLite file — never grid.db.
 	DBPath      string        `koanf:"dbPath"`

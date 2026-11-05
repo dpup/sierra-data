@@ -553,44 +553,77 @@ weather:
 
 ## Deployment
 
-The project includes built-in support for AWS ECR and ECS deployment:
+The repository includes a self-contained client for the Sierra deployment
+coordinator in AWS. Deployers need this checkout and AWS credentials; no
+infrastructure-repository checkout, deployment token or bastion connection is
+required. The AWS endpoint manages task definitions, standby slots, database
+ownership, load-balancer registration and cleanup.
 
-### AWS ECR/ECS Deployment
+### Deploy
 
-Set the required environment variables:
+With the existing build toolchain installed and AWS credentials configured:
+
 ```bash
-export DOCKER_REGISTRY=your-account-id.dkr.ecr.region.amazonaws.com
-export ECS_CLUSTER=your-cluster-name
-export ECS_SERVICE=your-service-name
-export ECS_TASK_DEFINITION=your-task-definition-name
-```
-
-Deploy to ECS:
-```bash
-# Build, push to ECR, and deploy to ECS in one command
+# Uses the normal AWS credential chain: environment credentials, SSO/profile, etc.
 make ecs-deploy
 
-# Or run individual steps:
-make ecr-push    # Build and push Docker image to ECR
-make ecs-deploy  # Update ECS service with latest image
+# Or choose a named profile and an explicit image tag.
+AWS_PROFILE=my-profile make ecs-deploy DOCKER_TAG=release-abc123
 ```
 
-**What happens during deployment:**
-1. Builds Docker image for linux/amd64 platform
-2. Authenticates and pushes to ECR
-3. Updates ECS task definition with new image
-4. Triggers ECS service deployment
-5. Waits for deployment to complete
+This checks the deployment client, discovers both ECR repositories from
+`sierra-data-coordinator`, builds and pushes Grid and relay with the same tag,
+then waits for the coordinated handoff. The default deployment tag is the
+current commit's 12-character SHA. Both images are built even when only one
+binary changed. Tags are resolved to immutable digests after the pushes.
 
-If the task definition also runs the mesh relay sidecar (an image from the
-`sierra-mesh-relay` ECR repository; see `docs/mesh-relay-server.md`), `ecs-deploy`
-detects it, builds and pushes the relay image (`make ecr-push-relay`), and
-updates both containers. Images are matched by repository, not container order.
+It refuses to build from a working tree with uncommitted changes to tracked
+files, which would ship under the commit's tag and come back on a rollback to
+it. Commit or discard them, or override with `make ecs-deploy ALLOW_DIRTY=1`.
 
-**Prerequisites:**
-- AWS CLI configured with appropriate permissions
-- Docker installed locally
-- `jq` installed for JSON processing (`brew install jq`)
+For images already pushed under the same tag in both repositories:
+
+```bash
+python3 scripts/deploy.py deploy --tag release-abc123 --wait
+```
+
+The region defaults to `AWS_REGION`, then `AWS_DEFAULT_REGION`, then
+`us-east-1`. Set `SIERRA_DEPLOY_FUNCTION` (or `--function` on the script) to use
+another configured coordinator. `--profile` overrides the normal AWS profile.
+No `ECS_CLUSTER`, `ECS_SERVICE`, `ECS_TASK_DEFINITION` or `DOCKER_REGISTRY`
+settings are needed by `make ecs-deploy`.
+
+### Status and rollback
+
+```bash
+make ecs-status          # owner, any operation in progress, the last operation's phase timeline
+make ecs-status JSON=1   # the coordinator's raw status document
+make ecs-rollback
+```
+
+Rollback starts a fresh standby on the previous image pair and uses the same
+ownership handoff. Successful deployment exits zero. A failed deployment that
+was automatically rolled back exits nonzero; inspect status before retrying.
+A CLI timeout leaves the server-side workflow running. `scripts/deploy.py
+resume --wait` resumes a terminated workflow after the underlying issue is
+resolved. Reuse `--operation-id` only when retrying the same start request.
+
+The coordinator owns service counts, task-definition registration and target
+membership. Application deployments go through this client; runtime settings
+such as environment variables, resource limits and volumes are managed by the
+infrastructure configuration.
+
+### Prerequisites and permissions
+
+- Python 3.9+ and AWS CLI v2 for the deployment client; it has no pip dependencies.
+- Make, Docker and the repository's Go/site build toolchain for `--build`.
+- Credentials with ECR push access to the configured repositories,
+  `ecr:DescribeImages`, and `lambda:GetFunctionConfiguration` /
+  `lambda:InvokeFunction` on the coordinator. The client needs no direct ECS
+  mutation or Secrets Manager access.
+
+Client tests run with `make test-deploy-client` and use mocked AWS/build calls.
+They do not build images or deploy anything.
 
 ## Development
 
