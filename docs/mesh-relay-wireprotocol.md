@@ -1,5 +1,5 @@
 # SIERRA Mesh Relay — Wire Protocol v1
 
-The spec has moved to **[dpup/sierra-meshrelay-protocol](https://github.com/dpup/sierra-meshrelay-protocol)**: see [PROTOCOL.md](https://github.com/dpup/sierra-meshrelay-protocol/blob/main/PROTOCOL.md).
+The spec lives in **[dpup/sierra-meshrelay](https://github.com/dpup/sierra-meshrelay)**: see [PROTOCOL.md](https://github.com/dpup/sierra-meshrelay/blob/main/PROTOCOL.md).
 
-That repo is the only copy. It also holds the Go types (package `meshproto`) that the relay (`internal/meshrelay`) and the bridge ([dpup/sierra-meshbridge](https://github.com/dpup/sierra-meshbridge)) both import, so a protocol change is one pull request there plus a module bump here.
+That repo holds the protocol, the relay and the bridge together. Its Go types (package `meshproto`) are tested against the spec's examples, and its end-to-end tests run the real relay against the real bridge. sierra-data deploys the relay (`cmd/mesh-relay`) by importing it.

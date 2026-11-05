@@ -1,6 +1,8 @@
 // Command mesh-relay is the SIERRA Mesh Relay: the service MeshCore gateway
 // bridges dial out to, and that authenticated clients reach a node through.
-// See internal/meshrelay and docs/mesh-relay-server.md.
+// The relay itself is the library github.com/dpup/sierra-meshrelay/relay;
+// see docs/relay.md there. This command wires it into sierra-data's prefab
+// config and deploy handoff.
 //
 // It is a separate process from cmd/server on purpose — a relay crash must not
 // touch the hazard feeds. It still runs on prefab like the Grid: prefab owns
@@ -29,7 +31,8 @@ import (
 
 	"github.com/dpup/sierra-data/internal/config"
 	"github.com/dpup/sierra-data/internal/handoff"
-	"github.com/dpup/sierra-data/internal/meshrelay"
+
+	meshrelay "github.com/dpup/sierra-meshrelay/relay"
 )
 
 const defaultPort = 8090
@@ -85,12 +88,13 @@ type relayApp struct {
 	mu         sync.Mutex
 	store      *meshrelay.Store
 	relay      *meshrelay.Relay
+	gate       *handoff.Gate // the relay's admission gate (Config.Gate); Quiesce closes and drains it
 	serverDone chan struct{}
 	quiesced   struct{ gate, sessions, drained, store bool }
 }
 
 func prepareRelay(ctx context.Context, relayCfg *config.MeshRelayConfig) (*relayApp, error) {
-	cfg, err := meshrelay.ConfigFrom(*relayCfg)
+	cfg, err := relayConfigFrom(*relayCfg)
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +124,7 @@ func (a *relayApp) Activate(actx context.Context) (err error) {
 	actx = handoff.WithLoggerOf(actx, a.ctx)
 	start := time.Now()
 	a.mu.Lock()
-	a.store, a.relay = nil, nil
+	a.store, a.relay, a.gate = nil, nil, nil
 	a.quiesced = struct{ gate, sessions, drained, store bool }{}
 	a.mu.Unlock()
 	defer func() {
@@ -149,9 +153,12 @@ func (a *relayApp) Activate(actx context.Context) (err error) {
 	a.mu.Unlock()
 	logging.Infow(a.ctx, "Relay store opened", "path", a.dbPath, "duration", time.Since(start))
 
-	relay := meshrelay.New(a.ctx, a.cfg, st)
+	gate := handoff.NewGate()
+	cfg := a.cfg
+	cfg.Gate = gate
+	relay := meshrelay.New(a.ctx, cfg, st)
 	a.mu.Lock()
-	a.relay = relay
+	a.relay, a.gate = relay, gate
 	a.mu.Unlock()
 	server := prefab.New(
 		prefab.WithContext(a.ctx),
@@ -202,7 +209,7 @@ func (a *relayApp) Quiesce(_ context.Context) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.relay != nil && !a.quiesced.gate {
-		a.relay.Gate().Close()
+		a.gate.Close()
 	}
 	a.quiesced.gate = true
 
@@ -221,7 +228,7 @@ func (a *relayApp) Quiesce(_ context.Context) error {
 	a.quiesced.sessions = true
 
 	if a.relay != nil && !a.quiesced.drained {
-		res := a.relay.Gate().Drain(a.control.Drain(), 2*time.Second)
+		res := a.gate.Drain(a.control.Drain(), 2*time.Second)
 		logging.Infow(a.ctx, "Quiesce: request drain complete",
 			"inFlight", res.InFlight, "cancelled", res.Cancelled, "remaining", res.Remaining,
 			"duration", res.Duration)

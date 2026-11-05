@@ -270,7 +270,7 @@ default path is unchanged.
 
 ## The file lock is a safeguard, not the protocol
 
-`store.Open` and `meshrelay.OpenStore` still take an exclusive `flock` on a
+`store.Open` and the relay's `OpenStore` (sierra-meshrelay) still take an exclusive `flock` on a
 sibling `.lock` file and wait up to `lockTimeout` for it. Locally that makes a
 premature activation fail (verified: activating a standby while the old
 process held the database failed with the lock error after the timeout, and
