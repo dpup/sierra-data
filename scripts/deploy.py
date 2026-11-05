@@ -96,30 +96,61 @@ def images(args, config):
     return out
 
 
-def wait(args, operation_id):
-    deadline = time.monotonic() + args.timeout
-    previous = None
-    while time.monotonic() < deadline:
+def wait(args, operation_id, first_phase=None, started=None):
+    """Follow operation_id to completion, printing one line per phase change.
+
+    Returns 0 on SUCCEEDED and 2 on any other result (a deployment that was
+    rolled back is not a success). Raises when the ownership lock is BLOCKED,
+    another operation becomes current, or the CLI's own wait times out (the
+    server-side workflow carries on regardless)."""
+    raw = getattr(args, "json", False)
+    clock = time.monotonic
+    started = clock() if started is None else started
+    deadline = clock() + args.timeout
+    previous, phase_since, last_note = first_phase, clock(), clock()
+    while clock() < deadline:
         state = invoke(args, {"command": "status"})
         op = state.get("operation")
         if not op or (state.get("last") or {}).get("id") == operation_id:
             last = state.get("last") or {}
             if last.get("id") != operation_id:
                 raise RuntimeError("operation no longer current; inspect durable coordinator status")
-            print(json.dumps({"result": last["result"], "operationId": operation_id,
-                              "owner": state.get("owner")}, indent=2))
-            return 0 if last["result"] == "SUCCEEDED" else 2
-        if op["id"] != operation_id:
+            result = last.get("result")
+            if raw:
+                print(json.dumps({"result": result, "operationId": operation_id,
+                                  "owner": state.get("owner")}, indent=2))
+            else:
+                mark = "✅" if result == "SUCCEEDED" else "❌"
+                print("%s %s in %s" % (mark, result, duration(clock() - started)))
+                owner = state.get("owner")
+                print("Owner     " + task_line(owner))
+                for line in process_lines((owner or {}).get("processes"), "          "):
+                    print(line)
+                if result != "SUCCEEDED":
+                    print("Inspect with `make ecs-status` before retrying.")
+            return 0 if result == "SUCCEEDED" else 2
+        if op.get("id") != operation_id:
             raise RuntimeError("another operation is current; refusing to follow it")
-        phase = op["phase"]
+        phase = op.get("phase")
         if phase != previous:
-            print(json.dumps({"operationId": operation_id, "phase": phase,
-                              "execution": op["execution"]}), flush=True)
-            previous = phase
+            if raw:
+                print(json.dumps({"operationId": operation_id, "phase": phase,
+                                  "execution": op.get("execution")}), flush=True)
+            else:
+                progress(started, phase)
+            previous, phase_since, last_note = phase, clock(), clock()
+        elif not raw and clock() - last_note >= 60:
+            progress(started, "%s (still waiting, %s)" % (phase, duration(clock() - phase_since)))
+            last_note = clock()
         if phase == "BLOCKED":
             raise RuntimeError("ownership lock retained: " + op.get("error", "unknown outcome"))
         time.sleep(3)
     raise RuntimeError("CLI wait timed out; workflow and ownership lock remain intact")
+
+
+def progress(started, text):
+    print("  %s  +%-7s %s" % (time.strftime("%H:%M:%S"), duration(time.monotonic() - started), text),
+          flush=True)
 
 
 # --- status rendering ---------------------------------------------------------
@@ -286,7 +317,7 @@ def main():
     parser.add_argument("--allow-dirty", action="store_true",
                         help="with --build, deploy even though tracked files differ from the commit the images are tagged with")
     parser.add_argument("--timeout", type=int, default=1800)
-    parser.add_argument("--json", action="store_true", help="status: print the raw coordinator document")
+    parser.add_argument("--json", action="store_true", help="print raw coordinator responses instead of a summary")
     args = parser.parse_args()
     if args.build and args.action != "deploy":
         parser.error("--build is supported only for deploy")
@@ -320,9 +351,21 @@ def main():
             if args.build:
                 build_images(args, config)
             payload["images"] = images(args, config)
+    started = time.monotonic()
     result = invoke(args, payload)
-    print(json.dumps(result, indent=2), flush=True)
-    return wait(args, result["operationId"]) if args.wait else 0
+    operation_id = result.get("operationId")
+    if args.wait and not operation_id:
+        raise RuntimeError("the coordinator did not return an operation id to follow")
+    if args.json:
+        print(json.dumps(result, indent=2), flush=True)
+    else:
+        print("%s %s started  (retry this same request with --operation-id %s)"
+              % (payload.get("action") or args.action, operation_id, operation_id), flush=True)
+        if result.get("phase"):
+            progress(started, result["phase"])
+    if not args.wait:
+        return 0
+    return wait(args, operation_id, first_phase=result.get("phase"), started=started)
 
 
 if __name__ == "__main__":

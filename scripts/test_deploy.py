@@ -168,6 +168,86 @@ class DeployTests(unittest.TestCase):
             deploy.invoke(arguments(), {"command": "status"})
 
 
+class FakeClock:
+    """time.monotonic/time.sleep stand-ins: each sleep advances the clock."""
+
+    def __init__(self, step=20):
+        self.now, self.step = 0.0, step
+
+    def monotonic(self):
+        return self.now
+
+    def sleep(self, _):
+        self.now += self.step
+
+
+OWNER = {"arn": "arn:aws:ecs:us-east-1:123456789012:task/example-cluster/0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+         "definition": "arn:aws:ecs:us-east-1:123456789012:task-definition/example-coordinated:3",
+         "ip": "10.0.0.30", "slot": "example-b", "state": "RUNNING",
+         "processes": {"grid": {"instanceId": "aaaa1111bbbb2222", "restartCount": None},
+                       "relay": {"instanceId": "cccc3333dddd4444", "restartCount": 0}}}
+
+
+def statuses(*phases, result="SUCCEEDED", op="op-1"):
+    """Coordinator status responses: one per phase poll, then the finished state."""
+    out = [{"operation": {"id": op, "phase": p, "execution": "arn:aws:states:x:execution:handoff:" + op}}
+           for p in phases]
+    out.append({"operation": None, "last": {"id": op, "result": result}, "owner": OWNER})
+    return out
+
+
+class ProgressOutputTests(unittest.TestCase):
+    def run_deploy(self, responses, extra=()):
+        clock = FakeClock()
+        replies = iter([{"operationId": "op-1", "phase": "PUBLISH",
+                         "execution": "arn:aws:states:x:execution:handoff:op-1"}] + responses)
+        with patch("sys.argv", ["deploy.py", "deploy", "--tag", "abc123", "--wait", *extra]), \
+                patch("deploy.configuration", return_value=CONFIG), patch("deploy.images", return_value={}), \
+                patch("deploy.invoke", side_effect=lambda *_: next(replies)), \
+                patch("deploy.time.monotonic", clock.monotonic), patch("deploy.time.sleep", clock.sleep), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            code = deploy.main()
+        return code, out.getvalue()
+
+    def test_successful_deploy_prints_one_line_per_phase_and_a_summary(self):
+        code, out = self.run_deploy(statuses("PUBLISH", "PREPARE", "WAIT_STANDBY", "WAIT_STANDBY",
+                                             "WAIT_STANDBY", "WAIT_STANDBY", "ROUTING"))
+        self.assertEqual(code, 0)
+        lines = out.splitlines()
+        self.assertEqual(lines[0], "deploy op-1 started  (retry this same request with --operation-id op-1)")
+        rows = [l for l in lines if __import__("re").match(r"  \d\d:\d\d:\d\d  \+", l)]
+        phases = [l.split()[-1] for l in rows if "still" not in l]
+        self.assertEqual(phases, ["PUBLISH", "PREPARE", "WAIT_STANDBY", "ROUTING"], "each phase once")
+        self.assertEqual(sum("WAIT_STANDBY (still waiting, 1m00s)" in l for l in lines), 1,
+                         "a phase that drags gets a note a minute in")
+        self.assertIn("✅ SUCCEEDED in 2m20s", lines)
+        self.assertIn("Owner     example-b  task 0f1e2d3c4b5a69788796a5b4c3d2e1f0  RUNNING  10.0.0.30  "
+                      "example-coordinated:3", lines)
+        self.assertIn("          relay  instance cccc3333dddd4444  restarts 0", lines)
+        self.assertNotIn("{", out, "no JSON in the default output")
+        self.assertNotIn("arn:aws", out)
+
+    def test_rolled_back_deploy_is_marked_and_exits_nonzero(self):
+        code, out = self.run_deploy(statuses("PREPARE", result="ROLLED_BACK"))
+        self.assertEqual(code, 2)
+        self.assertIn("❌ ROLLED_BACK in", out)
+        self.assertIn("Inspect with `make ecs-status` before retrying.", out)
+
+    def test_json_flag_keeps_the_raw_output(self):
+        code, out = self.run_deploy(statuses("PREPARE"), extra=["--json"])
+        self.assertEqual(code, 0)
+        self.assertIn('"operationId": "op-1"', out)
+        self.assertIn('{"operationId": "op-1", "phase": "PREPARE"', out)
+        self.assertIn('"result": "SUCCEEDED"', out)
+        self.assertNotIn("✅", out)
+
+    def test_waiting_needs_an_operation_id(self):
+        with patch("sys.argv", ["deploy.py", "deploy", "--tag", "abc123", "--wait"]), \
+                patch("deploy.configuration", return_value=CONFIG), patch("deploy.images", return_value={}), \
+                patch("deploy.invoke", return_value={}), self.assertRaises(RuntimeError):
+            deploy.main()
+
+
 TESTDATA = Path(__file__).resolve().parent / "testdata"
 PST = __import__("datetime").timezone(__import__("datetime").timedelta(hours=-8), "PST")
 
