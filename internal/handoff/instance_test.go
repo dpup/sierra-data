@@ -124,7 +124,7 @@ func (f *fakeECS) handler() http.Handler {
 			_ = json.NewEncoder(w).Encode(f.container(int(f.calls.Add(1))))
 		case "/v4/abc/task":
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"Cluster": "project-hub", "TaskARN": "arn:aws:ecs:us-east-1:1:task/project-hub/t1",
+				"Cluster": "example-cluster", "TaskARN": "arn:aws:ecs:us-east-1:123456789012:task/example-cluster/t1",
 				"Family": "sierra-data", "Revision": "42", "AvailabilityZone": "us-east-1b",
 				"LaunchType": "FARGATE",
 			})
@@ -138,7 +138,7 @@ func (f *fakeECS) handler() http.Handler {
 func containerDoc(startedAt time.Time, restarts int) map[string]any {
 	doc := map[string]any{
 		"DockerId": "cafe01", "Name": "relay", "DockerName": "ecs-sierra-relay",
-		"ContainerARN": "arn:aws:ecs:us-east-1:1:container/project-hub/t1/c1",
+		"ContainerARN": "arn:aws:ecs:us-east-1:123456789012:container/example-cluster/t1/c1",
 		"KnownStatus":  "RUNNING", "StartedAt": startedAt.Format(time.RFC3339Nano),
 	}
 	if restarts >= 0 {
@@ -181,8 +181,8 @@ func TestStatusReportsECSIdentity(t *testing.T) {
 	_, h := startECS(t, srv.URL+"/v4/abc")
 
 	d := h.waitFor(func(d StatusDoc) bool { return d.ECS.Available })
-	assert.Equal(t, "arn:aws:ecs:us-east-1:1:task/project-hub/t1", d.ECS.TaskARN)
-	assert.Equal(t, "project-hub", d.ECS.Cluster)
+	assert.Equal(t, "arn:aws:ecs:us-east-1:123456789012:task/example-cluster/t1", d.ECS.TaskARN)
+	assert.Equal(t, "example-cluster", d.ECS.Cluster)
 	assert.Equal(t, "sierra-data", d.ECS.Family)
 	assert.Equal(t, "42", d.ECS.Revision)
 	assert.Equal(t, "us-east-1b", d.ECS.AvailabilityZone)
@@ -204,7 +204,7 @@ func TestUnreportedRestartCountIsNullNotZero(t *testing.T) {
 	assert.Contains(t, rawStatus(t, h), `"restartCount":null`, "unknown must read as unknown, never as 0 restarts")
 }
 
-// The regression from project-hub docs/sierra-control-runtime-check.md: on a
+// The regression from a 2026-11-04 Fargate restart test: on a
 // Fargate in-place restart, ECS kept the ORIGINAL container start time (102s
 // before the new process) and only RestartCount moved. The first version
 // accepted the predecessor's reading as "bound" from start-time proximity and
