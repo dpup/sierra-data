@@ -43,7 +43,6 @@ Last updated: 2026-07-06
 │   ├── pushingest/            # Authenticated push ingest (POST /api/v1/ingest/{stream})
 │   ├── gridapi/               # /api/v1 GridService impl (gRPC) + hand-built GeoJSON
 │   ├── places/                # Grid place directory seeder (areas/counties/towns/corridors)
-│   ├── meshrelay/             # Mesh Relay: bridge/client websockets, leases, admin API, own SQLite
 │   └── lib/                   # Shared libraries (incl. lib/geojson: geometry + PIP)
 ├── data/places/               # Checked-in Census county polygons (counties.geojson)
 ├── site/                      # Embedded data.sierragridteam.org static site (served at /)
@@ -655,7 +654,10 @@ restart rehydrates events + history with no re-fetch. The in-memory TTL caches
 
 ## Mesh Relay (separate service)
 
-`cmd/mesh-relay` + `internal/meshrelay`: the meeting point for MeshCore gateway
+`cmd/mesh-relay` runs the relay library `github.com/dpup/sierra-meshrelay/relay`
+(imported as `meshrelay`; code, tests and docs live in
+[dpup/sierra-meshrelay](https://github.com/dpup/sierra-meshrelay) alongside the
+wire protocol and the bridge). It is the meeting point for MeshCore gateway
 bridges at volunteers' houses (they dial OUT over WSS) and the authenticated
 clients that use a node through them, at `/mesh/relay/*`. **It is not part of
 the Grid server process and must stay that way**: its own binary, its own image
@@ -683,12 +685,15 @@ lease holders, because a gateway sits at a volunteer's house); **never log frame
 private messages and channel keys — `CHANNEL_INFO` returns the secret); tokens
 are stored as SHA-256 only and shown once; one exclusive lease per gateway, and
 only onto a node that reports its pinned pubkey. The frame path never touches
-the DB (audit writes are queued). Wire protocol:
-`PROTOCOL.md` in github.com/dpup/sierra-meshrelay-protocol — the one copy,
-shared with the bridge. Its Go types (package `meshproto`) are aliased in
-`internal/meshrelay/protocol.go`; change the protocol there, then bump the
-module here. Service spec, decisions and the deploy
-checklist: `docs/mesh-relay-server.md`.
+the DB (audit writes are queued). Wire protocol
+(`PROTOCOL.md`), service spec, decisions and the deploy checklist
+(`docs/relay.md`) are all in sierra-meshrelay. **To change relay behaviour,
+change it there** (one PR covers the protocol, relay, bridge and their
+end-to-end tests), tag it, then `go get github.com/dpup/sierra-meshrelay@<tag>`
+here and deploy. What stays here: `cmd/mesh-relay` (prefab app wiring,
+`relayConfigFrom` for `prefab.yaml`'s `meshRelay:` section, and the
+`internal/handoff` gate passed in as `Config.Gate`), the Docker target, and
+the deploy.
 
 ## Deploy handoff (standby startup)
 

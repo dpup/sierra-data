@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dpup/sierra-data/internal/config"
-	"github.com/dpup/sierra-data/internal/meshrelay"
+	meshrelay "github.com/dpup/sierra-meshrelay/relay"
 )
 
 // TestE2EAgainstRelay runs the tool's full e2e scenario against an in-process

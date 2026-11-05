@@ -792,7 +792,7 @@ grid:
 # SIERRA Mesh Relay — a SEPARATE process (cmd/mesh-relay) that reads this same
 # file; the Grid server ignores this section. Gateways and client tokens live in
 # the relay's own database, not here. See docs/mesh-relay-server.md.
-# Lease/ping/rate/lockout timings default in code (internal/meshrelay Config);
+# Lease/ping/rate/lockout timings default in code (github.com/dpup/sierra-meshrelay/relay Config);
 # override with leaseDuration, leaseIdleTimeout, maxLeaseTotal, pingInterval,
 # frameRate, authFailLimit, authLockout, ...
 meshRelay:

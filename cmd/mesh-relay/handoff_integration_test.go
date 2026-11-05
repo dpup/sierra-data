@@ -18,7 +18,7 @@ import (
 
 	"github.com/dpup/sierra-data/internal/config"
 	"github.com/dpup/sierra-data/internal/handoff"
-	"github.com/dpup/sierra-data/internal/meshrelay"
+	meshrelay "github.com/dpup/sierra-meshrelay/relay"
 )
 
 // The REAL relayApp under the handoff controller, as main runs it. The first

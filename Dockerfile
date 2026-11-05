@@ -70,7 +70,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
 # Mesh relay image (docker build --target relay) — a SEPARATE service
 ###############################################################################
 # The relay is its own process with its own database so a relay crash or deploy
-# never touches the hazard feeds (see internal/meshrelay). It does not embed the
+# never touches the hazard feeds (the relay is github.com/dpup/sierra-meshrelay/relay). It does not embed the
 # site, so this build skips the Node stage entirely. These stages sit BEFORE the
 # server's final stage so a plain `docker build` still produces the server.
 FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS relay-builder
