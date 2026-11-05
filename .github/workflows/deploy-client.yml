@@ -1,0 +1,29 @@
+name: Deployment client
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/deploy.py'
+      - 'scripts/test_deploy.py'
+      - 'Makefile'
+      - '.github/workflows/deploy-client.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/deploy.py'
+      - 'scripts/test_deploy.py'
+      - 'Makefile'
+      - '.github/workflows/deploy-client.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - run: make test-deploy-client

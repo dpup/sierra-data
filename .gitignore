@@ -178,3 +178,7 @@ server.pid
 
 # burn-line build output (go build ./cmd/burn-line at the repo root)
 /burn-line
+
+# Python deployment-client checks
+__pycache__/
+*.pyc

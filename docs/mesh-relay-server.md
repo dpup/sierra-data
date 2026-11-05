@@ -150,4 +150,6 @@ These apply wherever the relay runs.
 - **Health endpoint:** `/mesh/relay/healthz`.
 - **Commit at least one admin hash** to `meshRelay.admins` (`make relay-token NAME=<you>`) before the first deploy. Then create gateways with `POST /mesh/relay/api/gateways` and hand each bridge token to its host.
 
-`make ecs-deploy` deploys the relay with the server when the task definition includes a relay container (see the README).
+`make ecs-deploy` always builds and pushes both images, then waits for the AWS
+coordinator to hand database ownership and traffic to the replacement task
+(see the README). AWS credentials and this repository are sufficient.
