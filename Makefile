@@ -617,7 +617,7 @@ ecs-deploy: test-deploy-client
 	python3 scripts/deploy.py deploy --build --wait --tag "$(if $(filter latest,$(DOCKER_TAG)),$(shell git rev-parse --short=12 HEAD),$(DOCKER_TAG))"$(if $(ALLOW_DIRTY), --allow-dirty)
 
 ecs-status:
-	python3 scripts/deploy.py status
+	python3 scripts/deploy.py status$(if $(JSON), --json)
 
 ecs-rollback:
 	python3 scripts/deploy.py rollback --wait
@@ -712,7 +712,7 @@ help:
 	@echo ""
 	@echo "Deployment targets:"
 	@echo "  ecs-deploy  - Build/push both images and wait for coordinated deployment (AWS credentials required)"
-	@echo "  ecs-status  - Show coordinator ownership and deployment progress"
+	@echo "  ecs-status  - Summarise coordinator ownership and deployment progress (JSON=1 for the raw document)"
 	@echo "  ecs-rollback - Deploy the previous image pair through the coordinator"
 	@echo "  test-deploy-client - Test the self-contained deployment client"
 	@echo "  docker      - Alias for docker-build"

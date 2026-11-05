@@ -8,6 +8,7 @@ coordinator handles database ownership and resolves deployment progress.
 """
 
 import argparse
+import datetime
 import json
 import os
 from pathlib import Path
@@ -121,6 +122,156 @@ def wait(args, operation_id):
     raise RuntimeError("CLI wait timed out; workflow and ownership lock remain intact")
 
 
+# --- status rendering ---------------------------------------------------------
+#
+# The coordinator's status document is the source of truth and its shape is
+# its own; this only summarises it, and tolerates missing or unknown fields
+# (anything it cannot place is simply not shown; --json has everything).
+
+
+def short_arn(arn):
+    """The readable part of an ARN: a task id, a family:revision, an execution name."""
+    if not arn:
+        return "-"
+    tail = arn.rsplit(":", 1)[-1] if ":task-definition/" not in arn else arn.split(":task-definition/", 1)[1]
+    return tail.rsplit("/", 1)[-1]
+
+
+def short_image(image):
+    """repo@sha256:abcdef... -> repo@sha256:abcdef123456"""
+    if not image:
+        return "-"
+    name, _, digest = image.partition("@")
+    name = name.rsplit("/", 1)[-1]
+    if digest.startswith("sha256:"):
+        digest = digest[:7 + 12]
+    return name + ("@" + digest if digest else "")
+
+
+def when(ts, now, tz):
+    if not ts:
+        return "-"
+    at = datetime.datetime.fromtimestamp(ts, tz)
+    return at.strftime("%Y-%m-%d %H:%M:%S %Z") + " (" + duration(now - ts) + " ago)"
+
+
+def duration(seconds):
+    seconds = int(max(seconds, 0))
+    hours, rest = divmod(seconds, 3600)
+    minutes, secs = divmod(rest, 60)
+    if hours:
+        return "%dh%02dm" % (hours, minutes)
+    if minutes:
+        return "%dm%02ds" % (minutes, secs)
+    return "%ds" % secs
+
+
+def task_line(task):
+    if not task:
+        return "none"
+    parts = [task.get("slot") or "-", "task " + short_arn(task.get("arn")), task.get("state") or "-"]
+    if task.get("ip"):
+        parts.append(task["ip"])
+    if task.get("definition"):
+        parts.append(short_arn(task["definition"]))
+    return "  ".join(parts)
+
+
+def process_lines(processes, indent):
+    lines = []
+    for name in sorted(processes or {}):
+        p = processes[name] or {}
+        restarts = p.get("restartCount")
+        lines.append("%s%-6s instance %s  restarts %s" % (
+            indent, name, p.get("instanceId") or "-", "-" if restarts is None else restarts))
+    return lines
+
+
+def operation_lines(op, now, tz, current):
+    lines = []
+    head = [op.get("kind") or "operation", op.get("id") or "-"]
+    if current:
+        head.append("phase " + (op.get("phase") or "-"))
+    else:
+        head.append(op.get("result") or op.get("phase") or "-")
+    if op.get("rollback"):
+        head.append("(rollback)")
+    if op.get("run") and op["run"] != 1:
+        head.append("run %s" % op["run"])
+    lines.append("  ".join(head))
+    if op.get("slot"):
+        lines.append("  slot      " + op["slot"])
+    started, finished = op.get("startedAt"), op.get("finishedAt")
+    if started:
+        lines.append("  started   " + when(started, now, tz))
+    if finished:
+        lines.append("  finished  " + when(finished, now, tz) +
+                     ("  took " + duration(finished - started) if started else ""))
+    elif current and op.get("phaseAt"):
+        lines.append("  in phase  " + duration(now - op["phaseAt"]))
+    if op.get("execution") and short_arn(op["execution"]) != op.get("id"):
+        lines.append("  execution " + short_arn(op["execution"]))
+    for name, image in sorted((op.get("images") or {}).items()):
+        lines.append("  image     %-6s %s" % (name, short_image(image)))
+    old = op.get("old") or {}
+    if old:
+        tasks = old.get("tasks") or []
+        stopped = set((op.get("releaseEvidence") or {}).get("stoppedTasks") or [])
+        desc = short_arn(old.get("definition")) + (" (legacy)" if old.get("legacy") else "")
+        lines.append("  replaced  %s, %d task(s)" % (desc, len(tasks)))
+        for t in tasks:
+            mark = "stopped" if t.get("arn") in stopped else t.get("state") or "-"
+            lines.append("            task %s  %s" % (short_arn(t.get("arn")), mark))
+    if op.get("error"):
+        lines.append("  error     " + str(op["error"]))
+    timeline = op.get("timeline") or []
+    if timeline:
+        lines.append("  timeline (phase, offset from start, time in phase)")
+        end = finished or now
+        for i, step in enumerate(timeline):
+            nxt = timeline[i + 1]["at"] if i + 1 < len(timeline) else end
+            offset = step["at"] - (started or timeline[0]["at"])
+            lines.append("    %-18s +%-7s %s" % (step.get("phase") or "-", duration(offset), duration(nxt - step["at"])))
+    return lines
+
+
+def format_status(state, now=None, tz=None):
+    """A human summary of the coordinator's status document."""
+    now = time.time() if now is None else now
+    tz = tz or datetime.datetime.now().astimezone().tzinfo
+    owner = state.get("owner")
+    lines = ["Owner     " + task_line(owner)]
+    if owner:
+        lines += process_lines(owner.get("processes"), "          ")
+    op = state.get("operation")
+    lines.append("")
+    if op:
+        lines.append("Operation " + operation_lines(op, now, tz, True)[0])
+        lines += operation_lines(op, now, tz, True)[1:]
+    else:
+        lines.append("Operation none in progress")
+    last = state.get("last")
+    if last:
+        lines.append("")
+        body = operation_lines(last, now, tz, False)
+        lines.append("Last      " + body[0])
+        lines += body[1:]
+    previous = state.get("previous")
+    lines.append("")
+    if previous:
+        desc = short_arn(previous.get("definition")) if isinstance(previous, dict) else str(previous)
+        lines.append("Previous  " + desc)
+        for name, image in sorted(((previous.get("images") or {}) if isinstance(previous, dict) else {}).items()):
+            lines.append("  image     %-6s %s" % (name, short_image(image)))
+    else:
+        lines.append("Previous  none (nothing to roll back to)")
+    if "legacyRetired" in state:
+        lines.append("Legacy    " + ("retired" if state["legacyRetired"] else "still running"))
+    if state.get("version") is not None:
+        lines.append("Version   %s" % state["version"])
+    return "\n".join(lines)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=["status", "bootstrap", "deploy", "rollback", "resume", "abort"])
@@ -135,6 +286,7 @@ def main():
     parser.add_argument("--allow-dirty", action="store_true",
                         help="with --build, deploy even though tracked files differ from the commit the images are tagged with")
     parser.add_argument("--timeout", type=int, default=1800)
+    parser.add_argument("--json", action="store_true", help="status: print the raw coordinator document")
     args = parser.parse_args()
     if args.build and args.action != "deploy":
         parser.error("--build is supported only for deploy")
@@ -153,7 +305,8 @@ def main():
         if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}", args.tag):
             parser.error("--tag must be a valid Docker/ECR tag")
     if args.action == "status":
-        print(json.dumps(invoke(args, {"command": "status"}), indent=2))
+        state = invoke(args, {"command": "status"})
+        print(json.dumps(state, indent=2) if args.json else format_status(state))
         return 0
     if args.action in {"resume", "abort"}:
         payload = {"command": args.action}

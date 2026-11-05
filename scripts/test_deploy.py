@@ -168,5 +168,67 @@ class DeployTests(unittest.TestCase):
             deploy.invoke(arguments(), {"command": "status"})
 
 
+TESTDATA = Path(__file__).resolve().parent / "testdata"
+PST = __import__("datetime").timezone(__import__("datetime").timedelta(hours=-8), "PST")
+
+
+class StatusFormatTests(unittest.TestCase):
+    def test_completed_bootstrap_reads_as_a_summary(self):
+        state = json.loads((TESTDATA / "status-bootstrap.json").read_text())
+        out = deploy.format_status(state, now=1793853300, tz=PST)
+        lines = out.splitlines()
+        self.assertEqual(lines[0], "Owner     example-a  task 0f1e2d3c4b5a69788796a5b4c3d2e1f0  RUNNING  "
+                                   "10.0.0.20  example-coordinated:2")
+        self.assertIn("          grid   instance aaaa1111bbbb2222  restarts -", lines)
+        self.assertIn("          relay  instance cccc3333dddd4444  restarts 0", lines)
+        self.assertIn("Operation none in progress", lines)
+        self.assertIn("Last      bootstrap  sierra-bootstrap-20261105T042314Z  SUCCEEDED", lines)
+        self.assertIn("  finished  2026-11-04 20:29:35 PST (5m25s ago)  took 3m40s", lines)
+        self.assertIn("  replaced  example:57 (legacy), 1 task(s)", lines)
+        self.assertIn("            task 1a2b3c4d5e6f708192a3b4c5d6e7f809  stopped", lines)
+        self.assertIn("    WAIT_OLD_STOPPED   +1m21s   1m53s", lines)
+        self.assertIn("    WAIT_CLEANED       +3m38s   2s", lines, "the last phase runs to finishedAt")
+        self.assertIn("Previous  none (nothing to roll back to)", lines)
+        self.assertNotIn("execution", out, "an execution named like the operation is not repeated")
+        self.assertNotIn("arn:aws", out, "ARNs are shortened")
+
+    def test_operation_in_progress_shows_its_phase_and_images(self):
+        state = {"owner": None, "last": None, "previous": {
+                     "definition": "arn:aws:ecs:us-east-1:123456789012:task-definition/example-coordinated:3",
+                     "images": {"grid": REGISTRY + "/grid@sha256:" + "a" * 64}},
+                 "operation": {"id": "deploy-1", "kind": "deploy", "phase": "WAIT_STANDBY", "phaseAt": 1000,
+                               "startedAt": 990, "rollback": True, "error": "standby not live yet",
+                               "execution": "arn:aws:states:us-east-1:123456789012:execution:handoff:exec-9",
+                               "images": {"grid": REGISTRY + "/grid@sha256:" + "b" * 64,
+                                          "relay": REGISTRY + "/relay@sha256:" + "c" * 64},
+                               "timeline": [{"at": 990, "phase": "PREPARE"}, {"at": 1000, "phase": "WAIT_STANDBY"}]}}
+        out = deploy.format_status(state, now=1045, tz=PST).splitlines()
+        self.assertEqual(out[0], "Owner     none")
+        self.assertIn("Operation deploy  deploy-1  phase WAIT_STANDBY  (rollback)", out)
+        self.assertIn("  in phase  45s", out)
+        self.assertIn("  execution exec-9", out)
+        self.assertIn("  image     grid   grid@sha256:" + "b" * 12, out)
+        self.assertIn("  image     relay  relay@sha256:" + "c" * 12, out)
+        self.assertIn("  error     standby not live yet", out)
+        self.assertIn("    WAIT_STANDBY       +10s     45s", out, "the current phase runs to now")
+        self.assertIn("Previous  example-coordinated:3", out)
+
+    def test_empty_document_does_not_crash(self):
+        out = deploy.format_status({}, now=0, tz=PST)
+        self.assertIn("Owner     none", out)
+        self.assertIn("Operation none in progress", out)
+
+    def test_status_json_flag_prints_the_raw_document(self):
+        state = json.loads((TESTDATA / "status-bootstrap.json").read_text())
+        for argv, raw in ((["deploy.py", "status", "--json"], True), (["deploy.py", "status"], False)):
+            with patch("sys.argv", argv), patch("deploy.invoke", return_value=state), \
+                    contextlib.redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(deploy.main(), 0)
+            if raw:
+                self.assertEqual(json.loads(out.getvalue()), state)
+            else:
+                self.assertTrue(out.getvalue().startswith("Owner     example-a"))
+
+
 if __name__ == "__main__":
     unittest.main()

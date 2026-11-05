@@ -1,0 +1,77 @@
+{
+  "previous": null,
+  "version": 94,
+  "owner": {
+    "arn": "arn:aws:ecs:us-east-1:123456789012:task/example-cluster/0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+    "definition": "arn:aws:ecs:us-east-1:123456789012:task-definition/example-coordinated:2",
+    "ip": "10.0.0.20",
+    "processes": {
+      "grid": {"instanceId": "aaaa1111bbbb2222", "restartCount": null},
+      "relay": {"instanceId": "cccc3333dddd4444", "restartCount": 0}
+    },
+    "slot": "example-a",
+    "state": "RUNNING"
+  },
+  "operation": null,
+  "pk": "state",
+  "last": {
+    "candidate": {
+      "arn": "arn:aws:ecs:us-east-1:123456789012:task/example-cluster/0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+      "definition": "arn:aws:ecs:us-east-1:123456789012:task-definition/example-coordinated:2",
+      "ip": "10.0.0.20",
+      "processes": {
+        "grid": {"instanceId": "aaaa1111bbbb2222", "restartCount": null},
+        "relay": {"instanceId": "cccc3333dddd4444", "restartCount": 0}
+      },
+      "slot": "example-a",
+      "state": "RUNNING"
+    },
+    "definition": "arn:aws:ecs:us-east-1:123456789012:task-definition/example-coordinated:2",
+    "emptyObservedAt": 1793852944,
+    "execution": "arn:aws:states:us-east-1:123456789012:execution:example-handoff:sierra-bootstrap-20261105T042314Z",
+    "finishedAt": 1793852975,
+    "id": "sierra-bootstrap-20261105T042314Z",
+    "images": null,
+    "kind": "bootstrap",
+    "old": {
+      "definition": "arn:aws:ecs:us-east-1:123456789012:task-definition/example:57",
+      "legacy": true,
+      "slot": "example",
+      "tasks": [
+        {
+          "arn": "arn:aws:ecs:us-east-1:123456789012:task/example-cluster/1a2b3c4d5e6f708192a3b4c5d6e7f809",
+          "definition": "arn:aws:ecs:us-east-1:123456789012:task-definition/example:57",
+          "ip": "10.0.0.10",
+          "slot": "example",
+          "state": "RUNNING"
+        }
+      ]
+    },
+    "phase": "WAIT_CLEANED",
+    "phaseAt": 1793852973,
+    "releaseEvidence": {
+      "stoppedTasks": ["arn:aws:ecs:us-east-1:123456789012:task/example-cluster/1a2b3c4d5e6f708192a3b4c5d6e7f809"]
+    },
+    "releaseStarted": true,
+    "released": true,
+    "result": "SUCCEEDED",
+    "rollback": false,
+    "run": 1,
+    "slot": "example-a",
+    "startedAt": 1793852755,
+    "stopping": ["arn:aws:ecs:us-east-1:123456789012:task/example-cluster/1a2b3c4d5e6f708192a3b4c5d6e7f809"],
+    "timeline": [
+      {"at": 1793852756, "phase": "PREPARE"},
+      {"at": 1793852757, "phase": "WAIT_STANDBY"},
+      {"at": 1793852835, "phase": "RELEASING"},
+      {"at": 1793852836, "phase": "WAIT_OLD_STOPPED"},
+      {"at": 1793852949, "phase": "ACTIVATING"},
+      {"at": 1793852951, "phase": "WAIT_ACTIVE"},
+      {"at": 1793852964, "phase": "ROUTING"},
+      {"at": 1793852966, "phase": "WAIT_ROUTING"},
+      {"at": 1793852972, "phase": "CLEANING"},
+      {"at": 1793852973, "phase": "WAIT_CLEANED"}
+    ]
+  },
+  "legacyRetired": true
+}

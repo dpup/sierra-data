@@ -596,7 +596,8 @@ settings are needed by `make ecs-deploy`.
 ### Status and rollback
 
 ```bash
-make ecs-status
+make ecs-status          # owner, any operation in progress, the last operation's phase timeline
+make ecs-status JSON=1   # the coordinator's raw status document
 make ecs-rollback
 ```
 
