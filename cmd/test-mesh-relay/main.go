@@ -1,6 +1,7 @@
 // Command test-mesh-relay is the CLI diagnostic for the SIERRA Mesh Relay
 // (peer of test-meshcore/test-pge). It talks to a RUNNING relay from the
-// outside, over the wire protocol in docs/mesh-relay-wireprotocol.md, so it
+// outside, over the wire protocol (PROTOCOL.md in
+// github.com/dpup/sierra-meshrelay-protocol), so it
 // exercises the same path a real bridge and client do — including whatever
 // reverse proxy sits in front.
 //

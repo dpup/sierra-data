@@ -5,8 +5,9 @@
 //	node <--serial/TCP--> bridge ==WSS (bridge dials out)==> relay <==WSS== client
 //
 // A bridge dials OUT to the relay, so a house needs no open port and works
-// behind CGNAT. The wire protocol is docs/mesh-relay-wireprotocol.md (shared
-// verbatim with the bridge repo); the service requirements are
+// behind CGNAT. The wire protocol is PROTOCOL.md in
+// github.com/dpup/sierra-meshrelay-protocol, whose Go types (shared with the
+// bridge) protocol.go aliases; the service requirements are
 // docs/mesh-relay-server.md. Read both before changing anything here.
 //
 // # Why a separate process

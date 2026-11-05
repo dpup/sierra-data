@@ -684,8 +684,10 @@ private messages and channel keys — `CHANNEL_INFO` returns the secret); tokens
 are stored as SHA-256 only and shown once; one exclusive lease per gateway, and
 only onto a node that reports its pinned pubkey. The frame path never touches
 the DB (audit writes are queued). Wire protocol:
-`docs/mesh-relay-wireprotocol.md` — **shared verbatim with the bridge repo
-(meshbridge); change it in both**. Service spec, decisions and the deploy
+`PROTOCOL.md` in github.com/dpup/sierra-meshrelay-protocol — the one copy,
+shared with the bridge. Its Go types (package `meshproto`) are aliased in
+`internal/meshrelay/protocol.go`; change the protocol there, then bump the
+module here. Service spec, decisions and the deploy
 checklist: `docs/mesh-relay-server.md`.
 
 ## Deploy handoff (standby startup)

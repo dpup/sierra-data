@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	meshproto "github.com/dpup/sierra-meshrelay-protocol"
 )
 
 // Token prefixes make a leaked token recognizable (and greppable by secret
@@ -59,14 +61,8 @@ var clientNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,62}$`)
 // ValidClientName reports whether name is a legal client name.
 func ValidClientName(name string) bool { return clientNamePattern.MatchString(name) }
 
-// pubkeyPattern is a MeshCore Ed25519 public key in hex.
-var pubkeyPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
-
 // NormalizePubkey lowercases a hex pubkey and reports whether it is well formed.
-func NormalizePubkey(s string) (string, bool) {
-	s = strings.ToLower(strings.TrimSpace(s))
-	return s, pubkeyPattern.MatchString(s)
-}
+func NormalizePubkey(s string) (string, bool) { return meshproto.NormalizePubkey(s) }
 
 // MintToken returns a new opaque token: prefix + base64url(32 random bytes).
 func MintToken(prefix string) (string, error) {

@@ -1,6 +1,6 @@
 # Handoff: SIERRA Mesh Relay (data server)
 
-*For the agent working on the SIERRA data server. Read `mesh-relay-wireprotocol.md` (this directory) first. It's the canonical wire spec, shared with the bridge repo.*
+*For the agent working on the SIERRA data server. Read the wire spec first: [PROTOCOL.md](https://github.com/dpup/sierra-meshrelay-protocol/blob/main/PROTOCOL.md) in `dpup/sierra-meshrelay-protocol`, shared with the bridge repo.*
 
 ## What we're building
 
