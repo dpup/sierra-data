@@ -164,12 +164,12 @@ func (r *Relay) bridgeControl(s *bridgeSession, data []byte) {
 		if json.Unmarshal(data, &m) != nil {
 			return
 		}
-		pinned, mismatch, err := r.checkPubkey(s.gateway, m.NodeInfo)
+		pinned, mismatch, err := r.checkPubkey(s.gateway, m.Node)
 		if err != nil {
 			logging.Errorw(r.ctx, "pubkey check failed", "gateway", s.gateway, "error", err)
 			return
 		}
-		r.updateNode(s, m.NodeInfo, pinned, mismatch)
+		r.updateNode(s, m.Node, pinned, mismatch)
 	case "stats":
 		var m statsMsg
 		if json.Unmarshal(data, &m) != nil {
