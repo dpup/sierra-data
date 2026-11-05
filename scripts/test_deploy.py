@@ -72,6 +72,7 @@ class DeployTests(unittest.TestCase):
         events = []
         images = {"grid": "grid@sha256:a", "relay": "relay@sha256:b"}
         with patch("sys.argv", ["deploy.py", "deploy", "--build", "--tag", "abc123", "--operation-id", "request", "--wait"]), \
+                patch("deploy.dirty_files", return_value=[]), \
                 patch("deploy.configuration", return_value=CONFIG), \
                 patch("deploy.build_images", side_effect=lambda *_: events.append("build")), \
                 patch("deploy.images", side_effect=lambda *_: events.append("resolve") or images), \
@@ -85,6 +86,7 @@ class DeployTests(unittest.TestCase):
 
     def test_failed_push_never_requests_a_deployment(self):
         with patch("sys.argv", ["deploy.py", "deploy", "--build", "--tag", "abc123"]), \
+                patch("deploy.dirty_files", return_value=[]), \
                 patch("deploy.configuration", return_value=CONFIG), \
                 patch("deploy.build_images", side_effect=subprocess.CalledProcessError(1, ["make"])), \
                 patch("deploy.invoke") as invoke, patch("deploy.images") as resolve:
@@ -94,13 +96,45 @@ class DeployTests(unittest.TestCase):
         resolve.assert_not_called()
 
     def test_build_without_tag_uses_repository_commit(self):
-        with patch("sys.argv", ["deploy.py", "deploy", "--build"]), \
+        with patch("sys.argv", ["deploy.py", "deploy", "--build"]), patch("deploy.dirty_files", return_value=[]), \
                 patch("deploy.subprocess.run", return_value=SimpleNamespace(stdout="0123456789ab\n")) as git, \
                 patch("deploy.configuration", return_value=CONFIG), patch("deploy.build_images") as build, \
                 patch("deploy.images", return_value={}), patch("deploy.invoke", return_value={}), \
                 contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(deploy.main(), 0)
         self.assertEqual(build.call_args.args[0].tag, "0123456789ab")
+        self.assertEqual(git.call_args.kwargs["cwd"], deploy.REPO)
+
+    def test_dirty_tree_never_builds_or_deploys(self):
+        # Images are tagged with the commit; uncommitted changes would ship under it.
+        with patch("sys.argv", ["deploy.py", "deploy", "--build", "--tag", "abc123"]), \
+                patch("deploy.dirty_files", return_value=["api/v1/common.pb.go"]), \
+                patch("deploy.configuration") as config, patch("deploy.build_images") as build, \
+                patch("deploy.invoke") as invoke, contextlib.redirect_stderr(io.StringIO()) as err:
+            with self.assertRaises(SystemExit) as exit:
+                deploy.main()
+        self.assertEqual(exit.exception.code, 2)
+        self.assertIn("api/v1/common.pb.go", err.getvalue())
+        self.assertIn("--allow-dirty", err.getvalue())
+        config.assert_not_called()
+        build.assert_not_called()
+        invoke.assert_not_called()
+
+    def test_allow_dirty_is_an_explicit_override(self):
+        with patch("sys.argv", ["deploy.py", "deploy", "--build", "--tag", "abc123", "--allow-dirty"]), \
+                patch("deploy.dirty_files", return_value=["Makefile"]) as dirty, \
+                patch("deploy.configuration", return_value=CONFIG), patch("deploy.build_images") as build, \
+                patch("deploy.images", return_value={}), patch("deploy.invoke", return_value={}), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(deploy.main(), 0)
+        dirty.assert_not_called()
+        build.assert_called_once()
+
+    def test_dirty_files_lists_tracked_changes_only(self):
+        porcelain = " M api/v1/common.pb.go\nM  Makefile\n"
+        with patch("deploy.subprocess.run", return_value=SimpleNamespace(stdout=porcelain)) as git:
+            self.assertEqual(deploy.dirty_files(), ["api/v1/common.pb.go", "Makefile"])
+        self.assertIn("--untracked-files=no", git.call_args.args[0])
         self.assertEqual(git.call_args.kwargs["cwd"], deploy.REPO)
 
     def test_completed_rollback_returns_nonzero_instead_of_ecs_stable(self):

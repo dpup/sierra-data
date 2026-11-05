@@ -52,6 +52,15 @@ def configuration(args):
     return config
 
 
+def dirty_files():
+    """Tracked files that differ from HEAD. A --build deploy tags its images
+    with the commit, so anything listed here would ship labelled as code it is
+    not, and a later rollback to that tag would bring it back."""
+    result = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"],
+                            cwd=REPO, capture_output=True, text=True, check=True)
+    return [line[3:] for line in result.stdout.splitlines() if line.strip()]
+
+
 def build_images(args, config):
     destinations = []
     for name, target, variable in [("grid", "ecr-push-grid", "DOCKER_IMAGE_NAME"),
@@ -123,10 +132,18 @@ def main():
     parser.add_argument("--confirm-legacy-stop", help="bootstrap acknowledgement: exact legacy service name")
     parser.add_argument("--wait", action="store_true")
     parser.add_argument("--build", action="store_true", help="build and push both images from this repository before deploying")
+    parser.add_argument("--allow-dirty", action="store_true",
+                        help="with --build, deploy even though tracked files differ from the commit the images are tagged with")
     parser.add_argument("--timeout", type=int, default=1800)
     args = parser.parse_args()
     if args.build and args.action != "deploy":
         parser.error("--build is supported only for deploy")
+    if args.build and not args.allow_dirty:
+        changed = dirty_files()
+        if changed:
+            parser.error("the working tree has uncommitted changes, which would ship under this commit's tag:\n  "
+                         + "\n  ".join(changed)
+                         + "\ncommit or discard them, or pass --allow-dirty (make ecs-deploy ALLOW_DIRTY=1)")
     if args.action == "deploy" and not args.tag:
         if not args.build:
             parser.error("deploy requires --tag for both images, or --build to use the current commit")

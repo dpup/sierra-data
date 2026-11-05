@@ -611,8 +611,10 @@ docker-push: docker-build
 # both ECR repositories there; AWS credentials are the only deployment config.
 # Use the commit tag by default, keeping explicit non-latest DOCKER_TAG values.
 .PHONY: ecs-deploy ecs-status ecs-rollback test-deploy-client
+# Refuses a working tree with uncommitted tracked changes (they would ship under
+# the commit's tag); ALLOW_DIRTY=1 overrides.
 ecs-deploy: test-deploy-client
-	python3 scripts/deploy.py deploy --build --wait --tag "$(if $(filter latest,$(DOCKER_TAG)),$(shell git rev-parse --short=12 HEAD),$(DOCKER_TAG))"
+	python3 scripts/deploy.py deploy --build --wait --tag "$(if $(filter latest,$(DOCKER_TAG)),$(shell git rev-parse --short=12 HEAD),$(DOCKER_TAG))"$(if $(ALLOW_DIRTY), --allow-dirty)
 
 ecs-status:
 	python3 scripts/deploy.py status

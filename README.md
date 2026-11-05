@@ -577,6 +577,10 @@ then waits for the coordinated handoff. The default deployment tag is the
 current commit's 12-character SHA. Both images are built even when only one
 binary changed. Tags are resolved to immutable digests after the pushes.
 
+It refuses to build from a working tree with uncommitted changes to tracked
+files, which would ship under the commit's tag and come back on a rollback to
+it. Commit or discard them, or override with `make ecs-deploy ALLOW_DIRTY=1`.
+
 For images already pushed under the same tag in both repositories:
 
 ```bash
