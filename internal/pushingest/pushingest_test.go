@@ -100,6 +100,64 @@ func TestRegistryRejectsSharedToken(t *testing.T) {
 	require.Error(t, err, "two reporters sharing a token makes attribution meaningless")
 }
 
+func TestReporterHashCanBeSuppliedByID(t *testing.T) {
+	// A deploy that generates the token injects its hash by reporter id
+	// (PF__GRID__INGEST__REPORTER_TOKEN_SHA256__RELAY), with none committed.
+	r, err := NewRegistry(config.IngestConfig{
+		Reporters: []config.Reporter{{ID: "relay", TokenSuppliedAtDeploy: true,
+			Streams: []string{MeshStream}, MinInterval: time.Nanosecond}},
+		ReporterTokenSha256: map[string]string{"relay": strings.ToUpper(TokenHash(testToken))},
+	})
+	require.NoError(t, err)
+	w := post(r, testToken, MeshStream, sampleReport)
+	require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), `"reporterId":"relay"`)
+	assert.Equal(t, http.StatusUnauthorized, post(r, "wrong", MeshStream, sampleReport).Code)
+}
+
+func TestSuppliedReporterHashMisconfigurationsFailAtStartup(t *testing.T) {
+	committed := config.Reporter{ID: "relay", TokenSha256: TokenHash("x"), Streams: []string{MeshStream}}
+	bare := config.Reporter{ID: "relay", Streams: []string{MeshStream}}
+	atDeploy := config.Reporter{ID: "relay", TokenSuppliedAtDeploy: true, Streams: []string{MeshStream}}
+	committedAtDeploy := atDeploy
+	committedAtDeploy.TokenSha256 = TokenHash("x")
+	cases := map[string]config.IngestConfig{
+		"marked at deploy but committed": {Reporters: []config.Reporter{committedAtDeploy}},
+		"both committed and supplied": {Reporters: []config.Reporter{committed},
+			ReporterTokenSha256: map[string]string{"relay": TokenHash("y")}},
+		"supplied but empty": {Reporters: []config.Reporter{bare},
+			ReporterTokenSha256: map[string]string{"relay": " "}},
+		"neither": {Reporters: []config.Reporter{bare}},
+		"supplied for an unknown reporter": {Reporters: []config.Reporter{committed},
+			ReporterTokenSha256: map[string]string{"rely": TokenHash("y")}},
+		"supplied hash malformed": {Reporters: []config.Reporter{bare},
+			ReporterTokenSha256: map[string]string{"relay": "abc"}},
+	}
+	for name, cfg := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := NewRegistry(cfg)
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestReporterAwaitingItsDeployHashCannotAuthenticate(t *testing.T) {
+	// A local server has no deploy-supplied hash: it must still start, with the
+	// reporter configured (so its /sources row shows it never reporting) and no
+	// token, not even an empty one, authenticating as it.
+	r, err := NewRegistry(config.IngestConfig{Reporters: []config.Reporter{
+		{ID: "alan-pi", TokenSha256: TokenHash(testToken), Streams: []string{MeshStream}},
+		{ID: "relay", TokenSuppliedAtDeploy: true, Streams: []string{MeshStream}},
+	}})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"relay"}, r.MissingTokens())
+	assert.Equal(t, []string{"alan-pi", "relay"}, r.ReporterIDs(MeshStream))
+	for _, tok := range []string{"", " ", "relay"} {
+		_, ok := r.authenticate(tok)
+		assert.False(t, ok, "token %q", tok)
+	}
+}
+
 func TestPostAcceptsReport(t *testing.T) {
 	r := testRegistry(t)
 	w := post(r, testToken, MeshStream, sampleReport)

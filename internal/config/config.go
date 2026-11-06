@@ -92,6 +92,10 @@ type MeshRelayConfig struct {
 	Admins []MeshRelayAdmin `koanf:"admins"`
 	// DebugPayloadGateways log frame payloads for these gateways. Never in prod.
 	DebugPayloadGateways []string `koanf:"debugPayloadGateways"`
+	// Telemetry is the relay's in-process poller of gateway nodes
+	// (internal/relaytelemetry), which reports to the Grid as a mesh.repeater
+	// reporter.
+	Telemetry MeshRelayTelemetryConfig `koanf:"telemetry"`
 
 	LeaseDuration    time.Duration `koanf:"leaseDuration"`
 	LeaseIdleTimeout time.Duration `koanf:"leaseIdleTimeout"`
@@ -104,6 +108,24 @@ type MeshRelayConfig struct {
 	AuthFailLimit    int           `koanf:"authFailLimit"`
 	AuthFailWindow   time.Duration `koanf:"authFailWindow"`
 	AuthLockout      time.Duration `koanf:"authLockout"`
+}
+
+// MeshRelayTelemetryConfig is meshRelay.telemetry. The poller runs only when
+// Gateways, GridURL and IngestToken are all set.
+type MeshRelayTelemetryConfig struct {
+	// Gateways whose node is polled and published: opt-in per gateway.
+	Gateways []string      `koanf:"gateways"`
+	Interval time.Duration `koanf:"interval"`
+	// GridURL is the Grid the report is pushed to (its ingest endpoint).
+	GridURL string `koanf:"gridUrl"`
+	// IngestToken is the Grid mesh.repeater reporter token for the relay.
+	// Secret: PF__MESH_RELAY__TELEMETRY__INGEST_TOKEN only, never prefab.yaml.
+	IngestToken string `koanf:"ingestToken"`
+}
+
+// Enabled reports whether the poller has everything it needs to run.
+func (t MeshRelayTelemetryConfig) Enabled() bool {
+	return len(t.Gateways) > 0 && t.GridURL != "" && t.IngestToken != ""
 }
 
 // MeshRelayAdmin is one bootstrap admin.
@@ -205,6 +227,13 @@ type IngestConfig struct {
 	// DefaultIngestTelemetryPersistInterval.
 	TelemetryPersistInterval time.Duration `koanf:"telemetryPersistInterval"`
 	Reporters                []Reporter    `koanf:"reporters"`
+	// ReporterTokenSha256 supplies a reporter's token hash by reporter id, in
+	// place of its committed tokenSha256, so a deploy that generates the token
+	// can inject the hash too: PF__GRID__INGEST__REPORTER_TOKEN_SHA256__<ID>
+	// (the id lowercased, so only ids of lowercase letters and digits can be set
+	// this way). A reporter takes its hash from exactly one of the two places,
+	// and an entry naming no configured reporter is an error, never ignored.
+	ReporterTokenSha256 map[string]string `koanf:"reporterTokenSha256"`
 }
 
 // Reporter is one authorized push client.
@@ -215,11 +244,18 @@ type IngestConfig struct {
 // token is not a credential — it cannot be replayed and cannot be reversed — so
 // the committed file can carry it safely and adding a reporter stays an ordinary
 // pull request. The token exists only on the reporter's own machine. Generate a
-// pair with `make ingest-token`.
+// pair with `make ingest-token`. A deploy-managed token supplies its hash
+// through IngestConfig.ReporterTokenSha256 instead (see TokenSuppliedAtDeploy).
 type Reporter struct {
 	ID          string `koanf:"id"`
 	Name        string `koanf:"name"`
 	TokenSha256 string `koanf:"tokenSha256"`
+	// TokenSuppliedAtDeploy marks a reporter whose hash comes only from
+	// IngestConfig.ReporterTokenSha256. Without it a missing hash fails startup;
+	// with it the reporter stays configured but cannot authenticate, so a local
+	// server starts and a deploy that forgot the hash shows on /sources as a
+	// reporter that never reports.
+	TokenSuppliedAtDeploy bool `koanf:"tokenSuppliedAtDeploy"`
 	// Streams this reporter may post to (e.g. "mesh.repeater"). Empty means none:
 	// authorization is granted, never defaulted.
 	Streams []string `koanf:"streams"`

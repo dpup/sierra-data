@@ -9,7 +9,9 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -60,6 +62,49 @@ func TestRelayHandoffLifecycle(t *testing.T) {
 	require.NoError(t, err, "released: the next owner takes the lock at once")
 	require.NoError(t, next.Close())
 
+	assert.Equal(t, 0, h.terminate())
+}
+
+// The telemetry poller runs only while the relay is ACTIVE: it starts with
+// activation and quiesce stops it before relay.db is released.
+func TestRelayTelemetryPollerFollowsTheLifecycle(t *testing.T) {
+	var mu sync.Mutex
+	pushes := 0
+	grid := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		pushes++
+		mu.Unlock()
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer grid.Close()
+	count := func() int { mu.Lock(); defer mu.Unlock(); return pushes }
+
+	prev := telemetryFirstPoll
+	telemetryFirstPoll = 0
+	defer func() { telemetryFirstPoll = prev }()
+
+	port := freePort(t)
+	app, err := prepareRelay(testCtx(), &config.MeshRelayConfig{
+		DBPath: filepath.Join(t.TempDir(), "relay.db"), Port: port, LockTimeout: time.Second,
+		Control: config.ControlConfig{DrainTimeout: 500 * time.Millisecond, WorkerStopTimeout: 5 * time.Second},
+		Telemetry: config.MeshRelayTelemetryConfig{Gateways: []string{"gw-a"}, Interval: 20 * time.Millisecond,
+			GridURL: grid.URL, IngestToken: "x"},
+	})
+	require.NoError(t, err)
+	h := runController(t, app, true)
+	time.Sleep(100 * time.Millisecond)
+	assert.Zero(t, count(), "no polling in STANDBY")
+
+	h.command("/activate", "tel-activate")
+	require.Equal(t, handoff.StateActive, h.waitSettled().State)
+	require.Eventually(t, func() bool { return count() >= 2 }, 5*time.Second, 10*time.Millisecond,
+		"the poller reports on its interval once ACTIVE")
+
+	h.command("/quiesce", "tel-quiesce")
+	require.Equal(t, handoff.StateQuiesced, h.waitSettled().State)
+	after := count()
+	time.Sleep(150 * time.Millisecond)
+	assert.Equal(t, after, count(), "quiesce stopped the poller")
 	assert.Equal(t, 0, h.terminate())
 }
 

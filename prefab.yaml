@@ -661,6 +661,22 @@ grid:
         minInterval: "30s"
         # Breaks ties when two monitors disagree about a node's identity.
         priority: 10
+      # The mesh relay's telemetry poller (meshRelay.telemetry): the companion
+      # node behind each opted-in gateway, read every 5m over the relay. It
+      # reports full keys read from the node itself.
+      #
+      # The deploy generates the token and sets it in two places: the relay's
+      # PF__MESH_RELAY__TELEMETRY__INGEST_TOKEN, and its lowercase-hex SHA-256
+      # in this server's PF__GRID__INGEST__REPORTER_TOKEN_SHA256__RELAY. Neither
+      # is committed. Without the hash (a local server) this reporter stays
+      # listed but nothing authenticates as it.
+      - id: relay
+        name: "SIERRA Mesh Relay gateway nodes"
+        tokenSuppliedAtDeploy: true
+        streams: ["mesh.repeater"]
+        staleAfter: "30m"
+        minInterval: "30s"
+        priority: 20
       # The burn-line reader (.github/workflows/burn-line.yml). It reports ONCE
       # A DAY, so staleAfter is generous: anything under ~24h would flag a
       # healthy reporter between runs. The layer's own 36h freshness gate
@@ -816,3 +832,20 @@ meshRelay:
   # Gateways whose frame payloads are logged. Payloads carry private messages
   # and channel keys: never set this in production.
   debugPayloadGateways: []
+  # The relay's own telemetry poller (internal/relaytelemetry): reads the
+  # companion node behind each listed gateway every `interval` (battery,
+  # uptime, airtime, radio and packet counters) and reports it to the Grid as
+  # the `relay` mesh.repeater reporter, like alanpi. It takes a background
+  # lease, so anyone connecting to the node takes it over, and needs no relay
+  # client token.
+  #
+  # Opt-in per gateway: publishing a node's telemetry can let someone match
+  # it to its gateway, which the public status deliberately does not do. Ask
+  # the host first.
+  #
+  # Runs only when the ingest token is set, so local relays never push:
+  #   PF__MESH_RELAY__TELEMETRY__INGEST_TOKEN   (grid.ingest.reporters[relay])
+  telemetry:
+    gateways: ["my-test-box"]
+    interval: "5m"
+    gridUrl: "https://data.sierragridteam.org"

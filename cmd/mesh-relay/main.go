@@ -18,9 +18,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"runtime/debug"
 	"sync"
@@ -31,6 +33,7 @@ import (
 
 	"github.com/dpup/sierra-data/internal/config"
 	"github.com/dpup/sierra-data/internal/handoff"
+	"github.com/dpup/sierra-data/internal/relaytelemetry"
 
 	meshrelay "github.com/dpup/sierra-meshrelay/relay"
 )
@@ -81,6 +84,7 @@ type relayApp struct {
 	dbPath      string
 	lockTimeout time.Duration
 	port        int
+	telemetry   config.MeshRelayTelemetryConfig
 
 	// onFatal is the controller's Fail (main sets it).
 	onFatal func(error)
@@ -90,8 +94,15 @@ type relayApp struct {
 	relay      *meshrelay.Relay
 	gate       *handoff.Gate // the relay's admission gate (Config.Gate); Quiesce closes and drains it
 	serverDone chan struct{}
-	quiesced   struct{ gate, sessions, drained, store bool }
+	// pollStop/pollDone run the telemetry poller, a background user of the
+	// relay and relay.db: Quiesce stops it first.
+	pollStop context.CancelFunc
+	pollDone chan struct{}
+	quiesced struct{ poller, gate, sessions, drained, store bool }
 }
+
+// telemetryFirstPoll waits for bridges to reconnect after a relay restart.
+var telemetryFirstPoll = time.Minute
 
 func prepareRelay(ctx context.Context, relayCfg *config.MeshRelayConfig) (*relayApp, error) {
 	cfg, err := relayConfigFrom(*relayCfg)
@@ -102,7 +113,10 @@ func prepareRelay(ctx context.Context, relayCfg *config.MeshRelayConfig) (*relay
 		logging.Warn(ctx, "No bootstrap admins configured (meshRelay.admins); the admin API is unusable "+
 			"until the clients table has an admin")
 	}
-	a := &relayApp{ctx: ctx, cfg: cfg, control: relayCfg.Control,
+	if err := checkTelemetry(ctx, relayCfg.Telemetry); err != nil {
+		return nil, err
+	}
+	a := &relayApp{ctx: ctx, cfg: cfg, control: relayCfg.Control, telemetry: relayCfg.Telemetry,
 		dbPath: relayCfg.DBPath, lockTimeout: relayCfg.LockTimeout, port: relayCfg.Port}
 	if a.dbPath == "" {
 		a.dbPath = "./data/relay.db"
@@ -124,8 +138,8 @@ func (a *relayApp) Activate(actx context.Context) (err error) {
 	actx = handoff.WithLoggerOf(actx, a.ctx)
 	start := time.Now()
 	a.mu.Lock()
-	a.store, a.relay, a.gate = nil, nil, nil
-	a.quiesced = struct{ gate, sessions, drained, store bool }{}
+	a.store, a.relay, a.gate, a.pollStop, a.pollDone = nil, nil, nil, nil, nil
+	a.quiesced = struct{ poller, gate, sessions, drained, store bool }{}
 	a.mu.Unlock()
 	defer func() {
 		// A panic is a failed activation like any other: release what was
@@ -197,8 +211,55 @@ func (a *relayApp) Activate(actx context.Context) (err error) {
 			a.onFatal(fmt.Errorf("relay server stopped: %w", serverErr))
 		}
 	}()
+	a.startTelemetry(relay, st)
 	logging.Infow(a.ctx, "Relay serving", "port", a.port, "activation", time.Since(start))
 	return nil
+}
+
+// checkTelemetry validates meshRelay.telemetry. Gateways without a token is
+// a local relay, not an error: the poller stays off and says so.
+func checkTelemetry(ctx context.Context, t config.MeshRelayTelemetryConfig) error {
+	for i, gw := range t.Gateways {
+		if !meshrelay.ValidGatewayName(gw) {
+			return fmt.Errorf("meshRelay.telemetry.gateways[%d]: %q is not a gateway name", i, gw)
+		}
+	}
+	if t.GridURL != "" {
+		u, err := url.Parse(t.GridURL)
+		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+			return fmt.Errorf("meshRelay.telemetry.gridUrl %q must be an http(s) URL", t.GridURL)
+		}
+	}
+	if len(t.Gateways) > 0 && !t.Enabled() {
+		logging.Infow(ctx, "Relay telemetry poller off: no ingest token "+
+			"(PF__MESH_RELAY__TELEMETRY__INGEST_TOKEN) or gridUrl", "gateways", t.Gateways)
+	}
+	return nil
+}
+
+// startTelemetry starts the poller when it is configured.
+func (a *relayApp) startTelemetry(relay *meshrelay.Relay, st *meshrelay.Store) {
+	if !a.telemetry.Enabled() {
+		return
+	}
+	p := relaytelemetry.New(relaytelemetry.Config{Gateways: a.telemetry.Gateways, Interval: a.telemetry.Interval,
+		GridURL: a.telemetry.GridURL, IngestToken: a.telemetry.IngestToken}, relay, st)
+	ctx, cancel := context.WithCancel(a.ctx)
+	done := make(chan struct{})
+	a.mu.Lock()
+	a.pollStop, a.pollDone = cancel, done
+	a.mu.Unlock()
+	go func() {
+		defer close(done)
+		defer func() {
+			// A poller bug must not take the relay down with it.
+			if r := recover(); r != nil {
+				logging.Errorw(a.ctx, "Relay telemetry poller panicked; stopped", "panic", r,
+					"stack", string(debug.Stack()))
+			}
+		}()
+		p.Run(ctx, telemetryFirstPoll)
+	}()
 }
 
 // Quiesce releases relay.db: stop admitting, close every session (leases end
@@ -208,6 +269,19 @@ func (a *relayApp) Quiesce(_ context.Context) error {
 	start := time.Now()
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	// The poller holds leases and reads relay.db: stop it before either goes.
+	if a.pollStop != nil && !a.quiesced.poller {
+		a.pollStop()
+		select {
+		case <-a.pollDone:
+		case <-time.After(a.control.WorkerStop()):
+			logging.Errorw(a.ctx, "Quiesce: telemetry poller did not stop")
+			return errors.New("telemetry poller did not stop")
+		}
+		logging.Info(a.ctx, "Quiesce: telemetry poller stopped")
+	}
+	a.quiesced.poller = true
+
 	if a.relay != nil && !a.quiesced.gate {
 		a.gate.Close()
 	}
