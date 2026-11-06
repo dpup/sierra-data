@@ -9,8 +9,10 @@ package relaytelemetry
 // Airtime is shared by everyone on the mesh, so the poller is frugal:
 //   - It only uses gateways whose node already has the repeater as a contact
 //     (it heard its advert): the best cheap sign of being in range, and the
-//     host's contacts are never touched. Only if none has, it tries the
-//     gateway that last reached it, adding the contact for the check.
+//     host's contacts are never added to. Only if none has, it tries the
+//     gateway that last reached it, adding the contact for the check. (A
+//     stored direct route that goes unanswered is reset and the check
+//     floods once, as the apps' "Reset path" does: see CheckRepeater.)
 //   - The gateway that last reached it goes first, then the one that shared
 //     it, then the rest.
 //   - At most maxMeshTries gateways actually transmit per repeater per cycle.
