@@ -661,6 +661,20 @@ grid:
         minInterval: "30s"
         # Breaks ties when two monitors disagree about a node's identity.
         priority: 10
+      # The mesh relay's telemetry poller (meshRelay.telemetry): the companion
+      # node behind each opted-in gateway, read every 5m over the relay. It
+      # reports full keys read from the node itself.
+      #
+      # Mint/rotate with: make ingest-token REPORTER=relay
+      # The token lives only in the relay's environment
+      # (PF__MESH_RELAY__TELEMETRY__INGEST_TOKEN); only its SHA-256 is here.
+      - id: relay
+        name: "SIERRA Mesh Relay gateway nodes"
+        tokenSha256: "cc08033b26021a8c0776e7cfd295d4cbff8ae4ce7775a3da932e6d994f1e0691"
+        streams: ["mesh.repeater"]
+        staleAfter: "30m"
+        minInterval: "30s"
+        priority: 20
       # The burn-line reader (.github/workflows/burn-line.yml). It reports ONCE
       # A DAY, so staleAfter is generous: anything under ~24h would flag a
       # healthy reporter between runs. The layer's own 36h freshness gate
@@ -816,3 +830,20 @@ meshRelay:
   # Gateways whose frame payloads are logged. Payloads carry private messages
   # and channel keys: never set this in production.
   debugPayloadGateways: []
+  # The relay's own telemetry poller (internal/relaytelemetry): reads the
+  # companion node behind each listed gateway every `interval` (battery,
+  # uptime, airtime, radio and packet counters) and reports it to the Grid as
+  # the `relay` mesh.repeater reporter, like alanpi. It takes a background
+  # lease, so anyone connecting to the node takes it over, and needs no relay
+  # client token.
+  #
+  # Opt-in per gateway: publishing a node's telemetry can let someone match
+  # it to its gateway, which the public status deliberately does not do. Ask
+  # the host first.
+  #
+  # Runs only when the ingest token is set, so local relays never push:
+  #   PF__MESH_RELAY__TELEMETRY__INGEST_TOKEN   (grid.ingest.reporters[relay])
+  telemetry:
+    gateways: ["my-test-box"]
+    interval: "5m"
+    gridUrl: "https://data.sierragridteam.org"

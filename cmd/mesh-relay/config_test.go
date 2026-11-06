@@ -28,3 +28,23 @@ func TestRelayConfigFrom(t *testing.T) {
 		assert.Error(t, err, "%+v", bad)
 	}
 }
+
+func TestCheckTelemetry(t *testing.T) {
+	ok := config.MeshRelayTelemetryConfig{Gateways: []string{"my-test-box"},
+		GridURL: "https://data.sierragridteam.org", IngestToken: "x"}
+	require.NoError(t, checkTelemetry(testCtx(), ok))
+	assert.True(t, ok.Enabled())
+
+	noToken := ok
+	noToken.IngestToken = ""
+	require.NoError(t, checkTelemetry(testCtx(), noToken), "a local relay without the token is not an error")
+	assert.False(t, noToken.Enabled(), "and it does not poll")
+
+	badName := ok
+	badName.Gateways = []string{"Not A Gateway"}
+	assert.Error(t, checkTelemetry(testCtx(), badName))
+
+	badURL := ok
+	badURL.GridURL = "data.sierragridteam.org"
+	assert.Error(t, checkTelemetry(testCtx(), badURL))
+}

@@ -695,6 +695,19 @@ here and deploy. What stays here: `cmd/mesh-relay` (prefab app wiring,
 `internal/handoff` gate passed in as `Config.Gate`), the Docker target, and
 the deploy.
 
+**Gateway node telemetry** (`internal/relaytelemetry`, run by `cmd/mesh-relay`):
+the relay polls the companion node behind each gateway listed in
+`meshRelay.telemetry.gateways` (opt-in per gateway: published telemetry can
+tie a node to its gateway, which the public status withholds) and pushes it
+to the Grid as the `relay` `mesh.repeater` reporter, the same contract as
+alanpi. It holds an in-process lease at `PriorityBackground` (`relay.Acquire`
++ `relay.Send`), so anyone connecting takes the node over, and it needs no
+relay client token; its only credential is the ingest token
+(`PF__MESH_RELAY__TELEMETRY__INGEST_TOKEN`, unset locally, so a local relay
+never pushes). Busy, paused or preempted polls record no attempt; an offline
+bridge or disconnected node is a failed attempt. It starts on activation and
+`relayApp.Quiesce` stops it before relay.db is released.
+
 ## Deploy handoff (standby startup)
 
 Both binaries share one lifecycle, `internal/handoff`:

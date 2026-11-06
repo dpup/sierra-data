@@ -92,6 +92,10 @@ type MeshRelayConfig struct {
 	Admins []MeshRelayAdmin `koanf:"admins"`
 	// DebugPayloadGateways log frame payloads for these gateways. Never in prod.
 	DebugPayloadGateways []string `koanf:"debugPayloadGateways"`
+	// Telemetry is the relay's in-process poller of gateway nodes
+	// (internal/relaytelemetry), which reports to the Grid as a mesh.repeater
+	// reporter.
+	Telemetry MeshRelayTelemetryConfig `koanf:"telemetry"`
 
 	LeaseDuration    time.Duration `koanf:"leaseDuration"`
 	LeaseIdleTimeout time.Duration `koanf:"leaseIdleTimeout"`
@@ -104,6 +108,24 @@ type MeshRelayConfig struct {
 	AuthFailLimit    int           `koanf:"authFailLimit"`
 	AuthFailWindow   time.Duration `koanf:"authFailWindow"`
 	AuthLockout      time.Duration `koanf:"authLockout"`
+}
+
+// MeshRelayTelemetryConfig is meshRelay.telemetry. The poller runs only when
+// Gateways, GridURL and IngestToken are all set.
+type MeshRelayTelemetryConfig struct {
+	// Gateways whose node is polled and published: opt-in per gateway.
+	Gateways []string      `koanf:"gateways"`
+	Interval time.Duration `koanf:"interval"`
+	// GridURL is the Grid the report is pushed to (its ingest endpoint).
+	GridURL string `koanf:"gridUrl"`
+	// IngestToken is the Grid mesh.repeater reporter token for the relay.
+	// Secret: PF__MESH_RELAY__TELEMETRY__INGEST_TOKEN only, never prefab.yaml.
+	IngestToken string `koanf:"ingestToken"`
+}
+
+// Enabled reports whether the poller has everything it needs to run.
+func (t MeshRelayTelemetryConfig) Enabled() bool {
+	return len(t.Gateways) > 0 && t.GridURL != "" && t.IngestToken != ""
 }
 
 // MeshRelayAdmin is one bootstrap admin.
