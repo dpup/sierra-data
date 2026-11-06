@@ -713,6 +713,25 @@ as `PF__GRID__INGEST__REPORTER_TOKEN_SHA256__RELAY`. Busy, paused or preempted p
 bridge or disconnected node is a failed attempt. It starts on activation and
 `relayApp.Quiesce` stops it before relay.db is released.
 
+**Shared repeaters** (`internal/relaytelemetry/repeaters.go`): hosts give
+SIERRA a repeater's password with `meshbridge repeater add` (the relay
+checks it by logging in, then seals it in relay.db with
+`PF__MESH_RELAY__SECRET_KEY`, 32 bytes base64; without the key sharing is
+off). Every `meshRelay.telemetry.repeaterInterval` (30m) the poller logs in
+over the mesh with `relay.CheckRepeater` and reports each repeater in the same
+`mesh.repeater` report. Airtime is shared, so it only uses gateways whose node
+already has the repeater as a contact (`OnlyIfKnown`: never adds contacts to
+a host's node), last-good gateway first, at most 3 transmitting per repeater
+per cycle, and stops on a refused password. Outcomes go back to the registry
+(`RecordRepeaterPoll`) so hosts and admins see the last read and problem.
+The key must stay stable across deploys: a new one makes every stored
+password unreadable. Each check also exports the repeater's last signed advert
+from the gateway's node; the poller forwards new ones on `mesh.packet` (no
+observer, so gateway nodes stay unnamed), which establishes island repeaters
+whose adverts never reach a broker. The `relay` reporter has `enumerates:
+true`, so the repeaters it lists are admitted without a location (shadow
+repeaters, no geometry) or outside the geofence; see internal/ingest/CLAUDE.md.
+
 ## Deploy handoff (standby startup)
 
 Both binaries share one lifecycle, `internal/handoff`:

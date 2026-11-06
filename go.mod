@@ -4,7 +4,7 @@ go 1.25.8
 
 require (
 	github.com/dpup/prefab v0.6.1
-	github.com/dpup/sierra-meshrelay v0.5.0
+	github.com/dpup/sierra-meshrelay v0.7.1
 	github.com/eclipse/paho.mqtt.golang v1.5.1
 	github.com/gorilla/websocket v1.5.3
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0

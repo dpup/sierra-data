@@ -230,9 +230,9 @@ func checkTelemetry(ctx context.Context, t config.MeshRelayTelemetryConfig) erro
 			return fmt.Errorf("meshRelay.telemetry.gridUrl %q must be an http(s) URL", t.GridURL)
 		}
 	}
-	if len(t.Gateways) > 0 && !t.Enabled() {
+	if (len(t.Gateways) > 0 || t.Repeaters) && !t.Enabled() {
 		logging.Infow(ctx, "Relay telemetry poller off: no ingest token "+
-			"(PF__MESH_RELAY__TELEMETRY__INGEST_TOKEN) or gridUrl", "gateways", t.Gateways)
+			"(PF__MESH_RELAY__TELEMETRY__INGEST_TOKEN) or gridUrl", "gateways", t.Gateways, "repeaters", t.Repeaters)
 	}
 	return nil
 }
@@ -242,8 +242,17 @@ func (a *relayApp) startTelemetry(relay *meshrelay.Relay, st *meshrelay.Store) {
 	if !a.telemetry.Enabled() {
 		return
 	}
+	var reps relaytelemetry.Repeaters
+	switch {
+	case a.telemetry.Repeaters && len(a.cfg.SecretKey) > 0:
+		reps = relay
+	case a.telemetry.Repeaters:
+		logging.Warn(a.ctx, "Relay telemetry: shared repeaters are off: no secret key (PF__MESH_RELAY__SECRET_KEY), "+
+			"so hosts can't share them either")
+	}
 	p := relaytelemetry.New(relaytelemetry.Config{Gateways: a.telemetry.Gateways, Interval: a.telemetry.Interval,
-		GridURL: a.telemetry.GridURL, IngestToken: a.telemetry.IngestToken}, relay, st)
+		RepeaterInterval: a.telemetry.RepeaterInterval, GridURL: a.telemetry.GridURL,
+		IngestToken: a.telemetry.IngestToken}, relay, st, reps)
 	ctx, cancel := context.WithCancel(a.ctx)
 	done := make(chan struct{})
 	a.mu.Lock()

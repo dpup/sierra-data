@@ -765,3 +765,68 @@ func TestReporterOnBothStreamsIsOneSourceRow(t *testing.T) {
 	require.Len(t, res.PerSource, 1)
 	assert.NoError(t, res.PerSource["alan-pi"])
 }
+
+// enumerated is a report from our relay, which lists the shared repeaters
+// their hosts explicitly added.
+func enumerated(r *pushingest.MeshNodeReport) { r.ReporterID, r.Enumerates = "relay", true }
+
+// A shadow repeater: its advert has no location. Heard passively it is
+// dropped (it can't be geofenced); listed by an enumerating reporter it is
+// admitted, with no geometry: its position is never invented or published.
+func TestEnumeratedLocationlessNodeIsAdmittedWithoutGeometry(t *testing.T) {
+	shadow := meshcore.NodeState{PubKey: fullKey, Role: meshcore.RoleRepeater, Name: "Shadow",
+		LastHeardAt: pollNow.Add(-time.Minute)}
+	reg := func() *fakeMeshRegistry {
+		return &fakeMeshRegistry{connected: 1, nodes: []meshcore.NodeState{shadow}}
+	}
+
+	// Passive: dropped.
+	n := pushNormalizer(t, reg(), pushingest.MeshSnapshot{Live: 1})
+	res, err := n.Poll(testCtx(), &fakePrior{})
+	require.NoError(t, err)
+	assert.Empty(t, res.Events, "a locationless advert heard passively")
+
+	// Listed by a monitor that doesn't enumerate: still dropped.
+	n = pushNormalizer(t, reg(), pushingest.MeshSnapshot{Live: 1,
+		Reports: []pushingest.MeshNodeReport{report(fullKey, "Shadow", pollNow)}})
+	res, err = n.Poll(testCtx(), &fakePrior{})
+	require.NoError(t, err)
+	assert.Empty(t, res.Events, "a non-enumerating monitor's list doesn't admit it")
+
+	// Enumerated: admitted, placeless, with the monitor's readings.
+	n = pushNormalizer(t, reg(), pushingest.MeshSnapshot{Live: 1,
+		Reports: []pushingest.MeshNodeReport{report(fullKey, "Shadow", pollNow, enumerated)}})
+	res, err = n.Poll(testCtx(), &fakePrior{})
+	require.NoError(t, err)
+	require.Len(t, res.Events, 1)
+	ev := res.Events[0]
+	assert.Equal(t, "meshcore:"+fullKey, ev.GetId())
+	assert.Equal(t, "Shadow", ev.GetMesh().GetName(), "the signed advert names it")
+	assert.Nil(t, ev.GetGeometry(), "no location is invented")
+	assert.InDelta(t, 4.14, ev.GetMesh().GetTelemetry().GetAdmin().GetBatteryVolts().GetValue(), 0.001)
+
+	// A prefix isn't an enumeration: only a full key admits a node.
+	n = pushNormalizer(t, reg(), pushingest.MeshSnapshot{Live: 1,
+		Reports: []pushingest.MeshNodeReport{report(keyPrefix, "Shadow", pollNow, enumerated)}})
+	res, err = n.Poll(testCtx(), &fakePrior{})
+	require.NoError(t, err)
+	assert.Empty(t, res.Events)
+}
+
+// An enumerated node outside the geofence (an island elsewhere) is admitted
+// with the location its advert gives.
+func TestEnumeratedNodeOutsideTheGeofence(t *testing.T) {
+	far := meshcore.NodeState{PubKey: fullKey, Role: meshcore.RoleRepeater, Name: "Far Island",
+		HasLocation: true, Lat: 47.6, Lng: -122.3, LastHeardAt: pollNow.Add(-time.Minute)}
+	n := pushNormalizer(t, &fakeMeshRegistry{connected: 1, nodes: []meshcore.NodeState{far}}, pushingest.MeshSnapshot{Live: 1})
+	res, err := n.Poll(testCtx(), &fakePrior{})
+	require.NoError(t, err)
+	assert.Empty(t, res.Events, "outside the fence, heard passively")
+
+	n = pushNormalizer(t, &fakeMeshRegistry{connected: 1, nodes: []meshcore.NodeState{far}}, pushingest.MeshSnapshot{Live: 1,
+		Reports: []pushingest.MeshNodeReport{report(fullKey, "Far Island", pollNow, enumerated)}})
+	res, err = n.Poll(testCtx(), &fakePrior{})
+	require.NoError(t, err)
+	require.Len(t, res.Events, 1)
+	assert.NotNil(t, res.Events[0].GetGeometry())
+}

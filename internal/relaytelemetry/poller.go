@@ -68,6 +68,10 @@ type Config struct {
 	IngestToken string // the Grid mesh.repeater reporter token
 	HTTPClient  *http.Client
 	Now         func() time.Time
+	// RepeaterInterval is how often shared repeaters are read (30m), on
+	// the next cycle after it passes. They're read over the mesh, whose
+	// airtime everyone shares.
+	RepeaterInterval time.Duration
 }
 
 // Poller polls gateway nodes and pushes their telemetry to the Grid.
@@ -76,8 +80,12 @@ type Poller struct {
 	relay Relay
 	gws   Gateways
 
-	mu    sync.Mutex
-	nodes map[string]*nodeState // by gateway
+	reps Repeaters // nil: no shared repeaters
+
+	mu               sync.Mutex
+	nodes            map[string]*nodeState // by gateway
+	repeaters        map[string]*nodeState // shared repeaters, by pubkey
+	lastRepeaterPoll time.Time
 }
 
 type nodeState struct {
@@ -87,10 +95,14 @@ type nodeState struct {
 	lastSuccess time.Time
 	sample      *Sample // last successful reading; nil if never reached
 	outcome     string  // last poll outcome, to log changes only
+	// Shared repeaters: the last signed advert a gateway's node stored for
+	// it, and the one the Grid last accepted (forwarded only on change).
+	advert, advertSent []byte
 }
 
-// New returns a Poller.
-func New(cfg Config, relay Relay, gws Gateways) *Poller {
+// New returns a Poller. reps, when not nil, adds the relay's shared
+// repeaters.
+func New(cfg Config, relay Relay, gws Gateways, reps Repeaters) *Poller {
 	if cfg.Interval <= 0 {
 		cfg.Interval = 5 * time.Minute
 	}
@@ -103,15 +115,20 @@ func New(cfg Config, relay Relay, gws Gateways) *Poller {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
+	if cfg.RepeaterInterval <= 0 {
+		cfg.RepeaterInterval = 30 * time.Minute
+	}
 	cfg.GridURL = strings.TrimRight(cfg.GridURL, "/")
-	return &Poller{cfg: cfg, relay: relay, gws: gws, nodes: map[string]*nodeState{}}
+	return &Poller{cfg: cfg, relay: relay, gws: gws, reps: reps, nodes: map[string]*nodeState{},
+		repeaters: map[string]*nodeState{}}
 }
 
 // Run polls every Interval until ctx ends. The first cycle waits one minute,
 // so bridges that reconnected after a relay restart are back first.
 func (p *Poller) Run(ctx context.Context, firstDelay time.Duration) {
 	logging.Infow(ctx, "Relay telemetry poller started", "gateways", p.cfg.Gateways,
-		"interval", p.cfg.Interval, "grid", p.cfg.GridURL)
+		"interval", p.cfg.Interval, "repeaters", p.reps != nil, "repeaterInterval", p.cfg.RepeaterInterval,
+		"grid", p.cfg.GridURL)
 	t := time.NewTimer(firstDelay)
 	defer t.Stop()
 	for {
@@ -147,10 +164,17 @@ func (p *Poller) Cycle(ctx context.Context) {
 		}
 		p.pollGateway(ctx, gw, key)
 	}
+	if now := p.cfg.Now(); p.repeaterDue(now) && ctx.Err() == nil {
+		p.pollRepeaters(ctx)
+		p.mu.Lock()
+		p.lastRepeaterPoll = now
+		p.mu.Unlock()
+	}
 	if ctx.Err() != nil {
 		return
 	}
 	p.push(ctx)
+	p.pushAdverts(ctx)
 }
 
 // outcome of one poll.
@@ -387,31 +411,35 @@ func (h *holder) endReason() (string, bool) {
 }
 
 // push sends the complete report to the Grid's mesh.repeater stream.
-func (p *Poller) push(ctx context.Context) {
-	body, err := json.Marshal(p.Report())
+func (p *Poller) push(ctx context.Context) { p.post(ctx, "mesh.repeater", p.Report()) }
+
+// post sends one document to a Grid ingest stream, reporting whether the
+// Grid accepted it (202; warnings are logged, not retried).
+func (p *Poller) post(ctx context.Context, stream string, v any) bool {
+	body, err := json.Marshal(v)
 	if err != nil {
-		logging.Errorw(ctx, "Relay telemetry: encoding the report failed", "error", err)
-		return
+		logging.Errorw(ctx, "Relay telemetry: encoding the report failed", "stream", stream, "error", err)
+		return false
 	}
-	url := p.cfg.GridURL + "/api/v1/ingest/mesh.repeater"
+	url := p.cfg.GridURL + "/api/v1/ingest/" + stream
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		logging.Errorw(ctx, "Relay telemetry: building the ingest request failed", "error", err)
-		return
+		logging.Errorw(ctx, "Relay telemetry: building the ingest request failed", "stream", stream, "error", err)
+		return false
 	}
 	req.Header.Set("Authorization", "Bearer "+p.cfg.IngestToken)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := p.cfg.HTTPClient.Do(req)
 	if err != nil {
-		logging.Warnw(ctx, "Relay telemetry: push to the Grid failed", "error", err)
-		return
+		logging.Warnw(ctx, "Relay telemetry: push to the Grid failed", "stream", stream, "error", err)
+		return false
 	}
 	defer resp.Body.Close()
 	out, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 	if resp.StatusCode != http.StatusAccepted {
-		logging.Warnw(ctx, "Relay telemetry: the Grid refused the report", "status", resp.StatusCode,
+		logging.Warnw(ctx, "Relay telemetry: the Grid refused the report", "stream", stream, "status", resp.StatusCode,
 			"retryAfter", resp.Header.Get("Retry-After"), "body", string(out))
-		return
+		return false
 	}
 	var ack struct {
 		Accepted int      `json:"accepted"`
@@ -419,9 +447,10 @@ func (p *Poller) push(ctx context.Context) {
 	}
 	_ = json.Unmarshal(out, &ack)
 	if len(ack.Warnings) > 0 {
-		logging.Warnw(ctx, "Relay telemetry: report accepted with warnings", "accepted", ack.Accepted,
-			"warnings", ack.Warnings)
-		return
+		logging.Warnw(ctx, "Relay telemetry: report accepted with warnings", "stream", stream,
+			"accepted", ack.Accepted, "warnings", ack.Warnings)
+		return true
 	}
-	logging.Debugw(ctx, "Relay telemetry: report accepted", "accepted", ack.Accepted)
+	logging.Debugw(ctx, "Relay telemetry: report accepted", "stream", stream, "accepted", ack.Accepted)
+	return true
 }

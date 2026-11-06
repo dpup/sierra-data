@@ -41,6 +41,7 @@ func TestValidateEnvOverridesAcceptsRealKeys(t *testing.T) {
 		"PF__GRID__MESHCORE__USERNAME=someone",
 		"PF__GRID__INGEST__REPORTER_TOKEN_SHA256__RELAY=abc",
 		"PF__MESH_RELAY__TELEMETRY__INGEST_TOKEN=x",
+		"PF__MESH_RELAY__SECRET_KEY=x",
 		"PF__MESH_RELAY__TELEMETRY__GRID_URL=http://localhost:8181",
 		"PF__OPENAI__API_KEY=sk-x",
 		"PF__GOOGLE_ROUTES__API_KEY=x",

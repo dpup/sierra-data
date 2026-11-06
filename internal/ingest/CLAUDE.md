@@ -392,6 +392,16 @@ node known ONLY from a monitor has no geometry and therefore no geometric place
 attachment, until an advert supplies one or the operator configures `placeIds`
 on the reporter.
 
+**Enumerated nodes skip the scope tests (2026-11-06).** A reporter with
+`enumerates: true` (only the relay) lists repeaters their hosts explicitly
+shared. A node it lists by FULL key is admitted on its signed advert even with
+no location (a "shadow" repeater at a sensitive site: no geometry is ever
+invented for it) or a location outside the geofence (an island elsewhere), and
+relay credit keeps it present like any in-scope node. The advert is still
+required: the relay forwards the one a gateway's node stored, on mesh.packet,
+and the Grid verifies its signature. Locationless adverts heard passively are
+still dropped, and a monitor still never creates a node.
+
 **A report-only tick keeps the stored position.** A node drops out of the
 registry snapshot when its last advert is older than its presence window — for
 a once-a-day backbone repeater, 14h (`graceFloor`) of every day — while the

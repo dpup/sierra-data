@@ -39,6 +39,9 @@ type MeshNodeReport struct {
 	ReporterID string
 	Priority   int
 	PlaceIDs   []string
+	// Enumerates: the reporter lists nodes it was explicitly asked to track
+	// (config.Reporter.Enumerates).
+	Enumerates bool
 
 	// NodeID is the reported identifier, lowercased hex — a FULL public key or,
 	// far more often, a prefix of one. Resolving a prefix to the full key is the
@@ -192,6 +195,7 @@ func (r *Registry) ingestMesh(_ context.Context, rep *reporter, body []byte, max
 			ReporterID:  rep.cfg.ID,
 			Priority:    rep.cfg.Priority,
 			PlaceIDs:    rep.cfg.PlaceIDs,
+			Enumerates:  rep.cfg.Enumerates,
 			NodeID:      id,
 			Name:        strings.TrimSpace(in.Name),
 			ReceivedAt:  now,

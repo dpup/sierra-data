@@ -289,14 +289,27 @@ func (n *NetworkNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult,
 		nodes = n.registry.Snapshot()
 	}
 
+	// Nodes an enumerating reporter (our relay's shared repeaters) lists by
+	// full key: each was explicitly added by its host.
+	enumerated := map[string]bool{}
+	for _, rep := range snap.Reports {
+		if rep.Enumerates && len(rep.NodeID) == meshPubKeyHex {
+			enumerated[rep.NodeID] = true
+		}
+	}
+
 	merged := make(map[string]*mergedNode, len(nodes)+len(snap.Reports))
 	for i := range nodes {
 		nd := nodes[i]
 		// Scope: an ADVERTISED node must have a location inside the geofence.
 		// Locationless adverts can't be geofenced and are dropped. Pushed nodes
 		// are exempt from both tests (below) — a reporter is an authenticated
-		// operator asserting its own scope, not an anonymous broadcast.
-		if !nd.HasLocation || !inAnyBounds(nd.Lat, nd.Lng, boxes) {
+		// operator asserting its own scope, not an anonymous broadcast. So is a
+		// node an enumerating reporter lists: its signed advert establishes it
+		// wherever it is, or without a location at all (a "shadow" repeater),
+		// because its host asked us to track it. A locationless advert heard
+		// passively is still dropped.
+		if !enumerated[nd.PubKey] && (!nd.HasLocation || !inAnyBounds(nd.Lat, nd.Lng, boxes)) {
 			continue
 		}
 		merged[nd.PubKey] = &mergedNode{key: nd.PubKey, mqtt: &nd}
@@ -350,7 +363,9 @@ func (n *NetworkNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult,
 		}
 		stored := priorByID(prior, meshSourceID+":"+key)
 		c := stored.GetGeometry().GetCentroid()
-		if stored == nil || c == nil || !inAnyBounds(c.GetLat(), c.GetLng(), boxes) {
+		// An enumerated (shadow) repeater carries traffic too, wherever it is.
+		inScope := enumerated[key] || (c != nil && inAnyBounds(c.GetLat(), c.GetLng(), boxes))
+		if stored == nil || !inScope {
 			continue
 		}
 		merged[key] = &mergedNode{key: key, relayedAt: at}
@@ -714,7 +729,13 @@ func (n *NetworkNormalizer) buildEvent(m *mergedNode, now time.Time, prior Prior
 	ev.CanonicalUrl = n.meshNodeURL(m.key)
 
 	var brokers []string
-	if m.mqtt != nil {
+	if m.mqtt != nil && !m.mqtt.HasLocation {
+		// An enumerated node whose advert has no location (a shadow
+		// repeater): never invent one. A position an earlier advert published
+		// rides forward, as below.
+		ev.Geometry = priorByID(prior, ev.GetId()).GetGeometry()
+		brokers = m.mqtt.Brokers
+	} else if m.mqtt != nil {
 		ev.Geometry = stablePosition(prior, ev.GetId(), m.mqtt.Lat, m.mqtt.Lng)
 		brokers = m.mqtt.Brokers
 	} else {

@@ -237,7 +237,7 @@ func (g *fakeGrid) last(t *testing.T) []map[string]any {
 
 func (h *harness) poller(grid *fakeGrid, gateways ...string) *Poller {
 	return New(Config{Gateways: gateways, Timeout: time.Second, GridURL: grid.srv.URL + "/",
-		IngestToken: "ingest-secret"}, h.relay, h.store)
+		IngestToken: "ingest-secret"}, h.relay, h.store, nil)
 }
 
 // --- tests ---
