@@ -212,3 +212,49 @@ func TestRepeaterNobodyHeardIsNotAnAttempt(t *testing.T) {
 	assert.Empty(t, grid.last(t), "never attempted: not reported yet")
 	h.relay.Release(human)
 }
+
+// packets returns the mesh.packet documents the fake Grid received.
+func (g *fakeGrid) packets() []map[string]any {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	var out []map[string]any
+	for i, a := range g.auth {
+		if strings.HasPrefix(a, "/api/v1/ingest/mesh.packet ") {
+			out = append(out, g.reports[i])
+		}
+	}
+	return out
+}
+
+// An island repeater's advert never reaches a broker; the poller forwards
+// the signed advert the gateway's node stored, once per new advert.
+func TestRepeaterAdvertIsForwardedOncePerChange(t *testing.T) {
+	h := newRepeaterHarness(t)
+	grid := newFakeGrid(t)
+	advert := []byte{0x11, 0x00, 0xaa, 0xbb, 0xcc} // header: flood ADVERT
+	rpt := &meshsim.Repeater{Pubkey: key("9"), Name: "Island", GuestPassword: "g", BatteryMV: 4000, Advert: advert}
+	island := meshsim.New(rpt)
+	tok := h.meshBridge("island", key("4"), island)
+	h.share(tok, rpt.Pubkey, "g")
+
+	now := time.Now()
+	p := New(Config{Timeout: time.Second, GridURL: grid.srv.URL, IngestToken: "x",
+		Now: func() time.Time { return now }}, h.relay, h.store, h.relay)
+	p.Cycle(h.ctx)
+	pk := grid.packets()
+	require.Len(t, pk, 1)
+	pkts := pk[0]["packets"].([]any)
+	require.Len(t, pkts, 1)
+	assert.Equal(t, "1100aabbcc", pkts[0].(map[string]any)["raw"])
+	assert.EqualValues(t, 4, pkts[0].(map[string]any)["packet_type"])
+	assert.NotContains(t, pk[0], "observer", "the gateway's node stays unnamed")
+
+	now = now.Add(31 * time.Minute)
+	p.Cycle(h.ctx)
+	assert.Len(t, grid.packets(), 1, "the same advert isn't re-sent: the Grid would read it as fresh presence")
+
+	island.Update(rpt.Pubkey, func(r *meshsim.Repeater) { r.Advert = []byte{0x11, 0x00, 0xdd} })
+	now = now.Add(31 * time.Minute)
+	p.Cycle(h.ctx)
+	require.Len(t, grid.packets(), 2, "a new advert is forwarded")
+}

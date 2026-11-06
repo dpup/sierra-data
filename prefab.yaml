@@ -670,13 +670,22 @@ grid:
       # in this server's PF__GRID__INGEST__REPORTER_TOKEN_SHA256__RELAY. Neither
       # is committed. Without the hash (a local server) this reporter stays
       # listed but nothing authenticates as it.
+      #
+      # It also reads the repeaters hosts shared with SIERRA (`meshbridge
+      # repeater add`) and forwards each one's signed advert, as a gateway's
+      # node stored it, on mesh.packet: that establishes repeaters on islands
+      # whose adverts never reach a broker. `enumerates` admits the repeaters
+      # it lists even when their advert has no location ("shadow" repeaters at
+      # sensitive sites, published without geometry) or lies outside the
+      # geofence. Passively heard locationless adverts are still dropped.
       - id: relay
-        name: "SIERRA Mesh Relay gateway nodes"
+        name: "SIERRA Mesh Relay"
         tokenSuppliedAtDeploy: true
-        streams: ["mesh.repeater"]
+        streams: ["mesh.repeater", "mesh.packet"]
         staleAfter: "30m"
         minInterval: "30s"
         priority: 20
+        enumerates: true
       # The burn-line reader (.github/workflows/burn-line.yml). It reports ONCE
       # A DAY, so staleAfter is generous: anything under ~24h would flag a
       # healthy reporter between runs. The layer's own 36h freshness gate

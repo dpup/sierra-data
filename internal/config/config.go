@@ -289,6 +289,15 @@ type Reporter struct {
 	// geometric matches, so this is a floor, never a ceiling. Empty by default —
 	// asserting a location we do not have is worse than admitting we lack one.
 	PlaceIDs []string `koanf:"placeIds"`
+	// Enumerates says this reporter's mesh.repeater report is an explicit
+	// list of nodes SIERRA was asked to track (the relay's shared repeaters,
+	// each added by its host). A node it lists by full key is admitted on its
+	// signed advert even when that advert carries no location (and so can't
+	// be geofenced) or a location outside the geofence: a "shadow" repeater
+	// at a sensitive site helps carry traffic without its position being
+	// published. Such a node gets no geometry. Locationless adverts heard
+	// passively are still dropped. Only for reporters we run.
+	Enumerates bool `koanf:"enumerates"`
 }
 
 // Resolved accessors. Config carries zero values for unset keys; these apply the

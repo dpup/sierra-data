@@ -725,7 +725,12 @@ a host's node), last-good gateway first, at most 3 transmitting per repeater
 per cycle, and stops on a refused password. Outcomes go back to the registry
 (`RecordRepeaterPoll`) so hosts and admins see the last read and problem.
 The key must stay stable across deploys: a new one makes every stored
-password unreadable.
+password unreadable. Each check also exports the repeater's last signed advert
+from the gateway's node; the poller forwards new ones on `mesh.packet` (no
+observer, so gateway nodes stay unnamed), which establishes island repeaters
+whose adverts never reach a broker. The `relay` reporter has `enumerates:
+true`, so the repeaters it lists are admitted without a location (shadow
+repeaters, no geometry) or outside the geofence; see internal/ingest/CLAUDE.md.
 
 ## Deploy handoff (standby startup)
 

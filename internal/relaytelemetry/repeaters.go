@@ -17,7 +17,9 @@ package relaytelemetry
 //   - A refused password stops the cycle for that repeater.
 
 import (
+	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"slices"
 	"time"
@@ -152,6 +154,9 @@ func (p *Poller) pollRepeater(ctx context.Context, c meshrelay.RepeaterCredentia
 		if res.Name != "" {
 			st.name = res.Name
 		}
+		if len(res.Advert) > 0 {
+			st.advert = res.Advert
+		}
 	case outcomeFailed:
 		st.lastAttempt = start
 	}
@@ -220,4 +225,56 @@ func i64(v *int) *int64 {
 // cycle (every RepeaterInterval).
 func (p *Poller) repeaterDue(now time.Time) bool {
 	return p.reps != nil && (p.lastRepeaterPoll.IsZero() || now.Sub(p.lastRepeaterPoll) >= p.cfg.RepeaterInterval)
+}
+
+// payloadAdvert is MeshCore's ADVERT payload type (header bits 2-5).
+const payloadAdvert = 4
+
+// pushAdverts forwards shared repeaters' signed adverts, as the gateway nodes
+// stored them, to the Grid's mesh.packet stream, which verifies each
+// signature. That establishes a repeater on an island whose adverts never
+// reach a broker. Only an advert the Grid hasn't accepted yet is sent: the
+// Grid stamps packets with its own receive time, so re-sending an old one
+// would read as fresh presence. Presence between adverts comes from the
+// repeater report's successful logins instead.
+func (p *Poller) pushAdverts(ctx context.Context) {
+	type pending struct {
+		st  *nodeState
+		raw []byte
+	}
+	var out []pending
+	p.mu.Lock()
+	for _, st := range p.repeaters {
+		if len(st.advert) > 0 && st.advert[0]>>2&0x0f == payloadAdvert && !bytes.Equal(st.advert, st.advertSent) {
+			out = append(out, pending{st, st.advert})
+		}
+	}
+	p.mu.Unlock()
+	if len(out) == 0 {
+		return
+	}
+	type packet struct {
+		PacketType int    `json:"packet_type"`
+		Raw        string `json:"raw"`
+	}
+	body := struct {
+		SchemaVersion int      `json:"schema_version"`
+		GeneratedAt   string   `json:"generated_at"`
+		Packets       []packet `json:"packets"`
+	}{SchemaVersion: 1, GeneratedAt: p.cfg.Now().UTC().Format(time.RFC3339)}
+	for _, o := range out {
+		body.Packets = append(body.Packets, packet{PacketType: payloadAdvert, Raw: hex.EncodeToString(o.raw)})
+	}
+	// No observer: the gateway nodes that stored these stay unnamed (the
+	// relay's public status never ties a node to its gateway); the Grid
+	// attributes them to this reporter.
+	if !p.post(ctx, "mesh.packet", body) {
+		return
+	}
+	p.mu.Lock()
+	for _, o := range out {
+		o.st.advertSent = o.raw
+	}
+	p.mu.Unlock()
+	logging.Infow(ctx, "Relay telemetry: forwarded repeater adverts", "count", len(out))
 }
