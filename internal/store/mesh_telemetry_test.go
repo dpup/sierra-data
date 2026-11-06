@@ -72,6 +72,50 @@ func TestMeshTelemetryInsertIsIdempotent(t *testing.T) {
 		"receivedAt records when we FIRST held it, not the latest re-offer")
 }
 
+// The relay reads a repeater every 30 minutes but reports every 5: each
+// report has a new reported_at around the same reading. Only a new read (a
+// new last_success_at) makes a new row; a monitor that sends no
+// last_success_at keeps one row per report.
+func TestMeshTelemetrySkipsRepeatedReads(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	t0 := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
+	relay := func(pubkey string, at, read time.Time) MeshTelemetrySample {
+		x := sample(pubkey, at)
+		x.Reporter, x.LastSuccessAt, x.LastAttemptAt = "relay", read, read
+		return x
+	}
+	var batch []MeshTelemetrySample
+	for i := range 12 { // an hour of 5-minute reports, reads at :00 and :30
+		at := t0.Add(time.Duration(i) * 5 * time.Minute)
+		batch = append(batch, relay("aa11", at, t0.Add(time.Duration(i/6)*30*time.Minute)))
+	}
+	// Another reporter's row for the node doesn't hide a repeat, and isn't hidden.
+	other := sample("aa11", t0.Add(7*time.Minute))
+	other.Reporter, other.LastSuccessAt = "alanpi", t0
+	batch = append(batch, other)
+	// No last_success: kept per report.
+	batch = append(batch, sample("bb22", t0), sample("bb22", t0.Add(5*time.Minute)))
+	require.NoError(t, s.InsertMeshTelemetry(ctx, batch))
+	// Re-offering a skipped report later is still skipped.
+	require.NoError(t, s.InsertMeshTelemetry(ctx, []MeshTelemetrySample{relay("aa11", t0.Add(10*time.Minute), t0)}))
+
+	got, _, err := s.MeshTelemetry(ctx, "aa11", t0.Add(-time.Hour), t0.Add(2*time.Hour))
+	require.NoError(t, err)
+	var relayRows []time.Time
+	for _, g := range got {
+		if g.Reporter == "relay" {
+			relayRows = append(relayRows, g.ReportedAt)
+			assert.Equal(t, g.LastSuccessAt.Unix(), g.LastAttemptAt.Unix())
+		}
+	}
+	assert.Equal(t, []time.Time{t0, t0.Add(30 * time.Minute)}, relayRows, "one row per read")
+	assert.Len(t, got, 3, "plus the other reporter's row")
+	got, _, err = s.MeshTelemetry(ctx, "bb22", t0.Add(-time.Hour), t0.Add(time.Hour))
+	require.NoError(t, err)
+	assert.Len(t, got, 2)
+}
+
 func TestMeshTelemetryCoverageAndPrune(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

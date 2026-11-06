@@ -18,6 +18,7 @@ import (
 	"github.com/dpup/sierra-data/internal/lib/geojson"
 	"github.com/dpup/sierra-data/internal/pushingest"
 	"github.com/dpup/sierra-data/internal/store"
+	"google.golang.org/protobuf/types/known/timestamppb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
@@ -1023,6 +1024,10 @@ func meshTelemetrySamples(events []*gridv1.Event, now time.Time) []store.MeshTel
 			ReportedAt: admin.GetReportedAt().AsTime(),
 			ReceivedAt: now,
 			Reporter:   admin.GetReporterId(),
+			// The monitor's own stamps: when it last read the node. The store
+			// uses LastSuccessAt to drop a report that repeats an archived read.
+			LastSuccessAt: tsTime(admin.GetLastSuccessAt()),
+			LastAttemptAt: tsTime(admin.GetLastAttemptAt()),
 
 			BatteryVolts:     wrapperFloat(admin.GetBatteryVolts()),
 			BatteryPct:       wrapperFloat(admin.GetBatteryPercent()),
@@ -1051,6 +1056,15 @@ func meshTelemetrySamples(events []*gridv1.Event, now time.Time) []store.MeshTel
 		})
 	}
 	return out
+}
+
+// tsTime is a timestamp's time, or zero when it is unset (AsTime would give
+// the Unix epoch).
+func tsTime(ts *timestamppb.Timestamp) time.Time {
+	if ts == nil {
+		return time.Time{}
+	}
+	return ts.AsTime()
 }
 
 // wrapperFloat / wrapperInt32 carry a wrapper's "unset" through to the archive

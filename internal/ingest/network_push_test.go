@@ -71,10 +71,12 @@ func report(nodeID, name string, success time.Time, mutate ...func(*pushingest.M
 	}
 	if !success.IsZero() {
 		r.Telemetry = &gridv1.MeshAdminTelemetry{
-			ReporterId:   "alan-pi",
-			ReportedAt:   tsProto(pollNow),
-			BatteryVolts: wrapperspb.Double(4.14),
-			PacketsSent:  150305,
+			ReporterId:    "alan-pi",
+			ReportedAt:    tsProto(pollNow),
+			LastSuccessAt: tsProto(success),
+			LastAttemptAt: tsProto(pollNow),
+			BatteryVolts:  wrapperspb.Double(4.14),
+			PacketsSent:   150305,
 		}
 	}
 	for _, m := range mutate {
@@ -697,6 +699,10 @@ func TestPollProjectsTelemetrySamples(t *testing.T) {
 	// the projection runs after resolution, so one node keeps one history.
 	assert.Equal(t, fullKey, s.PubKey)
 	assert.Equal(t, pollNow.Unix(), s.ReportedAt.Unix(), "the monitor's stamp is the dedupe key")
+	// The monitor's read stamps reach the archive, so it can tell a new read
+	// from a repeated one and the API can return them.
+	assert.Equal(t, pollNow.Unix(), s.LastSuccessAt.Unix())
+	assert.Equal(t, pollNow.Unix(), s.LastAttemptAt.Unix())
 	require.NotNil(t, s.BatteryVolts)
 	assert.InDelta(t, 4.14, *s.BatteryVolts, 0.001)
 	assert.Equal(t, int64(150305), s.PacketsSent)

@@ -363,7 +363,7 @@ canonical, because none of them holds event content:
 | `mesh_observations` | one row per received advert (Tier 0) | re-accumulates from the live MQTT feed |
 | `mesh_link_rollup` | per-link-per-day topology (Tier 1) | recompute from Tier 0 |
 | `mesh_activity` | per node: last advert received, last relay seen | re-accumulates within minutes for any node that is talking |
-| `mesh_telemetry` | one row per accepted monitor report | **gone forever** |
+| `mesh_telemetry` | one row per monitor read (a report repeating the last read is skipped) | **gone forever** |
 
 That last row is why `mesh_telemetry` gets a generous retention default (a year)
 while raw observations get 48 hours. A monitor reports the present and never
