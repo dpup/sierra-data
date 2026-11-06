@@ -23,6 +23,10 @@ type Sample struct {
 	RecvFlood      *int64
 	RecvDirect     *int64
 	RecvErrors     *int64
+	// Shared repeaters only (from their status and telemetry replies).
+	TemperatureC *float64
+	DirectDups   *int64
+	FloodDups    *int64
 }
 
 // Report is the mesh.repeater payload (docs/mesh-reporter-guide.md), the same
@@ -34,9 +38,10 @@ type Report struct {
 }
 
 // ReportEntry is one node. No omitempty: an unread value must arrive as null.
-// Fields the companion protocol has no source for (duplicates, queue-full
-// events, temperature, humidity, pressure, battery percent) are left out,
-// which the Grid reads as null.
+// Fields neither the companion nor a repeater's status has a source for
+// (queue-full events, humidity, pressure, battery percent) are left out,
+// which the Grid reads as null. A gateway node has no temperature or
+// duplicate counts either; they're sent as null.
 type ReportEntry struct {
 	ID          string `json:"id"`
 	Name        string `json:"name,omitempty"`
@@ -58,6 +63,9 @@ type ReportEntry struct {
 	RecvFlood      *int64   `json:"recv_flood"`
 	RecvDirect     *int64   `json:"recv_direct"`
 	RecvErrors     *int64   `json:"recv_errors"`
+	TemperatureC   *float64 `json:"temperature_c"`
+	DirectDups     *int64   `json:"direct_dups"`
+	FloodDups      *int64   `json:"flood_dups"`
 	Online         bool     `json:"online"`
 }
 
@@ -69,13 +77,24 @@ func (p *Poller) Report() Report {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	rep := Report{SchemaVersion: 1, GeneratedAt: now.UTC().Format(time.RFC3339), Repeaters: []ReportEntry{}}
+	var all []*nodeState
 	gws := make([]string, 0, len(p.nodes))
 	for gw := range p.nodes {
 		gws = append(gws, gw)
 	}
 	sort.Strings(gws)
 	for _, gw := range gws {
-		st := p.nodes[gw]
+		all = append(all, p.nodes[gw])
+	}
+	pks := make([]string, 0, len(p.repeaters))
+	for pk := range p.repeaters {
+		pks = append(pks, pk)
+	}
+	sort.Strings(pks)
+	for _, pk := range pks {
+		all = append(all, p.repeaters[pk])
+	}
+	for _, st := range all {
 		if st.lastAttempt.IsZero() {
 			continue // only ever skipped: we have not tried it yet
 		}
@@ -88,6 +107,7 @@ func (p *Poller) Report() Report {
 			e.NbSent, e.NbRecv = s.NbSent, s.NbRecv
 			e.SentFlood, e.SentDirect, e.RecvFlood, e.RecvDirect = s.SentFlood, s.SentDirect, s.RecvFlood, s.RecvDirect
 			e.RecvErrors = s.RecvErrors
+			e.TemperatureC, e.DirectDups, e.FloodDups = s.TemperatureC, s.DirectDups, s.FloodDups
 		}
 		rep.Repeaters = append(rep.Repeaters, e)
 	}

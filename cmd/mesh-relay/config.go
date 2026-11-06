@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"strings"
 
 	"github.com/dpup/prefab/errors"
@@ -30,7 +31,17 @@ func relayConfigFrom(c config.MeshRelayConfig) (meshrelay.Config, error) {
 		}
 		admins[a.Name] = hash
 	}
+	var secretKey []byte
+	if k := strings.TrimSpace(c.SecretKey); k != "" {
+		b, err := base64.StdEncoding.DecodeString(k)
+		if err != nil || len(b) != 32 {
+			return meshrelay.Config{}, errors.Errorf("meshRelay.secretKey (PF__MESH_RELAY__SECRET_KEY) must be 32 bytes, " +
+				"base64 (openssl rand -base64 32)")
+		}
+		secretKey = b
+	}
 	return meshrelay.Config{
+		SecretKey:     secretKey,
 		LeaseDuration: c.LeaseDuration, LeaseIdleTimeout: c.LeaseIdleTimeout, LeaseWarning: c.LeaseWarning,
 		MaxLeaseTotal: c.MaxLeaseTotal, HelloTimeout: c.HelloTimeout, PingInterval: c.PingInterval,
 		FrameRate: c.FrameRate, FrameBurst: c.FrameBurst,

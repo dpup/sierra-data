@@ -848,4 +848,12 @@ meshRelay:
   telemetry:
     gateways: ["my-test-box"]
     interval: "5m"
+    # Shared repeaters: hosts give SIERRA a repeater's (guest) password with
+    # `meshbridge repeater add`; the poller logs in over the mesh through a
+    # gateway whose node has heard it and reports it here too. Their
+    # passwords are sealed with PF__MESH_RELAY__SECRET_KEY (32 bytes, base64);
+    # without it hosts can't share repeaters and this does nothing. Mesh
+    # airtime is shared, so this is slower than the gateway polls.
+    repeaters: true
+    repeaterInterval: "30m"
     gridUrl: "https://data.sierragridteam.org"

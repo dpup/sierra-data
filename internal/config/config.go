@@ -96,6 +96,11 @@ type MeshRelayConfig struct {
 	// (internal/relaytelemetry), which reports to the Grid as a mesh.repeater
 	// reporter.
 	Telemetry MeshRelayTelemetryConfig `koanf:"telemetry"`
+	// SecretKey (base64, 32 bytes) seals shared repeaters' passwords in
+	// relay.db. Without it hosts can't share repeaters. Secret:
+	// PF__MESH_RELAY__SECRET_KEY only, never prefab.yaml. Keep it stable: a new
+	// key makes the stored passwords unreadable.
+	SecretKey string `koanf:"secretKey"`
 
 	LeaseDuration    time.Duration `koanf:"leaseDuration"`
 	LeaseIdleTimeout time.Duration `koanf:"leaseIdleTimeout"`
@@ -111,7 +116,8 @@ type MeshRelayConfig struct {
 }
 
 // MeshRelayTelemetryConfig is meshRelay.telemetry. The poller runs only when
-// Gateways, GridURL and IngestToken are all set.
+// GridURL and IngestToken are set, and it has gateways or shared repeaters
+// to read.
 type MeshRelayTelemetryConfig struct {
 	// Gateways whose node is polled and published: opt-in per gateway.
 	Gateways []string      `koanf:"gateways"`
@@ -121,11 +127,15 @@ type MeshRelayTelemetryConfig struct {
 	// IngestToken is the Grid mesh.repeater reporter token for the relay.
 	// Secret: PF__MESH_RELAY__TELEMETRY__INGEST_TOKEN only, never prefab.yaml.
 	IngestToken string `koanf:"ingestToken"`
+	// Repeaters polls the relay's shared repeaters (hosts opt in per
+	// repeater with `meshbridge repeater add`) every RepeaterInterval.
+	Repeaters        bool          `koanf:"repeaters"`
+	RepeaterInterval time.Duration `koanf:"repeaterInterval"`
 }
 
 // Enabled reports whether the poller has everything it needs to run.
 func (t MeshRelayTelemetryConfig) Enabled() bool {
-	return len(t.Gateways) > 0 && t.GridURL != "" && t.IngestToken != ""
+	return (len(t.Gateways) > 0 || t.Repeaters) && t.GridURL != "" && t.IngestToken != ""
 }
 
 // MeshRelayAdmin is one bootstrap admin.

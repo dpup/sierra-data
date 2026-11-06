@@ -68,6 +68,10 @@ type Config struct {
 	IngestToken string // the Grid mesh.repeater reporter token
 	HTTPClient  *http.Client
 	Now         func() time.Time
+	// RepeaterInterval is how often shared repeaters are read (30m), on
+	// the next cycle after it passes. They're read over the mesh, whose
+	// airtime everyone shares.
+	RepeaterInterval time.Duration
 }
 
 // Poller polls gateway nodes and pushes their telemetry to the Grid.
@@ -76,8 +80,12 @@ type Poller struct {
 	relay Relay
 	gws   Gateways
 
-	mu    sync.Mutex
-	nodes map[string]*nodeState // by gateway
+	reps  Repeaters // nil: no shared repeaters
+
+	mu               sync.Mutex
+	nodes            map[string]*nodeState // by gateway
+	repeaters        map[string]*nodeState // shared repeaters, by pubkey
+	lastRepeaterPoll time.Time
 }
 
 type nodeState struct {
@@ -89,8 +97,9 @@ type nodeState struct {
 	outcome     string  // last poll outcome, to log changes only
 }
 
-// New returns a Poller.
-func New(cfg Config, relay Relay, gws Gateways) *Poller {
+// New returns a Poller. reps, when not nil, adds the relay's shared
+// repeaters.
+func New(cfg Config, relay Relay, gws Gateways, reps Repeaters) *Poller {
 	if cfg.Interval <= 0 {
 		cfg.Interval = 5 * time.Minute
 	}
@@ -103,15 +112,20 @@ func New(cfg Config, relay Relay, gws Gateways) *Poller {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
+	if cfg.RepeaterInterval <= 0 {
+		cfg.RepeaterInterval = 30 * time.Minute
+	}
 	cfg.GridURL = strings.TrimRight(cfg.GridURL, "/")
-	return &Poller{cfg: cfg, relay: relay, gws: gws, nodes: map[string]*nodeState{}}
+	return &Poller{cfg: cfg, relay: relay, gws: gws, reps: reps, nodes: map[string]*nodeState{},
+		repeaters: map[string]*nodeState{}}
 }
 
 // Run polls every Interval until ctx ends. The first cycle waits one minute,
 // so bridges that reconnected after a relay restart are back first.
 func (p *Poller) Run(ctx context.Context, firstDelay time.Duration) {
 	logging.Infow(ctx, "Relay telemetry poller started", "gateways", p.cfg.Gateways,
-		"interval", p.cfg.Interval, "grid", p.cfg.GridURL)
+		"interval", p.cfg.Interval, "repeaters", p.reps != nil, "repeaterInterval", p.cfg.RepeaterInterval,
+		"grid", p.cfg.GridURL)
 	t := time.NewTimer(firstDelay)
 	defer t.Stop()
 	for {
@@ -146,6 +160,12 @@ func (p *Poller) Cycle(ctx context.Context) {
 			continue
 		}
 		p.pollGateway(ctx, gw, key)
+	}
+	if now := p.cfg.Now(); p.repeaterDue(now) && ctx.Err() == nil {
+		p.pollRepeaters(ctx)
+		p.mu.Lock()
+		p.lastRepeaterPoll = now
+		p.mu.Unlock()
 	}
 	if ctx.Err() != nil {
 		return
