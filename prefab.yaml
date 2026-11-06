@@ -665,12 +665,14 @@ grid:
       # node behind each opted-in gateway, read every 5m over the relay. It
       # reports full keys read from the node itself.
       #
-      # Mint/rotate with: make ingest-token REPORTER=relay
-      # The token lives only in the relay's environment
-      # (PF__MESH_RELAY__TELEMETRY__INGEST_TOKEN); only its SHA-256 is here.
+      # The deploy generates the token and sets it in two places: the relay's
+      # PF__MESH_RELAY__TELEMETRY__INGEST_TOKEN, and its lowercase-hex SHA-256
+      # in this server's PF__GRID__INGEST__REPORTER_TOKEN_SHA256__RELAY. Neither
+      # is committed. Without the hash (a local server) this reporter stays
+      # listed but nothing authenticates as it.
       - id: relay
         name: "SIERRA Mesh Relay gateway nodes"
-        tokenSha256: "cc08033b26021a8c0776e7cfd295d4cbff8ae4ce7775a3da932e6d994f1e0691"
+        tokenSuppliedAtDeploy: true
         streams: ["mesh.repeater"]
         staleAfter: "30m"
         minInterval: "30s"

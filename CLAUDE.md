@@ -255,7 +255,11 @@ writes the config entry (re-run with an existing id to ROTATE that reporter's
 token in place, keeping its other settings); bare `make ingest-token` just prints
 a pair. Never put the token in config, env, or a commit; a bad/typo'd hash is
 FATAL at startup by design (a skipped reporter would silently never
-authenticate).
+authenticate). A reporter whose token the deploy generates (today: `relay`)
+is marked `tokenSuppliedAtDeploy: true` with no committed hash; its hash comes
+from `PF__GRID__INGEST__REPORTER_TOKEN_SHA256__<ID>`. Without that variable it
+stays listed but nothing authenticates as it, so a local server still starts
+(with a warning).
 
 **Configuration Files**:
 - `prefab.yaml` - Application configuration (API refresh intervals, route
@@ -704,7 +708,8 @@ alanpi. It holds an in-process lease at `PriorityBackground` (`relay.Acquire`
 + `relay.Send`), so anyone connecting takes the node over, and it needs no
 relay client token; its only credential is the ingest token
 (`PF__MESH_RELAY__TELEMETRY__INGEST_TOKEN`, unset locally, so a local relay
-never pushes). Busy, paused or preempted polls record no attempt; an offline
+never pushes). The deploy generates that token and gives the Grid its SHA-256
+as `PF__GRID__INGEST__REPORTER_TOKEN_SHA256__RELAY`. Busy, paused or preempted polls record no attempt; an offline
 bridge or disconnected node is a failed attempt. It starts on activation and
 `relayApp.Quiesce` stops it before relay.db is released.
 

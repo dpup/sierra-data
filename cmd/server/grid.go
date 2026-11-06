@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"time"
 
@@ -299,6 +300,10 @@ func (a *gridApp) Activate(actx context.Context) (err error) {
 		pushingest.WithBurnAccepted(wakeBurn))
 	if err != nil {
 		return fmt.Errorf("invalid grid.ingest configuration: %w", err)
+	}
+	for _, id := range pushRegistry.MissingTokens() {
+		logging.Warnw(ctx, "Push reporter has no token hash; nothing can authenticate as it",
+			"reporter", id, "env", "PF__GRID__INGEST__REPORTER_TOKEN_SHA256__"+strings.ToUpper(id))
 	}
 	// Reporter health is in-memory; without this every deploy reports the
 	// once-a-day burn-line reporter as never having reported until its next run.

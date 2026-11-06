@@ -154,6 +154,8 @@ type Registry struct {
 	// from the credential, so a body claiming to be someone else changes nothing.
 	byTokenHash map[string]*reporter
 	order       []*reporter // config order, for stable iteration
+	// missingTokens are tokenSuppliedAtDeploy reporters given no hash.
+	missingTokens []string
 
 	mu sync.Mutex
 	// burn is the store the burn.line stream stages readings in, and burnLines
@@ -236,7 +238,19 @@ func NewRegistry(cfg config.IngestConfig, opts ...Option) (*Registry, error) {
 		}
 		seen[rc.ID] = true
 
-		h := strings.ToLower(strings.TrimSpace(rc.TokenSha256))
+		h, err := tokenHashFor(rc, cfg.ReporterTokenSha256)
+		if err != nil {
+			return nil, err
+		}
+		rc.TokenSha256 = h
+		if len(rc.Streams) == 0 {
+			return nil, fmt.Errorf("pushingest: reporter %q authorizes no streams", rc.ID)
+		}
+		if h == "" { // TokenSuppliedAtDeploy, and this deploy supplied none
+			r.order = append(r.order, newReporter(rc))
+			r.missingTokens = append(r.missingTokens, rc.ID)
+			continue
+		}
 		if len(h) != 64 {
 			return nil, fmt.Errorf("pushingest: reporter %q: tokenSha256 must be 64 hex characters, got %d", rc.ID, len(h))
 		}
@@ -246,21 +260,61 @@ func NewRegistry(cfg config.IngestConfig, opts ...Option) (*Registry, error) {
 		if _, dup := r.byTokenHash[h]; dup {
 			return nil, fmt.Errorf("pushingest: reporter %q shares a token with another reporter", rc.ID)
 		}
-		if len(rc.Streams) == 0 {
-			return nil, fmt.Errorf("pushingest: reporter %q authorizes no streams", rc.ID)
-		}
-		rep := &reporter{
-			cfg:                  rc,
-			streams:              make(map[string]bool, len(rc.Streams)),
-			lastAcceptedByStream: make(map[string]time.Time, len(rc.Streams)),
-		}
-		for _, s := range rc.Streams {
-			rep.streams[s] = true
-		}
+		rep := newReporter(rc)
 		r.byTokenHash[h] = rep
 		r.order = append(r.order, rep)
 	}
+	for id := range cfg.ReporterTokenSha256 {
+		if !seen[id] {
+			return nil, fmt.Errorf("pushingest: reporterTokenSha256 has a hash for %q, which is not a configured reporter", id)
+		}
+	}
 	return r, nil
+}
+
+func newReporter(rc config.Reporter) *reporter {
+	rep := &reporter{
+		cfg:                  rc,
+		streams:              make(map[string]bool, len(rc.Streams)),
+		lastAcceptedByStream: make(map[string]time.Time, len(rc.Streams)),
+	}
+	for _, s := range rc.Streams {
+		rep.streams[s] = true
+	}
+	return rep
+}
+
+// MissingTokens lists reporters marked tokenSuppliedAtDeploy that were given
+// no hash. They are configured but no token authenticates as them.
+func (r *Registry) MissingTokens() []string {
+	if r == nil {
+		return nil
+	}
+	return r.missingTokens
+}
+
+// tokenHashFor picks the reporter's hash from its committed tokenSha256 or the
+// deploy-supplied one. Both set is refused: either could be stale, and which
+// token authenticates must not depend on precedence nobody remembers.
+func tokenHashFor(rc config.Reporter, supplied map[string]string) (string, error) {
+	committed := strings.ToLower(strings.TrimSpace(rc.TokenSha256))
+	injected, ok := supplied[rc.ID]
+	injected = strings.ToLower(strings.TrimSpace(injected))
+	switch {
+	case rc.TokenSuppliedAtDeploy && committed != "":
+		return "", fmt.Errorf("pushingest: reporter %q is tokenSuppliedAtDeploy but also has a committed tokenSha256; remove one", rc.ID)
+	case ok && committed != "":
+		return "", fmt.Errorf("pushingest: reporter %q has both a committed tokenSha256 and one in reporterTokenSha256; remove one", rc.ID)
+	case ok && injected == "":
+		return "", fmt.Errorf("pushingest: reporter %q: reporterTokenSha256 entry is empty", rc.ID)
+	case ok:
+		return injected, nil
+	case committed == "" && rc.TokenSuppliedAtDeploy:
+		return "", nil
+	case committed == "":
+		return "", fmt.Errorf("pushingest: reporter %q has no tokenSha256 (set it in config, or supply PF__GRID__INGEST__REPORTER_TOKEN_SHA256__%s)", rc.ID, strings.ToUpper(rc.ID))
+	}
+	return committed, nil
 }
 
 // Enabled reports whether any reporter is configured. When false the server does
