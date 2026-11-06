@@ -79,6 +79,14 @@ const telemetryColumns = `pubkey, reported_at, received_at, reporter, last_succe
 // tick until the monitor files a new report, and a sample is immutable once
 // written. Re-offering is the normal case, not an error — roughly 14 of every
 // 15 rows offered here are already present.
+//
+// A monitor can also report more often than it reads: the SIERRA relay reads
+// a shared repeater every 30 minutes and reports every 5, so each report
+// carries a new reported_at around the SAME reading. A sample whose
+// last_success_at equals the one in the node's previous row from that reporter
+// is that repeat, and is skipped: one reading stays one row, and the cadence a
+// chart sees is the read cadence. Samples without a last_success_at can't be
+// told apart this way and are kept.
 func (s *Store) InsertMeshTelemetry(ctx context.Context, samples []MeshTelemetrySample) error {
 	if len(samples) == 0 {
 		return nil
@@ -91,9 +99,27 @@ func (s *Store) InsertMeshTelemetry(ctx context.Context, samples []MeshTelemetry
 			return fmt.Errorf("store: prepare mesh telemetry insert: %w", err)
 		}
 		defer stmt.Close()
+		prev, err := tx.PrepareContext(ctx, `
+			SELECT last_success_at FROM mesh_telemetry
+			WHERE pubkey = ? AND reporter = ? AND reported_at < ?
+			ORDER BY reported_at DESC LIMIT 1`)
+		if err != nil {
+			return fmt.Errorf("store: prepare mesh telemetry lookup: %w", err)
+		}
+		defer prev.Close()
 		for _, t := range samples {
 			if t.PubKey == "" || t.ReportedAt.IsZero() {
 				continue // no identity or no time: nothing a series could use
+			}
+			if !t.LastSuccessAt.IsZero() {
+				var last sql.NullInt64
+				err := prev.QueryRowContext(ctx, t.PubKey, t.Reporter, t.ReportedAt.Unix()).Scan(&last)
+				switch {
+				case err == nil && last.Valid && last.Int64 == t.LastSuccessAt.Unix():
+					continue // the same read, reported again
+				case err != nil && err != sql.ErrNoRows:
+					return fmt.Errorf("store: looking up mesh telemetry for %s: %w", t.PubKey, err)
+				}
 			}
 			if _, err := stmt.ExecContext(ctx,
 				t.PubKey, t.ReportedAt.Unix(), t.ReceivedAt.Unix(), t.Reporter,

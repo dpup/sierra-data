@@ -148,7 +148,10 @@ runs over the tick's EVENTS rather than the raw reports, because that is where a
 key prefix has already been resolved — filing one node's samples under two keys
 is the failure mode, and `PollResult.MeshTelemetryRenames` (paired with
 `Superseded`) is what carries the history across a promotion. Only the archive
-can be graphed; see `internal/store/CLAUDE.md`.
+can be graphed; see `internal/store/CLAUDE.md`. Rows are one per READ, not per
+report: a monitor that reports more often than it reads (the relay: reads every
+30 min, reports every 5) repeats its `last_success_at`, and the insert skips a
+row whose `last_success_at` matches that reporter's previous row for the node.
 
 **A missing shape is not a smaller shape.** PG&E's polygon layer periodically
 answers with zero rows (200, no error envelope — see `internal/clients/CLAUDE.md`),
