@@ -177,7 +177,8 @@ site: site-modules
 # Directories are listed alongside files because a DELETED page changes no
 # surviving file's mtime — only its parent directory's — and a deleted page that
 # lingers in site/dist is exactly the kind of staleness this rule exists to stop.
-SITE_SRC := $(shell find web/src web/public web/astro.config.mjs web/package.json web/package-lock.json \( -type f -o -type d \) 2>/dev/null)
+# CHANGELOG.md is rendered into the site's /changelog page (web/src/pages/changelog.astro).
+SITE_SRC := $(shell find web/src web/public web/astro.config.mjs web/package.json web/package-lock.json CHANGELOG.md \( -type f -o -type d \) 2>/dev/null)
 
 site/dist/index.html: $(SITE_SRC)
 	@$(MAKE) --no-print-directory site

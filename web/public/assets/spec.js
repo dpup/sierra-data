@@ -39,7 +39,7 @@ export const SEV_CAVEAT =
  * Order is the order the envelope table renders in.
  */
 export const FIELD_DOCS = {
-  id: ['string', 'Globally unique, source-namespaced {namespace}:{native_id} — calfire:, wx:, usgs:, firis:, evac:, chp:, meshcore:.'],
+  id: ['string', 'Globally unique, source-namespaced {namespace}:{native_id} — calfire:, firis:, evac:, wx:, usgs:, chp:, caltrans:, pge:, psps:, meshcore:, burn:.'],
   layer: ['Layer', 'Layer taxonomy. As a value it is the UPPERCASE enum name; as an address it is the lowercase slug.'],
   category: ['string', 'Source sub-type slug, free-form and lowercase ("active", "order").'],
   severity: ['Severity', 'Unified 5-level scale. Response urgency to the public, not physical magnitude.'],
@@ -65,7 +65,7 @@ export const FIELD_DOCS = {
   roadIncident: ['detail', 'logNumber, impact, duration, metadata map.'],
   power: ['detail', 'Outage: outageId, cause, customersAffected, crewStatus, estimatedRestoration. PSPS: eventId, eventName, timePeriod, stage (Watch | Warning), medicalBaselineAffected, deEnergizationStart, deEnergizationEnd. estimatedRestoration and deEnergizationEnd are ESTIMATES PG&E routinely overruns — they are deliberately not mapped onto expires, so never use them to hide an event.'],
   burnStatus: ['detail', 'Per-county residential burning status from two independent authorities that must BOTH permit a burn. permission (ALLOWED | PROHIBITED | UNKNOWN) is the combined answer — lead with it. burnDay (YES | NO | MARGINAL | UNKNOWN) is the county air district\'s call from its phone line; MARGINAL is elevation-restricted (the line\'s "orange"). calfireStatus (BURNING_SUSPENDED | PERMIT_REQUIRED | NO_PERMIT_REQUIRED | UNKNOWN) is CAL FIRE\'s seasonal permit status, with calfireEffective and calfireArea. burnLines[] carries each line\'s own answer, phone number and observation {message, transcript, confidence, observedAt — when the line was CALLED}. A reading older than 36h is UNKNOWN, never a stale answer. No geometry: the event attaches to its county through placeIds, so it has no map layer.'],
-  mesh: ['detail', 'publicKey, nodeType, name, reachability, and telemetry {snr, rssi, hopCount, gateways, lastAdvertAt, admin} — volatile, never mints a revision. snr/rssi/hopCount are NULL, not 0, for a node no MQTT bridge has heard (0 hops means heard direct, so it cannot also mean unknown). telemetry.admin is one sample an operator-run monitor read off the node itself (battery, temperature, airtime, packet counters) and pushed to /api/v1/ingest/mesh.repeater; its gauges are wrapper types, so an unread value is null and never a zero. reachability is the exception that IS hashed — a node going unreachable is a lifecycle change worth a history entry. Relay paths are NOT here (proto tag reserved): a path belongs to one reception, not to a node, so topology is served derived at GET /api/v1/mesh/links.'],
+  mesh: ['detail', 'publicKey, nodeType, name, reachability, and telemetry {snr, rssi, hopCount, gateways, lastAdvertAt, admin} — volatile, never mints a revision. snr/rssi/hopCount are NULL, not 0, for a node no MQTT bridge has heard (0 hops means heard direct, so it cannot also mean unknown). telemetry.admin is one sample an operator-run monitor read off the node itself (battery, temperature, airtime, packet counters) and pushed to /api/v1/ingest/mesh.repeater; its gauges are wrapper types, so an unread value is null and never a zero, and its counters (uptimeSeconds, airtimeMs, packetsSent…) are int64, which JSON carries as strings. reachability is the exception that IS hashed — a node going unreachable is a lifecycle change worth a history entry. Relay paths are NOT here (proto tag reserved): a path belongs to one reception, not to a node, so topology is served derived at GET /api/v1/mesh/links.'],
 };
 
 /**
@@ -82,14 +82,14 @@ export const ENDPOINTS = [
     params: [
       ['place', 'place slug or id', 'Only events intersecting this place, precomputed at ingest.', 'all places'],
       ['layer', 'Layer enum, repeatable', 'Accepts WILDFIRE or the slug wildfire, case-insensitive.', 'all layers'],
-      ['status', 'EventStatus, repeatable', 'Include RESOLVED/EXPIRED explicitly to see closed events.', 'ACTIVE,SCHEDULED'],
+      ['status', 'EventStatus, repeatable', 'Pass ACTIVE for what is in effect now: the default also returns SCHEDULED planned roadwork. Include RESOLVED/EXPIRED explicitly to see closed events.', 'ACTIVE,SCHEDULED'],
       ['severity_min', 'Severity enum', 'Inclusive floor on the unified scale.', 'INFO'],
       ['since', 'RFC 3339', 'Only events observed at or after this time.', 'no floor'],
-      ['page_size', 'int', 'Max events per page.', 'server default'],
+      ['page_size', 'int', 'Max events per page; values above 200 are capped at 200.', '50'],
       ['page_token', 'opaque string', "Cursor from a previous response's nextPageToken.", 'first page'],
     ],
     examples: [
-      '/api/v1/events?place=ebbetts-pass',
+      '/api/v1/events?place=ebbetts-pass&status=ACTIVE',
       '/api/v1/events?layer=wildfire&severity_min=MODERATE',
       '/api/v1/events?status=RESOLVED&status=EXPIRED&page_size=10',
     ],
@@ -137,7 +137,7 @@ export const ENDPOINTS = [
     path: '/api/v1/places/{place}/map/{layer}.geojson',
     blurb: 'One RFC 7946 FeatureCollection per layer, ready for MapLibre or Leaflet.',
     detail:
-      'Thirteen layer slugs: wildfire, evacuation, weather_alert, earthquake, road_incident, power, road_segment, chain_control, message_sign, fire_weather, mesh_node, mesh_link, camera. message_sign is what each Caltrans changeable message sign is showing, verbatim and always INFO — context, never a hazard. camera is Caltrans traffic cameras (INFO reference views, not hazards: the same cameras and distances as /api/v1/cameras?place=, with imageUrl and streamUrl in properties.camera). A foreign top-level metadata member carries sourceStatus (OK | STALE | UNAVAILABLE), generatedAt, lastSourceUpdate, attribution and sourceUrl. UNAVAILABLE arrives with empty features and must render as an unknown-state banner, never an empty map. Coordinates are [lng, lat], trimmed to 5 decimals. Not in the OpenAPI spec — these layers are hand-built. Cache-Control: max-age=60.',
+      'Thirteen layer slugs: wildfire, evacuation, weather_alert, earthquake, road_incident, power, road_segment, chain_control, message_sign, fire_weather, mesh_node, mesh_link, camera. message_sign is what each Caltrans changeable message sign is showing, verbatim and always INFO — context, never a hazard. camera is Caltrans traffic cameras (INFO reference views, not hazards: the same cameras and distances as /api/v1/cameras?place=, with imageUrl and streamUrl in properties.camera). A foreign top-level metadata member carries sourceStatus (OK | STALE | UNAVAILABLE), generatedAt, lastSourceUpdate, attribution and sourceUrl. UNAVAILABLE arrives with empty features and must render as an unknown-state banner, never an empty map. Coordinates are [lng, lat], trimmed to 5 decimals. Hand-built rather than a proto RPC, and described in the OpenAPI spec. Cache-Control: max-age=60.',
     params: [],
     examples: [
       '/api/v1/places/ebbetts-pass/map/wildfire.geojson',
@@ -200,7 +200,7 @@ export const ENDPOINTS = [
     path: '/api/v1/mesh/links',
     blurb: 'MeshCore relay topology — the derived, weighted edge list between nodes.',
     detail:
-      'Hand-built (not in the OpenAPI spec). Each advert we hear records its relay path in an append-only observation store; this endpoint serves the rolled-up per-link history. `window` trades currency for coverage. A link is reported with its observation count and last-heard time — a quiet-but-recent link is dim, not absent. Node presence itself is an event (layer=mesh); this is only the edges between them.',
+      'Hand-built rather than a proto RPC. Each advert we hear records its relay path in an append-only observation store; this endpoint serves the rolled-up per-link history. `window` trades currency for coverage. A link is reported with its observation count and last-heard time — a quiet-but-recent link is dim, not absent. Node presence itself is an event (layer=mesh); this is only the edges between them.',
     params: [['window', 'duration slug', 'e.g. 72h, 7d, 30d, all.', '72h']],
     examples: ['/api/v1/mesh/links', '/api/v1/mesh/links?window=7d'],
   },
@@ -254,7 +254,7 @@ export const CONVENTIONS = [
   ['Canonical client sort', 'For events: severity descending, then observedAt descending.'],
 ];
 
-/** The twelve .geojson map layers, in the order the Map screen lists them. */
+/** The thirteen .geojson map layers, in the order the Map screen lists them. */
 export const MAP_LAYERS = [
   'wildfire',
   'evacuation',

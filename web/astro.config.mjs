@@ -15,4 +15,8 @@ export default defineConfig({
   // No client framework, no view transitions → Astro ships no runtime JS of its
   // own; pages carry only the small inline scripts we author.
   devToolbar: { enabled: false },
+  // The only markdown is CHANGELOG.md (pages/changelog.astro). Shiki would emit
+  // inline-styled <pre class="astro-code"> in its own theme; plain <pre> lets the
+  // page map fences onto the design system's ink .code block instead.
+  markdown: { syntaxHighlight: false },
 });
