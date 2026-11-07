@@ -481,9 +481,14 @@ each of which bit:
 - **It created nodes.** A report for any id minted an event, prefix-keyed if
   unresolved. Now a report never creates one. It can hold a node present that no
   advert or relay is presenting this tick only if the node is mesh-established
-  (a full key with a stored event) AND the monitor reached it within the
-  unreachable window (`monitorHolds`). An unreachable node the mesh no longer
-  shows goes to the sweep like any other.
+  (a full key with a stored event) AND either the monitor reached it within
+  the unreachable window, or an enumerating reporter (the relay's shared
+  repeaters, which a host asked us to watch) lists it by full key
+  (`monitorHolds`). Any other unreachable node the mesh no longer shows goes
+  to the sweep like any other. A node that relay presence keeps keeps its
+  monitors' reports too, so its last readings stay on it: on 2026-11-07
+  Mission Outpost's gateway lost power, and 45 minutes later its event went
+  blank (no readings) instead of showing UNREACHABLE with them.
 - **Its silence froze the whole layer.** A STALE monitor suppressed the sweep
   for every `meshcore` node, so one Pi going quiet stopped ~600 nodes from ever
   expiring. It no longer suppresses anything.

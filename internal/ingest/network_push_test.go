@@ -836,3 +836,46 @@ func TestEnumeratedNodeOutsideTheGeofence(t *testing.T) {
 	require.Len(t, res.Events, 1)
 	assert.NotNil(t, res.Events[0].GetGeometry())
 }
+
+// A shared repeater the relay can't reach keeps its event with its last
+// readings, shown UNREACHABLE. On 2026-11-07 its gateway's node lost power
+// and, 45 minutes later, SIERRA Mission Outpost's event went blank: no
+// readings, no advert stamp.
+func TestUnreachableMonitoredNodeKeepsItsLastReadings(t *testing.T) {
+	lastOK := pollNow.Add(-2 * time.Hour)
+	stored := storedMeshEvent(fullKey, tsProto(lastOK))
+	stored.GetMesh().Telemetry.LastAdvertAt = tsProto(pollNow.Add(-3 * time.Hour))
+	prior := &fakePrior{events: []*gridv1.Event{stored}}
+
+	check := func(t *testing.T, ev *gridv1.Event) {
+		t.Helper()
+		mesh := ev.GetMesh()
+		assert.Equal(t, gridv1.MeshReachability_UNREACHABLE, mesh.GetReachability())
+		admin := mesh.GetTelemetry().GetAdmin()
+		require.NotNil(t, admin, "the last readings stay")
+		assert.Equal(t, lastOK, admin.GetLastSuccessAt().AsTime())
+		assert.InDelta(t, 4.14, admin.GetBatteryVolts().GetValue(), 0.001)
+		assert.Equal(t, pollNow.Add(-3*time.Hour), mesh.GetTelemetry().GetLastAdvertAt().AsTime(), "and so does the advert stamp")
+	}
+
+	t.Run("a shared repeater the relay still lists", func(t *testing.T) {
+		n := pushNormalizer(t, nil, pushingest.MeshSnapshot{Live: 1, Reports: []pushingest.MeshNodeReport{
+			report(fullKey, "SIERRA Mission Outpost", lastOK, func(r *pushingest.MeshNodeReport) { r.Enumerates = true })}})
+		res, err := n.Poll(testCtx(), prior)
+		require.NoError(t, err)
+		require.Len(t, res.Events, 1, "held: a host asked us to watch it")
+		check(t, res.Events[0])
+	})
+
+	t.Run("another monitor's node kept present by relays", func(t *testing.T) {
+		reg := &fakeMeshRegistry{connected: 1, relays: map[string]time.Time{fullKey: pollNow.Add(-time.Minute)}}
+		stored := proto.Clone(stored).(*gridv1.Event)
+		stored.Geometry = &gridv1.Geometry{Centroid: &gridv1.LatLng{Lat: 38.1, Lng: -120.4}}
+		n := pushNormalizer(t, reg, pushingest.MeshSnapshot{Live: 1, Reports: []pushingest.MeshNodeReport{
+			report(fullKey, "SIERRA Arnold Summit", lastOK)}})
+		res, err := n.Poll(testCtx(), &fakePrior{events: []*gridv1.Event{stored}})
+		require.NoError(t, err)
+		require.Len(t, res.Events, 1)
+		check(t, res.Events[0])
+	})
+}
