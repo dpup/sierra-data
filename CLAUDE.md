@@ -719,10 +719,20 @@ checks it by logging in, then seals it in relay.db with
 `PF__MESH_RELAY__SECRET_KEY`, 32 bytes base64; without the key sharing is
 off). Every `meshRelay.telemetry.repeaterInterval` (30m) the poller logs in
 over the mesh with `relay.CheckRepeater` and reports each repeater in the same
-`mesh.repeater` report. Airtime is shared, so it only uses gateways whose node
-already has the repeater as a contact (`OnlyIfKnown`: never adds contacts to
-a host's node), last-good gateway first, at most 3 transmitting per repeater
-per cycle, and stops on a refused password. Outcomes go back to the registry
+`mesh.repeater` report. The schedule is `schedule.go`: each repeater's cycle
+sits at an offset from its pubkey; it only uses gateways whose node already
+has the repeater as a contact (`OnlyIfKnown`: never adds contacts to a
+host's node), primary (last-good) gateway first, at most 3 transmitting per
+cycle. A check that gets no answer is retried after 30s/60s/120s on that
+gateway (flooding at once: `FloodFirst`), then the next gateway; retries
+only for a repeater read in its last cycle, so a dead one costs at most 3
+floods a cycle. A busy/paused/offline gateway isn't a failure. A refused
+password stops polling until the share is updated. Unread for
+`repeaterHibernateAfter` (6) cycles with no advert or other monitor's read
+on the Grid in that window: polled daily, and woken when the Grid shows it
+alive. The schedule is saved in the relay (`SetRepeaterPollState`), so a
+restart resumes it, and the relay records every check
+(`meshbridge admin repeaters` shows each gateway's last 24h). Outcomes go back to the registry
 (`RecordRepeaterPoll`) so hosts and admins see the last read and problem.
 The key must stay stable across deploys: a new one makes every stored
 password unreadable. Each check also exports the repeater's last signed advert

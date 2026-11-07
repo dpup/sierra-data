@@ -862,7 +862,12 @@ meshRelay:
     # gateway whose node has heard it and reports it here too. Their
     # passwords are sealed with PF__MESH_RELAY__SECRET_KEY (32 bytes, base64);
     # without it hosts can't share repeaters and this does nothing. Mesh
-    # airtime is shared, so this is slower than the gateway polls.
+    # airtime is shared, so this is slower than the gateway polls. A
+    # repeater that doesn't answer is retried after 30s, 60s and 120s on a
+    # gateway, then through the next one; one unread for
+    # repeaterHibernateAfter cycles that nothing else reports alive is
+    # polled once a day (internal/relaytelemetry/schedule.go).
     repeaters: true
     repeaterInterval: "30m"
+    repeaterHibernateAfter: 6
     gridUrl: "https://data.sierragridteam.org"

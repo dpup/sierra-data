@@ -126,6 +126,22 @@ func (h *harness) share(tok, pubkey, password string) {
 
 func key(c string) string { return strings.Repeat(c, 64) }
 
+// cycleAll runs due repeater work, then a gateway cycle (which pushes the
+// report).
+func (p *Poller) cycleAll(ctx context.Context) {
+	p.RepeaterTick(ctx)
+	p.Cycle(ctx)
+}
+
+// dueNow schedules every shared repeater's first cycle for now, instead of
+// at its offset.
+func (p *Poller) dueNow(ctx context.Context) {
+	p.RepeaterTick(ctx)
+	for _, j := range p.jobs {
+		j.state.NextCycle = p.cfg.Now()
+	}
+}
+
 func TestSharedRepeaterIsPolledThroughAGatewayThatHeardIt(t *testing.T) {
 	h := newRepeaterHarness(t)
 	grid := newFakeGrid(t)
@@ -140,7 +156,8 @@ func TestSharedRepeaterIsPolledThroughAGatewayThatHeardIt(t *testing.T) {
 	now := time.Now()
 	p := New(Config{Timeout: time.Second, GridURL: grid.srv.URL, IngestToken: "ingest-secret",
 		Now: func() time.Time { return now }}, h.relay, h.store, h.relay)
-	p.Cycle(h.ctx)
+	p.dueNow(h.ctx)
+	p.cycleAll(h.ctx)
 
 	reps := grid.last(t)
 	require.Len(t, reps, 1, "only the shared repeater; no gateway node is opted in")
@@ -165,7 +182,7 @@ func TestSharedRepeaterIsPolledThroughAGatewayThatHeardIt(t *testing.T) {
 	// Within the repeater interval, the next cycle doesn't transmit again.
 	statusReqs := cabin.StatusReqs
 	now = now.Add(5 * time.Minute)
-	p.Cycle(h.ctx)
+	p.cycleAll(h.ctx)
 	assert.Equal(t, statusReqs, cabin.StatusReqs)
 	require.Len(t, grid.last(t), 1, "but the repeater stays in the complete set")
 
@@ -174,7 +191,7 @@ func TestSharedRepeaterIsPolledThroughAGatewayThatHeardIt(t *testing.T) {
 	cabin.Update(rpt.Pubkey, func(r *meshsim.Repeater) { r.GuestPassword = "new" })
 	first := grid.last(t)[0]
 	now = now.Add(30 * time.Minute)
-	p.Cycle(h.ctx)
+	p.cycleAll(h.ctx)
 	r = grid.last(t)[0]
 	assert.Equal(t, false, r["online"])
 	assert.Greater(t, r["last_attempt"], first["last_attempt"])
@@ -191,7 +208,7 @@ func TestSharedRepeaterIsPolledThroughAGatewayThatHeardIt(t *testing.T) {
 	// Unshared: it leaves the report.
 	require.NoError(t, h.store.DeleteRepeater(rpt.Pubkey))
 	now = now.Add(30 * time.Minute)
-	p.Cycle(h.ctx)
+	p.cycleAll(h.ctx)
 	assert.Empty(t, grid.last(t))
 }
 
@@ -208,7 +225,8 @@ func TestRepeaterNobodyHeardIsNotAnAttempt(t *testing.T) {
 		Role: meshrelay.RoleOperator, Holder: newHolder()})
 	require.NoError(t, err)
 	p := New(Config{Timeout: time.Second, GridURL: grid.srv.URL, IngestToken: "x"}, h.relay, h.store, h.relay)
-	p.Cycle(h.ctx)
+	p.dueNow(h.ctx)
+	p.cycleAll(h.ctx)
 	assert.Empty(t, grid.last(t), "never attempted: not reported yet")
 	h.relay.Release(human)
 }
@@ -240,7 +258,8 @@ func TestRepeaterAdvertIsForwardedOncePerChange(t *testing.T) {
 	now := time.Now()
 	p := New(Config{Timeout: time.Second, GridURL: grid.srv.URL, IngestToken: "x",
 		Now: func() time.Time { return now }}, h.relay, h.store, h.relay)
-	p.Cycle(h.ctx)
+	p.dueNow(h.ctx)
+	p.cycleAll(h.ctx)
 	pk := grid.packets()
 	require.Len(t, pk, 1)
 	pkts := pk[0]["packets"].([]any)
@@ -250,11 +269,11 @@ func TestRepeaterAdvertIsForwardedOncePerChange(t *testing.T) {
 	assert.NotContains(t, pk[0], "observer", "the gateway's node stays unnamed")
 
 	now = now.Add(31 * time.Minute)
-	p.Cycle(h.ctx)
+	p.cycleAll(h.ctx)
 	assert.Len(t, grid.packets(), 1, "the same advert isn't re-sent: the Grid would read it as fresh presence")
 
 	island.Update(rpt.Pubkey, func(r *meshsim.Repeater) { r.Advert = []byte{0x11, 0x00, 0xdd} })
 	now = now.Add(31 * time.Minute)
-	p.Cycle(h.ctx)
+	p.cycleAll(h.ctx)
 	require.Len(t, grid.packets(), 2, "a new advert is forwarded")
 }
