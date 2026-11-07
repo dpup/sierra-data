@@ -91,12 +91,94 @@ func placeholders(n int) string {
 	return strings.TrimSuffix(strings.Repeat("?, ", n), ", ")
 }
 
+// Page is one page of a keyset-paginated query, with a resume token per row,
+// so a caller can serve fewer rows than it fetched (gridapi cuts a page at a
+// byte budget) without breaking the walk.
+type Page[T any] struct {
+	Items []T
+	// After[i] is the page token that resumes immediately after Items[i].
+	After []string
+	// More reports whether rows exist beyond the last item.
+	More bool
+}
+
+// Next is the next-page token when the first n items are served: "" only when
+// those n items end the result set. n is clamped to [1, len(Items)].
+func (p Page[T]) Next(n int) string {
+	if len(p.Items) == 0 {
+		return ""
+	}
+	n = min(max(n, 1), len(p.Items))
+	if n == len(p.Items) && !p.More {
+		return ""
+	}
+	return p.After[n-1]
+}
+
 // QueryEvents returns one page of events ordered severity DESC,
 // observed_at DESC, id ASC, plus the next page token ("" on the last page).
 // Pagination is keyset-based, so pages stay stable and complete while new
 // events arrive. All values are bound via placeholders.
 func (s *Store) QueryEvents(ctx context.Context, q EventQuery) ([]*gridv1.Event, string, error) {
+	p, err := s.QueryEventsPage(ctx, q)
+	if err != nil {
+		return nil, "", err
+	}
+	return p.Items, p.Next(len(p.Items)), nil
+}
+
+// QueryEventsPage is QueryEvents with a resume token for every row.
+func (s *Store) QueryEventsPage(ctx context.Context, q EventQuery) (Page[*gridv1.Event], error) {
 	pageSize := clampPageSize(q.PageSize)
+	query, args, err := eventsPageSQL(q, pageSize)
+	if err != nil {
+		return Page[*gridv1.Event]{}, err
+	}
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return Page[*gridv1.Event]{}, fmt.Errorf("store: query events: %w", err)
+	}
+	defer rows.Close()
+
+	var page Page[*gridv1.Event]
+	for rows.Next() {
+		var blob []byte
+		var cur eventCursor
+		if err := rows.Scan(&blob, &cur.S, &cur.O, &cur.ID); err != nil {
+			return Page[*gridv1.Event]{}, fmt.Errorf("store: scan event: %w", err)
+		}
+		if len(page.Items) == pageSize {
+			page.More = true
+			break
+		}
+		ev := &gridv1.Event{}
+		if err := proto.Unmarshal(blob, ev); err != nil {
+			return Page[*gridv1.Event]{}, fmt.Errorf("store: unmarshal event %s: %w", cur.ID, err)
+		}
+		page.Items = append(page.Items, ev)
+		page.After = append(page.After, encodeToken(cur))
+	}
+	if err := rows.Err(); err != nil {
+		return Page[*gridv1.Event]{}, fmt.Errorf("store: query events: %w", err)
+	}
+	return page, nil
+}
+
+// eventsPageSQL builds QueryEvents' statement, which returns pageSize+1 rows
+// (the extra one probes for a next page).
+//
+// It is two-phase on purpose. The keyset order (severity, observed_at, id)
+// comes from an index only when a single status is asked for; any status
+// list, the default ACTIVE,SCHEDULED included, sorts. Sorting `SELECT
+// e.proto, ...` copies the proto blob of EVERY matching row into the sorter
+// to keep 201 of them, so the cost followed the size of the whole matching
+// set, perimeters included, not the page: in production an all-statuses page
+// took 25-40 s whether pageSize was 5 or 200 (2026-11-07). The inner query
+// sorts only key columns, which sit ahead of the blob in the row and never
+// reach its overflow pages; the outer join reads just the page's blobs, by
+// primary key. Holding a read that long is what let a deploy's drain cancel
+// it mid-query (the 500 that gridapi.internalErr now reports as a 503).
+func eventsPageSQL(q EventQuery, pageSize int) (string, []any, error) {
 	statuses := q.Statuses
 	if len(statuses) == 0 {
 		statuses = []gridv1.EventStatus{gridv1.EventStatus_ACTIVE, gridv1.EventStatus_SCHEDULED}
@@ -104,7 +186,8 @@ func (s *Store) QueryEvents(ctx context.Context, q EventQuery) ([]*gridv1.Event,
 
 	var sb strings.Builder
 	var args []any
-	sb.WriteString(`SELECT e.proto, e.severity, e.observed_at, e.id FROM events e`)
+	sb.WriteString(`SELECT e.proto, k.severity, k.observed_at, k.id FROM (` +
+		`SELECT e.id, e.severity, e.observed_at FROM events e`)
 	if q.PlaceID != "" {
 		sb.WriteString(` JOIN event_places ep ON ep.event_id = e.id AND ep.place_id = ?`)
 		args = append(args, q.PlaceID)
@@ -130,45 +213,31 @@ func (s *Store) QueryEvents(ctx context.Context, q EventQuery) ([]*gridv1.Event,
 	if q.PageToken != "" {
 		var cur eventCursor
 		if err := decodeToken(q.PageToken, &cur); err != nil {
-			return nil, "", err
+			return "", nil, err
 		}
 		sb.WriteString(` AND (e.severity < ? OR (e.severity = ? AND e.observed_at < ?)
 			OR (e.severity = ? AND e.observed_at = ? AND e.id > ?))`)
 		args = append(args, cur.S, cur.S, cur.O, cur.S, cur.O, cur.ID)
 	}
-	sb.WriteString(` ORDER BY e.severity DESC, e.observed_at DESC, e.id ASC LIMIT ?`)
-	args = append(args, pageSize+1) // +1 probes for a next page
-
-	rows, err := s.db.QueryContext(ctx, sb.String(), args...)
-	if err != nil {
-		return nil, "", fmt.Errorf("store: query events: %w", err)
-	}
-	defer rows.Close()
-
-	var events []*gridv1.Event
-	var last eventCursor
-	for rows.Next() {
-		var blob []byte
-		var cur eventCursor
-		if err := rows.Scan(&blob, &cur.S, &cur.O, &cur.ID); err != nil {
-			return nil, "", fmt.Errorf("store: scan event: %w", err)
-		}
-		if len(events) == pageSize {
-			return events, encodeToken(last), rows.Err()
-		}
-		ev := &gridv1.Event{}
-		if err := proto.Unmarshal(blob, ev); err != nil {
-			return nil, "", fmt.Errorf("store: unmarshal event %s: %w", cur.ID, err)
-		}
-		events = append(events, ev)
-		last = cur
-	}
-	return events, "", rows.Err()
+	sb.WriteString(` ORDER BY e.severity DESC, e.observed_at DESC, e.id ASC LIMIT ?) k` +
+		` JOIN events e ON e.id = k.id` +
+		` ORDER BY k.severity DESC, k.observed_at DESC, k.id ASC`)
+	args = append(args, pageSize+1)
+	return sb.String(), args, nil
 }
 
 // EventHistory returns an event's revisions, newest first, with keyset
 // pagination on revision number.
 func (s *Store) EventHistory(ctx context.Context, id string, pageSize int, token string) ([]*gridv1.EventRevision, string, error) {
+	p, err := s.EventHistoryPage(ctx, id, pageSize, token)
+	if err != nil {
+		return nil, "", err
+	}
+	return p.Items, p.Next(len(p.Items)), nil
+}
+
+// EventHistoryPage is EventHistory with a resume token for every row.
+func (s *Store) EventHistoryPage(ctx context.Context, id string, pageSize int, token string) (Page[*gridv1.EventRevision], error) {
 	pageSize = clampPageSize(pageSize)
 	var sb strings.Builder
 	args := []any{id}
@@ -176,7 +245,7 @@ func (s *Store) EventHistory(ctx context.Context, id string, pageSize int, token
 	if token != "" {
 		var cur historyCursor
 		if err := decodeToken(token, &cur); err != nil {
-			return nil, "", err
+			return Page[*gridv1.EventRevision]{}, err
 		}
 		sb.WriteString(` AND revision < ?`)
 		args = append(args, cur.R)
@@ -186,22 +255,27 @@ func (s *Store) EventHistory(ctx context.Context, id string, pageSize int, token
 
 	rows, err := s.db.QueryContext(ctx, sb.String(), args...)
 	if err != nil {
-		return nil, "", fmt.Errorf("store: event history %s: %w", id, err)
+		return Page[*gridv1.EventRevision]{}, fmt.Errorf("store: event history %s: %w", id, err)
 	}
 	defer rows.Close()
 
-	var revs []*gridv1.EventRevision
+	var page Page[*gridv1.EventRevision]
 	for rows.Next() {
+		if len(page.Items) == pageSize {
+			page.More = true
+			break
+		}
 		rev, err := scanRevision(rows.Scan)
 		if err != nil {
-			return nil, "", err
+			return Page[*gridv1.EventRevision]{}, err
 		}
-		if len(revs) == pageSize {
-			return revs, encodeToken(historyCursor{R: revs[pageSize-1].GetRevision()}), rows.Err()
-		}
-		revs = append(revs, rev)
+		page.Items = append(page.Items, rev)
+		page.After = append(page.After, encodeToken(historyCursor{R: rev.GetRevision()}))
 	}
-	return revs, "", rows.Err()
+	if err := rows.Err(); err != nil {
+		return Page[*gridv1.EventRevision]{}, fmt.Errorf("store: event history %s: %w", id, err)
+	}
+	return page, nil
 }
 
 // QueryHistory returns one page of revisions across events, ordered
@@ -210,6 +284,15 @@ func (s *Store) EventHistory(ctx context.Context, id string, pageSize int, token
 // not per-revision snapshots (documented tradeoff: places are recomputed at
 // ingest, and revision-time re-matching would need per-revision geometry).
 func (s *Store) QueryHistory(ctx context.Context, q HistoryQuery) ([]*gridv1.EventRevision, string, error) {
+	p, err := s.QueryHistoryPage(ctx, q)
+	if err != nil {
+		return nil, "", err
+	}
+	return p.Items, p.Next(len(p.Items)), nil
+}
+
+// QueryHistoryPage is QueryHistory with a resume token for every row.
+func (s *Store) QueryHistoryPage(ctx context.Context, q HistoryQuery) (Page[*gridv1.EventRevision], error) {
 	pageSize := clampPageSize(q.PageSize)
 
 	var sb strings.Builder
@@ -238,7 +321,7 @@ func (s *Store) QueryHistory(ctx context.Context, q HistoryQuery) ([]*gridv1.Eve
 	if q.PageToken != "" {
 		var cur historyCursor
 		if err := decodeToken(q.PageToken, &cur); err != nil {
-			return nil, "", err
+			return Page[*gridv1.EventRevision]{}, err
 		}
 		sb.WriteString(` AND (r.observed_at < ? OR (r.observed_at = ? AND r.event_id > ?)
 			OR (r.observed_at = ? AND r.event_id = ? AND r.revision < ?))`)
@@ -249,27 +332,32 @@ func (s *Store) QueryHistory(ctx context.Context, q HistoryQuery) ([]*gridv1.Eve
 
 	rows, err := s.db.QueryContext(ctx, sb.String(), args...)
 	if err != nil {
-		return nil, "", fmt.Errorf("store: query history: %w", err)
+		return Page[*gridv1.EventRevision]{}, fmt.Errorf("store: query history: %w", err)
 	}
 	defer rows.Close()
 
-	var revs []*gridv1.EventRevision
-	var last historyCursor
+	var page Page[*gridv1.EventRevision]
 	for rows.Next() {
+		if len(page.Items) == pageSize {
+			page.More = true
+			break
+		}
 		var eventID string
 		rev, err := scanRevision(func(dest ...any) error {
 			return rows.Scan(append(dest, &eventID)...)
 		})
 		if err != nil {
-			return nil, "", err
+			return Page[*gridv1.EventRevision]{}, err
 		}
-		if len(revs) == pageSize {
-			return revs, encodeToken(last), rows.Err()
-		}
-		revs = append(revs, rev)
-		last = historyCursor{O: rev.GetObservedAt().AsTime().Unix(), ID: eventID, R: rev.GetRevision()}
+		page.Items = append(page.Items, rev)
+		page.After = append(page.After, encodeToken(historyCursor{
+			O: rev.GetObservedAt().AsTime().Unix(), ID: eventID, R: rev.GetRevision(),
+		}))
 	}
-	return revs, "", rows.Err()
+	if err := rows.Err(); err != nil {
+		return Page[*gridv1.EventRevision]{}, fmt.Errorf("store: query history: %w", err)
+	}
+	return page, nil
 }
 
 // scanRevision builds an EventRevision from (revision, observed_at,

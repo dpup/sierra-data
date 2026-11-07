@@ -11,6 +11,7 @@ import (
 	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	structpb "google.golang.org/protobuf/types/known/structpb"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	wrapperspb "google.golang.org/protobuf/types/known/wrapperspb"
 	reflect "reflect"
@@ -1124,13 +1125,22 @@ func (*Event_Power) isEvent_Detail() {}
 func (*Event_BurnStatus) isEvent_Detail() {}
 
 // Geometry is an event's or place's footprint.
+//
+// The GeoJSON comes in one of two forms, chosen per request with
+// `geometryFormat`: `BASE64` (the default and legacy form) fills `geojson`;
+// `OBJECT` fills `object` and leaves `geojson` empty. `bbox` and `centroid`
+// are the same in both.
 type Geometry struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The RFC 7946 GeoJSON geometry object (Point, LineString, Polygon,
-	// MultiPolygon, ...) as UTF-8 JSON, BASE64-ENCODED in this JSON response
-	// because the field is protobuf `bytes`. Decode with
-	// `JSON.parse(atob(geojson))`. Coordinates are `[longitude, latitude]`.
-	// Wildfire perimeters and evacuation zones can be tens of kilobytes.
+	// LEGACY FORM (the default, `geometryFormat=BASE64`). The RFC 7946 GeoJSON
+	// geometry object (Point, LineString, Polygon, MultiPolygon, ...) as UTF-8
+	// JSON, BASE64-ENCODED in this JSON response because the field is protobuf
+	// `bytes`. Decode with `JSON.parse(atob(geojson))`. Coordinates are
+	// `[longitude, latitude]`. Empty when the event has a location but no
+	// GeoJSON (some mesh nodes carry only a `centroid`), and empty in the
+	// `OBJECT` form. Kept unchanged for existing clients; new clients should
+	// request `geometryFormat=OBJECT` and read `object` instead. Perimeters,
+	// evacuation zones and outage areas run from kilobytes to about a megabyte.
 	Geojson []byte `protobuf:"bytes,1,opt,name=geojson,proto3" json:"geojson,omitempty"`
 	// Bounding box of the geometry, in decimal degrees. Always set when geometry
 	// is present.
@@ -1138,7 +1148,13 @@ type Geometry struct {
 	// Representative point for markers and list views: the point itself for a
 	// Point, otherwise the middle of the bounding box (which can fall outside an
 	// irregular polygon).
-	Centroid      *LatLng `protobuf:"bytes,3,opt,name=centroid,proto3" json:"centroid,omitempty"`
+	Centroid *LatLng `protobuf:"bytes,3,opt,name=centroid,proto3" json:"centroid,omitempty"`
+	// The same RFC 7946 geometry as a plain JSON object, e.g.
+	// `{"type": "Point", "coordinates": [-120.36108, 38.24239]}`, ready for
+	// MapLibre, Leaflet or turf with no decoding. Sent only when the request
+	// asks for `geometryFormat=OBJECT`, and then only when the event has
+	// GeoJSON; otherwise the key is absent (never `null`).
+	Object        *structpb.Struct `protobuf:"bytes,4,opt,name=object,proto3,oneof" json:"object,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1190,6 +1206,13 @@ func (x *Geometry) GetBbox() *BoundingBox {
 func (x *Geometry) GetCentroid() *LatLng {
 	if x != nil {
 		return x.Centroid
+	}
+	return nil
+}
+
+func (x *Geometry) GetObject() *structpb.Struct {
+	if x != nil {
+		return x.Object
 	}
 	return nil
 }
@@ -4805,8 +4828,11 @@ type ListEventsRequest struct {
 	// Only events whose `observedAt` is at or after this RFC 3339 time, e.g.
 	// `2026-11-06T00:00:00Z`.
 	Since string `protobuf:"bytes,5,opt,name=since,proto3" json:"since,omitempty"`
-	// Page size. 0 or omitted means the default of 50; values over 200 are
-	// clamped to 200; a negative value is a 400 INVALID_ARGUMENT.
+	// Most events per page. 0 or omitted means the default of 50; values over
+	// 200 are clamped to 200; a negative value is a 400 INVALID_ARGUMENT. A page
+	// can hold FEWER events than this, because it also stops before its encoded
+	// size passes about 3 MiB (perimeter-heavy events): keep requesting while
+	// `nextPageToken` is non-empty, and never treat a short page as the end.
 	PageSize int32 `protobuf:"varint,6,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
 	// The previous page's `nextPageToken`. Omit for the first page.
 	PageToken string `protobuf:"bytes,7,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
@@ -4814,8 +4840,13 @@ type ListEventsRequest struct {
 	// `enhancement.response`). Large; default false, which returns them as empty
 	// strings.
 	EnhancementIo bool `protobuf:"varint,8,opt,name=enhancement_io,json=enhancementIo,proto3" json:"enhancement_io,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// How each event's `geometry` carries its GeoJSON. `BASE64` (default, the
+	// legacy form): the base64 `geometry.geojson` string. `OBJECT`: a plain
+	// JSON object in `geometry.object`, with `geometry.geojson` empty.
+	// Case-insensitive; anything else is a 400.
+	GeometryFormat string `protobuf:"bytes,9,opt,name=geometry_format,json=geometryFormat,proto3" json:"geometry_format,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *ListEventsRequest) Reset() {
@@ -4904,6 +4935,13 @@ func (x *ListEventsRequest) GetEnhancementIo() bool {
 	return false
 }
 
+func (x *ListEventsRequest) GetGeometryFormat() string {
+	if x != nil {
+		return x.GeometryFormat
+	}
+	return ""
+}
+
 // GetEventRequest names one event.
 type GetEventRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -4911,8 +4949,10 @@ type GetEventRequest struct {
 	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	// Include `enhancement.request` and `enhancement.response`. Default false.
 	EnhancementIo bool `protobuf:"varint,2,opt,name=enhancement_io,json=enhancementIo,proto3" json:"enhancement_io,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// `BASE64` (default, legacy) or `OBJECT`; same as on `/api/v1/events`.
+	GeometryFormat string `protobuf:"bytes,3,opt,name=geometry_format,json=geometryFormat,proto3" json:"geometry_format,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *GetEventRequest) Reset() {
@@ -4959,20 +4999,31 @@ func (x *GetEventRequest) GetEnhancementIo() bool {
 	return false
 }
 
+func (x *GetEventRequest) GetGeometryFormat() string {
+	if x != nil {
+		return x.GeometryFormat
+	}
+	return ""
+}
+
 // GetEventHistoryRequest pages one event's revisions.
 type GetEventHistoryRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Event id.
 	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	// Page size. 0 or omitted means the default of 50; values over 200 are
-	// clamped to 200; a negative value is a 400 INVALID_ARGUMENT.
+	// Most revisions per page. 0 or omitted means the default of 50; values
+	// over 200 are clamped to 200; a negative value is a 400 INVALID_ARGUMENT. A
+	// page can hold fewer (it stops at about 3 MiB encoded): follow
+	// `nextPageToken` until it is empty.
 	PageSize int32 `protobuf:"varint,2,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
 	// The previous page's `nextPageToken`. Omit for the first page.
 	PageToken string `protobuf:"bytes,3,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
 	// Include `enhancement.request` and `enhancement.response`. Default false.
 	EnhancementIo bool `protobuf:"varint,4,opt,name=enhancement_io,json=enhancementIo,proto3" json:"enhancement_io,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// `BASE64` (default, legacy) or `OBJECT`; same as on `/api/v1/events`.
+	GeometryFormat string `protobuf:"bytes,5,opt,name=geometry_format,json=geometryFormat,proto3" json:"geometry_format,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *GetEventHistoryRequest) Reset() {
@@ -5033,6 +5084,13 @@ func (x *GetEventHistoryRequest) GetEnhancementIo() bool {
 	return false
 }
 
+func (x *GetEventHistoryRequest) GetGeometryFormat() string {
+	if x != nil {
+		return x.GeometryFormat
+	}
+	return ""
+}
+
 // ListHistoryRequest filters the revision archive.
 type ListHistoryRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -5045,15 +5103,19 @@ type ListHistoryRequest struct {
 	From string `protobuf:"bytes,3,opt,name=from,proto3" json:"from,omitempty"`
 	// Window end, RFC 3339, exclusive. Default: no upper bound.
 	To string `protobuf:"bytes,4,opt,name=to,proto3" json:"to,omitempty"`
-	// Page size. 0 or omitted means the default of 50; values over 200 are
-	// clamped to 200; a negative value is a 400 INVALID_ARGUMENT.
+	// Most revisions per page. 0 or omitted means the default of 50; values
+	// over 200 are clamped to 200; a negative value is a 400 INVALID_ARGUMENT. A
+	// page can hold fewer (it stops at about 3 MiB encoded): follow
+	// `nextPageToken` until it is empty.
 	PageSize int32 `protobuf:"varint,5,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
 	// The previous page's `nextPageToken`. Omit for the first page.
 	PageToken string `protobuf:"bytes,6,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
 	// Include `enhancement.request` and `enhancement.response`. Default false.
 	EnhancementIo bool `protobuf:"varint,7,opt,name=enhancement_io,json=enhancementIo,proto3" json:"enhancement_io,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// `BASE64` (default, legacy) or `OBJECT`; same as on `/api/v1/events`.
+	GeometryFormat string `protobuf:"bytes,8,opt,name=geometry_format,json=geometryFormat,proto3" json:"geometry_format,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *ListHistoryRequest) Reset() {
@@ -5135,6 +5197,13 @@ func (x *ListHistoryRequest) GetEnhancementIo() bool {
 	return false
 }
 
+func (x *ListHistoryRequest) GetGeometryFormat() string {
+	if x != nil {
+		return x.GeometryFormat
+	}
+	return ""
+}
+
 // ListPlacesRequest filters the place directory.
 type ListPlacesRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -5142,9 +5211,12 @@ type ListPlacesRequest struct {
 	// but no places of those kinds exist today. Default: every kind.
 	Kind string `protobuf:"bytes,1,opt,name=kind,proto3" json:"kind,omitempty"`
 	// Case-insensitive substring of the place name, e.g. `calav`.
-	Q             string `protobuf:"bytes,2,opt,name=q,proto3" json:"q,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Q string `protobuf:"bytes,2,opt,name=q,proto3" json:"q,omitempty"`
+	// `BASE64` (default, legacy) or `OBJECT` for each place's `geometry`; same
+	// as on `/api/v1/events`.
+	GeometryFormat string `protobuf:"bytes,3,opt,name=geometry_format,json=geometryFormat,proto3" json:"geometry_format,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *ListPlacesRequest) Reset() {
@@ -5191,13 +5263,22 @@ func (x *ListPlacesRequest) GetQ() string {
 	return ""
 }
 
+func (x *ListPlacesRequest) GetGeometryFormat() string {
+	if x != nil {
+		return x.GeometryFormat
+	}
+	return ""
+}
+
 // GetPlaceRequest names one place.
 type GetPlaceRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Place slug (`arnold`) or namespaced id (`town:arnold`).
-	Place         string `protobuf:"bytes,1,opt,name=place,proto3" json:"place,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Place string `protobuf:"bytes,1,opt,name=place,proto3" json:"place,omitempty"`
+	// `BASE64` (default, legacy) or `OBJECT`; same as on `/api/v1/events`.
+	GeometryFormat string `protobuf:"bytes,2,opt,name=geometry_format,json=geometryFormat,proto3" json:"geometry_format,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *GetPlaceRequest) Reset() {
@@ -5237,6 +5318,13 @@ func (x *GetPlaceRequest) GetPlace() string {
 	return ""
 }
 
+func (x *GetPlaceRequest) GetGeometryFormat() string {
+	if x != nil {
+		return x.GeometryFormat
+	}
+	return ""
+}
+
 // ResolvePlaceRequest is a point (lat AND lng) or an address, not both.
 //
 // (-- lat/lng are strings in proto so presence + range/NaN validation matches
@@ -5250,9 +5338,12 @@ type ResolvePlaceRequest struct {
 	Lng string `protobuf:"bytes,2,opt,name=lng,proto3" json:"lng,omitempty"`
 	// A US street address, geocoded with the Census geocoder. Include the city,
 	// state or ZIP for a reliable match.
-	Address       string `protobuf:"bytes,3,opt,name=address,proto3" json:"address,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Address string `protobuf:"bytes,3,opt,name=address,proto3" json:"address,omitempty"`
+	// `BASE64` (default, legacy) or `OBJECT` for each place's `geometry`; same
+	// as on `/api/v1/events`.
+	GeometryFormat string `protobuf:"bytes,4,opt,name=geometry_format,json=geometryFormat,proto3" json:"geometry_format,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *ResolvePlaceRequest) Reset() {
@@ -5302,6 +5393,13 @@ func (x *ResolvePlaceRequest) GetLng() string {
 func (x *ResolvePlaceRequest) GetAddress() string {
 	if x != nil {
 		return x.Address
+	}
+	return ""
+}
+
+func (x *ResolvePlaceRequest) GetGeometryFormat() string {
+	if x != nil {
+		return x.GeometryFormat
 	}
 	return ""
 }
@@ -6447,7 +6545,7 @@ var File_grid_proto protoreflect.FileDescriptor
 const file_grid_proto_rawDesc = "" +
 	"\n" +
 	"\n" +
-	"grid.proto\x12\agrid.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1egoogle/protobuf/wrappers.proto\x1a.protoc-gen-openapiv2/options/annotations.proto\"\xf2\f\n" +
+	"grid.proto\x12\agrid.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1egoogle/protobuf/wrappers.proto\x1a.protoc-gen-openapiv2/options/annotations.proto\"\xf2\f\n" +
 	"\x05Event\x12'\n" +
 	"\x02id\x18\x01 \x01(\tB\x17\x92A\x14J\x12\"chp:261106ST0341\"R\x02id\x12:\n" +
 	"\x05layer\x18\x02 \x01(\x0e2\x0e.grid.v1.LayerB\x14\x92A\x11J\x0f\"ROAD_INCIDENT\"R\x05layer\x12+\n" +
@@ -6490,11 +6588,13 @@ const file_grid_proto_rawDesc = "" +
 	"\x05power\x18\x1b \x01(\v2\x14.grid.v1.PowerDetailH\x00R\x05power\x12<\n" +
 	"\vburn_status\x18\x1f \x01(\v2\x19.grid.v1.BurnStatusDetailH\x00R\n" +
 	"burnStatusB\b\n" +
-	"\x06detailJ\x04\b\x1c\x10\x1f\"\xcc\x01\n" +
+	"\x06detailJ\x04\b\x1c\x10\x1f\"\x8d\x02\n" +
 	"\bGeometry\x12i\n" +
 	"\ageojson\x18\x01 \x01(\fBO\x92ALJJ\"eyJ0eXBlIjoiUG9pbnQiLCJjb29yZGluYXRlcyI6Wy0xMjAuMzYxMDgsMzguMjQyMzldfQ==\"R\ageojson\x12(\n" +
 	"\x04bbox\x18\x02 \x01(\v2\x14.grid.v1.BoundingBoxR\x04bbox\x12+\n" +
-	"\bcentroid\x18\x03 \x01(\v2\x0f.grid.v1.LatLngR\bcentroid\"\xbd\x01\n" +
+	"\bcentroid\x18\x03 \x01(\v2\x0f.grid.v1.LatLngR\bcentroid\x124\n" +
+	"\x06object\x18\x04 \x01(\v2\x17.google.protobuf.StructH\x00R\x06object\x88\x01\x01B\t\n" +
+	"\a_object\"\xbd\x01\n" +
 	"\vBoundingBox\x12)\n" +
 	"\amin_lat\x18\x01 \x01(\x01B\x10\x92A\rJ\v38.23557857R\x06minLat\x12+\n" +
 	"\amin_lng\x18\x02 \x01(\x01B\x12\x92A\x0fJ\r-120.55658028R\x06minLng\x12)\n" +
@@ -6812,7 +6912,7 @@ const file_grid_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\tB\r\x92A\n" +
 	"J\b\"caloes\"R\x02id\x12<\n" +
 	"\x06status\x18\x02 \x01(\tB$\x92A!J\x04\"OK\"\xf2\x02\x02OK\xf2\x02\x05STALE\xf2\x02\vUNAVAILABLER\x06status\x12B\n" +
-	"\x0flast_success_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\rlastSuccessAt\"\xf3\x03\n" +
+	"\x0flast_success_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\rlastSuccessAt\"\xbb\x04\n" +
 	"\x11ListEventsRequest\x12-\n" +
 	"\x05place\x18\x01 \x01(\tB\x17\x92A\x14J\x12\"calaveras-county\"R\x05place\x12{\n" +
 	"\x05layer\x18\x02 \x03(\tBe\x92Ab\xf2\x02\bWILDFIRE\xf2\x02\n" +
@@ -6824,16 +6924,19 @@ const file_grid_proto_rawDesc = "" +
 	"\tpage_size\x18\x06 \x01(\x05B\f\x92A\tY\x00\x00\x00\x00\x00\x00i@R\bpageSize\x12\x1d\n" +
 	"\n" +
 	"page_token\x18\a \x01(\tR\tpageToken\x12%\n" +
-	"\x0eenhancement_io\x18\b \x01(\bR\renhancementIo\"f\n" +
+	"\x0eenhancement_io\x18\b \x01(\bR\renhancementIo\x12F\n" +
+	"\x0fgeometry_format\x18\t \x01(\tB\x1d\x92A\x1a:\x06BASE64\xf2\x02\x06BASE64\xf2\x02\x06OBJECTR\x0egeometryFormat\"\xae\x01\n" +
 	"\x0fGetEventRequest\x12,\n" +
 	"\x02id\x18\x01 \x01(\tB\x1c\x92A\x19J\x17\"burn:calaveras-county\"R\x02id\x12%\n" +
-	"\x0eenhancement_io\x18\x02 \x01(\bR\renhancementIo\"\xb7\x01\n" +
+	"\x0eenhancement_io\x18\x02 \x01(\bR\renhancementIo\x12F\n" +
+	"\x0fgeometry_format\x18\x03 \x01(\tB\x1d\x92A\x1a:\x06BASE64\xf2\x02\x06BASE64\xf2\x02\x06OBJECTR\x0egeometryFormat\"\xff\x01\n" +
 	"\x16GetEventHistoryRequest\x12,\n" +
 	"\x02id\x18\x01 \x01(\tB\x1c\x92A\x19J\x17\"burn:calaveras-county\"R\x02id\x12)\n" +
 	"\tpage_size\x18\x02 \x01(\x05B\f\x92A\tY\x00\x00\x00\x00\x00\x00i@R\bpageSize\x12\x1d\n" +
 	"\n" +
 	"page_token\x18\x03 \x01(\tR\tpageToken\x12%\n" +
-	"\x0eenhancement_io\x18\x04 \x01(\bR\renhancementIo\"\xf7\x02\n" +
+	"\x0eenhancement_io\x18\x04 \x01(\bR\renhancementIo\x12F\n" +
+	"\x0fgeometry_format\x18\x05 \x01(\tB\x1d\x92A\x1a:\x06BASE64\xf2\x02\x06BASE64\xf2\x02\x06OBJECTR\x0egeometryFormat\"\xbf\x03\n" +
 	"\x12ListHistoryRequest\x12-\n" +
 	"\x05place\x18\x01 \x01(\tB\x17\x92A\x14J\x12\"calaveras-county\"R\x05place\x12{\n" +
 	"\x05layer\x18\x02 \x03(\tBe\x92Ab\xf2\x02\bWILDFIRE\xf2\x02\n" +
@@ -6844,17 +6947,21 @@ const file_grid_proto_rawDesc = "" +
 	"\tpage_size\x18\x05 \x01(\x05B\f\x92A\tY\x00\x00\x00\x00\x00\x00i@R\bpageSize\x12\x1d\n" +
 	"\n" +
 	"page_token\x18\x06 \x01(\tR\tpageToken\x12%\n" +
-	"\x0eenhancement_io\x18\a \x01(\bR\renhancementIo\"o\n" +
+	"\x0eenhancement_io\x18\a \x01(\bR\renhancementIo\x12F\n" +
+	"\x0fgeometry_format\x18\b \x01(\tB\x1d\x92A\x1a:\x06BASE64\xf2\x02\x06BASE64\xf2\x02\x06OBJECTR\x0egeometryFormat\"\xb7\x01\n" +
 	"\x11ListPlacesRequest\x12L\n" +
 	"\x04kind\x18\x01 \x01(\tB8\x92A5\xf2\x02\x04AREA\xf2\x02\x06COUNTY\xf2\x02\x04TOWN\xf2\x02\bCORRIDOR\xf2\x02\tEVAC_ZONE\xf2\x02\x04SITER\x04kind\x12\f\n" +
-	"\x01q\x18\x02 \x01(\tR\x01q\"6\n" +
+	"\x01q\x18\x02 \x01(\tR\x01q\x12F\n" +
+	"\x0fgeometry_format\x18\x03 \x01(\tB\x1d\x92A\x1a:\x06BASE64\xf2\x02\x06BASE64\xf2\x02\x06OBJECTR\x0egeometryFormat\"~\n" +
 	"\x0fGetPlaceRequest\x12#\n" +
 	"\x05place\x18\x01 \x01(\tB\r\x92A\n" +
-	"J\b\"arnold\"R\x05place\"\xac\x01\n" +
+	"J\b\"arnold\"R\x05place\x12F\n" +
+	"\x0fgeometry_format\x18\x02 \x01(\tB\x1d\x92A\x1a:\x06BASE64\xf2\x02\x06BASE64\xf2\x02\x06OBJECTR\x0egeometryFormat\"\xf4\x01\n" +
 	"\x13ResolvePlaceRequest\x12)\n" +
 	"\x03lat\x18\x01 \x01(\tB\x17\x92A\x14J\x0538.25\x9a\x02\x01\x05\xa2\x02\x06doubleR\x03lat\x12+\n" +
 	"\x03lng\x18\x02 \x01(\tB\x19\x92A\x16J\a-120.35\x9a\x02\x01\x05\xa2\x02\x06doubleR\x03lng\x12=\n" +
-	"\aaddress\x18\x03 \x01(\tB#\x92A J\x1e\"1 Main St, Murphys, CA 95247\"R\aaddress\"u\n" +
+	"\aaddress\x18\x03 \x01(\tB#\x92A J\x1e\"1 Main St, Murphys, CA 95247\"R\aaddress\x12F\n" +
+	"\x0fgeometry_format\x18\x04 \x01(\tB\x1d\x92A\x1a:\x06BASE64\xf2\x02\x06BASE64\xf2\x02\x06OBJECTR\x0egeometryFormat\"u\n" +
 	"\fResolveQuery\x12\x1c\n" +
 	"\x03lat\x18\x01 \x01(\x01B\n" +
 	"\x92A\aJ\x0538.25R\x03lat\x12\x1e\n" +
@@ -7012,62 +7119,62 @@ const file_grid_proto_rawDesc = "" +
 	"\x0eBurnPermission\x12\x1b\n" +
 	"\x17BURN_PERMISSION_UNKNOWN\x10\x00\x12\x1b\n" +
 	"\x17BURN_PERMISSION_ALLOWED\x10\x01\x12\x1e\n" +
-	"\x1aBURN_PERMISSION_PROHIBITED\x10\x022\xc9\x1a\n" +
-	"\vGridService\x12\xd5\x03\n" +
+	"\x1aBURN_PERMISSION_PROHIBITED\x10\x022\xc2\x1a\n" +
+	"\vGridService\x12\xe7\x02\n" +
 	"\n" +
-	"ListEvents\x12\x1a.grid.v1.ListEventsRequest\x1a\x12.grid.v1.EventList\"\x96\x03\x92A\xfc\x02\n" +
+	"ListEvents\x12\x1a.grid.v1.ListEventsRequest\x1a\x12.grid.v1.EventList\"\xa8\x02\x92A\x8e\x02\n" +
 	"\x06EventsJ>\n" +
 	"\x03304\x127\n" +
-	"5Not Modified: the `If-None-Match` ETag still matches.J\x8f\x01\n" +
-	"\x03400\x12\x87\x01\n" +
-	"\x84\x01INVALID_ARGUMENT: an unknown layer, status or severity, a timestamp that is not RFC 3339, a negative page size, or a bad page token.J\"\n" +
+	"5Not Modified: the `If-None-Match` ETag still matches.J\x9f\x01\n" +
+	"\x03400\x12\x97\x01\n" +
+	"\x94\x01INVALID_ARGUMENT: an unknown layer, status, severity or geometryFormat, a timestamp that is not RFC 3339, a negative page size, or a bad page token.J\"\n" +
 	"\x03404\x12\x1b\n" +
-	"\x19NOT_FOUND: unknown place.J|\n" +
-	"\x03429\x12u\n" +
-	"sRESOURCE_EXHAUSTED: the page exceeded the 4 MiB response limit (large perimeters); retry with a smaller `pageSize`.\x82\xd3\xe4\x93\x02\x10\x12\x0e/api/v1/events\x12\xc8\x01\n" +
-	"\bGetEvent\x12\x18.grid.v1.GetEventRequest\x1a\x0e.grid.v1.Event\"\x91\x01\x92As\n" +
+	"\x19NOT_FOUND: unknown place.\x82\xd3\xe4\x93\x02\x10\x12\x0e/api/v1/events\x12\x80\x02\n" +
+	"\bGetEvent\x12\x18.grid.v1.GetEventRequest\x1a\x0e.grid.v1.Event\"\xc9\x01\x92A\xaa\x01\n" +
 	"\x06EventsJ>\n" +
 	"\x03304\x127\n" +
-	"5Not Modified: the `If-None-Match` ETag still matches.J)\n" +
+	"5Not Modified: the `If-None-Match` ETag still matches.J5\n" +
+	"\x03400\x12.\n" +
+	",INVALID_ARGUMENT: an unknown geometryFormat.J)\n" +
 	"\x03404\x12\"\n" +
-	" NOT_FOUND: no event has this id.\x82\xd3\xe4\x93\x02\x15\x12\x13/api/v1/events/{id}\x12\xb1\x02\n" +
-	"\x0fGetEventHistory\x12\x1f.grid.v1.GetEventHistoryRequest\x1a\x1a.grid.v1.EventRevisionList\"\xe0\x01\x92A\xb9\x01\n" +
+	" NOT_FOUND: no event has this id.\x82\xd3\xe4\x93\x02\x15\x12\x13/api/v1/events/{id}\x12\xcd\x02\n" +
+	"\x0fGetEventHistory\x12\x1f.grid.v1.GetEventHistoryRequest\x1a\x1a.grid.v1.EventRevisionList\"\xfc\x01\x92A\xd5\x01\n" +
 	"\x06EventsJ>\n" +
 	"\x03304\x127\n" +
-	"5Not Modified: the `If-None-Match` ETag still matches.JD\n" +
-	"\x03400\x12=\n" +
-	";INVALID_ARGUMENT: a negative page size or a bad page token.J)\n" +
+	"5Not Modified: the `If-None-Match` ETag still matches.J`\n" +
+	"\x03400\x12Y\n" +
+	"WINVALID_ARGUMENT: a negative page size, a bad page token, or an unknown geometryFormat.J)\n" +
 	"\x03404\x12\"\n" +
-	" NOT_FOUND: no event has this id.\x82\xd3\xe4\x93\x02\x1d\x12\x1b/api/v1/events/{id}/history\x12\xb6\x03\n" +
-	"\vListHistory\x12\x1b.grid.v1.ListHistoryRequest\x1a\x1a.grid.v1.EventRevisionList\"\xed\x02\x92A\xd2\x02\n" +
+	" NOT_FOUND: no event has this id.\x82\xd3\xe4\x93\x02\x1d\x12\x1b/api/v1/events/{id}/history\x12\xe0\x02\n" +
+	"\vListHistory\x12\x1b.grid.v1.ListHistoryRequest\x1a\x1a.grid.v1.EventRevisionList\"\x97\x02\x92A\xfc\x01\n" +
 	"\x06EventsJ>\n" +
 	"\x03304\x127\n" +
-	"5Not Modified: the `If-None-Match` ETag still matches.Jy\n" +
-	"\x03400\x12r\n" +
-	"pINVALID_ARGUMENT: an unknown layer, a timestamp that is not RFC 3339, a negative page size, or a bad page token.J\"\n" +
+	"5Not Modified: the `If-None-Match` ETag still matches.J\x8d\x01\n" +
+	"\x03400\x12\x85\x01\n" +
+	"\x82\x01INVALID_ARGUMENT: an unknown layer or geometryFormat, a timestamp that is not RFC 3339, a negative page size, or a bad page token.J\"\n" +
 	"\x03404\x12\x1b\n" +
-	"\x19NOT_FOUND: unknown place.Ji\n" +
-	"\x03429\x12b\n" +
-	"`RESOURCE_EXHAUSTED: the page exceeded the 4 MiB response limit; retry with a smaller `pageSize`.\x82\xd3\xe4\x93\x02\x11\x12\x0f/api/v1/history\x12\xca\x01\n" +
+	"\x19NOT_FOUND: unknown place.\x82\xd3\xe4\x93\x02\x11\x12\x0f/api/v1/history\x12\xdd\x01\n" +
 	"\n" +
-	"ListPlaces\x12\x1a.grid.v1.ListPlacesRequest\x1a\x12.grid.v1.PlaceList\"\x8b\x01\x92Ar\n" +
+	"ListPlaces\x12\x1a.grid.v1.ListPlacesRequest\x1a\x12.grid.v1.PlaceList\"\x9e\x01\x92A\x84\x01\n" +
 	"\x06PlacesJ>\n" +
 	"\x03304\x127\n" +
-	"5Not Modified: the `If-None-Match` ETag still matches.J(\n" +
-	"\x03400\x12!\n" +
-	"\x1fINVALID_ARGUMENT: unknown kind.\x82\xd3\xe4\x93\x02\x10\x12\x0e/api/v1/places\x12\x9d\x03\n" +
-	"\fResolvePlace\x12\x1c.grid.v1.ResolvePlaceRequest\x1a\x1d.grid.v1.ResolvePlaceResponse\"\xcf\x02\x92A\xad\x02\n" +
-	"\x06PlacesJp\n" +
-	"\x03400\x12i\n" +
-	"gINVALID_ARGUMENT: neither or both of lat+lng and address, only one of lat/lng, or a value out of range.JY\n" +
+	"5Not Modified: the `If-None-Match` ETag still matches.J:\n" +
+	"\x03400\x123\n" +
+	"1INVALID_ARGUMENT: unknown kind or geometryFormat.\x82\xd3\xe4\x93\x02\x10\x12\x0e/api/v1/places\x12\xbb\x03\n" +
+	"\fResolvePlace\x12\x1c.grid.v1.ResolvePlaceRequest\x1a\x1d.grid.v1.ResolvePlaceResponse\"\xed\x02\x92A\xcb\x02\n" +
+	"\x06PlacesJ\x8d\x01\n" +
+	"\x03400\x12\x85\x01\n" +
+	"\x82\x01INVALID_ARGUMENT: neither or both of lat+lng and address, only one of lat/lng, a value out of range, or an unknown geometryFormat.JY\n" +
 	"\x03404\x12R\n" +
 	"PNOT_FOUND: the geocoder found no match for the address (add city, state or ZIP).JV\n" +
 	"\x03503\x12O\n" +
-	"MUNAVAILABLE: the address geocoder is down; retry later or resolve by lat/lng.\x82\xd3\xe4\x93\x02\x18\x12\x16/api/v1/places:resolve\x12\xc4\x01\n" +
-	"\bGetPlace\x12\x18.grid.v1.GetPlaceRequest\x1a\x0e.grid.v1.Place\"\x8d\x01\x92Al\n" +
+	"MUNAVAILABLE: the address geocoder is down; retry later or resolve by lat/lng.\x82\xd3\xe4\x93\x02\x18\x12\x16/api/v1/places:resolve\x12\xfc\x01\n" +
+	"\bGetPlace\x12\x18.grid.v1.GetPlaceRequest\x1a\x0e.grid.v1.Place\"\xc5\x01\x92A\xa3\x01\n" +
 	"\x06PlacesJ>\n" +
 	"\x03304\x127\n" +
-	"5Not Modified: the `If-None-Match` ETag still matches.J\"\n" +
+	"5Not Modified: the `If-None-Match` ETag still matches.J5\n" +
+	"\x03400\x12.\n" +
+	",INVALID_ARGUMENT: an unknown geometryFormat.J\"\n" +
 	"\x03404\x12\x1b\n" +
 	"\x19NOT_FOUND: unknown place.\x82\xd3\xe4\x93\x02\x18\x12\x16/api/v1/places/{place}\x12\xa0\x01\n" +
 	"\x0fGetPlaceSummary\x12\x1f.grid.v1.GetPlaceSummaryRequest\x1a\x15.grid.v1.PlaceSummary\"U\x92A,\n" +
@@ -7096,8 +7203,8 @@ const file_grid_proto_rawDesc = "" +
 	"\x10GetMeshTelemetry\x12 .grid.v1.GetMeshTelemetryRequest\x1a\x1d.grid.v1.MeshTelemetryArchive\"\xae\x01\x92A\x8c\x01\n" +
 	"\x04MeshJ\x83\x01\n" +
 	"\x03400\x12|\n" +
-	"zINVALID_ARGUMENT: `node` missing or not 8-64 even-length hex (optionally prefixed `meshcore:`), or `from` not before `to`.\x82\xd3\xe4\x93\x02\x18\x12\x16/api/v1/mesh/telemetry\x1ap\x92Am\x12kEvery /api/v1 RPC. The resource tags (Places, Events, Conditions, Sources, Mesh) group the same operations.B\xdf\\\x92A\xab\\\x12\x86U\n" +
-	"\fThe Grid API\x12\xe6SPublic, read-only JSON API of **The Grid**, the S.I.E.R.R.A. data service. It gathers hazard and situational-awareness feeds for California's central Sierra Nevada, centred on Calaveras and Tuolumne counties: the Highway 4 / Ebbetts Pass corridor (Angels Camp, Murphys, Arnold, Dorrington, Bear Valley) and the Highway 49/108 towns (Sonora, Columbia, Twain Harte). Neighbouring counties (Alpine, Amador, El Dorado, Mariposa, San Joaquin, Stanislaus) are in the place directory because hazards cross county lines.\n" +
+	"zINVALID_ARGUMENT: `node` missing or not 8-64 even-length hex (optionally prefixed `meshcore:`), or `from` not before `to`.\x82\xd3\xe4\x93\x02\x18\x12\x16/api/v1/mesh/telemetry\x1ap\x92Am\x12kEvery /api/v1 RPC. The resource tags (Places, Events, Conditions, Sources, Mesh) group the same operations.B\xd2`\x92A\x9e`\x12\xf9X\n" +
+	"\fThe Grid API\x12\xd9WPublic, read-only JSON API of **The Grid**, the S.I.E.R.R.A. data service. It gathers hazard and situational-awareness feeds for California's central Sierra Nevada, centred on Calaveras and Tuolumne counties: the Highway 4 / Ebbetts Pass corridor (Angels Camp, Murphys, Arnold, Dorrington, Bear Valley) and the Highway 49/108 towns (Sonora, Columbia, Twain Harte). Neighbouring counties (Alpine, Amador, El Dorado, Mariposa, San Joaquin, Stanislaus) are in the place directory because hazards cross county lines.\n" +
 	"\n" +
 	"Upstream sources: CAL FIRE and FIRIS (wildfires and perimeters), Cal OES / Genasys (evacuation zones), the National Weather Service (alerts, fire weather, forecasts), USGS (earthquakes), CHP and Caltrans (incidents, lane closures, chain control, cameras, message signs), PG&E (outages and Public Safety Power Shutoffs), county burn lines and CAL FIRE burn permits, the MeshCore community radio mesh, Google Routes and OpenWeatherMap.\n" +
 	"\n" +
@@ -7131,13 +7238,13 @@ const file_grid_proto_rawDesc = "" +
 	"- **Enums serialize as their name strings** (`\"SEVERE\"`), never as numbers.\n" +
 	"- **Timestamps** are RFC 3339 in UTC (`2026-11-07T03:13:00Z`), with up to nanosecond fractions.\n" +
 	"- **64-bit integers are JSON strings** (protobuf JSON mapping): mesh counters such as `uptimeSeconds: \"98350\"` and `cadenceSeconds: \"1831\"`. Parse them; 32-bit integers are plain numbers.\n" +
-	"- **`geometry.geojson` is base64.** It is a protobuf `bytes` field, so the RFC 7946 geometry JSON arrives base64-encoded: `JSON.parse(atob(event.geometry.geojson))`. Coordinates inside are `[longitude, latitude]`. `geometry.bbox` and `geometry.centroid` are plain numbers and need no decoding. For maps, the `.geojson` layer endpoints serve decoded geometry directly.\n" +
+	"- **Geometry: pass `geometryFormat=OBJECT`.** By default (`BASE64`, the legacy form kept for existing clients) `geometry.geojson` is a protobuf `bytes` field, so the RFC 7946 geometry JSON arrives base64-encoded: `JSON.parse(atob(event.geometry.geojson))`. With `geometryFormat=OBJECT` (on every route that returns events, revisions or places) the same geometry is a plain JSON object in `geometry.object` and `geometry.geojson` is empty. Coordinates are `[longitude, latitude]`. `geometry.bbox` and `geometry.centroid` are plain numbers in both forms. For maps, the `.geojson` layer endpoints serve whole FeatureCollections directly.\n" +
 	"- **Query parameters**: this spec names them in camelCase (`severityMin`, `pageSize`, `pageToken`, `enhancementIo`). The snake_case forms (`severity_min`, `page_size`, ...) work too. Enum values are case-insensitive. A repeated parameter can be repeated (`layer=WILDFIRE&layer=POWER`) or comma-separated (`layer=WILDFIRE,POWER`).\n" +
 	"- **Place addressing**: anywhere a place is named, the slug (`arnold`) or the namespaced id (`town:arnold`) works.\n" +
-	"- **Pagination** is keyset-based. `pageSize` 0 or omitted means 50, values over 200 are clamped to 200, and a negative value is a 400. Pass `nextPageToken` back as `pageToken` with the same filters until it comes back empty. Tokens are opaque. Pages stay stable while new events arrive. A large page of perimeter-heavy events can exceed the server's 4 MiB response limit and fail with HTTP 429 `RESOURCE_EXHAUSTED`; keep `pageSize` at or below 50 when you include RESOLVED or EXPIRED events.\n" +
+	"- **Pagination** is keyset-based. `pageSize` is a MAXIMUM: 0 or omitted means 50, values over 200 are clamped to 200, and a negative value is a 400. A page also stops before its encoded size passes about 3 MiB, so a page of perimeter-heavy events (fires, evacuation zones, outage areas) can hold fewer than `pageSize`; an event larger than that on its own is served alone on its page. Pass `nextPageToken` back as `pageToken` with the same filters (and the same `geometryFormat`) until it comes back empty: an empty token is the only end-of-list signal, never a short page. Tokens are opaque. Pages stay stable while new events arrive.\n" +
 	"- **Conditional GET**: event lists, event detail, event history, the revision archive, places and cameras return a weak `ETag`. Send it back in `If-None-Match` to get `304 Not Modified`. The tag changes whenever the body would, including in-place refreshes that write no revision (AI text, mesh telemetry, burn-line observations, place re-attachment). The summary, conditions, sources, resolve, scanners and mesh-telemetry endpoints do not yet send ETags.\n" +
 	"- **No authentication, no API key.** CORS is open (`Access-Control-Allow-Origin: *`), GET only, no credentials, so a browser page on any origin can call the API directly.\n" +
-	"- **Errors** are the gRPC status as JSON, `{code, codeName, message, details}`, with a mapped HTTP status: 400 `INVALID_ARGUMENT` (bad enum, timestamp or page token), 404 `NOT_FOUND` (unknown place, event or address), 429 `RESOURCE_EXHAUSTED` (response too large), 503 `UNAVAILABLE` (address geocoder down), 500 `INTERNAL`. Branch on `codeName`. During a deploy handoff any route can briefly answer `503`: the RPCs with the JSON error (`UNAVAILABLE`), the hand-built routes (`.geojson`, mesh links) with a plain-text body and `Retry-After: 1`. Retry after a second.\n" +
+	"- **Errors** are the gRPC status as JSON, `{code, codeName, message, details}`, with a mapped HTTP status: 400 `INVALID_ARGUMENT` (bad enum, timestamp or page token, `geometryFormat`), 404 `NOT_FOUND` (unknown place, event or address), 503 `UNAVAILABLE` (address geocoder down, or a request interrupted by a deploy), 500 `INTERNAL`. Branch on `codeName`. During a deploy handoff any route can briefly answer `503`: the RPCs with the JSON error (`UNAVAILABLE`), the hand-built routes (`.geojson`, mesh links) with a plain-text body and `Retry-After: 1`. Retry after a second; a retried page request with the same `pageToken` resumes exactly where it was.\n" +
 	"\n" +
 	"## Severity and status\n" +
 	"\n" +
@@ -7259,10 +7366,11 @@ var file_grid_proto_goTypes = []any{
 	nil,                             // 70: grid.v1.RoadIncidentDetail.MetadataEntry
 	nil,                             // 71: grid.v1.SummaryStats.SeverityCountsEntry
 	(*timestamppb.Timestamp)(nil),   // 72: google.protobuf.Timestamp
-	(*wrapperspb.DoubleValue)(nil),  // 73: google.protobuf.DoubleValue
-	(*wrapperspb.Int32Value)(nil),   // 74: google.protobuf.Int32Value
-	(*wrapperspb.UInt32Value)(nil),  // 75: google.protobuf.UInt32Value
-	(*wrapperspb.Int64Value)(nil),   // 76: google.protobuf.Int64Value
+	(*structpb.Struct)(nil),         // 73: google.protobuf.Struct
+	(*wrapperspb.DoubleValue)(nil),  // 74: google.protobuf.DoubleValue
+	(*wrapperspb.Int32Value)(nil),   // 75: google.protobuf.Int32Value
+	(*wrapperspb.UInt32Value)(nil),  // 76: google.protobuf.UInt32Value
+	(*wrapperspb.Int64Value)(nil),   // 77: google.protobuf.Int64Value
 }
 var file_grid_proto_depIdxs = []int32{
 	0,   // 0: grid.v1.Event.layer:type_name -> grid.v1.Layer
@@ -7286,128 +7394,129 @@ var file_grid_proto_depIdxs = []int32{
 	29,  // 18: grid.v1.Event.burn_status:type_name -> grid.v1.BurnStatusDetail
 	12,  // 19: grid.v1.Geometry.bbox:type_name -> grid.v1.BoundingBox
 	13,  // 20: grid.v1.Geometry.centroid:type_name -> grid.v1.LatLng
-	72,  // 21: grid.v1.Provenance.fetched_at:type_name -> google.protobuf.Timestamp
-	72,  // 22: grid.v1.Enhancement.enhanced_at:type_name -> google.protobuf.Timestamp
-	3,   // 23: grid.v1.Source.kind:type_name -> grid.v1.SourceKind
-	72,  // 24: grid.v1.Source.last_success_at:type_name -> google.protobuf.Timestamp
-	72,  // 25: grid.v1.Source.last_attempt_at:type_name -> google.protobuf.Timestamp
-	4,   // 26: grid.v1.Source.status:type_name -> grid.v1.SourceStatus
-	5,   // 27: grid.v1.Place.kind:type_name -> grid.v1.PlaceKind
-	11,  // 28: grid.v1.Place.geometry:type_name -> grid.v1.Geometry
-	70,  // 29: grid.v1.RoadIncidentDetail.metadata:type_name -> grid.v1.RoadIncidentDetail.MetadataEntry
-	24,  // 30: grid.v1.RoadIncidentDetail.closure:type_name -> grid.v1.LaneClosureDetail
-	72,  // 31: grid.v1.LaneClosureDetail.planned_start:type_name -> google.protobuf.Timestamp
-	72,  // 32: grid.v1.LaneClosureDetail.planned_end:type_name -> google.protobuf.Timestamp
-	72,  // 33: grid.v1.LaneClosureDetail.set_up_at:type_name -> google.protobuf.Timestamp
-	13,  // 34: grid.v1.LaneClosureDetail.begin:type_name -> grid.v1.LatLng
-	13,  // 35: grid.v1.LaneClosureDetail.end:type_name -> grid.v1.LatLng
-	26,  // 36: grid.v1.MeshDetail.telemetry:type_name -> grid.v1.MeshTelemetry
-	6,   // 37: grid.v1.MeshDetail.reachability:type_name -> grid.v1.MeshReachability
-	73,  // 38: grid.v1.MeshTelemetry.snr:type_name -> google.protobuf.DoubleValue
-	74,  // 39: grid.v1.MeshTelemetry.rssi:type_name -> google.protobuf.Int32Value
-	75,  // 40: grid.v1.MeshTelemetry.hop_count:type_name -> google.protobuf.UInt32Value
-	72,  // 41: grid.v1.MeshTelemetry.last_advert_at:type_name -> google.protobuf.Timestamp
-	27,  // 42: grid.v1.MeshTelemetry.admin:type_name -> grid.v1.MeshAdminTelemetry
-	72,  // 43: grid.v1.MeshTelemetry.last_heard_at:type_name -> google.protobuf.Timestamp
-	72,  // 44: grid.v1.MeshTelemetry.last_relayed_at:type_name -> google.protobuf.Timestamp
-	72,  // 45: grid.v1.MeshAdminTelemetry.reported_at:type_name -> google.protobuf.Timestamp
-	72,  // 46: grid.v1.MeshAdminTelemetry.last_success_at:type_name -> google.protobuf.Timestamp
-	72,  // 47: grid.v1.MeshAdminTelemetry.last_attempt_at:type_name -> google.protobuf.Timestamp
-	73,  // 48: grid.v1.MeshAdminTelemetry.battery_volts:type_name -> google.protobuf.DoubleValue
-	73,  // 49: grid.v1.MeshAdminTelemetry.battery_percent:type_name -> google.protobuf.DoubleValue
-	73,  // 50: grid.v1.MeshAdminTelemetry.temperature_c:type_name -> google.protobuf.DoubleValue
-	73,  // 51: grid.v1.MeshAdminTelemetry.humidity:type_name -> google.protobuf.DoubleValue
-	73,  // 52: grid.v1.MeshAdminTelemetry.pressure:type_name -> google.protobuf.DoubleValue
-	74,  // 53: grid.v1.MeshAdminTelemetry.noise_floor_dbm:type_name -> google.protobuf.Int32Value
-	73,  // 54: grid.v1.MeshAdminTelemetry.last_snr_db:type_name -> google.protobuf.DoubleValue
-	74,  // 55: grid.v1.MeshAdminTelemetry.last_rssi_dbm:type_name -> google.protobuf.Int32Value
-	74,  // 56: grid.v1.MeshAdminTelemetry.tx_queue_len:type_name -> google.protobuf.Int32Value
-	72,  // 57: grid.v1.PowerDetail.estimated_restoration:type_name -> google.protobuf.Timestamp
-	72,  // 58: grid.v1.PowerDetail.de_energization_start:type_name -> google.protobuf.Timestamp
-	72,  // 59: grid.v1.PowerDetail.de_energization_end:type_name -> google.protobuf.Timestamp
-	72,  // 60: grid.v1.PowerDetail.all_clear:type_name -> google.protobuf.Timestamp
-	7,   // 61: grid.v1.BurnStatusDetail.burn_day:type_name -> grid.v1.BurnDay
-	8,   // 62: grid.v1.BurnStatusDetail.calfire_status:type_name -> grid.v1.CalfireBurnStatus
-	9,   // 63: grid.v1.BurnStatusDetail.permission:type_name -> grid.v1.BurnPermission
-	72,  // 64: grid.v1.BurnStatusDetail.calfire_effective:type_name -> google.protobuf.Timestamp
-	30,  // 65: grid.v1.BurnStatusDetail.burn_lines:type_name -> grid.v1.BurnLineReading
-	72,  // 66: grid.v1.BurnStatusDetail.calfire_observed_at:type_name -> google.protobuf.Timestamp
-	7,   // 67: grid.v1.BurnLineReading.burn_day:type_name -> grid.v1.BurnDay
-	31,  // 68: grid.v1.BurnLineReading.observation:type_name -> grid.v1.BurnObservation
-	72,  // 69: grid.v1.BurnObservation.observed_at:type_name -> google.protobuf.Timestamp
-	10,  // 70: grid.v1.EventList.events:type_name -> grid.v1.Event
-	72,  // 71: grid.v1.EventRevision.observed_at:type_name -> google.protobuf.Timestamp
-	72,  // 72: grid.v1.EventRevision.ingested_at:type_name -> google.protobuf.Timestamp
-	10,  // 73: grid.v1.EventRevision.event:type_name -> grid.v1.Event
-	33,  // 74: grid.v1.EventRevisionList.revisions:type_name -> grid.v1.EventRevision
-	17,  // 75: grid.v1.PlaceList.places:type_name -> grid.v1.Place
-	16,  // 76: grid.v1.SourceList.sources:type_name -> grid.v1.Source
-	72,  // 77: grid.v1.GetMeshTelemetryRequest.from:type_name -> google.protobuf.Timestamp
-	72,  // 78: grid.v1.GetMeshTelemetryRequest.to:type_name -> google.protobuf.Timestamp
-	72,  // 79: grid.v1.MeshTelemetryArchive.from:type_name -> google.protobuf.Timestamp
-	72,  // 80: grid.v1.MeshTelemetryArchive.to:type_name -> google.protobuf.Timestamp
-	39,  // 81: grid.v1.MeshTelemetryArchive.coverage:type_name -> grid.v1.MeshTelemetryCoverage
-	76,  // 82: grid.v1.MeshTelemetryArchive.cadence_seconds:type_name -> google.protobuf.Int64Value
-	72,  // 83: grid.v1.MeshTelemetryArchive.reboots:type_name -> google.protobuf.Timestamp
-	40,  // 84: grid.v1.MeshTelemetryArchive.samples:type_name -> grid.v1.MeshTelemetrySample
-	72,  // 85: grid.v1.MeshTelemetryCoverage.from:type_name -> google.protobuf.Timestamp
-	72,  // 86: grid.v1.MeshTelemetryCoverage.to:type_name -> google.protobuf.Timestamp
-	27,  // 87: grid.v1.MeshTelemetrySample.reading:type_name -> grid.v1.MeshAdminTelemetry
-	72,  // 88: grid.v1.MeshTelemetrySample.received_at:type_name -> google.protobuf.Timestamp
-	72,  // 89: grid.v1.PlaceSummary.generated_at:type_name -> google.protobuf.Timestamp
-	43,  // 90: grid.v1.PlaceSummary.summary:type_name -> grid.v1.SummaryStats
-	45,  // 91: grid.v1.PlaceSummary.domains:type_name -> grid.v1.SummaryDomain
-	47,  // 92: grid.v1.PlaceSummary.sources:type_name -> grid.v1.SummarySourceHealth
-	71,  // 93: grid.v1.SummaryStats.severity_counts:type_name -> grid.v1.SummaryStats.SeverityCountsEntry
-	74,  // 94: grid.v1.SummaryStats.active_evacuations:type_name -> google.protobuf.Int32Value
-	44,  // 95: grid.v1.SummaryStats.top_events:type_name -> grid.v1.SummaryTopEvent
-	46,  // 96: grid.v1.SummaryDomain.headlines:type_name -> grid.v1.SummaryDomainHeadline
-	72,  // 97: grid.v1.SummarySourceHealth.last_success_at:type_name -> google.protobuf.Timestamp
-	55,  // 98: grid.v1.ResolvePlaceResponse.query:type_name -> grid.v1.ResolveQuery
-	17,  // 99: grid.v1.ResolvePlaceResponse.places:type_name -> grid.v1.Place
-	58,  // 100: grid.v1.ScannerList.scanners:type_name -> grid.v1.Scanner
-	13,  // 101: grid.v1.Camera.location:type_name -> grid.v1.LatLng
-	61,  // 102: grid.v1.CameraList.cameras:type_name -> grid.v1.Camera
-	72,  // 103: grid.v1.CameraList.last_source_update:type_name -> google.protobuf.Timestamp
-	72,  // 104: grid.v1.ForecastPeriod.time:type_name -> google.protobuf.Timestamp
-	72,  // 105: grid.v1.WeatherForecast.issued_at:type_name -> google.protobuf.Timestamp
-	66,  // 106: grid.v1.WeatherForecast.periods:type_name -> grid.v1.ForecastPeriod
-	72,  // 107: grid.v1.WeatherForecast.peak_wind_gust_at:type_name -> google.protobuf.Timestamp
-	64,  // 108: grid.v1.Conditions.weather:type_name -> grid.v1.WeatherConditions
-	65,  // 109: grid.v1.Conditions.fire_weather:type_name -> grid.v1.FireWeatherConditions
-	72,  // 110: grid.v1.Conditions.last_updated:type_name -> google.protobuf.Timestamp
-	67,  // 111: grid.v1.Conditions.forecast:type_name -> grid.v1.WeatherForecast
-	48,  // 112: grid.v1.GridService.ListEvents:input_type -> grid.v1.ListEventsRequest
-	49,  // 113: grid.v1.GridService.GetEvent:input_type -> grid.v1.GetEventRequest
-	50,  // 114: grid.v1.GridService.GetEventHistory:input_type -> grid.v1.GetEventHistoryRequest
-	51,  // 115: grid.v1.GridService.ListHistory:input_type -> grid.v1.ListHistoryRequest
-	52,  // 116: grid.v1.GridService.ListPlaces:input_type -> grid.v1.ListPlacesRequest
-	54,  // 117: grid.v1.GridService.ResolvePlace:input_type -> grid.v1.ResolvePlaceRequest
-	53,  // 118: grid.v1.GridService.GetPlace:input_type -> grid.v1.GetPlaceRequest
-	41,  // 119: grid.v1.GridService.GetPlaceSummary:input_type -> grid.v1.GetPlaceSummaryRequest
-	57,  // 120: grid.v1.GridService.ListScanners:input_type -> grid.v1.ListScannersRequest
-	60,  // 121: grid.v1.GridService.ListCameras:input_type -> grid.v1.ListCamerasRequest
-	63,  // 122: grid.v1.GridService.GetConditions:input_type -> grid.v1.GetConditionsRequest
-	69,  // 123: grid.v1.GridService.ListSources:input_type -> grid.v1.ListSourcesRequest
-	37,  // 124: grid.v1.GridService.GetMeshTelemetry:input_type -> grid.v1.GetMeshTelemetryRequest
-	32,  // 125: grid.v1.GridService.ListEvents:output_type -> grid.v1.EventList
-	10,  // 126: grid.v1.GridService.GetEvent:output_type -> grid.v1.Event
-	34,  // 127: grid.v1.GridService.GetEventHistory:output_type -> grid.v1.EventRevisionList
-	34,  // 128: grid.v1.GridService.ListHistory:output_type -> grid.v1.EventRevisionList
-	35,  // 129: grid.v1.GridService.ListPlaces:output_type -> grid.v1.PlaceList
-	56,  // 130: grid.v1.GridService.ResolvePlace:output_type -> grid.v1.ResolvePlaceResponse
-	17,  // 131: grid.v1.GridService.GetPlace:output_type -> grid.v1.Place
-	42,  // 132: grid.v1.GridService.GetPlaceSummary:output_type -> grid.v1.PlaceSummary
-	59,  // 133: grid.v1.GridService.ListScanners:output_type -> grid.v1.ScannerList
-	62,  // 134: grid.v1.GridService.ListCameras:output_type -> grid.v1.CameraList
-	68,  // 135: grid.v1.GridService.GetConditions:output_type -> grid.v1.Conditions
-	36,  // 136: grid.v1.GridService.ListSources:output_type -> grid.v1.SourceList
-	38,  // 137: grid.v1.GridService.GetMeshTelemetry:output_type -> grid.v1.MeshTelemetryArchive
-	125, // [125:138] is the sub-list for method output_type
-	112, // [112:125] is the sub-list for method input_type
-	112, // [112:112] is the sub-list for extension type_name
-	112, // [112:112] is the sub-list for extension extendee
-	0,   // [0:112] is the sub-list for field type_name
+	73,  // 21: grid.v1.Geometry.object:type_name -> google.protobuf.Struct
+	72,  // 22: grid.v1.Provenance.fetched_at:type_name -> google.protobuf.Timestamp
+	72,  // 23: grid.v1.Enhancement.enhanced_at:type_name -> google.protobuf.Timestamp
+	3,   // 24: grid.v1.Source.kind:type_name -> grid.v1.SourceKind
+	72,  // 25: grid.v1.Source.last_success_at:type_name -> google.protobuf.Timestamp
+	72,  // 26: grid.v1.Source.last_attempt_at:type_name -> google.protobuf.Timestamp
+	4,   // 27: grid.v1.Source.status:type_name -> grid.v1.SourceStatus
+	5,   // 28: grid.v1.Place.kind:type_name -> grid.v1.PlaceKind
+	11,  // 29: grid.v1.Place.geometry:type_name -> grid.v1.Geometry
+	70,  // 30: grid.v1.RoadIncidentDetail.metadata:type_name -> grid.v1.RoadIncidentDetail.MetadataEntry
+	24,  // 31: grid.v1.RoadIncidentDetail.closure:type_name -> grid.v1.LaneClosureDetail
+	72,  // 32: grid.v1.LaneClosureDetail.planned_start:type_name -> google.protobuf.Timestamp
+	72,  // 33: grid.v1.LaneClosureDetail.planned_end:type_name -> google.protobuf.Timestamp
+	72,  // 34: grid.v1.LaneClosureDetail.set_up_at:type_name -> google.protobuf.Timestamp
+	13,  // 35: grid.v1.LaneClosureDetail.begin:type_name -> grid.v1.LatLng
+	13,  // 36: grid.v1.LaneClosureDetail.end:type_name -> grid.v1.LatLng
+	26,  // 37: grid.v1.MeshDetail.telemetry:type_name -> grid.v1.MeshTelemetry
+	6,   // 38: grid.v1.MeshDetail.reachability:type_name -> grid.v1.MeshReachability
+	74,  // 39: grid.v1.MeshTelemetry.snr:type_name -> google.protobuf.DoubleValue
+	75,  // 40: grid.v1.MeshTelemetry.rssi:type_name -> google.protobuf.Int32Value
+	76,  // 41: grid.v1.MeshTelemetry.hop_count:type_name -> google.protobuf.UInt32Value
+	72,  // 42: grid.v1.MeshTelemetry.last_advert_at:type_name -> google.protobuf.Timestamp
+	27,  // 43: grid.v1.MeshTelemetry.admin:type_name -> grid.v1.MeshAdminTelemetry
+	72,  // 44: grid.v1.MeshTelemetry.last_heard_at:type_name -> google.protobuf.Timestamp
+	72,  // 45: grid.v1.MeshTelemetry.last_relayed_at:type_name -> google.protobuf.Timestamp
+	72,  // 46: grid.v1.MeshAdminTelemetry.reported_at:type_name -> google.protobuf.Timestamp
+	72,  // 47: grid.v1.MeshAdminTelemetry.last_success_at:type_name -> google.protobuf.Timestamp
+	72,  // 48: grid.v1.MeshAdminTelemetry.last_attempt_at:type_name -> google.protobuf.Timestamp
+	74,  // 49: grid.v1.MeshAdminTelemetry.battery_volts:type_name -> google.protobuf.DoubleValue
+	74,  // 50: grid.v1.MeshAdminTelemetry.battery_percent:type_name -> google.protobuf.DoubleValue
+	74,  // 51: grid.v1.MeshAdminTelemetry.temperature_c:type_name -> google.protobuf.DoubleValue
+	74,  // 52: grid.v1.MeshAdminTelemetry.humidity:type_name -> google.protobuf.DoubleValue
+	74,  // 53: grid.v1.MeshAdminTelemetry.pressure:type_name -> google.protobuf.DoubleValue
+	75,  // 54: grid.v1.MeshAdminTelemetry.noise_floor_dbm:type_name -> google.protobuf.Int32Value
+	74,  // 55: grid.v1.MeshAdminTelemetry.last_snr_db:type_name -> google.protobuf.DoubleValue
+	75,  // 56: grid.v1.MeshAdminTelemetry.last_rssi_dbm:type_name -> google.protobuf.Int32Value
+	75,  // 57: grid.v1.MeshAdminTelemetry.tx_queue_len:type_name -> google.protobuf.Int32Value
+	72,  // 58: grid.v1.PowerDetail.estimated_restoration:type_name -> google.protobuf.Timestamp
+	72,  // 59: grid.v1.PowerDetail.de_energization_start:type_name -> google.protobuf.Timestamp
+	72,  // 60: grid.v1.PowerDetail.de_energization_end:type_name -> google.protobuf.Timestamp
+	72,  // 61: grid.v1.PowerDetail.all_clear:type_name -> google.protobuf.Timestamp
+	7,   // 62: grid.v1.BurnStatusDetail.burn_day:type_name -> grid.v1.BurnDay
+	8,   // 63: grid.v1.BurnStatusDetail.calfire_status:type_name -> grid.v1.CalfireBurnStatus
+	9,   // 64: grid.v1.BurnStatusDetail.permission:type_name -> grid.v1.BurnPermission
+	72,  // 65: grid.v1.BurnStatusDetail.calfire_effective:type_name -> google.protobuf.Timestamp
+	30,  // 66: grid.v1.BurnStatusDetail.burn_lines:type_name -> grid.v1.BurnLineReading
+	72,  // 67: grid.v1.BurnStatusDetail.calfire_observed_at:type_name -> google.protobuf.Timestamp
+	7,   // 68: grid.v1.BurnLineReading.burn_day:type_name -> grid.v1.BurnDay
+	31,  // 69: grid.v1.BurnLineReading.observation:type_name -> grid.v1.BurnObservation
+	72,  // 70: grid.v1.BurnObservation.observed_at:type_name -> google.protobuf.Timestamp
+	10,  // 71: grid.v1.EventList.events:type_name -> grid.v1.Event
+	72,  // 72: grid.v1.EventRevision.observed_at:type_name -> google.protobuf.Timestamp
+	72,  // 73: grid.v1.EventRevision.ingested_at:type_name -> google.protobuf.Timestamp
+	10,  // 74: grid.v1.EventRevision.event:type_name -> grid.v1.Event
+	33,  // 75: grid.v1.EventRevisionList.revisions:type_name -> grid.v1.EventRevision
+	17,  // 76: grid.v1.PlaceList.places:type_name -> grid.v1.Place
+	16,  // 77: grid.v1.SourceList.sources:type_name -> grid.v1.Source
+	72,  // 78: grid.v1.GetMeshTelemetryRequest.from:type_name -> google.protobuf.Timestamp
+	72,  // 79: grid.v1.GetMeshTelemetryRequest.to:type_name -> google.protobuf.Timestamp
+	72,  // 80: grid.v1.MeshTelemetryArchive.from:type_name -> google.protobuf.Timestamp
+	72,  // 81: grid.v1.MeshTelemetryArchive.to:type_name -> google.protobuf.Timestamp
+	39,  // 82: grid.v1.MeshTelemetryArchive.coverage:type_name -> grid.v1.MeshTelemetryCoverage
+	77,  // 83: grid.v1.MeshTelemetryArchive.cadence_seconds:type_name -> google.protobuf.Int64Value
+	72,  // 84: grid.v1.MeshTelemetryArchive.reboots:type_name -> google.protobuf.Timestamp
+	40,  // 85: grid.v1.MeshTelemetryArchive.samples:type_name -> grid.v1.MeshTelemetrySample
+	72,  // 86: grid.v1.MeshTelemetryCoverage.from:type_name -> google.protobuf.Timestamp
+	72,  // 87: grid.v1.MeshTelemetryCoverage.to:type_name -> google.protobuf.Timestamp
+	27,  // 88: grid.v1.MeshTelemetrySample.reading:type_name -> grid.v1.MeshAdminTelemetry
+	72,  // 89: grid.v1.MeshTelemetrySample.received_at:type_name -> google.protobuf.Timestamp
+	72,  // 90: grid.v1.PlaceSummary.generated_at:type_name -> google.protobuf.Timestamp
+	43,  // 91: grid.v1.PlaceSummary.summary:type_name -> grid.v1.SummaryStats
+	45,  // 92: grid.v1.PlaceSummary.domains:type_name -> grid.v1.SummaryDomain
+	47,  // 93: grid.v1.PlaceSummary.sources:type_name -> grid.v1.SummarySourceHealth
+	71,  // 94: grid.v1.SummaryStats.severity_counts:type_name -> grid.v1.SummaryStats.SeverityCountsEntry
+	75,  // 95: grid.v1.SummaryStats.active_evacuations:type_name -> google.protobuf.Int32Value
+	44,  // 96: grid.v1.SummaryStats.top_events:type_name -> grid.v1.SummaryTopEvent
+	46,  // 97: grid.v1.SummaryDomain.headlines:type_name -> grid.v1.SummaryDomainHeadline
+	72,  // 98: grid.v1.SummarySourceHealth.last_success_at:type_name -> google.protobuf.Timestamp
+	55,  // 99: grid.v1.ResolvePlaceResponse.query:type_name -> grid.v1.ResolveQuery
+	17,  // 100: grid.v1.ResolvePlaceResponse.places:type_name -> grid.v1.Place
+	58,  // 101: grid.v1.ScannerList.scanners:type_name -> grid.v1.Scanner
+	13,  // 102: grid.v1.Camera.location:type_name -> grid.v1.LatLng
+	61,  // 103: grid.v1.CameraList.cameras:type_name -> grid.v1.Camera
+	72,  // 104: grid.v1.CameraList.last_source_update:type_name -> google.protobuf.Timestamp
+	72,  // 105: grid.v1.ForecastPeriod.time:type_name -> google.protobuf.Timestamp
+	72,  // 106: grid.v1.WeatherForecast.issued_at:type_name -> google.protobuf.Timestamp
+	66,  // 107: grid.v1.WeatherForecast.periods:type_name -> grid.v1.ForecastPeriod
+	72,  // 108: grid.v1.WeatherForecast.peak_wind_gust_at:type_name -> google.protobuf.Timestamp
+	64,  // 109: grid.v1.Conditions.weather:type_name -> grid.v1.WeatherConditions
+	65,  // 110: grid.v1.Conditions.fire_weather:type_name -> grid.v1.FireWeatherConditions
+	72,  // 111: grid.v1.Conditions.last_updated:type_name -> google.protobuf.Timestamp
+	67,  // 112: grid.v1.Conditions.forecast:type_name -> grid.v1.WeatherForecast
+	48,  // 113: grid.v1.GridService.ListEvents:input_type -> grid.v1.ListEventsRequest
+	49,  // 114: grid.v1.GridService.GetEvent:input_type -> grid.v1.GetEventRequest
+	50,  // 115: grid.v1.GridService.GetEventHistory:input_type -> grid.v1.GetEventHistoryRequest
+	51,  // 116: grid.v1.GridService.ListHistory:input_type -> grid.v1.ListHistoryRequest
+	52,  // 117: grid.v1.GridService.ListPlaces:input_type -> grid.v1.ListPlacesRequest
+	54,  // 118: grid.v1.GridService.ResolvePlace:input_type -> grid.v1.ResolvePlaceRequest
+	53,  // 119: grid.v1.GridService.GetPlace:input_type -> grid.v1.GetPlaceRequest
+	41,  // 120: grid.v1.GridService.GetPlaceSummary:input_type -> grid.v1.GetPlaceSummaryRequest
+	57,  // 121: grid.v1.GridService.ListScanners:input_type -> grid.v1.ListScannersRequest
+	60,  // 122: grid.v1.GridService.ListCameras:input_type -> grid.v1.ListCamerasRequest
+	63,  // 123: grid.v1.GridService.GetConditions:input_type -> grid.v1.GetConditionsRequest
+	69,  // 124: grid.v1.GridService.ListSources:input_type -> grid.v1.ListSourcesRequest
+	37,  // 125: grid.v1.GridService.GetMeshTelemetry:input_type -> grid.v1.GetMeshTelemetryRequest
+	32,  // 126: grid.v1.GridService.ListEvents:output_type -> grid.v1.EventList
+	10,  // 127: grid.v1.GridService.GetEvent:output_type -> grid.v1.Event
+	34,  // 128: grid.v1.GridService.GetEventHistory:output_type -> grid.v1.EventRevisionList
+	34,  // 129: grid.v1.GridService.ListHistory:output_type -> grid.v1.EventRevisionList
+	35,  // 130: grid.v1.GridService.ListPlaces:output_type -> grid.v1.PlaceList
+	56,  // 131: grid.v1.GridService.ResolvePlace:output_type -> grid.v1.ResolvePlaceResponse
+	17,  // 132: grid.v1.GridService.GetPlace:output_type -> grid.v1.Place
+	42,  // 133: grid.v1.GridService.GetPlaceSummary:output_type -> grid.v1.PlaceSummary
+	59,  // 134: grid.v1.GridService.ListScanners:output_type -> grid.v1.ScannerList
+	62,  // 135: grid.v1.GridService.ListCameras:output_type -> grid.v1.CameraList
+	68,  // 136: grid.v1.GridService.GetConditions:output_type -> grid.v1.Conditions
+	36,  // 137: grid.v1.GridService.ListSources:output_type -> grid.v1.SourceList
+	38,  // 138: grid.v1.GridService.GetMeshTelemetry:output_type -> grid.v1.MeshTelemetryArchive
+	126, // [126:139] is the sub-list for method output_type
+	113, // [113:126] is the sub-list for method input_type
+	113, // [113:113] is the sub-list for extension type_name
+	113, // [113:113] is the sub-list for extension extendee
+	0,   // [0:113] is the sub-list for field type_name
 }
 
 func init() { file_grid_proto_init() }
@@ -7426,6 +7535,7 @@ func file_grid_proto_init() {
 		(*Event_Power)(nil),
 		(*Event_BurnStatus)(nil),
 	}
+	file_grid_proto_msgTypes[1].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

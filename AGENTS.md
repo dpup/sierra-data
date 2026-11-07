@@ -543,8 +543,17 @@ gateway's `EmitUnpopulated` marshaler.
 
 **Grid Info Service** (`/api/v1/...`), the `GridService` RPCs:
 - `GET /api/v1/events` - cross-layer event query
-  (`place,layer,status,severity_min,since,page_token,page_size`; default status
-  `ACTIVE,SCHEDULED`; keyset pagination → `{events, nextPageToken}`). **`place`
+  (`place,layer,status,severity_min,since,page_token,page_size,geometry_format`;
+  default status `ACTIVE,SCHEDULED`; keyset pagination → `{events, nextPageToken}`).
+  **`page_size` is a ceiling**: the three paged RPCs also cut a page at
+  `gridapi.PageByteBudget` (3 MiB encoded, measured after every rewrite incl. the
+  geometry format) and hand back a token, and the gateway's loopback dial gets
+  `gridapi.GatewayDialOptions()` (64 MiB receive) so an item over the budget is
+  served alone. Without both, a perimeter-heavy page was a 429 at gRPC's 4 MiB
+  default. `geometry_format=OBJECT` (every event/revision/place RPC) puts GeoJSON
+  in `Geometry.object` (a proto3-`optional` Struct, so the default JSON has no
+  such key) instead of base64 `geojson`; the default stays byte-identical, pinned
+  by `internal/gridapi/testdata/geometry_default.golden.json`. **`place`
   accepts the slug (`hwy4-murphys-arnold`) or the namespaced id
   (`corridor:hwy4-murphys-arnold`)** — both resolve (`Store.GetPlace` keys on `id`
   when the value contains `:`, else `slug`); the bare slug is the intended form.

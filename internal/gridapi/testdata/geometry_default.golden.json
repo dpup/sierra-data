@@ -1,0 +1,766 @@
+{
+  "events": [
+    {
+      "id": "calfire:f1",
+      "layer": "WILDFIRE",
+      "category": "",
+      "severity": "SEVERE",
+      "status": "ACTIVE",
+      "headline": "Salt Fire — 120 acres, 10% contained",
+      "summary": "",
+      "description": "",
+      "areaLabel": "",
+      "canonicalUrl": "",
+      "geometry": {
+        "geojson": "eyJ0eXBlIjoiUG9pbnQiLCJjb29yZGluYXRlcyI6Wy0xMjAuNSwzOF19",
+        "bbox": {
+          "minLat": 38,
+          "minLng": -120.5,
+          "maxLat": 38,
+          "maxLng": -120.5
+        },
+        "centroid": {
+          "lat": 38,
+          "lng": -120.5
+        }
+      },
+      "placeIds": [
+        "area:calaveras",
+        "county:calaveras-county"
+      ],
+      "provenance": {
+        "sourceId": "calfire",
+        "sourceName": "",
+        "attribution": "",
+        "sourceUrl": "",
+        "fetchedAt": null
+      },
+      "effective": null,
+      "expires": null,
+      "observedAt": "2026-07-01T12:00:00Z",
+      "ingestedAt": null,
+      "revision": 1,
+      "enhancement": null
+    },
+    {
+      "id": "usgs:q1",
+      "layer": "EARTHQUAKE",
+      "category": "",
+      "severity": "MODERATE",
+      "status": "ACTIVE",
+      "headline": "M4.4 earthquake near Arnold (revised)",
+      "summary": "",
+      "description": "",
+      "areaLabel": "",
+      "canonicalUrl": "",
+      "geometry": {
+        "geojson": "eyJ0eXBlIjoiUG9pbnQiLCJjb29yZGluYXRlcyI6Wy0xMjAuMSwzOC40XX0=",
+        "bbox": {
+          "minLat": 38.4,
+          "minLng": -120.1,
+          "maxLat": 38.4,
+          "maxLng": -120.1
+        },
+        "centroid": {
+          "lat": 38.4,
+          "lng": -120.1
+        }
+      },
+      "placeIds": [
+        "area:calaveras",
+        "area:high-country",
+        "county:tuolumne-county"
+      ],
+      "provenance": {
+        "sourceId": "usgs",
+        "sourceName": "",
+        "attribution": "",
+        "sourceUrl": "",
+        "fetchedAt": null
+      },
+      "effective": null,
+      "expires": null,
+      "observedAt": "2026-07-01T15:00:00Z",
+      "ingestedAt": null,
+      "revision": 2,
+      "enhancement": null
+    },
+    {
+      "id": "wx:a1",
+      "layer": "WEATHER_ALERT",
+      "category": "",
+      "severity": "MODERATE",
+      "status": "SCHEDULED",
+      "headline": "Winter Weather Advisory",
+      "summary": "",
+      "description": "",
+      "areaLabel": "",
+      "canonicalUrl": "",
+      "geometry": null,
+      "placeIds": [
+        "area:calaveras"
+      ],
+      "provenance": {
+        "sourceId": "nws",
+        "sourceName": "",
+        "attribution": "",
+        "sourceUrl": "",
+        "fetchedAt": null
+      },
+      "effective": null,
+      "expires": null,
+      "observedAt": "2026-07-01T11:00:00Z",
+      "ingestedAt": null,
+      "revision": 1,
+      "enhancement": null
+    },
+    {
+      "id": "chp:i1",
+      "layer": "ROAD_INCIDENT",
+      "category": "",
+      "severity": "MINOR",
+      "status": "RESOLVED",
+      "headline": "Vehicle off roadway (cleared)",
+      "summary": "",
+      "description": "",
+      "areaLabel": "",
+      "canonicalUrl": "",
+      "geometry": {
+        "geojson": "eyJ0eXBlIjoiUG9pbnQiLCJjb29yZGluYXRlcyI6Wy0xMjAuNTUsMzguMDVdfQ==",
+        "bbox": {
+          "minLat": 38.05,
+          "minLng": -120.55,
+          "maxLat": 38.05,
+          "maxLng": -120.55
+        },
+        "centroid": {
+          "lat": 38.05,
+          "lng": -120.55
+        }
+      },
+      "placeIds": [
+        "area:calaveras",
+        "county:calaveras-county"
+      ],
+      "provenance": {
+        "sourceId": "chp",
+        "sourceName": "",
+        "attribution": "",
+        "sourceUrl": "",
+        "fetchedAt": null
+      },
+      "effective": null,
+      "expires": null,
+      "observedAt": "2026-07-01T10:00:00Z",
+      "ingestedAt": null,
+      "revision": 1,
+      "enhancement": {
+        "model": "gpt-5-mini",
+        "enhancedAt": null,
+        "fields": [
+          "headline",
+          "summary",
+          "impact"
+        ],
+        "request": "",
+        "response": ""
+      }
+    },
+    {
+      "id": "meshcore:aa00",
+      "layer": "MESH",
+      "category": "",
+      "severity": "INFO",
+      "status": "ACTIVE",
+      "headline": "Shadow node",
+      "summary": "",
+      "description": "",
+      "areaLabel": "",
+      "canonicalUrl": "",
+      "geometry": {
+        "geojson": "",
+        "bbox": null,
+        "centroid": {
+          "lat": 38.2,
+          "lng": -120.4
+        }
+      },
+      "placeIds": [
+        "area:calaveras",
+        "area:high-country",
+        "corridor:hwy-4",
+        "county:calaveras-county"
+      ],
+      "provenance": {
+        "sourceId": "meshcore",
+        "sourceName": "",
+        "attribution": "",
+        "sourceUrl": "",
+        "fetchedAt": null
+      },
+      "effective": null,
+      "expires": null,
+      "observedAt": "2026-07-01T12:00:00Z",
+      "ingestedAt": null,
+      "revision": 1,
+      "enhancement": null
+    }
+  ],
+  "nextPageToken": ""
+}
+{
+  "id": "usgs:q1",
+  "layer": "EARTHQUAKE",
+  "category": "",
+  "severity": "MODERATE",
+  "status": "ACTIVE",
+  "headline": "M4.4 earthquake near Arnold (revised)",
+  "summary": "",
+  "description": "",
+  "areaLabel": "",
+  "canonicalUrl": "",
+  "geometry": {
+    "geojson": "eyJ0eXBlIjoiUG9pbnQiLCJjb29yZGluYXRlcyI6Wy0xMjAuMSwzOC40XX0=",
+    "bbox": {
+      "minLat": 38.4,
+      "minLng": -120.1,
+      "maxLat": 38.4,
+      "maxLng": -120.1
+    },
+    "centroid": {
+      "lat": 38.4,
+      "lng": -120.1
+    }
+  },
+  "placeIds": [
+    "area:calaveras",
+    "area:high-country",
+    "county:tuolumne-county"
+  ],
+  "provenance": {
+    "sourceId": "usgs",
+    "sourceName": "",
+    "attribution": "",
+    "sourceUrl": "",
+    "fetchedAt": null
+  },
+  "effective": null,
+  "expires": null,
+  "observedAt": "2026-07-01T15:00:00Z",
+  "ingestedAt": null,
+  "revision": 2,
+  "enhancement": null
+}
+{
+  "revisions": [
+    {
+      "revision": 2,
+      "observedAt": "2026-07-01T15:00:00Z",
+      "ingestedAt": null,
+      "event": {
+        "id": "usgs:q1",
+        "layer": "EARTHQUAKE",
+        "category": "",
+        "severity": "MODERATE",
+        "status": "ACTIVE",
+        "headline": "M4.4 earthquake near Arnold (revised)",
+        "summary": "",
+        "description": "",
+        "areaLabel": "",
+        "canonicalUrl": "",
+        "geometry": {
+          "geojson": "eyJ0eXBlIjoiUG9pbnQiLCJjb29yZGluYXRlcyI6Wy0xMjAuMSwzOC40XX0=",
+          "bbox": {
+            "minLat": 38.4,
+            "minLng": -120.1,
+            "maxLat": 38.4,
+            "maxLng": -120.1
+          },
+          "centroid": {
+            "lat": 38.4,
+            "lng": -120.1
+          }
+        },
+        "placeIds": [
+          "area:calaveras",
+          "area:high-country",
+          "county:tuolumne-county"
+        ],
+        "provenance": {
+          "sourceId": "usgs",
+          "sourceName": "",
+          "attribution": "",
+          "sourceUrl": "",
+          "fetchedAt": null
+        },
+        "effective": null,
+        "expires": null,
+        "observedAt": "2026-07-01T15:00:00Z",
+        "ingestedAt": null,
+        "revision": 2,
+        "enhancement": null
+      }
+    },
+    {
+      "revision": 1,
+      "observedAt": "2026-07-01T14:00:00Z",
+      "ingestedAt": null,
+      "event": {
+        "id": "usgs:q1",
+        "layer": "EARTHQUAKE",
+        "category": "",
+        "severity": "MODERATE",
+        "status": "ACTIVE",
+        "headline": "M4.2 earthquake near Arnold",
+        "summary": "",
+        "description": "",
+        "areaLabel": "",
+        "canonicalUrl": "",
+        "geometry": {
+          "geojson": "eyJ0eXBlIjoiUG9pbnQiLCJjb29yZGluYXRlcyI6Wy0xMjAuMSwzOC40XX0=",
+          "bbox": {
+            "minLat": 38.4,
+            "minLng": -120.1,
+            "maxLat": 38.4,
+            "maxLng": -120.1
+          },
+          "centroid": {
+            "lat": 38.4,
+            "lng": -120.1
+          }
+        },
+        "placeIds": [
+          "area:calaveras",
+          "area:high-country",
+          "county:tuolumne-county"
+        ],
+        "provenance": {
+          "sourceId": "usgs",
+          "sourceName": "",
+          "attribution": "",
+          "sourceUrl": "",
+          "fetchedAt": null
+        },
+        "effective": null,
+        "expires": null,
+        "observedAt": "2026-07-01T14:00:00Z",
+        "ingestedAt": null,
+        "revision": 1,
+        "enhancement": null
+      }
+    }
+  ],
+  "nextPageToken": ""
+}
+{
+  "revisions": [
+    {
+      "revision": 2,
+      "observedAt": "2026-07-01T15:00:00Z",
+      "ingestedAt": null,
+      "event": {
+        "id": "usgs:q1",
+        "layer": "EARTHQUAKE",
+        "category": "",
+        "severity": "MODERATE",
+        "status": "ACTIVE",
+        "headline": "M4.4 earthquake near Arnold (revised)",
+        "summary": "",
+        "description": "",
+        "areaLabel": "",
+        "canonicalUrl": "",
+        "geometry": {
+          "geojson": "eyJ0eXBlIjoiUG9pbnQiLCJjb29yZGluYXRlcyI6Wy0xMjAuMSwzOC40XX0=",
+          "bbox": {
+            "minLat": 38.4,
+            "minLng": -120.1,
+            "maxLat": 38.4,
+            "maxLng": -120.1
+          },
+          "centroid": {
+            "lat": 38.4,
+            "lng": -120.1
+          }
+        },
+        "placeIds": [
+          "area:calaveras",
+          "area:high-country",
+          "county:tuolumne-county"
+        ],
+        "provenance": {
+          "sourceId": "usgs",
+          "sourceName": "",
+          "attribution": "",
+          "sourceUrl": "",
+          "fetchedAt": null
+        },
+        "effective": null,
+        "expires": null,
+        "observedAt": "2026-07-01T15:00:00Z",
+        "ingestedAt": null,
+        "revision": 2,
+        "enhancement": null
+      }
+    },
+    {
+      "revision": 1,
+      "observedAt": "2026-07-01T14:00:00Z",
+      "ingestedAt": null,
+      "event": {
+        "id": "usgs:q1",
+        "layer": "EARTHQUAKE",
+        "category": "",
+        "severity": "MODERATE",
+        "status": "ACTIVE",
+        "headline": "M4.2 earthquake near Arnold",
+        "summary": "",
+        "description": "",
+        "areaLabel": "",
+        "canonicalUrl": "",
+        "geometry": {
+          "geojson": "eyJ0eXBlIjoiUG9pbnQiLCJjb29yZGluYXRlcyI6Wy0xMjAuMSwzOC40XX0=",
+          "bbox": {
+            "minLat": 38.4,
+            "minLng": -120.1,
+            "maxLat": 38.4,
+            "maxLng": -120.1
+          },
+          "centroid": {
+            "lat": 38.4,
+            "lng": -120.1
+          }
+        },
+        "placeIds": [
+          "area:calaveras",
+          "area:high-country",
+          "county:tuolumne-county"
+        ],
+        "provenance": {
+          "sourceId": "usgs",
+          "sourceName": "",
+          "attribution": "",
+          "sourceUrl": "",
+          "fetchedAt": null
+        },
+        "effective": null,
+        "expires": null,
+        "observedAt": "2026-07-01T14:00:00Z",
+        "ingestedAt": null,
+        "revision": 1,
+        "enhancement": null
+      }
+    },
+    {
+      "revision": 1,
+      "observedAt": "2026-07-01T12:00:00Z",
+      "ingestedAt": null,
+      "event": {
+        "id": "calfire:f1",
+        "layer": "WILDFIRE",
+        "category": "",
+        "severity": "SEVERE",
+        "status": "ACTIVE",
+        "headline": "Salt Fire — 120 acres, 10% contained",
+        "summary": "",
+        "description": "",
+        "areaLabel": "",
+        "canonicalUrl": "",
+        "geometry": {
+          "geojson": "eyJ0eXBlIjoiUG9pbnQiLCJjb29yZGluYXRlcyI6Wy0xMjAuNSwzOF19",
+          "bbox": {
+            "minLat": 38,
+            "minLng": -120.5,
+            "maxLat": 38,
+            "maxLng": -120.5
+          },
+          "centroid": {
+            "lat": 38,
+            "lng": -120.5
+          }
+        },
+        "placeIds": [
+          "area:calaveras",
+          "county:calaveras-county"
+        ],
+        "provenance": {
+          "sourceId": "calfire",
+          "sourceName": "",
+          "attribution": "",
+          "sourceUrl": "",
+          "fetchedAt": null
+        },
+        "effective": null,
+        "expires": null,
+        "observedAt": "2026-07-01T12:00:00Z",
+        "ingestedAt": null,
+        "revision": 1,
+        "enhancement": null
+      }
+    },
+    {
+      "revision": 1,
+      "observedAt": "2026-07-01T12:00:00Z",
+      "ingestedAt": null,
+      "event": {
+        "id": "meshcore:aa00",
+        "layer": "MESH",
+        "category": "",
+        "severity": "INFO",
+        "status": "ACTIVE",
+        "headline": "Shadow node",
+        "summary": "",
+        "description": "",
+        "areaLabel": "",
+        "canonicalUrl": "",
+        "geometry": {
+          "geojson": "",
+          "bbox": null,
+          "centroid": {
+            "lat": 38.2,
+            "lng": -120.4
+          }
+        },
+        "placeIds": [
+          "area:calaveras",
+          "area:high-country",
+          "corridor:hwy-4",
+          "county:calaveras-county"
+        ],
+        "provenance": {
+          "sourceId": "meshcore",
+          "sourceName": "",
+          "attribution": "",
+          "sourceUrl": "",
+          "fetchedAt": null
+        },
+        "effective": null,
+        "expires": null,
+        "observedAt": "2026-07-01T12:00:00Z",
+        "ingestedAt": null,
+        "revision": 1,
+        "enhancement": null
+      }
+    },
+    {
+      "revision": 1,
+      "observedAt": "2026-07-01T11:00:00Z",
+      "ingestedAt": null,
+      "event": {
+        "id": "wx:a1",
+        "layer": "WEATHER_ALERT",
+        "category": "",
+        "severity": "MODERATE",
+        "status": "SCHEDULED",
+        "headline": "Winter Weather Advisory",
+        "summary": "",
+        "description": "",
+        "areaLabel": "",
+        "canonicalUrl": "",
+        "geometry": null,
+        "placeIds": [
+          "area:calaveras"
+        ],
+        "provenance": {
+          "sourceId": "nws",
+          "sourceName": "",
+          "attribution": "",
+          "sourceUrl": "",
+          "fetchedAt": null
+        },
+        "effective": null,
+        "expires": null,
+        "observedAt": "2026-07-01T11:00:00Z",
+        "ingestedAt": null,
+        "revision": 1,
+        "enhancement": null
+      }
+    },
+    {
+      "revision": 1,
+      "observedAt": "2026-07-01T10:00:00Z",
+      "ingestedAt": null,
+      "event": {
+        "id": "chp:i1",
+        "layer": "ROAD_INCIDENT",
+        "category": "",
+        "severity": "MINOR",
+        "status": "RESOLVED",
+        "headline": "Vehicle off roadway (cleared)",
+        "summary": "",
+        "description": "",
+        "areaLabel": "",
+        "canonicalUrl": "",
+        "geometry": {
+          "geojson": "eyJ0eXBlIjoiUG9pbnQiLCJjb29yZGluYXRlcyI6Wy0xMjAuNTUsMzguMDVdfQ==",
+          "bbox": {
+            "minLat": 38.05,
+            "minLng": -120.55,
+            "maxLat": 38.05,
+            "maxLng": -120.55
+          },
+          "centroid": {
+            "lat": 38.05,
+            "lng": -120.55
+          }
+        },
+        "placeIds": [
+          "area:calaveras",
+          "county:calaveras-county"
+        ],
+        "provenance": {
+          "sourceId": "chp",
+          "sourceName": "",
+          "attribution": "",
+          "sourceUrl": "",
+          "fetchedAt": null
+        },
+        "effective": null,
+        "expires": null,
+        "observedAt": "2026-07-01T10:00:00Z",
+        "ingestedAt": null,
+        "revision": 1,
+        "enhancement": {
+          "model": "gpt-5-mini",
+          "enhancedAt": null,
+          "fields": [
+            "headline",
+            "summary",
+            "impact"
+          ],
+          "request": "",
+          "response": ""
+        }
+      }
+    }
+  ],
+  "nextPageToken": ""
+}
+{
+  "id": "town:arnold",
+  "kind": "TOWN",
+  "name": "Arnold",
+  "slug": "arnold",
+  "geometry": {
+    "geojson": "eyJ0eXBlIjoiUG9pbnQiLCJjb29yZGluYXRlcyI6Wy0xMjAuMzUxMiwzOC4yNTUyXX0=",
+    "bbox": {
+      "minLat": 38.2552,
+      "minLng": -120.3512,
+      "maxLat": 38.2552,
+      "maxLng": -120.3512
+    },
+    "centroid": {
+      "lat": 38.2552,
+      "lng": -120.3512
+    }
+  },
+  "parentId": "county:calaveras-county"
+}
+{
+  "query": {
+    "lat": 38.25,
+    "lng": -120.35,
+    "matchedAddress": ""
+  },
+  "places": [
+    {
+      "id": "town:arnold",
+      "kind": "TOWN",
+      "name": "Arnold",
+      "slug": "arnold",
+      "geometry": {
+        "geojson": "eyJ0eXBlIjoiUG9pbnQiLCJjb29yZGluYXRlcyI6Wy0xMjAuMzUxMiwzOC4yNTUyXX0=",
+        "bbox": {
+          "minLat": 38.2552,
+          "minLng": -120.3512,
+          "maxLat": 38.2552,
+          "maxLng": -120.3512
+        },
+        "centroid": {
+          "lat": 38.2552,
+          "lng": -120.3512
+        }
+      },
+      "parentId": "county:calaveras-county"
+    },
+    {
+      "id": "corridor:hwy-4",
+      "kind": "CORRIDOR",
+      "name": "Hwy 4 — Angels Camp to Arnold",
+      "slug": "hwy-4",
+      "geometry": {
+        "geojson": "eyJ0eXBlIjoiTGluZVN0cmluZyIsImNvb3JkaW5hdGVzIjpbWy0xMjAuNTUsMzguMDddLFstMTIwLjM1LDM4LjI1XV19",
+        "bbox": {
+          "minLat": 38.07,
+          "minLng": -120.55,
+          "maxLat": 38.25,
+          "maxLng": -120.35
+        },
+        "centroid": {
+          "lat": 38.16,
+          "lng": -120.44999999999999
+        }
+      },
+      "parentId": ""
+    },
+    {
+      "id": "county:calaveras-county",
+      "kind": "COUNTY",
+      "name": "Calaveras County",
+      "slug": "calaveras-county",
+      "geometry": {
+        "geojson": "eyJ0eXBlIjoiUG9seWdvbiIsImNvb3JkaW5hdGVzIjpbW1stMTIwLjk5MzU5LDM4LjIyNTU4XSxbLTEyMC45OTU1LDM4LjIyNTRdLFstMTIwLjk4NjQ1LDM4LjIwNDY1XSxbLTEyMC45NzUzNCwzOC4xNzgyMl0sWy0xMjAuOTY5MTgsMzguMTYzMDJdLFstMTIwLjkzODg1LDM4LjA4ODMyXSxbLTEyMC45MjY0NSwzOC4wNzc0Ml0sWy0xMjAuOTE4NjgsMzguMDcwNzZdLFstMTIwLjg3NjA1LDM4LjAyODg5XSxbLTEyMC44NTI1MSwzOC4wMDkzNF0sWy0xMjAuODQ5OTMsMzguMDA3MTRdLFstMTIwLjg0NDc0LDM4LjAwMzE3XSxbLTEyMC44NDExNSwzOC4wMDA3OF0sWy0xMjAuODMyNzgsMzcuOTkzODRdLFstMTIwLjc5MzksMzcuOTU5MjNdLFstMTIwLjc4OSwzNy45NTQ3N10sWy0xMjAuNzg0LDM3Ljk1MDk2XSxbLTEyMC43ODA0NSwzNy45NDc3M10sWy0xMjAuNzc1NzksMzcuOTQzMDRdLFstMTIwLjc3MDM4LDM3LjkzODgxXSxbLTEyMC43Njc0MiwzNy45MzYxMl0sWy0xMjAuNzUyNjksMzcuOTIzMzNdLFstMTIwLjc1MSwzNy45MjA3Ml0sWy0xMjAuNzQ3MzQsMzcuOTE2MDVdLFstMTIwLjc0NDYyLDM3LjkxMjU4XSxbLTEyMC43Mjg2NywzNy44OTc2N10sWy0xMjAuNzE5MzgsMzcuODkwM10sWy0xMjAuNjYwODQsMzcuODM4OTNdLFstMTIwLjY1OTk0LDM3LjgzODIzXSxbLTEyMC42NTUyMSwzNy44MzMyNl0sWy0xMjAuNjUzNDMsMzcuODMxOTddLFstMTIwLjY1MzI3LDM3LjgzMTg2XSxbLTEyMC42NTMyNCwzNy44MzI4Ml0sWy0xMjAuNjQ4NjUsMzcuODM3NTZdLFstMTIwLjY0NjU5LDM3LjgzODI4XSxbLTEyMC42NDM0NCwzNy44NDA0OF0sWy0xMjAuNjQyNzEsMzcuODQyMjVdLFstMTIwLjY0MzY5LDM3Ljg0NDA2XSxbLTEyMC42NDE1MSwzNy44NDYwM10sWy0xMjAuNjM5MTYsMzcuODQ2NzNdLFstMTIwLjYzNzM4LDM3Ljg0ODddLFstMTIwLjYzNzkxLDM3Ljg0OTldLFstMTIwLjYzNzk3LDM3Ljg1MjM4XSxbLTEyMC42MzY4OSwzNy44NTQ3NV0sWy0xMjAuNjM1NzEsMzcuODU1ODZdLFstMTIwLjYzNTQ4LDM3Ljg1NzldLFstMTIwLjYzMzc5LDM3Ljg2MDYxXSxbLTEyMC42Mjc2OCwzNy44NjMzMV0sWy0xMjAuNjI1OTcsMzcuODY1MDddLFstMTIwLjYyMzgsMzcuODY2Ml0sWy0xMjAuNjIyNzEsMzcuODY3NDddLFstMTIwLjYxNjk3LDM3Ljg3MDA1XSxbLTEyMC42MDkwMywzNy44NzI3Ml0sWy0xMjAuNjA0NzQsMzcuODczMjRdLFstMTIwLjYwNDUyLDM3Ljg3MzgxXSxbLTEyMC42MDU0NCwzNy44NzU0MV0sWy0xMjAuNjA1MDcsMzcuODc2MTJdLFstMTIwLjYwNDYsMzcuODc2MzddLFstMTIwLjYwMDE0LDM3Ljg3OTYzXSxbLTEyMC41OTYzLDM3Ljg4MzM2XSxbLTEyMC41OTcxNiwzNy44ODQ5NV0sWy0xMjAuNTk3MzcsMzcuODg1OTddLFstMTIwLjU5NTg4LDM3Ljg4ODg4XSxbLTEyMC41OTAwMSwzNy44OTE5OF0sWy0xMjAuNTg4NTYsMzcuODkzNTRdLFstMTIwLjU4Nzc1LDM3Ljg5NDk4XSxbLTEyMC41ODQzLDM3Ljg5NjAxXSxbLTEyMC41ODEyOSwzNy44OTYwMl0sWy0xMjAuNTcyOTgsMzcuODk0MTNdLFstMTIwLjU3MTM1LDM3Ljg5NDQ0XSxbLTEyMC41NjgxNiwzNy44OTc1Nl0sWy0xMjAuNTY2OTksMzcuODk5NzNdLFstMTIwLjU2NjU1LDM3LjkwMTE2XSxbLTEyMC41NjQzNiwzNy45MDMwNV0sWy0xMjAuNTYyOTgsMzcuOTA3MjZdLFstMTIwLjU2MjUzLDM3LjkxMDUzXSxbLTEyMC41NjI4NywzNy45MTI0NF0sWy0xMjAuNTYyMiwzNy45MTQwN10sWy0xMjAuNTYxMTEsMzcuOTE0NzJdLFstMTIwLjU1NjYzLDM3LjkxNTkxXSxbLTEyMC41NTUxNSwzNy45MTY4M10sWy0xMjAuNTUzMzgsMzcuOTE5NzNdLFstMTIwLjU1MTExLDM3LjkyMTY4XSxbLTEyMC41NDcyOCwzNy45MjE2OF0sWy0xMjAuNTQ0MDIsMzcuOTE5OTldLFstMTIwLjU0MjM1LDM3LjkyMDQ1XSxbLTEyMC41Mzk4NSwzNy45MjQ0NF0sWy0xMjAuNTM3MjYsMzcuOTI3NTFdLFstMTIwLjUzNzI1LDM3LjkzMDExXSxbLTEyMC41Mzk0NSwzNy45MzMyNl0sWy0xMjAuNTQwMDIsMzcuOTM1ODFdLFstMTIwLjUzOTQ0LDM3LjkzNzM5XSxbLTEyMC41MzY3NCwzNy45NDAwNF0sWy0xMjAuNTM2NiwzNy45NDE5Ml0sWy0xMjAuNTM1MjQsMzcuOTQ0NF0sWy0xMjAuNTMzOTksMzcuOTQ1MDZdLFstMTIwLjUyOTg4LDM3Ljk0NjAzXSxbLTEyMC41MjM4LDM3Ljk0OTA1XSxbLTEyMC41MjIyMSwzNy45NDk5Ml0sWy0xMjAuNTE2NzUsMzcuOTUxOTddLFstMTIwLjUxNDk1LDM3Ljk1MzM5XSxbLTEyMC41MTM0NCwzNy45NTY0NF0sWy0xMjAuNTEzMzUsMzcuOTU3OTRdLFstMTIwLjUxNTA5LDM3Ljk2MjE1XSxbLTEyMC41MTc2LDM3Ljk2NTMxXSxbLTEyMC41MjQ3NywzNy45NjgyNF0sWy0xMjAuNTI2NDEsMzcuOTY5MjldLFstMTIwLjUyNzY3LDM3Ljk3MDkxXSxbLTEyMC41Mjc5NywzNy45NzI0NF0sWy0xMjAuNTI3NTcsMzcuOTc0NTRdLFstMTIwLjUyODI5LDM3Ljk3NTg5XSxbLTEyMC41MzExMywzNy45NzYzMV0sWy0xMjAuNTM4NjksMzcuOTc0NDVdLFstMTIwLjU0MjMyLDM3Ljk3NDU0XSxbLTEyMC41NDMyNywzNy45NzU3Ml0sWy0xMjAuNTQyODUsMzcuOTc3MjVdLFstMTIwLjU0MTE1LDM3Ljk3ODQ4XSxbLTEyMC41MzYzNiwzNy45ODAxN10sWy0xMjAuNTMxODIsMzcuOTgwNjddLFstMTIwLjUyODEyLDM3Ljk4MjI0XSxbLTEyMC41Mjc3NSwzNy45ODM5NF0sWy0xMjAuNTI5OTQsMzcuOTg2MjRdLFstMTIwLjUzNDI4LDM3Ljk4OTQ0XSxbLTEyMC41MzQ5OSwzNy45OTA5NF0sWy0xMjAuNTMyNzcsMzcuOTkyMTZdLFstMTIwLjUyOTk0LDM3Ljk5MjU0XSxbLTEyMC41MjUxOSwzNy45OTM2N10sWy0xMjAuNTIxNjUsMzcuOTk1MTZdLFstMTIwLjUyMDUxLDM3Ljk5NjM1XSxbLTEyMC41MjA0LDM3Ljk5ODM2XSxbLTEyMC41MTg4NiwzOC4wMDIyMl0sWy0xMjAuNTE2MTgsMzguMDA0MTNdLFstMTIwLjUxMzUyLDM4LjAwNDA1XSxbLTEyMC41MTEwOSwzOC4wMDI1OF0sWy0xMjAuNTA5MjksMzcuOTk5OTNdLFstMTIwLjUwOTY5LDM3Ljk5ODE2XSxbLTEyMC41MTQwMSwzNy45OTY2M10sWy0xMjAuNTEzNTUsMzcuOTk1NjFdLFstMTIwLjUxMDc4LDM3Ljk5MzM5XSxbLTEyMC41MDkxOSwzNy45OTE1MV0sWy0xMjAuNTA1NzcsMzcuOTkwOV0sWy0xMjAuNTA0NTIsMzcuOTkxMTRdLFstMTIwLjQ5OTgyLDM3Ljk5NTQ0XSxbLTEyMC40OTkzNywzNy45OTYxOV0sWy0xMjAuNDk5MjgsMzcuOTk5OTNdLFstMTIwLjUwMDE2LDM4LjAwNDEyXSxbLTEyMC41MDA0NCwzOC4wMDY2M10sWy0xMjAuNDk5ODIsMzguMDA3OTRdLFstMTIwLjQ5NjcyLDM4LjAwODJdLFstMTIwLjQ5MzQyLDM4LjAxMDddLFstMTIwLjQ5MjA2LDM4LjAxMTJdLFstMTIwLjQ4OTcyLDM4LjAwOTM4XSxbLTEyMC40ODY4OSwzOC4wMDk0N10sWy0xMjAuNDgzNjgsMzguMDEyMTFdLFstMTIwLjQ4MTcyLDM4LjAxMjRdLFstMTIwLjQ3Nzk1LDM4LjAxMTc2XSxbLTEyMC40NzM3OCwzOC4wMTI0NF0sWy0xMjAuNDY4NTEsMzguMDA5NjVdLFstMTIwLjQ2NTAzLDM4LjAwOTU5XSxbLTEyMC40NjM3NSwzOC4wMTAzOV0sWy0xMjAuNDYyOCwzOC4wMTE5M10sWy0xMjAuNDYzODUsMzguMDEzMzZdLFstMTIwLjQ2NzM0LDM4LjAxMzU5XSxbLTEyMC40Njg0MywzOC4wMTQzNF0sWy0xMjAuNDY5NjgsMzguMDE2NDVdLFstMTIwLjQ2ODg0LDM4LjAxOTY1XSxbLTEyMC40NjQ1MywzOC4wMjEwOV0sWy0xMjAuNDYyMTMsMzguMDIyMzddLFstMTIwLjQ2MTY0LDM4LjAyMzM4XSxbLTEyMC40NjE0NywzOC4wMjY5MV0sWy0xMjAuNDYxMDQsMzguMDI3ODRdLFstMTIwLjQ1Nzc1LDM4LjAzMTU1XSxbLTEyMC40NTQ5MiwzOC4wMzc1M10sWy0xMjAuNDUzOTYsMzguMDM4MjFdLFstMTIwLjQ1Mzk0LDM4LjA0MTM1XSxbLTEyMC40NDgyMiwzOC4wNDY1Ml0sWy0xMjAuNDQ2MjgsMzguMDQ3NzhdLFstMTIwLjQ0MzQ1LDM4LjA1MTY2XSxbLTEyMC40NDM0OCwzOC4wNTU3Ml0sWy0xMjAuNDQyNTMsMzguMDU4NzRdLFstMTIwLjQ0MDA3LDM4LjA2MDZdLFstMTIwLjQzODA3LDM4LjA2MDg5XSxbLTEyMC40MzI5OSwzOC4wNTk1M10sWy0xMjAuNDMxMjUsMzguMDYwNTFdLFstMTIwLjQzMDU2LDM4LjA2OTcxXSxbLTEyMC40MzEyNSwzOC4wNzI4NF0sWy0xMjAuNDMwODIsMzguMDczMzldLFstMTIwLjQyNjc0LDM4LjA3MjddLFstMTIwLjQyNDM3LDM4LjA3MzJdLFstMTIwLjQyNDI1LDM4LjA3NTddLFstMTIwLjQyMTUzLDM4LjA3ODc1XSxbLTEyMC40MTg2NCwzOC4wODA2XSxbLTEyMC40MTYxNywzOC4wODA2NF0sWy0xMjAuNDE0NjMsMzguMDgxOTFdLFstMTIwLjQxNDU5LDM4LjA4Mzk2XSxbLTEyMC40MTE5LDM4LjA4NjAyXSxbLTEyMC40MTA2LDM4LjA4Nzg4XSxbLTEyMC40MTA0LDM4LjA5MjQzXSxbLTEyMC40MDk0NCwzOC4wOTUyXSxbLTEyMC40MTA1MSwzOC4wOTk5M10sWy0xMjAuNDEwMDEsMzguMTAyNF0sWy0xMjAuNDA4MzcsMzguMTAzOV0sWy0xMjAuNDAxOTIsMzguMTA3ODNdLFstMTIwLjM5NTg3LDM4LjEwOTg5XSxbLTEyMC4zODc5NiwzOC4xMTUyNF0sWy0xMjAuMzg2MjIsMzguMTE4MjRdLFstMTIwLjM4NTc2LDM4LjEyMDk0XSxbLTEyMC4zODQ0MywzOC4xMjM2Ml0sWy0xMjAuMzg0MDMsMzguMTI1NjVdLFstMTIwLjM4MjUyLDM4LjEyNzU3XSxbLTEyMC4zNzg3OCwzOC4xMjk3N10sWy0xMjAuMzc4MDksMzguMTMyMDhdLFstMTIwLjM3ODcsMzguMTMzOTFdLFstMTIwLjM3ODAzLDM4LjEzNTU2XSxbLTEyMC4zNzQ5LDM4LjEzNjAxXSxbLTEyMC4zNzI2NywzOC4xMzY3NV0sWy0xMjAuMzcxNCwzOC4xMzc4N10sWy0xMjAuMzcxMDgsMzguMTQwMThdLFstMTIwLjM3MjM1LDM4LjE0MTE0XSxbLTEyMC4zNzYwMywzOC4xNDE5Ml0sWy0xMjAuMzc2MiwzOC4xNDI2NV0sWy0xMjAuMzcyNjQsMzguMTQ2NjNdLFstMTIwLjM3MTUxLDM4LjE0OTkyXSxbLTEyMC4zNjg4MiwzOC4xNTIyM10sWy0xMjAuMzY3NTcsMzguMTUyODFdLFstMTIwLjM1NzU0LDM4LjE1Mzg4XSxbLTEyMC4zNTc5MiwzOC4xNTgwOV0sWy0xMjAuMzYwMjEsMzguMTU5NTNdLFstMTIwLjM2MDMyLDM4LjE2MDM1XSxbLTEyMC4zNTY3OSwzOC4xNjI5OF0sWy0xMjAuMzUzNTcsMzguMTYzNzhdLFstMTIwLjM1MDUsMzguMTY5ODJdLFstMTIwLjM0ODM1LDM4LjE3MDcxXSxbLTEyMC4zNDQ4MiwzOC4xNzAxMl0sWy0xMjAuMzQwOTMsMzguMTcxNjNdLFstMTIwLjM0MDIxLDM4LjE3MjkzXSxbLTEyMC4zNDA5NiwzOC4xNzQ4M10sWy0xMjAuMzM5OTUsMzguMTc4MTldLFstMTIwLjMzNzI1LDM4LjE3ODA1XSxbLTEyMC4zMzc0NSwzOC4xODA1XSxbLTEyMC4zMzk3MSwzOC4xODMxMV0sWy0xMjAuMzM5NTEsMzguMTgzOTFdLFstMTIwLjMzNjI2LDM4LjE4NDM5XSxbLTEyMC4zMzU1MywzOC4xODQ5Nl0sWy0xMjAuMzM1NjUsMzguMTg3OTNdLFstMTIwLjMzMzIxLDM4LjE4OF0sWy0xMjAuMzMxODUsMzguMTg4OV0sWy0xMjAuMzMxNzMsMzguMTkwMzFdLFstMTIwLjMzMDE0LDM4LjE5Mzg4XSxbLTEyMC4zMzA0MiwzOC4xOTQ5OF0sWy0xMjAuMzI2ODMsMzguMTk1OF0sWy0xMjAuMzI1NjcsMzguMTk4NzNdLFstMTIwLjMyMTksMzguMjAxMzNdLFstMTIwLjMyMDUzLDM4LjIwNDI0XSxbLTEyMC4zMTg1LDM4LjIwNTg4XSxbLTEyMC4zMTcyNSwzOC4yMDcyNl0sWy0xMjAuMzE3MjIsMzguMjA4ODFdLFstMTIwLjMxNTgzLDM4LjIxMDc2XSxbLTEyMC4zMTU5MSwzOC4yMTIxXSxbLTEyMC4zMTIxMSwzOC4yMTU4MV0sWy0xMjAuMzEwMiwzOC4yMTg0Ml0sWy0xMjAuMzA4MTksMzguMjIyMDddLFstMTIwLjMwNzU4LDM4LjIyNDQzXSxbLTEyMC4zMDM2MywzOC4yMjcwMV0sWy0xMjAuMzAxOTgsMzguMjI5NDRdLFstMTIwLjI5NDE3LDM4LjIzMjQzXSxbLTEyMC4yOTEyNCwzOC4yMzRdLFstMTIwLjI5MDYsMzguMjM1MjhdLFstMTIwLjI5MDI1LDM4LjIzODA1XSxbLTEyMC4yOTA1NywzOC4yMzk1Ml0sWy0xMjAuMjkwMzYsMzguMjQzODhdLFstMTIwLjI4OTIyLDM4LjI0NjU2XSxbLTEyMC4yODY1NSwzOC4yNDc4Ml0sWy0xMjAuMjg2MTQsMzguMjQ5NzZdLFstMTIwLjI4NDIyLDM4LjI1MTU5XSxbLTEyMC4yODIxOSwzOC4yNTIxMl0sWy0xMjAuMjc5NzIsMzguMjU0OTNdLFstMTIwLjI3NzM0LDM4LjI1NjY5XSxbLTEyMC4yNzU5MSwzOC4yNTg4Ml0sWy0xMjAuMjczNTYsMzguMjU5MDJdLFstMTIwLjI3MjQzLDM4LjI1OTc3XSxbLTEyMC4yNzI0MywzOC4yNjIxOF0sWy0xMjAuMjczOTksMzguMjY0MzddLFstMTIwLjI3Mzc5LDM4LjI2NTQzXSxbLTEyMC4yNzE5LDM4LjI2NzY0XSxbLTEyMC4yNzEwMSwzOC4yNzAyOF0sWy0xMjAuMjcwMTgsMzguMjcxMTJdLFstMTIwLjI2NiwzOC4yNzI1OF0sWy0xMjAuMjY0ODksMzguMjc0MjVdLFstMTIwLjI2MDQ4LDM4LjI3ODA2XSxbLTEyMC4yNTgwNiwzOC4yODMyM10sWy0xMjAuMjU2MzcsMzguMjg1NzVdLFstMTIwLjI1NDUxLDM4LjI4Njc3XSxbLTEyMC4yNTE4NywzOC4yODcwMl0sWy0xMjAuMjQ5ODQsMzguMjg4NjldLFstMTIwLjI0Njk3LDM4LjI5MDJdLFstMTIwLjI0Mjc3LDM4LjI5MzE4XSxbLTEyMC4yMzk4NywzOC4yOTU3OV0sWy0xMjAuMjM3OTksMzguMjk4NDJdLFstMTIwLjIzNzI3LDM4LjMwMTU1XSxbLTEyMC4yMzQ1NywzOC4zMDM2NF0sWy0xMjAuMjM0MzIsMzguMzA0MzldLFstMTIwLjIzMzgyLDM4LjMwNjQzXSxbLTEyMC4yMzE1NiwzOC4zMDc0Nl0sWy0xMjAuMjI4NzUsMzguMzE0MzldLFstMTIwLjIyNTM1LDM4LjMxNTc5XSxbLTEyMC4yMjQ1MiwzOC4zMTgxOV0sWy0xMjAuMjIyNjYsMzguMzE5ODJdLFstMTIwLjIxNjk3LDM4LjMyMTQ1XSxbLTEyMC4yMTEwOCwzOC4zMjQ1Nl0sWy0xMjAuMjA4OTMsMzguMzI2NzRdLFstMTIwLjIwNTE2LDM4LjMyOTY1XSxbLTEyMC4yMDM3MSwzOC4zMzI1NV0sWy0xMjAuMjAxNTQsMzguMzM0NjRdLFstMTIwLjE5OTg4LDM4LjMzOTIzXSxbLTEyMC4xOTc1OSwzOC4zNDIxNl0sWy0xMjAuMTk2MTcsMzguMzQyODVdLFstMTIwLjE5NjE3LDM4LjM0NDU5XSxbLTEyMC4xOTQ3OCwzOC4zNDYzNV0sWy0xMjAuMTkzMywzOC4zNDkzN10sWy0xMjAuMTkxMjQsMzguMzQ5ODVdLFstMTIwLjE5MDE0LDM4LjM1Mjc2XSxbLTEyMC4xODk4OCwzOC4zNTU5Nl0sWy0xMjAuMTg4MjIsMzguMzU3NTldLFstMTIwLjE4NDgsMzguMzU4ODJdLFstMTIwLjE4NDE5LDM4LjM2MDg2XSxbLTEyMC4xODI1MSwzOC4zNjM3NF0sWy0xMjAuMTgyMjUsMzguMzY2MTRdLFstMTIwLjE4MDk0LDM4LjM2ODA5XSxbLTEyMC4xNzg0NCwzOC4zNzAyMl0sWy0xMjAuMTc2NDcsMzguMzcxMjVdLFstMTIwLjE3NjE4LDM4LjM3NDAxXSxbLTEyMC4xNzQwMywzOC4zNzM2M10sWy0xMjAuMTczNjIsMzguMzc1NV0sWy0xMjAuMTcwNTEsMzguMzc1OTFdLFstMTIwLjE2Njc3LDM4LjM3OTc2XSxbLTEyMC4xNjI2NywzOC4zODA5M10sWy0xMjAuMTYxMjIsMzguMzgwOV0sWy0xMjAuMTU4NTQsMzguMzg1MjldLFstMTIwLjE1NTMyLDM4LjM4NjldLFstMTIwLjE1MzA4LDM4LjM4Njk0XSxbLTEyMC4xNDg5NSwzOC4zODg4N10sWy0xMjAuMTQ2NTcsMzguMzkwMzddLFstMTIwLjE0NTgyLDM4LjM5MTYzXSxbLTEyMC4xNDA5OSwzOC4zOTQwMV0sWy0xMjAuMTM3MzYsMzguMzkzMTddLFstMTIwLjEzNjYzLDM4LjM5NDg2XSxbLTEyMC4xMzQ5MiwzOC4zOTY1M10sWy0xMjAuMTMyNzQsMzguMzk2ODNdLFstMTIwLjEyODg0LDM4LjM5NTc1XSxbLTEyMC4xMjY5NSwzOC4zOTYzOV0sWy0xMjAuMTIxNjMsMzguMzk5NDhdLFstMTIwLjEyMDY0LDM4LjM5OTQ4XSxbLTEyMC4xMTU1OSwzOC40MDExOV0sWy0xMjAuMTEyNTcsMzguNDAwNzhdLFstMTIwLjEwODIsMzguNDAyMDZdLFstMTIwLjEwNzQ1LDM4LjQwMTE3XSxbLTEyMC4xMDUxNSwzOC40MDA4N10sWy0xMjAuMDk5MDIsMzguNDAxNTNdLFstMTIwLjA5Nzc3LDM4LjQwMjg4XSxbLTEyMC4wOTAxOCwzOC40MDM3NV0sWy0xMjAuMDg3OTEsMzguNDAzMzhdLFstMTIwLjA4NTM1LDM4LjQwNTkyXSxbLTEyMC4wODIxNiwzOC40MDg0Nl0sWy0xMjAuMDgwODUsMzguNDEwMV0sWy0xMjAuMDc3NDIsMzguNDEwNjddLFstMTIwLjA3NTcsMzguNDEyMDldLFstMTIwLjA3NDcxLDM4LjQxMTRdLFstMTIwLjA3MzI2LDM4LjQxMjAyXSxbLTEyMC4wNzM1NywzOC40MTM1OF0sWy0xMjAuMDY5NzQsMzguNDEzNDhdLFstMTIwLjA2NzksMzguNDE1NDldLFstMTIwLjA2NTQxLDM4LjQxNDc2XSxbLTEyMC4wNjM5MiwzOC40MTQ5NF0sWy0xMjAuMDYyNjEsMzguNDE2NTJdLFstMTIwLjA1OTgyLDM4LjQxNzE2XSxbLTEyMC4wNTcwOSwzOC40MTcxMV0sWy0xMjAuMDU1NzUsMzguNDE4Nl0sWy0xMjAuMDUzNzQsMzguNDE5MjFdLFstMTIwLjA0OTAzLDM4LjQxOTM3XSxbLTEyMC4wNDgzLDM4LjQyMDYzXSxbLTEyMC4wNDU4OSwzOC40MjIyOV0sWy0xMjAuMDQyNzcsMzguNDIyOThdLFstMTIwLjA0MDU2LDM4LjQyNTkzXSxbLTEyMC4wMzg1LDM4LjQyNTk3XSxbLTEyMC4wMzY0MywzOC40MjQ2Ml0sWy0xMjAuMDI5OTIsMzguNDI0NjhdLFstMTIwLjAyOTI1LDM4LjQyNTA1XSxbLTEyMC4wMjc5NywzOC40MjY0XSxbLTEyMC4wMjM4NywzOC40MjkzMl0sWy0xMjAuMDIzMTEsMzguNDMwODddLFstMTIwLjAyMTA3LDM4LjQzMTgzXSxbLTEyMC4wMTk5NSwzOC40MzM1Ml0sWy0xMjAuMDIyNzgsMzguNDM1MjNdLFstMTIwLjA1MzU4LDM4LjQ1NTU1XSxbLTEyMC4wNTUxNCwzOC40NTUwNl0sWy0xMjAuMDU2MzcsMzguNDUzNDNdLFstMTIwLjA2NDc1LDM4LjQ1MDQ2XSxbLTEyMC4wNjY4MywzOC40NDgxXSxbLTEyMC4wNzA2NywzOC40NDc5XSxbLTEyMC4wNzI1NywzOC40NDcwOF0sWy0xMjAuMDcyNTEsMzguNDc4MTVdLFstMTIwLjA3MjQ4LDM4LjUwOTg3XSxbLTEyMC4wNzg0OSwzOC41MDg3M10sWy0xMjAuMDgwNDEsMzguNTA3NDNdLFstMTIwLjA4Mjc2LDM4LjUwODNdLFstMTIwLjA4NTA2LDM4LjUwNzIyXSxbLTEyMC4wODk0MSwzOC41MDY0XSxbLTEyMC4wOTIyMiwzOC41MDc1XSxbLTEyMC4wOTY0NCwzOC41MDYwOV0sWy0xMjAuMDk4MTIsMzguNTA0MzZdLFstMTIwLjEwMDMsMzguNTA0XSxbLTEyMC4xMDE0MiwzOC41MDUwNl0sWy0xMjAuMTAzMzcsMzguNTA1NDRdLFstMTIwLjEwNjA1LDM4LjUwMzkyXSxbLTEyMC4xMDgsMzguNTAzODRdLFstMTIwLjEwOTU1LDM4LjUwMTMzXSxbLTEyMC4xMTA4LDM4LjUwMDQ3XSxbLTEyMC4xMTE1MSwzOC40OTg1Ml0sWy0xMjAuMTE0MTMsMzguNDk3NTddLFstMTIwLjExNzE2LDM4LjQ5NzQ3XSxbLTEyMC4xMTc4NiwzOC40OTY2N10sWy0xMjAuMTIzNDQsMzguNDk1OTZdLFstMTIwLjEyNTE5LDM4LjQ5NTg0XSxbLTEyMC4xMjg4NCwzOC40OTcyMV0sWy0xMjAuMTM2NzIsMzguNDk3NF0sWy0xMjAuMTM5MzksMzguNDk4MzRdLFstMTIwLjE0MjQ4LDM4LjQ5ODAzXSxbLTEyMC4xNDM3NiwzOC40OTY3OV0sWy0xMjAuMTQ2NzEsMzguNDk1MzJdLFstMTIwLjE1MjEzLDM4LjQ5NTM2XSxbLTEyMC4xNTM1MiwzOC40OTQ0M10sWy0xMjAuMTU1ODIsMzguNDk0MV0sWy0xMjAuMTU3MjQsMzguNDk0NzZdLFstMTIwLjE2NDMyLDM4LjQ5NDIzXSxbLTEyMC4xNjkyMiwzOC40OTYyOV0sWy0xMjAuMTc0ODYsMzguNDk2MTNdLFstMTIwLjE3Nzg5LDM4LjQ5NjQzXSxbLTEyMC4xODAwNSwzOC40OTU1Nl0sWy0xMjAuMTgzNDEsMzguNDk2ODNdLFstMTIwLjE4NjMxLDM4LjQ5Njk2XSxbLTEyMC4xODg1OSwzOC40OTc4MV0sWy0xMjAuMTkzNjUsMzguNDk4NzldLFstMTIwLjE5ODIyLDM4LjQ5OTJdLFstMTIwLjIwNTcsMzguNTAxMDRdLFstMTIwLjIwOTQxLDM4LjUwMDc2XSxbLTEyMC4yMTQyMiwzOC40OTg1OF0sWy0xMjAuMjE3NDIsMzguNDk3NzFdLFstMTIwLjIyMDU0LDM4LjQ5NDQyXSxbLTEyMC4yMjYwMywzOC40OTA3NF0sWy0xMjAuMjMwNCwzOC40OTAzXSxbLTEyMC4yMzM2NiwzOC40OTAzNF0sWy0xMjAuMjM1NTUsMzguNDg5ODldLFstMTIwLjIzNjkyLDM4LjQ4ODA4XSxbLTEyMC4yNDA4NywzOC40ODUzNV0sWy0xMjAuMjQ0NjMsMzguNDg1NzRdLFstMTIwLjI0NzI4LDM4LjQ4Njg1XSxbLTEyMC4yNTIzOCwzOC40ODY3OV0sWy0xMjAuMjU0NjQsMzguNDg3NzFdLFstMTIwLjI1NzEsMzguNDg2OTNdLFstMTIwLjI1OTkzLDM4LjQ4NjcyXSxbLTEyMC4yNjI0OSwzOC40ODQyNl0sWy0xMjAuMjYzNDIsMzguNDgyNjNdLFstMTIwLjI2NDg5LDM4LjQ4MjddLFstMTIwLjI2OTU0LDM4LjQ3NzddLFstMTIwLjI3MjgzLDM4LjQ3Nzc2XSxbLTEyMC4yNzUxOCwzOC40NzYxNV0sWy0xMjAuMjc3NjUsMzguNDc1NjFdLFstMTIwLjI4Mzc5LDM4LjQ3NTQ1XSxbLTEyMC4yODg2NSwzOC40NzcwN10sWy0xMjAuMjkzNzQsMzguNDc3MzVdLFstMTIwLjMwMTE0LDM4LjQ3NDMxXSxbLTEyMC4zMDQ1NiwzOC40NzIxM10sWy0xMjAuMzA2NTYsMzguNDcyNDVdLFstMTIwLjMxMDE1LDM4LjQ3MjIxXSxbLTEyMC4zMTkxMSwzOC40NzEwM10sWy0xMjAuMzIwMzQsMzguNDcwNDldLFstMTIwLjMyMjI3LDM4LjQ2ODYyXSxbLTEyMC4zMjgwNCwzOC40NjY1NF0sWy0xMjAuMzMxMDQsMzguNDY1MTldLFstMTIwLjMzMzE5LDM4LjQ2NTQyXSxbLTEyMC4zMzgxNCwzOC40Njc0NF0sWy0xMjAuMzQyNjUsMzguNDY3MTVdLFstMTIwLjM1MTU4LDM4LjQ2NjJdLFstMTIwLjM1MzY1LDM4LjQ2NTQ4XSxbLTEyMC4zNjIxLDM4LjQ2NjY3XSxbLTEyMC4zNjQ5MiwzOC40NjY1N10sWy0xMjAuMzcsMzguNDY1MTldLFstMTIwLjM3NDI4LDM4LjQ2MjczXSxbLTEyMC4zNzYwMiwzOC40NjI1N10sWy0xMjAuMzc5MjgsMzguNDYxMDddLFstMTIwLjM4MDcxLDM4LjQ2MTA0XSxbLTEyMC4zODQ4MSwzOC40NjIyOF0sWy0xMjAuMzg1OCwzOC40NjUwOV0sWy0xMjAuMzg2NywzOC40NjYyM10sWy0xMjAuMzg5NzMsMzguNDY3Ml0sWy0xMjAuMzkyMzIsMzguNDY3MzhdLFstMTIwLjM5OTIxLDM4LjQ2NjcyXSxbLTEyMC40MDM1NCwzOC40Njc0N10sWy0xMjAuNDA2NzcsMzguNDY4OTFdLFstMTIwLjQwODMzLDM4LjQ2OTEyXSxbLTEyMC40MTI4NCwzOC40Njg3OF0sWy0xMjAuNDEyODQsMzguNDcwODFdLFstMTIwLjQxNDY2LDM4LjQ3MzA4XSxbLTEyMC40MTY2NCwzOC40NzM1OF0sWy0xMjAuNDE5NjksMzguNDczMTJdLFstMTIwLjQyMzIyLDM4LjQ3MzMyXSxbLTEyMC40MjQzNiwzOC40NzIwMl0sWy0xMjAuNDI4MTQsMzguNDY5M10sWy0xMjAuNDMxNTksMzguNDY3MThdLFstMTIwLjQzNzAzLDM4LjQ2NDM4XSxbLTEyMC40NDE1NCwzOC40NjMxMV0sWy0xMjAuNDQzOTksMzguNDYxNDddLFstMTIwLjQ0NTU0LDM4LjQ1Nzk3XSxbLTEyMC40NDc4NCwzOC40NTYxM10sWy0xMjAuNDQ3NzMsMzguNDUzNTRdLFstMTIwLjQ0ODY3LDM4LjQ1MjQ1XSxbLTEyMC40NTIxNiwzOC40NTAxMV0sWy0xMjAuNDU1NDcsMzguNDQ5NzddLFstMTIwLjQ1NzI3LDM4LjQ0OTA2XSxbLTEyMC40NjE0LDM4LjQ0NjE3XSxbLTEyMC40NjMwOSwzOC40NDY1Nl0sWy0xMjAuNDY0ODEsMzguNDQ4MDddLFstMTIwLjQ2NzE0LDM4LjQ0ODg0XSxbLTEyMC40NzAyMiwzOC40NDc0OV0sWy0xMjAuNDcyODEsMzguNDQ4MTFdLFstMTIwLjQ3NTcyLDM4LjQ0ODExXSxbLTEyMC40Nzg3MSwzOC40NDY4OV0sWy0xMjAuNDgzMjIsMzguNDQ2OF0sWy0xMjAuNDg0MzYsMzguNDQ1ODZdLFstMTIwLjQ4NTk1LDM4LjQ0NTY1XSxbLTEyMC40OTA5OSwzOC40NDYyOV0sWy0xMjAuNDkzOTYsMzguNDQ3MjNdLFstMTIwLjQ5NDIyLDM4LjQ0OTAxXSxbLTEyMC40OTUxMywzOC40NDk2Ml0sWy0xMjAuNDk5NjcsMzguNDQ3N10sWy0xMjAuNDk5OSwzOC40NDY0Nl0sWy0xMjAuNDk3OTMsMzguNDQ1MjhdLFstMTIwLjQ5ODMsMzguNDQ0MzZdLFstMTIwLjUwMTQ5LDM4LjQ0NDMyXSxbLTEyMC41MDM5MSwzOC40NDQ3MV0sWy0xMjAuNTA1NiwzOC40NDM3XSxbLTEyMC41MDQ2NCwzOC40MzkzOF0sWy0xMjAuNTA4MzUsMzguNDM3MTVdLFstMTIwLjUxMjg2LDM4LjQzMTYzXSxbLTEyMC41MTU5MiwzOC40Mjg5MV0sWy0xMjAuNTE5MzgsMzguNDI3NjhdLFstMTIwLjUyMDgxLDM4LjQyNjQ1XSxbLTEyMC41MjE0OCwzOC40MjQ4XSxbLTEyMC41MjM1OCwzOC40MjI2NV0sWy0xMjAuNTI3MjEsMzguNDIyOTNdLFstMTIwLjUyOTM3LDM4LjQyMDY1XSxbLTEyMC41MzAxMywzOC40MTg4OF0sWy0xMjAuNTM3NiwzOC40MTg1Ml0sWy0xMjAuNTM4NjgsMzguNDE5MzldLFstMTIwLjU0MTMsMzguNDIyOTFdLFstMTIwLjU0Mjc3LDM4LjQyMTgyXSxbLTEyMC41NTAzNCwzOC40MjAyOF0sWy0xMjAuNTUyMzQsMzguNDE4MjddLFstMTIwLjU1Mzg5LDM4LjQxODM1XSxbLTEyMC41NTUyNywzOC40MTY3N10sWy0xMjAuNTU4MTUsMzguNDE2MjldLFstMTIwLjU2MDAxLDM4LjQxNTA2XSxbLTEyMC41Njc4MiwzOC40MTVdLFstMTIwLjU3MDAzLDM4LjQxNDU3XSxbLTEyMC41NzIxOCwzOC40MTMxNl0sWy0xMjAuNTcyMjcsMzguNDEyNV0sWy0xMjAuNTcwNTgsMzguNDA4MDldLFstMTIwLjU3MTc3LDM4LjQwNTYzXSxbLTEyMC41NzQzMiwzOC40MDE4NV0sWy0xMjAuNTc2NDYsMzguNDAxMzRdLFstMTIwLjU4MTM1LDM4LjQwMTZdLFstMTIwLjU4MzcsMzguNDAwODldLFstMTIwLjU4Njk0LDM4LjQwMDUyXSxbLTEyMC41OTAwOSwzOC4zOTkyNV0sWy0xMjAuNTk1OCwzOC4zOTk2M10sWy0xMjAuNjAxMzYsMzguMzk5NzJdLFstMTIwLjYwNTc4LDM4LjM5OV0sWy0xMjAuNjA4MDcsMzguMzk4XSxbLTEyMC42MDkxNCwzOC4zOTY3Ml0sWy0xMjAuNjEwMDMsMzguMzkyNTddLFstMTIwLjYxMTc2LDM4LjM5MDY5XSxbLTEyMC42MTQ4OCwzOC4zODk0MV0sWy0xMjAuNjE1MDgsMzguMzg4N10sWy0xMjAuNjE0MDYsMzguMzg1NDRdLFstMTIwLjYxNDA4LDM4LjM4MjUxXSxbLTEyMC42MTQ3NCwzOC4zODA2MV0sWy0xMjAuNjE2ODUsMzguMzc5MDhdLFstMTIwLjYxNzExLDM4LjM3ODI0XSxbLTEyMC42MTYyOSwzOC4zNzYxOV0sWy0xMjAuNjE1MDYsMzguMzc0OTJdLFstMTIwLjYxNDU4LDM4LjM3MjgzXSxbLTEyMC42MTA1NSwzOC4zNzE5OF0sWy0xMjAuNjEwNDQsMzguMzcwMDFdLFstMTIwLjYxMzI2LDM4LjM2ODI1XSxbLTEyMC42MTYxNiwzOC4zNjc5OF0sWy0xMjAuNjE4MjgsMzguMzY2ODZdLFstMTIwLjYxODYzLDM4LjM2NTA3XSxbLTEyMC42MTc2NSwzOC4zNjM2M10sWy0xMjAuNjE3NzksMzguMzYxMDJdLFstMTIwLjYxOTY4LDM4LjM1NzczXSxbLTEyMC42MjE4NiwzOC4zNTczNl0sWy0xMjAuNjI0MzksMzguMzU3NTJdLFstMTIwLjYyNzksMzguMzU1ODNdLFstMTIwLjYyODI3LDM4LjM1NTRdLFstMTIwLjYyOTE4LDM4LjM1MDM2XSxbLTEyMC42MzE4LDM4LjM0NTU3XSxbLTEyMC42MzA1NywzOC4zNDM3M10sWy0xMjAuNjMwOTMsMzguMzQxMV0sWy0xMjAuNjMxMjksMzguMzQwMjZdLFstMTIwLjYzMzM3LDM4LjMzOTg0XSxbLTEyMC42Mzg1MSwzOC4zNDA4NF0sWy0xMjAuNjQwNzQsMzguMzM5XSxbLTEyMC42NDIyNywzOC4zMzg1MV0sWy0xMjAuNjQ0NTgsMzguMzM2OTddLFstMTIwLjY0NjYxLDM4LjMzNDU5XSxbLTEyMC42NDg1MiwzOC4zMzQ2Nl0sWy0xMjAuNjUxNTUsMzguMzMzOTldLFstMTIwLjY1NjUsMzguMzMwOTFdLFstMTIwLjY1ODk4LDM4LjMzMTU2XSxbLTEyMC42NjMzMSwzOC4zMzE4NV0sWy0xMjAuNjY2OTIsMzguMzMxNDldLFstMTIwLjY2OTMsMzguMzMwNzZdLFstMTIwLjY3MjYxLDM4LjMyOTI1XSxbLTEyMC42NzQ5MiwzOC4zMzA2OV0sWy0xMjAuNjc2NDYsMzguMzI4NTZdLFstMTIwLjY3OTM5LDM4LjMyNjU3XSxbLTEyMC42ODM1NywzOC4zMjQ2N10sWy0xMjAuNjg1ODUsMzguMzIwMzFdLFstMTIwLjY4ODE4LDM4LjMxODg4XSxbLTEyMC42OTI0LDM4LjMxNzk0XSxbLTEyMC42OTgzNCwzOC4zMTgxMV0sWy0xMjAuNzAzMDIsMzguMzE2MzFdLFstMTIwLjcxMDg1LDM4LjMxNTQ1XSxbLTEyMC43MTM1OCwzOC4zMTQ5XSxbLTEyMC43MTQ3MywzOC4zMTMzOF0sWy0xMjAuNzE3MTcsMzguMzEzNF0sWy0xMjAuNzIwMzUsMzguMzEyNjhdLFstMTIwLjcyMjM1LDM4LjMxMTI5XSxbLTEyMC43MjM4MSwzOC4zMTEwMV0sWy0xMjAuNzMxLDM4LjMwNzk2XSxbLTEyMC43MzI4OCwzOC4zMDc3XSxbLTEyMC43MzQ2MywzOC4zMDgzM10sWy0xMjAuNzM4MjksMzguMzA3NzddLFstMTIwLjc0MjE0LDM4LjMwNDc3XSxbLTEyMC43NDU5MiwzOC4zMDA2MV0sWy0xMjAuNzUwMzQsMzguMjk3NTZdLFstMTIwLjc1MTY5LDM4LjI5NTk0XSxbLTEyMC43NTMyNCwzOC4yOTAyOV0sWy0xMjAuNzU0NDQsMzguMjg4NDddLFstMTIwLjc1NjMzLDM4LjI4ODM4XSxbLTEyMC43NTc3NSwzOC4yODk1OF0sWy0xMjAuNzU5NjgsMzguMjkwMDNdLFstMTIwLjc2MTg2LDM4LjI4OTg1XSxbLTEyMC43NjcyOSwzOC4yOTAzMl0sWy0xMjAuNzcxNSwzOC4yODg3OF0sWy0xMjAuNzc0ODQsMzguMjg4NjZdLFstMTIwLjc3OSwzOC4yODc2Ml0sWy0xMjAuNzg1MzEsMzguMjg4OTJdLFstMTIwLjc5MDU0LDM4LjI4ODU5XSxbLTEyMC43OTU2MywzOC4yODY4N10sWy0xMjAuNzk4NDgsMzguMjg1NTldLFstMTIwLjc5OTkyLDM4LjI4NjA0XSxbLTEyMC44MDA3LDM4LjI4NzEzXSxbLTEyMC44MDMzNiwzOC4yODg4N10sWy0xMjAuODA1NzcsMzguMjg4MDRdLFstMTIwLjgwNzc0LDM4LjI4ODcyXSxbLTEyMC44MDg0MSwzOC4yODU4OF0sWy0xMjAuODEwMTMsMzguMjgyMDFdLFstMTIwLjgxMTI5LDM4LjI4MTQ0XSxbLTEyMC44MTI4OCwzOC4yODE3OF0sWy0xMjAuODE0MzEsMzguMjgzNTFdLFstMTIwLjgxNjg1LDM4LjI4MzkyXSxbLTEyMC44MTkyMywzOC4yODIwN10sWy0xMjAuODIyMDQsMzguMjc1NDVdLFstMTIwLjgyNDg4LDM4LjI3NDU1XSxbLTEyMC44MjgwNiwzOC4yNzE4OV0sWy0xMjAuODMyMDQsMzguMjY5MTVdLFstMTIwLjgzNTM2LDM4LjI2NzQ0XSxbLTEyMC44MzczOCwzOC4yNjcyMl0sWy0xMjAuODQwNjksMzguMjY1MzhdLFstMTIwLjg0MzE3LDM4LjI2NDQ0XSxbLTEyMC44NDY3OSwzOC4yNjQyN10sWy0xMjAuODQ3MzUsMzguMjYyNDJdLFstMTIwLjg0ODY1LDM4LjI2MTEyXSxbLTEyMC44NDg5NiwzOC4yNTg3OV0sWy0xMjAuODUwMDUsMzguMjU3MjVdLFstMTIwLjg1MjUyLDM4LjI1NTY1XSxbLTEyMC44NTQyMSwzOC4yNTI4OF0sWy0xMjAuODU0NDIsMzguMjQ5OTJdLFstMTIwLjg1NTY3LDM4LjI0ODNdLFstMTIwLjg1NzM4LDM4LjI0NzM2XSxbLTEyMC44NjEyOSwzOC4yNDYyMV0sWy0xMjAuODYzNjMsMzguMjQ2MDVdLFstMTIwLjg2OTk3LDM4LjI0NDRdLFstMTIwLjg3MjMsMzguMjQyNDRdLFstMTIwLjg3NDQ2LDM4LjI0MTk2XSxbLTEyMC44NzU0MiwzOC4yMzk3N10sWy0xMjAuODc3MDYsMzguMjM5NjhdLFstMTIwLjg3ODk3LDM4LjI0MDg0XSxbLTEyMC44ODAwNiwzOC4yNDA2MV0sWy0xMjAuODgwOTYsMzguMjM4ODddLFstMTIwLjg4MDc3LDM4LjIzMzYxXSxbLTEyMC44ODIxMywzOC4yMzI3NF0sWy0xMjAuODgyOTQsMzguMjMwN10sWy0xMjAuODg0ODMsMzguMjI5MDNdLFstMTIwLjg4NzcsMzguMjI4MzVdLFstMTIwLjg4OTA2LDM4LjIyNzE5XSxbLTEyMC44OTE1OSwzOC4yMjMxMV0sWy0xMjAuODkzNzksMzguMjIxMjhdLFstMTIwLjg5NjExLDM4LjIyMTIxXSxbLTEyMC45MDMwNywzOC4yMjI1Nl0sWy0xMjAuOTA0NzYsMzguMjI0NTJdLFstMTIwLjkwNzA4LDM4LjIyNTE2XSxbLTEyMC45MDkzMSwzOC4yMjc0OF0sWy0xMjAuOTEyNzQsMzguMjI5NDddLFstMTIwLjkxNDk0LDM4LjIzMDA0XSxbLTEyMC45MTc3MywzOC4yMjk5OV0sWy0xMjAuOTI1NTMsMzguMjI3NjNdLFstMTIwLjkzMDAyLDM4LjIyNV0sWy0xMjAuOTMzMzgsMzguMjIxOTVdLFstMTIwLjkzNzE2LDM4LjIyMDc2XSxbLTEyMC45NDIyLDM4LjIyMzM1XSxbLTEyMC45NDcyLDM4LjIyNDY3XSxbLTEyMC45NTAzMywzOC4yMjU5N10sWy0xMjAuOTUzNCwzOC4yMjYzMV0sWy0xMjAuOTU3MDgsMzguMjIzMjldLFstMTIwLjk2MTQxLDM4LjIyMjAzXSxbLTEyMC45NjMzNSwzOC4yMTk5XSxbLTEyMC45Njc0OSwzOC4yMjA0N10sWy0xMjAuOTcwMSwzOC4yMTk2Ml0sWy0xMjAuOTcyMSwzOC4yMTc5NV0sWy0xMjAuOTc4NjYsMzguMjIwOTldLFstMTIwLjk4MTA3LDM4LjIyMTc5XSxbLTEyMC45ODM3NywzOC4yMjExOV0sWy0xMjAuOTg1NzQsMzguMjIxNDFdLFstMTIwLjk4ODExLDM4LjIyMjU0XSxbLTEyMC45ODk1MywzOC4yMjM4OV0sWy0xMjAuOTkxNjEsMzguMjI0MjJdLFstMTIwLjk5MzU5LDM4LjIyNTU4XV1dfQ==",
+        "bbox": {
+          "minLat": 37.83186,
+          "minLng": -120.9955,
+          "maxLat": 38.50987,
+          "maxLng": -120.01995
+        },
+        "centroid": {
+          "lat": 38.170865,
+          "lng": -120.507725
+        }
+      },
+      "parentId": ""
+    },
+    {
+      "id": "area:calaveras",
+      "kind": "AREA",
+      "name": "Calaveras",
+      "slug": "calaveras",
+      "geometry": {
+        "geojson": "eyJ0eXBlIjoiUG9seWdvbiIsImNvb3JkaW5hdGVzIjpbW1stMTIwLjksMzcuOF0sWy0xMjAsMzcuOF0sWy0xMjAsMzguNTVdLFstMTIwLjksMzguNTVdLFstMTIwLjksMzcuOF1dXX0=",
+        "bbox": {
+          "minLat": 37.8,
+          "minLng": -120.9,
+          "maxLat": 38.55,
+          "maxLng": -120
+        },
+        "centroid": {
+          "lat": 38.175,
+          "lng": -120.45
+        }
+      },
+      "parentId": ""
+    },
+    {
+      "id": "area:high-country",
+      "kind": "AREA",
+      "name": "High Country",
+      "slug": "high-country",
+      "geometry": {
+        "geojson": "eyJ0eXBlIjoiUG9seWdvbiIsImNvb3JkaW5hdGVzIjpbW1stMTIwLjQsMzguMl0sWy0xMTkuNSwzOC4yXSxbLTExOS41LDM4LjhdLFstMTIwLjQsMzguOF0sWy0xMjAuNCwzOC4yXV1dfQ==",
+        "bbox": {
+          "minLat": 38.2,
+          "minLng": -120.4,
+          "maxLat": 38.8,
+          "maxLng": -119.5
+        },
+        "centroid": {
+          "lat": 38.5,
+          "lng": -119.95
+        }
+      },
+      "parentId": ""
+    }
+  ]
+}

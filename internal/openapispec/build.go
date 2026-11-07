@@ -80,6 +80,7 @@ func Build(swaggerJSON, overlayYAML []byte, proto protoreflect.FileDescriptor) (
 		return nil, rep, fmt.Errorf("overlay defaults: %w", err)
 	}
 	pruneUnusedTags(base)
+	pruneUnusedWellKnownSchemas(base)
 	trimServerSlashes(base)
 	if err := checkResponses(base); err != nil {
 		return nil, rep, err
@@ -243,6 +244,39 @@ func pruneUnusedTags(doc map[string]any) {
 		kept = append(kept, t)
 	}
 	doc["tags"] = kept
+}
+
+// pruneUnusedWellKnownSchemas drops the generated google.protobuf schemas
+// (`protobuf*`) nothing references. Importing a well-known type file makes
+// protoc-gen-openapiv2 emit every type in it: struct.proto brings
+// protobufNullValue, though Geometry.object (a Struct) is typed inline as an
+// object and never refers to it. A dangling component is lint noise in every
+// generated client.
+func pruneUnusedWellKnownSchemas(doc map[string]any) {
+	schemas, _ := lookup(doc, "components", "schemas").(map[string]any)
+	refs := map[string]bool{}
+	var walk func(v any)
+	walk = func(v any) {
+		switch t := v.(type) {
+		case map[string]any:
+			for k, val := range t {
+				if s, ok := val.(string); ok && k == "$ref" {
+					refs[s] = true
+				}
+				walk(val)
+			}
+		case []any:
+			for _, val := range t {
+				walk(val)
+			}
+		}
+	}
+	walk(doc)
+	for name := range schemas {
+		if strings.HasPrefix(name, "protobuf") && !refs["#/components/schemas/"+name] {
+			delete(schemas, name)
+		}
+	}
 }
 
 // trimServerSlashes drops the trailing slash kin-openapi's v2→v3 conversion

@@ -86,6 +86,57 @@ func TestQueryEventsPaginationStableAndComplete(t *testing.T) {
 	assert.Equal(t, eventIDs(full), paged)
 }
 
+// Page.After[i] resumes immediately after item i, so a caller may serve any
+// prefix of a page (gridapi stops at a byte budget) and the walk continues
+// with nothing skipped or repeated. Next follows the same rule, and is ""
+// only when the served prefix ends the result set.
+func TestPageResumesAfterAnyPrefix(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	seedInterleaved(t, s, 9)
+
+	full, err := s.QueryEventsPage(ctx, EventQuery{PageSize: 200})
+	require.NoError(t, err)
+	require.Len(t, full.Items, 9)
+	require.Len(t, full.After, 9)
+	assert.False(t, full.More)
+	assert.Empty(t, full.Next(9), "the whole set served: no next page")
+	ids := eventIDs(full.Items)
+
+	for n := 1; n < len(ids); n++ {
+		tok := full.Next(n)
+		require.Equal(t, full.After[n-1], tok)
+		rest, err := s.QueryEventsPage(ctx, EventQuery{PageSize: 200, PageToken: tok})
+		require.NoError(t, err)
+		assert.Equal(t, ids[n:], eventIDs(rest.Items), "resuming after item %d", n)
+	}
+
+	short, err := s.QueryEventsPage(ctx, EventQuery{PageSize: 4})
+	require.NoError(t, err)
+	assert.True(t, short.More)
+	assert.Equal(t, short.After[3], short.Next(4), "a full page with more rows hands back a token")
+
+	for _, history := range []func(tok string) (Page[*gridv1.EventRevision], error){
+		func(tok string) (Page[*gridv1.EventRevision], error) {
+			return s.QueryHistoryPage(ctx, HistoryQuery{PageSize: 200, PageToken: tok})
+		},
+		func(tok string) (Page[*gridv1.EventRevision], error) {
+			return s.EventHistoryPage(ctx, "usgs:q03", 200, tok)
+		},
+	} {
+		all, err := history("")
+		require.NoError(t, err)
+		require.NotEmpty(t, all.Items)
+		for n := 1; n < len(all.Items); n++ {
+			rest, err := history(all.Next(n))
+			require.NoError(t, err)
+			require.Len(t, rest.Items, len(all.Items)-n)
+			assert.Equal(t, all.Items[n].GetRevision(), rest.Items[0].GetRevision())
+			assert.Equal(t, all.Items[n].GetEvent().GetId(), rest.Items[0].GetEvent().GetId())
+		}
+	}
+}
+
 func TestQueryEventsPaginationStableUnderInserts(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
@@ -332,13 +383,38 @@ func TestQueryHistoryUsesObservedIndex(t *testing.T) {
 		"place-scoped history should drive from event_places; plan was:\n%s", plan)
 }
 
-// placeScopedEventsSQL is the shape QueryEvents builds for the commonest call
-// on the service — /api/v1/events?place=X with the default ACTIVE,SCHEDULED
-// statuses and no layer filter.
-const placeScopedEventsSQL = `SELECT e.proto, e.severity, e.observed_at, e.id FROM events e
-	JOIN event_places ep ON ep.event_id = e.id AND ep.place_id = ?
-	WHERE e.status IN (?, ?)
-	ORDER BY e.severity DESC, e.observed_at DESC, e.id ASC LIMIT ?`
+// eventsPlan returns the query plan of the statement QueryEvents runs for q,
+// split at the outer loop: key is the inner key-only query (filter + sort),
+// fetch is the outer loop that reads the page's blobs.
+func eventsPlan(t *testing.T, s *Store, q EventQuery) (key, fetch string) {
+	t.Helper()
+	query, args, err := eventsPageSQL(q, DefaultPageSize)
+	require.NoError(t, err)
+	plan := planFor(t, s, query, args...)
+	key, fetch, ok := strings.Cut(plan, "SCAN k\n")
+	require.True(t, ok, "QueryEvents must sort keys in a subquery, then fetch blobs; plan was:\n%s", plan)
+	return key, fetch
+}
+
+// TestQueryEventsSortsKeysNotBlobs pins QueryEvents' two-phase shape. Any
+// status LIST sorts (the index orders by severity within ONE status), and
+// sorting a SELECT that includes the proto blob copied every matching row's
+// blob into the sorter: an all-statuses page took 25-40 s in production
+// regardless of pageSize, long enough for a deploy drain to cancel it into a
+// 500 (2026-11-07). The sort must stay inside the key-only subquery, and the
+// outer loop must fetch by primary key without sorting again.
+func TestQueryEventsSortsKeysNotBlobs(t *testing.T) {
+	s := newTestStore(t)
+	all := []gridv1.EventStatus{gridv1.EventStatus_ACTIVE, gridv1.EventStatus_SCHEDULED,
+		gridv1.EventStatus_RESOLVED, gridv1.EventStatus_EXPIRED}
+	for _, q := range []EventQuery{{}, {Statuses: all}, {Statuses: all, Layers: []gridv1.Layer{gridv1.Layer_WILDFIRE}}} {
+		key, fetch := eventsPlan(t, s, q)
+		assert.Contains(t, key, "CO-ROUTINE k", "%+v", q)
+		assert.Contains(t, key, "TEMP B-TREE FOR ORDER BY", "the key query does the sorting (%+v)", q)
+		assert.Contains(t, fetch, "sqlite_autoindex_events_1 (id=?)", "blobs come by primary key (%+v)", q)
+		assert.NotContains(t, fetch, "TEMP B-TREE", "the blob fetch must not sort (%+v)", q)
+	}
+}
 
 // TestPlaceScopedEventsDoesNotWalkDeadAttachments pins the plan for the
 // place-scoped event query to driving from `events`, not from `event_places`.
@@ -438,8 +514,12 @@ func seedDeadAttachmentSkew(t *testing.T, s *Store, live int) {
 // place-scoped event query on a store seeded by seedDeadAttachmentSkew.
 func assertPlaceScopedPlanDrivesFromActive(t *testing.T, s *Store) {
 	t.Helper()
-	plan := planFor(t, s, placeScopedEventsSQL, "county:calaveras",
-		int32(gridv1.EventStatus_ACTIVE), int32(gridv1.EventStatus_SCHEDULED), 51)
+	// The commonest call on the service: /api/v1/events?place=X with the
+	// default ACTIVE,SCHEDULED statuses and no layer filter. Only the key
+	// query's join order matters here; the blob fetch after it reads the
+	// page's rows by primary key, which is bounded by the page size.
+	plan, _ := eventsPlan(t, s, EventQuery{PlaceID: "county:calaveras"})
+	plan = strings.TrimPrefix(plan, "CO-ROUTINE k\n")
 
 	// What matters is the JOIN ORDER, not which index names appear. The bad plan
 	// drives from event_places and reaches events through its primary key, one
