@@ -1,7 +1,9 @@
 package gridapi
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -53,12 +55,17 @@ func TestDefaultGeometryJSONIsUnchanged(t *testing.T) {
 	resolved, err := g.ResolvePlace(rpcBG(), &gridv1.ResolvePlaceRequest{Lat: "38.25", Lng: "-120.35"})
 	require.NoError(t, err)
 
+	// protojson deliberately varies its whitespace from build to build (so no
+	// one depends on its exact bytes), so each body is re-indented with
+	// encoding/json before comparing: the golden pins keys, order and values.
 	var out []byte
 	for _, m := range []proto.Message{list, one, hist, arch, town, resolved} {
 		scrubIngestTimes(m)
 		b, err := prefab.JSONMarshalOptions.Marshal(m)
 		require.NoError(t, err)
-		out = append(append(out, b...), '\n')
+		var norm bytes.Buffer
+		require.NoError(t, json.Indent(&norm, compactJSON(t, b), "", "  "))
+		out = append(append(out, norm.Bytes()...), '\n')
 	}
 
 	path := filepath.Join("testdata", "geometry_default.golden.json")
@@ -92,4 +99,11 @@ func scrubIngestTimes(m proto.Message) {
 			scrubEvent(r.GetEvent())
 		}
 	}
+}
+
+func compactJSON(t *testing.T, b []byte) []byte {
+	t.Helper()
+	var c bytes.Buffer
+	require.NoError(t, json.Compact(&c, b))
+	return c.Bytes()
 }
