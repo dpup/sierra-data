@@ -114,7 +114,9 @@ func findHandRoutes(t *testing.T) []handRoute {
 			continue
 		}
 		seen[dir] = true
-		for _, f := range parseDir(t, fset, dir) {
+		files := parseDir(t, fset, dir)
+		consts := stringConsts(files)
+		for _, f := range files {
 			for _, imp := range f.Imports {
 				path, _ := strconv.Unquote(imp.Path.Value)
 				if rel, ok := strings.CutPrefix(path, modulePath+"/"); ok {
@@ -137,16 +139,20 @@ func findHandRoutes(t *testing.T) []handRoute {
 					if len(call.Args) < 2 {
 						return true
 					}
+					// A method that is not a constant (a loop over methods, as the
+					// ingest route's 405 mounts are) is checked as "any method":
+					// the path must still be documented.
+					method, _ := resolveString(call.Args[0], consts)
 					routes = append(routes, handRoute{
-						method:  literal(t, call.Args[0], at.String()),
-						pattern: literal(t, call.Args[1], at.String()),
+						method:  method,
+						pattern: literal(t, call.Args[1], consts, at.String()),
 						at:      at.String(),
 					})
 				case "WithHTTPHandlerFunc", "WithHTTPHandler":
 					if len(call.Args) < 1 {
 						return true
 					}
-					routes = append(routes, handRoute{pattern: literal(t, call.Args[0], at.String()), at: at.String()})
+					routes = append(routes, handRoute{pattern: literal(t, call.Args[0], consts, at.String()), at: at.String()})
 				}
 				return true
 			})
@@ -176,13 +182,59 @@ func parseDir(t *testing.T, fset *token.FileSet, dir string) []*ast.File {
 	return files
 }
 
-func literal(t *testing.T, e ast.Expr, at string) string {
+func literal(t *testing.T, e ast.Expr, consts map[string]string, at string) string {
 	t.Helper()
-	lit, ok := e.(*ast.BasicLit)
-	if !ok || lit.Kind != token.STRING {
-		t.Errorf("%s: a hand-mounted route must name its method and path as string literals so its spec coverage can be checked", at)
-		return ""
+	s, ok := resolveString(e, consts)
+	if !ok {
+		t.Errorf("%s: a hand-mounted route must name its path as a string literal or package constant so its spec coverage can be checked", at)
 	}
-	s, _ := strconv.Unquote(lit.Value)
 	return s
+}
+
+// resolveString evaluates e when it is a string literal, a package-level
+// string constant of the same package, or an http.MethodX constant.
+func resolveString(e ast.Expr, consts map[string]string) (string, bool) {
+	switch v := e.(type) {
+	case *ast.BasicLit:
+		if v.Kind == token.STRING {
+			s, err := strconv.Unquote(v.Value)
+			return s, err == nil
+		}
+	case *ast.Ident:
+		s, ok := consts[v.Name]
+		return s, ok
+	case *ast.SelectorExpr:
+		if pkg, ok := v.X.(*ast.Ident); ok && pkg.Name == "http" {
+			if m, ok := strings.CutPrefix(v.Sel.Name, "Method"); ok && m != "" {
+				return strings.ToUpper(m), true
+			}
+		}
+	}
+	return "", false
+}
+
+// stringConsts collects the package-level string constants of files.
+func stringConsts(files []*ast.File) map[string]string {
+	consts := map[string]string{}
+	for _, f := range files {
+		for _, d := range f.Decls {
+			gd, ok := d.(*ast.GenDecl)
+			if !ok || gd.Tok != token.CONST {
+				continue
+			}
+			for _, spec := range gd.Specs {
+				vs := spec.(*ast.ValueSpec)
+				for i, name := range vs.Names {
+					if i < len(vs.Values) {
+						if lit, ok := vs.Values[i].(*ast.BasicLit); ok && lit.Kind == token.STRING {
+							if s, err := strconv.Unquote(lit.Value); err == nil {
+								consts[name.Name] = s
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	return consts
 }
