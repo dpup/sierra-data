@@ -730,8 +730,10 @@ floods a cycle. A busy/paused/offline gateway isn't a failure. A refused
 password stops polling until the share is updated. Unread for
 `repeaterHibernateAfter` (6) cycles with no advert or other monitor's read
 on the Grid in that window: polled daily, and woken when the Grid shows it
-alive. The schedule is saved in the relay (`SetRepeaterPollState`), so a
-restart resumes it, and the relay records every check
+alive. The schedule is saved in the relay (`SetRepeaterPollState`) with the
+last reading, so a restart resumes it and the report keeps each repeater's
+readings until its next cycle (a node missing from a report loses its
+telemetry on the Grid). The relay records every check
 (`meshbridge admin repeaters` shows each gateway's last 24h). Outcomes go back to the registry
 (`RecordRepeaterPoll`) so hosts and admins see the last read and problem.
 The key must stay stable across deploys: a new one makes every stored
