@@ -694,8 +694,6 @@ help:
 	@echo ""
 	@echo "Testing targets:"
 	@echo "  test        - Run full test suite (unit tests, works offline)"
-	@echo "  test-unit   - Run unit tests only"
-	@echo "  test-contract - Run contract tests"
 	@echo "  test-google [ROUTE_ID=id] [VERBOSE=true]   - Test Google Routes API"
 	@echo "  test-caltrans [VERBOSE=true] [FORMAT=table] - Test Caltrans KML feeds"
 	@echo "  test-weather [LOCATION_ID=id] [VERBOSE=true] - Test OpenWeatherMap API"

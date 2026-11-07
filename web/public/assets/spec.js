@@ -85,7 +85,7 @@ export const ENDPOINTS = [
       ['status', 'EventStatus, repeatable', 'Pass ACTIVE for what is in effect now: the default also returns SCHEDULED planned roadwork. Include RESOLVED/EXPIRED explicitly to see closed events.', 'ACTIVE,SCHEDULED'],
       ['severity_min', 'Severity enum', 'Inclusive floor on the unified scale.', 'INFO'],
       ['since', 'RFC 3339', 'Only events observed at or after this time.', 'no floor'],
-      ['page_size', 'int', 'Max events per page; values above 200 are capped at 200.', '50'],
+      ['page_size', 'int', 'Max events per page; values above 200 are capped at 200, a negative value is a 400.', '50'],
       ['page_token', 'opaque string', "Cursor from a previous response's nextPageToken.", 'first page'],
     ],
     examples: [
@@ -201,8 +201,8 @@ export const ENDPOINTS = [
     blurb: 'MeshCore relay topology — the derived, weighted edge list between nodes.',
     detail:
       'Hand-built rather than a proto RPC. Each advert we hear records its relay path in an append-only observation store; this endpoint serves the rolled-up per-link history. `window` trades currency for coverage. A link is reported with its observation count and last-heard time — a quiet-but-recent link is dim, not absent. Node presence itself is an event (layer=mesh); this is only the edges between them.',
-    params: [['window', 'duration slug', 'e.g. 72h, 7d, 30d, all.', '72h']],
-    examples: ['/api/v1/mesh/links', '/api/v1/mesh/links?window=7d'],
+    params: [['window', 'duration', 'A positive Go duration: 24h, 72h, 168h (7 days), 720h (30 days); over 9600h is clamped. Anything else (7d, all, bogus) is a 400.', '72h']],
+    examples: ['/api/v1/mesh/links', '/api/v1/mesh/links?window=168h'],
   },
   {
     path: '/api/v1/scanners',

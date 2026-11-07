@@ -141,11 +141,6 @@ path — prefer it over ad-hoc kills. When you must kill a server by hand:
 # Run all tests
 make test
 
-# Run specific test suites
-make test-contract
-make test-integration
-make test-unit
-
 # Test external API clients
 ./bin/test-google
 ./bin/test-caltrans  
@@ -499,7 +494,19 @@ status code or URL, add an endpoint), record it in `CHANGELOG.md` as a new dated
 section at the top (no formal releases — we deploy from `main`, so entries are
 timestamped). That's how consuming sites (ersn.net, sierragridteam.org) learn
 what to update. Flag anything that changes an existing response shape as a
-breaking change with a migration note.
+breaking change: start its `###` heading with `BREAKING:` and include a
+migration note. The file is also published at `/changelog`.
+
+**`/api/openapi.json` must stay a complete, accurate description** — it is what
+a consumer (or an agent) builds a client or UI from. It is OpenAPI 3.0.3,
+committed as `api/grid/v1/openapi.json` and built by `cmd/openapi-merge` from
+the generated `grid.swagger.json` plus the hand-written
+`api/grid/v1/openapi.overlay.yaml` (`make proto` runs it; `make openapi` alone
+after an overlay edit). Proto-defined RPCs are documented in `grid.proto`
+comments and `openapiv2_*` annotations; hand-built routes (`.geojson`,
+`/mesh/links`, ingest, `/mcp`) in the overlay. CI fails if the committed spec is
+stale or a hand-mounted route has no spec path. When you change behaviour,
+update its description and examples in the same PR.
 
 **One surface: `/api/v1`, proto-defined gRPC + gRPC-Gateway** (migrated 2026-07-09;
 see `docs/design/grpc-gateway-migration-plan.md`, `docs/design/v2-api-spec.md`). The `GridService`

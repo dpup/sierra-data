@@ -59,7 +59,7 @@ curl  https://data.sierragridteam.org/api/v1/places/calaveras-county/map/wildfir
       <code class="inline">severity_min</code> or <code class="inline">layer</code> to narrow
       further.</li>
     <li><strong><code class="inline">page_size</code></strong> defaults to 50; larger
-      values are capped at 200. Follow <code class="inline">nextPageToken</code> for more.</li>
+      values are capped at 200 and a negative value is a <code class="inline">400</code>. Follow <code class="inline">nextPageToken</code> for more.</li>
     <li><strong>64-bit integers are JSON strings</strong> (the proto3 JSON mapping), for
       example the mesh <code class="inline">telemetry.admin</code> counters
       (<code class="inline">"uptimeSeconds": "7121920"</code>). Parse them; do not compare

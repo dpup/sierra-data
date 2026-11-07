@@ -22,6 +22,89 @@ longer exist: `/api/v1` originally hosted a different hand-built REST surface,
 replaced by a snake_case `/v1` surface on 2026-07-05, which was folded back onto
 the proto-defined `/api/v1` gateway on 2026-07-09.
 
+## 2026-11-07
+
+### BREAKING: `/api/openapi.json` is now OpenAPI 3.0.3 and describes the whole API
+
+The spec moves from Swagger 2.0 to **OpenAPI 3.0.3**. Schemas move from
+`#/definitions/X` to `#/components/schemas/X`. It is now meant to be enough on
+its own to build a client or a UI:
+
+- An `info.description` overview: the resource model, a quickstart (resolve a
+  place → summary → events → map layers), conventions, caching, error codes,
+  severity and status, and the fail-loud rules.
+- Every operation has a summary, a description and a tag. Every field has a
+  description, closed-set strings carry enums, and there are examples taken
+  from production responses.
+- Routes not built from the proto are described too:
+  `GET /api/v1/places/{place}/map/{layer}.geojson` (all 13 layers, with the
+  per-layer `properties`), `GET /api/v1/mesh/links`,
+  `POST /api/v1/ingest/{stream}` (bearer auth) and `POST /mcp`.
+- `rpcStatus` documents `codeName`. A test fails CI when a hand-built route
+  has no spec entry.
+
+**Migration:** regenerate any client built from the old spec, and update
+`$ref` paths if you read the spec directly.
+
+### BREAKING: invalid parameters now return 400 instead of being ignored
+
+- `GET /api/v1/mesh/links` and `/places/{place}/map/mesh_link.geojson`: a
+  `window` that is not a positive duration (`bogus`, `72`, `0s`) now returns
+  `400 INVALID_ARGUMENT`. It used to fall back to 72h silently. Send a Go
+  duration such as `72h` or `168h`, or omit `window`.
+- `GET /api/v1/mesh/telemetry`: a `node` that is not 8–64 hex characters
+  (optionally prefixed `meshcore:`) now returns `400 INVALID_ARGUMENT`. It used
+  to return an empty 200.
+- `GET /api/v1/events`, `/events/{id}/history`, `/history`: a negative
+  `page_size` now returns `400 INVALID_ARGUMENT`. 0 still means the default
+  (50), and values above 200 are still clamped to 200.
+
+### ETags on map layers and mesh links now revalidate (weak tags)
+
+The `.geojson` layers and `GET /api/v1/mesh/links` used to change their `ETag`
+every second, because it hashed `generatedAt`, so `If-None-Match` almost never
+produced a `304`. The tag now covers only the data: features or links,
+`sourceStatus`, `lastSourceUpdate` and attribution. It is now **weak**
+(`W/"…"`). A client that echoes the tag back needs no change. After a `304`,
+your cached `generatedAt` stays at the original fetch time.
+
+### ETags on events no longer go stale
+
+`GET /api/v1/events`, `/events/{id}` and place-filtered `/history` could answer
+`304` with an outdated body after a change that adds no new revision. These
+changes are an event's AI enhancement or summary, mesh telemetry, a burn-line
+reading (and its `observedAt`), and the event's place attachments. Their ETags
+now change with them. Response shapes are unchanged.
+
+### `places:resolve` returns towns
+
+`GET /api/v1/places:resolve` now includes `TOWN` places. A point matches a town
+within 3 km of the town's centre (`grid.places.townRadiusMeters`). Towns sort
+after evacuation zones and before corridors, with the nearest town first.
+Events still do not attach to towns.
+
+### Summary headlines say whether they are an event
+
+Each `domains[].headlines[]` entry in `GET /api/v1/places/{place}/summary`
+gains `kind` (`EVENT` or `CONDITION`) and `layer` (e.g. `ROAD_INCIDENT`,
+`ROAD_SEGMENT`). A `CONDITION` id such as `road:hwy4-arnold-bearvalley` is a
+map feature, not an event: `GET /api/v1/events/{id}` returns 404 for it. Find
+it by `properties.id` in that layer's `.geojson`. Additive.
+
+### Smaller fixes
+
+- `GET /api/v1/mesh/telemetry` accepts the event id form `node=meshcore:<key>`,
+  as `/events` hands it out, as well as the bare key. The response's `node` is
+  the bare key.
+- `/api/v1/ingest/{stream}` answers a non-POST method with `405` and
+  `Allow: POST`. It used to return `501`.
+- Errors from the `.geojson` layers, `/api/v1/mesh/links` and ingest now use the
+  same `{code, codeName, message, details}` envelope as every other route.
+  `codeName` and `details` are new there.
+- Docs: the README is now an accurate quickstart. `/docs` gains a "building a
+  UI" section and loses several stale claims (`burnLinePhone` is
+  `burnLines[].phone`). This changelog is served at `/changelog`.
+
 ## 2026-11-04 (later)
 
 ### Mesh relay: public gateway status, and a `/relay` page
