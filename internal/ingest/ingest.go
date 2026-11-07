@@ -90,7 +90,7 @@ type PollResult struct {
 	// and merged by MAX, so a replay never moves a clock backwards. It is not
 	// event content, so it never reaches the event blob; the API overlays it at
 	// read time. See store.RecordMeshTick and the mesh section of
-	// internal/ingest/CLAUDE.md.
+	// internal/ingest/AGENTS.md.
 	MeshActivity []store.MeshActivity
 	// MeshActivityUnwritten, when set, is called if MeshActivity could not be
 	// written. The normalizer sends only clocks that moved since what it last

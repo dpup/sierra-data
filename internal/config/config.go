@@ -664,7 +664,7 @@ type MeshcoreConfig struct {
 	// so one relay buys a node what one advert of unknown cadence does; a
 	// negative value turns relay presence off. Relays can keep a node whose
 	// identity a signed advert established; they never create, move or rename
-	// one. See "Relay presence" in internal/ingest/CLAUDE.md.
+	// one. See "Relay presence" in internal/ingest/AGENTS.md.
 	RelayPresence time.Duration `koanf:"relayPresence"`
 	// NodeURL is the template for each node event's canonical_url, with
 	// `{publicKey}` replaced by the node's full 64-hex public key: the node's

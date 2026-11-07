@@ -134,7 +134,7 @@ func (r incidentJSON) normalize() Incident {
 }
 
 // pacific is the zone for CAL FIRE's zoneless timestamps. Like the Caltrans/CHP
-// feeds (see internal/clients/CLAUDE.md), no-offset California timestamps are
+// feeds (see internal/clients/AGENTS.md), no-offset California timestamps are
 // Pacific, not UTC; cmd/server blank-imports time/tzdata so this resolves.
 var pacific, _ = time.LoadLocation("America/Los_Angeles")
 

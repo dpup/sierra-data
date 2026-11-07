@@ -2667,7 +2667,7 @@ type MeshTelemetry struct {
 	// hop directly) that carries the byte. Direct routes: prefix only, never a
 	// 1-byte hop, never taught to the neighbour graph (FrameHeader.RouteHops).
 	// Presence window: grid.meshcore.relayPresence. See "Two activity clocks" and
-	// "Relay presence" in internal/ingest/CLAUDE.md. --)
+	// "Relay presence" in internal/ingest/AGENTS.md. --)
 	LastRelayedAt *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=last_relayed_at,json=lastRelayedAt,proto3" json:"last_relayed_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

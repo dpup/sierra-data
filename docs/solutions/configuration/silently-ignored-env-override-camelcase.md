@@ -42,7 +42,7 @@ The consequences are silent and expensive:
 
 - **Production**: the store lands at the image's `./data/grid.db` rather than the
   mounted `/data` volume, so the **entire revision history is discarded on every
-  container replacement**. `internal/store/CLAUDE.md` is explicit that this data
+  container replacement**. `internal/store/AGENTS.md` is explicit that this data
   is irreplaceable — most upstreams are active-only, so a lost DB cannot be
   rebuilt beyond the current snapshot.
 - **Dev sandbox**: `moat.yaml` set `PF__GRID__DBPATH` specifically to keep the DB
@@ -73,7 +73,7 @@ for _, ns := range []string{"grid", "roads", "weather", "hazards", ...} {
 Registering the namespace silences validation for **everything inside it**. So
 prefab's own `server.*` keys stayed validated while ours — the camelCase-heavy
 ones — did not. The Dockerfile had already been bitten and carried a comment
-warning about the exact spelling; the root `CLAUDE.md`, `prefab.yaml`,
+warning about the exact spelling; the root `AGENTS.md`, `prefab.yaml`,
 `moat.yaml`, `docs/`, and a store error message all still had the wrong name.
 A comment in one file does not protect the other eight.
 
@@ -124,8 +124,8 @@ Design choices worth keeping:
   game of whack-a-mole across restarts.
 
 The wrong spellings were also corrected everywhere they appeared: `moat.yaml`
-(the live one), root `CLAUDE.md`, `prefab.yaml`, `internal/config/config.go`,
-`internal/store/store.go`'s error message, `internal/store/CLAUDE.md`, and two
+(the live one), root `AGENTS.md`, `prefab.yaml`, `internal/config/config.go`,
+`internal/store/store.go`'s error message, `internal/store/AGENTS.md`, and two
 `docs/` files — plus `PF__GRID__JOURNALMODE` → `PF__GRID__JOURNAL_MODE`, the same
 defect. Historical `CHANGELOG.md` entries were left alone as dated records.
 
@@ -152,7 +152,7 @@ this bug.
 
 ## Related
 
-- `../../../internal/store/CLAUDE.md` — why the grid DB is a system of record and
+- `../../../internal/store/AGENTS.md` — why the grid DB is a system of record and
   not a rehydrate-able cache (what losing it actually costs), and the
   bind-mount/virtiofs corruption hazard.
 - `Dockerfile` — the original, correct `PF__GRID__DB_PATH` and the comment that

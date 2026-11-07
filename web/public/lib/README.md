@@ -15,7 +15,7 @@ new tag from unpkg (or the GitHub release) and update this note.
 
 ## Fonts (`fonts/`)
 
-Three families, each with one job (see `web/CLAUDE.md`): **Archivo** for display,
+Three families, each with one job (see `web/AGENTS.md`): **Archivo** for display,
 **IBM Plex Sans** for prose, **IBM Plex Mono** for every value that came from the
 API. All latin subsets, `font-display: swap`, self-hosted for the same reason as
 MapLibre — no Google Fonts request at runtime.

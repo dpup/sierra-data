@@ -31,7 +31,7 @@ type UpsertResult struct {
 // BEFORE enhancing. The MESH exclusion is what keeps the MeshCore advert
 // firehose from minting a revision per packet: SNR/RSSI/hops/gateways change
 // constantly but ride in telemetry, so only a node's stable identity, role,
-// name, location, or status flips the hash. See internal/store/CLAUDE.md.
+// name, location, or status flips the hash. See internal/store/AGENTS.md.
 func ContentHash(ev *gridv1.Event) string {
 	c := proto.Clone(ev).(*gridv1.Event)
 	c.Revision = 0
@@ -656,7 +656,7 @@ func (s *Store) refreshEventPlaces(tx *sql.Tx, ev *gridv1.Event) (bool, error) {
 		return false, fmt.Errorf("store: marshal event %s for refresh: %w", ev.GetId(), err)
 	}
 	// Columns are indexes re-derived from the blob on every write (see
-	// internal/store/CLAUDE.md): the burn refresh moves observed_at, so the
+	// internal/store/AGENTS.md): the burn refresh moves observed_at, so the
 	// observed_at column moves with it. For every other refresh it is unchanged.
 	if stored.GetObservedAt() != nil {
 		if _, err := tx.Exec(`UPDATE events SET proto = ?, observed_at = ?, refreshes = refreshes + 1 WHERE id = ?`,

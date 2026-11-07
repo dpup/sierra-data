@@ -123,7 +123,7 @@ $(TEST_PGE_BINARY): proto
 # Where the site's npm dependencies actually live.
 #
 # Files written into /workspace — a virtiofs bind mount — bit-corrupt in place
-# (the same fault class as the SQLite corruption in internal/store/CLAUDE.md).
+# (the same fault class as the SQLite corruption in internal/store/AGENTS.md).
 # npm writes ~188MB of them, and one flipped byte in @astrojs/compiler's
 # astro.wasm or in any dist/*.js kills the build with an error naming an
 # innocent .astro file. So node_modules lives OFF the mount and web/node_modules

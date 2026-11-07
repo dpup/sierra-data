@@ -67,7 +67,7 @@ make proto   # then: git status api/ — only files for protos you edited should
   teardown by PORT, not by the kill command's exit.** A smoke-test server that
   survived its kill loop ran for six days (2026-10-03 to 10-09) and kept
   production's mesh feed deaf the whole time — see "A deaf broker" in
-  `internal/ingest/CLAUDE.md`. After killing, `curl -m2 localhost:<port>` for
+  `internal/ingest/AGENTS.md`. After killing, `curl -m2 localhost:<port>` for
   every port you used must get no answer. Leave mesh on only when the change
   under test is the mesh client, and then only on a current build.
 - **Never run a server binary built from before 2026-10-09 with mesh enabled
@@ -77,7 +77,7 @@ make proto   # then: git status api/ — only files for protos you edited should
   credentials. Each connect knocks production's session off. Current builds
   append a random per-process suffix. When comparing against an old build, set
   `PF__GRID__MESHCORE__ENABLED=false` for it. See "A deaf broker" in
-  `internal/ingest/CLAUDE.md`.
+  `internal/ingest/AGENTS.md`.
 - Weather refresh is lazy (request-driven); the first `/weather` hit triggers
   the OpenWeather fan-out. Mind API budgets: don't loop requests that bust
   caches, and never wire `/data/3.0/onecall` back into the server (1,000/day cap).

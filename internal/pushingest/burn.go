@@ -13,7 +13,7 @@ import (
 //
 // It is pushed rather than polled because the authority is a PHONE NUMBER, not a
 // feed — cmd/burn-line dials it from CI, transcribes the recording and extracts
-// a status. See internal/ingest/CLAUDE.md for the layer this feeds.
+// a status. See internal/ingest/AGENTS.md for the layer this feeds.
 const BurnStream = "burn.line"
 
 // burnSchemaVersion is the payload contract this handler understands.

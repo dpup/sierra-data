@@ -16,7 +16,7 @@ applies_when:
 
 # A tick that learned nothing about a node's position wiped the position it had
 
-Primary files: `internal/ingest/network.go` (`buildEvent`), `internal/ingest/network_push_test.go` (`TestPushOnlyTickKeepsStoredPosition`), `internal/ingest/CLAUDE.md`.
+Primary files: `internal/ingest/network.go` (`buildEvent`), `internal/ingest/network_push_test.go` (`TestPushOnlyTickKeepsStoredPosition`), `internal/ingest/AGENTS.md`.
 
 ## Symptom
 

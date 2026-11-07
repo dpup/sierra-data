@@ -1103,7 +1103,7 @@ button:disabled { opacity: 0.45; cursor: default; }
 /* 13.5px, not 13px, and the intro measure — so a notice lands on the SAME
    column edge as the section intros around it. At 13px it inherited --measure
    (36em) and came out 468px beside a 540px intro: two right edges, 72px apart,
-   in one stack. Three sizes, one edge — see the measure note in web/CLAUDE.md.
+   in one stack. Three sizes, one edge — see the measure note in web/AGENTS.md.
    The BOX takes the measure, so its right edge lands with the intros' — a
    bordered callout whose text is inset reads as deliberate; one sticking 30px
    past the paragraph above it reads as a mistake. */

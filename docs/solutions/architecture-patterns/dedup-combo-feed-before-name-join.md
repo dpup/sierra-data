@@ -18,7 +18,7 @@ applies_when:
 # Swapping a rate-limited feed for a faster superset, and deduping its many-rows-per-entity shape
 
 Shipped in commit `1fdcdd2` on `main` (`feat(ingest,firis)!: swap wildfire perimeter source WFIGS -> CAL FIRE/FIRIS combo feed`); follow-up place-matching fix in commit `7c2b873`.
-Primary files: `internal/clients/firis/client.go`, `internal/ingest/wildfire.go`, `cmd/server/main.go`, `docs/design/firis-perimeter-source-design.md`, `internal/ingest/CLAUDE.md`.
+Primary files: `internal/clients/firis/client.go`, `internal/ingest/wildfire.go`, `cmd/server/main.go`, `docs/design/firis-perimeter-source-design.md`, `internal/ingest/AGENTS.md`.
 
 ## Context
 
@@ -103,7 +103,7 @@ The representative pick is a **total order** so it's deterministic under ties (`
 
 ### 3. Treat an empty-but-successful upstream response as non-authoritative
 
-A working combo feed with *any* active fire in-bbox returns at least one perimeter, so a zero-feature HTTP 200 is far more likely a transient ArcGIS glitch (backend load-shedding, a momentarily-empty spatial index) than every fire's perimeter vanishing at once. Two mechanisms encode that (this is the ingest fail-loud posture, `internal/ingest/CLAUDE.md`):
+A working combo feed with *any* active fire in-bbox returns at least one perimeter, so a zero-feature HTTP 200 is far more likely a transient ArcGIS glitch (backend load-shedding, a momentarily-empty spatial index) than every fire's perimeter vanishing at once. Two mechanisms encode that (this is the ingest fail-loud posture, `internal/ingest/AGENTS.md`):
 
 **Never cache an empty set as last-good** (`gatedPerimeters`, `wildfire.go:269`):
 

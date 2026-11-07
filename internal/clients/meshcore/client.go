@@ -917,7 +917,7 @@ func relayObserver(env *packetEnvelope, defaultGateway string) string {
 // a quiesced Grid (internal/handoff) never rejoins the feed. It disconnects
 // unconditionally rather than relying on IsConnected, which with connect
 // retry on reports true while paho is still trying (the quirk behind "A deaf
-// broker" in internal/ingest/CLAUDE.md).
+// broker" in internal/ingest/AGENTS.md).
 func (r *Registry) Close() {
 	r.mu.Lock()
 	clients := r.clients
