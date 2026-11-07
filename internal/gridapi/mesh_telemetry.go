@@ -3,6 +3,7 @@ package gridapi
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
+	"github.com/dpup/sierra-data/internal/clients/meshcore"
 	"github.com/dpup/sierra-data/internal/store"
 )
 
@@ -28,10 +30,24 @@ const (
 // the node's event carries — so the archive cannot describe a reading
 // differently from the live record, and an unread gauge stays null in both.
 func (g *GridServer) GetMeshTelemetry(ctx context.Context, req *gridv1.GetMeshTelemetryRequest) (*gridv1.MeshTelemetryArchive, error) {
-	node := strings.ToLower(strings.TrimSpace(req.GetNode()))
-	if node == "" {
+	if strings.TrimSpace(req.GetNode()) == "" {
 		return nil, invalidErr(errors.New("node is required: the full public key of one mesh node"))
 	}
+	// Either id form a client holds is accepted: the bare key, or the event id
+	// /api/v1/events hands out ("meshcore:<key>"). The key may be a PREFIX — a
+	// node a monitor reports that no advert has matched to a full key yet is
+	// archived under it, and its event id carries the same prefix.
+	node, ok := meshcore.ParseNodeKey(req.GetNode())
+	if !ok {
+		return nil, invalidErr(fmt.Errorf(
+			"node %q is not a mesh node id: want %d-%d hex characters (a public key or a prefix of one), optionally prefixed %q",
+			req.GetNode(), meshcore.MinNodeIDHex, meshcore.MaxNodeIDHex, meshcore.EventIDPrefix))
+	}
+	// A well-formed key we hold nothing for is an empty 200, not NOT_FOUND: the
+	// archive is keyed independently of the event lifecycle (most mesh nodes
+	// have no monitor at all, an expired node's history outlives its event, and
+	// a prefix key is renamed when the full key arrives), so "no samples" is a
+	// true statement about the archive, and coverage.samples: 0 says it.
 
 	now := g.svc.Now()
 	to := now

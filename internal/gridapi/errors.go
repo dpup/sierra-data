@@ -5,28 +5,22 @@ import (
 	"net/http"
 
 	"github.com/dpup/prefab/logging"
-	spb "google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/protobuf/encoding/protojson"
+
+	"github.com/dpup/sierra-data/internal/lib/httperr"
 )
 
-// writeStatus emits a google.rpc.Status body as protojson with proto field
-// names ({"code":<grpc code int>,"message":"..."}) under the given HTTP
-// status — the /v1 error convention (plan §2.3). code is the gRPC code
-// numeric value; the HTTP status carries the transport semantics. Errors are
-// never cacheable, so no ETag and Cache-Control: no-store.
+// writeStatus emits the /api/v1 error envelope ({code, codeName, message,
+// details}, the shape the gateway routes return) under the given HTTP status.
+// grpcCode is the gRPC code numeric value; the HTTP status carries the
+// transport semantics. Errors are never cacheable (Cache-Control: no-store).
 func writeStatus(w http.ResponseWriter, httpCode int, grpcCode int, msg string) {
-	body, err := protojson.MarshalOptions{UseProtoNames: true}.Marshal(
-		&spb.Status{Code: int32(grpcCode), Message: msg})
-	if err != nil {
-		// Marshal of a Status literal cannot realistically fail; keep the body
-		// shape either way.
-		body = []byte(`{"code":13,"message":"internal error"}`)
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(httpCode)
-	_, _ = w.Write(body)
+	httperr.Write(w, httpCode, codes.Code(grpcCode), msg) //nolint:gosec // small constants
+}
+
+// invalidArgument is 400 / INVALID_ARGUMENT.
+func invalidArgument(w http.ResponseWriter, msg string) {
+	writeStatus(w, http.StatusBadRequest, int(codes.InvalidArgument), msg)
 }
 
 // notFound is 404 / NOT_FOUND.

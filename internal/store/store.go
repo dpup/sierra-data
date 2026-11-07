@@ -261,6 +261,10 @@ type Store struct {
 	// or TOWN place and still attach to it. See WithWildfireProximity.
 	wildfireBuffer float64
 
+	// townRadius is how far (metres) from a TOWN's point a location may be and
+	// still resolve to that town. See WithTownRadius.
+	townRadius float64
+
 	// maxOpenConns is the pool bound actually applied, kept for Settings.
 	maxOpenConns int
 
@@ -302,6 +306,7 @@ type Option func(*openConfig)
 type openConfig struct {
 	journalMode    string
 	wildfireBuffer float64
+	townRadius     float64
 	cacheSizeMB    int
 	maxOpenConns   int
 	lockTimeout    time.Duration
@@ -347,6 +352,26 @@ func WithWildfireProximity(meters float64) Option {
 	return func(c *openConfig) {
 		if meters > 0 {
 			c.wildfireBuffer = meters
+		}
+	}
+}
+
+// DefaultTownRadiusMeters is how close to a town's point a location must be to
+// resolve to that town when grid.places.townRadiusMeters is unset. 3 km covers
+// the built-up core of the service area's towns (Murphys, Arnold, Sonora)
+// while the closest pair, Sonora and Columbia (~5.9 km apart), overlap only in
+// a sliver, where both are returned, nearest first.
+const DefaultTownRadiusMeters = 3000
+
+// WithTownRadius sets how far (metres) from a TOWN place's point a location may
+// be and still resolve to it (PlacesContaining). Towns are seeded as points, so
+// "contains" has to mean "within this radius" for them, or no location would
+// ever resolve to a town. Zero or negative keeps DefaultTownRadiusMeters.
+// Resolve only: event attachment (matchPlaces) is unchanged.
+func WithTownRadius(meters float64) Option {
+	return func(c *openConfig) {
+		if meters > 0 {
+			c.townRadius = meters
 		}
 	}
 }
@@ -433,7 +458,8 @@ const (
 // override with WithJournalMode.
 func Open(path string, opts ...Option) (*Store, error) {
 	cfg := openConfig{journalMode: "TRUNCATE", cacheSizeMB: DefaultCacheSizeMB,
-		maxOpenConns: DefaultMaxOpenConns, lockTimeout: lockAcquireTimeout}
+		maxOpenConns: DefaultMaxOpenConns, lockTimeout: lockAcquireTimeout,
+		townRadius: DefaultTownRadiusMeters}
 	for _, o := range opts {
 		o(&cfg)
 	}
@@ -508,7 +534,8 @@ func Open(path string, opts ...Option) (*Store, error) {
 				"probably cannot support it (WAL needs a real local disk; use TRUNCATE on NFS/EFS)",
 			cfg.journalMode, applied.JournalMode, path)
 	}
-	s := &Store{db: db, lockFile: lockFile, wildfireBuffer: cfg.wildfireBuffer, maxOpenConns: cfg.maxOpenConns}
+	s := &Store{db: db, lockFile: lockFile, wildfireBuffer: cfg.wildfireBuffer,
+		townRadius: cfg.townRadius, maxOpenConns: cfg.maxOpenConns}
 	if err := s.migrate(); err != nil {
 		db.Close()
 		lockFile.Close()

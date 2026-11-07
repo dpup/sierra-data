@@ -205,7 +205,8 @@ func (a *gridApp) Activate(actx context.Context) (err error) {
 		store.WithLockTimeout(appConfig.Grid.LockTimeout),
 		// A SIGTERM during the lock wait ends it at once.
 		store.WithLockContext(actx),
-		store.WithWildfireProximity(appConfig.Grid.Wildfire.PlaceBuffer()))
+		store.WithWildfireProximity(appConfig.Grid.Wildfire.PlaceBuffer()),
+		store.WithTownRadius(appConfig.Grid.Places.TownRadiusMeters))
 	if err != nil {
 		return fmt.Errorf("open grid store %s: %w", appConfig.Grid.DBPath, err)
 	}
@@ -504,10 +505,7 @@ func (a *gridApp) Activate(actx context.Context) (err error) {
 			// [GET], so the POST preflight is denied — the same property that
 			// protects /mcp. Do not add POST to that list.
 			if pushRegistry.Enabled() {
-				if err := mux.HandlePath("POST", "/api/v1/ingest/{stream}",
-					gated(func(w http.ResponseWriter, r *http.Request, pp map[string]string) {
-						pushRegistry.ServeStream(w, r, pp["stream"])
-					})); err != nil {
+				if err := pushRegistry.Mount(mux, gated); err != nil {
 					return err
 				}
 			}

@@ -215,3 +215,24 @@ func TestSeed_AreaPrefersPolygon(t *testing.T) {
 	assert.Greater(t, bb.GetMinLng(), -121.0)
 	assert.Less(t, bb.GetMaxLng(), -119.5)
 }
+
+// Resolving a location in a town returns that town, most-specific first. The
+// point is where the Census geocoder puts "1 Main St, Murphys, CA" (~350 m from
+// the town's seeded point); before towns had a radius, resolve answered with
+// the corridors, county and area and never the town.
+func TestSeededTownsResolve(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	require.NoError(t, Seed(ctx, s, testConfig()))
+
+	got, err := s.PlacesContaining(ctx, 38.135981753589, -120.456858075567)
+	require.NoError(t, err)
+	require.NotEmpty(t, got)
+	assert.Equal(t, "town:murphys", got[0].GetId(), "the town is the most specific place")
+	ids := make([]string, len(got))
+	for i, p := range got {
+		ids[i] = p.GetId()
+	}
+	assert.Contains(t, ids, "county:calaveras-county")
+	assert.NotContains(t, ids, "town:sonora", "~20 km away")
+}

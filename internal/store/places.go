@@ -115,6 +115,11 @@ func (s *Store) GetPlace(ctx context.Context, slugOrID string) (*gridv1.Place, e
 // ordered most-specific-first (SITE, EVAC_ZONE, TOWN, CORRIDOR, COUNTY,
 // AREA), then by name. Bbox prefilter, then even-odd point-in-polygon; the
 // place inventory is small enough (tens of rows) that a full scan is fine.
+//
+// Towns are the exception: they are seeded as points (the weather location),
+// which no point-in-polygon test can match, so a town "contains" a location
+// within the store's town radius of it (WithTownRadius). When more than one
+// town is that close they are all returned, nearest first.
 func (s *Store) PlacesContaining(ctx context.Context, lat, lng float64) ([]*gridv1.Place, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT proto FROM places`)
 	if err != nil {
@@ -127,6 +132,7 @@ func (s *Store) PlacesContaining(ctx context.Context, lat, lng float64) ([]*grid
 	}
 
 	var matched []*gridv1.Place
+	townDist := map[string]float64{} // matched town id -> metres from the query
 	for _, p := range all {
 		raw := p.GetGeometry().GetGeojson()
 		if len(raw) == 0 {
@@ -134,6 +140,13 @@ func (s *Store) PlacesContaining(ctx context.Context, lat, lng float64) ([]*grid
 		}
 		g, err := geojson.Parse(raw)
 		if err != nil {
+			continue
+		}
+		if p.GetKind() == gridv1.PlaceKind_TOWN && g.Type == "Point" {
+			if d := geojson.MetersBetween(lat, lng, g.Point.Lat(), g.Point.Lng()); d <= s.townRadius {
+				matched = append(matched, p)
+				townDist[p.GetId()] = d
+			}
 			continue
 		}
 		minLat, minLng, maxLat, maxLng := g.Bbox()
@@ -152,6 +165,9 @@ func (s *Store) PlacesContaining(ctx context.Context, lat, lng float64) ([]*grid
 		si, sj := placeSpecificity[matched[i].GetKind()], placeSpecificity[matched[j].GetKind()]
 		if si != sj {
 			return si < sj
+		}
+		if di, dj := townDist[matched[i].GetId()], townDist[matched[j].GetId()]; di != dj {
+			return di < dj // towns only; every other kind has no entry (0 == 0)
 		}
 		return matched[i].GetName() < matched[j].GetName()
 	})

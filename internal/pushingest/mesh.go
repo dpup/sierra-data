@@ -2,7 +2,6 @@ package pushingest
 
 import (
 	"context"
-	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
@@ -11,6 +10,7 @@ import (
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
+	"github.com/dpup/sierra-data/internal/clients/meshcore"
 )
 
 // MeshStream is the stream name for operator-monitored MeshCore repeaters:
@@ -23,14 +23,12 @@ const MeshStream = "mesh.repeater"
 // says what kind of thing it is, the schema version says which revision of it.
 const meshSchemaVersion = 1
 
-// Bounds on an individual node id. A MeshCore public key is 32 bytes (64 hex);
-// monitors commonly identify a node by a prefix of it (Alan's reports use 8
-// bytes / 16 hex). Anything shorter than 4 bytes is too collision-prone to
-// resolve to a node with any confidence, so it is rejected outright rather than
-// silently matched against the wrong repeater.
+// Bounds on an individual node id: a full public key or a prefix of one. The
+// rule is shared with the read side (GET /api/v1/mesh/telemetry), so it lives
+// in internal/clients/meshcore.
 const (
-	minNodeIDHex = 8
-	maxNodeIDHex = 64
+	minNodeIDHex = meshcore.MinNodeIDHex
+	maxNodeIDHex = meshcore.MaxNodeIDHex
 )
 
 // MeshNodeReport is one monitor's view of one node, normalized and
@@ -342,13 +340,7 @@ func int32Value(v *int32) *wrapperspb.Int32Value {
 
 // validNodeID accepts an even-length lowercase hex string within the bounds a
 // pubkey prefix can meaningfully carry.
-func validNodeID(id string) bool {
-	if len(id) < minNodeIDHex || len(id) > maxNodeIDHex || len(id)%2 != 0 {
-		return false
-	}
-	_, err := hex.DecodeString(id)
-	return err == nil
-}
+func validNodeID(id string) bool { return meshcore.ValidNodeID(id) }
 
 func hasAnyMetric(in meshRepeaterIn) bool {
 	return in.BatteryVoltage != nil || in.BatteryPercent != nil || in.TemperatureC != nil ||
