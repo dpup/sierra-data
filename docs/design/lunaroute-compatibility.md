@@ -301,7 +301,7 @@ whether transcription moves at all.
 
 ## 6a. Probe results (run 2, 2026-10-09 12:20 UTC)
 
-Workflow run [37929213439](https://github.com/dpup/sierra-data/actions/runs/37929213439);
+Workflow run [37929213439](https://github.com/sierragridteam/sierra-data/actions/runs/37929213439);
 the full reports are its step summary and artifacts. Production-shape
 requests were sent **without** `reasoning_effort` on this run (the tool now
 sends it by default, matching production on gpt-5-mini).
@@ -334,7 +334,7 @@ tool now prints them).
 
 ## 6b. Probe results (run 3, 2026-10-09 12:34 UTC, tuning on)
 
-Workflow run [37930798331](https://github.com/dpup/sierra-data/actions/runs/37930798331).
+Workflow run [37930798331](https://github.com/sierragridteam/sierra-data/actions/runs/37930798331).
 Every production-shape request carried `reasoning_effort: low`; the
 LunaRoute leg **also** carried `chat_template_kwargs.enable_thinking: false`
 (the dispatch set `no_thinking`), so its figures are for thinking fully off.

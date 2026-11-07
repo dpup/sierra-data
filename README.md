@@ -64,7 +64,7 @@ curl https://data.sierragridteam.org/api/v1/places/calaveras-county/map/wildfire
 
 1. Clone the repository:
    ```bash
-   git clone git@github.com:dpup/sierra-data.git
+   git clone git@github.com:sierragridteam/sierra-data.git
    cd sierra-data
    ```
 
