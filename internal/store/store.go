@@ -177,7 +177,7 @@ CREATE INDEX idx_mesh_telem_time ON mesh_telemetry(reported_at);`
 
 // migrationV7 adds the burn-line staging table: the landing spot for readings
 // PUSHED to the service rather than polled from an upstream (the burn-day facet
-// of Layer_BURN_STATUS; see internal/ingest/CLAUDE.md).
+// of Layer_BURN_STATUS; see internal/ingest/AGENTS.md).
 //
 // It exists so a push does NOT write events. The ingest scheduler stays the
 // single owner of event writes: the push handler validates a reading and lands
@@ -470,7 +470,7 @@ const (
 	// 64 MB worst case, deliberately conservative because the task's memory
 	// limit is not knowable from the code. Size it against the HOT set, not the
 	// file: event_revisions and mesh_observations dominate the file but are cold
-	// for /events. See internal/store/CLAUDE.md.
+	// for /events. See internal/store/AGENTS.md.
 	DefaultCacheSizeMB = 8
 )
 

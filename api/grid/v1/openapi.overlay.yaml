@@ -61,6 +61,14 @@ defaults:
             description: Human-readable explanation. Not stable; do not parse.
           details:
             description: Structured error details. Usually empty.
+      # The generator types google.protobuf.Struct as a bare `object`. This
+      # names the real shape (the same RFC 7946 schema the .geojson routes
+      # use), beside the generated type and description.
+      v1Geometry:
+        properties:
+          object:
+            allOf: [{$ref: "#/components/schemas/GeoJSONGeometry"}]
+            example: {"type": "Point", "coordinates": [-120.36108, 38.24239]}
 
   # grid.proto describes each RPC's error statuses (description only); the
   # merge completes them (error envelope, no body on a 304) and these defaults
@@ -346,6 +354,19 @@ spec:
           type: {type: string, enum: [Feature]}
           geometry: {$ref: "#/components/schemas/MapGeometry"}
           properties: {$ref: "#/components/schemas/MapFeatureProperties"}
+
+      # GeoJSONGeometry is the same shape, never null, for the RPCs' opt-in
+      # `geometry.object`. It references this schema rather than the reverse:
+      # a nullable schema built on a non-nullable allOf rejects its own null
+      # examples in validators.
+      GeoJSONGeometry:
+        type: object
+        allOf: [{$ref: "#/components/schemas/MapGeometry"}]
+        description: |
+          An RFC 7946 geometry object, the same shape as a map feature's
+          `geometry` (MapGeometry) but never `null`: an event's or place's
+          `geometry.object` when the request passes `geometryFormat=OBJECT`.
+          A position is `[longitude, latitude]`, longitude first.
 
       MapGeometry:
         type: object

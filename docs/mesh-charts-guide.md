@@ -203,4 +203,4 @@ windowed), if the page wants a map beside the charts.
 ---
 
 See `CHANGELOG.md` (2026-09-15, evening) for the API entry, and
-`internal/store/CLAUDE.md` for why the archive is shaped the way it is.
+`internal/store/AGENTS.md` for why the archive is shaped the way it is.

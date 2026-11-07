@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dpup/prefab/logging"
 	"github.com/dpup/prefab/plugins/etag"
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"google.golang.org/grpc/codes"
@@ -70,7 +71,15 @@ func invalidErr(err error) error { return status.Error(codes.InvalidArgument, er
 // internalErr logs the real error server-side and returns a generic
 // codes.Internal status — the raw error never reaches the (public, unauthed)
 // wire. Mirrors errors.go's internal() convention for the hand-built handlers.
+//
+// A store error on a request whose context already ended is not internal:
+// the query was interrupted (a deploy's drain cancels in-flight requests),
+// so it is the retryable interruptedErr instead.
 func internalErr(ctx context.Context, err error) error {
+	if ctx.Err() != nil {
+		logging.Infow(logging.EnsureLogger(ctx), "gridapi: request interrupted", "error", err, "cause", ctx.Err())
+		return interruptedErr(ctx)
+	}
 	logError(ctx, "gridapi: internal error", err)
 	return status.Error(codes.Internal, "internal error")
 }
@@ -111,11 +120,14 @@ type GridServer struct {
 	// the rare case where a changed place polygon reattaches events without a new
 	// revision (which DataVersion alone would miss).
 	placesVersion string
+	// pageBudget is the encoded-size cap on one list page (PageByteBudget;
+	// tests shrink it to keep fixtures small).
+	pageBudget int
 }
 
 // NewGridServer wires the gRPC service over the existing gridapi Service.
 func NewGridServer(svc *Service) *GridServer {
-	return &GridServer{svc: svc, placesVersion: randomNonce()}
+	return &GridServer{svc: svc, placesVersion: randomNonce(), pageBudget: PageByteBudget}
 }
 
 // randomNonce returns a short random hex string. On the (practically
@@ -179,6 +191,10 @@ func (g *GridServer) ListEvents(ctx context.Context, req *gridv1.ListEventsReque
 		return nil, invalidErr(err)
 	}
 	eq.PageToken = req.GetPageToken()
+	geomFmt, err := parseGeometryFormat(req.GetGeometryFormat())
+	if err != nil {
+		return nil, invalidErr(err)
+	}
 
 	// Filters are validated above (400/404 first); guard on a cheap global data
 	// version + the filter set so a match skips the query entirely.
@@ -199,23 +215,33 @@ func (g *GridServer) ListEvents(ctx context.Context, req *gridv1.ListEventsReque
 	tag := weakListTag(version,
 		req.GetPlace(), strings.Join(req.GetLayer(), ","), strings.Join(req.GetStatus(), ","),
 		req.GetSeverityMin(), req.GetSince(),
-		strconv.Itoa(int(req.GetPageSize())), req.GetPageToken(), strconv.FormatBool(req.GetEnhancementIo()))
+		strconv.Itoa(int(req.GetPageSize())), req.GetPageToken(), strconv.FormatBool(req.GetEnhancementIo()),
+		geomFmt.String())
 	if err := etag.Guard(ctx, tag); err != nil {
 		return nil, err // 304 — skip the query
 	}
 
-	events, next, err := g.svc.Store.QueryEvents(ctx, eq)
+	page, err := g.svc.Store.QueryEventsPage(ctx, eq)
 	if err != nil {
 		return nil, tokenOrInternal(ctx, err)
 	}
+	events := page.Items
 	stripEventsIO(events, req.GetEnhancementIo())
 	g.svc.overlayMeshActivity(ctx, events)
-	return &gridv1.EventList{Events: events, NextPageToken: next}, nil
+	applyGeometryFormat(ctx, geomFmt, eventGeometries(events)...)
+	// Cut at the byte budget only now, with every rewrite applied, so the
+	// budget measures what is actually sent.
+	n := fitToBudget(events, g.pageBudget)
+	return &gridv1.EventList{Events: events[:n], NextPageToken: page.Next(n)}, nil
 }
 
 // GetEvent returns the current revision of one event. A cheap revision read
 // answers a conditional GET (304) before the proto blob is loaded.
 func (g *GridServer) GetEvent(ctx context.Context, req *gridv1.GetEventRequest) (*gridv1.Event, error) {
+	geomFmt, err := parseGeometryFormat(req.GetGeometryFormat())
+	if err != nil {
+		return nil, invalidErr(err)
+	}
 	stamp, ok, err := g.svc.Store.EventVersion(ctx, req.GetId())
 	if err != nil {
 		return nil, internalErr(ctx, err)
@@ -227,9 +253,9 @@ func (g *GridServer) GetEvent(ctx context.Context, req *gridv1.GetEventRequest) 
 	// revision's blob (a fresh enhancement, mesh telemetry, a burn observation
 	// or re-attached place_ids land without a revision bump — see
 	// store.refreshEventPlaces), and whether the large enhancement I/O fields
-	// are included. placesVersion is the per-boot nonce the in-process
-	// counters need.
-	tag := fmt.Sprintf("%s:%s:%d.%d:%t", g.placesVersion, req.GetId(), stamp.Revision, stamp.Refreshes, req.GetEnhancementIo())
+	// are included, and the geometry format. placesVersion is the per-boot
+	// nonce the in-process counters need.
+	tag := fmt.Sprintf("%s:%s:%d.%d:%t:%s", g.placesVersion, req.GetId(), stamp.Revision, stamp.Refreshes, req.GetEnhancementIo(), geomFmt)
 	// A mesh node's activity clocks are overlaid from outside the blob and move
 	// without a revision, so they are part of the validator. One primary-key
 	// read, reused for the overlay below.
@@ -253,6 +279,7 @@ func (g *GridServer) GetEvent(ctx context.Context, req *gridv1.GetEventRequest) 
 	}
 	stripEventsIO([]*gridv1.Event{ev}, req.GetEnhancementIo())
 	applyMeshActivity([]*gridv1.Event{ev}, activity)
+	applyGeometryFormat(ctx, geomFmt, ev.GetGeometry())
 	return ev, nil
 }
 
@@ -261,6 +288,10 @@ func (g *GridServer) GetEvent(ctx context.Context, req *gridv1.GetEventRequest) 
 // cannot exist).
 func (g *GridServer) GetEventHistory(ctx context.Context, req *gridv1.GetEventHistoryRequest) (*gridv1.EventRevisionList, error) {
 	pageSize, err := parsePageSize(req.GetPageSize())
+	if err != nil {
+		return nil, invalidErr(err)
+	}
+	geomFmt, err := parseGeometryFormat(req.GetGeometryFormat())
 	if err != nil {
 		return nil, invalidErr(err)
 	}
@@ -276,16 +307,26 @@ func (g *GridServer) GetEventHistory(ctx context.Context, req *gridv1.GetEventHi
 	}
 	// Revision snapshots are immutable, so in-place rewrites of the current
 	// blob (stamp.Refreshes) never change this body: the revision alone keys it.
-	tag := etag.Weak(fmt.Sprintf("%s:%s:%d:%d:%s:%t", g.placesVersion, req.GetId(), stamp.Revision, req.GetPageSize(), req.GetPageToken(), req.GetEnhancementIo()))
+	tag := etag.Weak(fmt.Sprintf("%s:%s:%d:%d:%s:%t:%s", g.placesVersion, req.GetId(), stamp.Revision, req.GetPageSize(), req.GetPageToken(), req.GetEnhancementIo(), geomFmt))
 	if err := etag.Guard(ctx, tag); err != nil {
 		return nil, err // 304 — skip the history query + blob rehydrate
 	}
-	revs, next, err := g.svc.Store.EventHistory(ctx, req.GetId(), pageSize, req.GetPageToken())
+	page, err := g.svc.Store.EventHistoryPage(ctx, req.GetId(), pageSize, req.GetPageToken())
 	if err != nil {
 		return nil, tokenOrInternal(ctx, err)
 	}
-	stripRevisionsIO(revs, req.GetEnhancementIo())
-	return &gridv1.EventRevisionList{Revisions: revs, NextPageToken: next}, nil
+	return g.revisionPage(ctx, page, req.GetEnhancementIo(), geomFmt), nil
+}
+
+// revisionPage shapes a store page of revisions for the wire: I/O stripped,
+// geometry in the requested form, then cut at the byte budget (after the
+// rewrites, so the budget measures what is sent).
+func (g *GridServer) revisionPage(ctx context.Context, page store.Page[*gridv1.EventRevision], keepIO bool, geomFmt geometryFormat) *gridv1.EventRevisionList {
+	revs := page.Items
+	stripRevisionsIO(revs, keepIO)
+	applyGeometryFormat(ctx, geomFmt, revisionGeometries(revs)...)
+	n := fitToBudget(revs, g.pageBudget)
+	return &gridv1.EventRevisionList{Revisions: revs[:n], NextPageToken: page.Next(n)}
 }
 
 // ListHistory returns revisions across events filtered by place, layer, and a
@@ -313,6 +354,10 @@ func (g *GridServer) ListHistory(ctx context.Context, req *gridv1.ListHistoryReq
 		return nil, invalidErr(err)
 	}
 	hq.PageToken = req.GetPageToken()
+	geomFmt, err := parseGeometryFormat(req.GetGeometryFormat())
+	if err != nil {
+		return nil, invalidErr(err)
+	}
 
 	dv, err := g.svc.Store.DataVersion(ctx)
 	if err != nil {
@@ -326,17 +371,17 @@ func (g *GridServer) ListHistory(ctx context.Context, req *gridv1.ListHistoryReq
 	}
 	tag := weakListTag(version,
 		req.GetPlace(), strings.Join(req.GetLayer(), ","), req.GetFrom(), req.GetTo(),
-		strconv.Itoa(int(req.GetPageSize())), req.GetPageToken(), strconv.FormatBool(req.GetEnhancementIo()))
+		strconv.Itoa(int(req.GetPageSize())), req.GetPageToken(), strconv.FormatBool(req.GetEnhancementIo()),
+		geomFmt.String())
 	if err := etag.Guard(ctx, tag); err != nil {
 		return nil, err // 304 — skip the query
 	}
 
-	revs, next, err := g.svc.Store.QueryHistory(ctx, hq)
+	page, err := g.svc.Store.QueryHistoryPage(ctx, hq)
 	if err != nil {
 		return nil, tokenOrInternal(ctx, err)
 	}
-	stripRevisionsIO(revs, req.GetEnhancementIo())
-	return &gridv1.EventRevisionList{Revisions: revs, NextPageToken: next}, nil
+	return g.revisionPage(ctx, page, req.GetEnhancementIo(), geomFmt), nil
 }
 
 // ListPlaces returns the place directory filtered by kind (enum name or
@@ -350,20 +395,29 @@ func (g *GridServer) ListPlaces(ctx context.Context, req *gridv1.ListPlacesReque
 		}
 		kind = k
 	}
+	geomFmt, err := parseGeometryFormat(req.GetGeometryFormat())
+	if err != nil {
+		return nil, invalidErr(err)
+	}
 	// The directory is static within a process; a match skips building the
 	// (geometry-heavy) list.
-	if err := etag.Guard(ctx, weakListTag(g.placesVersion, "kind="+req.GetKind(), "q="+req.GetQ())); err != nil {
+	if err := etag.Guard(ctx, weakListTag(g.placesVersion, "kind="+req.GetKind(), "q="+req.GetQ(), "geometry="+geomFmt.String())); err != nil {
 		return nil, err
 	}
 	places, err := g.svc.Store.ListPlaces(ctx, kind, req.GetQ())
 	if err != nil {
 		return nil, internalErr(ctx, err)
 	}
+	applyGeometryFormat(ctx, geomFmt, placeGeometries(places)...)
 	return &gridv1.PlaceList{Places: places}, nil
 }
 
 // GetPlace returns one place by slug or namespaced id ("area:ebbetts-pass").
 func (g *GridServer) GetPlace(ctx context.Context, req *gridv1.GetPlaceRequest) (*gridv1.Place, error) {
+	geomFmt, err := parseGeometryFormat(req.GetGeometryFormat())
+	if err != nil {
+		return nil, invalidErr(err)
+	}
 	place, err := g.svc.Store.GetPlace(ctx, req.GetPlace())
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, notFoundErr("unknown place: %q", req.GetPlace())
@@ -373,9 +427,10 @@ func (g *GridServer) GetPlace(ctx context.Context, req *gridv1.GetPlaceRequest) 
 	}
 	// Places are static within a process; the load above is a single indexed row,
 	// so guard after it — a match still saves re-sending the geometry blob.
-	if err := etag.Guard(ctx, etag.Weak(g.placesVersion+":"+place.GetId())); err != nil {
+	if err := etag.Guard(ctx, etag.Weak(g.placesVersion+":"+place.GetId()+":"+geomFmt.String())); err != nil {
 		return nil, err
 	}
+	applyGeometryFormat(ctx, geomFmt, place.GetGeometry())
 	return place, nil
 }
 
@@ -400,6 +455,10 @@ func (g *GridServer) GetPlaceSummary(ctx context.Context, req *gridv1.GetPlaceSu
 // first). lat/lng are validated exactly as the /v1 handler did; address geocodes
 // via Census then runs the same point-in-polygon lookup.
 func (g *GridServer) ResolvePlace(ctx context.Context, req *gridv1.ResolvePlaceRequest) (*gridv1.ResolvePlaceResponse, error) {
+	geomFmt, err := parseGeometryFormat(req.GetGeometryFormat())
+	if err != nil {
+		return nil, invalidErr(err)
+	}
 	latS, lngS, addr := req.GetLat(), req.GetLng(), req.GetAddress()
 	var lat, lng float64
 	var matched string
@@ -441,6 +500,7 @@ func (g *GridServer) ResolvePlace(ctx context.Context, req *gridv1.ResolvePlaceR
 	if err != nil {
 		return nil, internalErr(ctx, err)
 	}
+	applyGeometryFormat(ctx, geomFmt, placeGeometries(places)...)
 	return &gridv1.ResolvePlaceResponse{
 		Query:  &gridv1.ResolveQuery{Lat: lat, Lng: lng, MatchedAddress: matched},
 		Places: places,

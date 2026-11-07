@@ -22,6 +22,70 @@ longer exist: `/api/v1` originally hosted a different hand-built REST surface,
 replaced by a snake_case `/v1` surface on 2026-07-05, which was folded back onto
 the proto-defined `/api/v1` gateway on 2026-07-09.
 
+## 2026-11-07 (later)
+
+### BREAKING: a page can hold fewer than `pageSize` items
+
+`GET /api/v1/events`, `/api/v1/events/{id}/history` and `/api/v1/history` now
+stop a page before its encoded size passes about 3 MiB and return a
+`nextPageToken` for the rest. `pageSize` (0 = 50, max 200) is now a ceiling, not
+a count: a page of fire perimeters, evacuation zones or PG&E outage areas can
+hold far fewer items than you asked for. An item larger than the budget on its
+own is served alone on its page.
+
+This replaces a failure. Until now such a page went past the gateway's 4 MiB
+limit and answered `429 RESOURCE_EXHAUSTED` ("received message larger than
+max"), and the only remedy was guessing a smaller `pageSize`. That 429 no longer
+happens, and the advice to keep `pageSize` at or below 50 with RESOLVED or
+EXPIRED events is withdrawn.
+
+**Migration:** keep requesting while `nextPageToken` is non-empty, passing it
+back as `pageToken` with the same filters. An empty `nextPageToken` is the only
+end-of-list signal. Code that stops when a page holds fewer than `pageSize`
+items will now stop early and miss events. Tokens are unchanged: a token from
+before this change still resumes where it left off.
+
+### An interrupted request is `503 UNAVAILABLE`, not `500 INTERNAL`
+
+When a deploy hands over to a new instance, requests still running after the
+drain's grace period are cancelled. They used to answer
+`500 {"codeName": "INTERNAL"}`, which reads as a server bug. They now answer
+`503 UNAVAILABLE` ("request interrupted ... retry"), like requests that arrive
+during the handoff. Retry the same request; a page request with the same
+`pageToken` resumes exactly where it was.
+
+Deep pages are also much faster. An all-statuses page took 25 to 40 seconds,
+whatever its size, because the store sorted every matching event with its full
+geometry. Those long reads are what the drain cut off. It now sorts only the
+key columns and reads geometry for the page's own rows.
+
+### `geometryFormat=OBJECT`: geometry as a plain JSON object
+
+Every route that returns events, revisions or places (`/api/v1/events`,
+`/events/{id}`, `/events/{id}/history`, `/history`, `/places`,
+`/places/{place}`, `/places:resolve`) accepts `geometryFormat` (also
+`geometry_format`), `BASE64` or `OBJECT`, case-insensitive. Any other value is
+`400 INVALID_ARGUMENT`.
+
+- `OBJECT`: each geometry carries the RFC 7946 GeoJSON in a new field,
+  `geometry.object`, as a plain JSON object
+  (`{"type": "Point", "coordinates": [-120.36108, 38.24239]}`). `geometry.geojson`
+  is `""`, so the geometry is not sent twice. `bbox` and `centroid` are
+  unchanged. A geometry with no GeoJSON (a mesh node with only a centroid) has
+  no `object`.
+- `BASE64` (the default when the parameter is omitted): byte-for-byte the
+  response you get today. `geometry.geojson` is the base64 string to
+  `JSON.parse(atob(...))`, and there is no `object` key (not even `null`).
+  The base64 field is now documented as the legacy form. It is not going away.
+
+The format is part of the ETag, so a cached base64 body never answers an
+`OBJECT` request with 304. Pages are cut at the size of the format you asked
+for. An object encodes larger than the base64 bytes, so an `OBJECT` page of
+perimeters can hold fewer events. The OpenAPI spec types `geometry.object` as
+`GeoJSONGeometry`, the same RFC 7946 schema the `.geojson` routes use.
+
+No client change is needed. New clients should pass `geometryFormat=OBJECT`.
+
 ## 2026-11-07
 
 ### BREAKING: `/api/openapi.json` is now OpenAPI 3.0.3 and describes the whole API
@@ -126,6 +190,20 @@ INFO` while that stretch of Hwy 4 was CLOSED. They now always include it.
   becomes `allOf: [{$ref}]` with `type` and `nullable` beside it. Scalars,
   enums, arrays and maps are never null, and an event's unused per-layer detail
   blocks are absent rather than null.
+- Fields the server always fills are typed as present and never null: no
+  `nullable`, and listed in their schema's `required`. They are
+  `Event.provenance`, `Event.ingestedAt`, `provenance.fetchedAt`,
+  `geometry.bbox` and `geometry.centroid` (whenever `geometry` itself is set),
+  `Place.geometry`, a lane closure's `plannedStart`, a burn line's
+  `observation.observedAt` (when `observation` is set), every field of a
+  history revision (`observedAt`, `ingestedAt`, `event`), the summary's
+  `generatedAt` and `summary`, `places:resolve`'s `query`, a camera's
+  `location`, and the mesh telemetry archive's `from`, `to`, `coverage` and
+  each sample's `reading` and `receivedAt`. Every other field outside an
+  event's detail blocks is in `required` too, because the key is always sent;
+  the ones that can be `null` keep `nullable`. A generated client therefore
+  types these as present and drops the null checks. The wire format is
+  unchanged.
 - Enum- and message-typed fields keep their descriptions, which the 2.0 to 3.0
   conversion used to drop (`Event.status`, `Event.layer`, ...).
 - Every 304/4xx/5xx response object is valid: a complete inline object (the

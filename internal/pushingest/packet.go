@@ -18,7 +18,7 @@ import (
 // MQTT observer at all. (The first measurement, "every few days per repeater",
 // was taken during our own subscriber outage of 2026-10-03..09; through a
 // delivering subscription the brokers carry most of the backbone. See "A deaf
-// broker" in internal/ingest/CLAUDE.md.) The map at map.meshcore.io hears those
+// broker" in internal/ingest/AGENTS.md.) The map at map.meshcore.io hears those
 // adverts through a small uploader bot that reads a companion's received-packet
 // log and POSTs each ADVERT frame. This stream accepts exactly that: the raw frame, in the envelope the MQTT bridges already publish, so the
 // MeshCore registry ingests it through the same code and the same trust rule.

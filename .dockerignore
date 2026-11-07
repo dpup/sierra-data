@@ -61,3 +61,4 @@ temp/
 # Claude specific
 .claude/
 CLAUDE.md
+AGENTS.md

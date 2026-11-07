@@ -34,7 +34,7 @@ type CameraFetcher interface {
 // never waits on Caltrans.
 //
 // It deliberately does NOT use the TTL cache the other services share (see
-// CLAUDE.md here). That cache stops serving at 2x the refresh interval, which
+// AGENTS.md here). That cache stops serving at 2x the refresh interval, which
 // suits feeds that change by the minute. A camera list from last week is still
 // right: when a refresh fails, the district's last good list keeps being served,
 // marked STALE with the time it was fetched, for as long as the failure lasts.

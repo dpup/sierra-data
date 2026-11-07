@@ -190,7 +190,7 @@ func inIncidentAreas(lc cwwp2.LaneClosure, areas []config.IncidentArea) (in, pla
 // laneClosureEventID is "caltrans:d{district}-{index}" with the index's colons
 // dropped ("caltrans:d10-C4QB-0004-2026-10-02-070100"). Every part is
 // immutable for the window, as an id under `resolve` must be (see "an event id
-// may only be built from IMMUTABLE fields" in CLAUDE.md). The district prefix
+// may only be built from IMMUTABLE fields" in AGENTS.md). The district prefix
 // is there because the index is only known to be unique within one district's
 // file, and the closure ids it starts with are per-route codes that two
 // districts sharing a route could both issue.

@@ -62,6 +62,26 @@ func at(t *testing.T, doc map[string]any, path ...string) any {
 	return cur
 }
 
+// Importing a well-known type file (struct.proto) makes the generator emit all
+// its types; one nothing references is dropped, one in use is kept.
+func TestBuild_PrunesUnusedWellKnownSchemas(t *testing.T) {
+	swagger := strings.Replace(fixtureSwagger,
+		`"rpcStatus": {"type": "object", "properties": {"code": {"type": "integer", "format": "int32"}, "message": {"type": "string"}}}`,
+		`"rpcStatus": {"type": "object", "properties": {"code": {"type": "integer", "format": "int32"}, "message": {"type": "string"},
+		   "details": {"type": "array", "items": {"$ref": "#/definitions/protobufAny"}}}},
+		 "protobufAny": {"type": "object", "properties": {"@type": {"type": "string"}}},
+		 "protobufNullValue": {"type": "string", "enum": ["NULL_VALUE"], "default": "NULL_VALUE"}`, 1)
+	require.NotEqual(t, fixtureSwagger, swagger, "fixture edit applied")
+	out, _, err := Build([]byte(swagger), nil, nil)
+	require.NoError(t, err)
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(out, &doc))
+	schemas := at(t, doc, "components", "schemas").(map[string]any)
+	assert.Contains(t, schemas, "protobufAny", "referenced by rpcStatus.details")
+	assert.NotContains(t, schemas, "protobufNullValue", "referenced by nothing")
+	assert.Contains(t, schemas, "v1Place")
+}
+
 func TestBuild_ConvertsToOpenAPI3(t *testing.T) {
 	doc, _, err := build(t, "")
 	require.NoError(t, err)

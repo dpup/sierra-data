@@ -25,7 +25,7 @@ applies_when:
 
 Primary files: `internal/clients/meshcore/client.go` (`Brokers`,
 `deliveryProblem`, `clientID`), `internal/ingest/network.go` (`Poll`,
-`brokerDelivery`), `internal/ingest/CLAUDE.md` ("A deaf broker").
+`brokerDelivery`), `internal/ingest/AGENTS.md` ("A deaf broker").
 
 ## Symptom
 

@@ -24,7 +24,7 @@
 //
 // That is why a push source needs no new lifecycle concepts: "wrap a push source
 // as a poller" is a pattern this codebase already committed to for MeshCore MQTT
-// (see internal/ingest/CLAUDE.md). This is the second instance of it, not a new
+// (see internal/ingest/AGENTS.md). This is the second instance of it, not a new
 // idea.
 //
 // # What a stream owns, and what it does not
@@ -78,7 +78,7 @@ import (
 //
 // Suppression is the honest response to a reporter blip: its nodes are missing
 // from the snapshot for OUR reason, so their absence proves nothing (the
-// fail-loud invariant in internal/ingest/CLAUDE.md). But suppression cannot be
+// fail-loud invariant in internal/ingest/AGENTS.md). But suppression cannot be
 // unbounded — a monitor that dies permanently would otherwise freeze the whole
 // mesh layer's lifecycle forever, and every node it ever reported would stay
 // ACTIVE for good.

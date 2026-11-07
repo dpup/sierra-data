@@ -308,7 +308,7 @@ func supersededStandalones(byName map[string]perimCandidate, used map[string]boo
 // set the caller carries the prior polygon forward, so a perimeter-only fire
 // stays in scope; if it silently dropped out of Events instead, the disappearance
 // sweep would RESOLVE it — a fabricated all-clear on a life-safety layer
-// (internal/ingest/CLAUDE.md).
+// (internal/ingest/AGENTS.md).
 func inWildfireScope(b config.GeoBounds, lat, lng float64, geom *gridv1.Geometry) bool {
 	if b.Contains(lat, lng) {
 		return true

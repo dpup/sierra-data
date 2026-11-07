@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/genproto/googleapis/api/annotations"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protodesc"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -16,21 +17,23 @@ import (
 	_ "google.golang.org/protobuf/types/known/wrapperspb"
 )
 
-// nullableFixtureProto is one message with a field of every shape the gateway
-// marshals differently under EmitUnpopulated:
+// presenceFixtureProto is one message with a field of every shape the gateway
+// marshals differently under EmitUnpopulated, plus the two REQUIRED shapes:
 //
 //	message Thing {
-//	  string name = 1;                         // scalar: ""      -> not nullable
-//	  Kind kind = 2;                           // enum: 0 name    -> not nullable
-//	  google.protobuf.Timestamp seen_at = 3;   // message: null   -> nullable
-//	  google.protobuf.Int32Value count = 4;    // wrapper: null   -> nullable
-//	  Other other = 5;                         // message: null   -> nullable
-//	  repeated Other others = 6;               // list: []        -> not nullable
-//	  map<string, int32> tally = 7;            // map: {}         -> not nullable
-//	  oneof detail { Other a = 8; Other b = 9; } // absent, not null -> not nullable
-//	  optional int32 opt = 10;                 // proto3 optional: absent -> not nullable
+//	  string name = 1;                         // scalar: ""      -> required, not nullable
+//	  Kind kind = 2;                           // enum: 0 name    -> required, not nullable
+//	  google.protobuf.Timestamp seen_at = 3;   // message: null   -> required, nullable
+//	  google.protobuf.Int32Value count = 4;    // wrapper: null   -> required, nullable
+//	  Other other = 5;                         // message: null   -> required, nullable
+//	  repeated Other others = 6;               // list: []        -> required, not nullable
+//	  map<string, int32> tally = 7;            // map: {}         -> required, not nullable
+//	  oneof detail { Other a = 8; Other b = 9; } // absent, not null -> neither
+//	  optional int32 opt = 10;                 // proto3 optional: absent -> neither
+//	  Other must = 11 [(google.api.field_behavior) = REQUIRED];                    // required, not nullable
+//	  google.protobuf.Timestamp made_at = 12 [(google.api.field_behavior) = REQUIRED]; // required, not nullable
 //	}
-func nullableFixtureProto(t *testing.T) protoreflect.FileDescriptor {
+func presenceFixtureProto(t *testing.T) protoreflect.FileDescriptor {
 	t.Helper()
 	opt := descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL
 	rep := descriptorpb.FieldDescriptorProto_LABEL_REPEATED
@@ -51,6 +54,11 @@ func nullableFixtureProto(t *testing.T) protoreflect.FileDescriptor {
 	}
 	optInt := oneof(field("opt", 10, opt, descriptorpb.FieldDescriptorProto_TYPE_INT32, ""), 1)
 	optInt.Proto3Optional = proto.Bool(true)
+	required := func(f *descriptorpb.FieldDescriptorProto) *descriptorpb.FieldDescriptorProto {
+		f.Options = &descriptorpb.FieldOptions{}
+		proto.SetExtension(f.Options, annotations.E_FieldBehavior, []annotations.FieldBehavior{annotations.FieldBehavior_REQUIRED})
+		return f
+	}
 
 	fdp := &descriptorpb.FileDescriptorProto{
 		Name:       proto.String("fixture/v1/fixture.proto"),
@@ -76,6 +84,8 @@ func nullableFixtureProto(t *testing.T) protoreflect.FileDescriptor {
 					oneof(field("a", 8, opt, msg, ".fixture.v1.Other"), 0),
 					oneof(field("b", 9, opt, msg, ".fixture.v1.Other"), 0),
 					optInt,
+					required(field("must", 11, opt, msg, ".fixture.v1.Other")),
+					required(field("made_at", 12, opt, msg, ".google.protobuf.Timestamp")),
 				},
 				NestedType: []*descriptorpb.DescriptorProto{{
 					Name: proto.String("TallyEntry"),
@@ -94,9 +104,12 @@ func nullableFixtureProto(t *testing.T) protoreflect.FileDescriptor {
 	return fd
 }
 
-func TestNullableFields_FollowsProtojsonEmitUnpopulated(t *testing.T) {
-	got := nullableFields(nullableFixtureProto(t))
-	assert.Equal(t, map[string][]string{"v1Thing": {"seenAt", "count", "other"}}, got)
+func TestPresenceFields_FollowsProtojsonEmitUnpopulated(t *testing.T) {
+	got := presenceFields(presenceFixtureProto(t))
+	assert.Equal(t, map[string]presence{"v1Thing": {
+		required: []string{"name", "kind", "seenAt", "count", "other", "others", "tally", "must", "madeAt"},
+		nullable: []string{"seenAt", "count", "other"},
+	}}, got)
 }
 
 // nullableSwagger is what protoc-gen-openapiv2 emits for the fixture: the
@@ -127,21 +140,27 @@ const nullableSwagger = `{
       "tally": {"type": "object", "additionalProperties": {"type": "integer", "format": "int32"}},
       "a": {"$ref": "#/definitions/v1Other", "description": "Detail A."},
       "b": {"$ref": "#/definitions/v1Other"},
-      "opt": {"type": "integer", "format": "int32"}
-    }}
+      "opt": {"type": "integer", "format": "int32"},
+      "must": {"$ref": "#/definitions/v1Other"},
+      "madeAt": {"type": "string", "format": "date-time", "description": "When it was made."}
+    }, "required": ["must", "madeAt"]}
   }
 }`
 
-func TestBuild_MarksNullableProperties(t *testing.T) {
-	out, _, err := Build([]byte(nullableSwagger), nil, nullableFixtureProto(t))
+func TestBuild_MarksPresence(t *testing.T) {
+	out, _, err := Build([]byte(nullableSwagger), nil, presenceFixtureProto(t))
 	require.NoError(t, err)
 	var doc map[string]any
 	require.NoError(t, json.Unmarshal(out, &doc))
 	props := at(t, doc, "components", "schemas", "v1Thing", "properties").(map[string]any)
 	prop := func(name string) map[string]any { return props[name].(map[string]any) }
 
-	// Scalars, enums, lists, maps and oneof members are never null.
-	for _, name := range []string{"name", "kind", "others", "tally", "a", "b", "opt"} {
+	// Every field but a oneof member always has a key.
+	assert.Equal(t,
+		[]any{"count", "kind", "madeAt", "must", "name", "other", "others", "seenAt", "tally"},
+		at(t, doc, "components", "schemas", "v1Thing", "required"))
+	// Scalars, enums, lists, maps, oneof members and REQUIRED fields are never null.
+	for _, name := range []string{"name", "kind", "others", "tally", "a", "b", "opt", "must", "madeAt"} {
 		assert.NotContains(t, prop(name), "nullable", name)
 	}
 	// Timestamps and wrappers keep their scalar type and gain nullable.
@@ -163,24 +182,28 @@ func TestBuild_MarksNullableProperties(t *testing.T) {
 	assert.Equal(t, "Detail A.", prop("a")["description"])
 	// A bare $ref with nothing to keep stays a bare $ref.
 	assert.Equal(t, map[string]any{"$ref": "#/components/schemas/v1Other"}, prop("b"))
+	// A REQUIRED message is not wrapped for nullability: still a bare $ref.
+	assert.Equal(t, map[string]any{"$ref": "#/components/schemas/v1Other"}, prop("must"))
+	assert.Equal(t, map[string]any{"type": "string", "format": "date-time", "description": "When it was made."}, prop("madeAt"))
 }
 
-func TestBuild_NullableNamingDriftFails(t *testing.T) {
-	// The descriptor says Thing has a nullable `other`; a generator that named
-	// the property differently must fail the build, not drop the marker.
+func TestBuild_PresenceNamingDriftFails(t *testing.T) {
+	// The descriptor says Thing has a `name`; a generator that named the
+	// property differently must fail the build, not drop the markers.
 	drifted := []byte(`{
   "swagger": "2.0", "info": {"title": "t", "version": "v1"}, "paths": {},
   "definitions": {"v1Thing": {"type": "object", "properties": {"seenAt": {"type": "string", "format": "date-time"}}}}
 }`)
-	_, _, err := Build(drifted, nil, nullableFixtureProto(t))
+	_, _, err := Build(drifted, nil, presenceFixtureProto(t))
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), `schema v1Thing has no property "count"`)
+	assert.Contains(t, err.Error(), `schema v1Thing has no property "name"`)
 }
 
 // The served spec marks the fields clients most often get wrong: the
 // evacuation count (null = unknown, never 0), source timestamps, and the
-// no-footprint event geometry; and leaves scalars alone.
-func TestCommittedSpecNullability(t *testing.T) {
+// no-footprint event geometry; leaves scalars alone; and types the fields the
+// server always fills (REQUIRED in grid.proto) as present and non-null.
+func TestCommittedSpecPresence(t *testing.T) {
 	out, err := os.ReadFile("../../api/grid/v1/openapi.json")
 	require.NoError(t, err)
 	var doc map[string]any
@@ -203,7 +226,43 @@ func TestCommittedSpecNullability(t *testing.T) {
 		{"v1Source", "kind"},
 		{"v1Event", "canonicalUrl"},
 		{"v1Event", "wildfire"}, // oneof member: absent, not null
+		{"v1Event", "provenance"},
+		{"v1Event", "ingestedAt"},
+		{"v1EventRevision", "event"},
+		{"v1PlaceSummary", "summary"},
 	} {
 		assert.NotContains(t, schema(c[0], c[1]), "nullable", c[0]+"."+c[1])
 	}
+	required := func(name string) []any {
+		return at(t, doc, "components", "schemas", name, "required").([]any)
+	}
+	assert.Contains(t, required("v1Event"), "provenance")
+	assert.Contains(t, required("v1Event"), "geometry", "nullable, but always sent")
+	assert.NotContains(t, required("v1Event"), "wildfire", "a oneof member is left out when unset")
+	assert.Contains(t, required("v1SummaryStats"), "totalActive")
+}
+
+func TestCheckWire(t *testing.T) {
+	md := presenceFixtureProto(t).Messages().ByName("Thing")
+	full := `{"name":"","kind":"KIND_UNSPECIFIED","seenAt":null,"count":null,"other":null,
+		"others":[{}],"tally":{},"must":{},"madeAt":"2026-11-07T00:00:00Z","a":{}}`
+	seen := map[string]bool{}
+	problems, err := CheckWire(md, []byte(full), seen)
+	require.NoError(t, err)
+	assert.Empty(t, problems)
+	assert.Equal(t, map[string]bool{"fixture.v1.Thing.must": true, "fixture.v1.Thing.made_at": true}, seen)
+
+	problems, err = CheckWire(md, []byte(`{"name":"","kind":"KIND_UNSPECIFIED","seenAt":null,"count":null,
+		"others":[],"tally":{},"must":null,"madeAt":null}`), nil)
+	require.NoError(t, err)
+	assert.Equal(t, []string{
+		"Thing.other: missing",
+		"Thing.must: null, but the spec says it never is",
+		"Thing.madeAt: null, but the spec says it never is",
+	}, problems)
+}
+
+func TestRequiredFieldsReachable(t *testing.T) {
+	md := presenceFixtureProto(t).Messages().ByName("Thing")
+	assert.Equal(t, []string{"fixture.v1.Thing.made_at", "fixture.v1.Thing.must"}, RequiredFieldsReachable(md))
 }

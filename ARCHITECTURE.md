@@ -269,8 +269,8 @@ system of record; a restart rehydrates events and revisions with no re-fetch.
          └──────────────── same store state, same fail-loud source_status ┘
 ```
 
-**Key invariants** (details in `internal/store/CLAUDE.md`,
-`internal/ingest/CLAUDE.md`):
+**Key invariants** (details in `internal/store/AGENTS.md`,
+`internal/ingest/AGENTS.md`):
 - **Fail-loud lifecycle.** An error — or a clean fetch that can't prove a source's
   full current set — never resolves/expires events. Mechanisms: `PerSource`
   errors skip that source's sweep; `SweepSuppress` skips a source that fetched

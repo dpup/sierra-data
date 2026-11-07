@@ -256,7 +256,7 @@ make fmt    # go fmt
 └── Makefile
 ```
 
-`CLAUDE.md` and the `CLAUDE.md` files in subdirectories hold the detailed
+`AGENTS.md` and the `AGENTS.md` files in subdirectories hold the detailed
 development notes.
 
 ### Adding New Roads

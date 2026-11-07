@@ -2,7 +2,7 @@
 
 Scratch notes from the deploy discussion. The grid store is a **system of record**
 (irreplaceable revision history + resolved/expired events; sources are active-only
-so a lost DB does NOT fully rebuild — see `internal/store/CLAUDE.md`). So durability
+so a lost DB does NOT fully rebuild — see `internal/store/AGENTS.md`). So durability
 matters. Two goals now drive this: **durability**, and **blue/green (zero-downtime)
 deploys** — today every deploy is a few minutes of downtime.
 
@@ -79,7 +79,7 @@ Findings:
   locking broken and must refuse the writer role.
 
 Unverified: the same binary run across two Fargate tasks on the production EFS
-mount. Keeps EFS and its latency problems (`internal/store/CLAUDE.md`).
+mount. Keeps EFS and its latency problems (`internal/store/AGENTS.md`).
 
 ## Option B — (leaning) local-disk SQLite + Litestream, SQS for push, a lease
 

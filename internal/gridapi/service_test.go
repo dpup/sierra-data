@@ -174,7 +174,7 @@ func seedEvents(t *testing.T, st *store.Store) {
 		Headline:   "M4.2 earthquake near Arnold",
 		Geometry:   pointGeom(38.4, -120.1),
 		ObservedAt: timestamppb.New(base.Add(2 * time.Hour)),
-		Provenance: &gridv1.Provenance{SourceId: "usgs"},
+		Provenance: &gridv1.Provenance{SourceId: "usgs", FetchedAt: timestamppb.New(base)},
 	}
 	_, err := st.UpsertEvent(ctx, quake)
 	require.NoError(t, err)
@@ -191,7 +191,7 @@ func seedEvents(t *testing.T, st *store.Store) {
 		Headline:   "Salt Fire — 120 acres, 10% contained",
 		Geometry:   pointGeom(38.0, -120.5),
 		ObservedAt: timestamppb.New(base),
-		Provenance: &gridv1.Provenance{SourceId: "calfire"},
+		Provenance: &gridv1.Provenance{SourceId: "calfire", FetchedAt: timestamppb.New(base)},
 	})
 	require.NoError(t, err)
 
@@ -201,7 +201,7 @@ func seedEvents(t *testing.T, st *store.Store) {
 		Headline:   "Winter Weather Advisory",
 		PlaceIds:   []string{"area:calaveras"}, // zone-carrying alert: preset, no geometry
 		ObservedAt: timestamppb.New(base.Add(-1 * time.Hour)),
-		Provenance: &gridv1.Provenance{SourceId: "nws"},
+		Provenance: &gridv1.Provenance{SourceId: "nws", FetchedAt: timestamppb.New(base)},
 	})
 	require.NoError(t, err)
 
@@ -211,7 +211,7 @@ func seedEvents(t *testing.T, st *store.Store) {
 		Headline:   "Vehicle off roadway (cleared)",
 		Geometry:   pointGeom(38.05, -120.55),
 		ObservedAt: timestamppb.New(base.Add(-2 * time.Hour)),
-		Provenance: &gridv1.Provenance{SourceId: "chp"},
+		Provenance: &gridv1.Provenance{SourceId: "chp", FetchedAt: timestamppb.New(base)},
 		Enhancement: &gridv1.Enhancement{
 			Model:    "gpt-5-mini",
 			Fields:   []string{"headline", "summary", "impact"},

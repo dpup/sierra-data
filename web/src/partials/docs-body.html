@@ -58,8 +58,11 @@ curl  https://data.sierragridteam.org/api/v1/places/calaveras-county/map/wildfir
       <code class="inline">MESH</code> nodes at <code class="inline">INFO</code>. Add
       <code class="inline">severity_min</code> or <code class="inline">layer</code> to narrow
       further.</li>
-    <li><strong><code class="inline">page_size</code></strong> defaults to 50; larger
-      values are capped at 200 and a negative value is a <code class="inline">400</code>. Follow <code class="inline">nextPageToken</code> for more.</li>
+    <li><strong><code class="inline">page_size</code></strong> is a maximum. It defaults to 50; larger
+      values are capped at 200 and a negative value is a <code class="inline">400</code>. A page
+      also stops at about 3&nbsp;MiB, so a page of fire perimeters or outage areas can hold
+      fewer events than you asked for. Follow <code class="inline">nextPageToken</code> until it
+      is empty; a short page is not the end.</li>
     <li><strong>64-bit integers are JSON strings</strong> (the proto3 JSON mapping), for
       example the mesh <code class="inline">telemetry.admin</code> counters
       (<code class="inline">"uptimeSeconds": "7121920"</code>). Parse them; do not compare
@@ -100,7 +103,7 @@ curl  https://data.sierragridteam.org/api/v1/places/calaveras-county/map/wildfir
     <li><strong>Timestamps</strong> are RFC 3339 strings (e.g. <code class="inline">2026-07-05T14:02:00Z</code>).</li>
     <li><strong>Enum values</strong> render as their proto names (<code class="inline">WILDFIRE</code>, <code class="inline">ACTIVE</code>, <code class="inline">SEVERE</code>). Query parameters accept them case-insensitively, and <code class="inline">layer</code> parameters additionally accept the lowercase layer slugs used in <code class="inline">.geojson</code> paths (<code class="inline">wildfire</code>).</li>
     <li><strong>Repeatable filters</strong>: parameters documented as <em>repeatable</em> may appear multiple times — <code class="inline">?layer=wildfire&amp;layer=evacuation</code>.</li>
-    <li><strong>Pagination</strong> is cursor-based on the <em>event</em> lists — <code class="inline">events</code>, <code class="inline">events/{id}/history</code>, and <code class="inline">history</code>: pass the opaque <code class="inline">nextPageToken</code> from a response as the <code class="inline">page_token</code> query parameter on the next request (base64 keyset cursors; treat them as opaque). The directory lists — <code class="inline">places</code>, <code class="inline">sources</code>, <code class="inline">scanners</code>, and <code class="inline">cameras</code> — are <strong>not paginated</strong>: each returns its complete set in one response by design (a bounded, slowly-changing directory), with no <code class="inline">nextPageToken</code>. Read them whole; don't build paging logic for them.</li>
+    <li><strong>Pagination</strong> is cursor-based on the <em>event</em> lists — <code class="inline">events</code>, <code class="inline">events/{id}/history</code>, and <code class="inline">history</code>: pass the opaque <code class="inline">nextPageToken</code> from a response as the <code class="inline">page_token</code> query parameter on the next request (base64 keyset cursors; treat them as opaque), with the same filters, until it comes back empty. <code class="inline">page_size</code> is a ceiling, not a promise: a page also stops before its encoded size passes about 3&nbsp;MiB, so perimeter-heavy pages are shorter, and an event bigger than that on its own arrives alone on its page. Only an empty <code class="inline">nextPageToken</code> means the list is done. The directory lists — <code class="inline">places</code>, <code class="inline">sources</code>, <code class="inline">scanners</code>, and <code class="inline">cameras</code> — are <strong>not paginated</strong>: each returns its complete set in one response by design (a bounded, slowly-changing directory), with no <code class="inline">nextPageToken</code>. Read them whole; don't build paging logic for them.</li>
     <li><strong>Query parameters</strong> stay snake_case regardless of response casing: <code class="inline">severity_min</code>, <code class="inline">page_token</code>, <code class="inline">page_size</code> (camelCase forms are also accepted).</li>
     <li><strong>ETags</strong>: <em>most</em> read endpoints carry a weak <code class="inline">ETag</code>; a conditional request with a matching <code class="inline">If-None-Match</code> gets <code class="inline">304 Not Modified</code> and skips the work. Coverage: <code class="inline">events/{id}</code> + <code class="inline">.../history</code>, the <code class="inline">events</code> and <code class="inline">history</code> lists, <code class="inline">places</code> + <code class="inline">places/{place}</code>, <code class="inline">cameras</code>, and the <code class="inline">.geojson</code> layers (body-hash). Not yet instrumented: <code class="inline">conditions</code>, <code class="inline">sources</code>, <code class="inline">places:resolve</code>, <code class="inline">scanners</code>, and <code class="inline">summary</code>. Independently, every proto RPC carries <code class="inline">Cache-Control: public, max-age=30</code>, so a proxy/CDN may serve any of them up to 30&nbsp;s stale (the <code class="inline">.geojson</code> layers use <code class="inline">max-age=60</code>).</li>
     <li><strong>Errors</strong> from the proto RPCs are gRPC-standard <code class="inline">{code, codeName, message, details}</code> alongside the mapped HTTP status; the one hand-built endpoint (<code class="inline">.geojson</code>) emits the older <code class="inline">google.rpc.Status</code> shape (<code class="inline">{code, message, details}</code>, no <code class="inline">codeName</code>):</li>
@@ -322,24 +325,38 @@ Content-Type: application/json
     through <a href="#endpoints"><code class="inline">/api/v1/history</code></a>.
   </p>
 
-  <h3 id="geometry-b64">Geometry and the base64 note</h3>
+  <h3 id="geometry-b64">Geometry: ask for an object</h3>
   <p>
-    <code class="inline">Event.geometry</code> is
-    <code class="inline">{geojson: bytes, bbox: {minLat, minLng, maxLat,
-    maxLng}, centroid: {lat, lng}}</code>. The
-    <code class="inline">geojson</code> field is a raw RFC 7946 geometry
-    object stored as proto <code class="inline">bytes</code> — protojson
-    renders bytes as <strong>base64</strong>, so decode before parsing:
+    <code class="inline">Event.geometry</code> (and
+    <code class="inline">Place.geometry</code>) is
+    <code class="inline">{geojson, bbox: {minLat, minLng, maxLat, maxLng},
+    centroid: {lat, lng}}</code>. Pass
+    <code class="inline">geometry_format=OBJECT</code> on any route that returns
+    events, revisions or places and the RFC 7946 geometry arrives as a plain JSON
+    object in <code class="inline">geometry.object</code>, with
+    <code class="inline">geojson</code> left empty:
+  </p>
+  <pre class="code">// GET /api/v1/events/{id}?geometry_format=OBJECT
+const geom = event.geometry?.object ?? null;       // may be absent entirely
+// geom is an RFC 7946 geometry object — coordinates are [lng, lat]</pre>
+  <p>
+    Without it you get the <strong>legacy form</strong>, kept unchanged for
+    existing clients: <code class="inline">geojson</code> is the same geometry
+    stored as proto <code class="inline">bytes</code>, which protojson renders as
+    <strong>base64</strong>, and there is no <code class="inline">object</code>
+    key. Decode before parsing:
   </p>
   <pre class="code">const g = event.geometry;                          // may be absent entirely
-const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
-// geom is an RFC 7946 geometry object — coordinates are [lng, lat]</pre>
+const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;</pre>
   <p class="small muted">
     <code class="inline">bbox</code> and <code class="inline">centroid</code>
     are always populated at ingest when geometry exists, so list views never
-    need to decode. For map rendering, prefer the
-    <a href="#endpoints"><code class="inline">.geojson</code> endpoints</a> —
-    the base64 field exists for detail views.
+    need to decode. The format is part of the
+    <code class="inline">ETag</code>, and of the page-size budget: objects
+    encode larger, so an <code class="inline">OBJECT</code> page of perimeters
+    can hold fewer events. For map rendering, prefer the
+    <a href="#endpoints"><code class="inline">.geojson</code> endpoints</a>,
+    which serve whole FeatureCollections.
   </p>
 </section>
 

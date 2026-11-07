@@ -49,7 +49,7 @@ export const FIELD_DOCS = {
   description: ['string', 'Long form. Original upstream text, always preserved verbatim.'],
   areaLabel: ['string', 'Human area label, e.g. "Hathaway Pines & Avery".'],
   canonicalUrl: ['string', 'Upstream detail URL; scheme-validated, only https:// and http:// survive.'],
-  geometry: ['Geometry', '{geojson: bytes, bbox, centroid}. geojson is base64 — decode before parsing. May be absent.'],
+  geometry: ['Geometry', '{geojson, bbox, centroid}, plus object with ?geometry_format=OBJECT: the RFC 7946 geometry as a plain JSON object, geojson then empty. Without it (the legacy default) geojson is base64 — decode before parsing — and there is no object key. May be absent.'],
   placeIds: ['repeated string', 'Place intersections, precomputed at ingest. Geometry is never touched at query time.'],
   provenance: ['Provenance', 'sourceId, sourceName, attribution, sourceUrl, fetchedAt. Display the attribution wherever you render.'],
   effective: ['Timestamp', 'When the event takes effect — in the future for SCHEDULED.'],
@@ -78,15 +78,16 @@ export const ENDPOINTS = [
     path: '/api/v1/events',
     blurb: 'The cross-layer query — every discrete occurrence through one surface.',
     detail:
-      'Returns EventList: {"events": [Event…], "nextPageToken": "…"}. Keyset-paginated in canonical order — severity descending, then observedAt descending, then id. Pass the opaque nextPageToken as page_token for the next page.',
+      'Returns EventList: {"events": [Event…], "nextPageToken": "…"}. Keyset-paginated in canonical order — severity descending, then observedAt descending, then id. Pass the opaque nextPageToken as page_token for the next page, until it comes back empty: page_size is a ceiling, and a page also stops at about 3 MiB, so perimeter-heavy pages hold fewer events. A short page is not the end.',
     params: [
       ['place', 'place slug or id', 'Only events intersecting this place, precomputed at ingest.', 'all places'],
       ['layer', 'Layer enum, repeatable', 'Accepts WILDFIRE or the slug wildfire, case-insensitive.', 'all layers'],
       ['status', 'EventStatus, repeatable', 'Pass ACTIVE for what is in effect now: the default also returns SCHEDULED planned roadwork. Include RESOLVED/EXPIRED explicitly to see closed events.', 'ACTIVE,SCHEDULED'],
       ['severity_min', 'Severity enum', 'Inclusive floor on the unified scale.', 'INFO'],
       ['since', 'RFC 3339', 'Only events observed at or after this time.', 'no floor'],
-      ['page_size', 'int', 'Max events per page; values above 200 are capped at 200, a negative value is a 400.', '50'],
+      ['page_size', 'int', 'Max events per page; values above 200 are capped at 200, a negative value is a 400. A page can hold fewer (about 3 MiB at most): follow nextPageToken.', '50'],
       ['page_token', 'opaque string', "Cursor from a previous response's nextPageToken.", 'first page'],
+      ['geometry_format', 'BASE64 | OBJECT', 'OBJECT puts each geometry in geometry.object as plain JSON; BASE64 is the legacy base64 geometry.geojson. Also on /events/{id}, /history, the place routes.', 'BASE64'],
     ],
     examples: [
       '/api/v1/events?place=ebbetts-pass&status=ACTIVE',
@@ -106,14 +107,14 @@ export const ENDPOINTS = [
     path: '/api/v1/events/{id}/history',
     blurb: 'The per-incident timeline — every revision, newest first.',
     detail:
-      'Returns EventRevisionList: each entry is {"revision": n, "observedAt": …, "ingestedAt": …, "event": Event}. A revision is written only when content actually changes; upstream re-stamps with identical content produce nothing. Lifecycle transitions are themselves revisions, so the record ends with the ending.',
+      'Returns EventRevisionList: each entry is {"revision": n, "observedAt": …, "ingestedAt": …, "event": Event}, paged like /events (page_size is a ceiling; follow nextPageToken). A revision is written only when content actually changes; upstream re-stamps with identical content produce nothing. Lifecycle transitions are themselves revisions, so the record ends with the ending.',
     params: [],
     examples: [],
   },
   {
     path: '/api/v1/history',
     blurb: 'Cross-event archive and replay over all revisions — the after-action query.',
-    detail: 'Returns EventRevisionList across every event in range.',
+    detail: 'Returns EventRevisionList across every event in range, paged like /events: page_size is a ceiling and a page stops at about 3 MiB, so follow nextPageToken until it is empty.',
     params: [
       ['place', 'place slug or id', 'Revisions of events intersecting this place.', 'all places'],
       ['from', 'RFC 3339', 'Start of the time range (inclusive).', 'open'],

@@ -3,7 +3,7 @@ import Shell from '../layouts/Shell.astro';
 import PageHead from '../components/PageHead.astro';
 // The repo-root CHANGELOG.md, rendered at build time. It is the one document a
 // consuming site reads before updating, and it lives at the root because that
-// is where the CLAUDE.md rule ("record API changes in CHANGELOG.md") sends
+// is where the AGENTS.md rule ("record API changes in CHANGELOG.md") sends
 // every author. Importing it here means the page cannot drift from the file:
 // there is no second copy. The Makefile's SITE_SRC and the Dockerfile's
 // site-builder stage both include ../CHANGELOG.md so an edit rebuilds the site.

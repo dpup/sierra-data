@@ -87,7 +87,7 @@ edge-crossing catches it.
 - **No backfill needed for a matching-logic fix.** The store recomputes place
   attachments on every upsert, including hash-equal no-ops (`refreshEventPlaces`
   rewrites `event_places` and the blob's `place_ids` when the recomputed set
-  differs — see `internal/store/CLAUDE.md`), so a fix self-heals stored events on
+  differs — see `internal/store/AGENTS.md`), so a fix self-heals stored events on
   the next poll.
 - **Test the bbox-overlaps-but-disjoint case explicitly** — a place whose bbox
   clips the event while its polygon misses it. Covered by

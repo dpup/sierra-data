@@ -239,5 +239,5 @@ deliberately, because no alarm will do it for you.
   case of richer geometry exposing a downstream assumption.
 - `dedup-combo-feed-before-name-join.md` — the FIRIS source swap that produced
   the perimeters this work depends on, and the adoption/name-join it builds on.
-- `../../../internal/ingest/CLAUDE.md` — the fail-loud sweep invariant and the
+- `../../../internal/ingest/AGENTS.md` — the fail-loud sweep invariant and the
   `Superseded` contract.

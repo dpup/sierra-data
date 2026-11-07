@@ -83,7 +83,7 @@ roads:
     # still contributes closures, truck levels, controls outside these
     # districts, and any control CWWP2 doesn't confirm. District 10 covers
     # Calaveras, Tuolumne, Alpine, Amador and Mariposa. See
-    # internal/clients/CLAUDE.md.
+    # internal/clients/AGENTS.md.
     #
     # messageSignDistricts backs the message_sign map layer: what each
     # changeable message sign is showing, verbatim and always INFO (mostly

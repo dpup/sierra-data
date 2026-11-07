@@ -135,7 +135,7 @@ func (p *PeriodicRefreshService) refreshCacheData(ctx context.Context) {
 	// only on days with steady traffic. That is well inside the free tier's
 	// 60 calls/minute, and it buys predictable latency. Adding weather.locations
 	// raises it linearly. (Do NOT reach for One Call 3.0 here — separate 1,000/day
-	// cap; see the root CLAUDE.md.)
+	// cap; see the root AGENTS.md.)
 	if p.weatherService != nil {
 		wxCtx, wxCancel := context.WithTimeout(ctx, 2*time.Minute)
 		if _, err := p.weatherService.ListWeather(wxCtx, &api.ListWeatherRequest{}); err != nil {
