@@ -9,6 +9,7 @@ package gridapi
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -746,4 +747,78 @@ func TestSummary_IgnoresMessageSigns(t *testing.T) {
 	assert.NotContains(t, hb.requested, hazards.LayerMessageSign)
 	assert.Contains(t, hb.requested, hazards.LayerChainControl, "the fake is wired")
 	assert.NotContains(t, rec.Body.String(), "CHAINS REQUIRED")
+}
+
+// TestSummary_DomainHeadlinesSayWhetherTheyAreEvents pins kind/layer on domain
+// headlines. A condition feature's id (road:..., cc:..., fw:region) is not an
+// event — GET /api/v1/events/{id} 404s on it — so a client must be able to tell
+// the two apart before following the id.
+func TestSummary_DomainHeadlinesSayWhetherTheyAreEvents(t *testing.T) {
+	s := newTestService(t)
+	allSourcesOK(t, s.Store)
+	upsert(t, s.Store, &gridv1.Event{
+		Id: "chp:i2", Layer: gridv1.Layer_ROAD_INCIDENT,
+		Severity: gridv1.Severity_MINOR, Status: gridv1.EventStatus_ACTIVE,
+		Headline:   "Disabled vehicle blocking shoulder",
+		Geometry:   pointGeom(38.06, -120.54),
+		ObservedAt: timestamppb.New(base.Add(time.Hour)),
+		Provenance: &gridv1.Provenance{SourceId: "chp"},
+	})
+	hb := &fakeCondBuilder{byLayer: map[string]condFake{
+		hazards.LayerChainControl: {status: "OK"},
+		// Live features carry the UPPERCASE layer; the field must be uppercase
+		// either way.
+		hazards.LayerRoadSegment: {status: "OK", features: []hazards.Feature{
+			condFeature("road:hwy4-arnold-bearvalley", "ROAD_SEGMENT", "SEVERE", "Hwy 4 — Arnold to Bear Valley", nil),
+		}},
+		hazards.LayerFireWeather: {status: "OK"},
+	}}
+
+	sum, err := s.buildPlaceSummary(context.Background(), hb, "calaveras")
+	require.NoError(t, err)
+	var roads *gridv1.SummaryDomain
+	for _, d := range sum.GetDomains() {
+		if d.GetDomain() == "roads" {
+			roads = d
+		}
+	}
+	require.NotNil(t, roads)
+	require.Len(t, roads.GetHeadlines(), 2)
+
+	cond, ev := roads.GetHeadlines()[0], roads.GetHeadlines()[1]
+	assert.Equal(t, "road:hwy4-arnold-bearvalley", cond.GetId())
+	assert.Equal(t, "CONDITION", cond.GetKind())
+	assert.Equal(t, "ROAD_SEGMENT", cond.GetLayer())
+	assert.Equal(t, "chp:i2", ev.GetId())
+	assert.Equal(t, "EVENT", ev.GetKind())
+	assert.Equal(t, "ROAD_INCIDENT", ev.GetLayer())
+
+	// An EVENT headline's id really is fetchable; a CONDITION's is not.
+	_, err = s.Store.GetEvent(context.Background(), ev.GetId())
+	require.NoError(t, err)
+	_, err = s.Store.GetEvent(context.Background(), cond.GetId())
+	assert.ErrorIs(t, err, store.ErrNotFound)
+
+	// Wire shape: both fields are emitted, camelCase. (Decoded, not substring
+	// matched: protojson varies its whitespace on purpose.)
+	body, err := gatewaySummaryJSON.Marshal(sum)
+	require.NoError(t, err)
+	var wire struct {
+		Domains []struct {
+			Domain    string `json:"domain"`
+			Headlines []struct {
+				ID    string `json:"id"`
+				Kind  string `json:"kind"`
+				Layer string `json:"layer"`
+			} `json:"headlines"`
+		} `json:"domains"`
+	}
+	require.NoError(t, json.Unmarshal(body, &wire))
+	for _, d := range wire.Domains {
+		if d.Domain == "roads" {
+			require.Len(t, d.Headlines, 2)
+			assert.Equal(t, "CONDITION", d.Headlines[0].Kind)
+			assert.Equal(t, "ROAD_SEGMENT", d.Headlines[0].Layer)
+		}
+	}
 }
