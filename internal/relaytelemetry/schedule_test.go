@@ -285,6 +285,24 @@ func TestReportKeepsTheLastReadingAcrossARestart(t *testing.T) {
 	assert.NotNil(t, e.BatteryVoltage)
 }
 
+func TestWaitingWhileNoGatewayCanTry(t *testing.T) {
+	off := &meshrelay.UnavailableError{Code: "node_disconnected"}
+	h := newSched(t, []string{"a", "b"}, map[string][]error{"a": {off, off, nil}, "b": {busy, busy, busy}}, meshrelay.RepeaterPollState{})
+	h.at(0)
+	require.NotNil(t, h.reps.state.WaitingSince)
+	assert.Equal(t, t0, *h.reps.state.WaitingSince)
+	assert.Equal(t, "a: the gateway's node is disconnected; b: the gateway's node is in use", h.reps.state.Waiting)
+	assert.Zero(t, h.reps.state.FailedCycles, "not a failure")
+
+	h.at(30 * time.Minute)
+	require.NotNil(t, h.reps.state.WaitingSince)
+	assert.Equal(t, t0, *h.reps.state.WaitingSince, "since the first such cycle")
+
+	h.at(60 * time.Minute)
+	assert.Nil(t, h.reps.state.WaitingSince, "a read ends it")
+	assert.Empty(t, h.reps.state.Waiting)
+}
+
 func gws(cs []call) []string {
 	var out []string
 	for _, c := range cs {

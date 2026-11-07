@@ -19,7 +19,9 @@ package relaytelemetry
 //     single try per gateway, so a dead repeater costs at most
 //     maxMeshTries floods per cycle.
 //   - A busy, paused or offline gateway, or one whose node hasn't heard the
-//     repeater, isn't a failure: the next gateway is tried at once.
+//     repeater, isn't a failure: the next gateway is tried at once. While
+//     cycles end with no gateway able to try, the state says so
+//     (WaitingSince, Waiting), so hosts see why it isn't being read.
 //   - A refused password ends the cycle and stops polling until the share
 //     is updated.
 //
@@ -42,6 +44,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/dpup/prefab/logging"
@@ -80,6 +83,7 @@ type repeaterCycle struct {
 	unanswered map[string]bool // gateways whose route went unanswered
 	lastErr    error
 	via        string
+	skipped    []string // "gateway: why" for gateways that couldn't try
 }
 
 // RepeaterTick runs whatever repeater work is due at the poller's clock:
@@ -194,6 +198,11 @@ func (p *Poller) step(ctx context.Context, j *repeaterJob, c meshrelay.RepeaterC
 		if cy.lastErr == nil {
 			cy.lastErr = err
 		}
+		why := meshrelay.RepeaterErrorText(err)
+		if errors.Is(err, meshrelay.ErrNotKnown) {
+			why = "its node hasn't heard the repeater"
+		}
+		cy.skipped = append(cy.skipped, gw+": "+why)
 		cy.gi, cy.retry, cy.nextAt = cy.gi+1, 0, now
 		return
 	}
@@ -260,6 +269,16 @@ func (p *Poller) endCycle(ctx context.Context, j *repeaterJob, c meshrelay.Repea
 			}
 		}
 	}
+	// Waiting: cycles end with no gateway able to try. A cycle that went over
+	// the mesh (or read it) ends it.
+	if outcome == outcomeSkipped {
+		if st.WaitingSince == nil {
+			st.WaitingSince = ptr(cy.start)
+		}
+		st.Waiting = waitingText(cy.skipped)
+	} else {
+		st.WaitingSince, st.Waiting = nil, ""
+	}
 	st.NextCycle = next
 	p.reps.SetRepeaterPollState(c.Pubkey, *st)
 	if outcome != outcomeSkipped || errors.Is(cy.lastErr, meshrelay.ErrNotKnown) {
@@ -325,6 +344,21 @@ func (p *Poller) restore(c meshrelay.RepeaterCredential) {
 		p.repeaters[c.Pubkey] = ns
 	}
 	p.mu.Unlock()
+}
+
+// waitingText says why no gateway could try, for the first few.
+func waitingText(skipped []string) string {
+	if len(skipped) == 0 {
+		return "no gateway is online"
+	}
+	slices.Sort(skipped)
+	skipped = slices.Compact(skipped)
+	more := ""
+	if len(skipped) > 3 {
+		more = fmt.Sprintf("; %d more", len(skipped)-3)
+		skipped = skipped[:3]
+	}
+	return strings.Join(skipped, "; ") + more
 }
 
 // candidates orders the gateways to try for a repeater: its primary (or the

@@ -769,7 +769,9 @@ cycle. A check that gets no answer is retried after 30s/60s/120s on that
 gateway (flooding at once: `FloodFirst`), then the next gateway; retries
 only for a repeater read in its last cycle, so a dead one costs at most 3
 floods a cycle. A busy/paused/offline gateway isn't a failure. A refused
-password stops polling until the share is updated. Unread for
+password stops polling until the share is updated. Cycles in which no
+gateway could try (offline, paused, busy) aren't failures; the state marks
+the repeater waiting, with why, until a cycle transmits. Unread for
 `repeaterHibernateAfter` (6) cycles with no advert or other monitor's read
 on the Grid in that window: polled daily, and woken when the Grid shows it
 alive. The schedule is saved in the relay (`SetRepeaterPollState`) with the
