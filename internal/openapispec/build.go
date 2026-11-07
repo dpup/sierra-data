@@ -11,11 +11,12 @@
 //     shared error responses, and the security scheme.
 //
 // Build converts the generated document to OpenAPI 3.0 (3.0 says nullable, oneOf
-// and per-response content types, which Swagger 2.0 cannot), marks the
-// properties the gateway can serialize as null (nullable.go, from the proto
-// descriptor), completes the generated error responses (responses.go), merges the overlay into it under the rules in merge.go, checks
-// every $ref resolves, validates the result with kin-openapi, and renders it
-// with a stable key order. The output is api/grid/v1/openapi.json, which is
+// and per-response content types, which Swagger 2.0 cannot), marks which
+// properties the gateway always sends (`required`) and which it can send as
+// null (presence.go, from the proto descriptor), completes the generated error
+// responses (responses.go), merges the overlay into it under the rules in
+// merge.go, checks every $ref resolves, validates the result with kin-openapi,
+// and renders it with a stable key order. The output is api/grid/v1/openapi.json, which is
 // committed and embedded.
 package openapispec
 
@@ -58,13 +59,13 @@ type Report struct {
 // Build produces the served OpenAPI document from the generated Swagger 2.0
 // JSON and the overlay YAML. proto is the descriptor of the .proto file the
 // swagger was generated from (gridv1.File_grid_proto); it decides which
-// properties are nullable. A nil descriptor marks none.
+// properties are required and which nullable. A nil descriptor marks none.
 func Build(swaggerJSON, overlayYAML []byte, proto protoreflect.FileDescriptor) ([]byte, Report, error) {
 	base, err := convertToV3(swaggerJSON)
 	if err != nil {
 		return nil, Report{}, err
 	}
-	if err := markNullable(base, nullableFields(proto)); err != nil {
+	if err := markPresence(base, presenceFields(proto)); err != nil {
 		return nil, Report{}, err
 	}
 	completeGeneratedResponses(base)

@@ -6447,7 +6447,7 @@ var File_grid_proto protoreflect.FileDescriptor
 const file_grid_proto_rawDesc = "" +
 	"\n" +
 	"\n" +
-	"grid.proto\x12\agrid.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1egoogle/protobuf/wrappers.proto\x1a.protoc-gen-openapiv2/options/annotations.proto\"\xf2\f\n" +
+	"grid.proto\x12\agrid.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1fgoogle/api/field_behavior.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1egoogle/protobuf/wrappers.proto\x1a.protoc-gen-openapiv2/options/annotations.proto\"\xfe\f\n" +
 	"\x05Event\x12'\n" +
 	"\x02id\x18\x01 \x01(\tB\x17\x92A\x14J\x12\"chp:261106ST0341\"R\x02id\x12:\n" +
 	"\x05layer\x18\x02 \x01(\x0e2\x0e.grid.v1.LayerB\x14\x92A\x11J\x0f\"ROAD_INCIDENT\"R\x05layer\x12+\n" +
@@ -6464,15 +6464,15 @@ const file_grid_proto_rawDesc = "" +
 	"\rcanonical_url\x18\n" +
 	" \x01(\tB\t\x92A\x06\xa2\x02\x03uriR\fcanonicalUrl\x12-\n" +
 	"\bgeometry\x18\v \x01(\v2\x11.grid.v1.GeometryR\bgeometry\x12\x1b\n" +
-	"\tplace_ids\x18\f \x03(\tR\bplaceIds\x123\n" +
+	"\tplace_ids\x18\f \x03(\tR\bplaceIds\x129\n" +
 	"\n" +
-	"provenance\x18\r \x01(\v2\x13.grid.v1.ProvenanceR\n" +
+	"provenance\x18\r \x01(\v2\x13.grid.v1.ProvenanceB\x04\xe2A\x01\x02R\n" +
 	"provenance\x128\n" +
 	"\teffective\x18\x0e \x01(\v2\x1a.google.protobuf.TimestampR\teffective\x124\n" +
 	"\aexpires\x18\x0f \x01(\v2\x1a.google.protobuf.TimestampR\aexpires\x12;\n" +
 	"\vobserved_at\x18\x10 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"observedAt\x12;\n" +
-	"\vingested_at\x18\x11 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"observedAt\x12A\n" +
+	"\vingested_at\x18\x11 \x01(\v2\x1a.google.protobuf.TimestampB\x04\xe2A\x01\x02R\n" +
 	"ingestedAt\x12\"\n" +
 	"\brevision\x18\x12 \x01(\rB\x06\x92A\x03J\x012R\brevision\x126\n" +
 	"\venhancement\x18\x13 \x01(\v2\x14.grid.v1.EnhancementR\venhancement\x125\n" +
@@ -6490,11 +6490,11 @@ const file_grid_proto_rawDesc = "" +
 	"\x05power\x18\x1b \x01(\v2\x14.grid.v1.PowerDetailH\x00R\x05power\x12<\n" +
 	"\vburn_status\x18\x1f \x01(\v2\x19.grid.v1.BurnStatusDetailH\x00R\n" +
 	"burnStatusB\b\n" +
-	"\x06detailJ\x04\b\x1c\x10\x1f\"\xcc\x01\n" +
+	"\x06detailJ\x04\b\x1c\x10\x1f\"\xd8\x01\n" +
 	"\bGeometry\x12i\n" +
-	"\ageojson\x18\x01 \x01(\fBO\x92ALJJ\"eyJ0eXBlIjoiUG9pbnQiLCJjb29yZGluYXRlcyI6Wy0xMjAuMzYxMDgsMzguMjQyMzldfQ==\"R\ageojson\x12(\n" +
-	"\x04bbox\x18\x02 \x01(\v2\x14.grid.v1.BoundingBoxR\x04bbox\x12+\n" +
-	"\bcentroid\x18\x03 \x01(\v2\x0f.grid.v1.LatLngR\bcentroid\"\xbd\x01\n" +
+	"\ageojson\x18\x01 \x01(\fBO\x92ALJJ\"eyJ0eXBlIjoiUG9pbnQiLCJjb29yZGluYXRlcyI6Wy0xMjAuMzYxMDgsMzguMjQyMzldfQ==\"R\ageojson\x12.\n" +
+	"\x04bbox\x18\x02 \x01(\v2\x14.grid.v1.BoundingBoxB\x04\xe2A\x01\x02R\x04bbox\x121\n" +
+	"\bcentroid\x18\x03 \x01(\v2\x0f.grid.v1.LatLngB\x04\xe2A\x01\x02R\bcentroid\"\xbd\x01\n" +
 	"\vBoundingBox\x12)\n" +
 	"\amin_lat\x18\x01 \x01(\x01B\x10\x92A\rJ\v38.23557857R\x06minLat\x12+\n" +
 	"\amin_lng\x18\x02 \x01(\x01B\x12\x92A\x0fJ\r-120.55658028R\x06minLng\x12)\n" +
@@ -6502,7 +6502,7 @@ const file_grid_proto_rawDesc = "" +
 	"\amax_lng\x18\x04 \x01(\x01B\x12\x92A\x0fJ\r-120.43495978R\x06maxLng\"N\n" +
 	"\x06LatLng\x12 \n" +
 	"\x03lat\x18\x01 \x01(\x01B\x0e\x92A\vJ\t38.242394R\x03lat\x12\"\n" +
-	"\x03lng\x18\x02 \x01(\x01B\x10\x92A\rJ\v-120.361081R\x03lng\"\xfc\x02\n" +
+	"\x03lng\x18\x02 \x01(\x01B\x10\x92A\rJ\v-120.361081R\x03lng\"\x82\x03\n" +
 	"\n" +
 	"Provenance\x12\x92\x01\n" +
 	"\tsource_id\x18\x01 \x01(\tBu\x92ArJ\x05\"chp\"\xf2\x02\acalfire\xf2\x02\x05firis\xf2\x02\x06caloes\xf2\x02\x03nws\xf2\x02\x04usgs\xf2\x02\x03chp\xf2\x02\bcaltrans\xf2\x02\x03pge\xf2\x02\x04psps\xf2\x02\bmeshcore\xf2\x02\bburnline\xf2\x02\fcalfire-burnR\bsourceId\x126\n" +
@@ -6510,9 +6510,9 @@ const file_grid_proto_rawDesc = "" +
 	"sourceName\x12<\n" +
 	"\vattribution\x18\x03 \x01(\tB\x1a\x92A\x17J\x15\"quickmap.dot.ca.gov\"R\vattribution\x12(\n" +
 	"\n" +
-	"source_url\x18\x04 \x01(\tB\t\x92A\x06\xa2\x02\x03uriR\tsourceUrl\x129\n" +
+	"source_url\x18\x04 \x01(\tB\t\x92A\x06\xa2\x02\x03uriR\tsourceUrl\x12?\n" +
 	"\n" +
-	"fetched_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\tfetchedAt\"\xeb\x01\n" +
+	"fetched_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampB\x04\xe2A\x01\x02R\tfetchedAt\"\xeb\x01\n" +
 	"\vEnhancement\x12'\n" +
 	"\x05model\x18\x01 \x01(\tB\x11\x92A\x0eJ\f\"gpt-5-mini\"R\x05model\x12;\n" +
 	"\venhanced_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
@@ -6535,14 +6535,14 @@ const file_grid_proto_rawDesc = "" +
 	"\x0flast_attempt_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\rlastAttemptAt\x12\x1d\n" +
 	"\n" +
 	"last_error\x18\b \x01(\tR\tlastError\x128\n" +
-	"\x06status\x18\t \x01(\x0e2\x15.grid.v1.SourceStatusB\t\x92A\x06J\x04\"OK\"R\x06status\"\x96\x02\n" +
+	"\x06status\x18\t \x01(\x0e2\x15.grid.v1.SourceStatusB\t\x92A\x06J\x04\"OK\"R\x06status\"\x9c\x02\n" +
 	"\x05Place\x12\"\n" +
 	"\x02id\x18\x01 \x01(\tB\x12\x92A\x0fJ\r\"town:arnold\"R\x02id\x123\n" +
 	"\x04kind\x18\x02 \x01(\x0e2\x12.grid.v1.PlaceKindB\v\x92A\bJ\x06\"TOWN\"R\x04kind\x12%\n" +
 	"\x04name\x18\x03 \x01(\tB\x11\x92A\x0eJ\f\"Arnold, CA\"R\x04name\x12!\n" +
 	"\x04slug\x18\x04 \x01(\tB\r\x92A\n" +
-	"J\b\"arnold\"R\x04slug\x12-\n" +
-	"\bgeometry\x18\x05 \x01(\v2\x11.grid.v1.GeometryR\bgeometry\x12;\n" +
+	"J\b\"arnold\"R\x04slug\x123\n" +
+	"\bgeometry\x18\x05 \x01(\v2\x11.grid.v1.GeometryB\x04\xe2A\x01\x02R\bgeometry\x12;\n" +
 	"\tparent_id\x18\x06 \x01(\tB\x1e\x92A\x1bJ\x19\"county:calaveras-county\"R\bparentId\"\xb2\x01\n" +
 	"\x0eWildfireDetail\x12\"\n" +
 	"\x05acres\x18\x01 \x01(\x01B\f\x92A\tJ\a6801.39R\x05acres\x12)\n" +
@@ -6582,7 +6582,7 @@ const file_grid_proto_rawDesc = "" +
 	"\aclosure\x18\b \x01(\v2\x1a.grid.v1.LaneClosureDetailR\aclosure\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\x02\x10\x03J\x04\b\x03\x10\x04J\x04\b\x06\x10\a\"\xe4\b\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\x02\x10\x03J\x04\b\x03\x10\x04J\x04\b\x06\x10\a\"\xea\b\n" +
 	"\x11LaneClosureDetail\x12B\n" +
 	"\twindow_id\x18\x01 \x01(\tB%\x92A\"J \"C26EA-0001-2026-08-24-07:01:00\"R\bwindowId\x12#\n" +
 	"\bdistrict\x18\x02 \x01(\x05B\a\x92A\x04J\x0210R\bdistrict\x12+\n" +
@@ -6601,8 +6601,8 @@ const file_grid_proto_rawDesc = "" +
 	"\vtotal_lanes\x18\v \x01(\x05B\x06\x92A\x03J\x012R\n" +
 	"totalLanes\x126\n" +
 	"\x17estimated_delay_minutes\x18\f \x01(\x05R\x15estimatedDelayMinutes\x12a\n" +
-	"\x10closure_duration\x18\r \x01(\tB6\x92A3J\v\"Long Term\"\xf2\x02\bStandard\xf2\x02\tLong Term\xf2\x02\fIntermittentR\x0fclosureDuration\x12?\n" +
-	"\rplanned_start\x18\x0e \x01(\v2\x1a.google.protobuf.TimestampR\fplannedStart\x12;\n" +
+	"\x10closure_duration\x18\r \x01(\tB6\x92A3J\v\"Long Term\"\xf2\x02\bStandard\xf2\x02\tLong Term\xf2\x02\fIntermittentR\x0fclosureDuration\x12E\n" +
+	"\rplanned_start\x18\x0e \x01(\v2\x1a.google.protobuf.TimestampB\x04\xe2A\x01\x02R\fplannedStart\x12;\n" +
 	"\vplanned_end\x18\x0f \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"plannedEnd\x12%\n" +
 	"\x0eend_indefinite\x18\x10 \x01(\bR\rendIndefinite\x126\n" +
@@ -6708,7 +6708,7 @@ const file_grid_proto_rawDesc = "" +
 	"\x04name\x18\x02 \x01(\tB!\x92A\x1eJ\x1c\"Calaveras County burn line\"R\x04name\x12)\n" +
 	"\x05phone\x18\x03 \x01(\tB\x13\x92A\x10J\x0e\"+12097546600\"R\x05phone\x12@\n" +
 	"\bburn_day\x18\x04 \x01(\x0e2\x10.grid.v1.BurnDayB\x13\x92A\x10J\x0e\"BURN_DAY_YES\"R\aburnDay\x12:\n" +
-	"\vobservation\x18\x05 \x01(\v2\x18.grid.v1.BurnObservationR\vobservation\"\x88\x02\n" +
+	"\vobservation\x18\x05 \x01(\v2\x18.grid.v1.BurnObservationR\vobservation\"\x8e\x02\n" +
 	"\x0fBurnObservation\x12T\n" +
 	"\amessage\x18\x01 \x01(\tB:\x92A7J5\"Today is a burn day with no elevation restrictions.\"R\amessage\x12\x1e\n" +
 	"\n" +
@@ -6716,19 +6716,19 @@ const file_grid_proto_rawDesc = "" +
 	"transcript\x12'\n" +
 	"\n" +
 	"confidence\x18\x03 \x01(\x05B\a\x92A\x04J\x0295R\n" +
-	"confidence\x12;\n" +
-	"\vobserved_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"confidence\x12A\n" +
+	"\vobserved_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampB\x04\xe2A\x01\x02R\n" +
 	"observedAtJ\x04\b\x05\x10\x06R\x13calfire_observed_at\"[\n" +
 	"\tEventList\x12&\n" +
 	"\x06events\x18\x01 \x03(\v2\x0e.grid.v1.EventR\x06events\x12&\n" +
-	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"\xd3\x01\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"\xe5\x01\n" +
 	"\rEventRevision\x12\"\n" +
-	"\brevision\x18\x01 \x01(\rB\x06\x92A\x03J\x013R\brevision\x12;\n" +
-	"\vobserved_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"observedAt\x12;\n" +
-	"\vingested_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"ingestedAt\x12$\n" +
-	"\x05event\x18\x04 \x01(\v2\x0e.grid.v1.EventR\x05event\"q\n" +
+	"\brevision\x18\x01 \x01(\rB\x06\x92A\x03J\x013R\brevision\x12A\n" +
+	"\vobserved_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampB\x04\xe2A\x01\x02R\n" +
+	"observedAt\x12A\n" +
+	"\vingested_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampB\x04\xe2A\x01\x02R\n" +
+	"ingestedAt\x12*\n" +
+	"\x05event\x18\x04 \x01(\v2\x0e.grid.v1.EventB\x04\xe2A\x01\x02R\x05event\"q\n" +
 	"\x11EventRevisionList\x124\n" +
 	"\trevisions\x18\x01 \x03(\v2\x16.grid.v1.EventRevisionR\trevisions\x12&\n" +
 	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"3\n" +
@@ -6740,12 +6740,12 @@ const file_grid_proto_rawDesc = "" +
 	"\x17GetMeshTelemetryRequest\x12\xa3\x01\n" +
 	"\x04node\x18\x01 \x01(\tB\x8e\x01\x92A\x8a\x01JB\"a30081749739257489c372a0183f5f7cfd1705eb1dc4441ae11dd30533927c71\"\x8a\x01<^([mM][eE][sS][hH][cC][oO][rR][eE]:)?([0-9a-fA-F]{2}){4,32}$\xd2\x01\x04nodeR\x04node\x12.\n" +
 	"\x04from\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x04from\x12*\n" +
-	"\x02to\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\x02to\"\xa1\x03\n" +
+	"\x02to\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\x02to\"\xb3\x03\n" +
 	"\x14MeshTelemetryArchive\x12\x12\n" +
-	"\x04node\x18\x01 \x01(\tR\x04node\x12.\n" +
-	"\x04from\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x04from\x12*\n" +
-	"\x02to\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\x02to\x12:\n" +
-	"\bcoverage\x18\x04 \x01(\v2\x1e.grid.v1.MeshTelemetryCoverageR\bcoverage\x12Q\n" +
+	"\x04node\x18\x01 \x01(\tR\x04node\x124\n" +
+	"\x04from\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampB\x04\xe2A\x01\x02R\x04from\x120\n" +
+	"\x02to\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampB\x04\xe2A\x01\x02R\x02to\x12@\n" +
+	"\bcoverage\x18\x04 \x01(\v2\x1e.grid.v1.MeshTelemetryCoverageB\x04\xe2A\x01\x02R\bcoverage\x12Q\n" +
 	"\x0fcadence_seconds\x18\x05 \x01(\v2\x1b.google.protobuf.Int64ValueB\v\x92A\bJ\x06\"1831\"R\x0ecadenceSeconds\x124\n" +
 	"\areboots\x18\x06 \x03(\v2\x1a.google.protobuf.TimestampR\areboots\x12\x1c\n" +
 	"\ttruncated\x18\a \x01(\bR\ttruncated\x126\n" +
@@ -6753,21 +6753,21 @@ const file_grid_proto_rawDesc = "" +
 	"\x15MeshTelemetryCoverage\x12.\n" +
 	"\x04from\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x04from\x12*\n" +
 	"\x02to\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x02to\x12#\n" +
-	"\asamples\x18\x03 \x01(\x05B\t\x92A\x06J\x043213R\asamples\"\x89\x01\n" +
-	"\x13MeshTelemetrySample\x125\n" +
-	"\areading\x18\x01 \x01(\v2\x1b.grid.v1.MeshAdminTelemetryR\areading\x12;\n" +
-	"\vreceived_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"\asamples\x18\x03 \x01(\x05B\t\x92A\x06J\x043213R\asamples\"\x95\x01\n" +
+	"\x13MeshTelemetrySample\x12;\n" +
+	"\areading\x18\x01 \x01(\v2\x1b.grid.v1.MeshAdminTelemetryB\x04\xe2A\x01\x02R\areading\x12A\n" +
+	"\vreceived_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampB\x04\xe2A\x01\x02R\n" +
 	"receivedAt\"G\n" +
 	"\x16GetPlaceSummaryRequest\x12-\n" +
-	"\x05place\x18\x01 \x01(\tB\x17\x92A\x14J\x12\"calaveras-county\"R\x05place\"\xc5\x03\n" +
+	"\x05place\x18\x01 \x01(\tB\x17\x92A\x14J\x12\"calaveras-county\"R\x05place\"\xd1\x03\n" +
 	"\fPlaceSummary\x12-\n" +
 	"\x05place\x18\x01 \x01(\tB\x17\x92A\x14J\x12\"calaveras-county\"R\x05place\x129\n" +
 	"\bplace_id\x18\x02 \x01(\tB\x1e\x92A\x1bJ\x19\"county:calaveras-county\"R\aplaceId\x126\n" +
 	"\n" +
-	"place_name\x18\x03 \x01(\tB\x17\x92A\x14J\x12\"Calaveras County\"R\tplaceName\x12=\n" +
-	"\fgenerated_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\vgeneratedAt\x129\n" +
-	"\x04mode\x18\x05 \x01(\tB%\x92A\"J\a\"WATCH\"\xf2\x02\x05QUIET\xf2\x02\x05WATCH\xf2\x02\x06ACTIVER\x04mode\x12/\n" +
-	"\asummary\x18\x06 \x01(\v2\x15.grid.v1.SummaryStatsR\asummary\x120\n" +
+	"place_name\x18\x03 \x01(\tB\x17\x92A\x14J\x12\"Calaveras County\"R\tplaceName\x12C\n" +
+	"\fgenerated_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampB\x04\xe2A\x01\x02R\vgeneratedAt\x129\n" +
+	"\x04mode\x18\x05 \x01(\tB%\x92A\"J\a\"WATCH\"\xf2\x02\x05QUIET\xf2\x02\x05WATCH\xf2\x02\x06ACTIVER\x04mode\x125\n" +
+	"\asummary\x18\x06 \x01(\v2\x15.grid.v1.SummaryStatsB\x04\xe2A\x01\x02R\asummary\x120\n" +
 	"\adomains\x18\a \x03(\v2\x16.grid.v1.SummaryDomainR\adomains\x126\n" +
 	"\asources\x18\b \x03(\v2\x1c.grid.v1.SummarySourceHealthR\asources\"\xe6\x05\n" +
 	"\fSummaryStats\x12e\n" +
@@ -6859,9 +6859,9 @@ const file_grid_proto_rawDesc = "" +
 	"\x03lat\x18\x01 \x01(\x01B\n" +
 	"\x92A\aJ\x0538.25R\x03lat\x12\x1e\n" +
 	"\x03lng\x18\x02 \x01(\x01B\f\x92A\tJ\a-120.35R\x03lng\x12'\n" +
-	"\x0fmatched_address\x18\x03 \x01(\tR\x0ematchedAddress\"k\n" +
-	"\x14ResolvePlaceResponse\x12+\n" +
-	"\x05query\x18\x01 \x01(\v2\x15.grid.v1.ResolveQueryR\x05query\x12&\n" +
+	"\x0fmatched_address\x18\x03 \x01(\tR\x0ematchedAddress\"q\n" +
+	"\x14ResolvePlaceResponse\x121\n" +
+	"\x05query\x18\x01 \x01(\v2\x15.grid.v1.ResolveQueryB\x04\xe2A\x01\x02R\x05query\x12&\n" +
 	"\x06places\x18\x02 \x03(\v2\x0e.grid.v1.PlaceR\x06places\"@\n" +
 	"\x13ListScannersRequest\x12)\n" +
 	"\x05place\x18\x01 \x01(\tB\x13\x92A\x10J\x0e\"ebbetts-pass\"R\x05place\"\x99\x02\n" +
@@ -6874,7 +6874,7 @@ const file_grid_proto_rawDesc = "" +
 	"\bscanners\x18\x01 \x03(\v2\x10.grid.v1.ScannerR\bscanners\"9\n" +
 	"\x12ListCamerasRequest\x12#\n" +
 	"\x05place\x18\x01 \x01(\tB\r\x92A\n" +
-	"J\b\"sonora\"R\x05place\"\xf4\x04\n" +
+	"J\b\"sonora\"R\x05place\"\xfa\x04\n" +
 	"\x06Camera\x12\x1e\n" +
 	"\x02id\x18\x01 \x01(\tB\x0e\x92A\vJ\t\"d10-172\"R\x02id\x125\n" +
 	"\x04name\x18\x02 \x01(\tB!\x92A\x1eJ\x1c\"EB 108 W/O Soulsbyville Rd\"R\x04name\x126\n" +
@@ -6883,8 +6883,8 @@ const file_grid_proto_rawDesc = "" +
 	"\"Tuolumne\"R\x06county\x12#\n" +
 	"\x05route\x18\x05 \x01(\tB\r\x92A\n" +
 	"J\b\"SR-108\"R\x05route\x12J\n" +
-	"\tdirection\x18\x06 \x01(\tB,\x92A)J\x06\"East\"\xf2\x02\x00\xf2\x02\x05North\xf2\x02\x05South\xf2\x02\x04East\xf2\x02\x04WestR\tdirection\x12+\n" +
-	"\blocation\x18\a \x01(\v2\x0f.grid.v1.LatLngR\blocation\x120\n" +
+	"\tdirection\x18\x06 \x01(\tB,\x92A)J\x06\"East\"\xf2\x02\x00\xf2\x02\x05North\xf2\x02\x05South\xf2\x02\x04East\xf2\x02\x04WestR\tdirection\x121\n" +
+	"\blocation\x18\a \x01(\v2\x0f.grid.v1.LatLngB\x04\xe2A\x01\x02R\blocation\x120\n" +
 	"\x0eelevation_feet\x18\b \x01(\x05B\t\x92A\x06J\x042650R\relevationFeet\x12&\n" +
 	"\timage_url\x18\t \x01(\tB\t\x92A\x06\xa2\x02\x03uriR\bimageUrl\x12:\n" +
 	"\x15image_refresh_minutes\x18\n" +
@@ -7096,8 +7096,8 @@ const file_grid_proto_rawDesc = "" +
 	"\x10GetMeshTelemetry\x12 .grid.v1.GetMeshTelemetryRequest\x1a\x1d.grid.v1.MeshTelemetryArchive\"\xae\x01\x92A\x8c\x01\n" +
 	"\x04MeshJ\x83\x01\n" +
 	"\x03400\x12|\n" +
-	"zINVALID_ARGUMENT: `node` missing or not 8-64 even-length hex (optionally prefixed `meshcore:`), or `from` not before `to`.\x82\xd3\xe4\x93\x02\x18\x12\x16/api/v1/mesh/telemetry\x1ap\x92Am\x12kEvery /api/v1 RPC. The resource tags (Places, Events, Conditions, Sources, Mesh) group the same operations.B\xdf\\\x92A\xab\\\x12\x86U\n" +
-	"\fThe Grid API\x12\xe6SPublic, read-only JSON API of **The Grid**, the S.I.E.R.R.A. data service. It gathers hazard and situational-awareness feeds for California's central Sierra Nevada, centred on Calaveras and Tuolumne counties: the Highway 4 / Ebbetts Pass corridor (Angels Camp, Murphys, Arnold, Dorrington, Bear Valley) and the Highway 49/108 towns (Sonora, Columbia, Twain Harte). Neighbouring counties (Alpine, Amador, El Dorado, Mariposa, San Joaquin, Stanislaus) are in the place directory because hazards cross county lines.\n" +
+	"zINVALID_ARGUMENT: `node` missing or not 8-64 even-length hex (optionally prefixed `meshcore:`), or `from` not before `to`.\x82\xd3\xe4\x93\x02\x18\x12\x16/api/v1/mesh/telemetry\x1ap\x92Am\x12kEvery /api/v1 RPC. The resource tags (Places, Events, Conditions, Sources, Mesh) group the same operations.B\xf6^\x92A\xc2^\x12\x9dW\n" +
+	"\fThe Grid API\x12\xfdUPublic, read-only JSON API of **The Grid**, the S.I.E.R.R.A. data service. It gathers hazard and situational-awareness feeds for California's central Sierra Nevada, centred on Calaveras and Tuolumne counties: the Highway 4 / Ebbetts Pass corridor (Angels Camp, Murphys, Arnold, Dorrington, Bear Valley) and the Highway 49/108 towns (Sonora, Columbia, Twain Harte). Neighbouring counties (Alpine, Amador, El Dorado, Mariposa, San Joaquin, Stanislaus) are in the place directory because hazards cross county lines.\n" +
 	"\n" +
 	"Upstream sources: CAL FIRE and FIRIS (wildfires and perimeters), Cal OES / Genasys (evacuation zones), the National Weather Service (alerts, fire weather, forecasts), USGS (earthquakes), CHP and Caltrans (incidents, lane closures, chain control, cameras, message signs), PG&E (outages and Public Safety Power Shutoffs), county burn lines and CAL FIRE burn permits, the MeshCore community radio mesh, Google Routes and OpenWeatherMap.\n" +
 	"\n" +
@@ -7127,7 +7127,7 @@ const file_grid_proto_rawDesc = "" +
 	"\n" +
 	"## Conventions\n" +
 	"\n" +
-	"- **JSON field names are camelCase.** Every field is present, except the per-layer detail blocks on an event (only the one matching `layer` is sent). An unset message or timestamp is `null`; the spec marks every such field `nullable`. An unset scalar is `0`, `\"\"` or `false`, never `null`. Wrapper-typed fields (`activeEvacuations`, the mesh gauges) are `null` when unknown, so a real `0` is never confused with \"no reading\". Arrays are `[]` and maps `{}` when empty.\n" +
+	"- **JSON field names are camelCase.** Every field is present, except the per-layer detail blocks on an event (only the one matching `layer` is sent), so the spec lists every other field in its schema's `required`. Only a field the spec marks `nullable` can be `null`: an object, timestamp or wrapper the server can leave unset, such as `geometry`, `expires` or `lastSuccessAt`. Everything else is never `null`. Objects and timestamps the server always fills (`provenance`, `ingestedAt`, `summary`, ...) are not marked nullable. An unset scalar is `0`, `\"\"` or `false`. Arrays are `[]` and maps `{}` when empty. Wrapper-typed fields (`activeEvacuations`, the mesh gauges) are `null` when unknown, so a real `0` is never confused with \"no reading\".\n" +
 	"- **Enums serialize as their name strings** (`\"SEVERE\"`), never as numbers.\n" +
 	"- **Timestamps** are RFC 3339 in UTC (`2026-11-07T03:13:00Z`), with up to nanosecond fractions.\n" +
 	"- **64-bit integers are JSON strings** (protobuf JSON mapping): mesh counters such as `uptimeSeconds: \"98350\"` and `cadenceSeconds: \"1831\"`. Parse them; 32-bit integers are plain numbers.\n" +

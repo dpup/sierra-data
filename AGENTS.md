@@ -513,6 +513,19 @@ comments and `openapiv2_*` annotations; hand-built routes (`.geojson`,
 stale or a hand-mounted route has no spec path. When you change behaviour,
 update its description and examples in the same PR.
 
+**Nullability is derived, except for one annotation.** Every field outside a
+oneof is listed in its schema's `required` (EmitUnpopulated always writes the
+key), and every message-typed field (Timestamp, wrappers, nested messages) is
+`nullable` unless grid.proto marks it `(google.api.field_behavior) =
+REQUIRED`, which means the server sets it on every path
+(`internal/openapispec/presence.go`). Mark a field REQUIRED only when no layer,
+source or error path leaves it unset: a wrong "never null" breaks generated
+clients. Two contract tests hold the annotations to the code by reading them off
+the descriptor: `TestResponsesHonorFieldPresence` (every RPC, `internal/gridapi`)
+and `TestNormalizersHonorFieldPresence` (every poller through a scheduler tick,
+`internal/ingest`). A REQUIRED field no fixture produces fails them too, so a
+new one needs a fixture.
+
 **One surface: `/api/v1`, proto-defined gRPC + gRPC-Gateway** (migrated 2026-07-09;
 see `docs/design/grpc-gateway-migration-plan.md`, `docs/design/v2-api-spec.md`). The `GridService`
 proto (`api/grid/v1/grid.proto`) is served over the gateway that Prefab mounts at

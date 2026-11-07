@@ -5,7 +5,7 @@
       "name": "The Grid (S.I.E.R.R.A. data service)",
       "url": "https://github.com/dpup/sierra-data"
     },
-    "description": "Public, read-only JSON API of **The Grid**, the S.I.E.R.R.A. data service. It gathers hazard and situational-awareness feeds for California's central Sierra Nevada, centred on Calaveras and Tuolumne counties: the Highway 4 / Ebbetts Pass corridor (Angels Camp, Murphys, Arnold, Dorrington, Bear Valley) and the Highway 49/108 towns (Sonora, Columbia, Twain Harte). Neighbouring counties (Alpine, Amador, El Dorado, Mariposa, San Joaquin, Stanislaus) are in the place directory because hazards cross county lines.\n\nUpstream sources: CAL FIRE and FIRIS (wildfires and perimeters), Cal OES / Genasys (evacuation zones), the National Weather Service (alerts, fire weather, forecasts), USGS (earthquakes), CHP and Caltrans (incidents, lane closures, chain control, cameras, message signs), PG&E (outages and Public Safety Power Shutoffs), county burn lines and CAL FIRE burn permits, the MeshCore community radio mesh, Google Routes and OpenWeatherMap.\n\nThis service is an aggregator, not an authority. For a life-safety decision, link the official source. An event's link is `canonicalUrl` (the item's own page), else `provenance.sourceUrl`, else the `homepageUrl` of its source (`GET /api/v1/sources`, joined on `provenance.sourceId`). Either event field can be an empty string: CHP incidents, Caltrans lane closures, FIRIS perimeters and NWS alerts have neither, so their link is the source homepage. Every map feature carries `properties.source`, and evacuation views link Genasys (`metadata.sourceUrl`, `summary.evacuationSourceUrl`).\n\n## Resource model\n\n- **Event**: one item from one upstream source, such as a fire, an evacuation zone, a weather alert, a road incident, an outage, a mesh radio node or a county's burn status. The id is stable (`{source}:{native id}`, e.g. `chp:261106ST0341`) and every change is kept as a numbered revision.\n- **Layer**: the event taxonomy (`Event.layer`). The *event layers* are stored and queryable at `/api/v1/events`: WILDFIRE, EVACUATION, WEATHER_ALERT, EARTHQUAKE, ROAD_INCIDENT, POWER, MESH and BURN_STATUS. The *condition layers* (`road_segment`, `chain_control`, `fire_weather`, `message_sign`) are live projections of current state, not events: they appear only on the `.geojson` map layers, in `GET /api/v1/conditions`, and in the place summary's domains.\n- **Place**: a named geography (AREA, COUNTY, TOWN, CORRIDOR). Events attach to places geometrically and every event lists its `placeIds`.\n- **Source**: an upstream feed with live health (`GET /api/v1/sources`).\n- **PlaceSummary**: the one-call rollup for a place (mode, per-domain status, top events, evacuation count).\n\n## Quickstart: build a dashboard for a place\n\n1. Pick a place: `GET /api/v1/places` lists them all (about 20). For a dashboard use an AREA (`ebbetts-pass`), a COUNTY (`calaveras-county`) or a CORRIDOR (`hwy4-arnold-bearvalley`): those have a footprint, so events and conditions attach to them. Do not build a dashboard on a TOWN (`arnold`). A town is a point, so an event attaches to it only when the event's polygon covers it (an evacuation zone, a fire perimeter), a wildfire comes near, or the fact is county-wide (burn status). Point events (road incidents, outages, earthquakes) and road conditions never attach, so a town's summary can read QUIET with an open `roads` domain while its highway is closed. Use a town to label a location and to find its county (`parentId`), or map a point or an address with `GET /api/v1/places:resolve?lat=38.25&lng=-120.35` (or `?address=...`) and pick the most specific non-town place it returns. Use the `slug` in paths.\n2. Headline status: `GET /api/v1/places/{slug}/summary` returns `mode` (QUIET, WATCH or ACTIVE), one block per domain (fire, evacuation, weather, roads, seismic, power, burn, comms), the top five hazards and `activeEvacuations`. Show each domain's `status` and `highestSeverity` next to `mode`: road and chain-control conditions (a closed highway) raise the `roads` domain but never `mode`.\n3. Event feed: `GET /api/v1/events?place={slug}&status=ACTIVE&severityMin=MINOR`. Then `GET /api/v1/events/{id}` for detail and `/api/v1/events/{id}/history` for its timeline.\n4. Map: `GET /api/v1/places/{slug}/map/{layer}.geojson` serves one RFC 7946 FeatureCollection per layer (documented separately from the RPCs below).\n5. Context: `GET /api/v1/conditions?place={slug}` for current weather, forecasts and the fire-weather state, `GET /api/v1/cameras?place={slug}` for traffic cameras, and `GET /api/v1/sources` for source-health badges.\n\nPoll every 30 to 60 seconds. JSON responses are cacheable for 30 seconds (`Cache-Control: public, max-age=30`), GeoJSON layers and mesh links for 60; upstream feeds refresh every 2 to 15 minutes.\n\n## Filter the event feed\n\nAn unscoped `GET /api/v1/events` is mostly MESH nodes: hundreds of community radio nodes across Northern California, all INFO, many outside every place. It also holds a week of planned Caltrans roadwork (ROAD_INCIDENT, status SCHEDULED). For a hazard feed, pass `place`, pass `status=ACTIVE`, and either pass `severityMin=MINOR` or list the layers you want. POWER events at INFO are single-customer outages.\n\n## Conventions\n\n- **JSON field names are camelCase.** Every field is present, except the per-layer detail blocks on an event (only the one matching `layer` is sent). An unset message or timestamp is `null`; the spec marks every such field `nullable`. An unset scalar is `0`, `\"\"` or `false`, never `null`. Wrapper-typed fields (`activeEvacuations`, the mesh gauges) are `null` when unknown, so a real `0` is never confused with \"no reading\". Arrays are `[]` and maps `{}` when empty.\n- **Enums serialize as their name strings** (`\"SEVERE\"`), never as numbers.\n- **Timestamps** are RFC 3339 in UTC (`2026-11-07T03:13:00Z`), with up to nanosecond fractions.\n- **64-bit integers are JSON strings** (protobuf JSON mapping): mesh counters such as `uptimeSeconds: \"98350\"` and `cadenceSeconds: \"1831\"`. Parse them; 32-bit integers are plain numbers.\n- **`geometry.geojson` is base64.** It is a protobuf `bytes` field, so the RFC 7946 geometry JSON arrives base64-encoded: `JSON.parse(atob(event.geometry.geojson))`. Coordinates inside are `[longitude, latitude]`. `geometry.bbox` and `geometry.centroid` are plain numbers and need no decoding. For maps, the `.geojson` layer endpoints serve decoded geometry directly.\n- **Query parameters**: this spec names them in camelCase (`severityMin`, `pageSize`, `pageToken`, `enhancementIo`). The snake_case forms (`severity_min`, `page_size`, ...) work too. Enum values are case-insensitive. A repeated parameter can be repeated (`layer=WILDFIRE&layer=POWER`) or comma-separated (`layer=WILDFIRE,POWER`).\n- **Place addressing**: anywhere a place is named, the slug (`arnold`) or the namespaced id (`town:arnold`) works.\n- **Pagination** is keyset-based. `pageSize` 0 or omitted means 50, values over 200 are clamped to 200, and a negative value is a 400. Pass `nextPageToken` back as `pageToken` with the same filters until it comes back empty. Tokens are opaque. Pages stay stable while new events arrive. A large page of perimeter-heavy events can exceed the server's 4 MiB response limit and fail with HTTP 429 `RESOURCE_EXHAUSTED`; keep `pageSize` at or below 50 when you include RESOLVED or EXPIRED events.\n- **Conditional GET**: event lists, event detail, event history, the revision archive, places and cameras return a weak `ETag`. Send it back in `If-None-Match` to get `304 Not Modified`. The tag changes whenever the body would, including in-place refreshes that write no revision (AI text, mesh telemetry, burn-line observations, place re-attachment). The summary, conditions, sources, resolve, scanners and mesh-telemetry endpoints do not yet send ETags.\n- **No authentication, no API key.** CORS is open (`Access-Control-Allow-Origin: *`), GET only, no credentials, so a browser page on any origin can call the API directly.\n- **Errors** are the gRPC status as JSON, `{code, codeName, message, details}`, with a mapped HTTP status: 400 `INVALID_ARGUMENT` (bad enum, timestamp or page token), 404 `NOT_FOUND` (unknown place, event or address), 429 `RESOURCE_EXHAUSTED` (response too large), 503 `UNAVAILABLE` (address geocoder down), 500 `INTERNAL`. Branch on `codeName`. During a deploy handoff any route can briefly answer `503`: the RPCs with the JSON error (`UNAVAILABLE`), the hand-built routes (`.geojson`, mesh links) with a plain-text body and `Retry-After: 1`. Retry after a second.\n\n## Severity and status\n\nEvery event and map feature uses one severity scale: INFO (rank 0), MINOR (1), MODERATE (2), SEVERE (3), EXTREME (4). It expresses how urgently the public should respond, not physical magnitude. `severityRank` is the same value as a number, for sorting and colour ramps. `/api/v1/events` sorts by severity, then most recently observed.\n\nStatus lifecycle: SCHEDULED (planned, not yet in effect) → ACTIVE → RESOLVED (the authoritative feed stopped listing it) or EXPIRED (it aged out). An event that reappears goes back to ACTIVE with a new revision. The end of an event is a revision too, so history keeps the all-clear.\n\n## Fail-loud honesty\n\nThe API never turns a failure into an all-clear.\n\n- Source health is `OK`, `STALE` (serving last-good data while the upstream fails) or `UNAVAILABLE` (nothing trustworthy to serve). It appears on `/api/v1/sources`, on each summary domain, in the summary's `sources` sidecar, on `/api/v1/cameras`, and in each map layer's `metadata.sourceStatus`. UNAVAILABLE with no items means *unknown*. Render it as \"unknown, check the source\", never as \"none\".\n- Evacuations: `summary.activeEvacuations` is `null` when the evacuation source is UNAVAILABLE (unknown; send people to Genasys at `summary.evacuationSourceUrl`), `0` when a healthy fetch found no active zone (\"none reported\", not a guarantee), and `N` when zones are active.\n- A failed fetch never resolves or expires events. They stay as they were and the source reads STALE.\n- The fire-weather state comes only from issued NWS products. The API never infers a Red Flag Warning that NWS has not issued.\n\n## Casing quirks (kept for compatibility)\n\n- Layer names in responses (`Event.layer`, `summary.topEvents[].layer`) are UPPERCASE enum names (`ROAD_INCIDENT`). Map-layer path segments are lowercase slugs (`road_incident.geojson`). `?layer=` accepts either, plus the aliases `mesh_node` and `network` for MESH.\n- `fireWeather.state` is lowercase: `normal`, `elevated` or `red-flag`.\n- Burn-status enum values carry a prefix (`BURN_DAY_YES`, `CALFIRE_PERMIT_REQUIRED`, `BURN_PERMISSION_ALLOWED`).\n\nAPI changes are listed, dated, in [CHANGELOG.md](https://github.com/dpup/sierra-data/blob/main/CHANGELOG.md).",
+    "description": "Public, read-only JSON API of **The Grid**, the S.I.E.R.R.A. data service. It gathers hazard and situational-awareness feeds for California's central Sierra Nevada, centred on Calaveras and Tuolumne counties: the Highway 4 / Ebbetts Pass corridor (Angels Camp, Murphys, Arnold, Dorrington, Bear Valley) and the Highway 49/108 towns (Sonora, Columbia, Twain Harte). Neighbouring counties (Alpine, Amador, El Dorado, Mariposa, San Joaquin, Stanislaus) are in the place directory because hazards cross county lines.\n\nUpstream sources: CAL FIRE and FIRIS (wildfires and perimeters), Cal OES / Genasys (evacuation zones), the National Weather Service (alerts, fire weather, forecasts), USGS (earthquakes), CHP and Caltrans (incidents, lane closures, chain control, cameras, message signs), PG&E (outages and Public Safety Power Shutoffs), county burn lines and CAL FIRE burn permits, the MeshCore community radio mesh, Google Routes and OpenWeatherMap.\n\nThis service is an aggregator, not an authority. For a life-safety decision, link the official source. An event's link is `canonicalUrl` (the item's own page), else `provenance.sourceUrl`, else the `homepageUrl` of its source (`GET /api/v1/sources`, joined on `provenance.sourceId`). Either event field can be an empty string: CHP incidents, Caltrans lane closures, FIRIS perimeters and NWS alerts have neither, so their link is the source homepage. Every map feature carries `properties.source`, and evacuation views link Genasys (`metadata.sourceUrl`, `summary.evacuationSourceUrl`).\n\n## Resource model\n\n- **Event**: one item from one upstream source, such as a fire, an evacuation zone, a weather alert, a road incident, an outage, a mesh radio node or a county's burn status. The id is stable (`{source}:{native id}`, e.g. `chp:261106ST0341`) and every change is kept as a numbered revision.\n- **Layer**: the event taxonomy (`Event.layer`). The *event layers* are stored and queryable at `/api/v1/events`: WILDFIRE, EVACUATION, WEATHER_ALERT, EARTHQUAKE, ROAD_INCIDENT, POWER, MESH and BURN_STATUS. The *condition layers* (`road_segment`, `chain_control`, `fire_weather`, `message_sign`) are live projections of current state, not events: they appear only on the `.geojson` map layers, in `GET /api/v1/conditions`, and in the place summary's domains.\n- **Place**: a named geography (AREA, COUNTY, TOWN, CORRIDOR). Events attach to places geometrically and every event lists its `placeIds`.\n- **Source**: an upstream feed with live health (`GET /api/v1/sources`).\n- **PlaceSummary**: the one-call rollup for a place (mode, per-domain status, top events, evacuation count).\n\n## Quickstart: build a dashboard for a place\n\n1. Pick a place: `GET /api/v1/places` lists them all (about 20). For a dashboard use an AREA (`ebbetts-pass`), a COUNTY (`calaveras-county`) or a CORRIDOR (`hwy4-arnold-bearvalley`): those have a footprint, so events and conditions attach to them. Do not build a dashboard on a TOWN (`arnold`). A town is a point, so an event attaches to it only when the event's polygon covers it (an evacuation zone, a fire perimeter), a wildfire comes near, or the fact is county-wide (burn status). Point events (road incidents, outages, earthquakes) and road conditions never attach, so a town's summary can read QUIET with an open `roads` domain while its highway is closed. Use a town to label a location and to find its county (`parentId`), or map a point or an address with `GET /api/v1/places:resolve?lat=38.25&lng=-120.35` (or `?address=...`) and pick the most specific non-town place it returns. Use the `slug` in paths.\n2. Headline status: `GET /api/v1/places/{slug}/summary` returns `mode` (QUIET, WATCH or ACTIVE), one block per domain (fire, evacuation, weather, roads, seismic, power, burn, comms), the top five hazards and `activeEvacuations`. Show each domain's `status` and `highestSeverity` next to `mode`: road and chain-control conditions (a closed highway) raise the `roads` domain but never `mode`.\n3. Event feed: `GET /api/v1/events?place={slug}&status=ACTIVE&severityMin=MINOR`. Then `GET /api/v1/events/{id}` for detail and `/api/v1/events/{id}/history` for its timeline.\n4. Map: `GET /api/v1/places/{slug}/map/{layer}.geojson` serves one RFC 7946 FeatureCollection per layer (documented separately from the RPCs below).\n5. Context: `GET /api/v1/conditions?place={slug}` for current weather, forecasts and the fire-weather state, `GET /api/v1/cameras?place={slug}` for traffic cameras, and `GET /api/v1/sources` for source-health badges.\n\nPoll every 30 to 60 seconds. JSON responses are cacheable for 30 seconds (`Cache-Control: public, max-age=30`), GeoJSON layers and mesh links for 60; upstream feeds refresh every 2 to 15 minutes.\n\n## Filter the event feed\n\nAn unscoped `GET /api/v1/events` is mostly MESH nodes: hundreds of community radio nodes across Northern California, all INFO, many outside every place. It also holds a week of planned Caltrans roadwork (ROAD_INCIDENT, status SCHEDULED). For a hazard feed, pass `place`, pass `status=ACTIVE`, and either pass `severityMin=MINOR` or list the layers you want. POWER events at INFO are single-customer outages.\n\n## Conventions\n\n- **JSON field names are camelCase.** Every field is present, except the per-layer detail blocks on an event (only the one matching `layer` is sent), so the spec lists every other field in its schema's `required`. Only a field the spec marks `nullable` can be `null`: an object, timestamp or wrapper the server can leave unset, such as `geometry`, `expires` or `lastSuccessAt`. Everything else is never `null`. Objects and timestamps the server always fills (`provenance`, `ingestedAt`, `summary`, ...) are not marked nullable. An unset scalar is `0`, `\"\"` or `false`. Arrays are `[]` and maps `{}` when empty. Wrapper-typed fields (`activeEvacuations`, the mesh gauges) are `null` when unknown, so a real `0` is never confused with \"no reading\".\n- **Enums serialize as their name strings** (`\"SEVERE\"`), never as numbers.\n- **Timestamps** are RFC 3339 in UTC (`2026-11-07T03:13:00Z`), with up to nanosecond fractions.\n- **64-bit integers are JSON strings** (protobuf JSON mapping): mesh counters such as `uptimeSeconds: \"98350\"` and `cadenceSeconds: \"1831\"`. Parse them; 32-bit integers are plain numbers.\n- **`geometry.geojson` is base64.** It is a protobuf `bytes` field, so the RFC 7946 geometry JSON arrives base64-encoded: `JSON.parse(atob(event.geometry.geojson))`. Coordinates inside are `[longitude, latitude]`. `geometry.bbox` and `geometry.centroid` are plain numbers and need no decoding. For maps, the `.geojson` layer endpoints serve decoded geometry directly.\n- **Query parameters**: this spec names them in camelCase (`severityMin`, `pageSize`, `pageToken`, `enhancementIo`). The snake_case forms (`severity_min`, `page_size`, ...) work too. Enum values are case-insensitive. A repeated parameter can be repeated (`layer=WILDFIRE&layer=POWER`) or comma-separated (`layer=WILDFIRE,POWER`).\n- **Place addressing**: anywhere a place is named, the slug (`arnold`) or the namespaced id (`town:arnold`) works.\n- **Pagination** is keyset-based. `pageSize` 0 or omitted means 50, values over 200 are clamped to 200, and a negative value is a 400. Pass `nextPageToken` back as `pageToken` with the same filters until it comes back empty. Tokens are opaque. Pages stay stable while new events arrive. A large page of perimeter-heavy events can exceed the server's 4 MiB response limit and fail with HTTP 429 `RESOURCE_EXHAUSTED`; keep `pageSize` at or below 50 when you include RESOLVED or EXPIRED events.\n- **Conditional GET**: event lists, event detail, event history, the revision archive, places and cameras return a weak `ETag`. Send it back in `If-None-Match` to get `304 Not Modified`. The tag changes whenever the body would, including in-place refreshes that write no revision (AI text, mesh telemetry, burn-line observations, place re-attachment). The summary, conditions, sources, resolve, scanners and mesh-telemetry endpoints do not yet send ETags.\n- **No authentication, no API key.** CORS is open (`Access-Control-Allow-Origin: *`), GET only, no credentials, so a browser page on any origin can call the API directly.\n- **Errors** are the gRPC status as JSON, `{code, codeName, message, details}`, with a mapped HTTP status: 400 `INVALID_ARGUMENT` (bad enum, timestamp or page token), 404 `NOT_FOUND` (unknown place, event or address), 429 `RESOURCE_EXHAUSTED` (response too large), 503 `UNAVAILABLE` (address geocoder down), 500 `INTERNAL`. Branch on `codeName`. During a deploy handoff any route can briefly answer `503`: the RPCs with the JSON error (`UNAVAILABLE`), the hand-built routes (`.geojson`, mesh links) with a plain-text body and `Retry-After: 1`. Retry after a second.\n\n## Severity and status\n\nEvery event and map feature uses one severity scale: INFO (rank 0), MINOR (1), MODERATE (2), SEVERE (3), EXTREME (4). It expresses how urgently the public should respond, not physical magnitude. `severityRank` is the same value as a number, for sorting and colour ramps. `/api/v1/events` sorts by severity, then most recently observed.\n\nStatus lifecycle: SCHEDULED (planned, not yet in effect) → ACTIVE → RESOLVED (the authoritative feed stopped listing it) or EXPIRED (it aged out). An event that reappears goes back to ACTIVE with a new revision. The end of an event is a revision too, so history keeps the all-clear.\n\n## Fail-loud honesty\n\nThe API never turns a failure into an all-clear.\n\n- Source health is `OK`, `STALE` (serving last-good data while the upstream fails) or `UNAVAILABLE` (nothing trustworthy to serve). It appears on `/api/v1/sources`, on each summary domain, in the summary's `sources` sidecar, on `/api/v1/cameras`, and in each map layer's `metadata.sourceStatus`. UNAVAILABLE with no items means *unknown*. Render it as \"unknown, check the source\", never as \"none\".\n- Evacuations: `summary.activeEvacuations` is `null` when the evacuation source is UNAVAILABLE (unknown; send people to Genasys at `summary.evacuationSourceUrl`), `0` when a healthy fetch found no active zone (\"none reported\", not a guarantee), and `N` when zones are active.\n- A failed fetch never resolves or expires events. They stay as they were and the source reads STALE.\n- The fire-weather state comes only from issued NWS products. The API never infers a Red Flag Warning that NWS has not issued.\n\n## Casing quirks (kept for compatibility)\n\n- Layer names in responses (`Event.layer`, `summary.topEvents[].layer`) are UPPERCASE enum names (`ROAD_INCIDENT`). Map-layer path segments are lowercase slugs (`road_incident.geojson`). `?layer=` accepts either, plus the aliases `mesh_node` and `network` for MESH.\n- `fireWeather.state` is lowercase: `normal`, `elevated` or `red-flag`.\n- Burn-status enum values carry a prefix (`BURN_DAY_YES`, `CALFIRE_PERMIT_REQUIRED`, `BURN_PERMISSION_ALLOWED`).\n\nAPI changes are listed, dated, in [CHANGELOG.md](https://github.com/dpup/sierra-data/blob/main/CHANGELOG.md).",
     "license": {
       "name": "MIT",
       "url": "https://github.com/dpup/sierra-data/blob/main/LICENSE"
@@ -4450,6 +4450,12 @@
             "type": "number"
           }
         },
+        "required": [
+          "maxLat",
+          "maxLng",
+          "minLat",
+          "minLng"
+        ],
         "type": "object"
       },
       "v1BurnDay": {
@@ -4501,6 +4507,13 @@
             "type": "string"
           }
         },
+        "required": [
+          "burnDay",
+          "id",
+          "name",
+          "observation",
+          "phone"
+        ],
         "type": "object"
       },
       "v1BurnObservation": {
@@ -4520,7 +4533,6 @@
           "observedAt": {
             "description": "When the line was called.",
             "format": "date-time",
-            "nullable": true,
             "type": "string"
           },
           "transcript": {
@@ -4528,6 +4540,12 @@
             "type": "string"
           }
         },
+        "required": [
+          "confidence",
+          "message",
+          "observedAt",
+          "transcript"
+        ],
         "type": "object"
       },
       "v1BurnPermission": {
@@ -4595,6 +4613,15 @@
             "example": "BURN_PERMISSION_ALLOWED"
           }
         },
+        "required": [
+          "burnDay",
+          "burnLines",
+          "calfireArea",
+          "calfireEffective",
+          "calfireObservedAt",
+          "calfireStatus",
+          "permission"
+        ],
         "type": "object"
       },
       "v1CalfireBurnStatus": {
@@ -4666,9 +4693,7 @@
                 "$ref": "#/components/schemas/v1LatLng"
               }
             ],
-            "description": "Camera position.",
-            "nullable": true,
-            "type": "object"
+            "description": "Camera position."
           },
           "name": {
             "description": "Caltrans's camera name.",
@@ -4691,6 +4716,21 @@
             "type": "string"
           }
         },
+        "required": [
+          "county",
+          "description",
+          "direction",
+          "distanceMeters",
+          "elevationFeet",
+          "id",
+          "imageRefreshMinutes",
+          "imageUrl",
+          "location",
+          "name",
+          "nearbyPlace",
+          "route",
+          "streamUrl"
+        ],
         "type": "object"
       },
       "v1CameraList": {
@@ -4725,6 +4765,12 @@
             "type": "string"
           }
         },
+        "required": [
+          "attribution",
+          "cameras",
+          "lastSourceUpdate",
+          "sourceStatus"
+        ],
         "type": "object"
       },
       "v1Conditions": {
@@ -4761,6 +4807,12 @@
             "type": "array"
           }
         },
+        "required": [
+          "fireWeather",
+          "forecast",
+          "lastUpdated",
+          "weather"
+        ],
         "type": "object"
       },
       "v1EarthquakeDetail": {
@@ -4785,6 +4837,11 @@
             "type": "number"
           }
         },
+        "required": [
+          "depthKm",
+          "felt",
+          "magnitude"
+        ],
         "type": "object"
       },
       "v1Enhancement": {
@@ -4822,6 +4879,13 @@
             "type": "string"
           }
         },
+        "required": [
+          "enhancedAt",
+          "fields",
+          "model",
+          "request",
+          "response"
+        ],
         "type": "object"
       },
       "v1EvacuationDetail": {
@@ -4853,6 +4917,12 @@
             "type": "string"
           }
         },
+        "required": [
+          "county",
+          "eventType",
+          "level",
+          "zoneId"
+        ],
         "type": "object"
       },
       "v1Event": {
@@ -4954,7 +5024,6 @@
           "ingestedAt": {
             "description": "When the Grid stored this revision.",
             "format": "date-time",
-            "nullable": true,
             "type": "string"
           },
           "layer": {
@@ -5001,9 +5070,7 @@
                 "$ref": "#/components/schemas/v1Provenance"
               }
             ],
-            "description": "Which source published it, with attribution text to display.",
-            "nullable": true,
-            "type": "object"
+            "description": "Which source published it, with attribution text to display."
           },
           "revision": {
             "description": "Revision number, starting at 1. It increases by one on every content change\nor status transition. `/api/v1/events/{id}/history` lists every revision.",
@@ -5059,6 +5126,27 @@
             "description": "WILDFIRE detail."
           }
         },
+        "required": [
+          "areaLabel",
+          "canonicalUrl",
+          "category",
+          "description",
+          "effective",
+          "enhancement",
+          "expires",
+          "geometry",
+          "headline",
+          "id",
+          "ingestedAt",
+          "layer",
+          "observedAt",
+          "placeIds",
+          "provenance",
+          "revision",
+          "severity",
+          "status",
+          "summary"
+        ],
         "type": "object"
       },
       "v1EventList": {
@@ -5076,6 +5164,10 @@
             "type": "string"
           }
         },
+        "required": [
+          "events",
+          "nextPageToken"
+        ],
         "type": "object"
       },
       "v1EventRevision": {
@@ -5087,20 +5179,16 @@
                 "$ref": "#/components/schemas/v1Event"
               }
             ],
-            "description": "The full event as it was at this revision. Mesh activity clocks\n(`lastHeardAt`, `lastRelayedAt`) are not filled on history snapshots.",
-            "nullable": true,
-            "type": "object"
+            "description": "The full event as it was at this revision. Mesh activity clocks\n(`lastHeardAt`, `lastRelayedAt`) are not filled on history snapshots."
           },
           "ingestedAt": {
             "description": "When the Grid stored this revision.",
             "format": "date-time",
-            "nullable": true,
             "type": "string"
           },
           "observedAt": {
             "description": "The upstream content time of this revision (`event.observedAt`).",
             "format": "date-time",
-            "nullable": true,
             "type": "string"
           },
           "revision": {
@@ -5110,6 +5198,12 @@
             "type": "integer"
           }
         },
+        "required": [
+          "event",
+          "ingestedAt",
+          "observedAt",
+          "revision"
+        ],
         "type": "object"
       },
       "v1EventRevisionList": {
@@ -5127,6 +5221,10 @@
             "type": "array"
           }
         },
+        "required": [
+          "nextPageToken",
+          "revisions"
+        ],
         "type": "object"
       },
       "v1EventStatus": {
@@ -5167,6 +5265,11 @@
             "type": "array"
           }
         },
+        "required": [
+          "headline",
+          "state",
+          "zones"
+        ],
         "type": "object"
       },
       "v1FireWeatherDetail": {
@@ -5193,6 +5296,11 @@
             "type": "array"
           }
         },
+        "required": [
+          "sourceEvent",
+          "state",
+          "zones"
+        ],
         "type": "object"
       },
       "v1ForecastPeriod": {
@@ -5235,6 +5343,14 @@
             "type": "integer"
           }
         },
+        "required": [
+          "humidityPercent",
+          "temperatureCelsius",
+          "time",
+          "windDirectionDegrees",
+          "windGustKmh",
+          "windSpeedKmh"
+        ],
         "type": "object"
       },
       "v1Geometry": {
@@ -5246,9 +5362,7 @@
                 "$ref": "#/components/schemas/v1BoundingBox"
               }
             ],
-            "description": "Bounding box of the geometry, in decimal degrees. Always set when geometry\nis present.",
-            "nullable": true,
-            "type": "object"
+            "description": "Bounding box of the geometry, in decimal degrees. Always set when geometry\nis present."
           },
           "centroid": {
             "allOf": [
@@ -5256,9 +5370,7 @@
                 "$ref": "#/components/schemas/v1LatLng"
               }
             ],
-            "description": "Representative point for markers and list views: the point itself for a\nPoint, otherwise the middle of the bounding box (which can fall outside an\nirregular polygon).",
-            "nullable": true,
-            "type": "object"
+            "description": "Representative point for markers and list views: the point itself for a\nPoint, otherwise the middle of the bounding box (which can fall outside an\nirregular polygon)."
           },
           "geojson": {
             "description": "The RFC 7946 GeoJSON geometry object (Point, LineString, Polygon,\nMultiPolygon, ...) as UTF-8 JSON, BASE64-ENCODED in this JSON response\nbecause the field is protobuf `bytes`. Decode with\n`JSON.parse(atob(geojson))`. Coordinates are `[longitude, latitude]`.\nWildfire perimeters and evacuation zones can be tens of kilobytes.",
@@ -5267,6 +5379,11 @@
             "type": "string"
           }
         },
+        "required": [
+          "bbox",
+          "centroid",
+          "geojson"
+        ],
         "type": "object"
       },
       "v1LaneClosureDetail": {
@@ -5366,7 +5483,6 @@
           "plannedStart": {
             "description": "Planned start of the window.",
             "format": "date-time",
-            "nullable": true,
             "type": "string"
           },
           "route": {
@@ -5397,6 +5513,29 @@
             "type": "string"
           }
         },
+        "required": [
+          "begin",
+          "beginLocation",
+          "closureDuration",
+          "closureId",
+          "closureType",
+          "direction",
+          "district",
+          "end",
+          "endIndefinite",
+          "endLocation",
+          "estimatedDelayMinutes",
+          "facility",
+          "lanesClosed",
+          "logNumber",
+          "plannedEnd",
+          "plannedStart",
+          "route",
+          "setUpAt",
+          "totalLanes",
+          "windowId",
+          "workType"
+        ],
         "type": "object"
       },
       "v1LatLng": {
@@ -5415,6 +5554,10 @@
             "type": "number"
           }
         },
+        "required": [
+          "lat",
+          "lng"
+        ],
         "type": "object"
       },
       "v1Layer": {
@@ -5605,6 +5748,35 @@
             "type": "string"
           }
         },
+        "required": [
+          "airtimeMs",
+          "batteryPercent",
+          "batteryPercentSource",
+          "batteryVolts",
+          "directDups",
+          "floodDups",
+          "fullEvents",
+          "humidity",
+          "lastAttemptAt",
+          "lastRssiDbm",
+          "lastSnrDb",
+          "lastSuccessAt",
+          "noiseFloorDbm",
+          "packetsReceived",
+          "packetsSent",
+          "pressure",
+          "recvDirect",
+          "recvErrors",
+          "recvFlood",
+          "reportedAt",
+          "reporterId",
+          "rxAirtimeMs",
+          "sentDirect",
+          "sentFlood",
+          "temperatureC",
+          "txQueueLen",
+          "uptimeSeconds"
+        ],
         "type": "object"
       },
       "v1MeshDetail": {
@@ -5652,6 +5824,13 @@
             "type": "object"
           }
         },
+        "required": [
+          "name",
+          "nodeType",
+          "publicKey",
+          "reachability",
+          "telemetry"
+        ],
         "type": "object"
       },
       "v1MeshReachability": {
@@ -5724,6 +5903,16 @@
             "type": "number"
           }
         },
+        "required": [
+          "admin",
+          "gateways",
+          "hopCount",
+          "lastAdvertAt",
+          "lastHeardAt",
+          "lastRelayedAt",
+          "rssi",
+          "snr"
+        ],
         "type": "object"
       },
       "v1MeshTelemetryArchive": {
@@ -5742,14 +5931,11 @@
                 "$ref": "#/components/schemas/v1MeshTelemetryCoverage"
               }
             ],
-            "description": "What the archive holds for this node at all, whatever window was asked\nfor. A window outside it has no samples because we do not have them, which\nis not the same as the node being quiet.",
-            "nullable": true,
-            "type": "object"
+            "description": "What the archive holds for this node at all, whatever window was asked\nfor. A window outside it has no samples because we do not have them, which\nis not the same as the node being quiet."
           },
           "from": {
             "description": "Window start actually used (after defaults and clamping).",
             "format": "date-time",
-            "nullable": true,
             "type": "string"
           },
           "node": {
@@ -5774,7 +5960,6 @@
           "to": {
             "description": "Window end actually used.",
             "format": "date-time",
-            "nullable": true,
             "type": "string"
           },
           "truncated": {
@@ -5782,6 +5967,16 @@
             "type": "boolean"
           }
         },
+        "required": [
+          "cadenceSeconds",
+          "coverage",
+          "from",
+          "node",
+          "reboots",
+          "samples",
+          "to",
+          "truncated"
+        ],
         "type": "object"
       },
       "v1MeshTelemetryCoverage": {
@@ -5806,6 +6001,11 @@
             "type": "string"
           }
         },
+        "required": [
+          "from",
+          "samples",
+          "to"
+        ],
         "type": "object"
       },
       "v1MeshTelemetrySample": {
@@ -5817,17 +6017,18 @@
                 "$ref": "#/components/schemas/v1MeshAdminTelemetry"
               }
             ],
-            "description": "The reading. `reading.reportedAt` is the sample's own time; gauges are\nnullable exactly as on the live event.",
-            "nullable": true,
-            "type": "object"
+            "description": "The reading. `reading.reportedAt` is the sample's own time; gauges are\nnullable exactly as on the live event."
           },
           "receivedAt": {
             "description": "When the Grid first stored it.",
             "format": "date-time",
-            "nullable": true,
             "type": "string"
           }
         },
+        "required": [
+          "reading",
+          "receivedAt"
+        ],
         "type": "object"
       },
       "v1Place": {
@@ -5839,9 +6040,7 @@
                 "$ref": "#/components/schemas/v1Geometry"
               }
             ],
-            "description": "The place's shape: a Polygon for counties and areas, a LineString for\ncorridors, a Point for towns.",
-            "nullable": true,
-            "type": "object"
+            "description": "The place's shape: a Polygon for counties and areas, a LineString for\ncorridors, a Point for towns."
           },
           "id": {
             "description": "Namespaced id, `{kind}:{slug}`.",
@@ -5873,6 +6072,14 @@
             "type": "string"
           }
         },
+        "required": [
+          "geometry",
+          "id",
+          "kind",
+          "name",
+          "parentId",
+          "slug"
+        ],
         "type": "object"
       },
       "v1PlaceKind": {
@@ -5900,6 +6107,9 @@
             "type": "array"
           }
         },
+        "required": [
+          "places"
+        ],
         "type": "object"
       },
       "v1PlaceSummary": {
@@ -5915,7 +6125,6 @@
           "generatedAt": {
             "description": "When this summary was computed.",
             "format": "date-time",
-            "nullable": true,
             "type": "string"
           },
           "mode": {
@@ -5956,11 +6165,19 @@
                 "$ref": "#/components/schemas/v1SummaryStats"
               }
             ],
-            "description": "Cross-layer hazard rollup.",
-            "nullable": true,
-            "type": "object"
+            "description": "Cross-layer hazard rollup."
           }
         },
+        "required": [
+          "domains",
+          "generatedAt",
+          "mode",
+          "place",
+          "placeId",
+          "placeName",
+          "sources",
+          "summary"
+        ],
         "type": "object"
       },
       "v1PowerDetail": {
@@ -6043,6 +6260,21 @@
             "type": "string"
           }
         },
+        "required": [
+          "allClear",
+          "cause",
+          "crewStatus",
+          "customersAffected",
+          "deEnergizationEnd",
+          "deEnergizationStart",
+          "estimatedRestoration",
+          "eventId",
+          "eventName",
+          "medicalBaselineAffected",
+          "outageId",
+          "stage",
+          "timePeriod"
+        ],
         "type": "object"
       },
       "v1Provenance": {
@@ -6056,7 +6288,6 @@
           "fetchedAt": {
             "description": "When the Grid fetched the upstream data behind this revision.",
             "format": "date-time",
-            "nullable": true,
             "type": "string"
           },
           "sourceId": {
@@ -6089,6 +6320,13 @@
             "type": "string"
           }
         },
+        "required": [
+          "attribution",
+          "fetchedAt",
+          "sourceId",
+          "sourceName",
+          "sourceUrl"
+        ],
         "type": "object"
       },
       "v1ResolvePlaceResponse": {
@@ -6107,11 +6345,13 @@
                 "$ref": "#/components/schemas/v1ResolveQuery"
               }
             ],
-            "description": "The point that was resolved.",
-            "nullable": true,
-            "type": "object"
+            "description": "The point that was resolved."
           }
         },
+        "required": [
+          "places",
+          "query"
+        ],
         "type": "object"
       },
       "v1ResolveQuery": {
@@ -6134,6 +6374,11 @@
             "type": "string"
           }
         },
+        "required": [
+          "lat",
+          "lng",
+          "matchedAddress"
+        ],
         "type": "object"
       },
       "v1RoadIncidentDetail": {
@@ -6190,6 +6435,13 @@
             "type": "object"
           }
         },
+        "required": [
+          "closure",
+          "duration",
+          "impact",
+          "logNumber",
+          "metadata"
+        ],
         "type": "object"
       },
       "v1Scanner": {
@@ -6217,6 +6469,12 @@
             "type": "string"
           }
         },
+        "required": [
+          "agency",
+          "broadcastifyUrl",
+          "channelLabel",
+          "feedId"
+        ],
         "type": "object"
       },
       "v1ScannerList": {
@@ -6230,6 +6488,9 @@
             "type": "array"
           }
         },
+        "required": [
+          "scanners"
+        ],
         "type": "object"
       },
       "v1Severity": {
@@ -6319,6 +6580,20 @@
             "example": "OK"
           }
         },
+        "required": [
+          "attribution",
+          "expireAfterSeconds",
+          "homepageUrl",
+          "id",
+          "kind",
+          "lastAttemptAt",
+          "lastError",
+          "lastSuccessAt",
+          "name",
+          "pollIntervalSeconds",
+          "staleAfterSeconds",
+          "status"
+        ],
         "type": "object"
       },
       "v1SourceKind": {
@@ -6342,6 +6617,9 @@
             "type": "array"
           }
         },
+        "required": [
+          "sources"
+        ],
         "type": "object"
       },
       "v1SourceStatus": {
@@ -6409,6 +6687,13 @@
             "type": "string"
           }
         },
+        "required": [
+          "activeCount",
+          "domain",
+          "headlines",
+          "highestSeverity",
+          "status"
+        ],
         "type": "object"
       },
       "v1SummaryDomainHeadline": {
@@ -6464,6 +6749,13 @@
             "type": "string"
           }
         },
+        "required": [
+          "headline",
+          "id",
+          "kind",
+          "layer",
+          "severity"
+        ],
         "type": "object"
       },
       "v1SummarySourceHealth": {
@@ -6491,6 +6783,11 @@
             "type": "string"
           }
         },
+        "required": [
+          "id",
+          "lastSuccessAt",
+          "status"
+        ],
         "type": "object"
       },
       "v1SummaryStats": {
@@ -6565,6 +6862,16 @@
             "type": "integer"
           }
         },
+        "required": [
+          "activeEvacuations",
+          "evacuationSourceUrl",
+          "evacuationStatus",
+          "highestSeverity",
+          "highestSeverityRank",
+          "severityCounts",
+          "topEvents",
+          "totalActive"
+        ],
         "type": "object"
       },
       "v1SummaryTopEvent": {
@@ -6617,6 +6924,14 @@
             "type": "string"
           }
         },
+        "required": [
+          "headline",
+          "id",
+          "layer",
+          "severity",
+          "severityRank",
+          "source"
+        ],
         "type": "object"
       },
       "v1WeatherAlertDetail": {
@@ -6679,6 +6994,14 @@
             "type": "array"
           }
         },
+        "required": [
+          "areaDesc",
+          "certainty",
+          "instruction",
+          "nwsSeverity",
+          "urgency",
+          "zones"
+        ],
         "type": "object"
       },
       "v1WeatherConditions": {
@@ -6746,6 +7069,19 @@
             "type": "integer"
           }
         },
+        "required": [
+          "feelsLikeCelsius",
+          "humidityPercent",
+          "locationId",
+          "locationName",
+          "temperatureCelsius",
+          "visibilityKm",
+          "weatherDescription",
+          "weatherIcon",
+          "weatherMain",
+          "windDirectionDegrees",
+          "windSpeedKmh"
+        ],
         "type": "object"
       },
       "v1WeatherForecast": {
@@ -6799,6 +7135,16 @@
             "type": "string"
           }
         },
+        "required": [
+          "horizonHours",
+          "issuedAt",
+          "locationId",
+          "minHumidityPercent",
+          "peakWindGustAt",
+          "peakWindGustKmh",
+          "periods",
+          "source"
+        ],
         "type": "object"
       },
       "v1WildfireDetail": {
@@ -6829,6 +7175,13 @@
             "type": "boolean"
           }
         },
+        "required": [
+          "acres",
+          "cause",
+          "containment",
+          "county",
+          "hasPerimeter"
+        ],
         "type": "object"
       }
     },

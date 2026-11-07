@@ -3,6 +3,7 @@ syntax = "proto3";
 package grid.v1;
 
 import "google/api/annotations.proto";
+import "google/api/field_behavior.proto";
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/wrappers.proto";
 import "protoc-gen-openapiv2/options/annotations.proto";
@@ -104,11 +105,15 @@ option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
       "## Conventions\n\n"
       "- **JSON field names are camelCase.** Every field is present, except the "
       "per-layer detail blocks on an event (only the one matching `layer` is "
-      "sent). An unset message or timestamp is `null`; the spec marks every such "
-      "field `nullable`. An unset scalar is `0`, `\"\"` or `false`, never `null`. "
-      "Wrapper-typed fields (`activeEvacuations`, the mesh gauges) are `null` when "
-      "unknown, so a real `0` is never confused with \"no reading\". Arrays are "
-      "`[]` and maps `{}` when empty.\n"
+      "sent), so the spec lists every other field in its schema's `required`. "
+      "Only a field the spec marks `nullable` can be `null`: an object, timestamp "
+      "or wrapper the server can leave unset, such as `geometry`, `expires` or "
+      "`lastSuccessAt`. Everything else is never `null`. Objects and timestamps "
+      "the server always fills (`provenance`, `ingestedAt`, `summary`, ...) are not "
+      "marked nullable. An unset scalar is `0`, `\"\"` or `false`. Arrays are "
+      "`[]` and maps `{}` when empty. Wrapper-typed fields (`activeEvacuations`, "
+      "the mesh gauges) are `null` when unknown, so a real `0` is never confused "
+      "with \"no reading\".\n"
       "- **Enums serialize as their name strings** (`\"SEVERE\"`), never as numbers.\n"
       "- **Timestamps** are RFC 3339 in UTC (`2026-11-07T03:13:00Z`), with up to "
       "nanosecond fractions.\n"
@@ -311,7 +316,7 @@ message Event {
   repeated string place_ids = 12;
 
   // Which source published it, with attribution text to display.
-  Provenance provenance = 13;
+  Provenance provenance = 13 [(google.api.field_behavior) = REQUIRED];
 
   // When the event took or takes effect: alert onset, incident start, outage
   // start, closure set-up time. `null` when the source does not say.
@@ -329,7 +334,7 @@ message Event {
   google.protobuf.Timestamp observed_at = 16;
 
   // When the Grid stored this revision.
-  google.protobuf.Timestamp ingested_at = 17;
+  google.protobuf.Timestamp ingested_at = 17 [(google.api.field_behavior) = REQUIRED];
 
   // Revision number, starting at 1. It increases by one on every content change
   // or status transition. `/api/v1/events/{id}/history` lists every revision.
@@ -476,11 +481,11 @@ message Geometry {
   bytes geojson = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"eyJ0eXBlIjoiUG9pbnQiLCJjb29yZGluYXRlcyI6Wy0xMjAuMzYxMDgsMzguMjQyMzldfQ==\""}];
   // Bounding box of the geometry, in decimal degrees. Always set when geometry
   // is present.
-  BoundingBox bbox = 2;
+  BoundingBox bbox = 2 [(google.api.field_behavior) = REQUIRED];
   // Representative point for markers and list views: the point itself for a
   // Point, otherwise the middle of the bounding box (which can fall outside an
   // irregular polygon).
-  LatLng centroid = 3;
+  LatLng centroid = 3 [(google.api.field_behavior) = REQUIRED];
 }
 
 // BoundingBox is a WGS 84 bounding box in decimal degrees.
@@ -524,7 +529,7 @@ message Provenance {
   // burn status. Fall back to `Source.homepageUrl` for `sourceId`.
   string source_url = 4 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {format: "uri"}];
   // When the Grid fetched the upstream data behind this revision.
-  google.protobuf.Timestamp fetched_at = 5;
+  google.protobuf.Timestamp fetched_at = 5 [(google.api.field_behavior) = REQUIRED];
 }
 
 // Enhancement marks AI-generated text so a client can badge it. The model
@@ -653,7 +658,7 @@ message Place {
   string slug = 4 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"arnold\""}];
   // The place's shape: a Polygon for counties and areas, a LineString for
   // corridors, a Point for towns.
-  Geometry geometry = 5;
+  Geometry geometry = 5 [(google.api.field_behavior) = REQUIRED];
   // Id of the containing place (a town's county). Empty string when none.
   string parent_id = 6 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"county:calaveras-county\""}];
 }
@@ -846,7 +851,7 @@ message LaneClosureDetail {
     enum: ["Standard", "Long Term", "Intermittent"]
   }];
   // Planned start of the window.
-  google.protobuf.Timestamp planned_start = 14;
+  google.protobuf.Timestamp planned_start = 14 [(google.api.field_behavior) = REQUIRED];
   // Planned end of the window. `null` when `endIndefinite`.
   google.protobuf.Timestamp planned_end = 15;
   // True when the window has no planned end.
@@ -1239,7 +1244,7 @@ message BurnObservation {
   // thresholded: this is an AI reading of phone audio, so show it when it is low.
   int32 confidence = 3 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "95"}];
   // When the line was called.
-  google.protobuf.Timestamp observed_at = 4;
+  google.protobuf.Timestamp observed_at = 4 [(google.api.field_behavior) = REQUIRED];
 
   reserved 5;                       // was calfire_observed_at, now on BurnStatusDetail
   reserved "calfire_observed_at";
@@ -1298,12 +1303,12 @@ message EventRevision {
   // Revision number, from 1.
   uint32 revision = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "3"}];
   // The upstream content time of this revision (`event.observedAt`).
-  google.protobuf.Timestamp observed_at = 2;
+  google.protobuf.Timestamp observed_at = 2 [(google.api.field_behavior) = REQUIRED];
   // When the Grid stored this revision.
-  google.protobuf.Timestamp ingested_at = 3;
+  google.protobuf.Timestamp ingested_at = 3 [(google.api.field_behavior) = REQUIRED];
   // The full event as it was at this revision. Mesh activity clocks
   // (`lastHeardAt`, `lastRelayedAt`) are not filled on history snapshots.
-  Event event = 4;
+  Event event = 4 [(google.api.field_behavior) = REQUIRED];
 }
 
 // EventRevisionList is one page of revisions.
@@ -1661,14 +1666,14 @@ message MeshTelemetryArchive {
   // prefix).
   string node = 1;
   // Window start actually used (after defaults and clamping).
-  google.protobuf.Timestamp from = 2;
+  google.protobuf.Timestamp from = 2 [(google.api.field_behavior) = REQUIRED];
   // Window end actually used.
-  google.protobuf.Timestamp to = 3;
+  google.protobuf.Timestamp to = 3 [(google.api.field_behavior) = REQUIRED];
 
   // What the archive holds for this node at all, whatever window was asked
   // for. A window outside it has no samples because we do not have them, which
   // is not the same as the node being quiet.
-  MeshTelemetryCoverage coverage = 4;
+  MeshTelemetryCoverage coverage = 4 [(google.api.field_behavior) = REQUIRED];
 
   // Median gap between samples in the window, in seconds, so a chart knows which
   // gaps are abnormal enough to break a line on. 64-bit, so a JSON STRING
@@ -1710,9 +1715,9 @@ message MeshTelemetryCoverage {
 message MeshTelemetrySample {
   // The reading. `reading.reportedAt` is the sample's own time; gauges are
   // nullable exactly as on the live event.
-  MeshAdminTelemetry reading = 1;
+  MeshAdminTelemetry reading = 1 [(google.api.field_behavior) = REQUIRED];
   // When the Grid first stored it.
-  google.protobuf.Timestamp received_at = 2;
+  google.protobuf.Timestamp received_at = 2 [(google.api.field_behavior) = REQUIRED];
 }
 
 // GetPlaceSummaryRequest names the place.
@@ -1734,7 +1739,7 @@ message PlaceSummary {
   // The place's display name.
   string place_name = 3 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"Calaveras County\""}];
   // When this summary was computed.
-  google.protobuf.Timestamp generated_at = 4;
+  google.protobuf.Timestamp generated_at = 4 [(google.api.field_behavior) = REQUIRED];
 
   // Overall posture. The rules below are checked in order and the first match
   // wins.
@@ -1763,7 +1768,7 @@ message PlaceSummary {
     enum: ["QUIET", "WATCH", "ACTIVE"]
   }];
   // Cross-layer hazard rollup.
-  SummaryStats summary = 6;
+  SummaryStats summary = 6 [(google.api.field_behavior) = REQUIRED];
   // One block per domain, always in this order: `fire`, `evacuation`,
   // `weather`, `roads`, `seismic`, `power`, then `burn` (when burn counties are
   // configured) and `comms` (when the mesh source is enabled). Both are
@@ -2076,7 +2081,7 @@ message ResolveQuery {
 // ResolvePlaceResponse lists the places containing a point.
 message ResolvePlaceResponse {
   // The point that was resolved.
-  ResolveQuery query = 1;
+  ResolveQuery query = 1 [(google.api.field_behavior) = REQUIRED];
   // Containing places, most specific first. Empty when the point is outside
   // every place.
   repeated Place places = 2;
@@ -2136,7 +2141,7 @@ message Camera {
     enum: ["", "North", "South", "East", "West"]
   }];
   // Camera position.
-  LatLng location = 7;
+  LatLng location = 7 [(google.api.field_behavior) = REQUIRED];
   // Elevation in feet.
   int32 elevation_feet = 8 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "2650"}];
   // Current snapshot JPEG, hosted by Caltrans (cwwp2.dot.ca.gov).

@@ -32,7 +32,7 @@ func seedMeshNode(t *testing.T, s *Service, pk string) {
 		Status: gridv1.EventStatus_ACTIVE, Headline: "SIERRA Lilac Park (repeater)",
 		Geometry:   pointGeom(38.1, -120.5),
 		ObservedAt: timestamppb.New(base.Add(-72 * time.Hour)),
-		Provenance: &gridv1.Provenance{SourceId: "meshcore"},
+		Provenance: &gridv1.Provenance{SourceId: "meshcore", FetchedAt: timestamppb.New(base)},
 		Detail: &gridv1.Event_Mesh{Mesh: &gridv1.MeshDetail{
 			PublicKey: pk, NodeType: "repeater", Name: "SIERRA Lilac Park",
 			Telemetry: &gridv1.MeshTelemetry{Gateways: []string{"gw"}},
@@ -161,7 +161,7 @@ func TestMeshActivityOnMapLayers(t *testing.T) {
 	_, err := s.Store.UpsertEvent(ctx, &gridv1.Event{
 		Id: "meshcore:bb", Layer: gridv1.Layer_MESH, Severity: gridv1.Severity_INFO,
 		Status: gridv1.EventStatus_ACTIVE, Headline: "neighbour", Geometry: pointGeom(38.2, -120.4),
-		Provenance: &gridv1.Provenance{SourceId: "meshcore"},
+		Provenance: &gridv1.Provenance{SourceId: "meshcore", FetchedAt: timestamppb.New(base)},
 		Detail:     &gridv1.Event_Mesh{Mesh: &gridv1.MeshDetail{PublicKey: "bb", NodeType: "repeater"}},
 	})
 	require.NoError(t, err)

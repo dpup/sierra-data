@@ -126,6 +126,20 @@ INFO` while that stretch of Hwy 4 was CLOSED. They now always include it.
   becomes `allOf: [{$ref}]` with `type` and `nullable` beside it. Scalars,
   enums, arrays and maps are never null, and an event's unused per-layer detail
   blocks are absent rather than null.
+- Fields the server always fills are typed as present and never null: no
+  `nullable`, and listed in their schema's `required`. They are
+  `Event.provenance`, `Event.ingestedAt`, `provenance.fetchedAt`,
+  `geometry.bbox` and `geometry.centroid` (whenever `geometry` itself is set),
+  `Place.geometry`, a lane closure's `plannedStart`, a burn line's
+  `observation.observedAt` (when `observation` is set), every field of a
+  history revision (`observedAt`, `ingestedAt`, `event`), the summary's
+  `generatedAt` and `summary`, `places:resolve`'s `query`, a camera's
+  `location`, and the mesh telemetry archive's `from`, `to`, `coverage` and
+  each sample's `reading` and `receivedAt`. Every other field outside an
+  event's detail blocks is in `required` too, because the key is always sent;
+  the ones that can be `null` keep `nullable`. A generated client therefore
+  types these as present and drops the null checks. The wire format is
+  unchanged.
 - Enum- and message-typed fields keep their descriptions, which the 2.0 to 3.0
   conversion used to drop (`Event.status`, `Event.layer`, ...).
 - Every 304/4xx/5xx response object is valid: a complete inline object (the
