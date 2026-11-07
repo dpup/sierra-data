@@ -148,3 +148,28 @@ func TestServeMeshLinkLayer(t *testing.T) {
 	assert.Equal(t, "mesh_link", fc.Metadata.Layer)
 	assert.Equal(t, "OK", fc.Metadata.SourceStatus)
 }
+
+// /api/v1/mesh/links carries generatedAt too; its validator must not.
+func TestServeMeshLinks_ETagIgnoresGeneratedAt(t *testing.T) {
+	s := newTestService(t)
+	now := base
+	s.Now = func() time.Time { return now }
+	serve := func(hdr ...string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/mesh/links", nil)
+		for i := 0; i+1 < len(hdr); i += 2 {
+			req.Header.Set(hdr[i], hdr[i+1])
+		}
+		rec := httptest.NewRecorder()
+		s.serveMeshLinks(rec, req)
+		return rec
+	}
+	rec := serve()
+	require.Equal(t, http.StatusOK, rec.Code)
+	tag := rec.Header().Get("ETag")
+	require.NotEmpty(t, tag)
+
+	now = now.Add(2 * time.Second)
+	rec = serve("If-None-Match", tag)
+	assert.Equal(t, http.StatusNotModified, rec.Code, "same links a moment later revalidate")
+	assert.Equal(t, tag, rec.Header().Get("ETag"))
+}

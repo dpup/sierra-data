@@ -232,11 +232,20 @@ CREATE TABLE mesh_activity (
   last_relayed_at INTEGER NOT NULL DEFAULT 0  -- our receive time of the last packet it relayed
 ) WITHOUT ROWID`
 
+// migrationV10 counts in-place rewrites of an event's current blob: the
+// hash-equal path (refreshEventPlaces) persists hash-excluded fields — place
+// ids, a fresh AI enhancement, mesh telemetry, burn observations — without
+// minting a revision, so the revision alone cannot tell two served bodies
+// apart. EventVersion returns (revision, refreshes) as the event-detail ETag
+// input. Like last_seen_at it is a column-only value, never in the blob; it
+// is bookkeeping for a validator, not content.
+const migrationV10 = `ALTER TABLE events ADD COLUMN refreshes INTEGER NOT NULL DEFAULT 0`
+
 // migrations[i] is the DDL for schema version i+1. Applied versions are
 // recorded in schema_migrations; already-applied versions are skipped, so
 // Open is idempotent across restarts and an existing dev DB at an older
 // version picks up only the missing migrations.
-var migrations = []string{schemaV1, migrationV2, migrationV3, migrationV4, migrationV5, migrationV6, migrationV7, migrationV8, migrationV9}
+var migrations = []string{schemaV1, migrationV2, migrationV3, migrationV4, migrationV5, migrationV6, migrationV7, migrationV8, migrationV9, migrationV10}
 
 // ErrNotFound is returned by point lookups (GetEvent, GetPlace) when no row
 // matches. Callers map it to a 404.
@@ -275,6 +284,12 @@ type Store struct {
 	// ETag validators fold it in for responses that carry mesh activity: the
 	// table moves without minting a revision, so DataVersion cannot see it.
 	meshActivityVersion atomic.Int64
+
+	// refreshVersions counts, per layer, the in-place blob rewrites of events
+	// in that layer (see RefreshVersion). Guarded by its own lock, not mu, so
+	// readers never wait on the writer's transaction.
+	refreshMu       sync.RWMutex
+	refreshVersions map[gridv1.Layer]int64
 }
 
 // PlacesVersion returns a counter that changes whenever the place set changes.

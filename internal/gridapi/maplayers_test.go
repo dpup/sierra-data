@@ -475,8 +475,7 @@ func TestMapLayer_NotFound(t *testing.T) {
 	assert.Contains(t, sb.Message, "atlantis")
 }
 
-// TestMapLayer_ETag: bodies are deterministic under the injected clock, so
-// the strong ETag revalidates to 304 with headers intact.
+// TestMapLayer_ETag: the data ETag revalidates to 304 with headers intact.
 func TestMapLayer_ETag(t *testing.T) {
 	s := newTestService(t)
 	recordOK(t, s.Store, "usgs")
@@ -576,4 +575,74 @@ func TestLayerSourceStatus_Power(t *testing.T) {
 		src("pge", gridv1.SourceStatus_STALE), src("psps", gridv1.SourceStatus_OK),
 	}, hazards.LayerPower)
 	assert.Equal(t, "STALE", status)
+}
+
+// The body carries metadata.generatedAt, which moves every second. A validator
+// hashed over it changed on every request, so If-None-Match only ever matched
+// within the same second. The ETag must follow the data, not the clock — and
+// still change when the envelope's honesty fields (sourceStatus,
+// lastSourceUpdate) do.
+func TestMapLayer_ETagIgnoresGeneratedAt(t *testing.T) {
+	s := newTestService(t)
+	recordOK(t, s.Store, "usgs")
+	now := base
+	s.Now = func() time.Time { return now }
+	const path = "/v1/places/calaveras/map/earthquake.geojson"
+
+	rec := get(t, s, path)
+	require.Equal(t, http.StatusOK, rec.Code)
+	tag := rec.Header().Get("ETag")
+	first := rec.Body.String()
+
+	now = now.Add(time.Second)
+	rec = get(t, s, path)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotEqual(t, first, rec.Body.String(), "generatedAt moved")
+	assert.Equal(t, tag, rec.Header().Get("ETag"), "same data a second later: same validator")
+
+	now = now.Add(time.Minute)
+	rec = get(t, s, path, "If-None-Match", tag)
+	assert.Equal(t, http.StatusNotModified, rec.Code, "revalidates across seconds")
+
+	// The source going down changes sourceStatus/lastSourceUpdate but not the
+	// features: the validator must change, or a client keeps showing OK.
+	recordErr(t, s.Store, "usgs")
+	rec = get(t, s, path, "If-None-Match", tag)
+	require.Equal(t, http.StatusOK, rec.Code, "a sourceStatus change is a new representation")
+	assert.Equal(t, "STALE", getFC(t, s, path).Metadata.SourceStatus)
+	assert.NotEqual(t, tag, rec.Header().Get("ETag"))
+}
+
+// Same rule on a condition layer, where the builder hands us lastSourceUpdate
+// directly: a STALE layer whose last good fetch moves is a new representation
+// even with identical features.
+func TestMapLayer_ConditionETagFollowsLastSourceUpdate(t *testing.T) {
+	s := newTestService(t)
+	now := base
+	s.Now = func() time.Time { return now }
+	hb := &fakeHazards{status: "STALE", last: base.Add(-time.Hour), ok: true}
+	serve := func(inm string) *httptest.ResponseRecorder {
+		place, err := s.Store.GetPlace(context.Background(), "calaveras")
+		require.NoError(t, err)
+		req := httptest.NewRequest(http.MethodGet, "/v1/places/calaveras/map/road_segment.geojson", nil)
+		if inm != "" {
+			req.Header.Set("If-None-Match", inm)
+		}
+		rec := httptest.NewRecorder()
+		s.serveConditionLayer(rec, req, hb, place, hazards.LayerRoadSegment)
+		return rec
+	}
+	rec := serve("")
+	require.Equal(t, http.StatusOK, rec.Code)
+	tag := rec.Header().Get("ETag")
+
+	now = now.Add(5 * time.Second)
+	assert.Equal(t, http.StatusNotModified, serve(tag).Code, "only generatedAt moved")
+
+	hb.last = base.Add(-30 * time.Minute)
+	assert.Equal(t, http.StatusOK, serve(tag).Code, "lastSourceUpdate moved")
+
+	hb.status = "OK"
+	hb.last = time.Time{}
+	assert.Equal(t, http.StatusOK, serve(tag).Code, "sourceStatus moved")
 }

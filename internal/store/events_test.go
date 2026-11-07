@@ -34,7 +34,7 @@ func TestEventVersion(t *testing.T) {
 	rev, ok, err = s.EventVersion(ctx, "usgs:q1")
 	require.NoError(t, err)
 	assert.True(t, ok)
-	assert.Equal(t, int64(1), rev)
+	assert.Equal(t, EventStamp{Revision: 1}, rev)
 
 	// A content change bumps the revision the validator keys off.
 	changed := proto.Clone(ev).(*gridv1.Event)
@@ -45,7 +45,7 @@ func TestEventVersion(t *testing.T) {
 	rev, ok, err = s.EventVersion(ctx, "usgs:q1")
 	require.NoError(t, err)
 	assert.True(t, ok)
-	assert.Equal(t, int64(2), rev)
+	assert.Equal(t, EventStamp{Revision: 2}, rev)
 }
 
 func TestDataVersion(t *testing.T) {
@@ -90,6 +90,54 @@ func TestDataVersion(t *testing.T) {
 	v4, err := s.DataVersion(ctx)
 	require.NoError(t, err)
 	assert.Greater(t, v4, v3, "a lifecycle transition bumps the version")
+}
+
+// The hash-equal path rewrites a blob without a revision (here: a fresh AI
+// summary). The validators must see that, or a conditional GET answers 304
+// for the old body; and a poll that rewrites nothing must move neither.
+func TestRefreshMovesValidators(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	seedSource(t, s, "usgs")
+
+	ev := testEvent("usgs:q1", gridv1.Severity_MODERATE, gridv1.EventStatus_ACTIVE, "M4.2 near Murphys")
+	ev.Summary = "A small quake."
+	ev.Enhancement = &gridv1.Enhancement{Model: "m"}
+	_, err := s.UpsertEvent(ctx, ev)
+	require.NoError(t, err)
+
+	stamp := func() EventStamp {
+		st, ok, err := s.EventVersion(ctx, "usgs:q1")
+		require.NoError(t, err)
+		require.True(t, ok)
+		return st
+	}
+	quakes := []gridv1.Layer{gridv1.Layer_EARTHQUAKE}
+	fires := []gridv1.Layer{gridv1.Layer_WILDFIRE}
+	st0, q0, f0, all0 := stamp(), s.RefreshVersion(quakes), s.RefreshVersion(fires), s.RefreshVersion(nil)
+
+	// No-op re-upsert: nothing rewritten, nothing moves.
+	_, err = s.UpsertEvent(ctx, proto.Clone(ev).(*gridv1.Event))
+	require.NoError(t, err)
+	assert.Equal(t, st0, stamp())
+	assert.Equal(t, q0, s.RefreshVersion(quakes))
+
+	// A re-run enhancement lands in place.
+	next := proto.Clone(ev).(*gridv1.Event)
+	next.Summary = "A small quake; no damage reported."
+	res, err := s.UpsertEvent(ctx, next)
+	require.NoError(t, err)
+	require.False(t, res.Changed)
+
+	st1 := stamp()
+	assert.Equal(t, st0.Revision, st1.Revision, "no new revision")
+	assert.Greater(t, st1.Refreshes, st0.Refreshes, "the in-place rewrite moves the event stamp")
+	assert.Greater(t, s.RefreshVersion(quakes), q0, "and the layer's list version")
+	assert.Greater(t, s.RefreshVersion(nil), all0, "and the all-layers version")
+	assert.Equal(t, f0, s.RefreshVersion(fires), "another layer's version stays put")
+	assert.Equal(t, s.RefreshVersion(quakes),
+		s.RefreshVersion([]gridv1.Layer{gridv1.Layer_EARTHQUAKE, gridv1.Layer_EARTHQUAKE}),
+		"a repeated layer is counted once")
 }
 
 func TestUpsertRevisionGating(t *testing.T) {

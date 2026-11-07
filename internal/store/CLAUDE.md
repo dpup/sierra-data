@@ -15,7 +15,7 @@ Every row stores the full `grid.v1` proto as a `BLOB`; the scalar columns
 the blob. Every read path (`GetEvent`, `QueryEvents`, `EventHistory`, place/source
 reads) rehydrates from the blob, never from the columns — so a column and the blob
 can never drift into two answers. (The two deliberate exceptions are the ETag
-validators `EventVersion` — `SELECT revision` — and `DataVersion` —
+validators `EventVersion` — `SELECT revision, refreshes` — and `DataVersion` —
 `MAX(rowid)` over `event_revisions`: they read a column/rowid *on purpose*, never
 rehydrating, because they must be cheap and they only ever feed an opaque
 change-detection tag, never a response body. The `revision` column is written
@@ -68,6 +68,17 @@ without this and served its first observation from 2026-10-09 to 10-12 while
 daily readings landed; burnday.ersn.net read the frozen call time and told
 residents the data was stale. If you exclude a new field from the hash, add it
 to that path and to the poller's ForceWrite in the same change.
+
+**That path changes the served body without a revision, so it must move the
+validators.** Each rewrite bumps the row's `refreshes` column (migrationV10)
+and, after the commit, an in-process per-layer counter. `EventVersion` returns
+`EventStamp{Revision, Refreshes}` for the event-detail ETag, and `ListEvents`
+folds `RefreshVersion(layers)` in beside `DataVersion`. Keyed on revision
+alone, a conditional GET answered 304 with the old enhancement, telemetry or
+burn observation. Per layer so a mesh node's telemetry refresh leaves a
+road-incident list's 304 alone; bumped after the commit so a reader can never
+pair the new version with the old blob. A hash-equal poll that rewrites
+nothing moves neither. History is untouched: a revision snapshot never changes.
 
 `NeedsUpdate` is the read-only pre-check the scheduler uses for the budget
 decision; `UpsertEvent` re-computes the hash itself from the event **as passed**

@@ -477,10 +477,11 @@ func (a *gridApp) Activate(actx context.Context) (err error) {
 		// below. Restores what the hand-built /v1 handlers set before the migration.
 		prefab.WithGRPCInterceptor(gridapi.CacheControlInterceptor(30)),
 		// Conditional GET (ETag/If-None-Match -> 304) for RPCs that call
-		// etag.Guard — event detail (revision), the event/history lists
-		// (DataVersion + filters), and places (per-process nonce) — so a match
-		// skips the expensive load. The hand-built .geojson route bypasses the
-		// gRPC interceptor and keeps its own body-hash ETag. (GetPlaceSummary is
+		// etag.Guard — event detail (revision + in-place refreshes), the
+		// event/history lists (DataVersion + per-layer RefreshVersion +
+		// filters), and places (per-process nonce) — so a match skips the
+		// expensive load. The hand-built .geojson route bypasses the gRPC
+		// interceptor and keeps its own data-hash ETag. (GetPlaceSummary is
 		// not yet guarded.)
 		prefab.WithPlugin(etag.Plugin()),
 		prefab.WithGRPCService(&gridv1.GridService_ServiceDesc, gridServer),

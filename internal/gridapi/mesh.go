@@ -70,12 +70,28 @@ func (s *Service) serveMeshLinks(w http.ResponseWriter, r *http.Request) {
 			BestSnr:      l.BestSNR,
 		})
 	}
-	body, err := json.Marshal(resp)
+	// The validator covers the window and the links, not generatedAt (which
+	// moves every second and would defeat If-None-Match).
+	lj, err := json.Marshal(resp.Links)
 	if err != nil {
 		internal(ctx, w, err)
 		return
 	}
-	writeJSON(w, r, body, "application/json", maxAgeConditions)
+	body, err := json.Marshal(meshLinksWire{Window: resp.Window, GeneratedAt: resp.GeneratedAt, Links: lj})
+	if err != nil {
+		internal(ctx, w, err)
+		return
+	}
+	const contentType = "application/json"
+	writeJSON(w, r, body, dataETag(contentType, []byte(resp.Window), lj), contentType, maxAgeConditions)
+}
+
+// meshLinksWire is meshLinksResponse with the links already serialized, so
+// they are marshaled once for both the ETag and the body.
+type meshLinksWire struct {
+	Window      string          `json:"window"`
+	GeneratedAt string          `json:"generatedAt"`
+	Links       json.RawMessage `json:"links"`
 }
 
 // windowLabel renders the effective window as a clean "<n>h" for the common

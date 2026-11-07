@@ -511,8 +511,11 @@ everything from the grid event store. Field names are **camelCase** (protojson
 is on. Conditional GET (ETag/If-None-Match -> 304) is wired via prefab's `etag`
 plugin on most read RPCs — event detail, the event/history lists, places, and
 cameras (`GetPlaceSummary`/`GetConditions`/`ListSources`/`ResolvePlace`/
-`ListScanners` are not yet guarded); the `.geojson` keeps its own body-hash
-ETag. The prior
+`ListScanners` are not yet guarded); the `.geojson` and `/mesh/links` keep
+their own weak ETag over the body's data (features + metadata, everything but
+`generatedAt`, which moves every second). Event validators fold in
+`EventStamp.Refreshes` / `RefreshVersion`, because the store rewrites some
+fields in place without a revision (see `internal/store/CLAUDE.md`). The prior
 hand-built REST surfaces (the old `/api/v1/roads|weather|
 hazards|situation|incidents` and the snake_case `/v1`) have all been **removed** —
 they fold into the endpoints below.
