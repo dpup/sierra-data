@@ -517,7 +517,10 @@ func (a *gridApp) Activate(actx context.Context) (err error) {
 			return nil
 		}),
 		prefab.WithHTTPHandlerFunc("/mcp", gate.HandlerFunc(mcpHandler.ServeHTTP)),
-		// Publish the generated OpenAPI spec for /api/v1 (protoc-gen-openapiv2).
+		// Publish the OpenAPI spec (generated from grid.proto plus the hand-written
+		// overlay; see api/grid/v1/openapi.go). A route mounted by hand here or in
+		// gridapi needs a path in openapi.overlay.yaml, or
+		// TestHandBuiltRoutesAreDocumented fails.
 		// Exact path, so it wins over the gateway's /api/ subtree mount.
 		prefab.WithHTTPHandlerFunc("/api/openapi.json", gate.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
