@@ -137,6 +137,19 @@ func weakListTag(version string, parts ...string) string {
 	return etag.Weak(version + "-" + hex.EncodeToString(sum[:8]))
 }
 
+// parsePageSize validates a list RPC's page_size. The proto contract is
+// "0 = default (store clamps to 1..200)": 0 takes the store default (50) and
+// anything above the ceiling is clamped by the store, not refused, so a client
+// asking for "as many as you will give me" gets a full page. A negative size has
+// no meaning, and used to be read as 0, so it is refused rather than guessed.
+func parsePageSize(n int32) (int, error) {
+	if n < 0 {
+		return 0, fmt.Errorf("page_size must be >= 0 (0 = the default of %d; above %d is clamped to %d), got %d",
+			store.DefaultPageSize, store.MaxPageSize, store.MaxPageSize, n)
+	}
+	return int(n), nil
+}
+
 // ListEvents returns store-backed events with the place/layer/status/severity/
 // since filters and keyset pagination (order: severity DESC, observed_at DESC,
 // id ASC). page_size 0 defaults via the store's clamp.
@@ -162,7 +175,9 @@ func (g *GridServer) ListEvents(ctx context.Context, req *gridv1.ListEventsReque
 			return nil, invalidErr(err)
 		}
 	}
-	eq.PageSize = int(req.GetPageSize())
+	if eq.PageSize, err = parsePageSize(req.GetPageSize()); err != nil {
+		return nil, invalidErr(err)
+	}
 	eq.PageToken = req.GetPageToken()
 
 	// Filters are validated above (400/404 first); guard on a cheap global data
@@ -171,7 +186,12 @@ func (g *GridServer) ListEvents(ctx context.Context, req *gridv1.ListEventsReque
 	if err != nil {
 		return nil, internalErr(ctx, err)
 	}
-	version := g.placesVersion + "." + strconv.FormatInt(dv, 10)
+	// DataVersion counts revisions; RefreshVersion counts the in-place blob
+	// rewrites (enhancement, mesh telemetry, burn observations, place ids)
+	// that change a body without one. Per layer, so an unrelated layer's
+	// refresh leaves this list's 304 alone.
+	version := g.placesVersion + "." + strconv.FormatInt(dv, 10) +
+		".r" + strconv.FormatInt(g.svc.Store.RefreshVersion(eq.Layers), 10)
 	if layersIncludeMesh(eq.Layers) {
 		// Mesh activity is overlaid at read time and moves without a revision.
 		version += ".m" + strconv.FormatInt(g.svc.Store.MeshActivityVersion(), 10)
@@ -196,19 +216,20 @@ func (g *GridServer) ListEvents(ctx context.Context, req *gridv1.ListEventsReque
 // GetEvent returns the current revision of one event. A cheap revision read
 // answers a conditional GET (304) before the proto blob is loaded.
 func (g *GridServer) GetEvent(ctx context.Context, req *gridv1.GetEventRequest) (*gridv1.Event, error) {
-	rev, ok, err := g.svc.Store.EventVersion(ctx, req.GetId())
+	stamp, ok, err := g.svc.Store.EventVersion(ctx, req.GetId())
 	if err != nil {
 		return nil, internalErr(ctx, err)
 	}
 	if !ok {
 		return nil, notFoundErr("unknown event: %q", req.GetId())
 	}
-	// The body depends on the revision and whether the large enhancement I/O
-	// fields are included; placesVersion is folded in too so a redeploy that
-	// re-attaches this event to different places (place_ids live in the body but
-	// can change without a revision bump — see store.refreshEventPlaces) doesn't
-	// serve a stale 304.
-	tag := fmt.Sprintf("%s:%s:%d:%t", g.placesVersion, req.GetId(), rev, req.GetEnhancementIo())
+	// The body depends on the revision, the in-place rewrites of that
+	// revision's blob (a fresh enhancement, mesh telemetry, a burn observation
+	// or re-attached place_ids land without a revision bump — see
+	// store.refreshEventPlaces), and whether the large enhancement I/O fields
+	// are included. placesVersion is the per-boot nonce the in-process
+	// counters need.
+	tag := fmt.Sprintf("%s:%s:%d.%d:%t", g.placesVersion, req.GetId(), stamp.Revision, stamp.Refreshes, req.GetEnhancementIo())
 	// A mesh node's activity clocks are overlaid from outside the blob and move
 	// without a revision, so they are part of the validator. One primary-key
 	// read, reused for the overlay below.
@@ -239,23 +260,27 @@ func (g *GridServer) GetEvent(ctx context.Context, req *gridv1.GetEventRequest) 
 // (an empty history is indistinguishable from a revision-less event, which
 // cannot exist).
 func (g *GridServer) GetEventHistory(ctx context.Context, req *gridv1.GetEventHistoryRequest) (*gridv1.EventRevisionList, error) {
+	pageSize, err := parsePageSize(req.GetPageSize())
+	if err != nil {
+		return nil, invalidErr(err)
+	}
 	// A cheap revision read doubles as the existence check (replacing a full
 	// blob load) and the ETag validator: history grows only when the current
 	// revision bumps; the page window and IO flag shape the body.
-	rev, ok, err := g.svc.Store.EventVersion(ctx, req.GetId())
+	stamp, ok, err := g.svc.Store.EventVersion(ctx, req.GetId())
 	if err != nil {
 		return nil, internalErr(ctx, err)
 	}
 	if !ok {
 		return nil, notFoundErr("unknown event: %q", req.GetId())
 	}
-	// placesVersion folded in for the same reason as GetEvent (revision alone
-	// misses a place re-attachment that rewrites the blob without a revision).
-	tag := etag.Weak(fmt.Sprintf("%s:%s:%d:%d:%s:%t", g.placesVersion, req.GetId(), rev, req.GetPageSize(), req.GetPageToken(), req.GetEnhancementIo()))
+	// Revision snapshots are immutable, so in-place rewrites of the current
+	// blob (stamp.Refreshes) never change this body: the revision alone keys it.
+	tag := etag.Weak(fmt.Sprintf("%s:%s:%d:%d:%s:%t", g.placesVersion, req.GetId(), stamp.Revision, req.GetPageSize(), req.GetPageToken(), req.GetEnhancementIo()))
 	if err := etag.Guard(ctx, tag); err != nil {
 		return nil, err // 304 — skip the history query + blob rehydrate
 	}
-	revs, next, err := g.svc.Store.EventHistory(ctx, req.GetId(), int(req.GetPageSize()), req.GetPageToken())
+	revs, next, err := g.svc.Store.EventHistory(ctx, req.GetId(), pageSize, req.GetPageToken())
 	if err != nil {
 		return nil, tokenOrInternal(ctx, err)
 	}
@@ -284,14 +309,22 @@ func (g *GridServer) ListHistory(ctx context.Context, req *gridv1.ListHistoryReq
 			return nil, invalidErr(err)
 		}
 	}
-	hq.PageSize = int(req.GetPageSize())
+	if hq.PageSize, err = parsePageSize(req.GetPageSize()); err != nil {
+		return nil, invalidErr(err)
+	}
 	hq.PageToken = req.GetPageToken()
 
 	dv, err := g.svc.Store.DataVersion(ctx)
 	if err != nil {
 		return nil, internalErr(ctx, err)
 	}
-	tag := weakListTag(g.placesVersion+"."+strconv.FormatInt(dv, 10),
+	version := g.placesVersion + "." + strconv.FormatInt(dv, 10)
+	if hq.PlaceID != "" {
+		// Snapshots never change, but which events a place matches can: a
+		// place re-attachment rewrites event_places without a revision.
+		version += ".r" + strconv.FormatInt(g.svc.Store.RefreshVersion(hq.Layers), 10)
+	}
+	tag := weakListTag(version,
 		req.GetPlace(), strings.Join(req.GetLayer(), ","), req.GetFrom(), req.GetTo(),
 		strconv.Itoa(int(req.GetPageSize())), req.GetPageToken(), strconv.FormatBool(req.GetEnhancementIo()))
 	if err := etag.Guard(ctx, tag); err != nil {

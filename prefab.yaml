@@ -429,6 +429,15 @@ grid:
     marginDegrees: 0.5
     placeBufferMeters: 20000
 
+  # Towns are seeded as POINTS (each weather location), so GET
+  # /api/v1/places:resolve returns a town when the location is within this many
+  # metres of its point. Resolve only: event attachment to towns is unchanged.
+  # The closest pair, Sonora and Columbia, are ~5.9 km apart, so 3 km overlaps
+  # only in a sliver (both are returned there, nearest first). Unset/<= 0 =>
+  # 3000.
+  places:
+    townRadiusMeters: 3000
+
   # PG&E power layer. No geography knobs: unlike fire, an outage outside the
   # footprint is not a threat to it, so the layer uses the plain hazards union.
   #

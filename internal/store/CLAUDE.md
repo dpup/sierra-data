@@ -15,7 +15,7 @@ Every row stores the full `grid.v1` proto as a `BLOB`; the scalar columns
 the blob. Every read path (`GetEvent`, `QueryEvents`, `EventHistory`, place/source
 reads) rehydrates from the blob, never from the columns — so a column and the blob
 can never drift into two answers. (The two deliberate exceptions are the ETag
-validators `EventVersion` — `SELECT revision` — and `DataVersion` —
+validators `EventVersion` — `SELECT revision, refreshes` — and `DataVersion` —
 `MAX(rowid)` over `event_revisions`: they read a column/rowid *on purpose*, never
 rehydrating, because they must be cheap and they only ever feed an opaque
 change-detection tag, never a response body. The `revision` column is written
@@ -69,6 +69,17 @@ daily readings landed; burnday.ersn.net read the frozen call time and told
 residents the data was stale. If you exclude a new field from the hash, add it
 to that path and to the poller's ForceWrite in the same change.
 
+**That path changes the served body without a revision, so it must move the
+validators.** Each rewrite bumps the row's `refreshes` column (migrationV10)
+and, after the commit, an in-process per-layer counter. `EventVersion` returns
+`EventStamp{Revision, Refreshes}` for the event-detail ETag, and `ListEvents`
+folds `RefreshVersion(layers)` in beside `DataVersion`. Keyed on revision
+alone, a conditional GET answered 304 with the old enhancement, telemetry or
+burn observation. Per layer so a mesh node's telemetry refresh leaves a
+road-incident list's 304 alone; bumped after the commit so a reader can never
+pair the new version with the old blob. A hash-equal poll that rewrites
+nothing moves neither. History is untouched: a revision snapshot never changes.
+
 `NeedsUpdate` is the read-only pre-check the scheduler uses for the budget
 decision; `UpsertEvent` re-computes the hash itself from the event **as passed**
 (before any store-side mutation like geometry backfill) so the stored hash always
@@ -116,6 +127,20 @@ The lifecycle expire grace (`ingest.shouldExpire`) is anchored to `last_seen_at`
 so a stable long-lived event that drops out of a single poll is not expired
 instantly. Rows predating the `last_seen_at` migration (value 0) fall back to
 `observed_at`, then `ingested_at`, so the grace still terminates them.
+
+## Resolve (`PlacesContaining`) and towns
+
+`PlacesContaining` (behind `GET /api/v1/places:resolve`) uses the same
+polygon/corridor tests as event attachment, plus one rule of its own: a
+**TOWN** is seeded as a point (its weather location), which no
+point-in-polygon test can match, so a town contains a location within
+`townRadius` metres of it (`WithTownRadius`, from
+`grid.places.townRadiusMeters`, default `DefaultTownRadiusMeters` 3 km). Towns
+within range are returned nearest first. The radius is **resolve only**:
+`matchPlaces` does not use it, so events still attach to a town only through
+the wildfire proximity rule or a preset `place_ids` (burn status). Putting it
+into attachment would change every point event's `place_ids`, and so what
+`/events?place=<town>` returns: a separate decision.
 
 ## `event_places` recompute — including the hash-equal path
 

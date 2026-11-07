@@ -205,7 +205,8 @@ func (a *gridApp) Activate(actx context.Context) (err error) {
 		store.WithLockTimeout(appConfig.Grid.LockTimeout),
 		// A SIGTERM during the lock wait ends it at once.
 		store.WithLockContext(actx),
-		store.WithWildfireProximity(appConfig.Grid.Wildfire.PlaceBuffer()))
+		store.WithWildfireProximity(appConfig.Grid.Wildfire.PlaceBuffer()),
+		store.WithTownRadius(appConfig.Grid.Places.TownRadiusMeters))
 	if err != nil {
 		return fmt.Errorf("open grid store %s: %w", appConfig.Grid.DBPath, err)
 	}
@@ -477,10 +478,11 @@ func (a *gridApp) Activate(actx context.Context) (err error) {
 		// below. Restores what the hand-built /v1 handlers set before the migration.
 		prefab.WithGRPCInterceptor(gridapi.CacheControlInterceptor(30)),
 		// Conditional GET (ETag/If-None-Match -> 304) for RPCs that call
-		// etag.Guard — event detail (revision), the event/history lists
-		// (DataVersion + filters), and places (per-process nonce) — so a match
-		// skips the expensive load. The hand-built .geojson route bypasses the
-		// gRPC interceptor and keeps its own body-hash ETag. (GetPlaceSummary is
+		// etag.Guard — event detail (revision + in-place refreshes), the
+		// event/history lists (DataVersion + per-layer RefreshVersion +
+		// filters), and places (per-process nonce) — so a match skips the
+		// expensive load. The hand-built .geojson route bypasses the gRPC
+		// interceptor and keeps its own data-hash ETag. (GetPlaceSummary is
 		// not yet guarded.)
 		prefab.WithPlugin(etag.Plugin()),
 		prefab.WithGRPCService(&gridv1.GridService_ServiceDesc, gridServer),
@@ -504,10 +506,7 @@ func (a *gridApp) Activate(actx context.Context) (err error) {
 			// [GET], so the POST preflight is denied — the same property that
 			// protects /mcp. Do not add POST to that list.
 			if pushRegistry.Enabled() {
-				if err := mux.HandlePath("POST", "/api/v1/ingest/{stream}",
-					gated(func(w http.ResponseWriter, r *http.Request, pp map[string]string) {
-						pushRegistry.ServeStream(w, r, pp["stream"])
-					})); err != nil {
+				if err := pushRegistry.Mount(mux, gated); err != nil {
 					return err
 				}
 			}
@@ -517,7 +516,10 @@ func (a *gridApp) Activate(actx context.Context) (err error) {
 			return nil
 		}),
 		prefab.WithHTTPHandlerFunc("/mcp", gate.HandlerFunc(mcpHandler.ServeHTTP)),
-		// Publish the generated OpenAPI spec for /api/v1 (protoc-gen-openapiv2).
+		// Publish the OpenAPI spec (generated from grid.proto plus the hand-written
+		// overlay; see api/grid/v1/openapi.go). A route mounted by hand here or in
+		// gridapi needs a path in openapi.overlay.yaml, or
+		// TestHandBuiltRoutesAreDocumented fails.
 		// Exact path, so it wins over the gateway's /api/ subtree mount.
 		prefab.WithHTTPHandlerFunc("/api/openapi.json", gate.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")

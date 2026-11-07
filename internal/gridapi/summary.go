@@ -253,6 +253,9 @@ func (s *Service) buildPlaceSummary(ctx context.Context, hb hazardsBuilder, plac
 	// nothing stored", where unknown really is unknown.
 	evacStatus := eventLayerStatus(hazards.LayerEvacuation)
 	stats.EvacuationStatus = evacStatus
+	// The link the fail-loud text sends people to, set in every state (above
+	// all UNAVAILABLE): the same URL the evacuation map layer's metadata carries.
+	_, stats.EvacuationSourceUrl = eventLayerMeta(hazards.LayerEvacuation, sources)
 	if evacStatus == "OK" || evacStatus == "STALE" {
 		var n int32
 		for _, ev := range events {
@@ -422,7 +425,15 @@ type mergedItem struct {
 	rank        int
 	headline    string
 	isCondition bool
+	layer       string // UPPERCASE: the event's Layer name, or the condition layer
 }
+
+// Headline kinds (SummaryDomainHeadline.kind): an EVENT id resolves at
+// GET /api/v1/events/{id}; a CONDITION id is a map feature with no event record.
+const (
+	headlineKindEvent     = "EVENT"
+	headlineKindCondition = "CONDITION"
+)
 
 func eventItems(events []*gridv1.Event) []mergedItem {
 	out := make([]mergedItem, 0, len(events))
@@ -432,6 +443,7 @@ func eventItems(events []*gridv1.Event) []mergedItem {
 			severity: ev.GetSeverity().String(),
 			rank:     int(ev.GetSeverity().Number()),
 			headline: ev.GetHeadline(),
+			layer:    ev.GetLayer().String(),
 		})
 	}
 	return out
@@ -446,6 +458,7 @@ func featureItems(features []hazards.Feature) []mergedItem {
 			rank:        f.Properties.SeverityRank,
 			headline:    f.Properties.Headline,
 			isCondition: true,
+			layer:       strings.ToUpper(f.Properties.Layer),
 		})
 	}
 	return out
@@ -494,7 +507,13 @@ func buildDomain(name string, statuses []string, items []mergedItem) *gridv1.Sum
 		sorted = sorted[:3]
 	}
 	for _, it := range sorted {
-		d.Headlines = append(d.Headlines, &gridv1.SummaryDomainHeadline{Id: it.id, Severity: it.severity, Headline: it.headline})
+		kind := headlineKindEvent
+		if it.isCondition {
+			kind = headlineKindCondition
+		}
+		d.Headlines = append(d.Headlines, &gridv1.SummaryDomainHeadline{
+			Id: it.id, Severity: it.severity, Headline: it.headline, Kind: kind, Layer: it.layer,
+		})
 	}
 	return d
 }

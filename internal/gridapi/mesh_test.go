@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
@@ -66,8 +67,29 @@ func TestServeMeshLinks(t *testing.T) {
 	assert.Equal(t, "1h", resp.Window)
 	assert.Empty(t, resp.Links)
 
-	// A garbage window falls back to the default rather than erroring.
-	assert.Equal(t, "72h", meshLinksAt(t, s, "not-a-duration").Window)
+	// Past the retention ceiling is clamped, and the response says so.
+	assert.Equal(t, "9600h", meshLinksAt(t, s, "100000h").Window)
+}
+
+// A window that does not parse is a 400 naming what is accepted. It used to
+// fall back to 72h silently, so a typo came back looking like a real answer.
+func TestServeMeshLinksRejectsBadWindow(t *testing.T) {
+	s := newTestService(t)
+	for _, window := range []string{"bogus", "72", "-1h", "0s"} {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/mesh/links?window="+window, nil)
+		rec := httptest.NewRecorder()
+		s.serveMeshLinks(rec, req)
+		sb := requireStatus(t, rec, http.StatusBadRequest, int(codes.InvalidArgument))
+		assert.Contains(t, sb.Message, "72h", window)
+		assert.Contains(t, sb.Message, "168h", window)
+	}
+
+	// The place-scoped mesh_link layer shares the parameter, and the rule.
+	place := &gridv1.Place{Id: "area:test", Slug: "test"}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/places/test/map/mesh_link.geojson?window=bogus", nil)
+	rec := httptest.NewRecorder()
+	s.serveMeshLinkLayer(rec, req, place)
+	requireStatus(t, rec, http.StatusBadRequest, int(codes.InvalidArgument))
 }
 
 func TestServeMeshLinkLayer(t *testing.T) {
@@ -147,4 +169,29 @@ func TestServeMeshLinkLayer(t *testing.T) {
 	require.NotNil(t, fc.Metadata)
 	assert.Equal(t, "mesh_link", fc.Metadata.Layer)
 	assert.Equal(t, "OK", fc.Metadata.SourceStatus)
+}
+
+// /api/v1/mesh/links carries generatedAt too; its validator must not.
+func TestServeMeshLinks_ETagIgnoresGeneratedAt(t *testing.T) {
+	s := newTestService(t)
+	now := base
+	s.Now = func() time.Time { return now }
+	serve := func(hdr ...string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/mesh/links", nil)
+		for i := 0; i+1 < len(hdr); i += 2 {
+			req.Header.Set(hdr[i], hdr[i+1])
+		}
+		rec := httptest.NewRecorder()
+		s.serveMeshLinks(rec, req)
+		return rec
+	}
+	rec := serve()
+	require.Equal(t, http.StatusOK, rec.Code)
+	tag := rec.Header().Get("ETag")
+	require.NotEmpty(t, tag)
+
+	now = now.Add(2 * time.Second)
+	rec = serve("If-None-Match", tag)
+	assert.Equal(t, http.StatusNotModified, rec.Code, "same links a moment later revalidate")
+	assert.Equal(t, tag, rec.Header().Get("ETag"))
 }

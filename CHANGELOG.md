@@ -1,18 +1,162 @@
 # Changelog
 
-All notable **API-facing** changes to The Grid (the S.I.E.R.R.A data service at
-`data.sierragridteam.org`). This is the document to read before updating a
-consuming site (e.g. ersn.net, sierragridteam.org).
+All notable **API-facing** changes to The Grid, the S.I.E.R.R.A data service at
+`https://data.sierragridteam.org`. Read it before updating a consuming site (for
+example ersn.net or sierragridteam.org). It is published at
+<https://data.sierragridteam.org/changelog>; the API reference is at
+<https://data.sierragridteam.org/docs> and the OpenAPI spec at
+<https://data.sierragridteam.org/api/openapi.json>.
 
-There are no formal releases — the service deploys from `main`. Each entry below
-is timestamped; add a new dated section at the top when the API surface changes.
-The API is JSON over HTTP. As of 2026-07-09 there is a single surface,
-`/api/v1/...`, served by gRPC + gRPC-Gateway (field names **camelCase**
-throughout; errors are gRPC-standard `{code, codeName, message, details}`). The
-`.geojson` map layers stay hand-built (RFC 7946 geometry) but are also camelCase.
-(History: `/api/v1` originally hosted a different hand-built REST surface, replaced
-by a snake_case `/v1` surface on 2026-07-05, which was in turn folded back onto the
-proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
+**Format.** There are no versioned releases: the service deploys from `main`, so
+each entry is a dated `##` section, newest first (several on one day are marked
+"(later)"). Each `###` heading under it is one change. A heading that starts
+with **`BREAKING:`** changes an existing URL, field, value or behaviour that a
+consumer may depend on, and the entry says how to migrate. Every other entry is
+additive or internal and needs no client change.
+
+**Current surface.** One API, `/api/v1/...`, served by gRPC + gRPC-Gateway:
+field names are camelCase, timestamps RFC 3339, errors gRPC-standard
+`{code, codeName, message, details}`. The `.geojson` map layers are served by a
+hand-built handler and are camelCase too. Older entries describe surfaces that no
+longer exist: `/api/v1` originally hosted a different hand-built REST surface,
+replaced by a snake_case `/v1` surface on 2026-07-05, which was folded back onto
+the proto-defined `/api/v1` gateway on 2026-07-09.
+
+## 2026-11-07
+
+### BREAKING: `/api/openapi.json` is now OpenAPI 3.0.3 and describes the whole API
+
+The spec moves from Swagger 2.0 to **OpenAPI 3.0.3**. Schemas move from
+`#/definitions/X` to `#/components/schemas/X`. It is now meant to be enough on
+its own to build a client or a UI:
+
+- An `info.description` overview: the resource model, a quickstart (resolve a
+  place → summary → events → map layers), conventions, caching, error codes,
+  severity and status, and the fail-loud rules.
+- Every operation has a summary, a description and a tag. Every field has a
+  description, closed-set strings carry enums, and there are examples taken
+  from production responses.
+- Routes not built from the proto are described too:
+  `GET /api/v1/places/{place}/map/{layer}.geojson` (all 13 layers, with the
+  per-layer `properties`), `GET /api/v1/mesh/links`,
+  `POST /api/v1/ingest/{stream}` (bearer auth) and `POST /mcp`.
+- `rpcStatus` documents `codeName`. A test fails CI when a hand-built route
+  has no spec entry.
+
+**Migration:** regenerate any client built from the old spec, and update
+`$ref` paths if you read the spec directly.
+
+### BREAKING: invalid parameters now return 400 instead of being ignored
+
+- `GET /api/v1/mesh/links` and `/places/{place}/map/mesh_link.geojson`: a
+  `window` that is not a positive duration (`bogus`, `72`, `0s`) now returns
+  `400 INVALID_ARGUMENT`. It used to fall back to 72h silently. Send a Go
+  duration such as `72h` or `168h`, or omit `window`.
+- `GET /api/v1/mesh/telemetry`: a `node` that is not 8–64 hex characters
+  (optionally prefixed `meshcore:`) now returns `400 INVALID_ARGUMENT`. It used
+  to return an empty 200.
+- `GET /api/v1/events`, `/events/{id}/history`, `/history`: a negative
+  `page_size` now returns `400 INVALID_ARGUMENT`. 0 still means the default
+  (50), and values above 200 are still clamped to 200.
+
+### ETags on map layers and mesh links now revalidate (weak tags)
+
+The `.geojson` layers and `GET /api/v1/mesh/links` used to change their `ETag`
+every second, because it hashed `generatedAt`, so `If-None-Match` almost never
+produced a `304`. The tag now covers only the data: features or links,
+`sourceStatus`, `lastSourceUpdate` and attribution. It is now **weak**
+(`W/"…"`). A client that echoes the tag back needs no change. After a `304`,
+your cached `generatedAt` stays at the original fetch time.
+
+### ETags on events no longer go stale
+
+`GET /api/v1/events`, `/events/{id}` and place-filtered `/history` could answer
+`304` with an outdated body after a change that adds no new revision. These
+changes are an event's AI enhancement or summary, mesh telemetry, a burn-line
+reading (and its `observedAt`), and the event's place attachments. Their ETags
+now change with them. Response shapes are unchanged.
+
+### `places:resolve` returns towns
+
+`GET /api/v1/places:resolve` now includes `TOWN` places. A point matches a town
+within 3 km of the town's centre (`grid.places.townRadiusMeters`). Towns sort
+after evacuation zones and before corridors, with the nearest town first.
+Events still do not attach to towns.
+
+### Summary headlines say whether they are an event
+
+Each `domains[].headlines[]` entry in `GET /api/v1/places/{place}/summary`
+gains `kind` (`EVENT` or `CONDITION`) and `layer` (e.g. `ROAD_INCIDENT`,
+`ROAD_SEGMENT`). A `CONDITION` id such as `road:hwy4-arnold-bearvalley` is a
+map feature, not an event: `GET /api/v1/events/{id}` returns 404 for it. Find
+it by `properties.id` in that layer's `.geojson`. Additive.
+
+### Sources say whether they are a feed or a reporter
+
+Each `GET /api/v1/sources` row gains `kind`: `FEED` (an upstream the Grid
+polls; events name it in `provenance.sourceId`) or `REPORTER` (an operator-run
+monitor that pushes to `/api/v1/ingest/{stream}`: `alanpi`, `relay`,
+`burn-line`; health only). Judge a row by `status`; as a check on the Grid
+itself, treat it as stale when `lastAttemptAt` is older than
+`staleAfterSeconds`. The old advice to compare `lastAttemptAt` with
+`pollIntervalSeconds` misfired for reporters. `burn-line`'s
+`pollIntervalSeconds` now states the burn poller's hourly check (it said 60).
+Additive.
+
+### The summary links the evacuation viewer
+
+`summary.evacuationSourceUrl` in `GET /api/v1/places/{place}/summary` is the
+authoritative evacuation viewer (`https://protect.genasys.com/`), the same URL
+as the `evacuation` map layer's `metadata.sourceUrl`. It is set whatever
+`evacuationStatus` says, so a client can link it next to "unknown, check
+Genasys". Additive.
+
+### A corridor's summary and map include its own road segment
+
+`GET /api/v1/places/{corridor}/summary` and its `road_segment.geojson` left out
+the corridor's own segment, because the corridor's bounding box sits a few
+metres inside the segment's endpoints. `hwy4-arnold-bearvalley` read `roads: OK,
+INFO` while that stretch of Hwy 4 was CLOSED. They now always include it.
+
+### The spec marks nullable fields and has valid responses
+
+- Every field that can be JSON `null` is `nullable: true`: timestamps,
+  wrapper-typed numbers (`summary.activeEvacuations`, the mesh gauges) and
+  message-typed fields such as `geometry` and `enhancement`. A `$ref` field
+  becomes `allOf: [{$ref}]` with `type` and `nullable` beside it. Scalars,
+  enums, arrays and maps are never null, and an event's unused per-layer detail
+  blocks are absent rather than null.
+- Enum- and message-typed fields keep their descriptions, which the 2.0 to 3.0
+  conversion used to drop (`Event.status`, `Event.layer`, ...).
+- Every 304/4xx/5xx response object is valid: a complete inline object (the
+  RPC's own description, the `rpcStatus` body, real error examples, the 304
+  `ETag`/`Cache-Control` headers) or a pure `$ref`, never both. The unused
+  shared `NotFound` and `InvalidArgument` responses are gone.
+- Docs corrections: `canonicalUrl` and `provenance.sourceUrl` can be empty
+  (CHP incidents, Caltrans lane closures, FIRIS perimeters and NWS alerts have
+  neither); fall back to the source's `homepageUrl`. The quickstart recommends
+  AREA, COUNTY or CORRIDOR places for dashboards, not towns. `mode` documents
+  every input that can raise it: road conditions never do, so show domain
+  severity beside it. Map-feature `source.id` says which ids (`google`) have no
+  registry row and to judge those layers by `metadata.sourceStatus`. During a
+  handoff the RPCs answer `503` as JSON `UNAVAILABLE`, not plain text.
+
+No lane-closure `canonicalUrl` was added: Caltrans publishes no per-closure
+page, and a map pin is not an authoritative link.
+
+### Smaller fixes
+
+- `GET /api/v1/mesh/telemetry` accepts the event id form `node=meshcore:<key>`,
+  as `/events` hands it out, as well as the bare key. The response's `node` is
+  the bare key.
+- `/api/v1/ingest/{stream}` answers a non-POST method with `405` and
+  `Allow: POST`. It used to return `501`.
+- Errors from the `.geojson` layers, `/api/v1/mesh/links` and ingest now use the
+  same `{code, codeName, message, details}` envelope as every other route.
+  `codeName` and `details` are new there.
+- Docs: the README is now an accurate quickstart. `/docs` gains a "building a
+  UI" section and loses several stale claims (`burnLinePhone` is
+  `burnLines[].phone`). This changelog is served at `/changelog`.
 
 ## 2026-11-04 (later)
 
@@ -571,7 +715,7 @@ the same list as GeoJSON.
   camera index.
 - Not paginated. Carries a weak `ETag`; the list refreshes every 6 hours.
 
-### `road_incident`: Caltrans lane closures from CWWP2, scheduled windows included
+### BREAKING: `road_incident`: Caltrans lane closures from CWWP2, scheduled windows included
 
 **Breaking for consumers that read every `road_incident` row as "happening
 now".** Applies to `GET /api/v1/events` (`layer=road_incident`),
@@ -739,7 +883,7 @@ remain are real changes.
 
 ## 2026-09-15 (later)
 
-### Breaking: `mesh.telemetry.snr`, `.rssi` and `.hopCount` are now nullable
+### BREAKING: `mesh.telemetry.snr`, `.rssi` and `.hopCount` are now nullable
 
 **Migration: treat `null` as "no bridge has heard this node", and stop reading a
 `0` as a measurement.** A consumer that only displays these values needs no
@@ -1546,7 +1690,7 @@ the `calfire:` event.
 
 ## 2026-07-27
 
-### BREAKING — wildfire perimeter source WFIGS → CAL FIRE / FIRIS combo feed
+### BREAKING: wildfire perimeter source WFIGS → CAL FIRE / FIRIS combo feed
 
 The `wildfire` layer's perimeter source moved from the NIFC WFIGS interagency
 upload to the **CAL FIRE / FIRIS combo feed** (`CA_Perimeters_NIFC_FIRIS_public_
@@ -1615,7 +1759,7 @@ Adds a short-range NWS fire-weather forecast — keyless, additive, informationa
 
 ## 2026-07-25
 
-### BREAKING — mesh-node presence layer renamed `NETWORK` → `MESH`
+### BREAKING: mesh-node presence layer renamed `NETWORK` → `MESH`
 
 The mesh-node presence layer was enum `NETWORK` while the rest of the surface
 called it `mesh_node` (map layer, `/api/v1/mesh` endpoints). That split made the
@@ -1680,7 +1824,7 @@ edge list.
   `a`/`b` to node coordinates from `GET /api/v1/events?layer=network` (or the
   `mesh_node.geojson` layer) to draw the links.
 
-### Removed — `telemetry.path` / `telemetry.pathNodes` (`NETWORK` layer) — **breaking**
+### BREAKING: Removed — `telemetry.path` / `telemetry.pathNodes` (`NETWORK` layer)
 
 - **`telemetry.path` and `telemetry.pathNodes` are gone** from network events
   (`GET /api/v1/events?layer=network`) and from the `mesh_node.geojson` `network`
@@ -1749,7 +1893,7 @@ road, normal fire weather) is excluded, so a quiet domain reports
 layers are unchanged — the full feature set still drives the `.geojson` layers.
 A consumer that rendered `activeCount` will now show fewer (accurate) items.
 
-### Changed — enum values are UPPERCASE on the `.geojson` and `summary` surfaces (BREAKING for map clients)
+### BREAKING: Changed — enum values are UPPERCASE on the `.geojson` and `summary` surfaces (map clients)
 
 The `.geojson` map layers and the place `summary` previously lowercased a few enum
 values that the proto RPCs already emitted as UPPERCASE. They are now consistent:
@@ -1803,7 +1947,7 @@ Also clarified: the `?place=` filter (and `/api/v1/places/{place}`) accept **eit
 the slug** (`hwy4-murphys-arnold`) **or the namespaced id**
 (`corridor:hwy4-murphys-arnold`) — the bare slug is the intended form.
 
-### Changed — the data API is now proto-defined gRPC + gRPC-Gateway at `/api/v1` (BREAKING)
+### BREAKING: Changed — the data API is now proto-defined gRPC + gRPC-Gateway at `/api/v1`
 
 The hand-built snake_case `/v1` surface (added 2026-07-05) has been **removed** and
 its endpoints re-defined as a Protocol Buffers `GridService` served over
@@ -1886,7 +2030,7 @@ in-process instead of `/v1`. Conditional-GET / ETag support is not yet wired
 
 ## 2026-07-08
 
-### Removed — legacy `/api/v1` surface (BREAKING)
+### BREAKING: Removed — legacy `/api/v1` surface
 
 The original `/api/v1` REST surface and its OpenAPI specs have been **removed**;
 those paths now return `404`. Everything it served is available on `/v1` (same
@@ -2046,7 +2190,7 @@ the highway. Same `LineString` geometry type, just more vertices; a straight
 `/v1/places` is seeded statically and remains the 2-point line for now.)
 
 
-### Changed — coverage area renamed `calaveras` → `ebbetts-pass` (**breaking** for `/api/v1` hazard URLs)
+### BREAKING: Changed — coverage area renamed `calaveras` → `ebbetts-pass` (`/api/v1` hazard URLs)
 
 The one configured coverage area was mis-named "Calaveras County" (slug `calaveras`)
 but actually spans **Calaveras and Tuolumne** along the Hwy 4 + Hwy 49 corridor, and
@@ -2288,7 +2432,7 @@ road alerts (model: gpt-5-mini). Additive, non-breaking:
 
 ## 2026-07-04 00:00 UTC
 
-### Changed — weather alerts are now NWS-only (**breaking**); weather refresh 5m → 15m
+### BREAKING: Changed — weather alerts are now NWS-only; weather refresh 5m → 15m
 
 The server was exceeding OpenWeather's One Call 3.0 free cap (1,000 calls/day)
 fetching per-location alerts that, for US locations, are relabeled NWS data we
@@ -2447,10 +2591,10 @@ This is additive — existing endpoints are unchanged.
 
 ## 2026-06-26 16:47 UTC
 
-A large API cleanup pass. Several responses changed shape — see **Breaking
-changes** first.
+A large API cleanup pass. Several responses changed shape — read the BREAKING
+section first.
 
-### ⚠ Breaking changes (consumers must update)
+### BREAKING: response-shape changes (consumers must update)
 
 | Area | Before | After | Migration |
 |------|--------|-------|-----------|

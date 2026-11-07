@@ -2,26 +2,17 @@ package gridapi
 
 import (
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"net/http"
 	"strings"
 )
 
-// writeJSON writes body with Cache-Control public,max-age and a strong ETag,
-// answering If-None-Match with 304. It writes any content type — the ETag input
-// includes the content type so two renderings never share a validator.
-//
-// The ETag is the first 16 bytes of sha256(contentType + NUL + body), hex,
-// quoted. 304 responses keep the ETag and Cache-Control headers (RFC 9110
-// §15.4.5) and no body.
-func writeJSON(w http.ResponseWriter, r *http.Request, body []byte, contentType string, maxAge int) {
-	h := sha256.New()
-	h.Write([]byte(contentType))
-	h.Write([]byte{0})
-	h.Write(body)
-	etag := `"` + hex.EncodeToString(h.Sum(nil)[:16]) + `"`
-
+// writeJSON writes body with Cache-Control public,max-age and the given ETag,
+// answering If-None-Match with 304. 304 responses keep the ETag and
+// Cache-Control headers (RFC 9110 §15.4.5) and no body.
+func writeJSON(w http.ResponseWriter, r *http.Request, body []byte, etag, contentType string, maxAge int) {
 	w.Header().Set("ETag", etag)
 	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", maxAge))
 	if inmMatches(r.Header.Get("If-None-Match"), etag) {
@@ -30,6 +21,31 @@ func writeJSON(w http.ResponseWriter, r *http.Request, body []byte, contentType 
 	}
 	w.Header().Set("Content-Type", contentType)
 	_, _ = w.Write(body)
+}
+
+// dataETag is a weak ETag over a response's DATA: the content type plus the
+// serialized parts of the body that describe it, which deliberately excludes
+// the per-request generatedAt stamp. Hashing the whole body made the validator
+// change every second, so a conditional GET only ever matched within the same
+// second. It is weak (W/) because two responses sharing it can differ in that
+// stamp, so they are semantically, not byte-for-byte, equivalent (RFC 9110
+// §8.8.1).
+//
+// The tag is the first 16 bytes of sha256 over the content type and each part,
+// every one length-prefixed so no two part lists hash alike.
+func dataETag(contentType string, parts ...[]byte) string {
+	h := sha256.New()
+	writePart := func(b []byte) {
+		var n [8]byte
+		binary.BigEndian.PutUint64(n[:], uint64(len(b)))
+		h.Write(n[:])
+		h.Write(b)
+	}
+	writePart([]byte(contentType))
+	for _, p := range parts {
+		writePart(p)
+	}
+	return `W/"` + hex.EncodeToString(h.Sum(nil)[:16]) + `"`
 }
 
 // inmMatches implements the If-None-Match check (RFC 9110 §13.1.2): the

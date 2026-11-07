@@ -7,6 +7,7 @@
 package gridv1
 
 import (
+	_ "github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2/options"
 	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -24,23 +25,54 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// Layer is the event taxonomy. Response values are these UPPERCASE names; the
+// `layer` query parameter also accepts lowercase slugs (`road_incident`).
+//
+// Only event layers appear here. The condition layers (`road_segment`,
+// `chain_control`, `fire_weather`, `message_sign`) are map layers and summary
+// inputs, never events.
 type Layer int32
 
 const (
+	// Never returned.
 	Layer_LAYER_UNSPECIFIED Layer = 0
-	Layer_WILDFIRE          Layer = 1
-	Layer_EVACUATION        Layer = 2
-	Layer_WEATHER_ALERT     Layer = 3
-	Layer_FIRE_WEATHER      Layer = 4
-	Layer_EARTHQUAKE        Layer = 5
-	Layer_ROAD_INCIDENT     Layer = 6
-	// condition-backed layers (ROAD_SEGMENT, CHAIN_CONTROL) are projections, not events
-	Layer_POWER        Layer = 10
-	Layer_GAUGE        Layer = 11
-	Layer_AIR_QUALITY  Layer = 12
-	Layer_MESH         Layer = 13
+	// Wildfires: CAL FIRE incidents joined with FIRIS/NIFC perimeters (sources
+	// `calfire`, `firis`). Scoped wider than other layers, so a fire approaching
+	// the region shows up before it arrives.
+	Layer_WILDFIRE Layer = 1
+	// Evacuation zones under an order, warning, advisory or shelter-in-place,
+	// from Cal OES / Genasys (source `caloes`). Life-safety: see the summary's
+	// `activeEvacuations`.
+	Layer_EVACUATION Layer = 2
+	// National Weather Service watches, warnings and advisories for the region's
+	// forecast zones (source `nws`). No geometry; attached to places by zone.
+	Layer_WEATHER_ALERT Layer = 3
+	// Reserved. Fire weather is a condition (`GET /api/v1/conditions`), not an
+	// event layer; no event carries it.
+	Layer_FIRE_WEATHER Layer = 4
+	// USGS earthquakes of magnitude 2.5 or more in the last 7 days (source `usgs`).
+	Layer_EARTHQUAKE Layer = 5
+	// CHP traffic incidents (source `chp`, AI-summarized) and Caltrans planned
+	// lane-closure windows (source `caltrans`). Planned windows not yet set up are
+	// SCHEDULED.
+	Layer_ROAD_INCIDENT Layer = 6
+	// (-- condition-backed layers (ROAD_SEGMENT, CHAIN_CONTROL) are projections, not events --)
+	// PG&E electric outages (source `pge`) and Public Safety Power Shutoffs
+	// (source `psps`). Most outages affect one customer and are INFO.
+	Layer_POWER Layer = 10
+	// Reserved for stream gauges; no events today.
+	Layer_GAUGE Layer = 11
+	// Reserved for air quality; no events today.
+	Layer_AIR_QUALITY Layer = 12
+	// MeshCore community radio nodes (source `meshcore`), one event per node.
+	// Ambient INFO state, not a hazard. It dominates an unscoped event query.
+	Layer_MESH Layer = 13
+	// Reserved for announcements; no events today.
 	Layer_ANNOUNCEMENT Layer = 14
-	Layer_BURN_STATUS  Layer = 15
+	// One event per tracked county saying whether residential burning is allowed
+	// today (sources `burnline`, `calfire-burn`). Ambient, permanently ACTIVE,
+	// always INFO; its revision history is the record of changes.
+	Layer_BURN_STATUS Layer = 15
 )
 
 // Enum value maps for Layer.
@@ -104,15 +136,38 @@ func (Layer) EnumDescriptor() ([]byte, []int) {
 	return file_grid_proto_rawDescGZIP(), []int{0}
 }
 
-// The shipped scale, unchanged. rank = enum value; INFO=0 ... EXTREME=4.
+// Severity is the unified 5-level scale shared by every layer: how urgently the
+// public should respond, not physical magnitude. The enum number is the rank
+// (`severityRank`, 0-4), for sorting and colour ramps.
+//
+// How each layer is graded. WILDFIRE: the worse of a containment floor (under
+// 50% contained SEVERE, 50-99% MODERATE, 100% MINOR) and size (1,000+ acres
+// under 50% contained EXTREME, 100+ acres SEVERE). EVACUATION: ORDER EXTREME,
+// WARNING and SHELTER_IN_PLACE SEVERE, ADVISORY MODERATE. WEATHER_ALERT: the NWS
+// severity (Extreme..Minor) one-to-one, otherwise INFO. EARTHQUAKE: M5+ SEVERE,
+// M4+ MODERATE, M2.5+ MINOR. ROAD_INCIDENT: a CHP incident by its AI-assessed
+// impact (severe SEVERE, moderate MODERATE, light MINOR, none INFO); a Caltrans
+// closure by its structure (full closure SEVERE, a travel lane or one-way
+// traffic MODERATE, shoulder only MINOR). POWER: 1,000+ customers SEVERE, 100+
+// MODERATE, 10+ MINOR, fewer INFO, unknown count MINOR, planned outages one rank
+// lower; PSPS Warning SEVERE, Watch MODERATE. MESH and BURN_STATUS: always INFO.
+// Condition layers on the map: road segment CLOSED SEVERE, restricted or heavy
+// congestion MODERATE; chain control R3 SEVERE, R2 MODERATE, R1 MINOR, road
+// closed MINOR; fire weather red-flag SEVERE, elevated MODERATE.
 type Severity int32
 
 const (
-	Severity_INFO     Severity = 0
-	Severity_MINOR    Severity = 1
+	// Rank 0. Informational: ambient state, single-customer outages, small quakes,
+	// clear roads. Also the default when a source gives no grade.
+	Severity_INFO Severity = 0
+	// Rank 1. Minor impact.
+	Severity_MINOR Severity = 1
+	// Rank 2. Moderate impact; worth attention.
 	Severity_MODERATE Severity = 2
-	Severity_SEVERE   Severity = 3
-	Severity_EXTREME  Severity = 4
+	// Rank 3. Severe; act or prepare now.
+	Severity_SEVERE Severity = 3
+	// Rank 4. Extreme; life-safety (evacuation orders, large uncontained fires).
+	Severity_EXTREME Severity = 4
 )
 
 // Enum value maps for Severity.
@@ -160,14 +215,26 @@ func (Severity) EnumDescriptor() ([]byte, []int) {
 	return file_grid_proto_rawDescGZIP(), []int{1}
 }
 
+// EventStatus is an event's lifecycle state. Every transition is a revision, so
+// the history keeps when an event started and ended.
 type EventStatus int32
 
 const (
+	// Never returned.
 	EventStatus_EVENT_STATUS_UNSPECIFIED EventStatus = 0
-	EventStatus_SCHEDULED                EventStatus = 1 // planned PSPS, forecast closures
-	EventStatus_ACTIVE                   EventStatus = 2
-	EventStatus_RESOLVED                 EventStatus = 3 // upstream confirmed over
-	EventStatus_EXPIRED                  EventStatus = 4 // aged out per-source policy; upstream went quiet
+	// Planned or forecast and not yet in effect, e.g. a Caltrans lane-closure
+	// window the crew has not set up yet.
+	EventStatus_SCHEDULED EventStatus = 1
+	// In effect now.
+	EventStatus_ACTIVE EventStatus = 2
+	// Over: an authoritatively active-only feed (CAL FIRE, Cal OES, CHP, Caltrans,
+	// PG&E) stopped listing it after a successful poll, or a closure passed its
+	// planned end plus an overrun grace without a pickup call.
+	EventStatus_RESOLVED EventStatus = 3
+	// Aged out: past its own `expires`, or unseen for longer than the source's
+	// grace (`Source.expireAfterSeconds`). Used where a feed going quiet proves
+	// nothing (NWS alerts, FIRIS perimeters, mesh nodes).
+	EventStatus_EXPIRED EventStatus = 4
 )
 
 // Enum value maps for EventStatus.
@@ -215,13 +282,77 @@ func (EventStatus) EnumDescriptor() ([]byte, []int) {
 	return file_grid_proto_rawDescGZIP(), []int{2}
 }
 
+// SourceKind says what a source registry row describes.
+type SourceKind int32
+
+const (
+	// Never returned.
+	SourceKind_SOURCE_KIND_UNSPECIFIED SourceKind = 0
+	// An upstream feed the Grid fetches on a schedule (CAL FIRE, NWS, PG&E, ...).
+	// Events name it in `provenance.sourceId`.
+	SourceKind_FEED SourceKind = 1
+	// An operator-run monitor that pushes to the Grid's ingest endpoint. Health
+	// only: no event carries its id, and `homepageUrl` is empty.
+	SourceKind_REPORTER SourceKind = 2
+)
+
+// Enum value maps for SourceKind.
+var (
+	SourceKind_name = map[int32]string{
+		0: "SOURCE_KIND_UNSPECIFIED",
+		1: "FEED",
+		2: "REPORTER",
+	}
+	SourceKind_value = map[string]int32{
+		"SOURCE_KIND_UNSPECIFIED": 0,
+		"FEED":                    1,
+		"REPORTER":                2,
+	}
+)
+
+func (x SourceKind) Enum() *SourceKind {
+	p := new(SourceKind)
+	*p = x
+	return p
+}
+
+func (x SourceKind) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (SourceKind) Descriptor() protoreflect.EnumDescriptor {
+	return file_grid_proto_enumTypes[3].Descriptor()
+}
+
+func (SourceKind) Type() protoreflect.EnumType {
+	return &file_grid_proto_enumTypes[3]
+}
+
+func (x SourceKind) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use SourceKind.Descriptor instead.
+func (SourceKind) EnumDescriptor() ([]byte, []int) {
+	return file_grid_proto_rawDescGZIP(), []int{3}
+}
+
+// SourceStatus is a source's health. The same three values appear as strings in
+// the summary's domains and sidecar, on `/api/v1/cameras`, and on the map
+// layers' `metadata.sourceStatus`.
 type SourceStatus int32
 
 const (
+	// Not polled yet since the registry row was created. Treat as UNAVAILABLE.
 	SourceStatus_SOURCE_STATUS_UNSPECIFIED SourceStatus = 0
-	SourceStatus_OK                        SourceStatus = 1
-	SourceStatus_STALE                     SourceStatus = 2
-	SourceStatus_UNAVAILABLE               SourceStatus = 3
+	// The last attempt succeeded.
+	SourceStatus_OK SourceStatus = 1
+	// The last attempt failed, but the last success is within
+	// `staleAfterSeconds`; what is served is last-good data.
+	SourceStatus_STALE SourceStatus = 2
+	// Failing beyond `staleAfterSeconds`, or never succeeded. Nothing current can
+	// be vouched for: render "unknown", never "none".
+	SourceStatus_UNAVAILABLE SourceStatus = 3
 )
 
 // Enum value maps for SourceStatus.
@@ -251,11 +382,11 @@ func (x SourceStatus) String() string {
 }
 
 func (SourceStatus) Descriptor() protoreflect.EnumDescriptor {
-	return file_grid_proto_enumTypes[3].Descriptor()
+	return file_grid_proto_enumTypes[4].Descriptor()
 }
 
 func (SourceStatus) Type() protoreflect.EnumType {
-	return &file_grid_proto_enumTypes[3]
+	return &file_grid_proto_enumTypes[4]
 }
 
 func (x SourceStatus) Number() protoreflect.EnumNumber {
@@ -264,19 +395,31 @@ func (x SourceStatus) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use SourceStatus.Descriptor instead.
 func (SourceStatus) EnumDescriptor() ([]byte, []int) {
-	return file_grid_proto_rawDescGZIP(), []int{3}
+	return file_grid_proto_rawDescGZIP(), []int{4}
 }
 
+// PlaceKind is the type of a place.
 type PlaceKind int32
 
 const (
+	// Never returned.
 	PlaceKind_PLACE_KIND_UNSPECIFIED PlaceKind = 0
-	PlaceKind_AREA                   PlaceKind = 1 // existing configured areas; org footprints live here too
-	PlaceKind_COUNTY                 PlaceKind = 2
-	PlaceKind_TOWN                   PlaceKind = 3
-	PlaceKind_EVAC_ZONE              PlaceKind = 4
-	PlaceKind_CORRIDOR               PlaceKind = 5
-	PlaceKind_SITE                   PlaceKind = 6
+	// A configured coverage area such as `ebbetts-pass` (the Highway 4 corridor
+	// region). Area places own the scanner feeds and the fire-weather zones.
+	PlaceKind_AREA PlaceKind = 1
+	// A county, from Census polygons.
+	PlaceKind_COUNTY PlaceKind = 2
+	// A town, stored as a Point. `places:resolve` matches a town within 3 km of
+	// its point. Events attach to a town only by overlapping polygons (and
+	// wildfires by proximity), never by that radius.
+	PlaceKind_TOWN PlaceKind = 3
+	// Reserved for evacuation zones as places; none exist today.
+	PlaceKind_EVAC_ZONE PlaceKind = 4
+	// A highway segment, stored as a LineString. Point events within about 1.5 km
+	// of the line attach to it.
+	PlaceKind_CORRIDOR PlaceKind = 5
+	// Reserved for individual sites; none exist today.
+	PlaceKind_SITE PlaceKind = 6
 )
 
 // Enum value maps for PlaceKind.
@@ -312,11 +455,11 @@ func (x PlaceKind) String() string {
 }
 
 func (PlaceKind) Descriptor() protoreflect.EnumDescriptor {
-	return file_grid_proto_enumTypes[4].Descriptor()
+	return file_grid_proto_enumTypes[5].Descriptor()
 }
 
 func (PlaceKind) Type() protoreflect.EnumType {
-	return &file_grid_proto_enumTypes[4]
+	return &file_grid_proto_enumTypes[5]
 }
 
 func (x PlaceKind) Number() protoreflect.EnumNumber {
@@ -325,16 +468,20 @@ func (x PlaceKind) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use PlaceKind.Descriptor instead.
 func (PlaceKind) EnumDescriptor() ([]byte, []int) {
-	return file_grid_proto_rawDescGZIP(), []int{4}
+	return file_grid_proto_rawDescGZIP(), []int{5}
 }
 
-// MeshReachability is an operator monitor's verdict on a node's admin interface.
+// MeshReachability is an operator monitor's verdict on a node's admin interface,
+// smoothed so a marginal link does not flap.
 type MeshReachability int32
 
 const (
-	MeshReachability_MESH_REACHABILITY_UNSPECIFIED MeshReachability = 0 // no monitor watches this node
-	MeshReachability_REACHABLE                     MeshReachability = 1 // a monitor reached it within the window
-	MeshReachability_UNREACHABLE                   MeshReachability = 2 // a monitor has been failing past the window
+	// No monitor watches this node (most nodes). Says nothing about liveness.
+	MeshReachability_MESH_REACHABILITY_UNSPECIFIED MeshReachability = 0
+	// A monitor reached it recently.
+	MeshReachability_REACHABLE MeshReachability = 1
+	// A monitor has been failing to reach it for longer than its window.
+	MeshReachability_UNREACHABLE MeshReachability = 2
 )
 
 // Enum value maps for MeshReachability.
@@ -362,11 +509,11 @@ func (x MeshReachability) String() string {
 }
 
 func (MeshReachability) Descriptor() protoreflect.EnumDescriptor {
-	return file_grid_proto_enumTypes[5].Descriptor()
+	return file_grid_proto_enumTypes[6].Descriptor()
 }
 
 func (MeshReachability) Type() protoreflect.EnumType {
-	return &file_grid_proto_enumTypes[5]
+	return &file_grid_proto_enumTypes[6]
 }
 
 func (x MeshReachability) Number() protoreflect.EnumNumber {
@@ -375,16 +522,22 @@ func (x MeshReachability) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use MeshReachability.Descriptor instead.
 func (MeshReachability) EnumDescriptor() ([]byte, []int) {
-	return file_grid_proto_rawDescGZIP(), []int{5}
+	return file_grid_proto_rawDescGZIP(), []int{6}
 }
 
+// BurnDay is the county air district's call for today.
 type BurnDay int32
 
 const (
-	BurnDay_BURN_DAY_UNKNOWN  BurnDay = 0 // not reached, or the reading was unusable/stale
-	BurnDay_BURN_DAY_YES      BurnDay = 1 // permissive burn day — burning allowed
-	BurnDay_BURN_DAY_NO       BurnDay = 2 // no-burn day — burning prohibited
-	BurnDay_BURN_DAY_MARGINAL BurnDay = 3 // restricted/partial (the line's "orange")
+	// Not read, unreadable, or older than 36 hours. Never treat as permissive.
+	BurnDay_BURN_DAY_UNKNOWN BurnDay = 0
+	// Permissive burn day: burning allowed (subject to CAL FIRE's status).
+	BurnDay_BURN_DAY_YES BurnDay = 1
+	// No-burn day: burning prohibited.
+	BurnDay_BURN_DAY_NO BurnDay = 2
+	// Restricted or partial day (for example elevation limits). Treated as a
+	// restriction, not a yes.
+	BurnDay_BURN_DAY_MARGINAL BurnDay = 3
 )
 
 // Enum value maps for BurnDay.
@@ -414,11 +567,11 @@ func (x BurnDay) String() string {
 }
 
 func (BurnDay) Descriptor() protoreflect.EnumDescriptor {
-	return file_grid_proto_enumTypes[6].Descriptor()
+	return file_grid_proto_enumTypes[7].Descriptor()
 }
 
 func (BurnDay) Type() protoreflect.EnumType {
-	return &file_grid_proto_enumTypes[6]
+	return &file_grid_proto_enumTypes[7]
 }
 
 func (x BurnDay) Number() protoreflect.EnumNumber {
@@ -427,16 +580,22 @@ func (x BurnDay) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use BurnDay.Descriptor instead.
 func (BurnDay) EnumDescriptor() ([]byte, []int) {
-	return file_grid_proto_rawDescGZIP(), []int{6}
+	return file_grid_proto_rawDescGZIP(), []int{7}
 }
 
+// CalfireBurnStatus is CAL FIRE's permit status for State Responsibility Area
+// land in the county.
 type CalfireBurnStatus int32
 
 const (
+	// Unknown: CAL FIRE's page has not been read.
 	CalfireBurnStatus_CALFIRE_BURN_STATUS_UNKNOWN CalfireBurnStatus = 0
-	CalfireBurnStatus_CALFIRE_BURNING_SUSPENDED   CalfireBurnStatus = 1 // permits suspended; no residential burning
-	CalfireBurnStatus_CALFIRE_PERMIT_REQUIRED     CalfireBurnStatus = 2 // burning allowed with a valid permit
-	CalfireBurnStatus_CALFIRE_NO_PERMIT_REQUIRED  CalfireBurnStatus = 3 // off-season; no permit needed
+	// Permits suspended: no residential burning.
+	CalfireBurnStatus_CALFIRE_BURNING_SUSPENDED CalfireBurnStatus = 1
+	// Burning allowed with a valid CAL FIRE permit.
+	CalfireBurnStatus_CALFIRE_PERMIT_REQUIRED CalfireBurnStatus = 2
+	// Off-season: no permit needed.
+	CalfireBurnStatus_CALFIRE_NO_PERMIT_REQUIRED CalfireBurnStatus = 3
 )
 
 // Enum value maps for CalfireBurnStatus.
@@ -466,11 +625,11 @@ func (x CalfireBurnStatus) String() string {
 }
 
 func (CalfireBurnStatus) Descriptor() protoreflect.EnumDescriptor {
-	return file_grid_proto_enumTypes[7].Descriptor()
+	return file_grid_proto_enumTypes[8].Descriptor()
 }
 
 func (CalfireBurnStatus) Type() protoreflect.EnumType {
-	return &file_grid_proto_enumTypes[7]
+	return &file_grid_proto_enumTypes[8]
 }
 
 func (x CalfireBurnStatus) Number() protoreflect.EnumNumber {
@@ -479,15 +638,19 @@ func (x CalfireBurnStatus) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use CalfireBurnStatus.Descriptor instead.
 func (CalfireBurnStatus) EnumDescriptor() ([]byte, []int) {
-	return file_grid_proto_rawDescGZIP(), []int{7}
+	return file_grid_proto_rawDescGZIP(), []int{8}
 }
 
+// BurnPermission is the combined answer, deliberately pessimistic.
 type BurnPermission int32
 
 const (
-	BurnPermission_BURN_PERMISSION_UNKNOWN    BurnPermission = 0 // at least one facet unknown — assume nothing
-	BurnPermission_BURN_PERMISSION_ALLOWED    BurnPermission = 1 // both facets permit burning today
-	BurnPermission_BURN_PERMISSION_PROHIBITED BurnPermission = 2 // at least one facet prohibits it
+	// At least one facet is unknown or stale and none prohibits: assume nothing.
+	BurnPermission_BURN_PERMISSION_UNKNOWN BurnPermission = 0
+	// Both facets are known and permit burning today.
+	BurnPermission_BURN_PERMISSION_ALLOWED BurnPermission = 1
+	// At least one facet prohibits burning today.
+	BurnPermission_BURN_PERMISSION_PROHIBITED BurnPermission = 2
 )
 
 // Enum value maps for BurnPermission.
@@ -515,11 +678,11 @@ func (x BurnPermission) String() string {
 }
 
 func (BurnPermission) Descriptor() protoreflect.EnumDescriptor {
-	return file_grid_proto_enumTypes[8].Descriptor()
+	return file_grid_proto_enumTypes[9].Descriptor()
 }
 
 func (BurnPermission) Type() protoreflect.EnumType {
-	return &file_grid_proto_enumTypes[8]
+	return &file_grid_proto_enumTypes[9]
 }
 
 func (x BurnPermission) Number() protoreflect.EnumNumber {
@@ -528,31 +691,103 @@ func (x BurnPermission) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use BurnPermission.Descriptor instead.
 func (BurnPermission) EnumDescriptor() ([]byte, []int) {
-	return file_grid_proto_rawDescGZIP(), []int{8}
+	return file_grid_proto_rawDescGZIP(), []int{9}
 }
 
+// Event is one item from one upstream source: a hazard, or a piece of ambient
+// state such as a mesh node or a county's burn status.
+//
+// The envelope fields are the same for every layer, so a client can render a
+// card from `headline`, `severity`, `status` and `provenance` without knowing the
+// layer. Layer-specific fields are in exactly one detail block (`wildfire`,
+// `evacuation`, `weatherAlert`, `earthquake`, `roadIncident`, `mesh`, `power` or
+// `burnStatus`), chosen by `layer`; the other blocks are absent. `fireWeather`
+// is never populated on an event.
 type Event struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	Id    string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"` // "{source_id}:{native_id}" — matches shipped ids
-	// e.g. "calfire:2026-salt-springs"
-	Layer        Layer                  `protobuf:"varint,2,opt,name=layer,proto3,enum=grid.v1.Layer" json:"layer,omitempty"`          // shipped taxonomy + additions
-	Category     string                 `protobuf:"bytes,3,opt,name=category,proto3" json:"category,omitempty"`                        // source sub-type slug ("active", "order", ...)
-	Severity     Severity               `protobuf:"varint,4,opt,name=severity,proto3,enum=grid.v1.Severity" json:"severity,omitempty"` // shipped 5-level scale
-	Status       EventStatus            `protobuf:"varint,5,opt,name=status,proto3,enum=grid.v1.EventStatus" json:"status,omitempty"`
-	Headline     string                 `protobuf:"bytes,6,opt,name=headline,proto3" json:"headline,omitempty"`                              // card-renderable without knowing the kind
-	Summary      string                 `protobuf:"bytes,7,opt,name=summary,proto3" json:"summary,omitempty"`                                // AI-enhanced 2–3 sentences where applicable
-	Description  string                 `protobuf:"bytes,8,opt,name=description,proto3" json:"description,omitempty"`                        // long form / original text
-	AreaLabel    string                 `protobuf:"bytes,9,opt,name=area_label,json=areaLabel,proto3" json:"area_label,omitempty"`           // "Hathaway Pines & Avery"
-	CanonicalUrl string                 `protobuf:"bytes,10,opt,name=canonical_url,json=canonicalUrl,proto3" json:"canonical_url,omitempty"` // scheme-validated (https/http only, per shipped rule)
-	Geometry     *Geometry              `protobuf:"bytes,11,opt,name=geometry,proto3" json:"geometry,omitempty"`                             // may be absent: county-wide advisories
-	PlaceIds     []string               `protobuf:"bytes,12,rep,name=place_ids,json=placeIds,proto3" json:"place_ids,omitempty"`             // precomputed intersections (spec §4)
-	Provenance   *Provenance            `protobuf:"bytes,13,opt,name=provenance,proto3" json:"provenance,omitempty"`
-	Effective    *timestamppb.Timestamp `protobuf:"bytes,14,opt,name=effective,proto3" json:"effective,omitempty"`
-	Expires      *timestamppb.Timestamp `protobuf:"bytes,15,opt,name=expires,proto3" json:"expires,omitempty"`
-	ObservedAt   *timestamppb.Timestamp `protobuf:"bytes,16,opt,name=observed_at,json=observedAt,proto3" json:"observed_at,omitempty"` // upstream last-update
-	IngestedAt   *timestamppb.Timestamp `protobuf:"bytes,17,opt,name=ingested_at,json=ingestedAt,proto3" json:"ingested_at,omitempty"`
-	Revision     uint32                 `protobuf:"varint,18,opt,name=revision,proto3" json:"revision,omitempty"`
-	Enhancement  *Enhancement           `protobuf:"bytes,19,opt,name=enhancement,proto3" json:"enhancement,omitempty"` // AI-enhancement provenance (spec §3.1)
+	// Stable event id, `{source}:{native id}`. It never changes over the event's
+	// life, so it is safe as a client key. Namespaces: `calfire:`, `firis:`
+	// (wildfire), `evac:` (evacuation zone), `wx:` (NWS alert), `usgs:`
+	// (earthquake), `chp:` (CHP incident), `caltrans:` (Caltrans lane-closure
+	// window), `pge:` (outage), `psps:` (power shutoff), `meshcore:` (mesh node),
+	// `burn:` (county burn status). Ids can contain colons; URL-encode them in a
+	// path.
+	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	// Which layer this event belongs to. It decides which detail block is
+	// populated.
+	Layer Layer `protobuf:"varint,2,opt,name=layer,proto3,enum=grid.v1.Layer" json:"layer,omitempty"`
+	// Source sub-type, lowercase except for weather alerts. By layer: WILDFIRE
+	// `wildfire`; EVACUATION `order` | `warning` | `advisory` | `shelter_in_place`;
+	// WEATHER_ALERT the NWS event name verbatim (`Red Flag Warning`, `Winter Storm
+	// Watch`, ...); EARTHQUAKE `earthquake`; ROAD_INCIDENT `incident` | `closure` |
+	// `construction` | `weather` (CHP types) or `closure` (Caltrans windows);
+	// POWER `unplanned` | `planned` | `psps`; MESH the node type (`repeater`,
+	// `companion`, `room_server`, `sensor`); BURN_STATUS `burn_status`.
+	Category string `protobuf:"bytes,3,opt,name=category,proto3" json:"category,omitempty"`
+	// Unified severity, INFO..EXTREME. Response urgency, not magnitude. See the
+	// Severity enum for how each layer is graded. `enhancement.fields` lists
+	// `severity` when an AI model assessed it (CHP incidents).
+	Severity Severity `protobuf:"varint,4,opt,name=severity,proto3,enum=grid.v1.Severity" json:"severity,omitempty"`
+	// Lifecycle status. `/api/v1/events` returns ACTIVE and SCHEDULED unless you
+	// ask for others.
+	Status EventStatus `protobuf:"varint,5,opt,name=status,proto3,enum=grid.v1.EventStatus" json:"status,omitempty"`
+	// One-line, card-ready title. Present on every event. For CHP incidents it
+	// may be AI-written (see `enhancement.fields`); for NWS alerts it is composed
+	// from the product, never by AI.
+	Headline string `protobuf:"bytes,6,opt,name=headline,proto3" json:"headline,omitempty"`
+	// AI-written plain-language summary of two or three sentences, for CHP
+	// incidents and NWS alerts. Empty string when none was generated. The original
+	// text is always kept in `description`.
+	Summary string `protobuf:"bytes,7,opt,name=summary,proto3" json:"summary,omitempty"`
+	// Long-form original text from the upstream (CHP log, NWS product body,
+	// evacuation instructions, closure description). May contain newlines. Empty
+	// string when the source has none, or when it would only repeat the headline.
+	Description string `protobuf:"bytes,8,opt,name=description,proto3" json:"description,omitempty"`
+	// Human-readable location ("SR 4 at Country Club Drive", "Calaveras County").
+	// Empty string when the source gives none.
+	AreaLabel string `protobuf:"bytes,9,opt,name=area_label,json=areaLabel,proto3" json:"area_label,omitempty"`
+	// Link to the authoritative page for THIS item: a USGS event page, a CAL FIRE
+	// incident page, a mesh node's CoreScope page, PG&E's outage or PSPS page, the
+	// CAL FIRE burn-permit page for burn status. Always http(s) when set. Empty
+	// string when the source has no per-item page, which today means CHP
+	// incidents, Caltrans lane closures, FIRIS perimeters, NWS alerts and
+	// evacuation zones. Fall back to `provenance.sourceUrl`, then to the source's
+	// `homepageUrl` (`GET /api/v1/sources`, joined on `provenance.sourceId`).
+	CanonicalUrl string `protobuf:"bytes,10,opt,name=canonical_url,json=canonicalUrl,proto3" json:"canonical_url,omitempty"`
+	// Where the event is. `null` for events with no footprint of their own: NWS
+	// zone alerts (they attach to places by zone instead) and burn status (a fact
+	// about a county).
+	Geometry *Geometry `protobuf:"bytes,11,opt,name=geometry,proto3" json:"geometry,omitempty"`
+	// Ids of every place this event attaches to, e.g. `["county:calaveras-county",
+	// "town:arnold"]`. Point events attach to the polygon places that contain them
+	// and to corridors within about 1.5 km. Polygon events attach to places they
+	// overlap. Wildfires also attach to AREA and TOWN places within 20 km. Empty
+	// when the event is outside every place (common for mesh nodes).
+	PlaceIds []string `protobuf:"bytes,12,rep,name=place_ids,json=placeIds,proto3" json:"place_ids,omitempty"`
+	// Which source published it, with attribution text to display.
+	Provenance *Provenance `protobuf:"bytes,13,opt,name=provenance,proto3" json:"provenance,omitempty"`
+	// When the event took or takes effect: alert onset, incident start, outage
+	// start, closure set-up time. `null` when the source does not say.
+	Effective *timestamppb.Timestamp `protobuf:"bytes,14,opt,name=effective,proto3" json:"effective,omitempty"`
+	// The upstream's declared end, such as an NWS alert's expiry. `null` for most
+	// layers. Restoration estimates and planned closure ends are never put here
+	// (they are routinely overrun); they live in the detail blocks.
+	Expires *timestamppb.Timestamp `protobuf:"bytes,15,opt,name=expires,proto3" json:"expires,omitempty"`
+	// When the upstream last changed this event's content. It moves only when a
+	// new revision is written, so it is NOT "last seen". For a mesh node's
+	// liveness use `mesh.telemetry.lastHeardAt` / `lastRelayedAt`; for burn
+	// status it follows each new phone-line reading.
+	ObservedAt *timestamppb.Timestamp `protobuf:"bytes,16,opt,name=observed_at,json=observedAt,proto3" json:"observed_at,omitempty"`
+	// When the Grid stored this revision.
+	IngestedAt *timestamppb.Timestamp `protobuf:"bytes,17,opt,name=ingested_at,json=ingestedAt,proto3" json:"ingested_at,omitempty"`
+	// Revision number, starting at 1. It increases by one on every content change
+	// or status transition. `/api/v1/events/{id}/history` lists every revision.
+	Revision uint32 `protobuf:"varint,18,opt,name=revision,proto3" json:"revision,omitempty"`
+	// Present when an AI model generated some of this event's text; lists which
+	// fields. `null` for events with no AI involvement.
+	Enhancement *Enhancement `protobuf:"bytes,19,opt,name=enhancement,proto3" json:"enhancement,omitempty"`
+	// (-- Mirrors the namespaced per-kind blocks; exactly one is set, by layer. --)
+	//
 	// Types that are valid to be assigned to Detail:
 	//
 	//	*Event_Wildfire
@@ -825,38 +1060,48 @@ type isEvent_Detail interface {
 }
 
 type Event_Wildfire struct {
+	// WILDFIRE detail.
 	Wildfire *WildfireDetail `protobuf:"bytes,20,opt,name=wildfire,proto3,oneof"`
 }
 
 type Event_Evacuation struct {
+	// EVACUATION detail.
 	Evacuation *EvacuationDetail `protobuf:"bytes,21,opt,name=evacuation,proto3,oneof"`
 }
 
 type Event_WeatherAlert struct {
+	// WEATHER_ALERT detail.
 	WeatherAlert *WeatherAlertDetail `protobuf:"bytes,22,opt,name=weather_alert,json=weatherAlert,proto3,oneof"`
 }
 
 type Event_FireWeather struct {
+	// Never populated on an event: fire weather is a condition
+	// (`GET /api/v1/conditions`, the `fire_weather` map layer).
 	FireWeather *FireWeatherDetail `protobuf:"bytes,23,opt,name=fire_weather,json=fireWeather,proto3,oneof"`
 }
 
 type Event_Earthquake struct {
+	// EARTHQUAKE detail.
 	Earthquake *EarthquakeDetail `protobuf:"bytes,24,opt,name=earthquake,proto3,oneof"`
 }
 
 type Event_RoadIncident struct {
+	// ROAD_INCIDENT detail (CHP incidents and Caltrans lane closures).
 	RoadIncident *RoadIncidentDetail `protobuf:"bytes,25,opt,name=road_incident,json=roadIncident,proto3,oneof"`
 }
 
 type Event_Mesh struct {
+	// MESH detail (one MeshCore radio node).
 	Mesh *MeshDetail `protobuf:"bytes,26,opt,name=mesh,proto3,oneof"`
 }
 
 type Event_Power struct {
+	// POWER detail (PG&E outage or Public Safety Power Shutoff).
 	Power *PowerDetail `protobuf:"bytes,27,opt,name=power,proto3,oneof"`
 }
 
 type Event_BurnStatus struct {
+	// BURN_STATUS detail (one county's residential burning status).
 	BurnStatus *BurnStatusDetail `protobuf:"bytes,31,opt,name=burn_status,json=burnStatus,proto3,oneof"`
 }
 
@@ -878,11 +1123,22 @@ func (*Event_Power) isEvent_Detail() {}
 
 func (*Event_BurnStatus) isEvent_Detail() {}
 
+// Geometry is an event's or place's footprint.
 type Geometry struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Geojson       []byte                 `protobuf:"bytes,1,opt,name=geojson,proto3" json:"geojson,omitempty"` // RFC 7946 geometry object, UTF-8
-	Bbox          *BoundingBox           `protobuf:"bytes,2,opt,name=bbox,proto3" json:"bbox,omitempty"`       // always populated at ingest
-	Centroid      *LatLng                `protobuf:"bytes,3,opt,name=centroid,proto3" json:"centroid,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The RFC 7946 GeoJSON geometry object (Point, LineString, Polygon,
+	// MultiPolygon, ...) as UTF-8 JSON, BASE64-ENCODED in this JSON response
+	// because the field is protobuf `bytes`. Decode with
+	// `JSON.parse(atob(geojson))`. Coordinates are `[longitude, latitude]`.
+	// Wildfire perimeters and evacuation zones can be tens of kilobytes.
+	Geojson []byte `protobuf:"bytes,1,opt,name=geojson,proto3" json:"geojson,omitempty"`
+	// Bounding box of the geometry, in decimal degrees. Always set when geometry
+	// is present.
+	Bbox *BoundingBox `protobuf:"bytes,2,opt,name=bbox,proto3" json:"bbox,omitempty"`
+	// Representative point for markers and list views: the point itself for a
+	// Point, otherwise the middle of the bounding box (which can fall outside an
+	// irregular polygon).
+	Centroid      *LatLng `protobuf:"bytes,3,opt,name=centroid,proto3" json:"centroid,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -938,12 +1194,17 @@ func (x *Geometry) GetCentroid() *LatLng {
 	return nil
 }
 
+// BoundingBox is a WGS 84 bounding box in decimal degrees.
 type BoundingBox struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	MinLat        float64                `protobuf:"fixed64,1,opt,name=min_lat,json=minLat,proto3" json:"min_lat,omitempty"`
-	MinLng        float64                `protobuf:"fixed64,2,opt,name=min_lng,json=minLng,proto3" json:"min_lng,omitempty"`
-	MaxLat        float64                `protobuf:"fixed64,3,opt,name=max_lat,json=maxLat,proto3" json:"max_lat,omitempty"`
-	MaxLng        float64                `protobuf:"fixed64,4,opt,name=max_lng,json=maxLng,proto3" json:"max_lng,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Southern edge, degrees latitude.
+	MinLat float64 `protobuf:"fixed64,1,opt,name=min_lat,json=minLat,proto3" json:"min_lat,omitempty"`
+	// Western edge, degrees longitude (negative in California).
+	MinLng float64 `protobuf:"fixed64,2,opt,name=min_lng,json=minLng,proto3" json:"min_lng,omitempty"`
+	// Northern edge, degrees latitude.
+	MaxLat float64 `protobuf:"fixed64,3,opt,name=max_lat,json=maxLat,proto3" json:"max_lat,omitempty"`
+	// Eastern edge, degrees longitude.
+	MaxLng        float64 `protobuf:"fixed64,4,opt,name=max_lng,json=maxLng,proto3" json:"max_lng,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1006,10 +1267,14 @@ func (x *BoundingBox) GetMaxLng() float64 {
 	return 0
 }
 
+// LatLng is one WGS 84 point in decimal degrees. Note the order: unlike GeoJSON
+// coordinates, this is latitude first.
 type LatLng struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Lat           float64                `protobuf:"fixed64,1,opt,name=lat,proto3" json:"lat,omitempty"`
-	Lng           float64                `protobuf:"fixed64,2,opt,name=lng,proto3" json:"lng,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Degrees latitude.
+	Lat float64 `protobuf:"fixed64,1,opt,name=lat,proto3" json:"lat,omitempty"`
+	// Degrees longitude (negative in California).
+	Lng           float64 `protobuf:"fixed64,2,opt,name=lng,proto3" json:"lng,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1058,12 +1323,24 @@ func (x *LatLng) GetLng() float64 {
 	return 0
 }
 
+// Provenance says which upstream published an event. Show `attribution` next to
+// the data.
 type Provenance struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	SourceId      string                 `protobuf:"bytes,1,opt,name=source_id,json=sourceId,proto3" json:"source_id,omitempty"`
-	SourceName    string                 `protobuf:"bytes,2,opt,name=source_name,json=sourceName,proto3" json:"source_name,omitempty"` // denormalized: "CAL FIRE"
-	Attribution   string                 `protobuf:"bytes,3,opt,name=attribution,proto3" json:"attribution,omitempty"`                 // "CAL FIRE / FIRIS"
-	SourceUrl     string                 `protobuf:"bytes,4,opt,name=source_url,json=sourceUrl,proto3" json:"source_url,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Source registry id; joins to `Source.id` on `/api/v1/sources`.
+	SourceId string `protobuf:"bytes,1,opt,name=source_id,json=sourceId,proto3" json:"source_id,omitempty"`
+	// Display name of the publisher, e.g. "CAL FIRE", "NWS Sacramento CA",
+	// "CHP / Caltrans".
+	SourceName string `protobuf:"bytes,2,opt,name=source_name,json=sourceName,proto3" json:"source_name,omitempty"`
+	// Attribution text to display, e.g. "CAL FIRE / FIRIS / NIFC". Can be an
+	// empty string.
+	Attribution string `protobuf:"bytes,3,opt,name=attribution,proto3" json:"attribution,omitempty"`
+	// Link to the publisher's page for this item or feed (for evacuations, the
+	// Genasys or county zone viewer). Empty string when none, which today means
+	// CHP incidents, Caltrans lane closures, FIRIS perimeters, NWS alerts and
+	// burn status. Fall back to `Source.homepageUrl` for `sourceId`.
+	SourceUrl string `protobuf:"bytes,4,opt,name=source_url,json=sourceUrl,proto3" json:"source_url,omitempty"`
+	// When the Grid fetched the upstream data behind this revision.
 	FetchedAt     *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=fetched_at,json=fetchedAt,proto3" json:"fetched_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1134,18 +1411,25 @@ func (x *Provenance) GetFetchedAt() *timestamppb.Timestamp {
 	return nil
 }
 
-// AI-enhancement provenance so clients can badge AI-summarized text
-// (spec §3.1: translate, never assert; originals preserved in description).
+// Enhancement marks AI-generated text so a client can badge it. The model
+// translates and summarizes the upstream text; it never asserts new facts, and
+// the original stays in `description`.
 type Enhancement struct {
-	state      protoimpl.MessageState `protogen:"open.v1"`
-	Model      string                 `protobuf:"bytes,1,opt,name=model,proto3" json:"model,omitempty"` // "gpt-4o-mini", "claude-haiku-4-5", ...
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Model that produced the text, e.g. "gpt-5-mini".
+	Model string `protobuf:"bytes,1,opt,name=model,proto3" json:"model,omitempty"`
+	// When the text was generated.
 	EnhancedAt *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=enhanced_at,json=enhancedAt,proto3" json:"enhanced_at,omitempty"`
-	Fields     []string               `protobuf:"bytes,3,rep,name=fields,proto3" json:"fields,omitempty"` // which Event fields were generated
-	// Transparency: the exact model input and output, so a client can show what
-	// was sent and what came back. `request` is the incident-specific user prompt
-	// (the static system prompt is not included); `response` is the raw structured
-	// JSON the model returned. Excluded from the event content hash.
-	Request       string `protobuf:"bytes,4,opt,name=request,proto3" json:"request,omitempty"`
+	// Which Event fields the model wrote, by JSON name: any of `headline`,
+	// `summary`, `severity`.
+	Fields []string `protobuf:"bytes,3,rep,name=fields,proto3" json:"fields,omitempty"`
+	// The incident-specific prompt sent to the model (the static system prompt is
+	// not included). Empty string unless the request set `enhancementIo=true`.
+	//
+	// (-- Excluded from the event content hash. --)
+	Request string `protobuf:"bytes,4,opt,name=request,proto3" json:"request,omitempty"`
+	// The raw structured JSON the model returned. Empty string unless the request
+	// set `enhancementIo=true`.
 	Response      string `protobuf:"bytes,5,opt,name=response,proto3" json:"response,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1216,21 +1500,71 @@ func (x *Enhancement) GetResponse() string {
 	return ""
 }
 
+// Source is one row of the source registry, with its health.
+//
+// Two kinds of row, told apart by `kind`: a FEED is an upstream the Grid
+// fetches on a schedule, and its id is what events carry in
+// `provenance.sourceId`. A REPORTER is an operator-run monitor that pushes data
+// to the Grid (`alanpi`, `relay`, `burn-line`); its row carries health only and
+// no event names it as its source.
+//
+// To judge health, read `status`. It is rewritten at every attempt, so as a
+// second check against the Grid itself stalling, treat a row as suspect when
+// `lastAttemptAt` is older than `staleAfterSeconds`. Do not compare
+// `lastAttemptAt` with `pollIntervalSeconds`: that misfires for reporters.
+//
+// Not every source id that appears in the API has a row. The live condition
+// layers fetch on request, outside the scheduler that writes this registry, so
+// `google` (the `road_segment` layer's travel times) has no row, and the
+// `caltrans` and `nws` rows describe the scheduled lane-closure and alert
+// polls, not the live `chain_control`, `message_sign`, `road_segment` and
+// `fire_weather` fetches. For those layers read the map layer's
+// `metadata.sourceStatus` or the summary domain's `status`.
 type Source struct {
-	state               protoimpl.MessageState `protogen:"open.v1"`
-	Id                  string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Name                string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	Attribution         string                 `protobuf:"bytes,3,opt,name=attribution,proto3" json:"attribution,omitempty"`
-	HomepageUrl         string                 `protobuf:"bytes,4,opt,name=homepage_url,json=homepageUrl,proto3" json:"homepage_url,omitempty"`
-	PollIntervalSeconds uint32                 `protobuf:"varint,5,opt,name=poll_interval_seconds,json=pollIntervalSeconds,proto3" json:"poll_interval_seconds,omitempty"`
-	StaleAfterSeconds   uint32                 `protobuf:"varint,10,opt,name=stale_after_seconds,json=staleAfterSeconds,proto3" json:"stale_after_seconds,omitempty"`    // per-source tunable; default 3x poll interval
-	ExpireAfterSeconds  uint32                 `protobuf:"varint,11,opt,name=expire_after_seconds,json=expireAfterSeconds,proto3" json:"expire_after_seconds,omitempty"` // per-source tunable; missing-from-feed → EXPIRED
-	LastSuccessAt       *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=last_success_at,json=lastSuccessAt,proto3" json:"last_success_at,omitempty"`
-	LastAttemptAt       *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=last_attempt_at,json=lastAttemptAt,proto3" json:"last_attempt_at,omitempty"`
-	LastError           string                 `protobuf:"bytes,8,opt,name=last_error,json=lastError,proto3" json:"last_error,omitempty"`
-	Status              SourceStatus           `protobuf:"varint,9,opt,name=status,proto3,enum=grid.v1.SourceStatus" json:"status,omitempty"` // shipped semantics, now per-source not per-layer
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Registry id; `Provenance.sourceId` on events joins to it (FEED rows only).
+	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	// Display name, e.g. "CHP (traffic incidents)".
+	Name string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	// Attribution text to display.
+	Attribution string `protobuf:"bytes,3,opt,name=attribution,proto3" json:"attribution,omitempty"`
+	// Public page for the upstream. Use it as the fallback link for an event
+	// whose `canonicalUrl` and `provenance.sourceUrl` are empty (join on
+	// `provenance.sourceId`). Empty string for REPORTER rows, and for a feed with
+	// no public page.
+	HomepageUrl string `protobuf:"bytes,4,opt,name=homepage_url,json=homepageUrl,proto3" json:"homepage_url,omitempty"`
+	// Whether this row is a scheduled feed or a push reporter.
+	Kind SourceKind `protobuf:"varint,12,opt,name=kind,proto3,enum=grid.v1.SourceKind" json:"kind,omitempty"`
+	// How often, in seconds, the Grid re-evaluates this row. For a FEED that is
+	// its poll interval. For a REPORTER it is the cadence of the Grid's check on
+	// the reporter, not how often the reporter reports.
+	PollIntervalSeconds uint32 `protobuf:"varint,5,opt,name=poll_interval_seconds,json=pollIntervalSeconds,proto3" json:"poll_interval_seconds,omitempty"`
+	// For a FEED: seconds after the last success during which a failing source
+	// still reads STALE rather than UNAVAILABLE (default three poll intervals).
+	// For a REPORTER: how long it may go without reporting before it stops
+	// reading OK (it then reads STALE for this long again, then UNAVAILABLE).
+	StaleAfterSeconds uint32 `protobuf:"varint,10,opt,name=stale_after_seconds,json=staleAfterSeconds,proto3" json:"stale_after_seconds,omitempty"`
+	// For sources whose silence proves nothing (NWS, FIRIS, MeshCore): how long,
+	// in seconds, an event may go unseen before it is EXPIRED. 0 means the source
+	// never auto-expires; its events are RESOLVED when a good poll stops listing
+	// them.
+	ExpireAfterSeconds uint32 `protobuf:"varint,11,opt,name=expire_after_seconds,json=expireAfterSeconds,proto3" json:"expire_after_seconds,omitempty"`
+	// When an attempt last succeeded. `null` if never. For a REPORTER this is the
+	// last check that found it reporting on time, not the time of its last
+	// report (`lastError` names that once it goes quiet).
+	LastSuccessAt *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=last_success_at,json=lastSuccessAt,proto3" json:"last_success_at,omitempty"`
+	// When the row was last evaluated, successfully or not. `null` if never.
+	// `status` is rewritten at each attempt, so if this is older than
+	// `staleAfterSeconds`, the Grid itself has stopped checking: treat the
+	// source as STALE whatever `status` says.
+	LastAttemptAt *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=last_attempt_at,json=lastAttemptAt,proto3" json:"last_attempt_at,omitempty"`
+	// The last attempt's error text. Empty string after a success.
+	LastError string `protobuf:"bytes,8,opt,name=last_error,json=lastError,proto3" json:"last_error,omitempty"`
+	// Health of this source. This is the field to judge it by; see the message
+	// description.
+	Status        SourceStatus `protobuf:"varint,9,opt,name=status,proto3,enum=grid.v1.SourceStatus" json:"status,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Source) Reset() {
@@ -1291,6 +1625,13 @@ func (x *Source) GetHomepageUrl() string {
 	return ""
 }
 
+func (x *Source) GetKind() SourceKind {
+	if x != nil {
+		return x.Kind
+	}
+	return SourceKind_SOURCE_KIND_UNSPECIFIED
+}
+
 func (x *Source) GetPollIntervalSeconds() uint32 {
 	if x != nil {
 		return x.PollIntervalSeconds
@@ -1340,14 +1681,23 @@ func (x *Source) GetStatus() SourceStatus {
 	return SourceStatus_SOURCE_STATUS_UNSPECIFIED
 }
 
+// Place is a named geography that events attach to.
 type Place struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"` // "area:ebbetts-pass" — existing area ids preserved under a kind
-	Kind          PlaceKind              `protobuf:"varint,2,opt,name=kind,proto3,enum=grid.v1.PlaceKind" json:"kind,omitempty"`
-	Name          string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
-	Slug          string                 `protobuf:"bytes,4,opt,name=slug,proto3" json:"slug,omitempty"`
-	Geometry      *Geometry              `protobuf:"bytes,5,opt,name=geometry,proto3" json:"geometry,omitempty"`
-	ParentId      string                 `protobuf:"bytes,6,opt,name=parent_id,json=parentId,proto3" json:"parent_id,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Namespaced id, `{kind}:{slug}`.
+	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	// What kind of place this is.
+	Kind PlaceKind `protobuf:"varint,2,opt,name=kind,proto3,enum=grid.v1.PlaceKind" json:"kind,omitempty"`
+	// Display name.
+	Name string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	// URL-safe short name, unique across all kinds. Use it in paths and the
+	// `place` parameter.
+	Slug string `protobuf:"bytes,4,opt,name=slug,proto3" json:"slug,omitempty"`
+	// The place's shape: a Polygon for counties and areas, a LineString for
+	// corridors, a Point for towns.
+	Geometry *Geometry `protobuf:"bytes,5,opt,name=geometry,proto3" json:"geometry,omitempty"`
+	// Id of the containing place (a town's county). Empty string when none.
+	ParentId      string `protobuf:"bytes,6,opt,name=parent_id,json=parentId,proto3" json:"parent_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1424,13 +1774,21 @@ func (x *Place) GetParentId() string {
 	return ""
 }
 
+// WildfireDetail is the WILDFIRE detail block.
 type WildfireDetail struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Acres         float64                `protobuf:"fixed64,1,opt,name=acres,proto3" json:"acres,omitempty"`
-	Containment   int32                  `protobuf:"varint,2,opt,name=containment,proto3" json:"containment,omitempty"` // percent contained, 0-100
-	County        string                 `protobuf:"bytes,3,opt,name=county,proto3" json:"county,omitempty"`
-	Cause         string                 `protobuf:"bytes,4,opt,name=cause,proto3" json:"cause,omitempty"`
-	HasPerimeter  bool                   `protobuf:"varint,5,opt,name=has_perimeter,json=hasPerimeter,proto3" json:"has_perimeter,omitempty"` // true when geometry is a FIRIS perimeter polygon
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Burned area in acres: CAL FIRE's figure, or the FIRIS perimeter's area when
+	// only a perimeter is known. Fractional.
+	Acres float64 `protobuf:"fixed64,1,opt,name=acres,proto3" json:"acres,omitempty"`
+	// Percent contained, 0-100. 0 also when unknown (perimeter-only fires).
+	Containment int32 `protobuf:"varint,2,opt,name=containment,proto3" json:"containment,omitempty"`
+	// County named by CAL FIRE. Empty string for perimeter-only fires.
+	County string `protobuf:"bytes,3,opt,name=county,proto3" json:"county,omitempty"`
+	// Cause as reported. Empty string when unknown.
+	Cause string `protobuf:"bytes,4,opt,name=cause,proto3" json:"cause,omitempty"`
+	// True when `geometry` is a FIRIS perimeter polygon; false when it is CAL
+	// FIRE's single origin point.
+	HasPerimeter  bool `protobuf:"varint,5,opt,name=has_perimeter,json=hasPerimeter,proto3" json:"has_perimeter,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1500,12 +1858,19 @@ func (x *WildfireDetail) GetHasPerimeter() bool {
 	return false
 }
 
+// EvacuationDetail is the EVACUATION detail block, one Cal OES / Genasys zone.
 type EvacuationDetail struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ZoneId        string                 `protobuf:"bytes,1,opt,name=zone_id,json=zoneId,proto3" json:"zone_id,omitempty"`
-	Level         string                 `protobuf:"bytes,2,opt,name=level,proto3" json:"level,omitempty"` // ORDER | WARNING | ADVISORY | SHELTER_IN_PLACE
-	EventType     string                 `protobuf:"bytes,3,opt,name=event_type,json=eventType,proto3" json:"event_type,omitempty"`
-	County        string                 `protobuf:"bytes,4,opt,name=county,proto3" json:"county,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Genasys zone id. `provenance.sourceUrl` links the zone's Genasys page.
+	ZoneId string `protobuf:"bytes,1,opt,name=zone_id,json=zoneId,proto3" json:"zone_id,omitempty"`
+	// Coded level. An unrecognized upstream status is coded WARNING, never
+	// dropped. ORDER and WARNING and SHELTER_IN_PLACE put the place summary in
+	// ACTIVE mode; ADVISORY puts it in WATCH.
+	Level string `protobuf:"bytes,2,opt,name=level,proto3" json:"level,omitempty"`
+	// Upstream event type, often an empty string.
+	EventType string `protobuf:"bytes,3,opt,name=event_type,json=eventType,proto3" json:"event_type,omitempty"`
+	// County as Cal OES spells it (uppercase).
+	County        string `protobuf:"bytes,4,opt,name=county,proto3" json:"county,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1568,18 +1933,24 @@ func (x *EvacuationDetail) GetCounty() string {
 	return ""
 }
 
-// Detail messages carry only KIND-SPECIFIC fields not already in the Event
-// envelope. Fields that duplicate an envelope field are NOT repeated here:
-//   - the NWS event name is the envelope `category`
-//   - the sending office is `provenance.source_name`
+// WeatherAlertDetail is the WEATHER_ALERT detail block, for one NWS product.
+//
+// It carries only fields the envelope lacks: the NWS event name is the
+// envelope `category`, and the issuing office is `provenance.sourceName`.
 type WeatherAlertDetail struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	NwsSeverity   string                 `protobuf:"bytes,2,opt,name=nws_severity,json=nwsSeverity,proto3" json:"nws_severity,omitempty"` // raw NWS vocabulary (Extreme..Minor), distinct from unified severity
-	Certainty     string                 `protobuf:"bytes,3,opt,name=certainty,proto3" json:"certainty,omitempty"`
-	Urgency       string                 `protobuf:"bytes,4,opt,name=urgency,proto3" json:"urgency,omitempty"`
-	Instruction   string                 `protobuf:"bytes,5,opt,name=instruction,proto3" json:"instruction,omitempty"`
-	AreaDesc      string                 `protobuf:"bytes,7,opt,name=area_desc,json=areaDesc,proto3" json:"area_desc,omitempty"` // NWS free-text area (no envelope equivalent for zone alerts)
-	Zones         []string               `protobuf:"bytes,8,rep,name=zones,proto3" json:"zones,omitempty"`                       // NWS forecast zones, e.g. "CAZ064"
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// NWS's own severity word, distinct from the unified `severity` it maps to.
+	NwsSeverity string `protobuf:"bytes,2,opt,name=nws_severity,json=nwsSeverity,proto3" json:"nws_severity,omitempty"`
+	// NWS certainty.
+	Certainty string `protobuf:"bytes,3,opt,name=certainty,proto3" json:"certainty,omitempty"`
+	// NWS urgency.
+	Urgency string `protobuf:"bytes,4,opt,name=urgency,proto3" json:"urgency,omitempty"`
+	// NWS recommended actions, verbatim, with newlines. Empty string when none.
+	Instruction string `protobuf:"bytes,5,opt,name=instruction,proto3" json:"instruction,omitempty"`
+	// NWS free-text list of the affected zones.
+	AreaDesc string `protobuf:"bytes,7,opt,name=area_desc,json=areaDesc,proto3" json:"area_desc,omitempty"`
+	// NWS forecast zone codes the alert covers, e.g. "CAZ138".
+	Zones         []string `protobuf:"bytes,8,rep,name=zones,proto3" json:"zones,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1656,13 +2027,20 @@ func (x *WeatherAlertDetail) GetZones() []string {
 	return nil
 }
 
-// fire_weather is condition-backed (a live projection, not an event); this
-// message exists for the spec §3 oneof shape.
+// FireWeatherDetail is never populated on an event. Fire weather is a condition,
+// served by `GET /api/v1/conditions` (`fireWeather`) and the `fire_weather` map
+// layer.
+//
+// (-- This message exists for the spec §3 oneof shape. --)
 type FireWeatherDetail struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	State         string                 `protobuf:"bytes,1,opt,name=state,proto3" json:"state,omitempty"`                                // normal | elevated | red-flag
-	SourceEvent   string                 `protobuf:"bytes,2,opt,name=source_event,json=sourceEvent,proto3" json:"source_event,omitempty"` // NWS product driving the state
-	Zones         []string               `protobuf:"bytes,3,rep,name=zones,proto3" json:"zones,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// `normal`, `elevated` (Fire Weather Watch) or `red-flag` (Red Flag Warning).
+	// Lowercase.
+	State string `protobuf:"bytes,1,opt,name=state,proto3" json:"state,omitempty"`
+	// NWS product driving the state.
+	SourceEvent string `protobuf:"bytes,2,opt,name=source_event,json=sourceEvent,proto3" json:"source_event,omitempty"`
+	// NWS fire-weather zones it covers.
+	Zones         []string `protobuf:"bytes,3,rep,name=zones,proto3" json:"zones,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1718,11 +2096,16 @@ func (x *FireWeatherDetail) GetZones() []string {
 	return nil
 }
 
+// EarthquakeDetail is the EARTHQUAKE detail block. The USGS event page is the
+// envelope `canonicalUrl`.
 type EarthquakeDetail struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Magnitude     float64                `protobuf:"fixed64,1,opt,name=magnitude,proto3" json:"magnitude,omitempty"`
-	DepthKm       float64                `protobuf:"fixed64,2,opt,name=depth_km,json=depthKm,proto3" json:"depth_km,omitempty"`
-	Felt          int32                  `protobuf:"varint,3,opt,name=felt,proto3" json:"felt,omitempty"` // USGS DYFI felt-report count
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Magnitude.
+	Magnitude float64 `protobuf:"fixed64,1,opt,name=magnitude,proto3" json:"magnitude,omitempty"`
+	// Hypocentre depth in kilometres.
+	DepthKm float64 `protobuf:"fixed64,2,opt,name=depth_km,json=depthKm,proto3" json:"depth_km,omitempty"`
+	// Number of USGS "Did You Feel It?" reports. 0 when none.
+	Felt          int32 `protobuf:"varint,3,opt,name=felt,proto3" json:"felt,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1778,16 +2161,25 @@ func (x *EarthquakeDetail) GetFelt() int32 {
 	return 0
 }
 
-// Kind-specific only. The incident type is the envelope `category`, the human
-// location is `area_label`, and the short line is the `headline` — none are
-// repeated here.
+// RoadIncidentDetail is the ROAD_INCIDENT detail block, for a CHP incident or a
+// Caltrans lane-closure window. The incident type is the envelope `category`,
+// the location is `areaLabel`, and the short line is `headline`.
 type RoadIncidentDetail struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	LogNumber     string                 `protobuf:"bytes,1,opt,name=log_number,json=logNumber,proto3" json:"log_number,omitempty"`                                                        // CHP log number; for a Caltrans closure, its closure id
-	Impact        string                 `protobuf:"bytes,4,opt,name=impact,proto3" json:"impact,omitempty"`                                                                               // AI-assessed: none | light | moderate | severe
-	Duration      string                 `protobuf:"bytes,5,opt,name=duration,proto3" json:"duration,omitempty"`                                                                           // AI-assessed: unknown | < 1 hour | several hours | ongoing
-	Metadata      map[string]string      `protobuf:"bytes,7,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // structured extras from AI analysis (internal keys stripped)
-	Closure       *LaneClosureDetail     `protobuf:"bytes,8,opt,name=closure,proto3" json:"closure,omitempty"`                                                                             // Caltrans planned closures only (source `caltrans`)
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// CHP log number for an incident; for a Caltrans closure, its closure id.
+	LogNumber string `protobuf:"bytes,1,opt,name=log_number,json=logNumber,proto3" json:"log_number,omitempty"`
+	// AI-assessed traffic impact (CHP incidents only); it drives `severity`.
+	// Empty string for Caltrans closures and when not yet assessed.
+	Impact string `protobuf:"bytes,4,opt,name=impact,proto3" json:"impact,omitempty"`
+	// AI-estimated duration (CHP incidents only). Empty string when not assessed.
+	Duration string `protobuf:"bytes,5,opt,name=duration,proto3" json:"duration,omitempty"`
+	// Free-form extras from the AI analysis, string to string (keys such as
+	// `incident_type`, `lanes_blocked`, `injuries`). Keys vary; treat as display
+	// only. Empty object when none.
+	Metadata map[string]string `protobuf:"bytes,7,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// The Caltrans closure window, for source `caltrans` only; `null` for CHP
+	// incidents.
+	Closure       *LaneClosureDetail `protobuf:"bytes,8,opt,name=closure,proto3" json:"closure,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1857,46 +2249,64 @@ func (x *RoadIncidentDetail) GetClosure() *LaneClosureDetail {
 	return nil
 }
 
-// One Caltrans planned lane-closure WINDOW, read from the CWWP2 data portal.
-// Every field is upstream data; none of it is AI-generated.
+// LaneClosureDetail is one Caltrans planned lane-closure WINDOW from the CWWP2
+// data portal. Every field is Caltrans data; none of it is AI-generated.
 //
-// The unit is the window because Caltrans has no other one. A multi-day job is
-// one row per day, and neither closure_id nor log_number identifies a job:
-// closure_id is a route-level project id, and one log number can cover
-// windows at different places on different days, or be re-issued daily at
-// the same place. window_id is the only unique key.
-//
-// The planned window is an estimate that crews overrun, so planned_end is NOT
-// mapped onto the envelope `expires` (the same rule as PG&E's restoration
-// estimate). A set-up closure stays ACTIVE until the crew radios it picked up,
-// or until planned_end plus a configured overrun grace (12h by default) passes
-// with no pickup call, when it is presumed picked up and RESOLVED. Indefinite
-// windows have no such bound.
+// A multi-day job is one window (one event) per day, and neither `closureId`
+// nor `logNumber` identifies a job; `windowId` is the only unique key. A window
+// is SCHEDULED until the crew radios it set up (`setUpAt`), then ACTIVE until
+// they radio it picked up, or until `plannedEnd` plus a 12-hour overrun grace
+// passes with no pickup call, when it is presumed over and RESOLVED. The
+// planned end is an estimate crews overrun, so it is never mapped onto the
+// envelope `expires`.
 type LaneClosureDetail struct {
-	state                 protoimpl.MessageState `protogen:"open.v1"`
-	WindowId              string                 `protobuf:"bytes,1,opt,name=window_id,json=windowId,proto3" json:"window_id,omitempty"`                                            // CWWP2 index: "C4QB-0004-2026-10-02-07:01:00"
-	District              int32                  `protobuf:"varint,2,opt,name=district,proto3" json:"district,omitempty"`                                                           // Caltrans district whose feed listed it
-	ClosureId             string                 `protobuf:"bytes,3,opt,name=closure_id,json=closureId,proto3" json:"closure_id,omitempty"`                                         // route-level project id ("C4QB"); not unique
-	LogNumber             string                 `protobuf:"bytes,4,opt,name=log_number,json=logNumber,proto3" json:"log_number,omitempty"`                                         // per-project request number ("4"); not unique
-	Route                 string                 `protobuf:"bytes,5,opt,name=route,proto3" json:"route,omitempty"`                                                                  // "SR-4", "US-50"
-	Direction             string                 `protobuf:"bytes,6,opt,name=direction,proto3" json:"direction,omitempty"`                                                          // travel flow, verbatim: "East / West", "North"
-	Facility              string                 `protobuf:"bytes,7,opt,name=facility,proto3" json:"facility,omitempty"`                                                            // "Conventional Hwy" | "On Ramp" | "Off Ramp" | ...
-	ClosureType           string                 `protobuf:"bytes,8,opt,name=closure_type,json=closureType,proto3" json:"closure_type,omitempty"`                                   // "Full" | "Lane" | "One-Way Traffic" | "Alternating Lanes" | ...
-	WorkType              string                 `protobuf:"bytes,9,opt,name=work_type,json=workType,proto3" json:"work_type,omitempty"`                                            // "Drainage Work", "Tree Work", ...
-	LanesClosed           string                 `protobuf:"bytes,10,opt,name=lanes_closed,json=lanesClosed,proto3" json:"lanes_closed,omitempty"`                                  // verbatim: "1, RShoulder", "All", "Rt Turn Ln"
-	TotalLanes            int32                  `protobuf:"varint,11,opt,name=total_lanes,json=totalLanes,proto3" json:"total_lanes,omitempty"`                                    // lanes at the site; 0 when not reported
-	EstimatedDelayMinutes int32                  `protobuf:"varint,12,opt,name=estimated_delay_minutes,json=estimatedDelayMinutes,proto3" json:"estimated_delay_minutes,omitempty"` // 0 when none or not reported
-	ClosureDuration       string                 `protobuf:"bytes,13,opt,name=closure_duration,json=closureDuration,proto3" json:"closure_duration,omitempty"`                      // "Standard" | "Long Term" | "Intermittent"
-	PlannedStart          *timestamppb.Timestamp `protobuf:"bytes,14,opt,name=planned_start,json=plannedStart,proto3" json:"planned_start,omitempty"`
-	PlannedEnd            *timestamppb.Timestamp `protobuf:"bytes,15,opt,name=planned_end,json=plannedEnd,proto3" json:"planned_end,omitempty"` // absent when end_indefinite
-	EndIndefinite         bool                   `protobuf:"varint,16,opt,name=end_indefinite,json=endIndefinite,proto3" json:"end_indefinite,omitempty"`
-	SetUpAt               *timestamppb.Timestamp `protobuf:"bytes,17,opt,name=set_up_at,json=setUpAt,proto3" json:"set_up_at,omitempty"`                 // the 10-97 call: crew on scene, closure in place
-	BeginLocation         string                 `protobuf:"bytes,18,opt,name=begin_location,json=beginLocation,proto3" json:"begin_location,omitempty"` // "Avery"
-	EndLocation           string                 `protobuf:"bytes,19,opt,name=end_location,json=endLocation,proto3" json:"end_location,omitempty"`       // equals begin_location for a closure at one spot
-	Begin                 *LatLng                `protobuf:"bytes,20,opt,name=begin,proto3" json:"begin,omitempty"`
-	End                   *LatLng                `protobuf:"bytes,21,opt,name=end,proto3" json:"end,omitempty"`
-	unknownFields         protoimpl.UnknownFields
-	sizeCache             protoimpl.SizeCache
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// CWWP2 window id, unique per window.
+	WindowId string `protobuf:"bytes,1,opt,name=window_id,json=windowId,proto3" json:"window_id,omitempty"`
+	// Caltrans district whose feed listed it (3 or 10 here).
+	District int32 `protobuf:"varint,2,opt,name=district,proto3" json:"district,omitempty"`
+	// Route-level project id. Not unique.
+	ClosureId string `protobuf:"bytes,3,opt,name=closure_id,json=closureId,proto3" json:"closure_id,omitempty"`
+	// Per-project request number. Not unique.
+	LogNumber string `protobuf:"bytes,4,opt,name=log_number,json=logNumber,proto3" json:"log_number,omitempty"`
+	// Route, e.g. "SR-4", "US-50".
+	Route string `protobuf:"bytes,5,opt,name=route,proto3" json:"route,omitempty"`
+	// Travel direction, verbatim, e.g. "East / West", "North".
+	Direction string `protobuf:"bytes,6,opt,name=direction,proto3" json:"direction,omitempty"`
+	// Facility, verbatim: "Conventional Hwy", "On Ramp", "Off Ramp", ...
+	Facility string `protobuf:"bytes,7,opt,name=facility,proto3" json:"facility,omitempty"`
+	// Closure type, verbatim: "Full", "Lane", "One-Way Traffic", "Alternating
+	// Lanes", "Moving", ...
+	ClosureType string `protobuf:"bytes,8,opt,name=closure_type,json=closureType,proto3" json:"closure_type,omitempty"`
+	// Work being done, e.g. "Drainage Work", "Tree Work".
+	WorkType string `protobuf:"bytes,9,opt,name=work_type,json=workType,proto3" json:"work_type,omitempty"`
+	// Lanes closed, verbatim: "1, RShoulder", "All", "Rt Turn Ln".
+	LanesClosed string `protobuf:"bytes,10,opt,name=lanes_closed,json=lanesClosed,proto3" json:"lanes_closed,omitempty"`
+	// Number of lanes at the site. 0 when not reported.
+	TotalLanes int32 `protobuf:"varint,11,opt,name=total_lanes,json=totalLanes,proto3" json:"total_lanes,omitempty"`
+	// Caltrans's delay estimate in minutes. 0 when none or not reported.
+	EstimatedDelayMinutes int32 `protobuf:"varint,12,opt,name=estimated_delay_minutes,json=estimatedDelayMinutes,proto3" json:"estimated_delay_minutes,omitempty"`
+	// How the closure runs.
+	ClosureDuration string `protobuf:"bytes,13,opt,name=closure_duration,json=closureDuration,proto3" json:"closure_duration,omitempty"`
+	// Planned start of the window.
+	PlannedStart *timestamppb.Timestamp `protobuf:"bytes,14,opt,name=planned_start,json=plannedStart,proto3" json:"planned_start,omitempty"`
+	// Planned end of the window. `null` when `endIndefinite`.
+	PlannedEnd *timestamppb.Timestamp `protobuf:"bytes,15,opt,name=planned_end,json=plannedEnd,proto3" json:"planned_end,omitempty"`
+	// True when the window has no planned end.
+	EndIndefinite bool `protobuf:"varint,16,opt,name=end_indefinite,json=endIndefinite,proto3" json:"end_indefinite,omitempty"`
+	// When the crew radioed the closure set up (the 10-97 call). `null` while it
+	// is SCHEDULED.
+	SetUpAt *timestamppb.Timestamp `protobuf:"bytes,17,opt,name=set_up_at,json=setUpAt,proto3" json:"set_up_at,omitempty"`
+	// Where the closure starts, verbatim, e.g. "Avery".
+	BeginLocation string `protobuf:"bytes,18,opt,name=begin_location,json=beginLocation,proto3" json:"begin_location,omitempty"`
+	// Where it ends; equals `beginLocation` for a closure at one spot.
+	EndLocation string `protobuf:"bytes,19,opt,name=end_location,json=endLocation,proto3" json:"end_location,omitempty"`
+	// Start point.
+	Begin *LatLng `protobuf:"bytes,20,opt,name=begin,proto3" json:"begin,omitempty"`
+	// End point.
+	End           *LatLng `protobuf:"bytes,21,opt,name=end,proto3" json:"end,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *LaneClosureDetail) Reset() {
@@ -2076,25 +2486,43 @@ func (x *LaneClosureDetail) GetEnd() *LatLng {
 	return nil
 }
 
-// MeshCore mesh-node presence (Layer_MESH). One event per node, keyed by
-// its Ed25519 public key. Stable identity + advertised location live here (and
-// mint a revision on change); the per-packet signal metrics live in the nested
-// MeshTelemetry, which the store's ContentHash zeroes — so the firehose of
-// adverts refreshes liveness (last_seen_at) without ever writing a revision.
+// MeshDetail is the MESH detail block, for one MeshCore radio node, keyed by its
+// Ed25519 public key.
+//
+// Identity, location and reachability changes write a revision. The volatile
+// signal readings in `telemetry` change constantly without one.
+//
+// (-- Stable identity + advertised location live here (and mint a revision on
+// change); the per-packet signal metrics live in the nested MeshTelemetry,
+// which the store's ContentHash zeroes, so the firehose of adverts refreshes
+// liveness (last_seen_at) without ever writing a revision. --)
 type MeshDetail struct {
-	state     protoimpl.MessageState `protogen:"open.v1"`
-	PublicKey string                 `protobuf:"bytes,1,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"` // full Ed25519 public key, hex (also the Event.id native part)
-	NodeType  string                 `protobuf:"bytes,2,opt,name=node_type,json=nodeType,proto3" json:"node_type,omitempty"`    // companion | repeater | room_server | sensor
-	Name      string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`                            // advertised node name
-	Telemetry *MeshTelemetry         `protobuf:"bytes,4,opt,name=telemetry,proto3" json:"telemetry,omitempty"`                  // VOLATILE — excluded from the content hash
-	// Whether an operator-run monitor could reach this node's admin interface.
-	// HASHED, unlike everything else an operator reports: a repeater going
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Full Ed25519 public key, 64 lowercase hex characters. It is also the native
+	// half of the event id (`meshcore:{publicKey}`) and the `node` parameter of
+	// `GET /api/v1/mesh/telemetry`.
+	PublicKey string `protobuf:"bytes,1,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"`
+	// Node role as advertised. Repeaters and room servers relay traffic;
+	// companions and sensors do not.
+	NodeType string `protobuf:"bytes,2,opt,name=node_type,json=nodeType,proto3" json:"node_type,omitempty"`
+	// Name the node advertises. Free text and can include emoji.
+	Name string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	// Signal readings and activity clocks. These change without a new revision.
+	//
+	// (-- VOLATILE — excluded from the content hash. --)
+	Telemetry *MeshTelemetry `protobuf:"bytes,4,opt,name=telemetry,proto3" json:"telemetry,omitempty"`
+	// Whether an operator-run monitor can reach this node's admin interface.
+	// MESH_REACHABILITY_UNSPECIFIED for the many nodes no monitor watches. A
+	// change writes a revision, so the history answers "how often is this
+	// repeater down?".
+	//
+	// (-- HASHED, unlike everything else an operator reports: a repeater going
 	// unreachable is a real lifecycle change worth a revision and a history entry
 	// ("how often is Lilac Park down?"), which is exactly what the telemetry block
 	// below can never answer. Derived with hysteresis in internal/ingest (never the
 	// raw per-poll `online` bool, which flaps on a marginal node and would mint a
 	// revision each way). UNSPECIFIED for a node no monitor watches — the MQTT
-	// advert firehose cannot express "I tried and could not reach it".
+	// advert firehose cannot express "I tried and could not reach it". --)
 	Reachability  MeshReachability `protobuf:"varint,5,opt,name=reachability,proto3,enum=grid.v1.MeshReachability" json:"reachability,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -2165,61 +2593,81 @@ func (x *MeshDetail) GetReachability() MeshReachability {
 	return MeshReachability_MESH_REACHABILITY_UNSPECIFIED
 }
 
-// MeshTelemetry is the volatile, per-advert signal state. It is deliberately
-// grouped into one sub-message so store.ContentHash can zero the whole field:
-// none of it mints a revision.
+// MeshTelemetry is a mesh node's volatile signal state and activity clocks. None
+// of it writes a revision, so history snapshots do not reflect it.
+//
+// For "is this node up right now", use `lastRelayedAt` (repeaters relay
+// constantly but advertise only every day or two), then `lastHeardAt`; never
+// the event's `observedAt`.
+//
+// (-- It is deliberately grouped into one sub-message so store.ContentHash can
+// zero the whole field: none of it mints a revision. --)
 type MeshTelemetry struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Wrapper types, not bare scalars, for the reason the admin gauges below are:
-	// under the gateway's EmitUnpopulated marshaler an unset scalar is published
-	// as 0, and here that 0 is a claim. A node an operator's monitor reports but
-	// no MQTT bridge has ever heard was going out as `snr: 0, rssi: 0,
+	// Signal-to-noise ratio of the last advert, in dB, as a listening gateway
+	// reported it. Nullable: `null` unless an MQTT bridge heard the advert (then
+	// `lastAdvertAt` is set too).
+	//
+	// (-- Wrapper types, not bare scalars, for the reason the admin gauges below
+	// are: under the gateway's EmitUnpopulated marshaler an unset scalar is
+	// published as 0, and here that 0 is a claim. A node an operator's monitor
+	// reports but no MQTT bridge has ever heard was going out as `snr: 0, rssi: 0,
 	// hopCount: 0` — a reading of 0 dB, heard DIRECT, for a node the mesh has not
 	// heard at all (observed live 2026-09-15 on three of nine monitored
 	// repeaters). hop_count makes it sharpest: 0 hops is a real and meaningful
-	// reading, so it cannot double as "unknown".
+	// reading, so it cannot double as "unknown". --)
+	Snr *wrapperspb.DoubleValue `protobuf:"bytes,1,opt,name=snr,proto3" json:"snr,omitempty"`
+	// Received signal strength of the last advert, in dBm, gateway-reported.
+	// Nullable, like `snr`.
+	Rssi *wrapperspb.Int32Value `protobuf:"bytes,2,opt,name=rssi,proto3" json:"rssi,omitempty"`
+	// Hops the last-heard advert travelled; 0 means heard directly. Nullable,
+	// like `snr`: `null` is unknown, not zero hops.
+	HopCount *wrapperspb.UInt32Value `protobuf:"bytes,3,opt,name=hop_count,json=hopCount,proto3" json:"hop_count,omitempty"`
+	// Ids of the gateways (observer node keys, uppercase hex) that heard the node.
+	Gateways []string `protobuf:"bytes,5,rep,name=gateways,proto3" json:"gateways,omitempty"`
+	// Time stamped by the node itself on its last advert (the node's clock, which
+	// can be wrong). `null` if no bridge has heard an advert.
+	LastAdvertAt *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=last_advert_at,json=lastAdvertAt,proto3" json:"last_advert_at,omitempty"`
+	// Latest reading from an operator-run monitor that logs into the node's admin
+	// interface. `null` for nodes no monitor watches. The full series is at
+	// `GET /api/v1/mesh/telemetry?node={publicKey}`.
 	//
-	// Absent now means absent: these are null unless an MQTT bridge reported the
-	// advert they came from, which `last_advert_at` also marks.
-	Snr          *wrapperspb.DoubleValue `protobuf:"bytes,1,opt,name=snr,proto3" json:"snr,omitempty"`                                         // last SNR (dB), gateway-reported
-	Rssi         *wrapperspb.Int32Value  `protobuf:"bytes,2,opt,name=rssi,proto3" json:"rssi,omitempty"`                                       // last RSSI (dBm), gateway-reported
-	HopCount     *wrapperspb.UInt32Value `protobuf:"bytes,3,opt,name=hop_count,json=hopCount,proto3" json:"hop_count,omitempty"`               // path length of the last-heard advert
-	Gateways     []string                `protobuf:"bytes,5,rep,name=gateways,proto3" json:"gateways,omitempty"`                               // origin ids of the gateways/brokers that heard it
-	LastAdvertAt *timestamppb.Timestamp  `protobuf:"bytes,6,opt,name=last_advert_at,json=lastAdvertAt,proto3" json:"last_advert_at,omitempty"` // sender-stamped time of the last advert
-	// The last sample pushed by an operator-run monitor that logs into the node's
-	// admin interface (internal/pushingest). Nested HERE, inside the block
-	// ContentHash zeroes, because every field of it is a counter or a gauge that
-	// moves on every report: hashed, a 5-minute reporting cadence would mint ~288
-	// revisions per node per day and say nothing.
+	// (-- Nested HERE, inside the block ContentHash zeroes, because every field of
+	// it is a counter or a gauge that moves on every report: hashed, a 5-minute
+	// reporting cadence would mint ~288 revisions per node per day and say
+	// nothing. --)
 	Admin *MeshAdminTelemetry `protobuf:"bytes,8,opt,name=admin,proto3" json:"admin,omitempty"`
-	// When WE last received one of this node's own adverts (our clock, not the
-	// node's: compare last_advert_at). This is the answer to "when did the node
-	// last speak". The event's observed_at is NOT: it moves only when something
+	// When the Grid last received one of this node's own adverts, by our clock
+	// (compare `lastAdvertAt`, the node's clock). Answers "when did the node last
+	// speak". `null` when no advert has been received since activity tracking
+	// began. Filled at read time on current events only; history revisions do not
+	// carry it.
+	//
+	// (-- The event's observed_at is NOT this: it moves only when something
 	// hashed changes (identity, position, reachability), so a node advertising
-	// the same thing every day kept an observed_at days old.
-	//
-	// Read-time only. Filled from the store's mesh_activity table when the event
-	// is served and never written into the event blob, so it mints no revision
-	// and costs no blob rewrite. Null when no advert has been received since
-	// activity tracking began.
+	// the same thing every day kept an observed_at days old. Read-time only:
+	// filled from the store's mesh_activity table when the event is served and
+	// never written into the event blob, so it mints no revision and costs no
+	// blob rewrite. --)
 	LastHeardAt *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=last_heard_at,json=lastHeardAt,proto3" json:"last_heard_at,omitempty"`
-	// When we last received a packet that this node had RELAYED: its key's hash
-	// appeared as a hop in the path of a FLOOD-routed packet of any type
-	// (messages, acks, path returns, adverts). A backbone repeater adverts every
-	// day or two but relays constantly, so this, not last_heard_at, is what says
-	// a repeater is up right now.
+	// When the Grid last received a packet this node RELAYED, by our clock. A
+	// repeater advertises every day or two but relays constantly, so this is the
+	// clock that says it is up right now. `null` when no relay has been
+	// attributed. Read-time only, like `lastHeardAt`.
 	//
-	// Two limits, both deliberate. A hop is credited only when exactly one
-	// relay-capable node fits it: a 2- or 3-byte hash by unique prefix, a 1-byte
-	// hash only as the one known neighbour of the next hop along (the observer
-	// heard the last hop directly) that carries the byte. A node seen only on
-	// 1-byte paths beside nodes it has never been linked to gets no relay time.
-	// And direct-routed packets never count: their path is the route still to be
-	// travelled, not the one travelled, so a hop there may never have heard the
-	// packet. A relay also keeps an already-known node PRESENT (ACTIVE) for
-	// grid.meshcore.relayPresence after it, the way an advert does; it never
-	// creates a node or changes its identity or position. Read-time only, like
-	// last_heard_at; null when no relay has been attributed.
+	// A hop is credited only when exactly one relay-capable node fits it, so a
+	// node whose traffic is ambiguous gets no relay time (it reads older than on
+	// other mesh tools). Flood-routed packets of any type credit every hop; a
+	// direct-routed packet's remaining route credits its 2- and 3-byte hops only.
+	// A relay also keeps a known node ACTIVE for a while after it, the way an
+	// advert does; it never creates a node or changes its name or position.
+	//
+	// (-- Flood hops: a 2- or 3-byte hash by unique prefix, a 1-byte hash only as
+	// the one known neighbour of the next hop along (the observer heard the last
+	// hop directly) that carries the byte. Direct routes: prefix only, never a
+	// 1-byte hop, never taught to the neighbour graph (FrameHeader.RouteHops).
+	// Presence window: grid.meshcore.relayPresence. See "Two activity clocks" and
+	// "Relay presence" in internal/ingest/CLAUDE.md. --)
 	LastRelayedAt *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=last_relayed_at,json=lastRelayedAt,proto3" json:"last_relayed_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -2311,50 +2759,77 @@ func (x *MeshTelemetry) GetLastRelayedAt() *timestamppb.Timestamp {
 	return nil
 }
 
-// MeshAdminTelemetry is one sample read off a node's own admin interface by an
-// operator-run monitor and pushed to POST /api/v1/ingest/mesh.repeater. It is
-// the node's self-reported view, which is why it duplicates rather than
-// overwrites the gateway-reported snr/rssi above: those are what a distant
-// listener heard, these are what the node itself measured.
+// MeshAdminTelemetry is one reading taken from a node's own admin interface by an
+// operator-run monitor. It is the node's self-reported view, which is why it
+// sits beside rather than replaces the gateway-reported `snr`/`rssi`: those are
+// what a distant listener heard, these are what the node measured.
 //
-// Gauges are wrapper types, not bare scalars, so "the monitor could not read
-// this" (null) stays distinguishable from a real zero — a 0% battery and an
-// unknown battery must never render alike. Same reasoning as the place summary's
-// activeEvacuations. Counters are lifetime-since-boot and plain: a node that has
-// sent nothing genuinely has sent zero.
+// Gauges are nullable: `null` means the monitor could not read it, which is not
+// the same as 0 (a 0% battery and an unknown battery must not render alike).
+// Counters are plain, count since the node's last boot (they reset at a
+// reboot), and are 64-bit, so they arrive as JSON STRINGS.
 type MeshAdminTelemetry struct {
-	state          protoimpl.MessageState  `protogen:"open.v1"`
-	ReporterId     string                  `protobuf:"bytes,1,opt,name=reporter_id,json=reporterId,proto3" json:"reporter_id,omitempty"`            // which monitor reported it (config id)
-	ReportedAt     *timestamppb.Timestamp  `protobuf:"bytes,2,opt,name=reported_at,json=reportedAt,proto3" json:"reported_at,omitempty"`            // when the monitor generated the report
-	LastSuccessAt  *timestamppb.Timestamp  `protobuf:"bytes,3,opt,name=last_success_at,json=lastSuccessAt,proto3" json:"last_success_at,omitempty"` // monitor's last successful read of THIS node
-	LastAttemptAt  *timestamppb.Timestamp  `protobuf:"bytes,4,opt,name=last_attempt_at,json=lastAttemptAt,proto3" json:"last_attempt_at,omitempty"` // monitor's last attempt, successful or not
-	BatteryVolts   *wrapperspb.DoubleValue `protobuf:"bytes,10,opt,name=battery_volts,json=batteryVolts,proto3" json:"battery_volts,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Which monitor reported it (its registry id, also a row on `/api/v1/sources`).
+	ReporterId string `protobuf:"bytes,1,opt,name=reporter_id,json=reporterId,proto3" json:"reporter_id,omitempty"`
+	// When the monitor produced the report. In the archive this is the sample's
+	// own time.
+	ReportedAt *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=reported_at,json=reportedAt,proto3" json:"reported_at,omitempty"`
+	// The monitor's last successful read of this node. Can be `null` (always
+	// `null` on archived samples).
+	LastSuccessAt *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=last_success_at,json=lastSuccessAt,proto3" json:"last_success_at,omitempty"`
+	// The monitor's last attempt to read this node, successful or not. Can be
+	// `null` (always `null` on archived samples).
+	LastAttemptAt *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=last_attempt_at,json=lastAttemptAt,proto3" json:"last_attempt_at,omitempty"`
+	// Battery voltage in volts. Nullable.
+	BatteryVolts *wrapperspb.DoubleValue `protobuf:"bytes,10,opt,name=battery_volts,json=batteryVolts,proto3" json:"battery_volts,omitempty"`
+	// Battery charge in percent, 0-100. Nullable. See `batteryPercentSource`.
 	BatteryPercent *wrapperspb.DoubleValue `protobuf:"bytes,11,opt,name=battery_percent,json=batteryPercent,proto3" json:"battery_percent,omitempty"`
-	// "measured" | "estimated" — an estimate derived from voltage is not a reading,
-	// and a UI that shows 97% should be able to say which it is.
-	BatteryPercentSource string                  `protobuf:"bytes,12,opt,name=battery_percent_source,json=batteryPercentSource,proto3" json:"battery_percent_source,omitempty"`
-	TemperatureC         *wrapperspb.DoubleValue `protobuf:"bytes,13,opt,name=temperature_c,json=temperatureC,proto3" json:"temperature_c,omitempty"`
-	Humidity             *wrapperspb.DoubleValue `protobuf:"bytes,14,opt,name=humidity,proto3" json:"humidity,omitempty"`
-	Pressure             *wrapperspb.DoubleValue `protobuf:"bytes,15,opt,name=pressure,proto3" json:"pressure,omitempty"`
-	NoiseFloorDbm        *wrapperspb.Int32Value  `protobuf:"bytes,16,opt,name=noise_floor_dbm,json=noiseFloorDbm,proto3" json:"noise_floor_dbm,omitempty"`
-	LastSnrDb            *wrapperspb.DoubleValue `protobuf:"bytes,17,opt,name=last_snr_db,json=lastSnrDb,proto3" json:"last_snr_db,omitempty"`       // node-measured, cf. telemetry.snr
-	LastRssiDbm          *wrapperspb.Int32Value  `protobuf:"bytes,18,opt,name=last_rssi_dbm,json=lastRssiDbm,proto3" json:"last_rssi_dbm,omitempty"` // node-measured, cf. telemetry.rssi
-	TxQueueLen           *wrapperspb.Int32Value  `protobuf:"bytes,19,opt,name=tx_queue_len,json=txQueueLen,proto3" json:"tx_queue_len,omitempty"`
-	UptimeSeconds        int64                   `protobuf:"varint,30,opt,name=uptime_seconds,json=uptimeSeconds,proto3" json:"uptime_seconds,omitempty"`
-	AirtimeMs            int64                   `protobuf:"varint,31,opt,name=airtime_ms,json=airtimeMs,proto3" json:"airtime_ms,omitempty"`
-	RxAirtimeMs          int64                   `protobuf:"varint,32,opt,name=rx_airtime_ms,json=rxAirtimeMs,proto3" json:"rx_airtime_ms,omitempty"`
-	PacketsSent          int64                   `protobuf:"varint,33,opt,name=packets_sent,json=packetsSent,proto3" json:"packets_sent,omitempty"`             // nb_sent
-	PacketsReceived      int64                   `protobuf:"varint,34,opt,name=packets_received,json=packetsReceived,proto3" json:"packets_received,omitempty"` // nb_recv
-	SentFlood            int64                   `protobuf:"varint,35,opt,name=sent_flood,json=sentFlood,proto3" json:"sent_flood,omitempty"`
-	SentDirect           int64                   `protobuf:"varint,36,opt,name=sent_direct,json=sentDirect,proto3" json:"sent_direct,omitempty"`
-	RecvFlood            int64                   `protobuf:"varint,37,opt,name=recv_flood,json=recvFlood,proto3" json:"recv_flood,omitempty"`
-	RecvDirect           int64                   `protobuf:"varint,38,opt,name=recv_direct,json=recvDirect,proto3" json:"recv_direct,omitempty"`
-	DirectDups           int64                   `protobuf:"varint,39,opt,name=direct_dups,json=directDups,proto3" json:"direct_dups,omitempty"`
-	FloodDups            int64                   `protobuf:"varint,40,opt,name=flood_dups,json=floodDups,proto3" json:"flood_dups,omitempty"`
-	FullEvents           int64                   `protobuf:"varint,41,opt,name=full_events,json=fullEvents,proto3" json:"full_events,omitempty"` // full_evts — queue-overflow events
-	RecvErrors           int64                   `protobuf:"varint,42,opt,name=recv_errors,json=recvErrors,proto3" json:"recv_errors,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	// Whether `batteryPercent` was measured by the node or estimated from
+	// voltage. Empty string when no percentage is reported.
+	BatteryPercentSource string `protobuf:"bytes,12,opt,name=battery_percent_source,json=batteryPercentSource,proto3" json:"battery_percent_source,omitempty"`
+	// Temperature in degrees Celsius. Nullable.
+	TemperatureC *wrapperspb.DoubleValue `protobuf:"bytes,13,opt,name=temperature_c,json=temperatureC,proto3" json:"temperature_c,omitempty"`
+	// Relative humidity in percent. Nullable (most nodes have no sensor).
+	Humidity *wrapperspb.DoubleValue `protobuf:"bytes,14,opt,name=humidity,proto3" json:"humidity,omitempty"`
+	// Barometric pressure in hPa. Nullable (most nodes have no sensor).
+	Pressure *wrapperspb.DoubleValue `protobuf:"bytes,15,opt,name=pressure,proto3" json:"pressure,omitempty"`
+	// Radio noise floor in dBm. Nullable.
+	NoiseFloorDbm *wrapperspb.Int32Value `protobuf:"bytes,16,opt,name=noise_floor_dbm,json=noiseFloorDbm,proto3" json:"noise_floor_dbm,omitempty"`
+	// SNR of the last packet the node itself received, in dB. Nullable.
+	LastSnrDb *wrapperspb.DoubleValue `protobuf:"bytes,17,opt,name=last_snr_db,json=lastSnrDb,proto3" json:"last_snr_db,omitempty"`
+	// RSSI of the last packet the node itself received, in dBm. Nullable.
+	LastRssiDbm *wrapperspb.Int32Value `protobuf:"bytes,18,opt,name=last_rssi_dbm,json=lastRssiDbm,proto3" json:"last_rssi_dbm,omitempty"`
+	// Packets waiting in the transmit queue. Nullable.
+	TxQueueLen *wrapperspb.Int32Value `protobuf:"bytes,19,opt,name=tx_queue_len,json=txQueueLen,proto3" json:"tx_queue_len,omitempty"`
+	// Seconds since the node booted. A decrease between samples is a reboot.
+	UptimeSeconds int64 `protobuf:"varint,30,opt,name=uptime_seconds,json=uptimeSeconds,proto3" json:"uptime_seconds,omitempty"`
+	// Milliseconds spent transmitting since boot.
+	AirtimeMs int64 `protobuf:"varint,31,opt,name=airtime_ms,json=airtimeMs,proto3" json:"airtime_ms,omitempty"`
+	// Milliseconds spent receiving since boot.
+	RxAirtimeMs int64 `protobuf:"varint,32,opt,name=rx_airtime_ms,json=rxAirtimeMs,proto3" json:"rx_airtime_ms,omitempty"`
+	// Packets sent since boot.
+	PacketsSent int64 `protobuf:"varint,33,opt,name=packets_sent,json=packetsSent,proto3" json:"packets_sent,omitempty"`
+	// Packets received since boot.
+	PacketsReceived int64 `protobuf:"varint,34,opt,name=packets_received,json=packetsReceived,proto3" json:"packets_received,omitempty"`
+	// Flood-routed packets sent since boot.
+	SentFlood int64 `protobuf:"varint,35,opt,name=sent_flood,json=sentFlood,proto3" json:"sent_flood,omitempty"`
+	// Direct-routed packets sent since boot.
+	SentDirect int64 `protobuf:"varint,36,opt,name=sent_direct,json=sentDirect,proto3" json:"sent_direct,omitempty"`
+	// Flood-routed packets received since boot.
+	RecvFlood int64 `protobuf:"varint,37,opt,name=recv_flood,json=recvFlood,proto3" json:"recv_flood,omitempty"`
+	// Direct-routed packets received since boot.
+	RecvDirect int64 `protobuf:"varint,38,opt,name=recv_direct,json=recvDirect,proto3" json:"recv_direct,omitempty"`
+	// Duplicate direct-routed packets dropped since boot.
+	DirectDups int64 `protobuf:"varint,39,opt,name=direct_dups,json=directDups,proto3" json:"direct_dups,omitempty"`
+	// Duplicate flood-routed packets dropped since boot.
+	FloodDups int64 `protobuf:"varint,40,opt,name=flood_dups,json=floodDups,proto3" json:"flood_dups,omitempty"`
+	// Transmit-queue overflow events since boot.
+	FullEvents int64 `protobuf:"varint,41,opt,name=full_events,json=fullEvents,proto3" json:"full_events,omitempty"`
+	// Receive errors (undecodable packets) since boot.
+	RecvErrors    int64 `protobuf:"varint,42,opt,name=recv_errors,json=recvErrors,proto3" json:"recv_errors,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *MeshAdminTelemetry) Reset() {
@@ -2576,41 +3051,59 @@ func (x *MeshAdminTelemetry) GetRecvErrors() int64 {
 	return 0
 }
 
-// PG&E electric outages and Public Safety Power Shutoffs (Layer_POWER). One
-// message covers both, because they are the same thing to a reader — the power
-// is out, or is about to be — and they differ only in which block is populated:
-// an unplanned/planned outage carries outage_id + crew_status, a PSPS carries
-// the event/stage/de-energization window. The envelope `category`
-// (unplanned|planned|psps) says which.
+// PowerDetail is the POWER detail block, for a PG&E outage or a Public Safety
+// Power Shutoff (PSPS). The envelope `category` says which: `unplanned` and
+// `planned` outages fill the outage fields; `psps` fills the PSPS fields. The
+// other group is zero, empty or `null`.
+//
+// Every PG&E time here is an estimate PG&E often overruns, so none of them is
+// mapped onto the envelope `expires` or drives the lifecycle.
 type PowerDetail struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// --- outage (source `pge`) ---
-	OutageId          string `protobuf:"bytes,1,opt,name=outage_id,json=outageId,proto3" json:"outage_id,omitempty"`                             // PG&E OUTAGE_ID, the native id half of "pge:{id}"
-	Cause             string `protobuf:"bytes,2,opt,name=cause,proto3" json:"cause,omitempty"`                                                   // raw PG&E code: "PLNND SHUTDOWN", "TREE CONTACT", "FIRE"
-	CustomersAffected int32  `protobuf:"varint,3,opt,name=customers_affected,json=customersAffected,proto3" json:"customers_affected,omitempty"` // EST_CUSTOMERS (statewide median is 1 — see the severity mapping)
-	CrewStatus        string `protobuf:"bytes,4,opt,name=crew_status,json=crewStatus,proto3" json:"crew_status,omitempty"`                       // "Awaiting T-Man" | "Crew On Site" | "No Access" | …
-	// Estimated time of restoration. This is an ESTIMATE and is routinely wrong
-	// (observed: an ETOR of 19:00Z on an outage still active at 22:00Z), so it is
-	// deliberately NOT mapped onto the envelope `expires`: `expires` is what
-	// shouldExpire terminates an event on, and a missed estimate must never
-	// retire a live outage.
+	// PG&E outage id, the native half of `pge:{id}`. Empty string for PSPS.
+	OutageId string `protobuf:"bytes,1,opt,name=outage_id,json=outageId,proto3" json:"outage_id,omitempty"`
+	// Raw PG&E cause code, e.g. "PLNND SHUTDOWN", "TREE CONTACT", "EMERG REPAIRS".
+	// Empty string for PSPS.
+	Cause string `protobuf:"bytes,2,opt,name=cause,proto3" json:"cause,omitempty"`
+	// Estimated customers without power. 0 means PG&E gave no count. Statewide,
+	// the median outage affects one customer.
+	CustomersAffected int32 `protobuf:"varint,3,opt,name=customers_affected,json=customersAffected,proto3" json:"customers_affected,omitempty"`
+	// PG&E crew status, verbatim: "Awaiting T-Man", "T-Man On Site", "Crew On
+	// Site", "No Access", ... Empty string for PSPS.
+	CrewStatus string `protobuf:"bytes,4,opt,name=crew_status,json=crewStatus,proto3" json:"crew_status,omitempty"`
+	// PG&E's estimated time of restoration. An estimate that is often missed;
+	// `null` when not given.
+	//
+	// (-- Observed: an ETOR of 19:00Z on an outage still active at 22:00Z.
+	// `expires` is what shouldExpire terminates an event on, and a missed
+	// estimate must never retire a live outage. --)
 	EstimatedRestoration *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=estimated_restoration,json=estimatedRestoration,proto3" json:"estimated_restoration,omitempty"`
 	// --- PSPS (source `psps`) ---
-	EventId    string `protobuf:"bytes,6,opt,name=event_id,json=eventId,proto3" json:"event_id,omitempty"`          // PG&E PSPS EventID
-	EventName  string `protobuf:"bytes,7,opt,name=event_name,json=eventName,proto3" json:"event_name,omitempty"`    // "PSPS_05172026"
-	TimePeriod string `protobuf:"bytes,8,opt,name=time_period,json=timePeriod,proto3" json:"time_period,omitempty"` // "TP02_05172026" — the de-energization window slice
-	Stage      string `protobuf:"bytes,9,opt,name=stage,proto3" json:"stage,omitempty"`                             // Watch | Warning
-	// Medical-baseline customers in the footprint — people whose medical
-	// equipment depends on grid power. No other feed we carry reports this.
-	MedicalBaselineAffected int32                  `protobuf:"varint,10,opt,name=medical_baseline_affected,json=medicalBaselineAffected,proto3" json:"medical_baseline_affected,omitempty"`
-	DeEnergizationStart     *timestamppb.Timestamp `protobuf:"bytes,11,opt,name=de_energization_start,json=deEnergizationStart,proto3" json:"de_energization_start,omitempty"`
-	DeEnergizationEnd       *timestamppb.Timestamp `protobuf:"bytes,12,opt,name=de_energization_end,json=deEnergizationEnd,proto3" json:"de_energization_end,omitempty"`
-	// PG&E's all-clear time for the window. This is a PLANNED time, not proof the
-	// shutoff ended: it is populated on rows still at stage `Watch`, where it
-	// simply mirrors de_energization_end. It therefore MUST NOT drive lifecycle —
-	// resolving an event on it would clear a shutoff that is still on, which is
-	// the worst thing this layer could do. It is carried so a client can show the
-	// expected all-clear alongside the other estimates.
+	// PG&E PSPS event id. Empty string for outages.
+	EventId string `protobuf:"bytes,6,opt,name=event_id,json=eventId,proto3" json:"event_id,omitempty"`
+	// PG&E PSPS event name. Empty string for outages.
+	EventName string `protobuf:"bytes,7,opt,name=event_name,json=eventName,proto3" json:"event_name,omitempty"`
+	// The de-energization time-period slice this event covers. Empty string for
+	// outages.
+	TimePeriod string `protobuf:"bytes,8,opt,name=time_period,json=timePeriod,proto3" json:"time_period,omitempty"`
+	// PSPS stage: `Watch` (shutoff under consideration, MODERATE) or `Warning`
+	// (shutoff committed, SEVERE). Empty string for outages.
+	Stage string `protobuf:"bytes,9,opt,name=stage,proto3" json:"stage,omitempty"`
+	// Medical-baseline customers in the shutoff footprint: people whose medical
+	// equipment depends on grid power. No other feed reports this.
+	MedicalBaselineAffected int32 `protobuf:"varint,10,opt,name=medical_baseline_affected,json=medicalBaselineAffected,proto3" json:"medical_baseline_affected,omitempty"`
+	// Planned start of de-energization. `null` for outages.
+	DeEnergizationStart *timestamppb.Timestamp `protobuf:"bytes,11,opt,name=de_energization_start,json=deEnergizationStart,proto3" json:"de_energization_start,omitempty"`
+	// Planned end of de-energization (an estimate). `null` for outages.
+	DeEnergizationEnd *timestamppb.Timestamp `protobuf:"bytes,12,opt,name=de_energization_end,json=deEnergizationEnd,proto3" json:"de_energization_end,omitempty"`
+	// PG&E's planned all-clear time. A plan, not proof the shutoff ended: it is
+	// set even while the stage is still Watch. Never use it to decide the power
+	// is back; use `status`.
+	//
+	// (-- It is populated on rows still at stage `Watch`, where it simply mirrors
+	// de_energization_end. It therefore MUST NOT drive lifecycle: resolving an
+	// event on it would clear a shutoff that is still on. --)
 	AllClear      *timestamppb.Timestamp `protobuf:"bytes,13,opt,name=all_clear,json=allClear,proto3" json:"all_clear,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -2737,57 +3230,56 @@ func (x *PowerDetail) GetAllClear() *timestamppb.Timestamp {
 	return nil
 }
 
-// Residential/outdoor burning status for one county (Layer_BURN_STATUS).
+// BurnStatusDetail is the BURN_STATUS detail block: whether residential/outdoor
+// burning is allowed today in one county.
 //
-// TWO INDEPENDENT AUTHORITIES gate a legal burn, and BOTH must permit it:
+// Two independent authorities must BOTH permit a burn, and each is a separate
+// facet because they fail independently: `burnDay`, the county air district's
+// daily permissive-burn-day call (read from its recorded phone line), and
+// `calfireStatus`, CAL FIRE's seasonal suspension of burn permits on State
+// Responsibility Area land (changes about twice a year). `permission` combines
+// them pessimistically.
 //
-//  1. `burn_day` — the county air district's permissive-burn-day call, decided
-//     daily from meteorology and air quality. Flips weekly in winter/spring.
-//  2. `calfire_status` — CAL FIRE's seasonal suspension of residential burn
-//     permits on State Responsibility Area land. Moves about twice a year.
-//
-// They are carried separately, never merged into one upstream value, because
-// they fail independently: the county line can be unreachable while CAL FIRE's
-// page is fine, and vice versa. `permission` is the only derived answer, and it
-// is deliberately pessimistic (see below).
-//
-// This is AMBIENT state, not a hazard: the event exists for a county at all
-// times and is excluded from the summary hazard rollup, exactly like mesh-node
-// presence. Its VALUE is the revision history — "when did it change" is the
-// question this layer answers.
+// The event exists for each tracked county at all times, is always INFO and
+// ACTIVE, and is left out of the summary's hazard rollup (it has its own `burn`
+// domain). `GET /api/v1/events/burn:{county slug}/history` shows when it changed.
 type BurnStatusDetail struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	BurnDay       BurnDay                `protobuf:"varint,1,opt,name=burn_day,json=burnDay,proto3,enum=grid.v1.BurnDay" json:"burn_day,omitempty"`
-	CalfireStatus CalfireBurnStatus      `protobuf:"varint,2,opt,name=calfire_status,json=calfireStatus,proto3,enum=grid.v1.CalfireBurnStatus" json:"calfire_status,omitempty"`
-	// Derived: the MORE RESTRICTIVE of the two facets, never the more permissive.
-	// UNKNOWN whenever either facet is unknown or stale — a missing answer must
-	// never read as ALLOWED. Someone acts on this with a match in their hand.
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The county line's answer for today, merged across `burnLines` taking the
+	// most restrictive (any NO wins, then any MARGINAL; YES needs every dialed
+	// line to answer). BURN_DAY_UNKNOWN when unread or the reading is older than
+	// 36 hours.
+	BurnDay BurnDay `protobuf:"varint,1,opt,name=burn_day,json=burnDay,proto3,enum=grid.v1.BurnDay" json:"burn_day,omitempty"`
+	// CAL FIRE's permit status for the county's SRA land. Carried forward from the
+	// last good read while CAL FIRE's page is unreachable; check
+	// `calfireObservedAt`.
+	CalfireStatus CalfireBurnStatus `protobuf:"varint,2,opt,name=calfire_status,json=calfireStatus,proto3,enum=grid.v1.CalfireBurnStatus" json:"calfire_status,omitempty"`
+	// The answer to "may I burn today?": PROHIBITED if either facet prohibits
+	// burning (no-burn day, marginal day, or CAL FIRE suspension); ALLOWED only
+	// when both facets are known and permissive; otherwise UNKNOWN. A missing
+	// answer never reads as ALLOWED.
 	Permission BurnPermission `protobuf:"varint,3,opt,name=permission,proto3,enum=grid.v1.BurnPermission" json:"permission,omitempty"`
 	// --- CAL FIRE facet (source `calfire-burn`) ---
-	// When the suspension took effect. The county phone line only ever says
-	// "until further notice"; this date exists nowhere else we read.
+	// When CAL FIRE's current status took effect (the county line only ever says
+	// "until further notice"). `null` when CAL FIRE gives no date.
 	CalfireEffective *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=calfire_effective,json=calfireEffective,proto3" json:"calfire_effective,omitempty"`
-	CalfireArea      string                 `protobuf:"bytes,5,opt,name=calfire_area,json=calfireArea,proto3" json:"calfire_area,omitempty"` // "All SRA" — the land classes covered
+	// Land classes CAL FIRE's status covers.
+	CalfireArea string `protobuf:"bytes,5,opt,name=calfire_area,json=calfireArea,proto3" json:"calfire_area,omitempty"`
 	// --- county facet (source `burnline`) ---
-	// Every recorded line that speaks for this county, each with its own reading.
-	//
-	// Repeated rather than one phone number because the line-to-county mapping is
-	// not 1:1 in EITHER direction: a county can have more than one relevant
-	// recording, and one air-district line routinely covers several counties.
-	// `burn_day` above is these lines merged, taking the most restrictive.
-	//
-	// A line with no usable reading still appears here, with burn_day UNKNOWN and
-	// its phone populated — that is the honest thing to show, and it is what lets
-	// a consumer say "we could not read it, here is the number".
+	// Every recorded phone line that speaks for this county, each with its own
+	// reading. One line can serve several counties, and a county can have several
+	// lines. A line we could not read still appears, with `burnDay`
+	// BURN_DAY_UNKNOWN and its phone number, so a reader can call it.
 	BurnLines []*BurnLineReading `protobuf:"bytes,6,rep,name=burn_lines,json=burnLines,proto3" json:"burn_lines,omitempty"`
-	// When the CAL FIRE page was last read successfully. EXCLUDED from the content
-	// hash (store.ContentHash), like the per-line observations: it moves every
-	// tick and would otherwise mint a revision every tick.
+	// When CAL FIRE's page was last read successfully. The only way to tell that
+	// `calfireStatus` is being carried forward rather than freshly confirmed. Can
+	// be `null`.
 	//
-	// It exists because the envelope's own observed_at cannot answer this. When
-	// the CAL FIRE scrape fails, that facet is carried forward from the stored
-	// event while observed_at still advances (we did poll) — so this is the only
-	// way a consumer can see the suspension value is not freshly confirmed.
+	// (-- EXCLUDED from the content hash (store.ContentHash), like the per-line
+	// observations: it moves every tick and would otherwise mint a revision every
+	// tick. The envelope's own observed_at cannot answer this: when the CAL FIRE
+	// scrape fails, that facet is carried forward from the stored event while
+	// observed_at still advances. --)
 	CalfireObservedAt *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=calfire_observed_at,json=calfireObservedAt,proto3" json:"calfire_observed_at,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
@@ -2874,15 +3366,21 @@ func (x *BurnStatusDetail) GetCalfireObservedAt() *timestamppb.Timestamp {
 
 // BurnLineReading is one recorded phone line's answer for today.
 type BurnLineReading struct {
-	state   protoimpl.MessageState `protogen:"open.v1"`
-	Id      string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`                                                // stable config id ("calaveras-apcd")
-	Name    string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`                                            // "Calaveras County APCD burn line"
-	Phone   string                 `protobuf:"bytes,3,opt,name=phone,proto3" json:"phone,omitempty"`                                          // the number a resident can call
-	BurnDay BurnDay                `protobuf:"varint,4,opt,name=burn_day,json=burnDay,proto3,enum=grid.v1.BurnDay" json:"burn_day,omitempty"` // this line's own answer; UNKNOWN if unread or stale
-	// Volatile per-observation fields — EXCLUDED from the content hash (see
-	// store.ContentHash), so they refresh without minting a revision. The line's
-	// burn_day above IS hashed: a line changing its answer, or going unreadable,
-	// is a real transition worth recording.
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Stable line id.
+	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	// Display name of the line.
+	Name string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	// The number a resident can call, E.164.
+	Phone string `protobuf:"bytes,3,opt,name=phone,proto3" json:"phone,omitempty"`
+	// This line's own answer. BURN_DAY_UNKNOWN if not read or stale. A change
+	// writes a revision.
+	BurnDay BurnDay `protobuf:"varint,4,opt,name=burn_day,json=burnDay,proto3,enum=grid.v1.BurnDay" json:"burn_day,omitempty"`
+	// The latest call: message, transcript, confidence and time. `null` when the
+	// line has never been read. Changes daily without writing a revision.
+	//
+	// (-- Volatile per-observation fields, EXCLUDED from the content hash (see
+	// store.ContentHash), so they refresh without minting a revision. --)
 	Observation   *BurnObservation `protobuf:"bytes,5,opt,name=observation,proto3" json:"observation,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -2953,23 +3451,25 @@ func (x *BurnLineReading) GetObservation() *BurnObservation {
 	return nil
 }
 
-// BurnObservation is the volatile half of a burn status reading. It is grouped
-// into its own sub-message so store.ContentHash can zero the whole field.
+// BurnObservation is the latest reading of one burn line. The line's message
+// names the date, so it changes every day even when the answer does not; that
+// is why it writes no revision.
 //
-// This is load-bearing, not tidiness. The county line's message NAMES THE DATE
-// ("Today, September 10th, is a burn day in Calaveras County"), so the text
-// differs every single day even when the answer has not changed. Hashed, it
-// would mint a revision daily and bury the handful of real transitions — the
-// only thing this layer exists to record — in 365 rows of noise a year.
+// (-- Grouped into its own sub-message so store.ContentHash can zero the whole
+// field. Hashed, it would mint a revision daily and bury the handful of real
+// transitions in 365 rows of noise a year. --)
 type BurnObservation struct {
-	state      protoimpl.MessageState `protogen:"open.v1"`
-	Message    string                 `protobuf:"bytes,1,opt,name=message,proto3" json:"message,omitempty"`       // the line's plain-language answer
-	Transcript string                 `protobuf:"bytes,2,opt,name=transcript,proto3" json:"transcript,omitempty"` // cleaned transcript of the recording
-	// The transcription model's own confidence, 0-100. Surfaced rather than
-	// thresholded: this is an LLM reading of phone audio, and a consumer deserves
-	// to see when the read was shaky.
-	Confidence    int32                  `protobuf:"varint,3,opt,name=confidence,proto3" json:"confidence,omitempty"`
-	ObservedAt    *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=observed_at,json=observedAt,proto3" json:"observed_at,omitempty"` // when this line was last called
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The line's answer in plain language, extracted by a model from the
+	// transcript.
+	Message string `protobuf:"bytes,1,opt,name=message,proto3" json:"message,omitempty"`
+	// Cleaned machine transcript of the recording.
+	Transcript string `protobuf:"bytes,2,opt,name=transcript,proto3" json:"transcript,omitempty"`
+	// The model's confidence in the reading, 0-100. Shown rather than
+	// thresholded: this is an AI reading of phone audio, so show it when it is low.
+	Confidence int32 `protobuf:"varint,3,opt,name=confidence,proto3" json:"confidence,omitempty"`
+	// When the line was called.
+	ObservedAt    *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=observed_at,json=observedAt,proto3" json:"observed_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3032,10 +3532,15 @@ func (x *BurnObservation) GetObservedAt() *timestamppb.Timestamp {
 	return nil
 }
 
+// EventList is one page of events.
 type EventList struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Events        []*Event               `protobuf:"bytes,1,rep,name=events,proto3" json:"events,omitempty"`
-	NextPageToken string                 `protobuf:"bytes,2,opt,name=next_page_token,json=nextPageToken,proto3" json:"next_page_token,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Events on this page, ordered by severity (highest first), then
+	// `observedAt` (newest first), then id.
+	Events []*Event `protobuf:"bytes,1,rep,name=events,proto3" json:"events,omitempty"`
+	// Token for the next page; pass it as `pageToken` with the same filters.
+	// Empty string on the last page.
+	NextPageToken string `protobuf:"bytes,2,opt,name=next_page_token,json=nextPageToken,proto3" json:"next_page_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3084,12 +3589,18 @@ func (x *EventList) GetNextPageToken() string {
 	return ""
 }
 
+// EventRevision is one stored snapshot of an event.
 type EventRevision struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Revision      uint32                 `protobuf:"varint,1,opt,name=revision,proto3" json:"revision,omitempty"`
-	ObservedAt    *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=observed_at,json=observedAt,proto3" json:"observed_at,omitempty"`
-	IngestedAt    *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=ingested_at,json=ingestedAt,proto3" json:"ingested_at,omitempty"`
-	Event         *Event                 `protobuf:"bytes,4,opt,name=event,proto3" json:"event,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Revision number, from 1.
+	Revision uint32 `protobuf:"varint,1,opt,name=revision,proto3" json:"revision,omitempty"`
+	// The upstream content time of this revision (`event.observedAt`).
+	ObservedAt *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=observed_at,json=observedAt,proto3" json:"observed_at,omitempty"`
+	// When the Grid stored this revision.
+	IngestedAt *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=ingested_at,json=ingestedAt,proto3" json:"ingested_at,omitempty"`
+	// The full event as it was at this revision. Mesh activity clocks
+	// (`lastHeardAt`, `lastRelayedAt`) are not filled on history snapshots.
+	Event         *Event `protobuf:"bytes,4,opt,name=event,proto3" json:"event,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3152,10 +3663,16 @@ func (x *EventRevision) GetEvent() *Event {
 	return nil
 }
 
+// EventRevisionList is one page of revisions.
 type EventRevisionList struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Revisions     []*EventRevision       `protobuf:"bytes,1,rep,name=revisions,proto3" json:"revisions,omitempty"`
-	NextPageToken string                 `protobuf:"bytes,2,opt,name=next_page_token,json=nextPageToken,proto3" json:"next_page_token,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Revisions on this page. Per-event history: newest revision first. The
+	// archive (`/api/v1/history`): `observedAt` newest first, then event id, then
+	// revision newest first.
+	Revisions []*EventRevision `protobuf:"bytes,1,rep,name=revisions,proto3" json:"revisions,omitempty"`
+	// Token for the next page; pass it as `pageToken` with the same filters.
+	// Empty string on the last page.
+	NextPageToken string `protobuf:"bytes,2,opt,name=next_page_token,json=nextPageToken,proto3" json:"next_page_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3204,9 +3721,11 @@ func (x *EventRevisionList) GetNextPageToken() string {
 	return ""
 }
 
+// PlaceList is the place directory.
 type PlaceList struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Places        []*Place               `protobuf:"bytes,1,rep,name=places,proto3" json:"places,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Places, ordered by kind and then name.
+	Places        []*Place `protobuf:"bytes,1,rep,name=places,proto3" json:"places,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3248,9 +3767,11 @@ func (x *PlaceList) GetPlaces() []*Place {
 	return nil
 }
 
+// SourceList is the source registry.
 type SourceList struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Sources       []*Source              `protobuf:"bytes,1,rep,name=sources,proto3" json:"sources,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Every source, ordered by id, including the health-only push-reporter rows.
+	Sources       []*Source `protobuf:"bytes,1,rep,name=sources,proto3" json:"sources,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3292,11 +3813,19 @@ func (x *SourceList) GetSources() []*Source {
 	return nil
 }
 
+// GetMeshTelemetryRequest selects one node and a time window.
 type GetMeshTelemetryRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Node          string                 `protobuf:"bytes,1,opt,name=node,proto3" json:"node,omitempty"` // the node's full public key, hex
-	From          *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=from,proto3" json:"from,omitempty"` // default: 24h before `to`
-	To            *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=to,proto3" json:"to,omitempty"`     // default: now
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Required. The node's public key (`Event.mesh.publicKey`) or its event id
+	// (`meshcore:{key}`), case-insensitive. 8 to 64 hex characters, even length:
+	// a monitor-only node known by a 16-character key prefix is valid. Anything
+	// else is a 400 INVALID_ARGUMENT. A well-formed key the archive does not know
+	// returns 200 with `coverage.samples: 0` and no samples.
+	Node string `protobuf:"bytes,1,opt,name=node,proto3" json:"node,omitempty"`
+	// Window start, RFC 3339, inclusive. Default: 24 hours before `to`.
+	From *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=from,proto3" json:"from,omitempty"`
+	// Window end, RFC 3339, exclusive. Default: now.
+	To            *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=to,proto3" json:"to,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3356,27 +3885,32 @@ func (x *GetMeshTelemetryRequest) GetTo() *timestamppb.Timestamp {
 // needs in order not to lie about them.
 type MeshTelemetryArchive struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	Node  string                 `protobuf:"bytes,1,opt,name=node,proto3" json:"node,omitempty"`
-	From  *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=from,proto3" json:"from,omitempty"`
-	To    *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=to,proto3" json:"to,omitempty"`
-	// What the ARCHIVE holds for this node, whatever was asked for. A window
-	// outside it returns no samples because we do not have them — which is not
-	// the same statement as the node having been quiet, and a chart cannot tell
-	// those apart unless it is told.
+	// The requested node, normalized to the bare lowercase key (no `meshcore:`
+	// prefix).
+	Node string `protobuf:"bytes,1,opt,name=node,proto3" json:"node,omitempty"`
+	// Window start actually used (after defaults and clamping).
+	From *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=from,proto3" json:"from,omitempty"`
+	// Window end actually used.
+	To *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=to,proto3" json:"to,omitempty"`
+	// What the archive holds for this node at all, whatever window was asked
+	// for. A window outside it has no samples because we do not have them, which
+	// is not the same as the node being quiet.
 	Coverage *MeshTelemetryCoverage `protobuf:"bytes,4,opt,name=coverage,proto3" json:"coverage,omitempty"`
-	// The observed MEDIAN gap between samples, so a client knows which gaps are
-	// abnormal enough to break a line on. Null with fewer than two samples: one
-	// point has no cadence. Median, not mean — one multi-hour outage in a day of
-	// 15-minute reports drags a mean past anything the feed does.
+	// Median gap between samples in the window, in seconds, so a chart knows which
+	// gaps are abnormal enough to break a line on. 64-bit, so a JSON STRING
+	// (`"1831"`). Nullable: `null` with fewer than two samples.
+	//
+	// (-- Median, not mean: one multi-hour outage in a day of 15-minute reports
+	// drags a mean past anything the feed does. --)
 	CadenceSeconds *wrapperspb.Int64Value `protobuf:"bytes,5,opt,name=cadence_seconds,json=cadenceSeconds,proto3" json:"cadence_seconds,omitempty"`
-	// Sample times where the node's uptime went BACKWARDS. Every lifetime counter
-	// restarts there, so a line drawn across one plunges to zero and climbs back —
-	// a graph of our arithmetic rather than of the mesh. Also a fact worth seeing.
+	// Sample times where the node's uptime went backwards, i.e. it rebooted. Every
+	// counter restarts there, so break counter lines at these times. Empty list
+	// when none.
 	Reboots []*timestamppb.Timestamp `protobuf:"bytes,6,rep,name=reboots,proto3" json:"reboots,omitempty"`
-	// The window held more samples than one response carries. Stated, never
-	// silent: a chart that ends early because the server stopped talking must not
-	// look like a chart of a node that stopped.
-	Truncated     bool                   `protobuf:"varint,7,opt,name=truncated,proto3" json:"truncated,omitempty"`
+	// True when the window held more than the 20,000 samples one response carries;
+	// the series ends early. Narrow the window to see the rest.
+	Truncated bool `protobuf:"varint,7,opt,name=truncated,proto3" json:"truncated,omitempty"`
+	// Samples in the window, oldest first.
 	Samples       []*MeshTelemetrySample `protobuf:"bytes,8,rep,name=samples,proto3" json:"samples,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -3468,11 +4002,15 @@ func (x *MeshTelemetryArchive) GetSamples() []*MeshTelemetrySample {
 	return nil
 }
 
+// MeshTelemetryCoverage is the span of the whole archive for one node.
 type MeshTelemetryCoverage struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	From          *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=from,proto3" json:"from,omitempty"`
-	To            *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=to,proto3" json:"to,omitempty"`
-	Samples       int32                  `protobuf:"varint,3,opt,name=samples,proto3" json:"samples,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Oldest archived sample. `null` when the archive holds none.
+	From *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=from,proto3" json:"from,omitempty"`
+	// Newest archived sample. `null` when the archive holds none.
+	To *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=to,proto3" json:"to,omitempty"`
+	// Number of archived samples in total.
+	Samples       int32 `protobuf:"varint,3,opt,name=samples,proto3" json:"samples,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3530,14 +4068,17 @@ func (x *MeshTelemetryCoverage) GetSamples() int32 {
 
 // MeshTelemetrySample is one archived report.
 //
-// The reading is MeshAdminTelemetry itself — the same message the event carries,
-// not a flattened copy of its 23 fields. One definition means the archive and
-// the live event cannot describe the same reading differently, and the gauges
-// keep their wrapper types, so an unread battery stays null here too.
+// (-- The reading is MeshAdminTelemetry itself — the same message the event
+// carries, not a flattened copy of its 23 fields. One definition means the
+// archive and the live event cannot describe the same reading differently, and
+// the gauges keep their wrapper types, so an unread battery stays null here too. --)
 type MeshTelemetrySample struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Reading       *MeshAdminTelemetry    `protobuf:"bytes,1,opt,name=reading,proto3" json:"reading,omitempty"`                         // reported_at is the sample's own time
-	ReceivedAt    *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=received_at,json=receivedAt,proto3" json:"received_at,omitempty"` // when the Grid first held it
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The reading. `reading.reportedAt` is the sample's own time; gauges are
+	// nullable exactly as on the live event.
+	Reading *MeshAdminTelemetry `protobuf:"bytes,1,opt,name=reading,proto3" json:"reading,omitempty"`
+	// When the Grid first stored it.
+	ReceivedAt    *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=received_at,json=receivedAt,proto3" json:"received_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3586,9 +4127,11 @@ func (x *MeshTelemetrySample) GetReceivedAt() *timestamppb.Timestamp {
 	return nil
 }
 
+// GetPlaceSummaryRequest names the place.
 type GetPlaceSummaryRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Place         string                 `protobuf:"bytes,1,opt,name=place,proto3" json:"place,omitempty"` // slug or namespaced id
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Place slug (`calaveras-county`) or namespaced id (`county:calaveras-county`).
+	Place         string `protobuf:"bytes,1,opt,name=place,proto3" json:"place,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3630,21 +4173,53 @@ func (x *GetPlaceSummaryRequest) GetPlace() string {
 	return ""
 }
 
-// PlaceSummary is the one-call place rollup (the former hand-built summary,
-// now proto so it is camelCase like the rest of the surface). active_evacuations
-// is a wrapper so it can serialize as an explicit JSON null: null when the
-// evacuation source is UNAVAILABLE (unknown — render "check Genasys"), 0 when
-// confirmed-empty (OK/STALE with no active zones), N when active. An error must
-// never become a 0.
+// PlaceSummary is the one-call rollup for a place.
+//
+// `summary` covers hazards only. Each entry in `domains` covers one subject
+// area, including the ambient ones (`burn`, `comms`) that the hazard rollup
+// leaves out.
 type PlaceSummary struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Place         string                 `protobuf:"bytes,1,opt,name=place,proto3" json:"place,omitempty"` // slug
-	PlaceId       string                 `protobuf:"bytes,2,opt,name=place_id,json=placeId,proto3" json:"place_id,omitempty"`
-	PlaceName     string                 `protobuf:"bytes,3,opt,name=place_name,json=placeName,proto3" json:"place_name,omitempty"`
-	GeneratedAt   *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=generated_at,json=generatedAt,proto3" json:"generated_at,omitempty"`
-	Mode          string                 `protobuf:"bytes,5,opt,name=mode,proto3" json:"mode,omitempty"` // QUIET | WATCH | ACTIVE
-	Summary       *SummaryStats          `protobuf:"bytes,6,opt,name=summary,proto3" json:"summary,omitempty"`
-	Domains       []*SummaryDomain       `protobuf:"bytes,7,rep,name=domains,proto3" json:"domains,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The place's slug.
+	Place string `protobuf:"bytes,1,opt,name=place,proto3" json:"place,omitempty"`
+	// The place's namespaced id.
+	PlaceId string `protobuf:"bytes,2,opt,name=place_id,json=placeId,proto3" json:"place_id,omitempty"`
+	// The place's display name.
+	PlaceName string `protobuf:"bytes,3,opt,name=place_name,json=placeName,proto3" json:"place_name,omitempty"`
+	// When this summary was computed.
+	GeneratedAt *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=generated_at,json=generatedAt,proto3" json:"generated_at,omitempty"`
+	// Overall posture. The rules below are checked in order and the first match
+	// wins.
+	//
+	//   - `ACTIVE`: an active evacuation at ORDER, WARNING or SHELTER_IN_PLACE; or
+	//     any active EXTREME event; or an active wildfire at SEVERE or above.
+	//   - `WATCH`: any active SEVERE event; or an active evacuation ADVISORY; or
+	//     fire weather `elevated` (Fire Weather Watch) or `red-flag` (Red Flag
+	//     Warning) for a place inside a coverage area; or the evacuation source
+	//     UNAVAILABLE (unknown is never quiet); or any layer feeding the
+	//     summary UNAVAILABLE while an active event is MODERATE or above.
+	//   - `QUIET`: otherwise. A MODERATE or lower event on its own leaves the
+	//     place QUIET.
+	//
+	// Only these inputs can raise it: ACTIVE events on the WILDFIRE,
+	// EVACUATION, WEATHER_ALERT, EARTHQUAKE, ROAD_INCIDENT and POWER layers
+	// (by severity), the fire-weather state, and source health. These never
+	// raise it: SCHEDULED events (a planned closure, a watch or PSPS not yet in
+	// effect), MESH nodes, BURN_STATUS, INFO POWER outages, and every condition
+	// other than fire weather. A CLOSED `road_segment` or a chain control
+	// raises the `roads` domain's `highestSeverity`, not `mode`, so a place can
+	// be QUIET with a closed highway. Show each domain's `status` and
+	// `highestSeverity` alongside `mode`.
+	Mode string `protobuf:"bytes,5,opt,name=mode,proto3" json:"mode,omitempty"`
+	// Cross-layer hazard rollup.
+	Summary *SummaryStats `protobuf:"bytes,6,opt,name=summary,proto3" json:"summary,omitempty"`
+	// One block per domain, always in this order: `fire`, `evacuation`,
+	// `weather`, `roads`, `seismic`, `power`, then `burn` (when burn counties are
+	// configured) and `comms` (when the mesh source is enabled). Both are
+	// configured in production.
+	Domains []*SummaryDomain `protobuf:"bytes,7,rep,name=domains,proto3" json:"domains,omitempty"`
+	// Health of the sources behind the summary's layers. Region-wide, not
+	// specific to the place.
 	Sources       []*SummarySourceHealth `protobuf:"bytes,8,rep,name=sources,proto3" json:"sources,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -3736,21 +4311,45 @@ func (x *PlaceSummary) GetSources() []*SummarySourceHealth {
 	return nil
 }
 
+// SummaryStats is the place's hazard rollup.
+//
+// It counts the place's ACTIVE and SCHEDULED events except four carve-outs:
+// MESH nodes and BURN_STATUS (ambient state, shown in their own domains), POWER
+// outages at INFO (single-customer service calls), and SCHEDULED road closures
+// (planned roadwork). A SCHEDULED weather watch or PSPS still counts. Condition
+// layers never count here.
 type SummaryStats struct {
-	state               protoimpl.MessageState `protogen:"open.v1"`
-	HighestSeverity     string                 `protobuf:"bytes,1,opt,name=highest_severity,json=highestSeverity,proto3" json:"highest_severity,omitempty"`
-	HighestSeverityRank int32                  `protobuf:"varint,2,opt,name=highest_severity_rank,json=highestSeverityRank,proto3" json:"highest_severity_rank,omitempty"`
-	SeverityCounts      map[string]int32       `protobuf:"bytes,3,rep,name=severity_counts,json=severityCounts,proto3" json:"severity_counts,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
-	TotalActive         int32                  `protobuf:"varint,4,opt,name=total_active,json=totalActive,proto3" json:"total_active,omitempty"`
-	// NULLABLE: serializes as JSON `null` (not 0) when evacuation data is
-	// UNAVAILABLE. The OpenAPI type is `integer` only because Swagger 2.0 cannot
-	// express a nullable scalar — do NOT coerce null→0 (an error must never become
-	// a 0). null = UNAVAILABLE, 0 = confirmed no active zones, N = active.
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Highest severity among the counted events; `INFO` when there are none.
+	HighestSeverity string `protobuf:"bytes,1,opt,name=highest_severity,json=highestSeverity,proto3" json:"highest_severity,omitempty"`
+	// Rank of `highestSeverity`, 0 (INFO) to 4 (EXTREME).
+	HighestSeverityRank int32 `protobuf:"varint,2,opt,name=highest_severity_rank,json=highestSeverityRank,proto3" json:"highest_severity_rank,omitempty"`
+	// Count of counted events per severity name (`INFO` .. `EXTREME`). A severity
+	// with no events is absent rather than 0.
+	SeverityCounts map[string]int32 `protobuf:"bytes,3,rep,name=severity_counts,json=severityCounts,proto3" json:"severity_counts,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
+	// Number of counted events (ACTIVE and SCHEDULED, after the carve-outs).
+	TotalActive int32 `protobuf:"varint,4,opt,name=total_active,json=totalActive,proto3" json:"total_active,omitempty"`
+	// ACTIVE evacuation zones attached to the place. NULLABLE: `null` when the
+	// evacuation source is UNAVAILABLE with nothing stored (unknown: render
+	// "unknown, check Genasys", never "none"). `0` means a healthy fetch found no
+	// active zone ("no active evacuations reported", not a guarantee). Never
+	// coerce `null` to 0.
 	ActiveEvacuations *wrapperspb.Int32Value `protobuf:"bytes,5,opt,name=active_evacuations,json=activeEvacuations,proto3" json:"active_evacuations,omitempty"`
-	EvacuationStatus  string                 `protobuf:"bytes,6,opt,name=evacuation_status,json=evacuationStatus,proto3" json:"evacuation_status,omitempty"` // OK | STALE | UNAVAILABLE
-	TopEvents         []*SummaryTopEvent     `protobuf:"bytes,7,rep,name=top_events,json=topEvents,proto3" json:"top_events,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// Health of the evacuation source as served: `OK`, `STALE` (source failing
+	// but stored zones are served; the count is last-good) or `UNAVAILABLE`
+	// (then `activeEvacuations` is `null`).
+	EvacuationStatus string `protobuf:"bytes,6,opt,name=evacuation_status,json=evacuationStatus,proto3" json:"evacuation_status,omitempty"`
+	// Up to five counted events, most severe first, then most recently observed.
+	// Every id here is an event (`GET /api/v1/events/{id}`).
+	TopEvents []*SummaryTopEvent `protobuf:"bytes,7,rep,name=top_events,json=topEvents,proto3" json:"top_events,omitempty"`
+	// The authoritative evacuation viewer (Genasys Protect), the same link as
+	// the `evacuation` map layer's `metadata.sourceUrl`. Always set, whatever
+	// `evacuationStatus` says: it is where to send people when the count is
+	// `null` ("unknown, check Genasys") and the place to confirm a 0 or an N.
+	// For one zone's own page use the event's `provenance.sourceUrl`.
+	EvacuationSourceUrl string `protobuf:"bytes,8,opt,name=evacuation_source_url,json=evacuationSourceUrl,proto3" json:"evacuation_source_url,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *SummaryStats) Reset() {
@@ -3832,14 +4431,29 @@ func (x *SummaryStats) GetTopEvents() []*SummaryTopEvent {
 	return nil
 }
 
+func (x *SummaryStats) GetEvacuationSourceUrl() string {
+	if x != nil {
+		return x.EvacuationSourceUrl
+	}
+	return ""
+}
+
+// SummaryTopEvent is one of the place's most urgent hazard events.
 type SummaryTopEvent struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Layer         string                 `protobuf:"bytes,2,opt,name=layer,proto3" json:"layer,omitempty"` // lowercase layer slug ("weather_alert")
-	Severity      string                 `protobuf:"bytes,3,opt,name=severity,proto3" json:"severity,omitempty"`
-	SeverityRank  int32                  `protobuf:"varint,4,opt,name=severity_rank,json=severityRank,proto3" json:"severity_rank,omitempty"`
-	Headline      string                 `protobuf:"bytes,5,opt,name=headline,proto3" json:"headline,omitempty"`
-	Source        string                 `protobuf:"bytes,6,opt,name=source,proto3" json:"source,omitempty"` // provenance source id ("usgs")
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Event id, fetchable at `GET /api/v1/events/{id}`.
+	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	// The event's layer as the UPPERCASE enum name, the same value as
+	// `Event.layer`. Never MESH or BURN_STATUS (excluded from the rollup).
+	Layer string `protobuf:"bytes,2,opt,name=layer,proto3" json:"layer,omitempty"`
+	// The event's severity.
+	Severity string `protobuf:"bytes,3,opt,name=severity,proto3" json:"severity,omitempty"`
+	// Rank of `severity`, 0-4.
+	SeverityRank int32 `protobuf:"varint,4,opt,name=severity_rank,json=severityRank,proto3" json:"severity_rank,omitempty"`
+	// The event's headline.
+	Headline string `protobuf:"bytes,5,opt,name=headline,proto3" json:"headline,omitempty"`
+	// The event's source id (`provenance.sourceId`).
+	Source        string `protobuf:"bytes,6,opt,name=source,proto3" json:"source,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3916,15 +4530,33 @@ func (x *SummaryTopEvent) GetSource() string {
 	return ""
 }
 
+// SummaryDomain is one subject area's status for the place.
+//
+// Domain inputs: `fire` = WILDFIRE events + the fire_weather condition;
+// `evacuation` = EVACUATION; `weather` = WEATHER_ALERT; `roads` = ROAD_INCIDENT
+// events (not SCHEDULED roadwork) + the chain_control and road_segment
+// conditions; `seismic` = EARTHQUAKE; `power` = POWER (including INFO
+// outages); `burn` = BURN_STATUS; `comms` = MESH. A domain counts every one of
+// its ACTIVE and SCHEDULED events at any severity, but a condition only when it
+// is above INFO (an open road or normal fire weather is not "active").
 type SummaryDomain struct {
-	state           protoimpl.MessageState   `protogen:"open.v1"`
-	Domain          string                   `protobuf:"bytes,1,opt,name=domain,proto3" json:"domain,omitempty"` // fire | evacuation | weather | roads | seismic | power (| comms when enabled)
-	Status          string                   `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"` // worst source_status across the domain's layers
-	HighestSeverity string                   `protobuf:"bytes,3,opt,name=highest_severity,json=highestSeverity,proto3" json:"highest_severity,omitempty"`
-	ActiveCount     int32                    `protobuf:"varint,4,opt,name=active_count,json=activeCount,proto3" json:"active_count,omitempty"`
-	Headlines       []*SummaryDomainHeadline `protobuf:"bytes,5,rep,name=headlines,proto3" json:"headlines,omitempty"` // top 3 by severity
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Domain name.
+	Domain string `protobuf:"bytes,1,opt,name=domain,proto3" json:"domain,omitempty"`
+	// The WORST source status across the domain's layers, so partial data never
+	// presents as complete. A failing source with stored events reads STALE.
+	Status string `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
+	// Highest severity among the domain's counted items; `INFO` when none.
+	HighestSeverity string `protobuf:"bytes,3,opt,name=highest_severity,json=highestSeverity,proto3" json:"highest_severity,omitempty"`
+	// Number of counted items (events plus above-INFO conditions). It can be
+	// non-zero while `summary.totalActive` is 0: `comms` counts mesh nodes,
+	// `burn` counts burn status, and `power` counts INFO outages.
+	ActiveCount int32 `protobuf:"varint,4,opt,name=active_count,json=activeCount,proto3" json:"active_count,omitempty"`
+	// Up to three counted items, most severe first (events before conditions on
+	// ties). An item is an event OR a condition-layer feature; check `kind`.
+	Headlines     []*SummaryDomainHeadline `protobuf:"bytes,5,rep,name=headlines,proto3" json:"headlines,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *SummaryDomain) Reset() {
@@ -3992,11 +4624,28 @@ func (x *SummaryDomain) GetHeadlines() []*SummaryDomainHeadline {
 	return nil
 }
 
+// SummaryDomainHeadline is one item in a domain's headline list: an event, or a
+// live condition-layer feature (a closed road segment, a chain control, a fire
+// weather banner). Use `kind` to tell them apart before following `id`.
 type SummaryDomainHeadline struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Severity      string                 `protobuf:"bytes,2,opt,name=severity,proto3" json:"severity,omitempty"`
-	Headline      string                 `protobuf:"bytes,3,opt,name=headline,proto3" json:"headline,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The item's id. For `kind: EVENT` an event id, fetchable at
+	// `GET /api/v1/events/{id}`. For `kind: CONDITION` a map-feature id
+	// (`road:{segment}`, `cc:{checkpoint}`, `fw:region`): it is NOT an event and
+	// `GET /api/v1/events/{id}` returns 404. Find it as `properties.id` in the
+	// place's `{layer}.geojson` map layer (the layer slug is `layer` lowercased).
+	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	// The item's severity.
+	Severity string `protobuf:"bytes,2,opt,name=severity,proto3" json:"severity,omitempty"`
+	// The item's headline.
+	Headline string `protobuf:"bytes,3,opt,name=headline,proto3" json:"headline,omitempty"`
+	// `EVENT` when `id` is a stored event, `CONDITION` when it is a live
+	// condition-layer map feature with no event record.
+	Kind string `protobuf:"bytes,4,opt,name=kind,proto3" json:"kind,omitempty"`
+	// The item's layer, UPPERCASE. For an event, its `Event.layer`. For a
+	// condition, the condition layer (`ROAD_SEGMENT`, `CHAIN_CONTROL`,
+	// `FIRE_WEATHER`); lowercase it for the `.geojson` map-layer path.
+	Layer         string `protobuf:"bytes,5,opt,name=layer,proto3" json:"layer,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4052,10 +4701,28 @@ func (x *SummaryDomainHeadline) GetHeadline() string {
 	return ""
 }
 
+func (x *SummaryDomainHeadline) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *SummaryDomainHeadline) GetLayer() string {
+	if x != nil {
+		return x.Layer
+	}
+	return ""
+}
+
+// SummarySourceHealth is one source registry row behind the summary's layers.
 type SummarySourceHealth struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Status        string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Source id, as on `/api/v1/sources`.
+	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	// The source's health. A source never polled reads `UNAVAILABLE`.
+	Status string `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
+	// When the source last polled successfully. `null` if never.
 	LastSuccessAt *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=last_success_at,json=lastSuccessAt,proto3" json:"last_success_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -4112,19 +4779,41 @@ func (x *SummarySourceHealth) GetLastSuccessAt() *timestamppb.Timestamp {
 	return nil
 }
 
-// Filter/enum fields are strings (parsed server-side with the shared helpers),
-// matching the query params of the surface being replaced. page_size 0 = default
-// (store clamps to 1..200). enhancement_io opts into the large model I/O fields.
+// ListEventsRequest filters the event feed. All filters combine with AND.
+//
+// (-- Filter/enum fields are strings (parsed server-side with the shared
+// helpers), matching the query params of the surface being replaced.
+// page_size 0 = default (store clamps to 1..200). --)
 type ListEventsRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Place         string                 `protobuf:"bytes,1,opt,name=place,proto3" json:"place,omitempty"`
-	Layer         []string               `protobuf:"bytes,2,rep,name=layer,proto3" json:"layer,omitempty"`
-	Status        []string               `protobuf:"bytes,3,rep,name=status,proto3" json:"status,omitempty"`
-	SeverityMin   string                 `protobuf:"bytes,4,opt,name=severity_min,json=severityMin,proto3" json:"severity_min,omitempty"`
-	Since         string                 `protobuf:"bytes,5,opt,name=since,proto3" json:"since,omitempty"` // RFC 3339
-	PageSize      int32                  `protobuf:"varint,6,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
-	PageToken     string                 `protobuf:"bytes,7,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
-	EnhancementIo bool                   `protobuf:"varint,8,opt,name=enhancement_io,json=enhancementIo,proto3" json:"enhancement_io,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Only events attached to this place: slug (`arnold`) or namespaced id
+	// (`town:arnold`). Omit for every place, including events outside all places.
+	Place string `protobuf:"bytes,1,opt,name=place,proto3" json:"place,omitempty"`
+	// Only these layers. Repeat the parameter or comma-separate. Case-insensitive;
+	// lowercase slugs (`road_incident`) and the aliases `mesh_node` and `network`
+	// (for MESH) also work. FIRE_WEATHER, GAUGE, AIR_QUALITY and ANNOUNCEMENT are
+	// accepted but no events carry them. Default: every layer.
+	Layer []string `protobuf:"bytes,2,rep,name=layer,proto3" json:"layer,omitempty"`
+	// Only these statuses. Repeat the parameter or comma-separate.
+	// Case-insensitive. Default: ACTIVE and SCHEDULED. Pass `ACTIVE` alone to drop
+	// planned roadwork; add RESOLVED and EXPIRED to include ended events.
+	Status []string `protobuf:"bytes,3,rep,name=status,proto3" json:"status,omitempty"`
+	// Only events at this severity or above. Case-insensitive. Default: no
+	// minimum (same as INFO). `MINOR` drops mesh nodes, burn status and
+	// single-customer outages.
+	SeverityMin string `protobuf:"bytes,4,opt,name=severity_min,json=severityMin,proto3" json:"severity_min,omitempty"`
+	// Only events whose `observedAt` is at or after this RFC 3339 time, e.g.
+	// `2026-11-06T00:00:00Z`.
+	Since string `protobuf:"bytes,5,opt,name=since,proto3" json:"since,omitempty"`
+	// Page size. 0 or omitted means the default of 50; values over 200 are
+	// clamped to 200; a negative value is a 400 INVALID_ARGUMENT.
+	PageSize int32 `protobuf:"varint,6,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
+	// The previous page's `nextPageToken`. Omit for the first page.
+	PageToken string `protobuf:"bytes,7,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
+	// Include the AI model's full prompt and response (`enhancement.request` and
+	// `enhancement.response`). Large; default false, which returns them as empty
+	// strings.
+	EnhancementIo bool `protobuf:"varint,8,opt,name=enhancement_io,json=enhancementIo,proto3" json:"enhancement_io,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4215,10 +4904,13 @@ func (x *ListEventsRequest) GetEnhancementIo() bool {
 	return false
 }
 
+// GetEventRequest names one event.
 type GetEventRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	EnhancementIo bool                   `protobuf:"varint,2,opt,name=enhancement_io,json=enhancementIo,proto3" json:"enhancement_io,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Event id, e.g. `chp:261106ST0341` or `burn:calaveras-county`.
+	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	// Include `enhancement.request` and `enhancement.response`. Default false.
+	EnhancementIo bool `protobuf:"varint,2,opt,name=enhancement_io,json=enhancementIo,proto3" json:"enhancement_io,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4267,12 +4959,18 @@ func (x *GetEventRequest) GetEnhancementIo() bool {
 	return false
 }
 
+// GetEventHistoryRequest pages one event's revisions.
 type GetEventHistoryRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	PageSize      int32                  `protobuf:"varint,2,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
-	PageToken     string                 `protobuf:"bytes,3,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
-	EnhancementIo bool                   `protobuf:"varint,4,opt,name=enhancement_io,json=enhancementIo,proto3" json:"enhancement_io,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Event id.
+	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	// Page size. 0 or omitted means the default of 50; values over 200 are
+	// clamped to 200; a negative value is a 400 INVALID_ARGUMENT.
+	PageSize int32 `protobuf:"varint,2,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
+	// The previous page's `nextPageToken`. Omit for the first page.
+	PageToken string `protobuf:"bytes,3,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
+	// Include `enhancement.request` and `enhancement.response`. Default false.
+	EnhancementIo bool `protobuf:"varint,4,opt,name=enhancement_io,json=enhancementIo,proto3" json:"enhancement_io,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4335,15 +5033,25 @@ func (x *GetEventHistoryRequest) GetEnhancementIo() bool {
 	return false
 }
 
+// ListHistoryRequest filters the revision archive.
 type ListHistoryRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Place         string                 `protobuf:"bytes,1,opt,name=place,proto3" json:"place,omitempty"`
-	Layer         []string               `protobuf:"bytes,2,rep,name=layer,proto3" json:"layer,omitempty"`
-	From          string                 `protobuf:"bytes,3,opt,name=from,proto3" json:"from,omitempty"` // RFC 3339
-	To            string                 `protobuf:"bytes,4,opt,name=to,proto3" json:"to,omitempty"`     // RFC 3339
-	PageSize      int32                  `protobuf:"varint,5,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
-	PageToken     string                 `protobuf:"bytes,6,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
-	EnhancementIo bool                   `protobuf:"varint,7,opt,name=enhancement_io,json=enhancementIo,proto3" json:"enhancement_io,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Only revisions of events currently attached to this place (slug or id).
+	Place string `protobuf:"bytes,1,opt,name=place,proto3" json:"place,omitempty"`
+	// Only these layers; same rules as on `/api/v1/events`.
+	Layer []string `protobuf:"bytes,2,rep,name=layer,proto3" json:"layer,omitempty"`
+	// Window start on each revision's `observedAt`, RFC 3339, inclusive. Default:
+	// no lower bound.
+	From string `protobuf:"bytes,3,opt,name=from,proto3" json:"from,omitempty"`
+	// Window end, RFC 3339, exclusive. Default: no upper bound.
+	To string `protobuf:"bytes,4,opt,name=to,proto3" json:"to,omitempty"`
+	// Page size. 0 or omitted means the default of 50; values over 200 are
+	// clamped to 200; a negative value is a 400 INVALID_ARGUMENT.
+	PageSize int32 `protobuf:"varint,5,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
+	// The previous page's `nextPageToken`. Omit for the first page.
+	PageToken string `protobuf:"bytes,6,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
+	// Include `enhancement.request` and `enhancement.response`. Default false.
+	EnhancementIo bool `protobuf:"varint,7,opt,name=enhancement_io,json=enhancementIo,proto3" json:"enhancement_io,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4427,10 +5135,14 @@ func (x *ListHistoryRequest) GetEnhancementIo() bool {
 	return false
 }
 
+// ListPlacesRequest filters the place directory.
 type ListPlacesRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Kind          string                 `protobuf:"bytes,1,opt,name=kind,proto3" json:"kind,omitempty"`
-	Q             string                 `protobuf:"bytes,2,opt,name=q,proto3" json:"q,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Only places of this kind. Case-insensitive. EVAC_ZONE and SITE are accepted
+	// but no places of those kinds exist today. Default: every kind.
+	Kind string `protobuf:"bytes,1,opt,name=kind,proto3" json:"kind,omitempty"`
+	// Case-insensitive substring of the place name, e.g. `calav`.
+	Q             string `protobuf:"bytes,2,opt,name=q,proto3" json:"q,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4479,9 +5191,11 @@ func (x *ListPlacesRequest) GetQ() string {
 	return ""
 }
 
+// GetPlaceRequest names one place.
 type GetPlaceRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Place         string                 `protobuf:"bytes,1,opt,name=place,proto3" json:"place,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Place slug (`arnold`) or namespaced id (`town:arnold`).
+	Place         string `protobuf:"bytes,1,opt,name=place,proto3" json:"place,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4523,13 +5237,20 @@ func (x *GetPlaceRequest) GetPlace() string {
 	return ""
 }
 
-// lat/lng are strings so presence + range/NaN validation matches the /v1
-// handler; provide lat+lng OR address, not both.
+// ResolvePlaceRequest is a point (lat AND lng) or an address, not both.
+//
+// (-- lat/lng are strings in proto so presence + range/NaN validation matches
+// the /v1 handler; the OpenAPI type is number. --)
 type ResolvePlaceRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Lat           string                 `protobuf:"bytes,1,opt,name=lat,proto3" json:"lat,omitempty"`
-	Lng           string                 `protobuf:"bytes,2,opt,name=lng,proto3" json:"lng,omitempty"`
-	Address       string                 `protobuf:"bytes,3,opt,name=address,proto3" json:"address,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Latitude in decimal degrees, -90 to 90. Requires `lng`.
+	Lat string `protobuf:"bytes,1,opt,name=lat,proto3" json:"lat,omitempty"`
+	// Longitude in decimal degrees, -180 to 180 (negative in California).
+	// Requires `lat`.
+	Lng string `protobuf:"bytes,2,opt,name=lng,proto3" json:"lng,omitempty"`
+	// A US street address, geocoded with the Census geocoder. Include the city,
+	// state or ZIP for a reliable match.
+	Address       string `protobuf:"bytes,3,opt,name=address,proto3" json:"address,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4585,11 +5306,16 @@ func (x *ResolvePlaceRequest) GetAddress() string {
 	return ""
 }
 
+// ResolveQuery echoes the point that was resolved.
 type ResolveQuery struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	Lat            float64                `protobuf:"fixed64,1,opt,name=lat,proto3" json:"lat,omitempty"`
-	Lng            float64                `protobuf:"fixed64,2,opt,name=lng,proto3" json:"lng,omitempty"`
-	MatchedAddress string                 `protobuf:"bytes,3,opt,name=matched_address,json=matchedAddress,proto3" json:"matched_address,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Latitude used for the lookup (the geocoded point for an address).
+	Lat float64 `protobuf:"fixed64,1,opt,name=lat,proto3" json:"lat,omitempty"`
+	// Longitude used for the lookup.
+	Lng float64 `protobuf:"fixed64,2,opt,name=lng,proto3" json:"lng,omitempty"`
+	// The address the geocoder matched, normalized. Empty string for a lat/lng
+	// query.
+	MatchedAddress string `protobuf:"bytes,3,opt,name=matched_address,json=matchedAddress,proto3" json:"matched_address,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -4645,10 +5371,14 @@ func (x *ResolveQuery) GetMatchedAddress() string {
 	return ""
 }
 
+// ResolvePlaceResponse lists the places containing a point.
 type ResolvePlaceResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Query         *ResolveQuery          `protobuf:"bytes,1,opt,name=query,proto3" json:"query,omitempty"`
-	Places        []*Place               `protobuf:"bytes,2,rep,name=places,proto3" json:"places,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The point that was resolved.
+	Query *ResolveQuery `protobuf:"bytes,1,opt,name=query,proto3" json:"query,omitempty"`
+	// Containing places, most specific first. Empty when the point is outside
+	// every place.
+	Places        []*Place `protobuf:"bytes,2,rep,name=places,proto3" json:"places,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4697,9 +5427,12 @@ func (x *ResolvePlaceResponse) GetPlaces() []*Place {
 	return nil
 }
 
+// ListScannersRequest optionally scopes the scanner list.
 type ListScannersRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Place         string                 `protobuf:"bytes,1,opt,name=place,proto3" json:"place,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// An AREA place (slug or id) returns that area's feeds. Any other place, or
+	// none, returns every feed.
+	Place         string `protobuf:"bytes,1,opt,name=place,proto3" json:"place,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4741,12 +5474,17 @@ func (x *ListScannersRequest) GetPlace() string {
 	return ""
 }
 
+// Scanner is one Broadcastify audio feed.
 type Scanner struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	FeedId          string                 `protobuf:"bytes,1,opt,name=feed_id,json=feedId,proto3" json:"feed_id,omitempty"`
-	ChannelLabel    string                 `protobuf:"bytes,2,opt,name=channel_label,json=channelLabel,proto3" json:"channel_label,omitempty"`
-	Agency          string                 `protobuf:"bytes,3,opt,name=agency,proto3" json:"agency,omitempty"`
-	BroadcastifyUrl string                 `protobuf:"bytes,4,opt,name=broadcastify_url,json=broadcastifyUrl,proto3" json:"broadcastify_url,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Broadcastify feed id.
+	FeedId string `protobuf:"bytes,1,opt,name=feed_id,json=feedId,proto3" json:"feed_id,omitempty"`
+	// What the feed carries.
+	ChannelLabel string `protobuf:"bytes,2,opt,name=channel_label,json=channelLabel,proto3" json:"channel_label,omitempty"`
+	// Agencies heard on it.
+	Agency string `protobuf:"bytes,3,opt,name=agency,proto3" json:"agency,omitempty"`
+	// Listening page on Broadcastify.
+	BroadcastifyUrl string `protobuf:"bytes,4,opt,name=broadcastify_url,json=broadcastifyUrl,proto3" json:"broadcastify_url,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -4809,9 +5547,11 @@ func (x *Scanner) GetBroadcastifyUrl() string {
 	return ""
 }
 
+// ScannerList is the scanner feeds.
 type ScannerList struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Scanners      []*Scanner             `protobuf:"bytes,1,rep,name=scanners,proto3" json:"scanners,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Feeds, in configuration order.
+	Scanners      []*Scanner `protobuf:"bytes,1,rep,name=scanners,proto3" json:"scanners,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4853,9 +5593,12 @@ func (x *ScannerList) GetScanners() []*Scanner {
 	return nil
 }
 
+// ListCamerasRequest optionally scopes the camera list.
 type ListCamerasRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Place         string                 `protobuf:"bytes,1,opt,name=place,proto3" json:"place,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Only cameras within 25 km of this place (slug or id), nearest first.
+	// Default: every camera near any coverage area.
+	Place         string `protobuf:"bytes,1,opt,name=place,proto3" json:"place,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4900,20 +5643,32 @@ func (x *ListCamerasRequest) GetPlace() string {
 // Camera is one Caltrans CCTV camera. Every listed camera is in service and has
 // an image; an out-of-service camera is dropped, not flagged.
 type Camera struct {
-	state               protoimpl.MessageState `protogen:"open.v1"`
-	Id                  string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`                                      // "d10-172": Caltrans district + the portal's camera index
-	Name                string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`                                  // "EB 108 W/O Soulsbyville Rd"
-	NearbyPlace         string                 `protobuf:"bytes,3,opt,name=nearby_place,json=nearbyPlace,proto3" json:"nearby_place,omitempty"` // "Soulsbyville"
-	County              string                 `protobuf:"bytes,4,opt,name=county,proto3" json:"county,omitempty"`                              // "Tuolumne"
-	Route               string                 `protobuf:"bytes,5,opt,name=route,proto3" json:"route,omitempty"`                                // "SR-108", "US-395"
-	Direction           string                 `protobuf:"bytes,6,opt,name=direction,proto3" json:"direction,omitempty"`                        // "East" | "West" | "North" | "South"; may be empty
-	Location            *LatLng                `protobuf:"bytes,7,opt,name=location,proto3" json:"location,omitempty"`
-	ElevationFeet       int32                  `protobuf:"varint,8,opt,name=elevation_feet,json=elevationFeet,proto3" json:"elevation_feet,omitempty"`
-	ImageUrl            string                 `protobuf:"bytes,9,opt,name=image_url,json=imageUrl,proto3" json:"image_url,omitempty"`                                      // the current snapshot JPEG on cwwp2.dot.ca.gov
-	ImageRefreshMinutes int32                  `protobuf:"varint,10,opt,name=image_refresh_minutes,json=imageRefreshMinutes,proto3" json:"image_refresh_minutes,omitempty"` // how often Caltrans replaces the snapshot; 0 = not reported
-	StreamUrl           string                 `protobuf:"bytes,11,opt,name=stream_url,json=streamUrl,proto3" json:"stream_url,omitempty"`                                  // HLS playlist (.m3u8); empty for an image-only camera
-	Description         string                 `protobuf:"bytes,12,opt,name=description,proto3" json:"description,omitempty"`                                               // Caltrans's note on the view, e.g. "Looking South"; usually empty
-	// Metres from the requested place — or, without ?place, from the nearest
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Camera id, `d{district}-{index}`.
+	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	// Caltrans's camera name.
+	Name string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	// Nearest community, per Caltrans.
+	NearbyPlace string `protobuf:"bytes,3,opt,name=nearby_place,json=nearbyPlace,proto3" json:"nearby_place,omitempty"`
+	// County, per Caltrans.
+	County string `protobuf:"bytes,4,opt,name=county,proto3" json:"county,omitempty"`
+	// Route, e.g. "SR-108", "US-395".
+	Route string `protobuf:"bytes,5,opt,name=route,proto3" json:"route,omitempty"`
+	// Direction the camera faces along the route. Empty string when not given.
+	Direction string `protobuf:"bytes,6,opt,name=direction,proto3" json:"direction,omitempty"`
+	// Camera position.
+	Location *LatLng `protobuf:"bytes,7,opt,name=location,proto3" json:"location,omitempty"`
+	// Elevation in feet.
+	ElevationFeet int32 `protobuf:"varint,8,opt,name=elevation_feet,json=elevationFeet,proto3" json:"elevation_feet,omitempty"`
+	// Current snapshot JPEG, hosted by Caltrans (cwwp2.dot.ca.gov).
+	ImageUrl string `protobuf:"bytes,9,opt,name=image_url,json=imageUrl,proto3" json:"image_url,omitempty"`
+	// How often Caltrans replaces the snapshot, in minutes. 0 when not reported.
+	ImageRefreshMinutes int32 `protobuf:"varint,10,opt,name=image_refresh_minutes,json=imageRefreshMinutes,proto3" json:"image_refresh_minutes,omitempty"`
+	// HLS playlist (.m3u8) for live video. Empty string for an image-only camera.
+	StreamUrl string `protobuf:"bytes,11,opt,name=stream_url,json=streamUrl,proto3" json:"stream_url,omitempty"`
+	// Caltrans's note on the view, e.g. "Looking South". Usually an empty string.
+	Description string `protobuf:"bytes,12,opt,name=description,proto3" json:"description,omitempty"`
+	// Metres from the requested place, or, without `place`, from the nearest
 	// coverage area. 0 means inside it.
 	DistanceMeters int32 `protobuf:"varint,13,opt,name=distance_meters,json=distanceMeters,proto3" json:"distance_meters,omitempty"`
 	unknownFields  protoimpl.UnknownFields
@@ -5041,19 +5796,21 @@ func (x *Camera) GetDistanceMeters() int32 {
 	return 0
 }
 
+// CameraList is the camera directory.
 type CameraList struct {
-	state   protoimpl.MessageState `protogen:"open.v1"`
-	Cameras []*Camera              `protobuf:"bytes,1,rep,name=cameras,proto3" json:"cameras,omitempty"` // nearest first, then by id
-	// OK | STALE | UNAVAILABLE — the camera LIST's health, the same honesty
-	// field the map layers carry. STALE: served from an older fetch (or a
-	// configured district is missing). UNAVAILABLE: no list has been fetched
-	// yet, or no camera districts are configured.
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Cameras, nearest first, then by id. Empty when none is nearby.
+	Cameras []*Camera `protobuf:"bytes,1,rep,name=cameras,proto3" json:"cameras,omitempty"`
+	// Health of the camera list. STALE: served from an older fetch, or a
+	// configured district is missing. UNAVAILABLE: no list fetched yet, or no
+	// camera districts configured.
 	SourceStatus string `protobuf:"bytes,2,opt,name=source_status,json=sourceStatus,proto3" json:"source_status,omitempty"`
-	// When the served list was fetched. Unset when source_status is OK.
+	// When the served list was fetched. `null` when `sourceStatus` is OK.
 	LastSourceUpdate *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=last_source_update,json=lastSourceUpdate,proto3" json:"last_source_update,omitempty"`
-	Attribution      string                 `protobuf:"bytes,4,opt,name=attribution,proto3" json:"attribution,omitempty"` // "Caltrans"
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Attribution to display.
+	Attribution   string `protobuf:"bytes,4,opt,name=attribution,proto3" json:"attribution,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *CameraList) Reset() {
@@ -5114,9 +5871,12 @@ func (x *CameraList) GetAttribution() string {
 	return ""
 }
 
+// GetConditionsRequest optionally scopes the conditions.
 type GetConditionsRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Place         string                 `protobuf:"bytes,1,opt,name=place,proto3" json:"place,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Only weather locations inside this place's bounding box (slug or id). Does
+	// not filter `fireWeather`.
+	Place         string `protobuf:"bytes,1,opt,name=place,proto3" json:"place,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5158,21 +5918,36 @@ func (x *GetConditionsRequest) GetPlace() string {
 	return ""
 }
 
+// WeatherConditions is current weather at one location, from OpenWeatherMap.
+// Whole numbers, metric units. A value that could not be read is 0.
 type WeatherConditions struct {
-	state                protoimpl.MessageState `protogen:"open.v1"`
-	LocationId           string                 `protobuf:"bytes,1,opt,name=location_id,json=locationId,proto3" json:"location_id,omitempty"`
-	LocationName         string                 `protobuf:"bytes,2,opt,name=location_name,json=locationName,proto3" json:"location_name,omitempty"`
-	WeatherMain          string                 `protobuf:"bytes,3,opt,name=weather_main,json=weatherMain,proto3" json:"weather_main,omitempty"`
-	WeatherDescription   string                 `protobuf:"bytes,4,opt,name=weather_description,json=weatherDescription,proto3" json:"weather_description,omitempty"`
-	WeatherIcon          string                 `protobuf:"bytes,5,opt,name=weather_icon,json=weatherIcon,proto3" json:"weather_icon,omitempty"`
-	TemperatureCelsius   int32                  `protobuf:"varint,6,opt,name=temperature_celsius,json=temperatureCelsius,proto3" json:"temperature_celsius,omitempty"`
-	FeelsLikeCelsius     int32                  `protobuf:"varint,7,opt,name=feels_like_celsius,json=feelsLikeCelsius,proto3" json:"feels_like_celsius,omitempty"`
-	HumidityPercent      int32                  `protobuf:"varint,8,opt,name=humidity_percent,json=humidityPercent,proto3" json:"humidity_percent,omitempty"`
-	WindSpeedKmh         int32                  `protobuf:"varint,9,opt,name=wind_speed_kmh,json=windSpeedKmh,proto3" json:"wind_speed_kmh,omitempty"`
-	WindDirectionDegrees int32                  `protobuf:"varint,10,opt,name=wind_direction_degrees,json=windDirectionDegrees,proto3" json:"wind_direction_degrees,omitempty"`
-	VisibilityKm         int32                  `protobuf:"varint,11,opt,name=visibility_km,json=visibilityKm,proto3" json:"visibility_km,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Location id; joins to `WeatherForecast.locationId`.
+	LocationId string `protobuf:"bytes,1,opt,name=location_id,json=locationId,proto3" json:"location_id,omitempty"`
+	// Display name.
+	LocationName string `protobuf:"bytes,2,opt,name=location_name,json=locationName,proto3" json:"location_name,omitempty"`
+	// OpenWeatherMap condition group: "Clear", "Clouds", "Rain", "Snow",
+	// "Thunderstorm", "Drizzle", "Mist", ...
+	WeatherMain string `protobuf:"bytes,3,opt,name=weather_main,json=weatherMain,proto3" json:"weather_main,omitempty"`
+	// OpenWeatherMap description, lowercase, e.g. "clear sky".
+	WeatherDescription string `protobuf:"bytes,4,opt,name=weather_description,json=weatherDescription,proto3" json:"weather_description,omitempty"`
+	// OpenWeatherMap icon code; the image is
+	// `https://openweathermap.org/img/wn/{icon}@2x.png`.
+	WeatherIcon string `protobuf:"bytes,5,opt,name=weather_icon,json=weatherIcon,proto3" json:"weather_icon,omitempty"`
+	// Air temperature, degrees Celsius.
+	TemperatureCelsius int32 `protobuf:"varint,6,opt,name=temperature_celsius,json=temperatureCelsius,proto3" json:"temperature_celsius,omitempty"`
+	// Feels-like temperature, degrees Celsius.
+	FeelsLikeCelsius int32 `protobuf:"varint,7,opt,name=feels_like_celsius,json=feelsLikeCelsius,proto3" json:"feels_like_celsius,omitempty"`
+	// Relative humidity, percent.
+	HumidityPercent int32 `protobuf:"varint,8,opt,name=humidity_percent,json=humidityPercent,proto3" json:"humidity_percent,omitempty"`
+	// Wind speed, km/h.
+	WindSpeedKmh int32 `protobuf:"varint,9,opt,name=wind_speed_kmh,json=windSpeedKmh,proto3" json:"wind_speed_kmh,omitempty"`
+	// Direction the wind blows FROM, degrees clockwise from north.
+	WindDirectionDegrees int32 `protobuf:"varint,10,opt,name=wind_direction_degrees,json=windDirectionDegrees,proto3" json:"wind_direction_degrees,omitempty"`
+	// Visibility, km (OpenWeatherMap caps it at 10).
+	VisibilityKm  int32 `protobuf:"varint,11,opt,name=visibility_km,json=visibilityKm,proto3" json:"visibility_km,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *WeatherConditions) Reset() {
@@ -5282,11 +6057,18 @@ func (x *WeatherConditions) GetVisibilityKm() int32 {
 	return 0
 }
 
+// FireWeatherConditions is the region's fire-weather state, from issued NWS
+// products only. It never claims a Red Flag Warning that NWS has not issued.
 type FireWeatherConditions struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	State         string                 `protobuf:"bytes,1,opt,name=state,proto3" json:"state,omitempty"` // normal | elevated | red-flag
-	Headline      string                 `protobuf:"bytes,2,opt,name=headline,proto3" json:"headline,omitempty"`
-	Zones         []string               `protobuf:"bytes,3,rep,name=zones,proto3" json:"zones,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// LOWERCASE state: `normal`, `elevated` (a Fire Weather Watch is in effect)
+	// or `red-flag` (a Red Flag Warning is in effect). Empty string when the
+	// state could not be determined.
+	State string `protobuf:"bytes,1,opt,name=state,proto3" json:"state,omitempty"`
+	// The NWS product's headline. Empty string when the state is normal.
+	Headline string `protobuf:"bytes,2,opt,name=headline,proto3" json:"headline,omitempty"`
+	// NWS fire-weather zones under the product. Empty when normal.
+	Zones         []string `protobuf:"bytes,3,rep,name=zones,proto3" json:"zones,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5342,18 +6124,24 @@ func (x *FireWeatherConditions) GetZones() []string {
 	return nil
 }
 
-// ForecastPeriod is one hourly step of a location's fire-weather forecast (NWS
-// gridpoint). Absent numeric fields serialize as 0, like WeatherConditions.
+// ForecastPeriod is one hour of a location's forecast (NWS gridpoint data),
+// rounded to whole numbers. A value NWS did not give is 0.
 type ForecastPeriod struct {
-	state                protoimpl.MessageState `protogen:"open.v1"`
-	Time                 *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=time,proto3" json:"time,omitempty"` // hourly period start, UTC
-	TemperatureCelsius   int32                  `protobuf:"varint,2,opt,name=temperature_celsius,json=temperatureCelsius,proto3" json:"temperature_celsius,omitempty"`
-	HumidityPercent      int32                  `protobuf:"varint,3,opt,name=humidity_percent,json=humidityPercent,proto3" json:"humidity_percent,omitempty"` // relative humidity
-	WindSpeedKmh         int32                  `protobuf:"varint,4,opt,name=wind_speed_kmh,json=windSpeedKmh,proto3" json:"wind_speed_kmh,omitempty"`
-	WindDirectionDegrees int32                  `protobuf:"varint,5,opt,name=wind_direction_degrees,json=windDirectionDegrees,proto3" json:"wind_direction_degrees,omitempty"`
-	WindGustKmh          int32                  `protobuf:"varint,6,opt,name=wind_gust_kmh,json=windGustKmh,proto3" json:"wind_gust_kmh,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Start of the hour, UTC.
+	Time *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=time,proto3" json:"time,omitempty"`
+	// Temperature, degrees Celsius.
+	TemperatureCelsius int32 `protobuf:"varint,2,opt,name=temperature_celsius,json=temperatureCelsius,proto3" json:"temperature_celsius,omitempty"`
+	// Relative humidity, percent.
+	HumidityPercent int32 `protobuf:"varint,3,opt,name=humidity_percent,json=humidityPercent,proto3" json:"humidity_percent,omitempty"`
+	// Sustained wind speed, km/h.
+	WindSpeedKmh int32 `protobuf:"varint,4,opt,name=wind_speed_kmh,json=windSpeedKmh,proto3" json:"wind_speed_kmh,omitempty"`
+	// Direction the wind blows FROM, degrees clockwise from north.
+	WindDirectionDegrees int32 `protobuf:"varint,5,opt,name=wind_direction_degrees,json=windDirectionDegrees,proto3" json:"wind_direction_degrees,omitempty"`
+	// Wind gust, km/h.
+	WindGustKmh   int32 `protobuf:"varint,6,opt,name=wind_gust_kmh,json=windGustKmh,proto3" json:"wind_gust_kmh,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ForecastPeriod) Reset() {
@@ -5428,20 +6216,30 @@ func (x *ForecastPeriod) GetWindGustKmh() int32 {
 	return 0
 }
 
-// WeatherForecast is a location's short-range fire-weather forecast: the raw NWS
-// gridpoint series (wind/gust/RH/temp) plus an at-a-glance summary. Informational
-// only — it never implies a fire-weather WARNING (issued products are in
-// FireWeatherConditions). See docs/design/fire-weather-forecast-design.md.
+// WeatherForecast is a location's short-range forecast: the hourly NWS gridpoint
+// series (wind, gust, humidity, temperature) plus an at-a-glance summary.
+// Informational only: it never implies a fire-weather warning (issued products
+// are in `fireWeather`).
+//
+// (-- See docs/design/fire-weather-forecast-design.md. --)
 type WeatherForecast struct {
-	state              protoimpl.MessageState `protogen:"open.v1"`
-	LocationId         string                 `protobuf:"bytes,1,opt,name=location_id,json=locationId,proto3" json:"location_id,omitempty"` // joins to WeatherConditions.location_id
-	Source             string                 `protobuf:"bytes,2,opt,name=source,proto3" json:"source,omitempty"`                           // e.g. "NWS (STO gridpoint)"
-	IssuedAt           *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=issued_at,json=issuedAt,proto3" json:"issued_at,omitempty"`       // grid update time
-	HorizonHours       int32                  `protobuf:"varint,4,opt,name=horizon_hours,json=horizonHours,proto3" json:"horizon_hours,omitempty"`
-	Periods            []*ForecastPeriod      `protobuf:"bytes,5,rep,name=periods,proto3" json:"periods,omitempty"`
-	PeakWindGustKmh    int32                  `protobuf:"varint,6,opt,name=peak_wind_gust_kmh,json=peakWindGustKmh,proto3" json:"peak_wind_gust_kmh,omitempty"` // summary: max over the horizon
-	PeakWindGustAt     *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=peak_wind_gust_at,json=peakWindGustAt,proto3" json:"peak_wind_gust_at,omitempty"`
-	MinHumidityPercent int32                  `protobuf:"varint,8,opt,name=min_humidity_percent,json=minHumidityPercent,proto3" json:"min_humidity_percent,omitempty"` // summary: min over the horizon
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Location id; joins to `WeatherConditions.locationId`.
+	LocationId string `protobuf:"bytes,1,opt,name=location_id,json=locationId,proto3" json:"location_id,omitempty"`
+	// Data source and NWS grid cell.
+	Source string `protobuf:"bytes,2,opt,name=source,proto3" json:"source,omitempty"`
+	// When NWS last updated the grid. Can be `null`.
+	IssuedAt *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=issued_at,json=issuedAt,proto3" json:"issued_at,omitempty"`
+	// Hours covered by `periods`.
+	HorizonHours int32 `protobuf:"varint,4,opt,name=horizon_hours,json=horizonHours,proto3" json:"horizon_hours,omitempty"`
+	// Hourly periods, in time order.
+	Periods []*ForecastPeriod `protobuf:"bytes,5,rep,name=periods,proto3" json:"periods,omitempty"`
+	// Highest wind gust over the horizon, km/h.
+	PeakWindGustKmh int32 `protobuf:"varint,6,opt,name=peak_wind_gust_kmh,json=peakWindGustKmh,proto3" json:"peak_wind_gust_kmh,omitempty"`
+	// When that peak gust is forecast. Can be `null`.
+	PeakWindGustAt *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=peak_wind_gust_at,json=peakWindGustAt,proto3" json:"peak_wind_gust_at,omitempty"`
+	// Lowest relative humidity over the horizon, percent. 0 when NWS gave none.
+	MinHumidityPercent int32 `protobuf:"varint,8,opt,name=min_humidity_percent,json=minHumidityPercent,proto3" json:"min_humidity_percent,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -5532,12 +6330,19 @@ func (x *WeatherForecast) GetMinHumidityPercent() int32 {
 	return 0
 }
 
+// Conditions is current, non-event state.
 type Conditions struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Weather       []*WeatherConditions   `protobuf:"bytes,1,rep,name=weather,proto3" json:"weather,omitempty"`
-	FireWeather   *FireWeatherConditions `protobuf:"bytes,2,opt,name=fire_weather,json=fireWeather,proto3" json:"fire_weather,omitempty"`
-	LastUpdated   *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=last_updated,json=lastUpdated,proto3" json:"last_updated,omitempty"`
-	Forecast      []*WeatherForecast     `protobuf:"bytes,4,rep,name=forecast,proto3" json:"forecast,omitempty"` // per-location, joins by location_id
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Current weather per location.
+	Weather []*WeatherConditions `protobuf:"bytes,1,rep,name=weather,proto3" json:"weather,omitempty"`
+	// The region's fire-weather state. Region-wide, whatever `place` was asked.
+	// Can be `null` when the weather service has no fire-weather reading.
+	FireWeather *FireWeatherConditions `protobuf:"bytes,2,opt,name=fire_weather,json=fireWeather,proto3" json:"fire_weather,omitempty"`
+	// When the weather data was last refreshed.
+	LastUpdated *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=last_updated,json=lastUpdated,proto3" json:"last_updated,omitempty"`
+	// Per-location forecasts, joined to `weather` by `locationId`. A location
+	// whose forecast could not be fetched is simply missing here.
+	Forecast      []*WeatherForecast `protobuf:"bytes,4,rep,name=forecast,proto3" json:"forecast,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5600,6 +6405,7 @@ func (x *Conditions) GetForecast() []*WeatherForecast {
 	return nil
 }
 
+// ListSourcesRequest takes no parameters.
 type ListSourcesRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -5641,21 +6447,22 @@ var File_grid_proto protoreflect.FileDescriptor
 const file_grid_proto_rawDesc = "" +
 	"\n" +
 	"\n" +
-	"grid.proto\x12\agrid.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1egoogle/protobuf/wrappers.proto\"\xb2\n" +
+	"grid.proto\x12\agrid.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1egoogle/protobuf/wrappers.proto\x1a.protoc-gen-openapiv2/options/annotations.proto\"\xf2\f\n" +
+	"\x05Event\x12'\n" +
+	"\x02id\x18\x01 \x01(\tB\x17\x92A\x14J\x12\"chp:261106ST0341\"R\x02id\x12:\n" +
+	"\x05layer\x18\x02 \x01(\x0e2\x0e.grid.v1.LayerB\x14\x92A\x11J\x0f\"ROAD_INCIDENT\"R\x05layer\x12+\n" +
+	"\bcategory\x18\x03 \x01(\tB\x0f\x92A\fJ\n" +
+	"\"incident\"R\bcategory\x12;\n" +
+	"\bseverity\x18\x04 \x01(\x0e2\x11.grid.v1.SeverityB\f\x92A\tJ\a\"MINOR\"R\bseverity\x12;\n" +
+	"\x06status\x18\x05 \x01(\x0e2\x14.grid.v1.EventStatusB\r\x92A\n" +
+	"J\b\"ACTIVE\"R\x06status\x12]\n" +
+	"\bheadline\x18\x06 \x01(\tBA\x92A>J<\"Traffic hazard causing near-miss incidents; CHP responding\"R\bheadline\x12\x81\x01\n" +
+	"\asummary\x18\a \x01(\tBg\x92AdJb\"Reported traffic hazard on SR 4 at Country Club Drive. CHP responded. No lanes reported blocked.\"R\asummary\x12 \n" +
+	"\vdescription\x18\b \x01(\tR\vdescription\x12@\n" +
 	"\n" +
-	"\x05Event\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12$\n" +
-	"\x05layer\x18\x02 \x01(\x0e2\x0e.grid.v1.LayerR\x05layer\x12\x1a\n" +
-	"\bcategory\x18\x03 \x01(\tR\bcategory\x12-\n" +
-	"\bseverity\x18\x04 \x01(\x0e2\x11.grid.v1.SeverityR\bseverity\x12,\n" +
-	"\x06status\x18\x05 \x01(\x0e2\x14.grid.v1.EventStatusR\x06status\x12\x1a\n" +
-	"\bheadline\x18\x06 \x01(\tR\bheadline\x12\x18\n" +
-	"\asummary\x18\a \x01(\tR\asummary\x12 \n" +
-	"\vdescription\x18\b \x01(\tR\vdescription\x12\x1d\n" +
-	"\n" +
-	"area_label\x18\t \x01(\tR\tareaLabel\x12#\n" +
+	"area_label\x18\t \x01(\tB!\x92A\x1eJ\x1c\"SR 4 at Country Club Drive\"R\tareaLabel\x12.\n" +
 	"\rcanonical_url\x18\n" +
-	" \x01(\tR\fcanonicalUrl\x12-\n" +
+	" \x01(\tB\t\x92A\x06\xa2\x02\x03uriR\fcanonicalUrl\x12-\n" +
 	"\bgeometry\x18\v \x01(\v2\x11.grid.v1.GeometryR\bgeometry\x12\x1b\n" +
 	"\tplace_ids\x18\f \x03(\tR\bplaceIds\x123\n" +
 	"\n" +
@@ -5666,8 +6473,8 @@ const file_grid_proto_rawDesc = "" +
 	"\vobserved_at\x18\x10 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"observedAt\x12;\n" +
 	"\vingested_at\x18\x11 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"ingestedAt\x12\x1a\n" +
-	"\brevision\x18\x12 \x01(\rR\brevision\x126\n" +
+	"ingestedAt\x12\"\n" +
+	"\brevision\x18\x12 \x01(\rB\x06\x92A\x03J\x012R\brevision\x126\n" +
 	"\venhancement\x18\x13 \x01(\v2\x14.grid.v1.EnhancementR\venhancement\x125\n" +
 	"\bwildfire\x18\x14 \x01(\v2\x17.grid.v1.WildfireDetailH\x00R\bwildfire\x12;\n" +
 	"\n" +
@@ -5683,166 +6490,173 @@ const file_grid_proto_rawDesc = "" +
 	"\x05power\x18\x1b \x01(\v2\x14.grid.v1.PowerDetailH\x00R\x05power\x12<\n" +
 	"\vburn_status\x18\x1f \x01(\v2\x19.grid.v1.BurnStatusDetailH\x00R\n" +
 	"burnStatusB\b\n" +
-	"\x06detailJ\x04\b\x1c\x10\x1f\"{\n" +
-	"\bGeometry\x12\x18\n" +
-	"\ageojson\x18\x01 \x01(\fR\ageojson\x12(\n" +
+	"\x06detailJ\x04\b\x1c\x10\x1f\"\xcc\x01\n" +
+	"\bGeometry\x12i\n" +
+	"\ageojson\x18\x01 \x01(\fBO\x92ALJJ\"eyJ0eXBlIjoiUG9pbnQiLCJjb29yZGluYXRlcyI6Wy0xMjAuMzYxMDgsMzguMjQyMzldfQ==\"R\ageojson\x12(\n" +
 	"\x04bbox\x18\x02 \x01(\v2\x14.grid.v1.BoundingBoxR\x04bbox\x12+\n" +
-	"\bcentroid\x18\x03 \x01(\v2\x0f.grid.v1.LatLngR\bcentroid\"q\n" +
-	"\vBoundingBox\x12\x17\n" +
-	"\amin_lat\x18\x01 \x01(\x01R\x06minLat\x12\x17\n" +
-	"\amin_lng\x18\x02 \x01(\x01R\x06minLng\x12\x17\n" +
-	"\amax_lat\x18\x03 \x01(\x01R\x06maxLat\x12\x17\n" +
-	"\amax_lng\x18\x04 \x01(\x01R\x06maxLng\",\n" +
-	"\x06LatLng\x12\x10\n" +
-	"\x03lat\x18\x01 \x01(\x01R\x03lat\x12\x10\n" +
-	"\x03lng\x18\x02 \x01(\x01R\x03lng\"\xc6\x01\n" +
+	"\bcentroid\x18\x03 \x01(\v2\x0f.grid.v1.LatLngR\bcentroid\"\xbd\x01\n" +
+	"\vBoundingBox\x12)\n" +
+	"\amin_lat\x18\x01 \x01(\x01B\x10\x92A\rJ\v38.23557857R\x06minLat\x12+\n" +
+	"\amin_lng\x18\x02 \x01(\x01B\x12\x92A\x0fJ\r-120.55658028R\x06minLng\x12)\n" +
+	"\amax_lat\x18\x03 \x01(\x01B\x10\x92A\rJ\v38.32345928R\x06maxLat\x12+\n" +
+	"\amax_lng\x18\x04 \x01(\x01B\x12\x92A\x0fJ\r-120.43495978R\x06maxLng\"N\n" +
+	"\x06LatLng\x12 \n" +
+	"\x03lat\x18\x01 \x01(\x01B\x0e\x92A\vJ\t38.242394R\x03lat\x12\"\n" +
+	"\x03lng\x18\x02 \x01(\x01B\x10\x92A\rJ\v-120.361081R\x03lng\"\xfc\x02\n" +
 	"\n" +
-	"Provenance\x12\x1b\n" +
-	"\tsource_id\x18\x01 \x01(\tR\bsourceId\x12\x1f\n" +
-	"\vsource_name\x18\x02 \x01(\tR\n" +
-	"sourceName\x12 \n" +
-	"\vattribution\x18\x03 \x01(\tR\vattribution\x12\x1d\n" +
+	"Provenance\x12\x92\x01\n" +
+	"\tsource_id\x18\x01 \x01(\tBu\x92ArJ\x05\"chp\"\xf2\x02\acalfire\xf2\x02\x05firis\xf2\x02\x06caloes\xf2\x02\x03nws\xf2\x02\x04usgs\xf2\x02\x03chp\xf2\x02\bcaltrans\xf2\x02\x03pge\xf2\x02\x04psps\xf2\x02\bmeshcore\xf2\x02\bburnline\xf2\x02\fcalfire-burnR\bsourceId\x126\n" +
+	"\vsource_name\x18\x02 \x01(\tB\x15\x92A\x12J\x10\"CHP / Caltrans\"R\n" +
+	"sourceName\x12<\n" +
+	"\vattribution\x18\x03 \x01(\tB\x1a\x92A\x17J\x15\"quickmap.dot.ca.gov\"R\vattribution\x12(\n" +
 	"\n" +
-	"source_url\x18\x04 \x01(\tR\tsourceUrl\x129\n" +
+	"source_url\x18\x04 \x01(\tB\t\x92A\x06\xa2\x02\x03uriR\tsourceUrl\x129\n" +
 	"\n" +
-	"fetched_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\tfetchedAt\"\xae\x01\n" +
-	"\vEnhancement\x12\x14\n" +
-	"\x05model\x18\x01 \x01(\tR\x05model\x12;\n" +
+	"fetched_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\tfetchedAt\"\xeb\x01\n" +
+	"\vEnhancement\x12'\n" +
+	"\x05model\x18\x01 \x01(\tB\x11\x92A\x0eJ\f\"gpt-5-mini\"R\x05model\x12;\n" +
 	"\venhanced_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"enhancedAt\x12\x16\n" +
-	"\x06fields\x18\x03 \x03(\tR\x06fields\x12\x18\n" +
+	"enhancedAt\x12@\n" +
+	"\x06fields\x18\x03 \x03(\tB(\x92A%J#[\"headline\", \"summary\", \"severity\"]R\x06fields\x12\x18\n" +
 	"\arequest\x18\x04 \x01(\tR\arequest\x12\x1a\n" +
-	"\bresponse\x18\x05 \x01(\tR\bresponse\"\xdd\x03\n" +
-	"\x06Source\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\x12 \n" +
-	"\vattribution\x18\x03 \x01(\tR\vattribution\x12!\n" +
-	"\fhomepage_url\x18\x04 \x01(\tR\vhomepageUrl\x122\n" +
-	"\x15poll_interval_seconds\x18\x05 \x01(\rR\x13pollIntervalSeconds\x12.\n" +
+	"\bresponse\x18\x05 \x01(\tR\bresponse\"\xf1\x04\n" +
+	"\x06Source\x12\x1a\n" +
+	"\x02id\x18\x01 \x01(\tB\n" +
+	"\x92A\aJ\x05\"chp\"R\x02id\x122\n" +
+	"\x04name\x18\x02 \x01(\tB\x1e\x92A\x1bJ\x19\"CHP (traffic incidents)\"R\x04name\x12 \n" +
+	"\vattribution\x18\x03 \x01(\tR\vattribution\x12,\n" +
+	"\fhomepage_url\x18\x04 \x01(\tB\t\x92A\x06\xa2\x02\x03uriR\vhomepageUrl\x124\n" +
+	"\x04kind\x18\f \x01(\x0e2\x13.grid.v1.SourceKindB\v\x92A\bJ\x06\"FEED\"R\x04kind\x12<\n" +
+	"\x15poll_interval_seconds\x18\x05 \x01(\rB\b\x92A\x05J\x03300R\x13pollIntervalSeconds\x128\n" +
 	"\x13stale_after_seconds\x18\n" +
-	" \x01(\rR\x11staleAfterSeconds\x120\n" +
-	"\x14expire_after_seconds\x18\v \x01(\rR\x12expireAfterSeconds\x12B\n" +
+	" \x01(\rB\b\x92A\x05J\x03900R\x11staleAfterSeconds\x128\n" +
+	"\x14expire_after_seconds\x18\v \x01(\rB\x06\x92A\x03J\x010R\x12expireAfterSeconds\x12B\n" +
 	"\x0flast_success_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\rlastSuccessAt\x12B\n" +
 	"\x0flast_attempt_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\rlastAttemptAt\x12\x1d\n" +
 	"\n" +
-	"last_error\x18\b \x01(\tR\tlastError\x12-\n" +
-	"\x06status\x18\t \x01(\x0e2\x15.grid.v1.SourceStatusR\x06status\"\xb3\x01\n" +
-	"\x05Place\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12&\n" +
-	"\x04kind\x18\x02 \x01(\x0e2\x12.grid.v1.PlaceKindR\x04kind\x12\x12\n" +
-	"\x04name\x18\x03 \x01(\tR\x04name\x12\x12\n" +
-	"\x04slug\x18\x04 \x01(\tR\x04slug\x12-\n" +
-	"\bgeometry\x18\x05 \x01(\v2\x11.grid.v1.GeometryR\bgeometry\x12\x1b\n" +
-	"\tparent_id\x18\x06 \x01(\tR\bparentId\"\x9b\x01\n" +
-	"\x0eWildfireDetail\x12\x14\n" +
-	"\x05acres\x18\x01 \x01(\x01R\x05acres\x12 \n" +
-	"\vcontainment\x18\x02 \x01(\x05R\vcontainment\x12\x16\n" +
+	"last_error\x18\b \x01(\tR\tlastError\x128\n" +
+	"\x06status\x18\t \x01(\x0e2\x15.grid.v1.SourceStatusB\t\x92A\x06J\x04\"OK\"R\x06status\"\x96\x02\n" +
+	"\x05Place\x12\"\n" +
+	"\x02id\x18\x01 \x01(\tB\x12\x92A\x0fJ\r\"town:arnold\"R\x02id\x123\n" +
+	"\x04kind\x18\x02 \x01(\x0e2\x12.grid.v1.PlaceKindB\v\x92A\bJ\x06\"TOWN\"R\x04kind\x12%\n" +
+	"\x04name\x18\x03 \x01(\tB\x11\x92A\x0eJ\f\"Arnold, CA\"R\x04name\x12!\n" +
+	"\x04slug\x18\x04 \x01(\tB\r\x92A\n" +
+	"J\b\"arnold\"R\x04slug\x12-\n" +
+	"\bgeometry\x18\x05 \x01(\v2\x11.grid.v1.GeometryR\bgeometry\x12;\n" +
+	"\tparent_id\x18\x06 \x01(\tB\x1e\x92A\x1bJ\x19\"county:calaveras-county\"R\bparentId\"\xb2\x01\n" +
+	"\x0eWildfireDetail\x12\"\n" +
+	"\x05acres\x18\x01 \x01(\x01B\f\x92A\tJ\a6801.39R\x05acres\x12)\n" +
+	"\vcontainment\x18\x02 \x01(\x05B\a\x92A\x04J\x0235R\vcontainment\x12\x16\n" +
 	"\x06county\x18\x03 \x01(\tR\x06county\x12\x14\n" +
 	"\x05cause\x18\x04 \x01(\tR\x05cause\x12#\n" +
-	"\rhas_perimeter\x18\x05 \x01(\bR\fhasPerimeter\"x\n" +
-	"\x10EvacuationDetail\x12\x17\n" +
-	"\azone_id\x18\x01 \x01(\tR\x06zoneId\x12\x14\n" +
-	"\x05level\x18\x02 \x01(\tR\x05level\x12\x1d\n" +
+	"\rhas_perimeter\x18\x05 \x01(\bR\fhasPerimeter\"\xe2\x01\n" +
+	"\x10EvacuationDetail\x121\n" +
+	"\azone_id\x18\x01 \x01(\tB\x18\x92A\x15J\x13\"US-CA-XCA-CCU-043\"R\x06zoneId\x12R\n" +
+	"\x05level\x18\x02 \x01(\tB<\x92A9J\a\"ORDER\"\xf2\x02\x05ORDER\xf2\x02\aWARNING\xf2\x02\bADVISORY\xf2\x02\x10SHELTER_IN_PLACER\x05level\x12\x1d\n" +
 	"\n" +
-	"event_type\x18\x03 \x01(\tR\teventType\x12\x16\n" +
-	"\x06county\x18\x04 \x01(\tR\x06county\"\xd0\x01\n" +
-	"\x12WeatherAlertDetail\x12!\n" +
-	"\fnws_severity\x18\x02 \x01(\tR\vnwsSeverity\x12\x1c\n" +
-	"\tcertainty\x18\x03 \x01(\tR\tcertainty\x12\x18\n" +
-	"\aurgency\x18\x04 \x01(\tR\aurgency\x12 \n" +
+	"event_type\x18\x03 \x01(\tR\teventType\x12(\n" +
+	"\x06county\x18\x04 \x01(\tB\x10\x92A\rJ\v\"CALAVERAS\"R\x06county\"\xb9\x03\n" +
+	"\x12WeatherAlertDetail\x12`\n" +
+	"\fnws_severity\x18\x02 \x01(\tB=\x92A:J\b\"Severe\"\xf2\x02\aExtreme\xf2\x02\x06Severe\xf2\x02\bModerate\xf2\x02\x05Minor\xf2\x02\aUnknownR\vnwsSeverity\x12_\n" +
+	"\tcertainty\x18\x03 \x01(\tBA\x92A>J\b\"Likely\"\xf2\x02\bObserved\xf2\x02\x06Likely\xf2\x02\bPossible\xf2\x02\bUnlikely\xf2\x02\aUnknownR\tcertainty\x12Z\n" +
+	"\aurgency\x18\x04 \x01(\tB@\x92A=J\n" +
+	"\"Expected\"\xf2\x02\tImmediate\xf2\x02\bExpected\xf2\x02\x06Future\xf2\x02\x04Past\xf2\x02\aUnknownR\aurgency\x12 \n" +
 	"\vinstruction\x18\x05 \x01(\tR\vinstruction\x12\x1b\n" +
-	"\tarea_desc\x18\a \x01(\tR\bareaDesc\x12\x14\n" +
-	"\x05zones\x18\b \x03(\tR\x05zonesJ\x04\b\x01\x10\x02J\x04\b\x06\x10\a\"b\n" +
-	"\x11FireWeatherDetail\x12\x14\n" +
-	"\x05state\x18\x01 \x01(\tR\x05state\x12!\n" +
+	"\tarea_desc\x18\a \x01(\tR\bareaDesc\x129\n" +
+	"\x05zones\x18\b \x03(\tB#\x92A J\x1e[\"CAZ137\", \"CAZ138\", \"CAZ139\"]R\x05zonesJ\x04\b\x01\x10\x02J\x04\b\x06\x10\a\"\x86\x01\n" +
+	"\x11FireWeatherDetail\x128\n" +
+	"\x05state\x18\x01 \x01(\tB\"\x92A\x1f\xf2\x02\x06normal\xf2\x02\belevated\xf2\x02\bred-flagR\x05state\x12!\n" +
 	"\fsource_event\x18\x02 \x01(\tR\vsourceEvent\x12\x14\n" +
-	"\x05zones\x18\x03 \x03(\tR\x05zones\"e\n" +
-	"\x10EarthquakeDetail\x12\x1c\n" +
-	"\tmagnitude\x18\x01 \x01(\x01R\tmagnitude\x12\x19\n" +
-	"\bdepth_km\x18\x02 \x01(\x01R\adepthKm\x12\x12\n" +
-	"\x04felt\x18\x03 \x01(\x05R\x04feltJ\x04\b\x04\x10\x05\"\xb3\x02\n" +
-	"\x12RoadIncidentDetail\x12\x1d\n" +
+	"\x05zones\x18\x03 \x03(\tR\x05zones\"\x82\x01\n" +
+	"\x10EarthquakeDetail\x12&\n" +
+	"\tmagnitude\x18\x01 \x01(\x01B\b\x92A\x05J\x033.1R\tmagnitude\x12#\n" +
+	"\bdepth_km\x18\x02 \x01(\x01B\b\x92A\x05J\x037.4R\adepthKm\x12\x1b\n" +
+	"\x04felt\x18\x03 \x01(\x05B\a\x92A\x04J\x0212R\x04feltJ\x04\b\x04\x10\x05\"\x80\x04\n" +
+	"\x12RoadIncidentDetail\x122\n" +
 	"\n" +
-	"log_number\x18\x01 \x01(\tR\tlogNumber\x12\x16\n" +
-	"\x06impact\x18\x04 \x01(\tR\x06impact\x12\x1a\n" +
-	"\bduration\x18\x05 \x01(\tR\bduration\x12E\n" +
-	"\bmetadata\x18\a \x03(\v2).grid.v1.RoadIncidentDetail.MetadataEntryR\bmetadata\x124\n" +
+	"log_number\x18\x01 \x01(\tB\x13\x92A\x10J\x0e\"261106ST0341\"R\tlogNumber\x12J\n" +
+	"\x06impact\x18\x04 \x01(\tB2\x92A/J\a\"light\"\xf2\x02\x00\xf2\x02\x04none\xf2\x02\x05light\xf2\x02\bmoderate\xf2\x02\x06severeR\x06impact\x12]\n" +
+	"\bduration\x18\x05 \x01(\tBA\x92A>J\n" +
+	"\"< 1 hour\"\xf2\x02\x00\xf2\x02\aunknown\xf2\x02\b< 1 hour\xf2\x02\rseveral hours\xf2\x02\aongoingR\bduration\x12\x85\x01\n" +
+	"\bmetadata\x18\a \x03(\v2).grid.v1.RoadIncidentDetail.MetadataEntryB>\x92A;J9{\"lanes_blocked\": \"none reported\", \"injuries\": \"unknown\"}R\bmetadata\x124\n" +
 	"\aclosure\x18\b \x01(\v2\x1a.grid.v1.LaneClosureDetailR\aclosure\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\x02\x10\x03J\x04\b\x03\x10\x04J\x04\b\x06\x10\a\"\xb2\x06\n" +
-	"\x11LaneClosureDetail\x12\x1b\n" +
-	"\twindow_id\x18\x01 \x01(\tR\bwindowId\x12\x1a\n" +
-	"\bdistrict\x18\x02 \x01(\x05R\bdistrict\x12\x1d\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\x02\x10\x03J\x04\b\x03\x10\x04J\x04\b\x06\x10\a\"\xe4\b\n" +
+	"\x11LaneClosureDetail\x12B\n" +
+	"\twindow_id\x18\x01 \x01(\tB%\x92A\"J \"C26EA-0001-2026-08-24-07:01:00\"R\bwindowId\x12#\n" +
+	"\bdistrict\x18\x02 \x01(\x05B\a\x92A\x04J\x0210R\bdistrict\x12+\n" +
 	"\n" +
-	"closure_id\x18\x03 \x01(\tR\tclosureId\x12\x1d\n" +
+	"closure_id\x18\x03 \x01(\tB\f\x92A\tJ\a\"C26EA\"R\tclosureId\x12'\n" +
 	"\n" +
-	"log_number\x18\x04 \x01(\tR\tlogNumber\x12\x14\n" +
-	"\x05route\x18\x05 \x01(\tR\x05route\x12\x1c\n" +
-	"\tdirection\x18\x06 \x01(\tR\tdirection\x12\x1a\n" +
-	"\bfacility\x18\a \x01(\tR\bfacility\x12!\n" +
-	"\fclosure_type\x18\b \x01(\tR\vclosureType\x12\x1b\n" +
-	"\twork_type\x18\t \x01(\tR\bworkType\x12!\n" +
+	"log_number\x18\x04 \x01(\tB\b\x92A\x05J\x03\"1\"R\tlogNumber\x12\"\n" +
+	"\x05route\x18\x05 \x01(\tB\f\x92A\tJ\a\"SR-26\"R\x05route\x120\n" +
+	"\tdirection\x18\x06 \x01(\tB\x12\x92A\x0fJ\r\"East / West\"R\tdirection\x123\n" +
+	"\bfacility\x18\a \x01(\tB\x17\x92A\x14J\x12\"Conventional Hwy\"R\bfacility\x12.\n" +
+	"\fclosure_type\x18\b \x01(\tB\v\x92A\bJ\x06\"Full\"R\vclosureType\x126\n" +
+	"\twork_type\x18\t \x01(\tB\x19\x92A\x16J\x14\"Roadway Excavation\"R\bworkType\x12-\n" +
 	"\flanes_closed\x18\n" +
-	" \x01(\tR\vlanesClosed\x12\x1f\n" +
-	"\vtotal_lanes\x18\v \x01(\x05R\n" +
+	" \x01(\tB\n" +
+	"\x92A\aJ\x05\"All\"R\vlanesClosed\x12'\n" +
+	"\vtotal_lanes\x18\v \x01(\x05B\x06\x92A\x03J\x012R\n" +
 	"totalLanes\x126\n" +
-	"\x17estimated_delay_minutes\x18\f \x01(\x05R\x15estimatedDelayMinutes\x12)\n" +
-	"\x10closure_duration\x18\r \x01(\tR\x0fclosureDuration\x12?\n" +
+	"\x17estimated_delay_minutes\x18\f \x01(\x05R\x15estimatedDelayMinutes\x12a\n" +
+	"\x10closure_duration\x18\r \x01(\tB6\x92A3J\v\"Long Term\"\xf2\x02\bStandard\xf2\x02\tLong Term\xf2\x02\fIntermittentR\x0fclosureDuration\x12?\n" +
 	"\rplanned_start\x18\x0e \x01(\v2\x1a.google.protobuf.TimestampR\fplannedStart\x12;\n" +
 	"\vplanned_end\x18\x0f \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"plannedEnd\x12%\n" +
 	"\x0eend_indefinite\x18\x10 \x01(\bR\rendIndefinite\x126\n" +
-	"\tset_up_at\x18\x11 \x01(\v2\x1a.google.protobuf.TimestampR\asetUpAt\x12%\n" +
-	"\x0ebegin_location\x18\x12 \x01(\tR\rbeginLocation\x12!\n" +
-	"\fend_location\x18\x13 \x01(\tR\vendLocation\x12%\n" +
+	"\tset_up_at\x18\x11 \x01(\v2\x1a.google.protobuf.TimestampR\asetUpAt\x12E\n" +
+	"\x0ebegin_location\x18\x12 \x01(\tB\x1e\x92A\x1bJ\x19\"Route 49 Mokelumne Hill\"R\rbeginLocation\x12<\n" +
+	"\fend_location\x18\x13 \x01(\tB\x19\x92A\x16J\x14\"Main Street (Left)\"R\vendLocation\x12%\n" +
 	"\x05begin\x18\x14 \x01(\v2\x0f.grid.v1.LatLngR\x05begin\x12!\n" +
-	"\x03end\x18\x15 \x01(\v2\x0f.grid.v1.LatLngR\x03end\"\xd1\x01\n" +
+	"\x03end\x18\x15 \x01(\v2\x0f.grid.v1.LatLngR\x03end\"\x9a\x03\n" +
 	"\n" +
-	"MeshDetail\x12\x1d\n" +
+	"MeshDetail\x12w\n" +
 	"\n" +
-	"public_key\x18\x01 \x01(\tR\tpublicKey\x12\x1b\n" +
-	"\tnode_type\x18\x02 \x01(\tR\bnodeType\x12\x12\n" +
-	"\x04name\x18\x03 \x01(\tR\x04name\x124\n" +
-	"\ttelemetry\x18\x04 \x01(\v2\x16.grid.v1.MeshTelemetryR\ttelemetry\x12=\n" +
-	"\freachability\x18\x05 \x01(\x0e2\x19.grid.v1.MeshReachabilityR\freachability\"\xde\x03\n" +
-	"\rMeshTelemetry\x12.\n" +
-	"\x03snr\x18\x01 \x01(\v2\x1c.google.protobuf.DoubleValueR\x03snr\x12/\n" +
-	"\x04rssi\x18\x02 \x01(\v2\x1b.google.protobuf.Int32ValueR\x04rssi\x129\n" +
-	"\thop_count\x18\x03 \x01(\v2\x1c.google.protobuf.UInt32ValueR\bhopCount\x12\x1a\n" +
+	"public_key\x18\x01 \x01(\tBX\x92AUJB\"a30081749739257489c372a0183f5f7cfd1705eb1dc4441ae11dd30533927c71\"\x8a\x01\x0e^[0-9a-f]{64}$R\tpublicKey\x12Z\n" +
+	"\tnode_type\x18\x02 \x01(\tB=\x92A:J\n" +
+	"\"repeater\"\xf2\x02\tcompanion\xf2\x02\brepeater\xf2\x02\vroom_server\xf2\x02\x06sensorR\bnodeType\x120\n" +
+	"\x04name\x18\x03 \x01(\tB\x1c\x92A\x19J\x17\"SIERRA Hathaway Pines\"R\x04name\x124\n" +
+	"\ttelemetry\x18\x04 \x01(\v2\x16.grid.v1.MeshTelemetryR\ttelemetry\x12O\n" +
+	"\freachability\x18\x05 \x01(\x0e2\x19.grid.v1.MeshReachabilityB\x10\x92A\rJ\v\"REACHABLE\"R\freachability\"\xfb\x03\n" +
+	"\rMeshTelemetry\x129\n" +
+	"\x03snr\x18\x01 \x01(\v2\x1c.google.protobuf.DoubleValueB\t\x92A\x06J\x0411.8R\x03snr\x129\n" +
+	"\x04rssi\x18\x02 \x01(\v2\x1b.google.protobuf.Int32ValueB\b\x92A\x05J\x03-39R\x04rssi\x12A\n" +
+	"\thop_count\x18\x03 \x01(\v2\x1c.google.protobuf.UInt32ValueB\x06\x92A\x03J\x014R\bhopCount\x12\x1a\n" +
 	"\bgateways\x18\x05 \x03(\tR\bgateways\x12@\n" +
 	"\x0elast_advert_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\flastAdvertAt\x121\n" +
 	"\x05admin\x18\b \x01(\v2\x1b.grid.v1.MeshAdminTelemetryR\x05admin\x12>\n" +
 	"\rlast_heard_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\vlastHeardAt\x12B\n" +
 	"\x0flast_relayed_at\x18\n" +
 	" \x01(\v2\x1a.google.protobuf.TimestampR\rlastRelayedAtJ\x04\b\x04\x10\x05J\x04\b\a\x10\bR\x04pathR\n" +
-	"path_nodes\"\xae\n" +
-	"\n" +
-	"\x12MeshAdminTelemetry\x12\x1f\n" +
-	"\vreporter_id\x18\x01 \x01(\tR\n" +
+	"path_nodes\"\xf6\v\n" +
+	"\x12MeshAdminTelemetry\x12.\n" +
+	"\vreporter_id\x18\x01 \x01(\tB\r\x92A\n" +
+	"J\b\"alanpi\"R\n" +
 	"reporterId\x12;\n" +
 	"\vreported_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"reportedAt\x12B\n" +
 	"\x0flast_success_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\rlastSuccessAt\x12B\n" +
-	"\x0flast_attempt_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\rlastAttemptAt\x12A\n" +
+	"\x0flast_attempt_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\rlastAttemptAt\x12L\n" +
 	"\rbattery_volts\x18\n" +
-	" \x01(\v2\x1c.google.protobuf.DoubleValueR\fbatteryVolts\x12E\n" +
-	"\x0fbattery_percent\x18\v \x01(\v2\x1c.google.protobuf.DoubleValueR\x0ebatteryPercent\x124\n" +
-	"\x16battery_percent_source\x18\f \x01(\tR\x14batteryPercentSource\x12A\n" +
-	"\rtemperature_c\x18\r \x01(\v2\x1c.google.protobuf.DoubleValueR\ftemperatureC\x128\n" +
+	" \x01(\v2\x1c.google.protobuf.DoubleValueB\t\x92A\x06J\x043.97R\fbatteryVolts\x12P\n" +
+	"\x0fbattery_percent\x18\v \x01(\v2\x1c.google.protobuf.DoubleValueB\t\x92A\x06J\x0471.1R\x0ebatteryPercent\x12`\n" +
+	"\x16battery_percent_source\x18\f \x01(\tB*\x92A'J\v\"estimated\"\xf2\x02\x00\xf2\x02\bmeasured\xf2\x02\testimatedR\x14batteryPercentSource\x12L\n" +
+	"\rtemperature_c\x18\r \x01(\v2\x1c.google.protobuf.DoubleValueB\t\x92A\x06J\x0413.5R\ftemperatureC\x128\n" +
 	"\bhumidity\x18\x0e \x01(\v2\x1c.google.protobuf.DoubleValueR\bhumidity\x128\n" +
-	"\bpressure\x18\x0f \x01(\v2\x1c.google.protobuf.DoubleValueR\bpressure\x12C\n" +
-	"\x0fnoise_floor_dbm\x18\x10 \x01(\v2\x1b.google.protobuf.Int32ValueR\rnoiseFloorDbm\x12<\n" +
-	"\vlast_snr_db\x18\x11 \x01(\v2\x1c.google.protobuf.DoubleValueR\tlastSnrDb\x12?\n" +
-	"\rlast_rssi_dbm\x18\x12 \x01(\v2\x1b.google.protobuf.Int32ValueR\vlastRssiDbm\x12=\n" +
-	"\ftx_queue_len\x18\x13 \x01(\v2\x1b.google.protobuf.Int32ValueR\n" +
-	"txQueueLen\x12%\n" +
-	"\x0euptime_seconds\x18\x1e \x01(\x03R\ruptimeSeconds\x12\x1d\n" +
+	"\bpressure\x18\x0f \x01(\v2\x1c.google.protobuf.DoubleValueR\bpressure\x12N\n" +
+	"\x0fnoise_floor_dbm\x18\x10 \x01(\v2\x1b.google.protobuf.Int32ValueB\t\x92A\x06J\x04-105R\rnoiseFloorDbm\x12G\n" +
+	"\vlast_snr_db\x18\x11 \x01(\v2\x1c.google.protobuf.DoubleValueB\t\x92A\x06J\x044.75R\tlastSnrDb\x12I\n" +
+	"\rlast_rssi_dbm\x18\x12 \x01(\v2\x1b.google.protobuf.Int32ValueB\b\x92A\x05J\x03-98R\vlastRssiDbm\x12E\n" +
+	"\ftx_queue_len\x18\x13 \x01(\v2\x1b.google.protobuf.Int32ValueB\x06\x92A\x03J\x010R\n" +
+	"txQueueLen\x123\n" +
+	"\x0euptime_seconds\x18\x1e \x01(\x03B\f\x92A\tJ\a\"98350\"R\ruptimeSeconds\x12*\n" +
 	"\n" +
-	"airtime_ms\x18\x1f \x01(\x03R\tairtimeMs\x12\"\n" +
-	"\rrx_airtime_ms\x18  \x01(\x03R\vrxAirtimeMs\x12!\n" +
-	"\fpackets_sent\x18! \x01(\x03R\vpacketsSent\x12)\n" +
-	"\x10packets_received\x18\" \x01(\x03R\x0fpacketsReceived\x12\x1d\n" +
+	"airtime_ms\x18\x1f \x01(\x03B\v\x92A\bJ\x06\"3095\"R\tairtimeMs\x120\n" +
+	"\rrx_airtime_ms\x18  \x01(\x03B\f\x92A\tJ\a\"13571\"R\vrxAirtimeMs\x12.\n" +
+	"\fpackets_sent\x18! \x01(\x03B\v\x92A\bJ\x06\"9175\"R\vpacketsSent\x127\n" +
+	"\x10packets_received\x18\" \x01(\x03B\f\x92A\tJ\a\"41144\"R\x0fpacketsReceived\x12\x1d\n" +
 	"\n" +
 	"sent_flood\x18# \x01(\x03R\tsentFlood\x12\x1f\n" +
 	"\vsent_direct\x18$ \x01(\x03R\n" +
@@ -5858,57 +6672,58 @@ const file_grid_proto_rawDesc = "" +
 	"\vfull_events\x18) \x01(\x03R\n" +
 	"fullEvents\x12\x1f\n" +
 	"\vrecv_errors\x18* \x01(\x03R\n" +
-	"recvErrors\"\xe3\x04\n" +
-	"\vPowerDetail\x12\x1b\n" +
-	"\toutage_id\x18\x01 \x01(\tR\boutageId\x12\x14\n" +
-	"\x05cause\x18\x02 \x01(\tR\x05cause\x12-\n" +
-	"\x12customers_affected\x18\x03 \x01(\x05R\x11customersAffected\x12\x1f\n" +
-	"\vcrew_status\x18\x04 \x01(\tR\n" +
+	"recvErrors\"\x93\x06\n" +
+	"\vPowerDetail\x12*\n" +
+	"\toutage_id\x18\x01 \x01(\tB\r\x92A\n" +
+	"J\b\"383765\"R\boutageId\x12*\n" +
+	"\x05cause\x18\x02 \x01(\tB\x14\x92A\x11J\x0f\"EMERG REPAIRS\"R\x05cause\x128\n" +
+	"\x12customers_affected\x18\x03 \x01(\x05B\t\x92A\x06J\x042082R\x11customersAffected\x125\n" +
+	"\vcrew_status\x18\x04 \x01(\tB\x14\x92A\x11J\x0f\"T-Man On Site\"R\n" +
 	"crewStatus\x12O\n" +
-	"\x15estimated_restoration\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\x14estimatedRestoration\x12\x19\n" +
-	"\bevent_id\x18\x06 \x01(\tR\aeventId\x12\x1d\n" +
+	"\x15estimated_restoration\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\x14estimatedRestoration\x12'\n" +
+	"\bevent_id\x18\x06 \x01(\tB\f\x92A\tJ\a\"23794\"R\aeventId\x123\n" +
 	"\n" +
-	"event_name\x18\a \x01(\tR\teventName\x12\x1f\n" +
-	"\vtime_period\x18\b \x01(\tR\n" +
-	"timePeriod\x12\x14\n" +
-	"\x05stage\x18\t \x01(\tR\x05stage\x12:\n" +
+	"event_name\x18\a \x01(\tB\x14\x92A\x11J\x0f\"PSPS_10142026\"R\teventName\x125\n" +
+	"\vtime_period\x18\b \x01(\tB\x14\x92A\x11J\x0f\"TP07_10142026\"R\n" +
+	"timePeriod\x129\n" +
+	"\x05stage\x18\t \x01(\tB#\x92A J\t\"Warning\"\xf2\x02\x00\xf2\x02\x05Watch\xf2\x02\aWarningR\x05stage\x12E\n" +
 	"\x19medical_baseline_affected\x18\n" +
-	" \x01(\x05R\x17medicalBaselineAffected\x12N\n" +
+	" \x01(\x05B\t\x92A\x06J\x041372R\x17medicalBaselineAffected\x12N\n" +
 	"\x15de_energization_start\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\x13deEnergizationStart\x12J\n" +
 	"\x13de_energization_end\x18\f \x01(\v2\x1a.google.protobuf.TimestampR\x11deEnergizationEnd\x127\n" +
-	"\tall_clear\x18\r \x01(\v2\x1a.google.protobuf.TimestampR\ballClear\"\xac\x03\n" +
-	"\x10BurnStatusDetail\x12+\n" +
-	"\bburn_day\x18\x01 \x01(\x0e2\x10.grid.v1.BurnDayR\aburnDay\x12A\n" +
-	"\x0ecalfire_status\x18\x02 \x01(\x0e2\x1a.grid.v1.CalfireBurnStatusR\rcalfireStatus\x127\n" +
+	"\tall_clear\x18\r \x01(\v2\x1a.google.protobuf.TimestampR\ballClear\"\x91\x04\n" +
+	"\x10BurnStatusDetail\x12@\n" +
+	"\bburn_day\x18\x01 \x01(\x0e2\x10.grid.v1.BurnDayB\x13\x92A\x10J\x0e\"BURN_DAY_YES\"R\aburnDay\x12a\n" +
+	"\x0ecalfire_status\x18\x02 \x01(\x0e2\x1a.grid.v1.CalfireBurnStatusB\x1e\x92A\x1bJ\x19\"CALFIRE_PERMIT_REQUIRED\"R\rcalfireStatus\x12W\n" +
 	"\n" +
-	"permission\x18\x03 \x01(\x0e2\x17.grid.v1.BurnPermissionR\n" +
+	"permission\x18\x03 \x01(\x0e2\x17.grid.v1.BurnPermissionB\x1e\x92A\x1bJ\x19\"BURN_PERMISSION_ALLOWED\"R\n" +
 	"permission\x12G\n" +
-	"\x11calfire_effective\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\x10calfireEffective\x12!\n" +
-	"\fcalfire_area\x18\x05 \x01(\tR\vcalfireArea\x127\n" +
+	"\x11calfire_effective\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\x10calfireEffective\x121\n" +
+	"\fcalfire_area\x18\x05 \x01(\tB\x0e\x92A\vJ\t\"All SRA\"R\vcalfireArea\x127\n" +
 	"\n" +
 	"burn_lines\x18\x06 \x03(\v2\x18.grid.v1.BurnLineReadingR\tburnLines\x12J\n" +
-	"\x13calfire_observed_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\x11calfireObservedAt\"\xb4\x01\n" +
-	"\x0fBurnLineReading\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
-	"\x05phone\x18\x03 \x01(\tR\x05phone\x12+\n" +
-	"\bburn_day\x18\x04 \x01(\x0e2\x10.grid.v1.BurnDayR\aburnDay\x12:\n" +
-	"\vobservation\x18\x05 \x01(\v2\x18.grid.v1.BurnObservationR\vobservation\"\xc3\x01\n" +
-	"\x0fBurnObservation\x12\x18\n" +
-	"\amessage\x18\x01 \x01(\tR\amessage\x12\x1e\n" +
+	"\x13calfire_observed_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\x11calfireObservedAt\"\x98\x02\n" +
+	"\x0fBurnLineReading\x12%\n" +
+	"\x02id\x18\x01 \x01(\tB\x15\x92A\x12J\x10\"calaveras-apcd\"R\x02id\x125\n" +
+	"\x04name\x18\x02 \x01(\tB!\x92A\x1eJ\x1c\"Calaveras County burn line\"R\x04name\x12)\n" +
+	"\x05phone\x18\x03 \x01(\tB\x13\x92A\x10J\x0e\"+12097546600\"R\x05phone\x12@\n" +
+	"\bburn_day\x18\x04 \x01(\x0e2\x10.grid.v1.BurnDayB\x13\x92A\x10J\x0e\"BURN_DAY_YES\"R\aburnDay\x12:\n" +
+	"\vobservation\x18\x05 \x01(\v2\x18.grid.v1.BurnObservationR\vobservation\"\x88\x02\n" +
+	"\x0fBurnObservation\x12T\n" +
+	"\amessage\x18\x01 \x01(\tB:\x92A7J5\"Today is a burn day with no elevation restrictions.\"R\amessage\x12\x1e\n" +
 	"\n" +
 	"transcript\x18\x02 \x01(\tR\n" +
-	"transcript\x12\x1e\n" +
+	"transcript\x12'\n" +
 	"\n" +
-	"confidence\x18\x03 \x01(\x05R\n" +
+	"confidence\x18\x03 \x01(\x05B\a\x92A\x04J\x0295R\n" +
 	"confidence\x12;\n" +
 	"\vobserved_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"observedAtJ\x04\b\x05\x10\x06R\x13calfire_observed_at\"[\n" +
 	"\tEventList\x12&\n" +
 	"\x06events\x18\x01 \x03(\v2\x0e.grid.v1.EventR\x06events\x12&\n" +
-	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"\xcb\x01\n" +
-	"\rEventRevision\x12\x1a\n" +
-	"\brevision\x18\x01 \x01(\rR\brevision\x12;\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"\xd3\x01\n" +
+	"\rEventRevision\x12\"\n" +
+	"\brevision\x18\x01 \x01(\rB\x06\x92A\x03J\x013R\brevision\x12;\n" +
 	"\vobserved_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"observedAt\x12;\n" +
 	"\vingested_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
@@ -5921,187 +6736,208 @@ const file_grid_proto_rawDesc = "" +
 	"\x06places\x18\x01 \x03(\v2\x0e.grid.v1.PlaceR\x06places\"7\n" +
 	"\n" +
 	"SourceList\x12)\n" +
-	"\asources\x18\x01 \x03(\v2\x0f.grid.v1.SourceR\asources\"\x89\x01\n" +
-	"\x17GetMeshTelemetryRequest\x12\x12\n" +
-	"\x04node\x18\x01 \x01(\tR\x04node\x12.\n" +
+	"\asources\x18\x01 \x03(\v2\x0f.grid.v1.SourceR\asources\"\x9b\x02\n" +
+	"\x17GetMeshTelemetryRequest\x12\xa3\x01\n" +
+	"\x04node\x18\x01 \x01(\tB\x8e\x01\x92A\x8a\x01JB\"a30081749739257489c372a0183f5f7cfd1705eb1dc4441ae11dd30533927c71\"\x8a\x01<^([mM][eE][sS][hH][cC][oO][rR][eE]:)?([0-9a-fA-F]{2}){4,32}$\xd2\x01\x04nodeR\x04node\x12.\n" +
 	"\x04from\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x04from\x12*\n" +
-	"\x02to\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\x02to\"\x94\x03\n" +
+	"\x02to\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\x02to\"\xa1\x03\n" +
 	"\x14MeshTelemetryArchive\x12\x12\n" +
 	"\x04node\x18\x01 \x01(\tR\x04node\x12.\n" +
 	"\x04from\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x04from\x12*\n" +
 	"\x02to\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\x02to\x12:\n" +
-	"\bcoverage\x18\x04 \x01(\v2\x1e.grid.v1.MeshTelemetryCoverageR\bcoverage\x12D\n" +
-	"\x0fcadence_seconds\x18\x05 \x01(\v2\x1b.google.protobuf.Int64ValueR\x0ecadenceSeconds\x124\n" +
+	"\bcoverage\x18\x04 \x01(\v2\x1e.grid.v1.MeshTelemetryCoverageR\bcoverage\x12Q\n" +
+	"\x0fcadence_seconds\x18\x05 \x01(\v2\x1b.google.protobuf.Int64ValueB\v\x92A\bJ\x06\"1831\"R\x0ecadenceSeconds\x124\n" +
 	"\areboots\x18\x06 \x03(\v2\x1a.google.protobuf.TimestampR\areboots\x12\x1c\n" +
 	"\ttruncated\x18\a \x01(\bR\ttruncated\x126\n" +
-	"\asamples\x18\b \x03(\v2\x1c.grid.v1.MeshTelemetrySampleR\asamples\"\x8d\x01\n" +
+	"\asamples\x18\b \x03(\v2\x1c.grid.v1.MeshTelemetrySampleR\asamples\"\x98\x01\n" +
 	"\x15MeshTelemetryCoverage\x12.\n" +
 	"\x04from\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x04from\x12*\n" +
-	"\x02to\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x02to\x12\x18\n" +
-	"\asamples\x18\x03 \x01(\x05R\asamples\"\x89\x01\n" +
+	"\x02to\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x02to\x12#\n" +
+	"\asamples\x18\x03 \x01(\x05B\t\x92A\x06J\x043213R\asamples\"\x89\x01\n" +
 	"\x13MeshTelemetrySample\x125\n" +
 	"\areading\x18\x01 \x01(\v2\x1b.grid.v1.MeshAdminTelemetryR\areading\x12;\n" +
 	"\vreceived_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"receivedAt\".\n" +
-	"\x16GetPlaceSummaryRequest\x12\x14\n" +
-	"\x05place\x18\x01 \x01(\tR\x05place\"\xcc\x02\n" +
-	"\fPlaceSummary\x12\x14\n" +
-	"\x05place\x18\x01 \x01(\tR\x05place\x12\x19\n" +
-	"\bplace_id\x18\x02 \x01(\tR\aplaceId\x12\x1d\n" +
+	"receivedAt\"G\n" +
+	"\x16GetPlaceSummaryRequest\x12-\n" +
+	"\x05place\x18\x01 \x01(\tB\x17\x92A\x14J\x12\"calaveras-county\"R\x05place\"\xc5\x03\n" +
+	"\fPlaceSummary\x12-\n" +
+	"\x05place\x18\x01 \x01(\tB\x17\x92A\x14J\x12\"calaveras-county\"R\x05place\x129\n" +
+	"\bplace_id\x18\x02 \x01(\tB\x1e\x92A\x1bJ\x19\"county:calaveras-county\"R\aplaceId\x126\n" +
 	"\n" +
-	"place_name\x18\x03 \x01(\tR\tplaceName\x12=\n" +
-	"\fgenerated_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\vgeneratedAt\x12\x12\n" +
-	"\x04mode\x18\x05 \x01(\tR\x04mode\x12/\n" +
+	"place_name\x18\x03 \x01(\tB\x17\x92A\x14J\x12\"Calaveras County\"R\tplaceName\x12=\n" +
+	"\fgenerated_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\vgeneratedAt\x129\n" +
+	"\x04mode\x18\x05 \x01(\tB%\x92A\"J\a\"WATCH\"\xf2\x02\x05QUIET\xf2\x02\x05WATCH\xf2\x02\x06ACTIVER\x04mode\x12/\n" +
 	"\asummary\x18\x06 \x01(\v2\x15.grid.v1.SummaryStatsR\asummary\x120\n" +
 	"\adomains\x18\a \x03(\v2\x16.grid.v1.SummaryDomainR\adomains\x126\n" +
-	"\asources\x18\b \x03(\v2\x1c.grid.v1.SummarySourceHealthR\asources\"\xd9\x03\n" +
-	"\fSummaryStats\x12)\n" +
-	"\x10highest_severity\x18\x01 \x01(\tR\x0fhighestSeverity\x122\n" +
-	"\x15highest_severity_rank\x18\x02 \x01(\x05R\x13highestSeverityRank\x12R\n" +
-	"\x0fseverity_counts\x18\x03 \x03(\v2).grid.v1.SummaryStats.SeverityCountsEntryR\x0eseverityCounts\x12!\n" +
-	"\ftotal_active\x18\x04 \x01(\x05R\vtotalActive\x12J\n" +
-	"\x12active_evacuations\x18\x05 \x01(\v2\x1b.google.protobuf.Int32ValueR\x11activeEvacuations\x12+\n" +
-	"\x11evacuation_status\x18\x06 \x01(\tR\x10evacuationStatus\x127\n" +
+	"\asources\x18\b \x03(\v2\x1c.grid.v1.SummarySourceHealthR\asources\"\xe6\x05\n" +
+	"\fSummaryStats\x12e\n" +
+	"\x10highest_severity\x18\x01 \x01(\tB:\x92A7J\b\"SEVERE\"\xf2\x02\x04INFO\xf2\x02\x05MINOR\xf2\x02\bMODERATE\xf2\x02\x06SEVERE\xf2\x02\aEXTREMER\x0fhighestSeverity\x12C\n" +
+	"\x15highest_severity_rank\x18\x02 \x01(\x05B\x0f\x92A\fJ\x013Y\x00\x00\x00\x00\x00\x00\x10@R\x13highestSeverityRank\x12}\n" +
+	"\x0fseverity_counts\x18\x03 \x03(\v2).grid.v1.SummaryStats.SeverityCountsEntryB)\x92A&J${\"INFO\": 1, \"MINOR\": 1, \"SEVERE\": 1}R\x0eseverityCounts\x12)\n" +
+	"\ftotal_active\x18\x04 \x01(\x05B\x06\x92A\x03J\x013R\vtotalActive\x12R\n" +
+	"\x12active_evacuations\x18\x05 \x01(\v2\x1b.google.protobuf.Int32ValueB\x06\x92A\x03J\x010R\x11activeEvacuations\x12Q\n" +
+	"\x11evacuation_status\x18\x06 \x01(\tB$\x92A!J\x04\"OK\"\xf2\x02\x02OK\xf2\x02\x05STALE\xf2\x02\vUNAVAILABLER\x10evacuationStatus\x127\n" +
 	"\n" +
-	"top_events\x18\a \x03(\v2\x18.grid.v1.SummaryTopEventR\ttopEvents\x1aA\n" +
+	"top_events\x18\a \x03(\v2\x18.grid.v1.SummaryTopEventR\ttopEvents\x12]\n" +
+	"\x15evacuation_source_url\x18\b \x01(\tB)\x92A&J\x1e\"https://protect.genasys.com/\"\xa2\x02\x03uriR\x13evacuationSourceUrl\x1aA\n" +
 	"\x13SeverityCountsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\x05R\x05value:\x028\x01\"\xac\x01\n" +
-	"\x0fSummaryTopEvent\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
-	"\x05layer\x18\x02 \x01(\tR\x05layer\x12\x1a\n" +
-	"\bseverity\x18\x03 \x01(\tR\bseverity\x12#\n" +
-	"\rseverity_rank\x18\x04 \x01(\x05R\fseverityRank\x12\x1a\n" +
-	"\bheadline\x18\x05 \x01(\tR\bheadline\x12\x16\n" +
-	"\x06source\x18\x06 \x01(\tR\x06source\"\xcb\x01\n" +
-	"\rSummaryDomain\x12\x16\n" +
-	"\x06domain\x18\x01 \x01(\tR\x06domain\x12\x16\n" +
-	"\x06status\x18\x02 \x01(\tR\x06status\x12)\n" +
-	"\x10highest_severity\x18\x03 \x01(\tR\x0fhighestSeverity\x12!\n" +
-	"\factive_count\x18\x04 \x01(\x05R\vactiveCount\x12<\n" +
-	"\theadlines\x18\x05 \x03(\v2\x1e.grid.v1.SummaryDomainHeadlineR\theadlines\"_\n" +
-	"\x15SummaryDomainHeadline\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1a\n" +
-	"\bseverity\x18\x02 \x01(\tR\bseverity\x12\x1a\n" +
-	"\bheadline\x18\x03 \x01(\tR\bheadline\"\x81\x01\n" +
-	"\x13SummarySourceHealth\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x16\n" +
-	"\x06status\x18\x02 \x01(\tR\x06status\x12B\n" +
-	"\x0flast_success_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\rlastSuccessAt\"\xf3\x01\n" +
-	"\x11ListEventsRequest\x12\x14\n" +
-	"\x05place\x18\x01 \x01(\tR\x05place\x12\x14\n" +
-	"\x05layer\x18\x02 \x03(\tR\x05layer\x12\x16\n" +
-	"\x06status\x18\x03 \x03(\tR\x06status\x12!\n" +
-	"\fseverity_min\x18\x04 \x01(\tR\vseverityMin\x12\x14\n" +
-	"\x05since\x18\x05 \x01(\tR\x05since\x12\x1b\n" +
-	"\tpage_size\x18\x06 \x01(\x05R\bpageSize\x12\x1d\n" +
+	"\x05value\x18\x02 \x01(\x05R\x05value:\x028\x01\"\xc7\x03\n" +
+	"\x0fSummaryTopEvent\x12@\n" +
+	"\x02id\x18\x01 \x01(\tB0\x92A-J+\"caltrans:d10-C26EA-0001-2026-08-24-070100\"R\x02id\x12w\n" +
+	"\x05layer\x18\x02 \x01(\tBa\x92A^J\x0f\"ROAD_INCIDENT\"\xf2\x02\bWILDFIRE\xf2\x02\n" +
+	"EVACUATION\xf2\x02\rWEATHER_ALERT\xf2\x02\n" +
+	"EARTHQUAKE\xf2\x02\rROAD_INCIDENT\xf2\x02\x05POWERR\x05layer\x12V\n" +
+	"\bseverity\x18\x03 \x01(\tB:\x92A7J\b\"SEVERE\"\xf2\x02\x04INFO\xf2\x02\x05MINOR\xf2\x02\bMODERATE\xf2\x02\x06SEVERE\xf2\x02\aEXTREMER\bseverity\x12+\n" +
+	"\rseverity_rank\x18\x04 \x01(\x05B\x06\x92A\x03J\x013R\fseverityRank\x12K\n" +
+	"\bheadline\x18\x05 \x01(\tB/\x92A,J*\"Hwy 26 full closure (Roadway Excavation)\"R\bheadline\x12'\n" +
+	"\x06source\x18\x06 \x01(\tB\x0f\x92A\fJ\n" +
+	"\"caltrans\"R\x06source\"\x8a\x03\n" +
+	"\rSummaryDomain\x12k\n" +
+	"\x06domain\x18\x01 \x01(\tBS\x92APJ\a\"roads\"\xf2\x02\x04fire\xf2\x02\n" +
+	"evacuation\xf2\x02\aweather\xf2\x02\x05roads\xf2\x02\aseismic\xf2\x02\x05power\xf2\x02\x04burn\xf2\x02\x05commsR\x06domain\x12<\n" +
+	"\x06status\x18\x02 \x01(\tB$\x92A!J\x04\"OK\"\xf2\x02\x02OK\xf2\x02\x05STALE\xf2\x02\vUNAVAILABLER\x06status\x12e\n" +
+	"\x10highest_severity\x18\x03 \x01(\tB:\x92A7J\b\"SEVERE\"\xf2\x02\x04INFO\xf2\x02\x05MINOR\xf2\x02\bMODERATE\xf2\x02\x06SEVERE\xf2\x02\aEXTREMER\x0fhighestSeverity\x12)\n" +
+	"\factive_count\x18\x04 \x01(\x05B\x06\x92A\x03J\x014R\vactiveCount\x12<\n" +
+	"\theadlines\x18\x05 \x03(\v2\x1e.grid.v1.SummaryDomainHeadlineR\theadlines\"\xdf\x03\n" +
+	"\x15SummaryDomainHeadline\x122\n" +
+	"\x02id\x18\x01 \x01(\tB\"\x92A\x1fJ\x1d\"road:hwy4-arnold-bearvalley\"R\x02id\x12V\n" +
+	"\bseverity\x18\x02 \x01(\tB:\x92A7J\b\"SEVERE\"\xf2\x02\x04INFO\xf2\x02\x05MINOR\xf2\x02\bMODERATE\xf2\x02\x06SEVERE\xf2\x02\aEXTREMER\bseverity\x12B\n" +
+	"\bheadline\x18\x03 \x01(\tB&\x92A#J!\"Hwy 4 — Arnold to Bear Valley\"R\bheadline\x128\n" +
+	"\x04kind\x18\x04 \x01(\tB$\x92A!J\v\"CONDITION\"\xf2\x02\x05EVENT\xf2\x02\tCONDITIONR\x04kind\x12\xbb\x01\n" +
+	"\x05layer\x18\x05 \x01(\tB\xa4\x01\x92A\xa0\x01J\x0e\"ROAD_SEGMENT\"\xf2\x02\bWILDFIRE\xf2\x02\n" +
+	"EVACUATION\xf2\x02\rWEATHER_ALERT\xf2\x02\n" +
+	"EARTHQUAKE\xf2\x02\rROAD_INCIDENT\xf2\x02\x05POWER\xf2\x02\x04MESH\xf2\x02\vBURN_STATUS\xf2\x02\fROAD_SEGMENT\xf2\x02\rCHAIN_CONTROL\xf2\x02\fFIRE_WEATHERR\x05layer\"\xb6\x01\n" +
+	"\x13SummarySourceHealth\x12\x1d\n" +
+	"\x02id\x18\x01 \x01(\tB\r\x92A\n" +
+	"J\b\"caloes\"R\x02id\x12<\n" +
+	"\x06status\x18\x02 \x01(\tB$\x92A!J\x04\"OK\"\xf2\x02\x02OK\xf2\x02\x05STALE\xf2\x02\vUNAVAILABLER\x06status\x12B\n" +
+	"\x0flast_success_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\rlastSuccessAt\"\xf3\x03\n" +
+	"\x11ListEventsRequest\x12-\n" +
+	"\x05place\x18\x01 \x01(\tB\x17\x92A\x14J\x12\"calaveras-county\"R\x05place\x12{\n" +
+	"\x05layer\x18\x02 \x03(\tBe\x92Ab\xf2\x02\bWILDFIRE\xf2\x02\n" +
+	"EVACUATION\xf2\x02\rWEATHER_ALERT\xf2\x02\n" +
+	"EARTHQUAKE\xf2\x02\rROAD_INCIDENT\xf2\x02\x05POWER\xf2\x02\x04MESH\xf2\x02\vBURN_STATUSR\x05layer\x12E\n" +
+	"\x06status\x18\x03 \x03(\tB-\x92A*\xf2\x02\x06ACTIVE\xf2\x02\tSCHEDULED\xf2\x02\bRESOLVED\xf2\x02\aEXPIREDR\x06status\x12S\n" +
+	"\fseverity_min\x18\x04 \x01(\tB0\x92A-\xf2\x02\x04INFO\xf2\x02\x05MINOR\xf2\x02\bMODERATE\xf2\x02\x06SEVERE\xf2\x02\aEXTREMER\vseverityMin\x12%\n" +
+	"\x05since\x18\x05 \x01(\tB\x0f\x92A\f\xa2\x02\tdate-timeR\x05since\x12)\n" +
+	"\tpage_size\x18\x06 \x01(\x05B\f\x92A\tY\x00\x00\x00\x00\x00\x00i@R\bpageSize\x12\x1d\n" +
 	"\n" +
 	"page_token\x18\a \x01(\tR\tpageToken\x12%\n" +
-	"\x0eenhancement_io\x18\b \x01(\bR\renhancementIo\"H\n" +
-	"\x0fGetEventRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12%\n" +
-	"\x0eenhancement_io\x18\x02 \x01(\bR\renhancementIo\"\x8b\x01\n" +
-	"\x16GetEventHistoryRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1b\n" +
-	"\tpage_size\x18\x02 \x01(\x05R\bpageSize\x12\x1d\n" +
+	"\x0eenhancement_io\x18\b \x01(\bR\renhancementIo\"f\n" +
+	"\x0fGetEventRequest\x12,\n" +
+	"\x02id\x18\x01 \x01(\tB\x1c\x92A\x19J\x17\"burn:calaveras-county\"R\x02id\x12%\n" +
+	"\x0eenhancement_io\x18\x02 \x01(\bR\renhancementIo\"\xb7\x01\n" +
+	"\x16GetEventHistoryRequest\x12,\n" +
+	"\x02id\x18\x01 \x01(\tB\x1c\x92A\x19J\x17\"burn:calaveras-county\"R\x02id\x12)\n" +
+	"\tpage_size\x18\x02 \x01(\x05B\f\x92A\tY\x00\x00\x00\x00\x00\x00i@R\bpageSize\x12\x1d\n" +
 	"\n" +
 	"page_token\x18\x03 \x01(\tR\tpageToken\x12%\n" +
-	"\x0eenhancement_io\x18\x04 \x01(\bR\renhancementIo\"\xc7\x01\n" +
-	"\x12ListHistoryRequest\x12\x14\n" +
-	"\x05place\x18\x01 \x01(\tR\x05place\x12\x14\n" +
-	"\x05layer\x18\x02 \x03(\tR\x05layer\x12\x12\n" +
-	"\x04from\x18\x03 \x01(\tR\x04from\x12\x0e\n" +
-	"\x02to\x18\x04 \x01(\tR\x02to\x12\x1b\n" +
-	"\tpage_size\x18\x05 \x01(\x05R\bpageSize\x12\x1d\n" +
+	"\x0eenhancement_io\x18\x04 \x01(\bR\renhancementIo\"\xf7\x02\n" +
+	"\x12ListHistoryRequest\x12-\n" +
+	"\x05place\x18\x01 \x01(\tB\x17\x92A\x14J\x12\"calaveras-county\"R\x05place\x12{\n" +
+	"\x05layer\x18\x02 \x03(\tBe\x92Ab\xf2\x02\bWILDFIRE\xf2\x02\n" +
+	"EVACUATION\xf2\x02\rWEATHER_ALERT\xf2\x02\n" +
+	"EARTHQUAKE\xf2\x02\rROAD_INCIDENT\xf2\x02\x05POWER\xf2\x02\x04MESH\xf2\x02\vBURN_STATUSR\x05layer\x12#\n" +
+	"\x04from\x18\x03 \x01(\tB\x0f\x92A\f\xa2\x02\tdate-timeR\x04from\x12\x1f\n" +
+	"\x02to\x18\x04 \x01(\tB\x0f\x92A\f\xa2\x02\tdate-timeR\x02to\x12)\n" +
+	"\tpage_size\x18\x05 \x01(\x05B\f\x92A\tY\x00\x00\x00\x00\x00\x00i@R\bpageSize\x12\x1d\n" +
 	"\n" +
 	"page_token\x18\x06 \x01(\tR\tpageToken\x12%\n" +
-	"\x0eenhancement_io\x18\a \x01(\bR\renhancementIo\"5\n" +
-	"\x11ListPlacesRequest\x12\x12\n" +
-	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\f\n" +
-	"\x01q\x18\x02 \x01(\tR\x01q\"'\n" +
-	"\x0fGetPlaceRequest\x12\x14\n" +
-	"\x05place\x18\x01 \x01(\tR\x05place\"S\n" +
-	"\x13ResolvePlaceRequest\x12\x10\n" +
-	"\x03lat\x18\x01 \x01(\tR\x03lat\x12\x10\n" +
-	"\x03lng\x18\x02 \x01(\tR\x03lng\x12\x18\n" +
-	"\aaddress\x18\x03 \x01(\tR\aaddress\"[\n" +
-	"\fResolveQuery\x12\x10\n" +
-	"\x03lat\x18\x01 \x01(\x01R\x03lat\x12\x10\n" +
-	"\x03lng\x18\x02 \x01(\x01R\x03lng\x12'\n" +
+	"\x0eenhancement_io\x18\a \x01(\bR\renhancementIo\"o\n" +
+	"\x11ListPlacesRequest\x12L\n" +
+	"\x04kind\x18\x01 \x01(\tB8\x92A5\xf2\x02\x04AREA\xf2\x02\x06COUNTY\xf2\x02\x04TOWN\xf2\x02\bCORRIDOR\xf2\x02\tEVAC_ZONE\xf2\x02\x04SITER\x04kind\x12\f\n" +
+	"\x01q\x18\x02 \x01(\tR\x01q\"6\n" +
+	"\x0fGetPlaceRequest\x12#\n" +
+	"\x05place\x18\x01 \x01(\tB\r\x92A\n" +
+	"J\b\"arnold\"R\x05place\"\xac\x01\n" +
+	"\x13ResolvePlaceRequest\x12)\n" +
+	"\x03lat\x18\x01 \x01(\tB\x17\x92A\x14J\x0538.25\x9a\x02\x01\x05\xa2\x02\x06doubleR\x03lat\x12+\n" +
+	"\x03lng\x18\x02 \x01(\tB\x19\x92A\x16J\a-120.35\x9a\x02\x01\x05\xa2\x02\x06doubleR\x03lng\x12=\n" +
+	"\aaddress\x18\x03 \x01(\tB#\x92A J\x1e\"1 Main St, Murphys, CA 95247\"R\aaddress\"u\n" +
+	"\fResolveQuery\x12\x1c\n" +
+	"\x03lat\x18\x01 \x01(\x01B\n" +
+	"\x92A\aJ\x0538.25R\x03lat\x12\x1e\n" +
+	"\x03lng\x18\x02 \x01(\x01B\f\x92A\tJ\a-120.35R\x03lng\x12'\n" +
 	"\x0fmatched_address\x18\x03 \x01(\tR\x0ematchedAddress\"k\n" +
 	"\x14ResolvePlaceResponse\x12+\n" +
 	"\x05query\x18\x01 \x01(\v2\x15.grid.v1.ResolveQueryR\x05query\x12&\n" +
-	"\x06places\x18\x02 \x03(\v2\x0e.grid.v1.PlaceR\x06places\"+\n" +
-	"\x13ListScannersRequest\x12\x14\n" +
-	"\x05place\x18\x01 \x01(\tR\x05place\"\x8a\x01\n" +
-	"\aScanner\x12\x17\n" +
-	"\afeed_id\x18\x01 \x01(\tR\x06feedId\x12#\n" +
-	"\rchannel_label\x18\x02 \x01(\tR\fchannelLabel\x12\x16\n" +
-	"\x06agency\x18\x03 \x01(\tR\x06agency\x12)\n" +
-	"\x10broadcastify_url\x18\x04 \x01(\tR\x0fbroadcastifyUrl\";\n" +
+	"\x06places\x18\x02 \x03(\v2\x0e.grid.v1.PlaceR\x06places\"@\n" +
+	"\x13ListScannersRequest\x12)\n" +
+	"\x05place\x18\x01 \x01(\tB\x13\x92A\x10J\x0e\"ebbetts-pass\"R\x05place\"\x99\x02\n" +
+	"\aScanner\x12%\n" +
+	"\afeed_id\x18\x01 \x01(\tB\f\x92A\tJ\a\"13524\"R\x06feedId\x12G\n" +
+	"\rchannel_label\x18\x02 \x01(\tB\"\x92A\x1fJ\x1d\"Sheriff / CAL FIRE Dispatch\"R\fchannelLabel\x126\n" +
+	"\x06agency\x18\x03 \x01(\tB\x1e\x92A\x1bJ\x19\"Calaveras SO / CAL FIRE\"R\x06agency\x12f\n" +
+	"\x10broadcastify_url\x18\x04 \x01(\tB;\x92A8J0\"https://www.broadcastify.com/listen/feed/13524\"\xa2\x02\x03uriR\x0fbroadcastifyUrl\";\n" +
 	"\vScannerList\x12,\n" +
-	"\bscanners\x18\x01 \x03(\v2\x10.grid.v1.ScannerR\bscanners\"*\n" +
-	"\x12ListCamerasRequest\x12\x14\n" +
-	"\x05place\x18\x01 \x01(\tR\x05place\"\xaa\x03\n" +
-	"\x06Camera\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\x12!\n" +
-	"\fnearby_place\x18\x03 \x01(\tR\vnearbyPlace\x12\x16\n" +
-	"\x06county\x18\x04 \x01(\tR\x06county\x12\x14\n" +
-	"\x05route\x18\x05 \x01(\tR\x05route\x12\x1c\n" +
-	"\tdirection\x18\x06 \x01(\tR\tdirection\x12+\n" +
-	"\blocation\x18\a \x01(\v2\x0f.grid.v1.LatLngR\blocation\x12%\n" +
-	"\x0eelevation_feet\x18\b \x01(\x05R\relevationFeet\x12\x1b\n" +
-	"\timage_url\x18\t \x01(\tR\bimageUrl\x122\n" +
+	"\bscanners\x18\x01 \x03(\v2\x10.grid.v1.ScannerR\bscanners\"9\n" +
+	"\x12ListCamerasRequest\x12#\n" +
+	"\x05place\x18\x01 \x01(\tB\r\x92A\n" +
+	"J\b\"sonora\"R\x05place\"\xf4\x04\n" +
+	"\x06Camera\x12\x1e\n" +
+	"\x02id\x18\x01 \x01(\tB\x0e\x92A\vJ\t\"d10-172\"R\x02id\x125\n" +
+	"\x04name\x18\x02 \x01(\tB!\x92A\x1eJ\x1c\"EB 108 W/O Soulsbyville Rd\"R\x04name\x126\n" +
+	"\fnearby_place\x18\x03 \x01(\tB\x13\x92A\x10J\x0e\"Soulsbyville\"R\vnearbyPlace\x12'\n" +
+	"\x06county\x18\x04 \x01(\tB\x0f\x92A\fJ\n" +
+	"\"Tuolumne\"R\x06county\x12#\n" +
+	"\x05route\x18\x05 \x01(\tB\r\x92A\n" +
+	"J\b\"SR-108\"R\x05route\x12J\n" +
+	"\tdirection\x18\x06 \x01(\tB,\x92A)J\x06\"East\"\xf2\x02\x00\xf2\x02\x05North\xf2\x02\x05South\xf2\x02\x04East\xf2\x02\x04WestR\tdirection\x12+\n" +
+	"\blocation\x18\a \x01(\v2\x0f.grid.v1.LatLngR\blocation\x120\n" +
+	"\x0eelevation_feet\x18\b \x01(\x05B\t\x92A\x06J\x042650R\relevationFeet\x12&\n" +
+	"\timage_url\x18\t \x01(\tB\t\x92A\x06\xa2\x02\x03uriR\bimageUrl\x12:\n" +
 	"\x15image_refresh_minutes\x18\n" +
-	" \x01(\x05R\x13imageRefreshMinutes\x12\x1d\n" +
+	" \x01(\x05B\x06\x92A\x03J\x015R\x13imageRefreshMinutes\x12(\n" +
 	"\n" +
-	"stream_url\x18\v \x01(\tR\tstreamUrl\x12 \n" +
-	"\vdescription\x18\f \x01(\tR\vdescription\x12'\n" +
-	"\x0fdistance_meters\x18\r \x01(\x05R\x0edistanceMeters\"\xc8\x01\n" +
+	"stream_url\x18\v \x01(\tB\t\x92A\x06\xa2\x02\x03uriR\tstreamUrl\x12 \n" +
+	"\vdescription\x18\f \x01(\tR\vdescription\x122\n" +
+	"\x0fdistance_meters\x18\r \x01(\x05B\t\x92A\x06J\x041200R\x0edistanceMeters\"\xff\x01\n" +
 	"\n" +
 	"CameraList\x12)\n" +
-	"\acameras\x18\x01 \x03(\v2\x0f.grid.v1.CameraR\acameras\x12#\n" +
-	"\rsource_status\x18\x02 \x01(\tR\fsourceStatus\x12H\n" +
-	"\x12last_source_update\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\x10lastSourceUpdate\x12 \n" +
-	"\vattribution\x18\x04 \x01(\tR\vattribution\",\n" +
-	"\x14GetConditionsRequest\x12\x14\n" +
-	"\x05place\x18\x01 \x01(\tR\x05place\"\xdb\x03\n" +
-	"\x11WeatherConditions\x12\x1f\n" +
-	"\vlocation_id\x18\x01 \x01(\tR\n" +
-	"locationId\x12#\n" +
-	"\rlocation_name\x18\x02 \x01(\tR\flocationName\x12!\n" +
-	"\fweather_main\x18\x03 \x01(\tR\vweatherMain\x12/\n" +
-	"\x13weather_description\x18\x04 \x01(\tR\x12weatherDescription\x12!\n" +
-	"\fweather_icon\x18\x05 \x01(\tR\vweatherIcon\x12/\n" +
-	"\x13temperature_celsius\x18\x06 \x01(\x05R\x12temperatureCelsius\x12,\n" +
-	"\x12feels_like_celsius\x18\a \x01(\x05R\x10feelsLikeCelsius\x12)\n" +
-	"\x10humidity_percent\x18\b \x01(\x05R\x0fhumidityPercent\x12$\n" +
-	"\x0ewind_speed_kmh\x18\t \x01(\x05R\fwindSpeedKmh\x124\n" +
+	"\acameras\x18\x01 \x03(\v2\x0f.grid.v1.CameraR\acameras\x12I\n" +
+	"\rsource_status\x18\x02 \x01(\tB$\x92A!J\x04\"OK\"\xf2\x02\x02OK\xf2\x02\x05STALE\xf2\x02\vUNAVAILABLER\fsourceStatus\x12H\n" +
+	"\x12last_source_update\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\x10lastSourceUpdate\x121\n" +
+	"\vattribution\x18\x04 \x01(\tB\x0f\x92A\fJ\n" +
+	"\"Caltrans\"R\vattribution\"E\n" +
+	"\x14GetConditionsRequest\x12-\n" +
+	"\x05place\x18\x01 \x01(\tB\x17\x92A\x14J\x12\"calaveras-county\"R\x05place\"\xdf\x04\n" +
+	"\x11WeatherConditions\x12/\n" +
+	"\vlocation_id\x18\x01 \x01(\tB\x0e\x92A\vJ\t\"murphys\"R\n" +
+	"locationId\x127\n" +
+	"\rlocation_name\x18\x02 \x01(\tB\x12\x92A\x0fJ\r\"Murphys, CA\"R\flocationName\x12/\n" +
+	"\fweather_main\x18\x03 \x01(\tB\f\x92A\tJ\a\"Clear\"R\vweatherMain\x12A\n" +
+	"\x13weather_description\x18\x04 \x01(\tB\x10\x92A\rJ\v\"clear sky\"R\x12weatherDescription\x12-\n" +
+	"\fweather_icon\x18\x05 \x01(\tB\n" +
+	"\x92A\aJ\x05\"01n\"R\vweatherIcon\x128\n" +
+	"\x13temperature_celsius\x18\x06 \x01(\x05B\a\x92A\x04J\x0210R\x12temperatureCelsius\x124\n" +
+	"\x12feels_like_celsius\x18\a \x01(\x05B\x06\x92A\x03J\x019R\x10feelsLikeCelsius\x122\n" +
+	"\x10humidity_percent\x18\b \x01(\x05B\a\x92A\x04J\x0275R\x0fhumidityPercent\x12,\n" +
+	"\x0ewind_speed_kmh\x18\t \x01(\x05B\x06\x92A\x03J\x017R\fwindSpeedKmh\x12=\n" +
 	"\x16wind_direction_degrees\x18\n" +
-	" \x01(\x05R\x14windDirectionDegrees\x12#\n" +
-	"\rvisibility_km\x18\v \x01(\x05R\fvisibilityKm\"_\n" +
-	"\x15FireWeatherConditions\x12\x14\n" +
-	"\x05state\x18\x01 \x01(\tR\x05state\x12\x1a\n" +
+	" \x01(\x05B\a\x92A\x04J\x0230R\x14windDirectionDegrees\x12,\n" +
+	"\rvisibility_km\x18\v \x01(\x05B\a\x92A\x04J\x0210R\fvisibilityKm\"\x90\x01\n" +
+	"\x15FireWeatherConditions\x12E\n" +
+	"\x05state\x18\x01 \x01(\tB/\x92A,J\b\"normal\"\xf2\x02\x06normal\xf2\x02\belevated\xf2\x02\bred-flag\xf2\x02\x00R\x05state\x12\x1a\n" +
 	"\bheadline\x18\x02 \x01(\tR\bheadline\x12\x14\n" +
-	"\x05zones\x18\x03 \x03(\tR\x05zones\"\x9c\x02\n" +
+	"\x05zones\x18\x03 \x03(\tR\x05zones\"\xc8\x02\n" +
 	"\x0eForecastPeriod\x12.\n" +
-	"\x04time\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x04time\x12/\n" +
-	"\x13temperature_celsius\x18\x02 \x01(\x05R\x12temperatureCelsius\x12)\n" +
-	"\x10humidity_percent\x18\x03 \x01(\x05R\x0fhumidityPercent\x12$\n" +
-	"\x0ewind_speed_kmh\x18\x04 \x01(\x05R\fwindSpeedKmh\x124\n" +
-	"\x16wind_direction_degrees\x18\x05 \x01(\x05R\x14windDirectionDegrees\x12\"\n" +
-	"\rwind_gust_kmh\x18\x06 \x01(\x05R\vwindGustKmh\"\x81\x03\n" +
-	"\x0fWeatherForecast\x12\x1f\n" +
-	"\vlocation_id\x18\x01 \x01(\tR\n" +
-	"locationId\x12\x16\n" +
-	"\x06source\x18\x02 \x01(\tR\x06source\x127\n" +
-	"\tissued_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\bissuedAt\x12#\n" +
-	"\rhorizon_hours\x18\x04 \x01(\x05R\fhorizonHours\x121\n" +
-	"\aperiods\x18\x05 \x03(\v2\x17.grid.v1.ForecastPeriodR\aperiods\x12+\n" +
-	"\x12peak_wind_gust_kmh\x18\x06 \x01(\x05R\x0fpeakWindGustKmh\x12E\n" +
-	"\x11peak_wind_gust_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\x0epeakWindGustAt\x120\n" +
-	"\x14min_humidity_percent\x18\b \x01(\x05R\x12minHumidityPercent\"\xfa\x01\n" +
+	"\x04time\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x04time\x128\n" +
+	"\x13temperature_celsius\x18\x02 \x01(\x05B\a\x92A\x04J\x0212R\x12temperatureCelsius\x122\n" +
+	"\x10humidity_percent\x18\x03 \x01(\x05B\a\x92A\x04J\x0264R\x0fhumidityPercent\x12,\n" +
+	"\x0ewind_speed_kmh\x18\x04 \x01(\x05B\x06\x92A\x03J\x016R\fwindSpeedKmh\x12=\n" +
+	"\x16wind_direction_degrees\x18\x05 \x01(\x05B\a\x92A\x04J\x0280R\x14windDirectionDegrees\x12+\n" +
+	"\rwind_gust_kmh\x18\x06 \x01(\x05B\a\x92A\x04J\x0213R\vwindGustKmh\"\xc4\x03\n" +
+	"\x0fWeatherForecast\x12/\n" +
+	"\vlocation_id\x18\x01 \x01(\tB\x0e\x92A\vJ\t\"murphys\"R\n" +
+	"locationId\x12.\n" +
+	"\x06source\x18\x02 \x01(\tB\x16\x92A\x13J\x11\"NWS (STO 73,42)\"R\x06source\x127\n" +
+	"\tissued_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\bissuedAt\x12,\n" +
+	"\rhorizon_hours\x18\x04 \x01(\x05B\a\x92A\x04J\x0248R\fhorizonHours\x121\n" +
+	"\aperiods\x18\x05 \x03(\v2\x17.grid.v1.ForecastPeriodR\aperiods\x124\n" +
+	"\x12peak_wind_gust_kmh\x18\x06 \x01(\x05B\a\x92A\x04J\x0217R\x0fpeakWindGustKmh\x12E\n" +
+	"\x11peak_wind_gust_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\x0epeakWindGustAt\x129\n" +
+	"\x14min_humidity_percent\x18\b \x01(\x05B\a\x92A\x04J\x0233R\x12minHumidityPercent\"\xfa\x01\n" +
 	"\n" +
 	"Conditions\x124\n" +
 	"\aweather\x18\x01 \x03(\v2\x1a.grid.v1.WeatherConditionsR\aweather\x12A\n" +
@@ -6139,7 +6975,12 @@ const file_grid_proto_rawDesc = "" +
 	"\n" +
 	"\x06ACTIVE\x10\x02\x12\f\n" +
 	"\bRESOLVED\x10\x03\x12\v\n" +
-	"\aEXPIRED\x10\x04*Q\n" +
+	"\aEXPIRED\x10\x04*A\n" +
+	"\n" +
+	"SourceKind\x12\x1b\n" +
+	"\x17SOURCE_KIND_UNSPECIFIED\x10\x00\x12\b\n" +
+	"\x04FEED\x10\x01\x12\f\n" +
+	"\bREPORTER\x10\x02*Q\n" +
 	"\fSourceStatus\x12\x1d\n" +
 	"\x19SOURCE_STATUS_UNSPECIFIED\x10\x00\x12\x06\n" +
 	"\x02OK\x10\x01\x12\t\n" +
@@ -6171,24 +7012,164 @@ const file_grid_proto_rawDesc = "" +
 	"\x0eBurnPermission\x12\x1b\n" +
 	"\x17BURN_PERMISSION_UNKNOWN\x10\x00\x12\x1b\n" +
 	"\x17BURN_PERMISSION_ALLOWED\x10\x01\x12\x1e\n" +
-	"\x1aBURN_PERMISSION_PROHIBITED\x10\x022\x80\n" +
+	"\x1aBURN_PERMISSION_PROHIBITED\x10\x022\xc9\x1a\n" +
+	"\vGridService\x12\xd5\x03\n" +
 	"\n" +
-	"\vGridService\x12T\n" +
+	"ListEvents\x12\x1a.grid.v1.ListEventsRequest\x1a\x12.grid.v1.EventList\"\x96\x03\x92A\xfc\x02\n" +
+	"\x06EventsJ>\n" +
+	"\x03304\x127\n" +
+	"5Not Modified: the `If-None-Match` ETag still matches.J\x8f\x01\n" +
+	"\x03400\x12\x87\x01\n" +
+	"\x84\x01INVALID_ARGUMENT: an unknown layer, status or severity, a timestamp that is not RFC 3339, a negative page size, or a bad page token.J\"\n" +
+	"\x03404\x12\x1b\n" +
+	"\x19NOT_FOUND: unknown place.J|\n" +
+	"\x03429\x12u\n" +
+	"sRESOURCE_EXHAUSTED: the page exceeded the 4 MiB response limit (large perimeters); retry with a smaller `pageSize`.\x82\xd3\xe4\x93\x02\x10\x12\x0e/api/v1/events\x12\xc8\x01\n" +
+	"\bGetEvent\x12\x18.grid.v1.GetEventRequest\x1a\x0e.grid.v1.Event\"\x91\x01\x92As\n" +
+	"\x06EventsJ>\n" +
+	"\x03304\x127\n" +
+	"5Not Modified: the `If-None-Match` ETag still matches.J)\n" +
+	"\x03404\x12\"\n" +
+	" NOT_FOUND: no event has this id.\x82\xd3\xe4\x93\x02\x15\x12\x13/api/v1/events/{id}\x12\xb1\x02\n" +
+	"\x0fGetEventHistory\x12\x1f.grid.v1.GetEventHistoryRequest\x1a\x1a.grid.v1.EventRevisionList\"\xe0\x01\x92A\xb9\x01\n" +
+	"\x06EventsJ>\n" +
+	"\x03304\x127\n" +
+	"5Not Modified: the `If-None-Match` ETag still matches.JD\n" +
+	"\x03400\x12=\n" +
+	";INVALID_ARGUMENT: a negative page size or a bad page token.J)\n" +
+	"\x03404\x12\"\n" +
+	" NOT_FOUND: no event has this id.\x82\xd3\xe4\x93\x02\x1d\x12\x1b/api/v1/events/{id}/history\x12\xb6\x03\n" +
+	"\vListHistory\x12\x1b.grid.v1.ListHistoryRequest\x1a\x1a.grid.v1.EventRevisionList\"\xed\x02\x92A\xd2\x02\n" +
+	"\x06EventsJ>\n" +
+	"\x03304\x127\n" +
+	"5Not Modified: the `If-None-Match` ETag still matches.Jy\n" +
+	"\x03400\x12r\n" +
+	"pINVALID_ARGUMENT: an unknown layer, a timestamp that is not RFC 3339, a negative page size, or a bad page token.J\"\n" +
+	"\x03404\x12\x1b\n" +
+	"\x19NOT_FOUND: unknown place.Ji\n" +
+	"\x03429\x12b\n" +
+	"`RESOURCE_EXHAUSTED: the page exceeded the 4 MiB response limit; retry with a smaller `pageSize`.\x82\xd3\xe4\x93\x02\x11\x12\x0f/api/v1/history\x12\xca\x01\n" +
 	"\n" +
-	"ListEvents\x12\x1a.grid.v1.ListEventsRequest\x1a\x12.grid.v1.EventList\"\x16\x82\xd3\xe4\x93\x02\x10\x12\x0e/api/v1/events\x12Q\n" +
-	"\bGetEvent\x12\x18.grid.v1.GetEventRequest\x1a\x0e.grid.v1.Event\"\x1b\x82\xd3\xe4\x93\x02\x15\x12\x13/api/v1/events/{id}\x12s\n" +
-	"\x0fGetEventHistory\x12\x1f.grid.v1.GetEventHistoryRequest\x1a\x1a.grid.v1.EventRevisionList\"#\x82\xd3\xe4\x93\x02\x1d\x12\x1b/api/v1/events/{id}/history\x12_\n" +
-	"\vListHistory\x12\x1b.grid.v1.ListHistoryRequest\x1a\x1a.grid.v1.EventRevisionList\"\x17\x82\xd3\xe4\x93\x02\x11\x12\x0f/api/v1/history\x12T\n" +
+	"ListPlaces\x12\x1a.grid.v1.ListPlacesRequest\x1a\x12.grid.v1.PlaceList\"\x8b\x01\x92Ar\n" +
+	"\x06PlacesJ>\n" +
+	"\x03304\x127\n" +
+	"5Not Modified: the `If-None-Match` ETag still matches.J(\n" +
+	"\x03400\x12!\n" +
+	"\x1fINVALID_ARGUMENT: unknown kind.\x82\xd3\xe4\x93\x02\x10\x12\x0e/api/v1/places\x12\x9d\x03\n" +
+	"\fResolvePlace\x12\x1c.grid.v1.ResolvePlaceRequest\x1a\x1d.grid.v1.ResolvePlaceResponse\"\xcf\x02\x92A\xad\x02\n" +
+	"\x06PlacesJp\n" +
+	"\x03400\x12i\n" +
+	"gINVALID_ARGUMENT: neither or both of lat+lng and address, only one of lat/lng, or a value out of range.JY\n" +
+	"\x03404\x12R\n" +
+	"PNOT_FOUND: the geocoder found no match for the address (add city, state or ZIP).JV\n" +
+	"\x03503\x12O\n" +
+	"MUNAVAILABLE: the address geocoder is down; retry later or resolve by lat/lng.\x82\xd3\xe4\x93\x02\x18\x12\x16/api/v1/places:resolve\x12\xc4\x01\n" +
+	"\bGetPlace\x12\x18.grid.v1.GetPlaceRequest\x1a\x0e.grid.v1.Place\"\x8d\x01\x92Al\n" +
+	"\x06PlacesJ>\n" +
+	"\x03304\x127\n" +
+	"5Not Modified: the `If-None-Match` ETag still matches.J\"\n" +
+	"\x03404\x12\x1b\n" +
+	"\x19NOT_FOUND: unknown place.\x82\xd3\xe4\x93\x02\x18\x12\x16/api/v1/places/{place}\x12\xa0\x01\n" +
+	"\x0fGetPlaceSummary\x12\x1f.grid.v1.GetPlaceSummaryRequest\x1a\x15.grid.v1.PlaceSummary\"U\x92A,\n" +
+	"\x06PlacesJ\"\n" +
+	"\x03404\x12\x1b\n" +
+	"\x19NOT_FOUND: unknown place.\x82\xd3\xe4\x93\x02 \x12\x1e/api/v1/places/{place}/summary\x12\x8f\x01\n" +
+	"\fListScanners\x12\x1c.grid.v1.ListScannersRequest\x1a\x14.grid.v1.ScannerList\"K\x92A0\n" +
 	"\n" +
-	"ListPlaces\x12\x1a.grid.v1.ListPlacesRequest\x1a\x12.grid.v1.PlaceList\"\x16\x82\xd3\xe4\x93\x02\x10\x12\x0e/api/v1/places\x12k\n" +
-	"\fResolvePlace\x12\x1c.grid.v1.ResolvePlaceRequest\x1a\x1d.grid.v1.ResolvePlaceResponse\"\x1e\x82\xd3\xe4\x93\x02\x18\x12\x16/api/v1/places:resolve\x12T\n" +
-	"\bGetPlace\x12\x18.grid.v1.GetPlaceRequest\x1a\x0e.grid.v1.Place\"\x1e\x82\xd3\xe4\x93\x02\x18\x12\x16/api/v1/places/{place}\x12q\n" +
-	"\x0fGetPlaceSummary\x12\x1f.grid.v1.GetPlaceSummaryRequest\x1a\x15.grid.v1.PlaceSummary\"&\x82\xd3\xe4\x93\x02 \x12\x1e/api/v1/places/{place}/summary\x12\\\n" +
-	"\fListScanners\x12\x1c.grid.v1.ListScannersRequest\x1a\x14.grid.v1.ScannerList\"\x18\x82\xd3\xe4\x93\x02\x12\x12\x10/api/v1/scanners\x12X\n" +
-	"\vListCameras\x12\x1b.grid.v1.ListCamerasRequest\x1a\x13.grid.v1.CameraList\"\x17\x82\xd3\xe4\x93\x02\x11\x12\x0f/api/v1/cameras\x12_\n" +
-	"\rGetConditions\x12\x1d.grid.v1.GetConditionsRequest\x1a\x13.grid.v1.Conditions\"\x1a\x82\xd3\xe4\x93\x02\x14\x12\x12/api/v1/conditions\x12X\n" +
-	"\vListSources\x12\x1b.grid.v1.ListSourcesRequest\x1a\x13.grid.v1.SourceList\"\x17\x82\xd3\xe4\x93\x02\x11\x12\x0f/api/v1/sources\x12s\n" +
-	"\x10GetMeshTelemetry\x12 .grid.v1.GetMeshTelemetryRequest\x1a\x1d.grid.v1.MeshTelemetryArchive\"\x1e\x82\xd3\xe4\x93\x02\x18\x12\x16/api/v1/mesh/telemetryB0Z.github.com/dpup/sierra-data/api/grid/v1;gridv1b\x06proto3"
+	"ConditionsJ\"\n" +
+	"\x03404\x12\x1b\n" +
+	"\x19NOT_FOUND: unknown place.\x82\xd3\xe4\x93\x02\x12\x12\x10/api/v1/scanners\x12\xcc\x01\n" +
+	"\vListCameras\x12\x1b.grid.v1.ListCamerasRequest\x1a\x13.grid.v1.CameraList\"\x8a\x01\x92Ap\n" +
+	"\n" +
+	"ConditionsJ>\n" +
+	"\x03304\x127\n" +
+	"5Not Modified: the `If-None-Match` ETag still matches.J\"\n" +
+	"\x03404\x12\x1b\n" +
+	"\x19NOT_FOUND: unknown place.\x82\xd3\xe4\x93\x02\x11\x12\x0f/api/v1/cameras\x12\x92\x01\n" +
+	"\rGetConditions\x12\x1d.grid.v1.GetConditionsRequest\x1a\x13.grid.v1.Conditions\"M\x92A0\n" +
+	"\n" +
+	"ConditionsJ\"\n" +
+	"\x03404\x12\x1b\n" +
+	"\x19NOT_FOUND: unknown place.\x82\xd3\xe4\x93\x02\x14\x12\x12/api/v1/conditions\x12d\n" +
+	"\vListSources\x12\x1b.grid.v1.ListSourcesRequest\x1a\x13.grid.v1.SourceList\"#\x92A\t\n" +
+	"\aSources\x82\xd3\xe4\x93\x02\x11\x12\x0f/api/v1/sources\x12\x84\x02\n" +
+	"\x10GetMeshTelemetry\x12 .grid.v1.GetMeshTelemetryRequest\x1a\x1d.grid.v1.MeshTelemetryArchive\"\xae\x01\x92A\x8c\x01\n" +
+	"\x04MeshJ\x83\x01\n" +
+	"\x03400\x12|\n" +
+	"zINVALID_ARGUMENT: `node` missing or not 8-64 even-length hex (optionally prefixed `meshcore:`), or `from` not before `to`.\x82\xd3\xe4\x93\x02\x18\x12\x16/api/v1/mesh/telemetry\x1ap\x92Am\x12kEvery /api/v1 RPC. The resource tags (Places, Events, Conditions, Sources, Mesh) group the same operations.B\xdf\\\x92A\xab\\\x12\x86U\n" +
+	"\fThe Grid API\x12\xe6SPublic, read-only JSON API of **The Grid**, the S.I.E.R.R.A. data service. It gathers hazard and situational-awareness feeds for California's central Sierra Nevada, centred on Calaveras and Tuolumne counties: the Highway 4 / Ebbetts Pass corridor (Angels Camp, Murphys, Arnold, Dorrington, Bear Valley) and the Highway 49/108 towns (Sonora, Columbia, Twain Harte). Neighbouring counties (Alpine, Amador, El Dorado, Mariposa, San Joaquin, Stanislaus) are in the place directory because hazards cross county lines.\n" +
+	"\n" +
+	"Upstream sources: CAL FIRE and FIRIS (wildfires and perimeters), Cal OES / Genasys (evacuation zones), the National Weather Service (alerts, fire weather, forecasts), USGS (earthquakes), CHP and Caltrans (incidents, lane closures, chain control, cameras, message signs), PG&E (outages and Public Safety Power Shutoffs), county burn lines and CAL FIRE burn permits, the MeshCore community radio mesh, Google Routes and OpenWeatherMap.\n" +
+	"\n" +
+	"This service is an aggregator, not an authority. For a life-safety decision, link the official source. An event's link is `canonicalUrl` (the item's own page), else `provenance.sourceUrl`, else the `homepageUrl` of its source (`GET /api/v1/sources`, joined on `provenance.sourceId`). Either event field can be an empty string: CHP incidents, Caltrans lane closures, FIRIS perimeters and NWS alerts have neither, so their link is the source homepage. Every map feature carries `properties.source`, and evacuation views link Genasys (`metadata.sourceUrl`, `summary.evacuationSourceUrl`).\n" +
+	"\n" +
+	"## Resource model\n" +
+	"\n" +
+	"- **Event**: one item from one upstream source, such as a fire, an evacuation zone, a weather alert, a road incident, an outage, a mesh radio node or a county's burn status. The id is stable (`{source}:{native id}`, e.g. `chp:261106ST0341`) and every change is kept as a numbered revision.\n" +
+	"- **Layer**: the event taxonomy (`Event.layer`). The *event layers* are stored and queryable at `/api/v1/events`: WILDFIRE, EVACUATION, WEATHER_ALERT, EARTHQUAKE, ROAD_INCIDENT, POWER, MESH and BURN_STATUS. The *condition layers* (`road_segment`, `chain_control`, `fire_weather`, `message_sign`) are live projections of current state, not events: they appear only on the `.geojson` map layers, in `GET /api/v1/conditions`, and in the place summary's domains.\n" +
+	"- **Place**: a named geography (AREA, COUNTY, TOWN, CORRIDOR). Events attach to places geometrically and every event lists its `placeIds`.\n" +
+	"- **Source**: an upstream feed with live health (`GET /api/v1/sources`).\n" +
+	"- **PlaceSummary**: the one-call rollup for a place (mode, per-domain status, top events, evacuation count).\n" +
+	"\n" +
+	"## Quickstart: build a dashboard for a place\n" +
+	"\n" +
+	"1. Pick a place: `GET /api/v1/places` lists them all (about 20). For a dashboard use an AREA (`ebbetts-pass`), a COUNTY (`calaveras-county`) or a CORRIDOR (`hwy4-arnold-bearvalley`): those have a footprint, so events and conditions attach to them. Do not build a dashboard on a TOWN (`arnold`). A town is a point, so an event attaches to it only when the event's polygon covers it (an evacuation zone, a fire perimeter), a wildfire comes near, or the fact is county-wide (burn status). Point events (road incidents, outages, earthquakes) and road conditions never attach, so a town's summary can read QUIET with an open `roads` domain while its highway is closed. Use a town to label a location and to find its county (`parentId`), or map a point or an address with `GET /api/v1/places:resolve?lat=38.25&lng=-120.35` (or `?address=...`) and pick the most specific non-town place it returns. Use the `slug` in paths.\n" +
+	"2. Headline status: `GET /api/v1/places/{slug}/summary` returns `mode` (QUIET, WATCH or ACTIVE), one block per domain (fire, evacuation, weather, roads, seismic, power, burn, comms), the top five hazards and `activeEvacuations`. Show each domain's `status` and `highestSeverity` next to `mode`: road and chain-control conditions (a closed highway) raise the `roads` domain but never `mode`.\n" +
+	"3. Event feed: `GET /api/v1/events?place={slug}&status=ACTIVE&severityMin=MINOR`. Then `GET /api/v1/events/{id}` for detail and `/api/v1/events/{id}/history` for its timeline.\n" +
+	"4. Map: `GET /api/v1/places/{slug}/map/{layer}.geojson` serves one RFC 7946 FeatureCollection per layer (documented separately from the RPCs below).\n" +
+	"5. Context: `GET /api/v1/conditions?place={slug}` for current weather, forecasts and the fire-weather state, `GET /api/v1/cameras?place={slug}` for traffic cameras, and `GET /api/v1/sources` for source-health badges.\n" +
+	"\n" +
+	"Poll every 30 to 60 seconds. JSON responses are cacheable for 30 seconds (`Cache-Control: public, max-age=30`), GeoJSON layers and mesh links for 60; upstream feeds refresh every 2 to 15 minutes.\n" +
+	"\n" +
+	"## Filter the event feed\n" +
+	"\n" +
+	"An unscoped `GET /api/v1/events` is mostly MESH nodes: hundreds of community radio nodes across Northern California, all INFO, many outside every place. It also holds a week of planned Caltrans roadwork (ROAD_INCIDENT, status SCHEDULED). For a hazard feed, pass `place`, pass `status=ACTIVE`, and either pass `severityMin=MINOR` or list the layers you want. POWER events at INFO are single-customer outages.\n" +
+	"\n" +
+	"## Conventions\n" +
+	"\n" +
+	"- **JSON field names are camelCase.** Every field is present, except the per-layer detail blocks on an event (only the one matching `layer` is sent). An unset message or timestamp is `null`; the spec marks every such field `nullable`. An unset scalar is `0`, `\"\"` or `false`, never `null`. Wrapper-typed fields (`activeEvacuations`, the mesh gauges) are `null` when unknown, so a real `0` is never confused with \"no reading\". Arrays are `[]` and maps `{}` when empty.\n" +
+	"- **Enums serialize as their name strings** (`\"SEVERE\"`), never as numbers.\n" +
+	"- **Timestamps** are RFC 3339 in UTC (`2026-11-07T03:13:00Z`), with up to nanosecond fractions.\n" +
+	"- **64-bit integers are JSON strings** (protobuf JSON mapping): mesh counters such as `uptimeSeconds: \"98350\"` and `cadenceSeconds: \"1831\"`. Parse them; 32-bit integers are plain numbers.\n" +
+	"- **`geometry.geojson` is base64.** It is a protobuf `bytes` field, so the RFC 7946 geometry JSON arrives base64-encoded: `JSON.parse(atob(event.geometry.geojson))`. Coordinates inside are `[longitude, latitude]`. `geometry.bbox` and `geometry.centroid` are plain numbers and need no decoding. For maps, the `.geojson` layer endpoints serve decoded geometry directly.\n" +
+	"- **Query parameters**: this spec names them in camelCase (`severityMin`, `pageSize`, `pageToken`, `enhancementIo`). The snake_case forms (`severity_min`, `page_size`, ...) work too. Enum values are case-insensitive. A repeated parameter can be repeated (`layer=WILDFIRE&layer=POWER`) or comma-separated (`layer=WILDFIRE,POWER`).\n" +
+	"- **Place addressing**: anywhere a place is named, the slug (`arnold`) or the namespaced id (`town:arnold`) works.\n" +
+	"- **Pagination** is keyset-based. `pageSize` 0 or omitted means 50, values over 200 are clamped to 200, and a negative value is a 400. Pass `nextPageToken` back as `pageToken` with the same filters until it comes back empty. Tokens are opaque. Pages stay stable while new events arrive. A large page of perimeter-heavy events can exceed the server's 4 MiB response limit and fail with HTTP 429 `RESOURCE_EXHAUSTED`; keep `pageSize` at or below 50 when you include RESOLVED or EXPIRED events.\n" +
+	"- **Conditional GET**: event lists, event detail, event history, the revision archive, places and cameras return a weak `ETag`. Send it back in `If-None-Match` to get `304 Not Modified`. The tag changes whenever the body would, including in-place refreshes that write no revision (AI text, mesh telemetry, burn-line observations, place re-attachment). The summary, conditions, sources, resolve, scanners and mesh-telemetry endpoints do not yet send ETags.\n" +
+	"- **No authentication, no API key.** CORS is open (`Access-Control-Allow-Origin: *`), GET only, no credentials, so a browser page on any origin can call the API directly.\n" +
+	"- **Errors** are the gRPC status as JSON, `{code, codeName, message, details}`, with a mapped HTTP status: 400 `INVALID_ARGUMENT` (bad enum, timestamp or page token), 404 `NOT_FOUND` (unknown place, event or address), 429 `RESOURCE_EXHAUSTED` (response too large), 503 `UNAVAILABLE` (address geocoder down), 500 `INTERNAL`. Branch on `codeName`. During a deploy handoff any route can briefly answer `503`: the RPCs with the JSON error (`UNAVAILABLE`), the hand-built routes (`.geojson`, mesh links) with a plain-text body and `Retry-After: 1`. Retry after a second.\n" +
+	"\n" +
+	"## Severity and status\n" +
+	"\n" +
+	"Every event and map feature uses one severity scale: INFO (rank 0), MINOR (1), MODERATE (2), SEVERE (3), EXTREME (4). It expresses how urgently the public should respond, not physical magnitude. `severityRank` is the same value as a number, for sorting and colour ramps. `/api/v1/events` sorts by severity, then most recently observed.\n" +
+	"\n" +
+	"Status lifecycle: SCHEDULED (planned, not yet in effect) → ACTIVE → RESOLVED (the authoritative feed stopped listing it) or EXPIRED (it aged out). An event that reappears goes back to ACTIVE with a new revision. The end of an event is a revision too, so history keeps the all-clear.\n" +
+	"\n" +
+	"## Fail-loud honesty\n" +
+	"\n" +
+	"The API never turns a failure into an all-clear.\n" +
+	"\n" +
+	"- Source health is `OK`, `STALE` (serving last-good data while the upstream fails) or `UNAVAILABLE` (nothing trustworthy to serve). It appears on `/api/v1/sources`, on each summary domain, in the summary's `sources` sidecar, on `/api/v1/cameras`, and in each map layer's `metadata.sourceStatus`. UNAVAILABLE with no items means *unknown*. Render it as \"unknown, check the source\", never as \"none\".\n" +
+	"- Evacuations: `summary.activeEvacuations` is `null` when the evacuation source is UNAVAILABLE (unknown; send people to Genasys at `summary.evacuationSourceUrl`), `0` when a healthy fetch found no active zone (\"none reported\", not a guarantee), and `N` when zones are active.\n" +
+	"- A failed fetch never resolves or expires events. They stay as they were and the source reads STALE.\n" +
+	"- The fire-weather state comes only from issued NWS products. The API never infers a Red Flag Warning that NWS has not issued.\n" +
+	"\n" +
+	"## Casing quirks (kept for compatibility)\n" +
+	"\n" +
+	"- Layer names in responses (`Event.layer`, `summary.topEvents[].layer`) are UPPERCASE enum names (`ROAD_INCIDENT`). Map-layer path segments are lowercase slugs (`road_incident.geojson`). `?layer=` accepts either, plus the aliases `mesh_node` and `network` for MESH.\n" +
+	"- `fireWeather.state` is lowercase: `normal`, `elevated` or `red-flag`.\n" +
+	"- Burn-status enum values carry a prefix (`BURN_DAY_YES`, `CALFIRE_PERMIT_REQUIRED`, `BURN_PERMISSION_ALLOWED`).\n" +
+	"\n" +
+	"API changes are listed, dated, in [CHANGELOG.md](https://github.com/dpup/sierra-data/blob/main/CHANGELOG.md).\"K\n" +
+	"$The Grid (S.I.E.R.R.A. data service)\x12#https://github.com/dpup/sierra-data*<\n" +
+	"\x03MIT\x125https://github.com/dpup/sierra-data/blob/main/LICENSE2\x02v1\x1a\x17data.sierragridteam.org*\x01\x022\x10application/json:\x10application/jsonj\x8b\x01\n" +
+	"\x06Places\x12\x80\x01The place directory, point/address resolution, and the one-call place summary. Start here: everything else is scoped by a place.j\x96\x01\n" +
+	"\x06Events\x12\x8b\x01Hazard and ambient-state events from the grid event store: the cross-layer feed, one event, its revision history, and the revision archive.j\x9e\x01\n" +
+	"\n" +
+	"Conditions\x12\x8f\x01Current, non-event state: weather, forecasts and fire weather, plus reference data (traffic cameras and scanner feeds). None of it is an event.jp\n" +
+	"\aSources\x12eThe upstream source registry and per-source health, which tells a client how far to trust each layer.j\xd6\x01\n" +
+	"\x04Mesh\x12\xcd\x01The MeshCore community radio mesh: node presence is the MESH event layer and the mesh_node map layer; relay topology is /api/v1/mesh/links and the mesh_link map layer; per-node history is GetMeshTelemetry.rM\n" +
+	"%The Grid site and human-readable docs\x12$https://data.sierragridteam.org/docsZ.github.com/dpup/sierra-data/api/grid/v1;gridv1b\x06proto3"
 
 var (
 	file_grid_proto_rawDescOnce sync.Once
@@ -6202,229 +7183,231 @@ func file_grid_proto_rawDescGZIP() []byte {
 	return file_grid_proto_rawDescData
 }
 
-var file_grid_proto_enumTypes = make([]protoimpl.EnumInfo, 9)
+var file_grid_proto_enumTypes = make([]protoimpl.EnumInfo, 10)
 var file_grid_proto_msgTypes = make([]protoimpl.MessageInfo, 62)
 var file_grid_proto_goTypes = []any{
 	(Layer)(0),                      // 0: grid.v1.Layer
 	(Severity)(0),                   // 1: grid.v1.Severity
 	(EventStatus)(0),                // 2: grid.v1.EventStatus
-	(SourceStatus)(0),               // 3: grid.v1.SourceStatus
-	(PlaceKind)(0),                  // 4: grid.v1.PlaceKind
-	(MeshReachability)(0),           // 5: grid.v1.MeshReachability
-	(BurnDay)(0),                    // 6: grid.v1.BurnDay
-	(CalfireBurnStatus)(0),          // 7: grid.v1.CalfireBurnStatus
-	(BurnPermission)(0),             // 8: grid.v1.BurnPermission
-	(*Event)(nil),                   // 9: grid.v1.Event
-	(*Geometry)(nil),                // 10: grid.v1.Geometry
-	(*BoundingBox)(nil),             // 11: grid.v1.BoundingBox
-	(*LatLng)(nil),                  // 12: grid.v1.LatLng
-	(*Provenance)(nil),              // 13: grid.v1.Provenance
-	(*Enhancement)(nil),             // 14: grid.v1.Enhancement
-	(*Source)(nil),                  // 15: grid.v1.Source
-	(*Place)(nil),                   // 16: grid.v1.Place
-	(*WildfireDetail)(nil),          // 17: grid.v1.WildfireDetail
-	(*EvacuationDetail)(nil),        // 18: grid.v1.EvacuationDetail
-	(*WeatherAlertDetail)(nil),      // 19: grid.v1.WeatherAlertDetail
-	(*FireWeatherDetail)(nil),       // 20: grid.v1.FireWeatherDetail
-	(*EarthquakeDetail)(nil),        // 21: grid.v1.EarthquakeDetail
-	(*RoadIncidentDetail)(nil),      // 22: grid.v1.RoadIncidentDetail
-	(*LaneClosureDetail)(nil),       // 23: grid.v1.LaneClosureDetail
-	(*MeshDetail)(nil),              // 24: grid.v1.MeshDetail
-	(*MeshTelemetry)(nil),           // 25: grid.v1.MeshTelemetry
-	(*MeshAdminTelemetry)(nil),      // 26: grid.v1.MeshAdminTelemetry
-	(*PowerDetail)(nil),             // 27: grid.v1.PowerDetail
-	(*BurnStatusDetail)(nil),        // 28: grid.v1.BurnStatusDetail
-	(*BurnLineReading)(nil),         // 29: grid.v1.BurnLineReading
-	(*BurnObservation)(nil),         // 30: grid.v1.BurnObservation
-	(*EventList)(nil),               // 31: grid.v1.EventList
-	(*EventRevision)(nil),           // 32: grid.v1.EventRevision
-	(*EventRevisionList)(nil),       // 33: grid.v1.EventRevisionList
-	(*PlaceList)(nil),               // 34: grid.v1.PlaceList
-	(*SourceList)(nil),              // 35: grid.v1.SourceList
-	(*GetMeshTelemetryRequest)(nil), // 36: grid.v1.GetMeshTelemetryRequest
-	(*MeshTelemetryArchive)(nil),    // 37: grid.v1.MeshTelemetryArchive
-	(*MeshTelemetryCoverage)(nil),   // 38: grid.v1.MeshTelemetryCoverage
-	(*MeshTelemetrySample)(nil),     // 39: grid.v1.MeshTelemetrySample
-	(*GetPlaceSummaryRequest)(nil),  // 40: grid.v1.GetPlaceSummaryRequest
-	(*PlaceSummary)(nil),            // 41: grid.v1.PlaceSummary
-	(*SummaryStats)(nil),            // 42: grid.v1.SummaryStats
-	(*SummaryTopEvent)(nil),         // 43: grid.v1.SummaryTopEvent
-	(*SummaryDomain)(nil),           // 44: grid.v1.SummaryDomain
-	(*SummaryDomainHeadline)(nil),   // 45: grid.v1.SummaryDomainHeadline
-	(*SummarySourceHealth)(nil),     // 46: grid.v1.SummarySourceHealth
-	(*ListEventsRequest)(nil),       // 47: grid.v1.ListEventsRequest
-	(*GetEventRequest)(nil),         // 48: grid.v1.GetEventRequest
-	(*GetEventHistoryRequest)(nil),  // 49: grid.v1.GetEventHistoryRequest
-	(*ListHistoryRequest)(nil),      // 50: grid.v1.ListHistoryRequest
-	(*ListPlacesRequest)(nil),       // 51: grid.v1.ListPlacesRequest
-	(*GetPlaceRequest)(nil),         // 52: grid.v1.GetPlaceRequest
-	(*ResolvePlaceRequest)(nil),     // 53: grid.v1.ResolvePlaceRequest
-	(*ResolveQuery)(nil),            // 54: grid.v1.ResolveQuery
-	(*ResolvePlaceResponse)(nil),    // 55: grid.v1.ResolvePlaceResponse
-	(*ListScannersRequest)(nil),     // 56: grid.v1.ListScannersRequest
-	(*Scanner)(nil),                 // 57: grid.v1.Scanner
-	(*ScannerList)(nil),             // 58: grid.v1.ScannerList
-	(*ListCamerasRequest)(nil),      // 59: grid.v1.ListCamerasRequest
-	(*Camera)(nil),                  // 60: grid.v1.Camera
-	(*CameraList)(nil),              // 61: grid.v1.CameraList
-	(*GetConditionsRequest)(nil),    // 62: grid.v1.GetConditionsRequest
-	(*WeatherConditions)(nil),       // 63: grid.v1.WeatherConditions
-	(*FireWeatherConditions)(nil),   // 64: grid.v1.FireWeatherConditions
-	(*ForecastPeriod)(nil),          // 65: grid.v1.ForecastPeriod
-	(*WeatherForecast)(nil),         // 66: grid.v1.WeatherForecast
-	(*Conditions)(nil),              // 67: grid.v1.Conditions
-	(*ListSourcesRequest)(nil),      // 68: grid.v1.ListSourcesRequest
-	nil,                             // 69: grid.v1.RoadIncidentDetail.MetadataEntry
-	nil,                             // 70: grid.v1.SummaryStats.SeverityCountsEntry
-	(*timestamppb.Timestamp)(nil),   // 71: google.protobuf.Timestamp
-	(*wrapperspb.DoubleValue)(nil),  // 72: google.protobuf.DoubleValue
-	(*wrapperspb.Int32Value)(nil),   // 73: google.protobuf.Int32Value
-	(*wrapperspb.UInt32Value)(nil),  // 74: google.protobuf.UInt32Value
-	(*wrapperspb.Int64Value)(nil),   // 75: google.protobuf.Int64Value
+	(SourceKind)(0),                 // 3: grid.v1.SourceKind
+	(SourceStatus)(0),               // 4: grid.v1.SourceStatus
+	(PlaceKind)(0),                  // 5: grid.v1.PlaceKind
+	(MeshReachability)(0),           // 6: grid.v1.MeshReachability
+	(BurnDay)(0),                    // 7: grid.v1.BurnDay
+	(CalfireBurnStatus)(0),          // 8: grid.v1.CalfireBurnStatus
+	(BurnPermission)(0),             // 9: grid.v1.BurnPermission
+	(*Event)(nil),                   // 10: grid.v1.Event
+	(*Geometry)(nil),                // 11: grid.v1.Geometry
+	(*BoundingBox)(nil),             // 12: grid.v1.BoundingBox
+	(*LatLng)(nil),                  // 13: grid.v1.LatLng
+	(*Provenance)(nil),              // 14: grid.v1.Provenance
+	(*Enhancement)(nil),             // 15: grid.v1.Enhancement
+	(*Source)(nil),                  // 16: grid.v1.Source
+	(*Place)(nil),                   // 17: grid.v1.Place
+	(*WildfireDetail)(nil),          // 18: grid.v1.WildfireDetail
+	(*EvacuationDetail)(nil),        // 19: grid.v1.EvacuationDetail
+	(*WeatherAlertDetail)(nil),      // 20: grid.v1.WeatherAlertDetail
+	(*FireWeatherDetail)(nil),       // 21: grid.v1.FireWeatherDetail
+	(*EarthquakeDetail)(nil),        // 22: grid.v1.EarthquakeDetail
+	(*RoadIncidentDetail)(nil),      // 23: grid.v1.RoadIncidentDetail
+	(*LaneClosureDetail)(nil),       // 24: grid.v1.LaneClosureDetail
+	(*MeshDetail)(nil),              // 25: grid.v1.MeshDetail
+	(*MeshTelemetry)(nil),           // 26: grid.v1.MeshTelemetry
+	(*MeshAdminTelemetry)(nil),      // 27: grid.v1.MeshAdminTelemetry
+	(*PowerDetail)(nil),             // 28: grid.v1.PowerDetail
+	(*BurnStatusDetail)(nil),        // 29: grid.v1.BurnStatusDetail
+	(*BurnLineReading)(nil),         // 30: grid.v1.BurnLineReading
+	(*BurnObservation)(nil),         // 31: grid.v1.BurnObservation
+	(*EventList)(nil),               // 32: grid.v1.EventList
+	(*EventRevision)(nil),           // 33: grid.v1.EventRevision
+	(*EventRevisionList)(nil),       // 34: grid.v1.EventRevisionList
+	(*PlaceList)(nil),               // 35: grid.v1.PlaceList
+	(*SourceList)(nil),              // 36: grid.v1.SourceList
+	(*GetMeshTelemetryRequest)(nil), // 37: grid.v1.GetMeshTelemetryRequest
+	(*MeshTelemetryArchive)(nil),    // 38: grid.v1.MeshTelemetryArchive
+	(*MeshTelemetryCoverage)(nil),   // 39: grid.v1.MeshTelemetryCoverage
+	(*MeshTelemetrySample)(nil),     // 40: grid.v1.MeshTelemetrySample
+	(*GetPlaceSummaryRequest)(nil),  // 41: grid.v1.GetPlaceSummaryRequest
+	(*PlaceSummary)(nil),            // 42: grid.v1.PlaceSummary
+	(*SummaryStats)(nil),            // 43: grid.v1.SummaryStats
+	(*SummaryTopEvent)(nil),         // 44: grid.v1.SummaryTopEvent
+	(*SummaryDomain)(nil),           // 45: grid.v1.SummaryDomain
+	(*SummaryDomainHeadline)(nil),   // 46: grid.v1.SummaryDomainHeadline
+	(*SummarySourceHealth)(nil),     // 47: grid.v1.SummarySourceHealth
+	(*ListEventsRequest)(nil),       // 48: grid.v1.ListEventsRequest
+	(*GetEventRequest)(nil),         // 49: grid.v1.GetEventRequest
+	(*GetEventHistoryRequest)(nil),  // 50: grid.v1.GetEventHistoryRequest
+	(*ListHistoryRequest)(nil),      // 51: grid.v1.ListHistoryRequest
+	(*ListPlacesRequest)(nil),       // 52: grid.v1.ListPlacesRequest
+	(*GetPlaceRequest)(nil),         // 53: grid.v1.GetPlaceRequest
+	(*ResolvePlaceRequest)(nil),     // 54: grid.v1.ResolvePlaceRequest
+	(*ResolveQuery)(nil),            // 55: grid.v1.ResolveQuery
+	(*ResolvePlaceResponse)(nil),    // 56: grid.v1.ResolvePlaceResponse
+	(*ListScannersRequest)(nil),     // 57: grid.v1.ListScannersRequest
+	(*Scanner)(nil),                 // 58: grid.v1.Scanner
+	(*ScannerList)(nil),             // 59: grid.v1.ScannerList
+	(*ListCamerasRequest)(nil),      // 60: grid.v1.ListCamerasRequest
+	(*Camera)(nil),                  // 61: grid.v1.Camera
+	(*CameraList)(nil),              // 62: grid.v1.CameraList
+	(*GetConditionsRequest)(nil),    // 63: grid.v1.GetConditionsRequest
+	(*WeatherConditions)(nil),       // 64: grid.v1.WeatherConditions
+	(*FireWeatherConditions)(nil),   // 65: grid.v1.FireWeatherConditions
+	(*ForecastPeriod)(nil),          // 66: grid.v1.ForecastPeriod
+	(*WeatherForecast)(nil),         // 67: grid.v1.WeatherForecast
+	(*Conditions)(nil),              // 68: grid.v1.Conditions
+	(*ListSourcesRequest)(nil),      // 69: grid.v1.ListSourcesRequest
+	nil,                             // 70: grid.v1.RoadIncidentDetail.MetadataEntry
+	nil,                             // 71: grid.v1.SummaryStats.SeverityCountsEntry
+	(*timestamppb.Timestamp)(nil),   // 72: google.protobuf.Timestamp
+	(*wrapperspb.DoubleValue)(nil),  // 73: google.protobuf.DoubleValue
+	(*wrapperspb.Int32Value)(nil),   // 74: google.protobuf.Int32Value
+	(*wrapperspb.UInt32Value)(nil),  // 75: google.protobuf.UInt32Value
+	(*wrapperspb.Int64Value)(nil),   // 76: google.protobuf.Int64Value
 }
 var file_grid_proto_depIdxs = []int32{
 	0,   // 0: grid.v1.Event.layer:type_name -> grid.v1.Layer
 	1,   // 1: grid.v1.Event.severity:type_name -> grid.v1.Severity
 	2,   // 2: grid.v1.Event.status:type_name -> grid.v1.EventStatus
-	10,  // 3: grid.v1.Event.geometry:type_name -> grid.v1.Geometry
-	13,  // 4: grid.v1.Event.provenance:type_name -> grid.v1.Provenance
-	71,  // 5: grid.v1.Event.effective:type_name -> google.protobuf.Timestamp
-	71,  // 6: grid.v1.Event.expires:type_name -> google.protobuf.Timestamp
-	71,  // 7: grid.v1.Event.observed_at:type_name -> google.protobuf.Timestamp
-	71,  // 8: grid.v1.Event.ingested_at:type_name -> google.protobuf.Timestamp
-	14,  // 9: grid.v1.Event.enhancement:type_name -> grid.v1.Enhancement
-	17,  // 10: grid.v1.Event.wildfire:type_name -> grid.v1.WildfireDetail
-	18,  // 11: grid.v1.Event.evacuation:type_name -> grid.v1.EvacuationDetail
-	19,  // 12: grid.v1.Event.weather_alert:type_name -> grid.v1.WeatherAlertDetail
-	20,  // 13: grid.v1.Event.fire_weather:type_name -> grid.v1.FireWeatherDetail
-	21,  // 14: grid.v1.Event.earthquake:type_name -> grid.v1.EarthquakeDetail
-	22,  // 15: grid.v1.Event.road_incident:type_name -> grid.v1.RoadIncidentDetail
-	24,  // 16: grid.v1.Event.mesh:type_name -> grid.v1.MeshDetail
-	27,  // 17: grid.v1.Event.power:type_name -> grid.v1.PowerDetail
-	28,  // 18: grid.v1.Event.burn_status:type_name -> grid.v1.BurnStatusDetail
-	11,  // 19: grid.v1.Geometry.bbox:type_name -> grid.v1.BoundingBox
-	12,  // 20: grid.v1.Geometry.centroid:type_name -> grid.v1.LatLng
-	71,  // 21: grid.v1.Provenance.fetched_at:type_name -> google.protobuf.Timestamp
-	71,  // 22: grid.v1.Enhancement.enhanced_at:type_name -> google.protobuf.Timestamp
-	71,  // 23: grid.v1.Source.last_success_at:type_name -> google.protobuf.Timestamp
-	71,  // 24: grid.v1.Source.last_attempt_at:type_name -> google.protobuf.Timestamp
-	3,   // 25: grid.v1.Source.status:type_name -> grid.v1.SourceStatus
-	4,   // 26: grid.v1.Place.kind:type_name -> grid.v1.PlaceKind
-	10,  // 27: grid.v1.Place.geometry:type_name -> grid.v1.Geometry
-	69,  // 28: grid.v1.RoadIncidentDetail.metadata:type_name -> grid.v1.RoadIncidentDetail.MetadataEntry
-	23,  // 29: grid.v1.RoadIncidentDetail.closure:type_name -> grid.v1.LaneClosureDetail
-	71,  // 30: grid.v1.LaneClosureDetail.planned_start:type_name -> google.protobuf.Timestamp
-	71,  // 31: grid.v1.LaneClosureDetail.planned_end:type_name -> google.protobuf.Timestamp
-	71,  // 32: grid.v1.LaneClosureDetail.set_up_at:type_name -> google.protobuf.Timestamp
-	12,  // 33: grid.v1.LaneClosureDetail.begin:type_name -> grid.v1.LatLng
-	12,  // 34: grid.v1.LaneClosureDetail.end:type_name -> grid.v1.LatLng
-	25,  // 35: grid.v1.MeshDetail.telemetry:type_name -> grid.v1.MeshTelemetry
-	5,   // 36: grid.v1.MeshDetail.reachability:type_name -> grid.v1.MeshReachability
-	72,  // 37: grid.v1.MeshTelemetry.snr:type_name -> google.protobuf.DoubleValue
-	73,  // 38: grid.v1.MeshTelemetry.rssi:type_name -> google.protobuf.Int32Value
-	74,  // 39: grid.v1.MeshTelemetry.hop_count:type_name -> google.protobuf.UInt32Value
-	71,  // 40: grid.v1.MeshTelemetry.last_advert_at:type_name -> google.protobuf.Timestamp
-	26,  // 41: grid.v1.MeshTelemetry.admin:type_name -> grid.v1.MeshAdminTelemetry
-	71,  // 42: grid.v1.MeshTelemetry.last_heard_at:type_name -> google.protobuf.Timestamp
-	71,  // 43: grid.v1.MeshTelemetry.last_relayed_at:type_name -> google.protobuf.Timestamp
-	71,  // 44: grid.v1.MeshAdminTelemetry.reported_at:type_name -> google.protobuf.Timestamp
-	71,  // 45: grid.v1.MeshAdminTelemetry.last_success_at:type_name -> google.protobuf.Timestamp
-	71,  // 46: grid.v1.MeshAdminTelemetry.last_attempt_at:type_name -> google.protobuf.Timestamp
-	72,  // 47: grid.v1.MeshAdminTelemetry.battery_volts:type_name -> google.protobuf.DoubleValue
-	72,  // 48: grid.v1.MeshAdminTelemetry.battery_percent:type_name -> google.protobuf.DoubleValue
-	72,  // 49: grid.v1.MeshAdminTelemetry.temperature_c:type_name -> google.protobuf.DoubleValue
-	72,  // 50: grid.v1.MeshAdminTelemetry.humidity:type_name -> google.protobuf.DoubleValue
-	72,  // 51: grid.v1.MeshAdminTelemetry.pressure:type_name -> google.protobuf.DoubleValue
-	73,  // 52: grid.v1.MeshAdminTelemetry.noise_floor_dbm:type_name -> google.protobuf.Int32Value
-	72,  // 53: grid.v1.MeshAdminTelemetry.last_snr_db:type_name -> google.protobuf.DoubleValue
-	73,  // 54: grid.v1.MeshAdminTelemetry.last_rssi_dbm:type_name -> google.protobuf.Int32Value
-	73,  // 55: grid.v1.MeshAdminTelemetry.tx_queue_len:type_name -> google.protobuf.Int32Value
-	71,  // 56: grid.v1.PowerDetail.estimated_restoration:type_name -> google.protobuf.Timestamp
-	71,  // 57: grid.v1.PowerDetail.de_energization_start:type_name -> google.protobuf.Timestamp
-	71,  // 58: grid.v1.PowerDetail.de_energization_end:type_name -> google.protobuf.Timestamp
-	71,  // 59: grid.v1.PowerDetail.all_clear:type_name -> google.protobuf.Timestamp
-	6,   // 60: grid.v1.BurnStatusDetail.burn_day:type_name -> grid.v1.BurnDay
-	7,   // 61: grid.v1.BurnStatusDetail.calfire_status:type_name -> grid.v1.CalfireBurnStatus
-	8,   // 62: grid.v1.BurnStatusDetail.permission:type_name -> grid.v1.BurnPermission
-	71,  // 63: grid.v1.BurnStatusDetail.calfire_effective:type_name -> google.protobuf.Timestamp
-	29,  // 64: grid.v1.BurnStatusDetail.burn_lines:type_name -> grid.v1.BurnLineReading
-	71,  // 65: grid.v1.BurnStatusDetail.calfire_observed_at:type_name -> google.protobuf.Timestamp
-	6,   // 66: grid.v1.BurnLineReading.burn_day:type_name -> grid.v1.BurnDay
-	30,  // 67: grid.v1.BurnLineReading.observation:type_name -> grid.v1.BurnObservation
-	71,  // 68: grid.v1.BurnObservation.observed_at:type_name -> google.protobuf.Timestamp
-	9,   // 69: grid.v1.EventList.events:type_name -> grid.v1.Event
-	71,  // 70: grid.v1.EventRevision.observed_at:type_name -> google.protobuf.Timestamp
-	71,  // 71: grid.v1.EventRevision.ingested_at:type_name -> google.protobuf.Timestamp
-	9,   // 72: grid.v1.EventRevision.event:type_name -> grid.v1.Event
-	32,  // 73: grid.v1.EventRevisionList.revisions:type_name -> grid.v1.EventRevision
-	16,  // 74: grid.v1.PlaceList.places:type_name -> grid.v1.Place
-	15,  // 75: grid.v1.SourceList.sources:type_name -> grid.v1.Source
-	71,  // 76: grid.v1.GetMeshTelemetryRequest.from:type_name -> google.protobuf.Timestamp
-	71,  // 77: grid.v1.GetMeshTelemetryRequest.to:type_name -> google.protobuf.Timestamp
-	71,  // 78: grid.v1.MeshTelemetryArchive.from:type_name -> google.protobuf.Timestamp
-	71,  // 79: grid.v1.MeshTelemetryArchive.to:type_name -> google.protobuf.Timestamp
-	38,  // 80: grid.v1.MeshTelemetryArchive.coverage:type_name -> grid.v1.MeshTelemetryCoverage
-	75,  // 81: grid.v1.MeshTelemetryArchive.cadence_seconds:type_name -> google.protobuf.Int64Value
-	71,  // 82: grid.v1.MeshTelemetryArchive.reboots:type_name -> google.protobuf.Timestamp
-	39,  // 83: grid.v1.MeshTelemetryArchive.samples:type_name -> grid.v1.MeshTelemetrySample
-	71,  // 84: grid.v1.MeshTelemetryCoverage.from:type_name -> google.protobuf.Timestamp
-	71,  // 85: grid.v1.MeshTelemetryCoverage.to:type_name -> google.protobuf.Timestamp
-	26,  // 86: grid.v1.MeshTelemetrySample.reading:type_name -> grid.v1.MeshAdminTelemetry
-	71,  // 87: grid.v1.MeshTelemetrySample.received_at:type_name -> google.protobuf.Timestamp
-	71,  // 88: grid.v1.PlaceSummary.generated_at:type_name -> google.protobuf.Timestamp
-	42,  // 89: grid.v1.PlaceSummary.summary:type_name -> grid.v1.SummaryStats
-	44,  // 90: grid.v1.PlaceSummary.domains:type_name -> grid.v1.SummaryDomain
-	46,  // 91: grid.v1.PlaceSummary.sources:type_name -> grid.v1.SummarySourceHealth
-	70,  // 92: grid.v1.SummaryStats.severity_counts:type_name -> grid.v1.SummaryStats.SeverityCountsEntry
-	73,  // 93: grid.v1.SummaryStats.active_evacuations:type_name -> google.protobuf.Int32Value
-	43,  // 94: grid.v1.SummaryStats.top_events:type_name -> grid.v1.SummaryTopEvent
-	45,  // 95: grid.v1.SummaryDomain.headlines:type_name -> grid.v1.SummaryDomainHeadline
-	71,  // 96: grid.v1.SummarySourceHealth.last_success_at:type_name -> google.protobuf.Timestamp
-	54,  // 97: grid.v1.ResolvePlaceResponse.query:type_name -> grid.v1.ResolveQuery
-	16,  // 98: grid.v1.ResolvePlaceResponse.places:type_name -> grid.v1.Place
-	57,  // 99: grid.v1.ScannerList.scanners:type_name -> grid.v1.Scanner
-	12,  // 100: grid.v1.Camera.location:type_name -> grid.v1.LatLng
-	60,  // 101: grid.v1.CameraList.cameras:type_name -> grid.v1.Camera
-	71,  // 102: grid.v1.CameraList.last_source_update:type_name -> google.protobuf.Timestamp
-	71,  // 103: grid.v1.ForecastPeriod.time:type_name -> google.protobuf.Timestamp
-	71,  // 104: grid.v1.WeatherForecast.issued_at:type_name -> google.protobuf.Timestamp
-	65,  // 105: grid.v1.WeatherForecast.periods:type_name -> grid.v1.ForecastPeriod
-	71,  // 106: grid.v1.WeatherForecast.peak_wind_gust_at:type_name -> google.protobuf.Timestamp
-	63,  // 107: grid.v1.Conditions.weather:type_name -> grid.v1.WeatherConditions
-	64,  // 108: grid.v1.Conditions.fire_weather:type_name -> grid.v1.FireWeatherConditions
-	71,  // 109: grid.v1.Conditions.last_updated:type_name -> google.protobuf.Timestamp
-	66,  // 110: grid.v1.Conditions.forecast:type_name -> grid.v1.WeatherForecast
-	47,  // 111: grid.v1.GridService.ListEvents:input_type -> grid.v1.ListEventsRequest
-	48,  // 112: grid.v1.GridService.GetEvent:input_type -> grid.v1.GetEventRequest
-	49,  // 113: grid.v1.GridService.GetEventHistory:input_type -> grid.v1.GetEventHistoryRequest
-	50,  // 114: grid.v1.GridService.ListHistory:input_type -> grid.v1.ListHistoryRequest
-	51,  // 115: grid.v1.GridService.ListPlaces:input_type -> grid.v1.ListPlacesRequest
-	53,  // 116: grid.v1.GridService.ResolvePlace:input_type -> grid.v1.ResolvePlaceRequest
-	52,  // 117: grid.v1.GridService.GetPlace:input_type -> grid.v1.GetPlaceRequest
-	40,  // 118: grid.v1.GridService.GetPlaceSummary:input_type -> grid.v1.GetPlaceSummaryRequest
-	56,  // 119: grid.v1.GridService.ListScanners:input_type -> grid.v1.ListScannersRequest
-	59,  // 120: grid.v1.GridService.ListCameras:input_type -> grid.v1.ListCamerasRequest
-	62,  // 121: grid.v1.GridService.GetConditions:input_type -> grid.v1.GetConditionsRequest
-	68,  // 122: grid.v1.GridService.ListSources:input_type -> grid.v1.ListSourcesRequest
-	36,  // 123: grid.v1.GridService.GetMeshTelemetry:input_type -> grid.v1.GetMeshTelemetryRequest
-	31,  // 124: grid.v1.GridService.ListEvents:output_type -> grid.v1.EventList
-	9,   // 125: grid.v1.GridService.GetEvent:output_type -> grid.v1.Event
-	33,  // 126: grid.v1.GridService.GetEventHistory:output_type -> grid.v1.EventRevisionList
-	33,  // 127: grid.v1.GridService.ListHistory:output_type -> grid.v1.EventRevisionList
-	34,  // 128: grid.v1.GridService.ListPlaces:output_type -> grid.v1.PlaceList
-	55,  // 129: grid.v1.GridService.ResolvePlace:output_type -> grid.v1.ResolvePlaceResponse
-	16,  // 130: grid.v1.GridService.GetPlace:output_type -> grid.v1.Place
-	41,  // 131: grid.v1.GridService.GetPlaceSummary:output_type -> grid.v1.PlaceSummary
-	58,  // 132: grid.v1.GridService.ListScanners:output_type -> grid.v1.ScannerList
-	61,  // 133: grid.v1.GridService.ListCameras:output_type -> grid.v1.CameraList
-	67,  // 134: grid.v1.GridService.GetConditions:output_type -> grid.v1.Conditions
-	35,  // 135: grid.v1.GridService.ListSources:output_type -> grid.v1.SourceList
-	37,  // 136: grid.v1.GridService.GetMeshTelemetry:output_type -> grid.v1.MeshTelemetryArchive
-	124, // [124:137] is the sub-list for method output_type
-	111, // [111:124] is the sub-list for method input_type
-	111, // [111:111] is the sub-list for extension type_name
-	111, // [111:111] is the sub-list for extension extendee
-	0,   // [0:111] is the sub-list for field type_name
+	11,  // 3: grid.v1.Event.geometry:type_name -> grid.v1.Geometry
+	14,  // 4: grid.v1.Event.provenance:type_name -> grid.v1.Provenance
+	72,  // 5: grid.v1.Event.effective:type_name -> google.protobuf.Timestamp
+	72,  // 6: grid.v1.Event.expires:type_name -> google.protobuf.Timestamp
+	72,  // 7: grid.v1.Event.observed_at:type_name -> google.protobuf.Timestamp
+	72,  // 8: grid.v1.Event.ingested_at:type_name -> google.protobuf.Timestamp
+	15,  // 9: grid.v1.Event.enhancement:type_name -> grid.v1.Enhancement
+	18,  // 10: grid.v1.Event.wildfire:type_name -> grid.v1.WildfireDetail
+	19,  // 11: grid.v1.Event.evacuation:type_name -> grid.v1.EvacuationDetail
+	20,  // 12: grid.v1.Event.weather_alert:type_name -> grid.v1.WeatherAlertDetail
+	21,  // 13: grid.v1.Event.fire_weather:type_name -> grid.v1.FireWeatherDetail
+	22,  // 14: grid.v1.Event.earthquake:type_name -> grid.v1.EarthquakeDetail
+	23,  // 15: grid.v1.Event.road_incident:type_name -> grid.v1.RoadIncidentDetail
+	25,  // 16: grid.v1.Event.mesh:type_name -> grid.v1.MeshDetail
+	28,  // 17: grid.v1.Event.power:type_name -> grid.v1.PowerDetail
+	29,  // 18: grid.v1.Event.burn_status:type_name -> grid.v1.BurnStatusDetail
+	12,  // 19: grid.v1.Geometry.bbox:type_name -> grid.v1.BoundingBox
+	13,  // 20: grid.v1.Geometry.centroid:type_name -> grid.v1.LatLng
+	72,  // 21: grid.v1.Provenance.fetched_at:type_name -> google.protobuf.Timestamp
+	72,  // 22: grid.v1.Enhancement.enhanced_at:type_name -> google.protobuf.Timestamp
+	3,   // 23: grid.v1.Source.kind:type_name -> grid.v1.SourceKind
+	72,  // 24: grid.v1.Source.last_success_at:type_name -> google.protobuf.Timestamp
+	72,  // 25: grid.v1.Source.last_attempt_at:type_name -> google.protobuf.Timestamp
+	4,   // 26: grid.v1.Source.status:type_name -> grid.v1.SourceStatus
+	5,   // 27: grid.v1.Place.kind:type_name -> grid.v1.PlaceKind
+	11,  // 28: grid.v1.Place.geometry:type_name -> grid.v1.Geometry
+	70,  // 29: grid.v1.RoadIncidentDetail.metadata:type_name -> grid.v1.RoadIncidentDetail.MetadataEntry
+	24,  // 30: grid.v1.RoadIncidentDetail.closure:type_name -> grid.v1.LaneClosureDetail
+	72,  // 31: grid.v1.LaneClosureDetail.planned_start:type_name -> google.protobuf.Timestamp
+	72,  // 32: grid.v1.LaneClosureDetail.planned_end:type_name -> google.protobuf.Timestamp
+	72,  // 33: grid.v1.LaneClosureDetail.set_up_at:type_name -> google.protobuf.Timestamp
+	13,  // 34: grid.v1.LaneClosureDetail.begin:type_name -> grid.v1.LatLng
+	13,  // 35: grid.v1.LaneClosureDetail.end:type_name -> grid.v1.LatLng
+	26,  // 36: grid.v1.MeshDetail.telemetry:type_name -> grid.v1.MeshTelemetry
+	6,   // 37: grid.v1.MeshDetail.reachability:type_name -> grid.v1.MeshReachability
+	73,  // 38: grid.v1.MeshTelemetry.snr:type_name -> google.protobuf.DoubleValue
+	74,  // 39: grid.v1.MeshTelemetry.rssi:type_name -> google.protobuf.Int32Value
+	75,  // 40: grid.v1.MeshTelemetry.hop_count:type_name -> google.protobuf.UInt32Value
+	72,  // 41: grid.v1.MeshTelemetry.last_advert_at:type_name -> google.protobuf.Timestamp
+	27,  // 42: grid.v1.MeshTelemetry.admin:type_name -> grid.v1.MeshAdminTelemetry
+	72,  // 43: grid.v1.MeshTelemetry.last_heard_at:type_name -> google.protobuf.Timestamp
+	72,  // 44: grid.v1.MeshTelemetry.last_relayed_at:type_name -> google.protobuf.Timestamp
+	72,  // 45: grid.v1.MeshAdminTelemetry.reported_at:type_name -> google.protobuf.Timestamp
+	72,  // 46: grid.v1.MeshAdminTelemetry.last_success_at:type_name -> google.protobuf.Timestamp
+	72,  // 47: grid.v1.MeshAdminTelemetry.last_attempt_at:type_name -> google.protobuf.Timestamp
+	73,  // 48: grid.v1.MeshAdminTelemetry.battery_volts:type_name -> google.protobuf.DoubleValue
+	73,  // 49: grid.v1.MeshAdminTelemetry.battery_percent:type_name -> google.protobuf.DoubleValue
+	73,  // 50: grid.v1.MeshAdminTelemetry.temperature_c:type_name -> google.protobuf.DoubleValue
+	73,  // 51: grid.v1.MeshAdminTelemetry.humidity:type_name -> google.protobuf.DoubleValue
+	73,  // 52: grid.v1.MeshAdminTelemetry.pressure:type_name -> google.protobuf.DoubleValue
+	74,  // 53: grid.v1.MeshAdminTelemetry.noise_floor_dbm:type_name -> google.protobuf.Int32Value
+	73,  // 54: grid.v1.MeshAdminTelemetry.last_snr_db:type_name -> google.protobuf.DoubleValue
+	74,  // 55: grid.v1.MeshAdminTelemetry.last_rssi_dbm:type_name -> google.protobuf.Int32Value
+	74,  // 56: grid.v1.MeshAdminTelemetry.tx_queue_len:type_name -> google.protobuf.Int32Value
+	72,  // 57: grid.v1.PowerDetail.estimated_restoration:type_name -> google.protobuf.Timestamp
+	72,  // 58: grid.v1.PowerDetail.de_energization_start:type_name -> google.protobuf.Timestamp
+	72,  // 59: grid.v1.PowerDetail.de_energization_end:type_name -> google.protobuf.Timestamp
+	72,  // 60: grid.v1.PowerDetail.all_clear:type_name -> google.protobuf.Timestamp
+	7,   // 61: grid.v1.BurnStatusDetail.burn_day:type_name -> grid.v1.BurnDay
+	8,   // 62: grid.v1.BurnStatusDetail.calfire_status:type_name -> grid.v1.CalfireBurnStatus
+	9,   // 63: grid.v1.BurnStatusDetail.permission:type_name -> grid.v1.BurnPermission
+	72,  // 64: grid.v1.BurnStatusDetail.calfire_effective:type_name -> google.protobuf.Timestamp
+	30,  // 65: grid.v1.BurnStatusDetail.burn_lines:type_name -> grid.v1.BurnLineReading
+	72,  // 66: grid.v1.BurnStatusDetail.calfire_observed_at:type_name -> google.protobuf.Timestamp
+	7,   // 67: grid.v1.BurnLineReading.burn_day:type_name -> grid.v1.BurnDay
+	31,  // 68: grid.v1.BurnLineReading.observation:type_name -> grid.v1.BurnObservation
+	72,  // 69: grid.v1.BurnObservation.observed_at:type_name -> google.protobuf.Timestamp
+	10,  // 70: grid.v1.EventList.events:type_name -> grid.v1.Event
+	72,  // 71: grid.v1.EventRevision.observed_at:type_name -> google.protobuf.Timestamp
+	72,  // 72: grid.v1.EventRevision.ingested_at:type_name -> google.protobuf.Timestamp
+	10,  // 73: grid.v1.EventRevision.event:type_name -> grid.v1.Event
+	33,  // 74: grid.v1.EventRevisionList.revisions:type_name -> grid.v1.EventRevision
+	17,  // 75: grid.v1.PlaceList.places:type_name -> grid.v1.Place
+	16,  // 76: grid.v1.SourceList.sources:type_name -> grid.v1.Source
+	72,  // 77: grid.v1.GetMeshTelemetryRequest.from:type_name -> google.protobuf.Timestamp
+	72,  // 78: grid.v1.GetMeshTelemetryRequest.to:type_name -> google.protobuf.Timestamp
+	72,  // 79: grid.v1.MeshTelemetryArchive.from:type_name -> google.protobuf.Timestamp
+	72,  // 80: grid.v1.MeshTelemetryArchive.to:type_name -> google.protobuf.Timestamp
+	39,  // 81: grid.v1.MeshTelemetryArchive.coverage:type_name -> grid.v1.MeshTelemetryCoverage
+	76,  // 82: grid.v1.MeshTelemetryArchive.cadence_seconds:type_name -> google.protobuf.Int64Value
+	72,  // 83: grid.v1.MeshTelemetryArchive.reboots:type_name -> google.protobuf.Timestamp
+	40,  // 84: grid.v1.MeshTelemetryArchive.samples:type_name -> grid.v1.MeshTelemetrySample
+	72,  // 85: grid.v1.MeshTelemetryCoverage.from:type_name -> google.protobuf.Timestamp
+	72,  // 86: grid.v1.MeshTelemetryCoverage.to:type_name -> google.protobuf.Timestamp
+	27,  // 87: grid.v1.MeshTelemetrySample.reading:type_name -> grid.v1.MeshAdminTelemetry
+	72,  // 88: grid.v1.MeshTelemetrySample.received_at:type_name -> google.protobuf.Timestamp
+	72,  // 89: grid.v1.PlaceSummary.generated_at:type_name -> google.protobuf.Timestamp
+	43,  // 90: grid.v1.PlaceSummary.summary:type_name -> grid.v1.SummaryStats
+	45,  // 91: grid.v1.PlaceSummary.domains:type_name -> grid.v1.SummaryDomain
+	47,  // 92: grid.v1.PlaceSummary.sources:type_name -> grid.v1.SummarySourceHealth
+	71,  // 93: grid.v1.SummaryStats.severity_counts:type_name -> grid.v1.SummaryStats.SeverityCountsEntry
+	74,  // 94: grid.v1.SummaryStats.active_evacuations:type_name -> google.protobuf.Int32Value
+	44,  // 95: grid.v1.SummaryStats.top_events:type_name -> grid.v1.SummaryTopEvent
+	46,  // 96: grid.v1.SummaryDomain.headlines:type_name -> grid.v1.SummaryDomainHeadline
+	72,  // 97: grid.v1.SummarySourceHealth.last_success_at:type_name -> google.protobuf.Timestamp
+	55,  // 98: grid.v1.ResolvePlaceResponse.query:type_name -> grid.v1.ResolveQuery
+	17,  // 99: grid.v1.ResolvePlaceResponse.places:type_name -> grid.v1.Place
+	58,  // 100: grid.v1.ScannerList.scanners:type_name -> grid.v1.Scanner
+	13,  // 101: grid.v1.Camera.location:type_name -> grid.v1.LatLng
+	61,  // 102: grid.v1.CameraList.cameras:type_name -> grid.v1.Camera
+	72,  // 103: grid.v1.CameraList.last_source_update:type_name -> google.protobuf.Timestamp
+	72,  // 104: grid.v1.ForecastPeriod.time:type_name -> google.protobuf.Timestamp
+	72,  // 105: grid.v1.WeatherForecast.issued_at:type_name -> google.protobuf.Timestamp
+	66,  // 106: grid.v1.WeatherForecast.periods:type_name -> grid.v1.ForecastPeriod
+	72,  // 107: grid.v1.WeatherForecast.peak_wind_gust_at:type_name -> google.protobuf.Timestamp
+	64,  // 108: grid.v1.Conditions.weather:type_name -> grid.v1.WeatherConditions
+	65,  // 109: grid.v1.Conditions.fire_weather:type_name -> grid.v1.FireWeatherConditions
+	72,  // 110: grid.v1.Conditions.last_updated:type_name -> google.protobuf.Timestamp
+	67,  // 111: grid.v1.Conditions.forecast:type_name -> grid.v1.WeatherForecast
+	48,  // 112: grid.v1.GridService.ListEvents:input_type -> grid.v1.ListEventsRequest
+	49,  // 113: grid.v1.GridService.GetEvent:input_type -> grid.v1.GetEventRequest
+	50,  // 114: grid.v1.GridService.GetEventHistory:input_type -> grid.v1.GetEventHistoryRequest
+	51,  // 115: grid.v1.GridService.ListHistory:input_type -> grid.v1.ListHistoryRequest
+	52,  // 116: grid.v1.GridService.ListPlaces:input_type -> grid.v1.ListPlacesRequest
+	54,  // 117: grid.v1.GridService.ResolvePlace:input_type -> grid.v1.ResolvePlaceRequest
+	53,  // 118: grid.v1.GridService.GetPlace:input_type -> grid.v1.GetPlaceRequest
+	41,  // 119: grid.v1.GridService.GetPlaceSummary:input_type -> grid.v1.GetPlaceSummaryRequest
+	57,  // 120: grid.v1.GridService.ListScanners:input_type -> grid.v1.ListScannersRequest
+	60,  // 121: grid.v1.GridService.ListCameras:input_type -> grid.v1.ListCamerasRequest
+	63,  // 122: grid.v1.GridService.GetConditions:input_type -> grid.v1.GetConditionsRequest
+	69,  // 123: grid.v1.GridService.ListSources:input_type -> grid.v1.ListSourcesRequest
+	37,  // 124: grid.v1.GridService.GetMeshTelemetry:input_type -> grid.v1.GetMeshTelemetryRequest
+	32,  // 125: grid.v1.GridService.ListEvents:output_type -> grid.v1.EventList
+	10,  // 126: grid.v1.GridService.GetEvent:output_type -> grid.v1.Event
+	34,  // 127: grid.v1.GridService.GetEventHistory:output_type -> grid.v1.EventRevisionList
+	34,  // 128: grid.v1.GridService.ListHistory:output_type -> grid.v1.EventRevisionList
+	35,  // 129: grid.v1.GridService.ListPlaces:output_type -> grid.v1.PlaceList
+	56,  // 130: grid.v1.GridService.ResolvePlace:output_type -> grid.v1.ResolvePlaceResponse
+	17,  // 131: grid.v1.GridService.GetPlace:output_type -> grid.v1.Place
+	42,  // 132: grid.v1.GridService.GetPlaceSummary:output_type -> grid.v1.PlaceSummary
+	59,  // 133: grid.v1.GridService.ListScanners:output_type -> grid.v1.ScannerList
+	62,  // 134: grid.v1.GridService.ListCameras:output_type -> grid.v1.CameraList
+	68,  // 135: grid.v1.GridService.GetConditions:output_type -> grid.v1.Conditions
+	36,  // 136: grid.v1.GridService.ListSources:output_type -> grid.v1.SourceList
+	38,  // 137: grid.v1.GridService.GetMeshTelemetry:output_type -> grid.v1.MeshTelemetryArchive
+	125, // [125:138] is the sub-list for method output_type
+	112, // [112:125] is the sub-list for method input_type
+	112, // [112:112] is the sub-list for extension type_name
+	112, // [112:112] is the sub-list for extension extendee
+	0,   // [0:112] is the sub-list for field type_name
 }
 
 func init() { file_grid_proto_init() }
@@ -6448,7 +7431,7 @@ func file_grid_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_grid_proto_rawDesc), len(file_grid_proto_rawDesc)),
-			NumEnums:      9,
+			NumEnums:      10,
 			NumMessages:   62,
 			NumExtensions: 0,
 			NumServices:   1,

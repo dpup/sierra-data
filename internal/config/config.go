@@ -183,6 +183,7 @@ type GridConfig struct {
 	Sources     map[string]SourceTuning `koanf:"sources"`
 	Meshcore    MeshcoreConfig          `koanf:"meshcore"`
 	Wildfire    WildfireConfig          `koanf:"wildfire"`
+	Places      PlacesConfig            `koanf:"places"`
 	Power       PowerConfig             `koanf:"power"`
 	Burn        BurnConfig              `koanf:"burn"`
 	Ingest      IngestConfig            `koanf:"ingest"`
@@ -403,6 +404,16 @@ func (w WildfireConfig) PlaceBuffer() float64 {
 		return w.PlaceBufferMeters
 	}
 	return DefaultWildfirePlaceBufferMeters
+}
+
+// PlacesConfig tunes the place directory's geometry rules.
+type PlacesConfig struct {
+	// TownRadiusMeters is how close to a TOWN place's point (its weather
+	// location) a location must be for GET /api/v1/places:resolve to return
+	// that town. Towns are points, so without a radius no location resolves to
+	// one. Resolve only: it does not change which events attach to a town.
+	// Unset/<=0 => store.DefaultTownRadiusMeters (3 km).
+	TownRadiusMeters float64 `koanf:"townRadiusMeters"`
 }
 
 // DefaultPowerOutageStaleAfter is how long PG&E's own outage ETL stamp may go

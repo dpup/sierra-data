@@ -426,16 +426,44 @@ func eventLayerMeta(layer string, sources []*gridv1.Source) (attribution, source
 // shared ETag/304 path with the map-layer cache policy (60s, matching
 // /api/v1/hazards). A nil features slice serializes as [] — an empty layer is
 // still a valid FeatureCollection.
+//
+// The ETag covers the features and every metadata member EXCEPT generatedAt,
+// so it changes when the data or its honesty fields (sourceStatus,
+// lastSourceUpdate, attribution) do, and not merely because a second passed.
+// The features are marshaled once and reused for both the validator and the
+// body.
 func (s *Service) writeFeatureCollection(w http.ResponseWriter, r *http.Request, features []hazards.Feature, md *hazards.Metadata) {
 	if features == nil {
 		features = []hazards.Feature{}
 	}
-	body, err := json.Marshal(hazards.FeatureCollection{Type: "FeatureCollection", Features: features, Metadata: md})
+	fj, err := json.Marshal(features)
 	if err != nil {
 		internal(r.Context(), w, err)
 		return
 	}
-	writeJSON(w, r, body, "application/geo+json", maxAgeConditions)
+	stable := *md
+	stable.GeneratedAt = ""
+	mj, err := json.Marshal(&stable)
+	if err != nil {
+		internal(r.Context(), w, err)
+		return
+	}
+	body, err := json.Marshal(featureCollectionWire{Type: "FeatureCollection", Features: fj, Metadata: md})
+	if err != nil {
+		internal(r.Context(), w, err)
+		return
+	}
+	const contentType = "application/geo+json"
+	writeJSON(w, r, body, dataETag(contentType, fj, mj), contentType, maxAgeConditions)
+}
+
+// featureCollectionWire is hazards.FeatureCollection with the features already
+// serialized, so writeFeatureCollection marshals them only once. Same members,
+// same order, so the bytes match a hazards.FeatureCollection marshal.
+type featureCollectionWire struct {
+	Type     string            `json:"type"`
+	Features json.RawMessage   `json:"features"`
+	Metadata *hazards.Metadata `json:"metadata,omitempty"`
 }
 
 // timeOrEmpty renders a time as RFC 3339 UTC, "" for zero (the shipped

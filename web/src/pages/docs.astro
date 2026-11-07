@@ -94,6 +94,10 @@ import docsBody from '../partials/docs-body.html?raw';
     .data-table th { white-space: nowrap; }
     .data-table td.num { white-space: nowrap; }
 
+    /* Paths like /api/v1/places/{place}/map/{layer}.geojson are one unbroken
+       token, wider than a phone column; let them break rather than scroll. */
+    main code.inline { overflow-wrap: anywhere; }
+
     /* ---- Endpoint reference (built by pages/docs.js from spec.js) ---- */
     .ep-list { border-top: 1px solid var(--rule); margin-top: 14px; }
     .ep { border-bottom: 1px solid var(--rule); }

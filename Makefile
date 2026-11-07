@@ -1,5 +1,5 @@
 # Live Data API Server - Build, Test, and Deployment Tasks
-.PHONY: test-mesh-relay mesh-relay run-relay relay-token docker-build-relay ecr-push ecr-push-grid ecr-push-relay ingest-token test-pge test-llm burn-line-dry-run build test proto proto-tools clean server tools site site-modules site-ensure site-install site-dev site-shots site-shots-mock check-wiring run dev lint fmt docker docker-build docker-run docker-run-dev docker-push docker-clean deploy install help test-meshcore
+.PHONY: openapi test-mesh-relay mesh-relay run-relay relay-token docker-build-relay ecr-push ecr-push-grid ecr-push-relay ingest-token test-pge test-llm burn-line-dry-run build test proto proto-tools clean server tools site site-modules site-ensure site-install site-dev site-shots site-shots-mock check-wiring run dev lint fmt docker docker-build docker-run docker-run-dev docker-push docker-clean deploy install help test-meshcore
 
 # Go parameters
 GOCMD=go
@@ -177,7 +177,8 @@ site: site-modules
 # Directories are listed alongside files because a DELETED page changes no
 # surviving file's mtime — only its parent directory's — and a deleted page that
 # lingers in site/dist is exactly the kind of staleness this rule exists to stop.
-SITE_SRC := $(shell find web/src web/public web/astro.config.mjs web/package.json web/package-lock.json \( -type f -o -type d \) 2>/dev/null)
+# CHANGELOG.md is rendered into the site's /changelog page (web/src/pages/changelog.astro).
+SITE_SRC := $(shell find web/src web/public web/astro.config.mjs web/package.json web/package-lock.json CHANGELOG.md \( -type f -o -type d \) 2>/dev/null)
 
 site/dist/index.html: $(SITE_SRC)
 	@$(MAKE) --no-print-directory site
@@ -259,6 +260,18 @@ proto: proto-tools
 		$(GRID_PROTO_DIR)/*.proto
 	@echo "Protobuf code generation completed."
 	@echo "OpenAPI specifications generated in $(PROTO_DIR)/"
+	@$(MAKE) --no-print-directory openapi
+
+# Build the served OpenAPI document (/api/openapi.json): the generated
+# grid.swagger.json converted to OpenAPI 3.0 with the hand-written overlay merged
+# in (cmd/openapi-merge, internal/openapispec). Run after editing the overlay;
+# `make proto` runs it too. Fails, writing nothing, on a merge conflict, a
+# dangling $ref or an invalid result.
+openapi:
+	go run ./cmd/openapi-merge \
+		-swagger $(GRID_PROTO_DIR)/grid.swagger.json \
+		-overlay $(GRID_PROTO_DIR)/openapi.overlay.yaml \
+		-out $(GRID_PROTO_DIR)/openapi.json
 
 # Clean build artifacts
 clean:
@@ -666,7 +679,8 @@ help:
 	@echo "  build       - Build server and all CLI tools (default)"
 	@echo "  server      - Build main server only"
 	@echo "  tools       - Build CLI testing tools only"
-	@echo "  proto       - Generate protobuf code"
+	@echo "  proto       - Generate protobuf code (and the OpenAPI spec)"
+	@echo "  openapi     - Rebuild api/grid/v1/openapi.json from the swagger + overlay"
 	@echo "  site        - Build the static site (Astro, web/ → site/dist; not committed)"
 	@echo "  site-ensure - Build the site only if missing/stale (implied by server, run, test)"
 	@echo "  site-dev    - Run the Astro dev server (hot reload)"
@@ -680,8 +694,6 @@ help:
 	@echo ""
 	@echo "Testing targets:"
 	@echo "  test        - Run full test suite (unit tests, works offline)"
-	@echo "  test-unit   - Run unit tests only"
-	@echo "  test-contract - Run contract tests"
 	@echo "  test-google [ROUTE_ID=id] [VERBOSE=true]   - Test Google Routes API"
 	@echo "  test-caltrans [VERBOSE=true] [FORMAT=table] - Test Caltrans KML feeds"
 	@echo "  test-weather [LOCATION_ID=id] [VERBOSE=true] - Test OpenWeatherMap API"

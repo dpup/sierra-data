@@ -59,6 +59,7 @@ const PAGES = [
   { name: 'history', url: '/history.html' },
   { name: 'docs', url: '/docs.html' },
   { name: 'mcp-guide', url: '/mcp-guide.html' },
+  { name: 'changelog', url: '/changelog.html' },
 ];
 
 const VIEWPORTS = [

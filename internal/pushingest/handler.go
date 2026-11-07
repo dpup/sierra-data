@@ -12,9 +12,10 @@ import (
 	"time"
 
 	"github.com/dpup/prefab/logging"
-	spb "google.golang.org/genproto/googleapis/rpc/status"
+	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/protobuf/encoding/protojson"
+
+	"github.com/dpup/sierra-data/internal/lib/httperr"
 )
 
 // streamHandler consumes one validated request body for one stream. Adding a
@@ -61,6 +62,35 @@ type ingestResponse struct {
 	ReceivedAt string   `json:"receivedAt"`
 }
 
+// IngestPath is the route pattern the ingest endpoint is mounted at.
+const IngestPath = "/api/v1/ingest/{stream}"
+
+// mountedMethods are the methods routed to ServeStream. Only POST does
+// anything; the rest are mounted so ServeStream can answer them with a real
+// 405 + Allow: POST. Left unmounted, the gateway answers a path match with the
+// wrong method as 501 UNIMPLEMENTED, which reads as "no such endpoint".
+var mountedMethods = []string{
+	http.MethodPost, http.MethodGet, http.MethodHead,
+	http.MethodPut, http.MethodPatch, http.MethodDelete,
+}
+
+// Mount registers the ingest endpoint on the gateway mux. wrap, when non-nil,
+// wraps the handler (cmd/server passes the handoff admission gate).
+func (r *Registry) Mount(mux *runtime.ServeMux, wrap func(runtime.HandlerFunc) runtime.HandlerFunc) error {
+	h := runtime.HandlerFunc(func(w http.ResponseWriter, req *http.Request, pp map[string]string) {
+		r.ServeStream(w, req, pp["stream"])
+	})
+	if wrap != nil {
+		h = wrap(h)
+	}
+	for _, m := range mountedMethods {
+		if err := mux.HandlePath(m, IngestPath, h); err != nil {
+			return fmt.Errorf("pushingest: mounting %s %s: %w", m, IngestPath, err)
+		}
+	}
+	return nil
+}
+
 // ServeStream handles POST /api/v1/ingest/{stream}. The stream comes from the
 // router; everything else is derived from the request.
 //
@@ -73,7 +103,8 @@ func (r *Registry) ServeStream(w http.ResponseWriter, req *http.Request, stream 
 
 	if req.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
-		writeStatus(w, http.StatusMethodNotAllowed, codes.InvalidArgument, "method not allowed")
+		writeStatus(w, http.StatusMethodNotAllowed, codes.Unimplemented,
+			fmt.Sprintf("method %s not allowed: the ingest endpoint accepts POST only", req.Method))
 		return
 	}
 
@@ -225,17 +256,9 @@ func decodeJSON[T any](body []byte) (T, error) {
 	return out, nil
 }
 
-// writeStatus emits a google.rpc.Status body, matching the error convention the
-// rest of /api/v1 uses (internal/gridapi/errors.go) so a client needs one error
+// writeStatus emits the /api/v1 error envelope ({code, codeName, message,
+// details}), the same shape as the gateway routes, so a client needs one error
 // parser for the whole surface.
 func writeStatus(w http.ResponseWriter, httpCode int, code codes.Code, msg string) {
-	body, err := protojson.MarshalOptions{UseProtoNames: true}.Marshal(
-		&spb.Status{Code: int32(code), Message: msg})
-	if err != nil {
-		body = []byte(`{"code":13,"message":"internal error"}`)
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(httpCode)
-	_, _ = w.Write(body)
+	httperr.Write(w, httpCode, code, msg)
 }

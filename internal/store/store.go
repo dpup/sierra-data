@@ -232,11 +232,27 @@ CREATE TABLE mesh_activity (
   last_relayed_at INTEGER NOT NULL DEFAULT 0  -- our receive time of the last packet it relayed
 ) WITHOUT ROWID`
 
+// migrationV10 counts in-place rewrites of an event's current blob: the
+// hash-equal path (refreshEventPlaces) persists hash-excluded fields — place
+// ids, a fresh AI enhancement, mesh telemetry, burn observations — without
+// minting a revision, so the revision alone cannot tell two served bodies
+// apart. EventVersion returns (revision, refreshes) as the event-detail ETag
+// input. Like last_seen_at it is a column-only value, never in the blob; it
+// is bookkeeping for a validator, not content.
+const migrationV10 = `ALTER TABLE events ADD COLUMN refreshes INTEGER NOT NULL DEFAULT 0`
+
+// migrationV11 records what each source registry row is (gridv1.SourceKind):
+// a scheduled FEED or a push REPORTER. Before it a client could not tell the
+// two apart, and judged a reporter by a poll cadence it does not have.
+// DEFAULT 1 (FEED) is right for every pre-existing row until the next boot's
+// SeedSources rewrites the reporters' rows.
+const migrationV11 = `ALTER TABLE sources ADD COLUMN kind INTEGER NOT NULL DEFAULT 1`
+
 // migrations[i] is the DDL for schema version i+1. Applied versions are
 // recorded in schema_migrations; already-applied versions are skipped, so
 // Open is idempotent across restarts and an existing dev DB at an older
 // version picks up only the missing migrations.
-var migrations = []string{schemaV1, migrationV2, migrationV3, migrationV4, migrationV5, migrationV6, migrationV7, migrationV8, migrationV9}
+var migrations = []string{schemaV1, migrationV2, migrationV3, migrationV4, migrationV5, migrationV6, migrationV7, migrationV8, migrationV9, migrationV10, migrationV11}
 
 // ErrNotFound is returned by point lookups (GetEvent, GetPlace) when no row
 // matches. Callers map it to a 404.
@@ -261,6 +277,10 @@ type Store struct {
 	// or TOWN place and still attach to it. See WithWildfireProximity.
 	wildfireBuffer float64
 
+	// townRadius is how far (metres) from a TOWN's point a location may be and
+	// still resolve to that town. See WithTownRadius.
+	townRadius float64
+
 	// maxOpenConns is the pool bound actually applied, kept for Settings.
 	maxOpenConns int
 
@@ -275,6 +295,12 @@ type Store struct {
 	// ETag validators fold it in for responses that carry mesh activity: the
 	// table moves without minting a revision, so DataVersion cannot see it.
 	meshActivityVersion atomic.Int64
+
+	// refreshVersions counts, per layer, the in-place blob rewrites of events
+	// in that layer (see RefreshVersion). Guarded by its own lock, not mu, so
+	// readers never wait on the writer's transaction.
+	refreshMu       sync.RWMutex
+	refreshVersions map[gridv1.Layer]int64
 }
 
 // PlacesVersion returns a counter that changes whenever the place set changes.
@@ -302,6 +328,7 @@ type Option func(*openConfig)
 type openConfig struct {
 	journalMode    string
 	wildfireBuffer float64
+	townRadius     float64
 	cacheSizeMB    int
 	maxOpenConns   int
 	lockTimeout    time.Duration
@@ -347,6 +374,26 @@ func WithWildfireProximity(meters float64) Option {
 	return func(c *openConfig) {
 		if meters > 0 {
 			c.wildfireBuffer = meters
+		}
+	}
+}
+
+// DefaultTownRadiusMeters is how close to a town's point a location must be to
+// resolve to that town when grid.places.townRadiusMeters is unset. 3 km covers
+// the built-up core of the service area's towns (Murphys, Arnold, Sonora)
+// while the closest pair, Sonora and Columbia (~5.9 km apart), overlap only in
+// a sliver, where both are returned, nearest first.
+const DefaultTownRadiusMeters = 3000
+
+// WithTownRadius sets how far (metres) from a TOWN place's point a location may
+// be and still resolve to it (PlacesContaining). Towns are seeded as points, so
+// "contains" has to mean "within this radius" for them, or no location would
+// ever resolve to a town. Zero or negative keeps DefaultTownRadiusMeters.
+// Resolve only: event attachment (matchPlaces) is unchanged.
+func WithTownRadius(meters float64) Option {
+	return func(c *openConfig) {
+		if meters > 0 {
+			c.townRadius = meters
 		}
 	}
 }
@@ -433,7 +480,8 @@ const (
 // override with WithJournalMode.
 func Open(path string, opts ...Option) (*Store, error) {
 	cfg := openConfig{journalMode: "TRUNCATE", cacheSizeMB: DefaultCacheSizeMB,
-		maxOpenConns: DefaultMaxOpenConns, lockTimeout: lockAcquireTimeout}
+		maxOpenConns: DefaultMaxOpenConns, lockTimeout: lockAcquireTimeout,
+		townRadius: DefaultTownRadiusMeters}
 	for _, o := range opts {
 		o(&cfg)
 	}
@@ -508,7 +556,8 @@ func Open(path string, opts ...Option) (*Store, error) {
 				"probably cannot support it (WAL needs a real local disk; use TRUNCATE on NFS/EFS)",
 			cfg.journalMode, applied.JournalMode, path)
 	}
-	s := &Store{db: db, lockFile: lockFile, wildfireBuffer: cfg.wildfireBuffer, maxOpenConns: cfg.maxOpenConns}
+	s := &Store{db: db, lockFile: lockFile, wildfireBuffer: cfg.wildfireBuffer,
+		townRadius: cfg.townRadius, maxOpenConns: cfg.maxOpenConns}
 	if err := s.migrate(); err != nil {
 		db.Close()
 		lockFile.Close()

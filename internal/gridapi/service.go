@@ -7,7 +7,8 @@
 // http.Handler. The whole surface is camelCase — the proto RPCs via the gateway
 // marshaler, the hand-built .geojson via camelCase json struct tags. Conditional
 // GET (ETag/If-None-Match -> 304) is wired via prefab's etag plugin on most read
-// RPCs (see grpc.go) and the .geojson keeps its own body-hash ETag.
+// RPCs (see grpc.go) and the .geojson keeps its own weak ETag over the body's
+// data, generatedAt excluded (see dataETag).
 package gridapi
 
 import (

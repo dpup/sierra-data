@@ -5,49 +5,360 @@ package grid.v1;
 import "google/api/annotations.proto";
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/wrappers.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
 
 option go_package = "github.com/dpup/sierra-data/api/grid/v1;gridv1";
 
 // Canonical grid event model (docs/design/v2-api-spec.md §3) plus GridService, the
 // read-only entity/query API exposed as JSON over gRPC-Gateway at /api/v1/...
 // (docs/design/grpc-gateway-migration-plan.md). The messages are the wire responses.
+//
+// Comments in this file are the API documentation: protoc-gen-openapiv2 turns
+// them into grid.swagger.json, served at /api/openapi.json. Write them for a
+// consumer who has never seen the code. Text inside "(-- ... --)" in a LEADING
+// comment is kept out of the OpenAPI output; use it for implementation notes.
+// A comment's first paragraph must end in a period, or the generator files it
+// as a `title` instead of a `description`.
 
+option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
+  info: {
+    title: "The Grid API"
+    version: "v1"
+    description:
+      "Public, read-only JSON API of **The Grid**, the S.I.E.R.R.A. data service. "
+      "It gathers hazard and situational-awareness feeds for California's central "
+      "Sierra Nevada, centred on Calaveras and Tuolumne counties: the Highway 4 / "
+      "Ebbetts Pass corridor (Angels Camp, Murphys, Arnold, Dorrington, Bear Valley) "
+      "and the Highway 49/108 towns (Sonora, Columbia, Twain Harte). Neighbouring "
+      "counties (Alpine, Amador, El Dorado, Mariposa, San Joaquin, Stanislaus) are "
+      "in the place directory because hazards cross county lines.\n\n"
+      "Upstream sources: CAL FIRE and FIRIS (wildfires and perimeters), Cal OES / "
+      "Genasys (evacuation zones), the National Weather Service (alerts, fire "
+      "weather, forecasts), USGS (earthquakes), CHP and Caltrans (incidents, lane "
+      "closures, chain control, cameras, message signs), PG&E (outages and Public "
+      "Safety Power Shutoffs), county burn lines and CAL FIRE burn permits, the "
+      "MeshCore community radio mesh, Google Routes and OpenWeatherMap.\n\n"
+      "This service is an aggregator, not an authority. For a life-safety decision, "
+      "link the official source. An event's link is `canonicalUrl` (the item's own "
+      "page), else `provenance.sourceUrl`, else the `homepageUrl` of its source "
+      "(`GET /api/v1/sources`, joined on `provenance.sourceId`). Either event field "
+      "can be an empty string: CHP incidents, Caltrans lane closures, FIRIS "
+      "perimeters and NWS alerts have neither, so their link is the source "
+      "homepage. Every map feature carries `properties.source`, and evacuation "
+      "views link Genasys (`metadata.sourceUrl`, `summary.evacuationSourceUrl`).\n\n"
+      "## Resource model\n\n"
+      "- **Event**: one item from one upstream source, such as a fire, an evacuation "
+      "zone, a weather alert, a road incident, an outage, a mesh radio node or a "
+      "county's burn status. The id is stable (`{source}:{native id}`, e.g. "
+      "`chp:261106ST0341`) and every change is kept as a numbered revision.\n"
+      "- **Layer**: the event taxonomy (`Event.layer`). The *event layers* are "
+      "stored and queryable at `/api/v1/events`: WILDFIRE, EVACUATION, "
+      "WEATHER_ALERT, EARTHQUAKE, ROAD_INCIDENT, POWER, MESH and BURN_STATUS. "
+      "The *condition layers* (`road_segment`, `chain_control`, `fire_weather`, "
+      "`message_sign`) are live projections of current state, not events: they "
+      "appear only on the `.geojson` map layers, in `GET /api/v1/conditions`, and "
+      "in the place summary's domains.\n"
+      "- **Place**: a named geography (AREA, COUNTY, TOWN, CORRIDOR). Events attach "
+      "to places geometrically and every event lists its `placeIds`.\n"
+      "- **Source**: an upstream feed with live health (`GET /api/v1/sources`).\n"
+      "- **PlaceSummary**: the one-call rollup for a place (mode, per-domain "
+      "status, top events, evacuation count).\n\n"
+      "## Quickstart: build a dashboard for a place\n\n"
+      "1. Pick a place: `GET /api/v1/places` lists them all (about 20). For a "
+      "dashboard use an AREA (`ebbetts-pass`), a COUNTY (`calaveras-county`) or a "
+      "CORRIDOR (`hwy4-arnold-bearvalley`): those have a footprint, so events and "
+      "conditions attach to them. Do not build a dashboard on a TOWN (`arnold`). A "
+      "town is a point, so an event attaches to it only when the event's polygon "
+      "covers it (an evacuation zone, a fire perimeter), a wildfire comes near, or "
+      "the fact is county-wide (burn status). Point events (road incidents, "
+      "outages, earthquakes) and road conditions never attach, so a town's summary "
+      "can read QUIET with an open `roads` domain while its highway is closed. Use a "
+      "town to label a location and to find its county (`parentId`), or map a "
+      "point or an address with `GET /api/v1/places:resolve?lat=38.25&lng=-120.35` "
+      "(or `?address=...`) and pick the most specific non-town place it returns. "
+      "Use the `slug` in paths.\n"
+      "2. Headline status: `GET /api/v1/places/{slug}/summary` returns `mode` "
+      "(QUIET, WATCH or ACTIVE), one block per domain (fire, evacuation, weather, "
+      "roads, seismic, power, burn, comms), the top five hazards and "
+      "`activeEvacuations`. Show each domain's `status` and `highestSeverity` "
+      "next to `mode`: road and chain-control conditions (a closed highway) raise "
+      "the `roads` domain but never `mode`.\n"
+      "3. Event feed: `GET /api/v1/events?place={slug}&status=ACTIVE&severityMin=MINOR`. "
+      "Then `GET /api/v1/events/{id}` for detail and `/api/v1/events/{id}/history` "
+      "for its timeline.\n"
+      "4. Map: `GET /api/v1/places/{slug}/map/{layer}.geojson` serves one RFC 7946 "
+      "FeatureCollection per layer (documented separately from the RPCs below).\n"
+      "5. Context: `GET /api/v1/conditions?place={slug}` for current weather, "
+      "forecasts and the fire-weather state, `GET /api/v1/cameras?place={slug}` for "
+      "traffic cameras, and `GET /api/v1/sources` for source-health badges.\n\n"
+      "Poll every 30 to 60 seconds. JSON responses are cacheable for 30 seconds "
+      "(`Cache-Control: public, max-age=30`), GeoJSON layers and mesh links for 60; "
+      "upstream feeds refresh every 2 to 15 minutes.\n\n"
+      "## Filter the event feed\n\n"
+      "An unscoped `GET /api/v1/events` is mostly MESH nodes: hundreds of community "
+      "radio nodes across Northern California, all INFO, many outside every place. "
+      "It also holds a week of planned Caltrans roadwork (ROAD_INCIDENT, status "
+      "SCHEDULED). For a hazard feed, pass `place`, pass `status=ACTIVE`, and "
+      "either pass `severityMin=MINOR` or list the layers you want. POWER events "
+      "at INFO are single-customer outages.\n\n"
+      "## Conventions\n\n"
+      "- **JSON field names are camelCase.** Every field is present, except the "
+      "per-layer detail blocks on an event (only the one matching `layer` is "
+      "sent). An unset message or timestamp is `null`; the spec marks every such "
+      "field `nullable`. An unset scalar is `0`, `\"\"` or `false`, never `null`. "
+      "Wrapper-typed fields (`activeEvacuations`, the mesh gauges) are `null` when "
+      "unknown, so a real `0` is never confused with \"no reading\". Arrays are "
+      "`[]` and maps `{}` when empty.\n"
+      "- **Enums serialize as their name strings** (`\"SEVERE\"`), never as numbers.\n"
+      "- **Timestamps** are RFC 3339 in UTC (`2026-11-07T03:13:00Z`), with up to "
+      "nanosecond fractions.\n"
+      "- **64-bit integers are JSON strings** (protobuf JSON mapping): mesh "
+      "counters such as `uptimeSeconds: \"98350\"` and `cadenceSeconds: \"1831\"`. "
+      "Parse them; 32-bit integers are plain numbers.\n"
+      "- **`geometry.geojson` is base64.** It is a protobuf `bytes` field, so the "
+      "RFC 7946 geometry JSON arrives base64-encoded: "
+      "`JSON.parse(atob(event.geometry.geojson))`. Coordinates inside are "
+      "`[longitude, latitude]`. `geometry.bbox` and `geometry.centroid` are plain "
+      "numbers and need no decoding. For maps, the `.geojson` layer endpoints serve "
+      "decoded geometry directly.\n"
+      "- **Query parameters**: this spec names them in camelCase (`severityMin`, "
+      "`pageSize`, `pageToken`, `enhancementIo`). The snake_case forms "
+      "(`severity_min`, `page_size`, ...) work too. Enum values are "
+      "case-insensitive. A repeated parameter can be repeated "
+      "(`layer=WILDFIRE&layer=POWER`) or comma-separated (`layer=WILDFIRE,POWER`).\n"
+      "- **Place addressing**: anywhere a place is named, the slug (`arnold`) or the "
+      "namespaced id (`town:arnold`) works.\n"
+      "- **Pagination** is keyset-based. `pageSize` 0 or omitted means 50, values "
+      "over 200 are clamped to 200, and a negative value is a 400. Pass `nextPageToken` back as `pageToken` with the same filters "
+      "until it comes back empty. Tokens are opaque. Pages stay stable while new "
+      "events arrive. A large page of perimeter-heavy events can exceed the "
+      "server's 4 MiB response limit and fail with HTTP 429 `RESOURCE_EXHAUSTED`; "
+      "keep `pageSize` at or below 50 when you include RESOLVED or EXPIRED events.\n"
+      "- **Conditional GET**: event lists, event detail, event history, the "
+      "revision archive, places and cameras return a weak `ETag`. Send it back in "
+      "`If-None-Match` to get `304 Not Modified`. The tag changes whenever the body "
+      "would, including in-place refreshes that write no revision (AI text, mesh "
+      "telemetry, burn-line observations, place re-attachment). The summary, conditions, sources, "
+      "resolve, scanners and mesh-telemetry endpoints do not yet send ETags.\n"
+      "- **No authentication, no API key.** CORS is open "
+      "(`Access-Control-Allow-Origin: *`), GET only, no credentials, so a browser "
+      "page on any origin can call the API directly.\n"
+      "- **Errors** are the gRPC status as JSON, `{code, codeName, message, details}`, "
+      "with a mapped HTTP status: 400 `INVALID_ARGUMENT` (bad enum, timestamp or "
+      "page token), 404 `NOT_FOUND` (unknown place, event or address), 429 "
+      "`RESOURCE_EXHAUSTED` (response too large), 503 `UNAVAILABLE` (address "
+      "geocoder down), 500 `INTERNAL`. Branch on `codeName`. During a deploy "
+      "handoff any route can briefly answer `503`: the RPCs with the JSON error "
+      "(`UNAVAILABLE`), the hand-built routes (`.geojson`, mesh links) with a "
+      "plain-text body and `Retry-After: 1`. Retry after a second.\n\n"
+      "## Severity and status\n\n"
+      "Every event and map feature uses one severity scale: INFO (rank 0), MINOR (1), "
+      "MODERATE (2), SEVERE (3), EXTREME (4). It expresses how urgently the public "
+      "should respond, not physical magnitude. `severityRank` is the same value as "
+      "a number, for sorting and colour ramps. `/api/v1/events` sorts by severity, "
+      "then most recently observed.\n\n"
+      "Status lifecycle: SCHEDULED (planned, not yet in effect) → ACTIVE → RESOLVED "
+      "(the authoritative feed stopped listing it) or EXPIRED (it aged out). An "
+      "event that reappears goes back to ACTIVE with a new revision. The end of an "
+      "event is a revision too, so history keeps the all-clear.\n\n"
+      "## Fail-loud honesty\n\n"
+      "The API never turns a failure into an all-clear.\n\n"
+      "- Source health is `OK`, `STALE` (serving last-good data while the upstream "
+      "fails) or `UNAVAILABLE` (nothing trustworthy to serve). It appears on "
+      "`/api/v1/sources`, on each summary domain, in the summary's `sources` "
+      "sidecar, on `/api/v1/cameras`, and in each map layer's `metadata.sourceStatus`. "
+      "UNAVAILABLE with no items means *unknown*. Render it as \"unknown, check "
+      "the source\", never as \"none\".\n"
+      "- Evacuations: `summary.activeEvacuations` is `null` when the evacuation "
+      "source is UNAVAILABLE (unknown; send people to Genasys at "
+      "`summary.evacuationSourceUrl`), `0` when a healthy "
+      "fetch found no active zone (\"none reported\", not a guarantee), and `N` when "
+      "zones are active.\n"
+      "- A failed fetch never resolves or expires events. They stay as they were "
+      "and the source reads STALE.\n"
+      "- The fire-weather state comes only from issued NWS products. The API never "
+      "infers a Red Flag Warning that NWS has not issued.\n\n"
+      "## Casing quirks (kept for compatibility)\n\n"
+      "- Layer names in responses (`Event.layer`, `summary.topEvents[].layer`) are "
+      "UPPERCASE enum names (`ROAD_INCIDENT`). Map-layer path segments are "
+      "lowercase slugs (`road_incident.geojson`). `?layer=` accepts either, plus "
+      "the aliases `mesh_node` and `network` for MESH.\n"
+      "- `fireWeather.state` is lowercase: `normal`, `elevated` or `red-flag`.\n"
+      "- Burn-status enum values carry a prefix (`BURN_DAY_YES`, "
+      "`CALFIRE_PERMIT_REQUIRED`, `BURN_PERMISSION_ALLOWED`).\n\n"
+      "API changes are listed, dated, in "
+      "[CHANGELOG.md](https://github.com/dpup/sierra-data/blob/main/CHANGELOG.md)."
+    contact: {
+      name: "The Grid (S.I.E.R.R.A. data service)"
+      url: "https://github.com/dpup/sierra-data"
+    }
+    license: {
+      name: "MIT"
+      url: "https://github.com/dpup/sierra-data/blob/main/LICENSE"
+    }
+  }
+  host: "data.sierragridteam.org"
+  schemes: HTTPS
+  consumes: "application/json"
+  produces: "application/json"
+  tags: [
+    {
+      name: "Places"
+      description: "The place directory, point/address resolution, and the one-call place summary. Start here: everything else is scoped by a place."
+    },
+    {
+      name: "Events"
+      description: "Hazard and ambient-state events from the grid event store: the cross-layer feed, one event, its revision history, and the revision archive."
+    },
+    {
+      name: "Conditions"
+      description: "Current, non-event state: weather, forecasts and fire weather, plus reference data (traffic cameras and scanner feeds). None of it is an event."
+    },
+    {
+      name: "Sources"
+      description: "The upstream source registry and per-source health, which tells a client how far to trust each layer."
+    },
+    {
+      name: "Mesh"
+      description: "The MeshCore community radio mesh: node presence is the MESH event layer and the mesh_node map layer; relay topology is /api/v1/mesh/links and the mesh_link map layer; per-node history is GetMeshTelemetry."
+    }
+  ]
+  external_docs: {
+    description: "The Grid site and human-readable docs"
+    url: "https://data.sierragridteam.org/docs"
+  }
+};
+
+// Event is one item from one upstream source: a hazard, or a piece of ambient
+// state such as a mesh node or a county's burn status.
+//
+// The envelope fields are the same for every layer, so a client can render a
+// card from `headline`, `severity`, `status` and `provenance` without knowing the
+// layer. Layer-specific fields are in exactly one detail block (`wildfire`,
+// `evacuation`, `weatherAlert`, `earthquake`, `roadIncident`, `mesh`, `power` or
+// `burnStatus`), chosen by `layer`; the other blocks are absent. `fireWeather`
+// is never populated on an event.
 message Event {
-  string id = 1;                    // "{source_id}:{native_id}" — matches shipped ids
-                                    // e.g. "calfire:2026-salt-springs"
-  Layer layer = 2;                  // shipped taxonomy + additions
-  string category = 3;              // source sub-type slug ("active", "order", ...)
-  Severity severity = 4;            // shipped 5-level scale
-  EventStatus status = 5;
+  // Stable event id, `{source}:{native id}`. It never changes over the event's
+  // life, so it is safe as a client key. Namespaces: `calfire:`, `firis:`
+  // (wildfire), `evac:` (evacuation zone), `wx:` (NWS alert), `usgs:`
+  // (earthquake), `chp:` (CHP incident), `caltrans:` (Caltrans lane-closure
+  // window), `pge:` (outage), `psps:` (power shutoff), `meshcore:` (mesh node),
+  // `burn:` (county burn status). Ids can contain colons; URL-encode them in a
+  // path.
+  string id = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"chp:261106ST0341\""}];
 
-  string headline = 6;              // card-renderable without knowing the kind
-  string summary = 7;               // AI-enhanced 2–3 sentences where applicable
-  string description = 8;           // long form / original text
-  string area_label = 9;            // "Hathaway Pines & Avery"
-  string canonical_url = 10;        // scheme-validated (https/http only, per shipped rule)
+  // Which layer this event belongs to. It decides which detail block is
+  // populated.
+  Layer layer = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"ROAD_INCIDENT\""}];
 
-  Geometry geometry = 11;           // may be absent: county-wide advisories
-  repeated string place_ids = 12;   // precomputed intersections (spec §4)
+  // Source sub-type, lowercase except for weather alerts. By layer: WILDFIRE
+  // `wildfire`; EVACUATION `order` | `warning` | `advisory` | `shelter_in_place`;
+  // WEATHER_ALERT the NWS event name verbatim (`Red Flag Warning`, `Winter Storm
+  // Watch`, ...); EARTHQUAKE `earthquake`; ROAD_INCIDENT `incident` | `closure` |
+  // `construction` | `weather` (CHP types) or `closure` (Caltrans windows);
+  // POWER `unplanned` | `planned` | `psps`; MESH the node type (`repeater`,
+  // `companion`, `room_server`, `sensor`); BURN_STATUS `burn_status`.
+  string category = 3 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"incident\""}];
 
+  // Unified severity, INFO..EXTREME. Response urgency, not magnitude. See the
+  // Severity enum for how each layer is graded. `enhancement.fields` lists
+  // `severity` when an AI model assessed it (CHP incidents).
+  Severity severity = 4 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"MINOR\""}];
+
+  // Lifecycle status. `/api/v1/events` returns ACTIVE and SCHEDULED unless you
+  // ask for others.
+  EventStatus status = 5 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"ACTIVE\""}];
+
+  // One-line, card-ready title. Present on every event. For CHP incidents it
+  // may be AI-written (see `enhancement.fields`); for NWS alerts it is composed
+  // from the product, never by AI.
+  string headline = 6 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"Traffic hazard causing near-miss incidents; CHP responding\""}];
+
+  // AI-written plain-language summary of two or three sentences, for CHP
+  // incidents and NWS alerts. Empty string when none was generated. The original
+  // text is always kept in `description`.
+  string summary = 7 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"Reported traffic hazard on SR 4 at Country Club Drive. CHP responded. No lanes reported blocked.\""}];
+
+  // Long-form original text from the upstream (CHP log, NWS product body,
+  // evacuation instructions, closure description). May contain newlines. Empty
+  // string when the source has none, or when it would only repeat the headline.
+  string description = 8;
+
+  // Human-readable location ("SR 4 at Country Club Drive", "Calaveras County").
+  // Empty string when the source gives none.
+  string area_label = 9 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"SR 4 at Country Club Drive\""}];
+
+  // Link to the authoritative page for THIS item: a USGS event page, a CAL FIRE
+  // incident page, a mesh node's CoreScope page, PG&E's outage or PSPS page, the
+  // CAL FIRE burn-permit page for burn status. Always http(s) when set. Empty
+  // string when the source has no per-item page, which today means CHP
+  // incidents, Caltrans lane closures, FIRIS perimeters, NWS alerts and
+  // evacuation zones. Fall back to `provenance.sourceUrl`, then to the source's
+  // `homepageUrl` (`GET /api/v1/sources`, joined on `provenance.sourceId`).
+  string canonical_url = 10 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {format: "uri"}];
+
+  // Where the event is. `null` for events with no footprint of their own: NWS
+  // zone alerts (they attach to places by zone instead) and burn status (a fact
+  // about a county).
+  Geometry geometry = 11;
+
+  // Ids of every place this event attaches to, e.g. `["county:calaveras-county",
+  // "town:arnold"]`. Point events attach to the polygon places that contain them
+  // and to corridors within about 1.5 km. Polygon events attach to places they
+  // overlap. Wildfires also attach to AREA and TOWN places within 20 km. Empty
+  // when the event is outside every place (common for mesh nodes).
+  repeated string place_ids = 12;
+
+  // Which source published it, with attribution text to display.
   Provenance provenance = 13;
 
+  // When the event took or takes effect: alert onset, incident start, outage
+  // start, closure set-up time. `null` when the source does not say.
   google.protobuf.Timestamp effective = 14;
+
+  // The upstream's declared end, such as an NWS alert's expiry. `null` for most
+  // layers. Restoration estimates and planned closure ends are never put here
+  // (they are routinely overrun); they live in the detail blocks.
   google.protobuf.Timestamp expires = 15;
-  google.protobuf.Timestamp observed_at = 16;   // upstream last-update
+
+  // When the upstream last changed this event's content. It moves only when a
+  // new revision is written, so it is NOT "last seen". For a mesh node's
+  // liveness use `mesh.telemetry.lastHeardAt` / `lastRelayedAt`; for burn
+  // status it follows each new phone-line reading.
+  google.protobuf.Timestamp observed_at = 16;
+
+  // When the Grid stored this revision.
   google.protobuf.Timestamp ingested_at = 17;
-  uint32 revision = 18;
 
-  Enhancement enhancement = 19;     // AI-enhancement provenance (spec §3.1)
+  // Revision number, starting at 1. It increases by one on every content change
+  // or status transition. `/api/v1/events/{id}/history` lists every revision.
+  uint32 revision = 18 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "2"}];
 
-  oneof detail {                    // mirrors the namespaced per-kind blocks
+  // Present when an AI model generated some of this event's text; lists which
+  // fields. `null` for events with no AI involvement.
+  Enhancement enhancement = 19;
+
+  // (-- Mirrors the namespaced per-kind blocks; exactly one is set, by layer. --)
+  oneof detail {
+    // WILDFIRE detail.
     WildfireDetail wildfire = 20;
+    // EVACUATION detail.
     EvacuationDetail evacuation = 21;
+    // WEATHER_ALERT detail.
     WeatherAlertDetail weather_alert = 22;
+    // Never populated on an event: fire weather is a condition
+    // (`GET /api/v1/conditions`, the `fire_weather` map layer).
     FireWeatherDetail fire_weather = 23;
+    // EARTHQUAKE detail.
     EarthquakeDetail earthquake = 24;
+    // ROAD_INCIDENT detail (CHP incidents and Caltrans lane closures).
     RoadIncidentDetail road_incident = 25;
+    // MESH detail (one MeshCore radio node).
     MeshDetail mesh = 26;
+    // POWER detail (PG&E outage or Public Safety Power Shutoff).
     PowerDetail power = 27;
+    // BURN_STATUS detail (one county's residential burning status).
     BurnStatusDetail burn_status = 31;
   }
 
@@ -55,256 +366,571 @@ message Event {
   reserved 28 to 30;
 }
 
+// Layer is the event taxonomy. Response values are these UPPERCASE names; the
+// `layer` query parameter also accepts lowercase slugs (`road_incident`).
+//
+// Only event layers appear here. The condition layers (`road_segment`,
+// `chain_control`, `fire_weather`, `message_sign`) are map layers and summary
+// inputs, never events.
 enum Layer {
+  // Never returned.
   LAYER_UNSPECIFIED = 0;
+  // Wildfires: CAL FIRE incidents joined with FIRIS/NIFC perimeters (sources
+  // `calfire`, `firis`). Scoped wider than other layers, so a fire approaching
+  // the region shows up before it arrives.
   WILDFIRE = 1;
+  // Evacuation zones under an order, warning, advisory or shelter-in-place,
+  // from Cal OES / Genasys (source `caloes`). Life-safety: see the summary's
+  // `activeEvacuations`.
   EVACUATION = 2;
+  // National Weather Service watches, warnings and advisories for the region's
+  // forecast zones (source `nws`). No geometry; attached to places by zone.
   WEATHER_ALERT = 3;
+  // Reserved. Fire weather is a condition (`GET /api/v1/conditions`), not an
+  // event layer; no event carries it.
   FIRE_WEATHER = 4;
+  // USGS earthquakes of magnitude 2.5 or more in the last 7 days (source `usgs`).
   EARTHQUAKE = 5;
+  // CHP traffic incidents (source `chp`, AI-summarized) and Caltrans planned
+  // lane-closure windows (source `caltrans`). Planned windows not yet set up are
+  // SCHEDULED.
   ROAD_INCIDENT = 6;
-  // condition-backed layers (ROAD_SEGMENT, CHAIN_CONTROL) are projections, not events
+  // (-- condition-backed layers (ROAD_SEGMENT, CHAIN_CONTROL) are projections, not events --)
+  // PG&E electric outages (source `pge`) and Public Safety Power Shutoffs
+  // (source `psps`). Most outages affect one customer and are INFO.
   POWER = 10;
+  // Reserved for stream gauges; no events today.
   GAUGE = 11;
+  // Reserved for air quality; no events today.
   AIR_QUALITY = 12;
+  // MeshCore community radio nodes (source `meshcore`), one event per node.
+  // Ambient INFO state, not a hazard. It dominates an unscoped event query.
   MESH = 13;
+  // Reserved for announcements; no events today.
   ANNOUNCEMENT = 14;
+  // One event per tracked county saying whether residential burning is allowed
+  // today (sources `burnline`, `calfire-burn`). Ambient, permanently ACTIVE,
+  // always INFO; its revision history is the record of changes.
   BURN_STATUS = 15;
 }
 
-// The shipped scale, unchanged. rank = enum value; INFO=0 ... EXTREME=4.
+// Severity is the unified 5-level scale shared by every layer: how urgently the
+// public should respond, not physical magnitude. The enum number is the rank
+// (`severityRank`, 0-4), for sorting and colour ramps.
+//
+// How each layer is graded. WILDFIRE: the worse of a containment floor (under
+// 50% contained SEVERE, 50-99% MODERATE, 100% MINOR) and size (1,000+ acres
+// under 50% contained EXTREME, 100+ acres SEVERE). EVACUATION: ORDER EXTREME,
+// WARNING and SHELTER_IN_PLACE SEVERE, ADVISORY MODERATE. WEATHER_ALERT: the NWS
+// severity (Extreme..Minor) one-to-one, otherwise INFO. EARTHQUAKE: M5+ SEVERE,
+// M4+ MODERATE, M2.5+ MINOR. ROAD_INCIDENT: a CHP incident by its AI-assessed
+// impact (severe SEVERE, moderate MODERATE, light MINOR, none INFO); a Caltrans
+// closure by its structure (full closure SEVERE, a travel lane or one-way
+// traffic MODERATE, shoulder only MINOR). POWER: 1,000+ customers SEVERE, 100+
+// MODERATE, 10+ MINOR, fewer INFO, unknown count MINOR, planned outages one rank
+// lower; PSPS Warning SEVERE, Watch MODERATE. MESH and BURN_STATUS: always INFO.
+// Condition layers on the map: road segment CLOSED SEVERE, restricted or heavy
+// congestion MODERATE; chain control R3 SEVERE, R2 MODERATE, R1 MINOR, road
+// closed MINOR; fire weather red-flag SEVERE, elevated MODERATE.
 enum Severity {
+  // Rank 0. Informational: ambient state, single-customer outages, small quakes,
+  // clear roads. Also the default when a source gives no grade.
   INFO = 0;
+  // Rank 1. Minor impact.
   MINOR = 1;
+  // Rank 2. Moderate impact; worth attention.
   MODERATE = 2;
+  // Rank 3. Severe; act or prepare now.
   SEVERE = 3;
+  // Rank 4. Extreme; life-safety (evacuation orders, large uncontained fires).
   EXTREME = 4;
 }
 
+// EventStatus is an event's lifecycle state. Every transition is a revision, so
+// the history keeps when an event started and ended.
 enum EventStatus {
+  // Never returned.
   EVENT_STATUS_UNSPECIFIED = 0;
-  SCHEDULED = 1;   // planned PSPS, forecast closures
+  // Planned or forecast and not yet in effect, e.g. a Caltrans lane-closure
+  // window the crew has not set up yet.
+  SCHEDULED = 1;
+  // In effect now.
   ACTIVE = 2;
-  RESOLVED = 3;    // upstream confirmed over
-  EXPIRED = 4;     // aged out per-source policy; upstream went quiet
+  // Over: an authoritatively active-only feed (CAL FIRE, Cal OES, CHP, Caltrans,
+  // PG&E) stopped listing it after a successful poll, or a closure passed its
+  // planned end plus an overrun grace without a pickup call.
+  RESOLVED = 3;
+  // Aged out: past its own `expires`, or unseen for longer than the source's
+  // grace (`Source.expireAfterSeconds`). Used where a feed going quiet proves
+  // nothing (NWS alerts, FIRIS perimeters, mesh nodes).
+  EXPIRED = 4;
 }
 
+// Geometry is an event's or place's footprint.
 message Geometry {
-  bytes geojson = 1;                // RFC 7946 geometry object, UTF-8
-  BoundingBox bbox = 2;             // always populated at ingest
+  // The RFC 7946 GeoJSON geometry object (Point, LineString, Polygon,
+  // MultiPolygon, ...) as UTF-8 JSON, BASE64-ENCODED in this JSON response
+  // because the field is protobuf `bytes`. Decode with
+  // `JSON.parse(atob(geojson))`. Coordinates are `[longitude, latitude]`.
+  // Wildfire perimeters and evacuation zones can be tens of kilobytes.
+  bytes geojson = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"eyJ0eXBlIjoiUG9pbnQiLCJjb29yZGluYXRlcyI6Wy0xMjAuMzYxMDgsMzguMjQyMzldfQ==\""}];
+  // Bounding box of the geometry, in decimal degrees. Always set when geometry
+  // is present.
+  BoundingBox bbox = 2;
+  // Representative point for markers and list views: the point itself for a
+  // Point, otherwise the middle of the bounding box (which can fall outside an
+  // irregular polygon).
   LatLng centroid = 3;
 }
 
+// BoundingBox is a WGS 84 bounding box in decimal degrees.
 message BoundingBox {
-  double min_lat = 1;
-  double min_lng = 2;
-  double max_lat = 3;
-  double max_lng = 4;
+  // Southern edge, degrees latitude.
+  double min_lat = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "38.23557857"}];
+  // Western edge, degrees longitude (negative in California).
+  double min_lng = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "-120.55658028"}];
+  // Northern edge, degrees latitude.
+  double max_lat = 3 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "38.32345928"}];
+  // Eastern edge, degrees longitude.
+  double max_lng = 4 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "-120.43495978"}];
 }
 
+// LatLng is one WGS 84 point in decimal degrees. Note the order: unlike GeoJSON
+// coordinates, this is latitude first.
 message LatLng {
-  double lat = 1;
-  double lng = 2;
+  // Degrees latitude.
+  double lat = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "38.242394"}];
+  // Degrees longitude (negative in California).
+  double lng = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "-120.361081"}];
 }
 
+// Provenance says which upstream published an event. Show `attribution` next to
+// the data.
 message Provenance {
-  string source_id = 1;
-  string source_name = 2;           // denormalized: "CAL FIRE"
-  string attribution = 3;           // "CAL FIRE / FIRIS"
-  string source_url = 4;
+  // Source registry id; joins to `Source.id` on `/api/v1/sources`.
+  string source_id = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    example: "\"chp\""
+    enum: ["calfire", "firis", "caloes", "nws", "usgs", "chp", "caltrans", "pge", "psps", "meshcore", "burnline", "calfire-burn"]
+  }];
+  // Display name of the publisher, e.g. "CAL FIRE", "NWS Sacramento CA",
+  // "CHP / Caltrans".
+  string source_name = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"CHP / Caltrans\""}];
+  // Attribution text to display, e.g. "CAL FIRE / FIRIS / NIFC". Can be an
+  // empty string.
+  string attribution = 3 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"quickmap.dot.ca.gov\""}];
+  // Link to the publisher's page for this item or feed (for evacuations, the
+  // Genasys or county zone viewer). Empty string when none, which today means
+  // CHP incidents, Caltrans lane closures, FIRIS perimeters, NWS alerts and
+  // burn status. Fall back to `Source.homepageUrl` for `sourceId`.
+  string source_url = 4 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {format: "uri"}];
+  // When the Grid fetched the upstream data behind this revision.
   google.protobuf.Timestamp fetched_at = 5;
 }
 
-// AI-enhancement provenance so clients can badge AI-summarized text
-// (spec §3.1: translate, never assert; originals preserved in description).
+// Enhancement marks AI-generated text so a client can badge it. The model
+// translates and summarizes the upstream text; it never asserts new facts, and
+// the original stays in `description`.
 message Enhancement {
-  string model = 1;                          // "gpt-4o-mini", "claude-haiku-4-5", ...
+  // Model that produced the text, e.g. "gpt-5-mini".
+  string model = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"gpt-5-mini\""}];
+  // When the text was generated.
   google.protobuf.Timestamp enhanced_at = 2;
-  repeated string fields = 3;                // which Event fields were generated
-  // Transparency: the exact model input and output, so a client can show what
-  // was sent and what came back. `request` is the incident-specific user prompt
-  // (the static system prompt is not included); `response` is the raw structured
-  // JSON the model returned. Excluded from the event content hash.
+  // Which Event fields the model wrote, by JSON name: any of `headline`,
+  // `summary`, `severity`.
+  repeated string fields = 3 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "[\"headline\", \"summary\", \"severity\"]"}];
+  // The incident-specific prompt sent to the model (the static system prompt is
+  // not included). Empty string unless the request set `enhancementIo=true`.
+  //
+  // (-- Excluded from the event content hash. --)
   string request = 4;
+  // The raw structured JSON the model returned. Empty string unless the request
+  // set `enhancementIo=true`.
   string response = 5;
 }
 
+// Source is one row of the source registry, with its health.
+//
+// Two kinds of row, told apart by `kind`: a FEED is an upstream the Grid
+// fetches on a schedule, and its id is what events carry in
+// `provenance.sourceId`. A REPORTER is an operator-run monitor that pushes data
+// to the Grid (`alanpi`, `relay`, `burn-line`); its row carries health only and
+// no event names it as its source.
+//
+// To judge health, read `status`. It is rewritten at every attempt, so as a
+// second check against the Grid itself stalling, treat a row as suspect when
+// `lastAttemptAt` is older than `staleAfterSeconds`. Do not compare
+// `lastAttemptAt` with `pollIntervalSeconds`: that misfires for reporters.
+//
+// Not every source id that appears in the API has a row. The live condition
+// layers fetch on request, outside the scheduler that writes this registry, so
+// `google` (the `road_segment` layer's travel times) has no row, and the
+// `caltrans` and `nws` rows describe the scheduled lane-closure and alert
+// polls, not the live `chain_control`, `message_sign`, `road_segment` and
+// `fire_weather` fetches. For those layers read the map layer's
+// `metadata.sourceStatus` or the summary domain's `status`.
 message Source {
-  string id = 1;
-  string name = 2;
+  // Registry id; `Provenance.sourceId` on events joins to it (FEED rows only).
+  string id = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"chp\""}];
+  // Display name, e.g. "CHP (traffic incidents)".
+  string name = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"CHP (traffic incidents)\""}];
+  // Attribution text to display.
   string attribution = 3;
-  string homepage_url = 4;
-  uint32 poll_interval_seconds = 5;
-  uint32 stale_after_seconds = 10;   // per-source tunable; default 3x poll interval
-  uint32 expire_after_seconds = 11;  // per-source tunable; missing-from-feed → EXPIRED
+  // Public page for the upstream. Use it as the fallback link for an event
+  // whose `canonicalUrl` and `provenance.sourceUrl` are empty (join on
+  // `provenance.sourceId`). Empty string for REPORTER rows, and for a feed with
+  // no public page.
+  string homepage_url = 4 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {format: "uri"}];
+  // Whether this row is a scheduled feed or a push reporter.
+  SourceKind kind = 12 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"FEED\""}];
+  // How often, in seconds, the Grid re-evaluates this row. For a FEED that is
+  // its poll interval. For a REPORTER it is the cadence of the Grid's check on
+  // the reporter, not how often the reporter reports.
+  uint32 poll_interval_seconds = 5 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "300"}];
+  // For a FEED: seconds after the last success during which a failing source
+  // still reads STALE rather than UNAVAILABLE (default three poll intervals).
+  // For a REPORTER: how long it may go without reporting before it stops
+  // reading OK (it then reads STALE for this long again, then UNAVAILABLE).
+  uint32 stale_after_seconds = 10 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "900"}];
+  // For sources whose silence proves nothing (NWS, FIRIS, MeshCore): how long,
+  // in seconds, an event may go unseen before it is EXPIRED. 0 means the source
+  // never auto-expires; its events are RESOLVED when a good poll stops listing
+  // them.
+  uint32 expire_after_seconds = 11 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "0"}];
+  // When an attempt last succeeded. `null` if never. For a REPORTER this is the
+  // last check that found it reporting on time, not the time of its last
+  // report (`lastError` names that once it goes quiet).
   google.protobuf.Timestamp last_success_at = 6;
+  // When the row was last evaluated, successfully or not. `null` if never.
+  // `status` is rewritten at each attempt, so if this is older than
+  // `staleAfterSeconds`, the Grid itself has stopped checking: treat the
+  // source as STALE whatever `status` says.
   google.protobuf.Timestamp last_attempt_at = 7;
+  // The last attempt's error text. Empty string after a success.
   string last_error = 8;
-  SourceStatus status = 9;          // shipped semantics, now per-source not per-layer
+  // Health of this source. This is the field to judge it by; see the message
+  // description.
+  SourceStatus status = 9 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"OK\""}];
 }
 
+// SourceKind says what a source registry row describes.
+enum SourceKind {
+  // Never returned.
+  SOURCE_KIND_UNSPECIFIED = 0;
+  // An upstream feed the Grid fetches on a schedule (CAL FIRE, NWS, PG&E, ...).
+  // Events name it in `provenance.sourceId`.
+  FEED = 1;
+  // An operator-run monitor that pushes to the Grid's ingest endpoint. Health
+  // only: no event carries its id, and `homepageUrl` is empty.
+  REPORTER = 2;
+}
+
+// SourceStatus is a source's health. The same three values appear as strings in
+// the summary's domains and sidecar, on `/api/v1/cameras`, and on the map
+// layers' `metadata.sourceStatus`.
 enum SourceStatus {
+  // Not polled yet since the registry row was created. Treat as UNAVAILABLE.
   SOURCE_STATUS_UNSPECIFIED = 0;
+  // The last attempt succeeded.
   OK = 1;
+  // The last attempt failed, but the last success is within
+  // `staleAfterSeconds`; what is served is last-good data.
   STALE = 2;
+  // Failing beyond `staleAfterSeconds`, or never succeeded. Nothing current can
+  // be vouched for: render "unknown", never "none".
   UNAVAILABLE = 3;
 }
 
+// Place is a named geography that events attach to.
 message Place {
-  string id = 1;        // "area:ebbetts-pass" — existing area ids preserved under a kind
-  PlaceKind kind = 2;
-  string name = 3;
-  string slug = 4;
+  // Namespaced id, `{kind}:{slug}`.
+  string id = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"town:arnold\""}];
+  // What kind of place this is.
+  PlaceKind kind = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"TOWN\""}];
+  // Display name.
+  string name = 3 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"Arnold, CA\""}];
+  // URL-safe short name, unique across all kinds. Use it in paths and the
+  // `place` parameter.
+  string slug = 4 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"arnold\""}];
+  // The place's shape: a Polygon for counties and areas, a LineString for
+  // corridors, a Point for towns.
   Geometry geometry = 5;
-  string parent_id = 6;
+  // Id of the containing place (a town's county). Empty string when none.
+  string parent_id = 6 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"county:calaveras-county\""}];
 }
 
+// PlaceKind is the type of a place.
 enum PlaceKind {
+  // Never returned.
   PLACE_KIND_UNSPECIFIED = 0;
-  AREA = 1;             // existing configured areas; org footprints live here too
+  // A configured coverage area such as `ebbetts-pass` (the Highway 4 corridor
+  // region). Area places own the scanner feeds and the fire-weather zones.
+  AREA = 1;
+  // A county, from Census polygons.
   COUNTY = 2;
+  // A town, stored as a Point. `places:resolve` matches a town within 3 km of
+  // its point. Events attach to a town only by overlapping polygons (and
+  // wildfires by proximity), never by that radius.
   TOWN = 3;
+  // Reserved for evacuation zones as places; none exist today.
   EVAC_ZONE = 4;
+  // A highway segment, stored as a LineString. Point events within about 1.5 km
+  // of the line attach to it.
   CORRIDOR = 5;
+  // Reserved for individual sites; none exist today.
   SITE = 6;
 }
 
 // Per-kind detail blocks. Unit-in-name convention (depth_km) carries over.
 
+// WildfireDetail is the WILDFIRE detail block.
 message WildfireDetail {
-  double acres = 1;
-  int32 containment = 2;            // percent contained, 0-100
+  // Burned area in acres: CAL FIRE's figure, or the FIRIS perimeter's area when
+  // only a perimeter is known. Fractional.
+  double acres = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "6801.39"}];
+  // Percent contained, 0-100. 0 also when unknown (perimeter-only fires).
+  int32 containment = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "35"}];
+  // County named by CAL FIRE. Empty string for perimeter-only fires.
   string county = 3;
+  // Cause as reported. Empty string when unknown.
   string cause = 4;
-  bool has_perimeter = 5;           // true when geometry is a FIRIS perimeter polygon
+  // True when `geometry` is a FIRIS perimeter polygon; false when it is CAL
+  // FIRE's single origin point.
+  bool has_perimeter = 5;
 }
 
+// EvacuationDetail is the EVACUATION detail block, one Cal OES / Genasys zone.
 message EvacuationDetail {
-  string zone_id = 1;
-  string level = 2;                 // ORDER | WARNING | ADVISORY | SHELTER_IN_PLACE
+  // Genasys zone id. `provenance.sourceUrl` links the zone's Genasys page.
+  string zone_id = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"US-CA-XCA-CCU-043\""}];
+  // Coded level. An unrecognized upstream status is coded WARNING, never
+  // dropped. ORDER and WARNING and SHELTER_IN_PLACE put the place summary in
+  // ACTIVE mode; ADVISORY puts it in WATCH.
+  string level = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    example: "\"ORDER\""
+    enum: ["ORDER", "WARNING", "ADVISORY", "SHELTER_IN_PLACE"]
+  }];
+  // Upstream event type, often an empty string.
   string event_type = 3;
-  string county = 4;
+  // County as Cal OES spells it (uppercase).
+  string county = 4 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"CALAVERAS\""}];
 }
 
-// Detail messages carry only KIND-SPECIFIC fields not already in the Event
-// envelope. Fields that duplicate an envelope field are NOT repeated here:
-//   - the NWS event name is the envelope `category`
-//   - the sending office is `provenance.source_name`
+// WeatherAlertDetail is the WEATHER_ALERT detail block, for one NWS product.
+//
+// It carries only fields the envelope lacks: the NWS event name is the
+// envelope `category`, and the issuing office is `provenance.sourceName`.
 message WeatherAlertDetail {
   // Removed fields keep their original tag numbers reserved so persisted blobs
   // decode correctly and the numbers are never reused: 1 = event (now the
   // envelope `category`), 6 = sender_name (now `provenance.source_name`).
   reserved 1, 6;
-  string nws_severity = 2;          // raw NWS vocabulary (Extreme..Minor), distinct from unified severity
-  string certainty = 3;
-  string urgency = 4;
+  // NWS's own severity word, distinct from the unified `severity` it maps to.
+  string nws_severity = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    example: "\"Severe\""
+    enum: ["Extreme", "Severe", "Moderate", "Minor", "Unknown"]
+  }];
+  // NWS certainty.
+  string certainty = 3 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    example: "\"Likely\""
+    enum: ["Observed", "Likely", "Possible", "Unlikely", "Unknown"]
+  }];
+  // NWS urgency.
+  string urgency = 4 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    example: "\"Expected\""
+    enum: ["Immediate", "Expected", "Future", "Past", "Unknown"]
+  }];
+  // NWS recommended actions, verbatim, with newlines. Empty string when none.
   string instruction = 5;
-  string area_desc = 7;             // NWS free-text area (no envelope equivalent for zone alerts)
-  repeated string zones = 8;        // NWS forecast zones, e.g. "CAZ064"
+  // NWS free-text list of the affected zones.
+  string area_desc = 7;
+  // NWS forecast zone codes the alert covers, e.g. "CAZ138".
+  repeated string zones = 8 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "[\"CAZ137\", \"CAZ138\", \"CAZ139\"]"}];
 }
 
-// fire_weather is condition-backed (a live projection, not an event); this
-// message exists for the spec §3 oneof shape.
+// FireWeatherDetail is never populated on an event. Fire weather is a condition,
+// served by `GET /api/v1/conditions` (`fireWeather`) and the `fire_weather` map
+// layer.
+//
+// (-- This message exists for the spec §3 oneof shape. --)
 message FireWeatherDetail {
-  string state = 1;                 // normal | elevated | red-flag
-  string source_event = 2;          // NWS product driving the state
+  // `normal`, `elevated` (Fire Weather Watch) or `red-flag` (Red Flag Warning).
+  // Lowercase.
+  string state = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {enum: ["normal", "elevated", "red-flag"]}];
+  // NWS product driving the state.
+  string source_event = 2;
+  // NWS fire-weather zones it covers.
   repeated string zones = 3;
 }
 
+// EarthquakeDetail is the EARTHQUAKE detail block. The USGS event page is the
+// envelope `canonicalUrl`.
 message EarthquakeDetail {
   reserved 4;                       // was url (now the envelope `canonical_url`)
-  double magnitude = 1;
-  double depth_km = 2;
-  int32 felt = 3;                   // USGS DYFI felt-report count
+  // Magnitude.
+  double magnitude = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "3.1"}];
+  // Hypocentre depth in kilometres.
+  double depth_km = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "7.4"}];
+  // Number of USGS "Did You Feel It?" reports. 0 when none.
+  int32 felt = 3 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "12"}];
 }
 
-// Kind-specific only. The incident type is the envelope `category`, the human
-// location is `area_label`, and the short line is the `headline` — none are
-// repeated here.
+// RoadIncidentDetail is the ROAD_INCIDENT detail block, for a CHP incident or a
+// Caltrans lane-closure window. The incident type is the envelope `category`,
+// the location is `areaLabel`, and the short line is `headline`.
 message RoadIncidentDetail {
   // Removed fields keep their original tags reserved: 2 = incident_type (now the
   // envelope `category`), 3 = location_description (now `area_label`),
   // 6 = condensed_summary (now the `headline`).
   reserved 2, 3, 6;
-  string log_number = 1;            // CHP log number; for a Caltrans closure, its closure id
-  string impact = 4;                // AI-assessed: none | light | moderate | severe
-  string duration = 5;              // AI-assessed: unknown | < 1 hour | several hours | ongoing
-  map<string, string> metadata = 7; // structured extras from AI analysis (internal keys stripped)
-  LaneClosureDetail closure = 8;    // Caltrans planned closures only (source `caltrans`)
+  // CHP log number for an incident; for a Caltrans closure, its closure id.
+  string log_number = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"261106ST0341\""}];
+  // AI-assessed traffic impact (CHP incidents only); it drives `severity`.
+  // Empty string for Caltrans closures and when not yet assessed.
+  string impact = 4 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    example: "\"light\""
+    enum: ["", "none", "light", "moderate", "severe"]
+  }];
+  // AI-estimated duration (CHP incidents only). Empty string when not assessed.
+  string duration = 5 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    example: "\"< 1 hour\""
+    enum: ["", "unknown", "< 1 hour", "several hours", "ongoing"]
+  }];
+  // Free-form extras from the AI analysis, string to string (keys such as
+  // `incident_type`, `lanes_blocked`, `injuries`). Keys vary; treat as display
+  // only. Empty object when none.
+  map<string, string> metadata = 7 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "{\"lanes_blocked\": \"none reported\", \"injuries\": \"unknown\"}"}];
+  // The Caltrans closure window, for source `caltrans` only; `null` for CHP
+  // incidents.
+  LaneClosureDetail closure = 8;
 }
 
-// One Caltrans planned lane-closure WINDOW, read from the CWWP2 data portal.
-// Every field is upstream data; none of it is AI-generated.
+// LaneClosureDetail is one Caltrans planned lane-closure WINDOW from the CWWP2
+// data portal. Every field is Caltrans data; none of it is AI-generated.
 //
-// The unit is the window because Caltrans has no other one. A multi-day job is
-// one row per day, and neither closure_id nor log_number identifies a job:
-// closure_id is a route-level project id, and one log number can cover
-// windows at different places on different days, or be re-issued daily at
-// the same place. window_id is the only unique key.
-//
-// The planned window is an estimate that crews overrun, so planned_end is NOT
-// mapped onto the envelope `expires` (the same rule as PG&E's restoration
-// estimate). A set-up closure stays ACTIVE until the crew radios it picked up,
-// or until planned_end plus a configured overrun grace (12h by default) passes
-// with no pickup call, when it is presumed picked up and RESOLVED. Indefinite
-// windows have no such bound.
+// A multi-day job is one window (one event) per day, and neither `closureId`
+// nor `logNumber` identifies a job; `windowId` is the only unique key. A window
+// is SCHEDULED until the crew radios it set up (`setUpAt`), then ACTIVE until
+// they radio it picked up, or until `plannedEnd` plus a 12-hour overrun grace
+// passes with no pickup call, when it is presumed over and RESOLVED. The
+// planned end is an estimate crews overrun, so it is never mapped onto the
+// envelope `expires`.
 message LaneClosureDetail {
-  string window_id = 1;                  // CWWP2 index: "C4QB-0004-2026-10-02-07:01:00"
-  int32 district = 2;                    // Caltrans district whose feed listed it
-  string closure_id = 3;                 // route-level project id ("C4QB"); not unique
-  string log_number = 4;                 // per-project request number ("4"); not unique
-  string route = 5;                      // "SR-4", "US-50"
-  string direction = 6;                  // travel flow, verbatim: "East / West", "North"
-  string facility = 7;                   // "Conventional Hwy" | "On Ramp" | "Off Ramp" | ...
-  string closure_type = 8;               // "Full" | "Lane" | "One-Way Traffic" | "Alternating Lanes" | ...
-  string work_type = 9;                  // "Drainage Work", "Tree Work", ...
-  string lanes_closed = 10;              // verbatim: "1, RShoulder", "All", "Rt Turn Ln"
-  int32 total_lanes = 11;                // lanes at the site; 0 when not reported
-  int32 estimated_delay_minutes = 12;    // 0 when none or not reported
-  string closure_duration = 13;          // "Standard" | "Long Term" | "Intermittent"
+  // CWWP2 window id, unique per window.
+  string window_id = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"C26EA-0001-2026-08-24-07:01:00\""}];
+  // Caltrans district whose feed listed it (3 or 10 here).
+  int32 district = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "10"}];
+  // Route-level project id. Not unique.
+  string closure_id = 3 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"C26EA\""}];
+  // Per-project request number. Not unique.
+  string log_number = 4 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"1\""}];
+  // Route, e.g. "SR-4", "US-50".
+  string route = 5 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"SR-26\""}];
+  // Travel direction, verbatim, e.g. "East / West", "North".
+  string direction = 6 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"East / West\""}];
+  // Facility, verbatim: "Conventional Hwy", "On Ramp", "Off Ramp", ...
+  string facility = 7 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"Conventional Hwy\""}];
+  // Closure type, verbatim: "Full", "Lane", "One-Way Traffic", "Alternating
+  // Lanes", "Moving", ...
+  string closure_type = 8 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"Full\""}];
+  // Work being done, e.g. "Drainage Work", "Tree Work".
+  string work_type = 9 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"Roadway Excavation\""}];
+  // Lanes closed, verbatim: "1, RShoulder", "All", "Rt Turn Ln".
+  string lanes_closed = 10 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"All\""}];
+  // Number of lanes at the site. 0 when not reported.
+  int32 total_lanes = 11 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "2"}];
+  // Caltrans's delay estimate in minutes. 0 when none or not reported.
+  int32 estimated_delay_minutes = 12;
+  // How the closure runs.
+  string closure_duration = 13 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    example: "\"Long Term\""
+    enum: ["Standard", "Long Term", "Intermittent"]
+  }];
+  // Planned start of the window.
   google.protobuf.Timestamp planned_start = 14;
-  google.protobuf.Timestamp planned_end = 15;  // absent when end_indefinite
+  // Planned end of the window. `null` when `endIndefinite`.
+  google.protobuf.Timestamp planned_end = 15;
+  // True when the window has no planned end.
   bool end_indefinite = 16;
-  google.protobuf.Timestamp set_up_at = 17;    // the 10-97 call: crew on scene, closure in place
-  string begin_location = 18;            // "Avery"
-  string end_location = 19;              // equals begin_location for a closure at one spot
+  // When the crew radioed the closure set up (the 10-97 call). `null` while it
+  // is SCHEDULED.
+  google.protobuf.Timestamp set_up_at = 17;
+  // Where the closure starts, verbatim, e.g. "Avery".
+  string begin_location = 18 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"Route 49 Mokelumne Hill\""}];
+  // Where it ends; equals `beginLocation` for a closure at one spot.
+  string end_location = 19 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"Main Street (Left)\""}];
+  // Start point.
   LatLng begin = 20;
+  // End point.
   LatLng end = 21;
 }
 
-// MeshCore mesh-node presence (Layer_MESH). One event per node, keyed by
-// its Ed25519 public key. Stable identity + advertised location live here (and
-// mint a revision on change); the per-packet signal metrics live in the nested
-// MeshTelemetry, which the store's ContentHash zeroes — so the firehose of
-// adverts refreshes liveness (last_seen_at) without ever writing a revision.
+// MeshDetail is the MESH detail block, for one MeshCore radio node, keyed by its
+// Ed25519 public key.
+//
+// Identity, location and reachability changes write a revision. The volatile
+// signal readings in `telemetry` change constantly without one.
+//
+// (-- Stable identity + advertised location live here (and mint a revision on
+// change); the per-packet signal metrics live in the nested MeshTelemetry,
+// which the store's ContentHash zeroes, so the firehose of adverts refreshes
+// liveness (last_seen_at) without ever writing a revision. --)
 message MeshDetail {
-  string public_key = 1;   // full Ed25519 public key, hex (also the Event.id native part)
-  string node_type = 2;    // companion | repeater | room_server | sensor
-  string name = 3;         // advertised node name
+  // Full Ed25519 public key, 64 lowercase hex characters. It is also the native
+  // half of the event id (`meshcore:{publicKey}`) and the `node` parameter of
+  // `GET /api/v1/mesh/telemetry`.
+  string public_key = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    example: "\"a30081749739257489c372a0183f5f7cfd1705eb1dc4441ae11dd30533927c71\""
+    pattern: "^[0-9a-f]{64}$"
+  }];
+  // Node role as advertised. Repeaters and room servers relay traffic;
+  // companions and sensors do not.
+  string node_type = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    example: "\"repeater\""
+    enum: ["companion", "repeater", "room_server", "sensor"]
+  }];
+  // Name the node advertises. Free text and can include emoji.
+  string name = 3 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"SIERRA Hathaway Pines\""}];
 
-  MeshTelemetry telemetry = 4;   // VOLATILE — excluded from the content hash
+  // Signal readings and activity clocks. These change without a new revision.
+  //
+  // (-- VOLATILE — excluded from the content hash. --)
+  MeshTelemetry telemetry = 4;
 
-  // Whether an operator-run monitor could reach this node's admin interface.
-  // HASHED, unlike everything else an operator reports: a repeater going
+  // Whether an operator-run monitor can reach this node's admin interface.
+  // MESH_REACHABILITY_UNSPECIFIED for the many nodes no monitor watches. A
+  // change writes a revision, so the history answers "how often is this
+  // repeater down?".
+  //
+  // (-- HASHED, unlike everything else an operator reports: a repeater going
   // unreachable is a real lifecycle change worth a revision and a history entry
   // ("how often is Lilac Park down?"), which is exactly what the telemetry block
   // below can never answer. Derived with hysteresis in internal/ingest (never the
   // raw per-poll `online` bool, which flaps on a marginal node and would mint a
   // revision each way). UNSPECIFIED for a node no monitor watches — the MQTT
-  // advert firehose cannot express "I tried and could not reach it".
-  MeshReachability reachability = 5;
+  // advert firehose cannot express "I tried and could not reach it". --)
+  MeshReachability reachability = 5 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"REACHABLE\""}];
 }
 
-// MeshReachability is an operator monitor's verdict on a node's admin interface.
+// MeshReachability is an operator monitor's verdict on a node's admin interface,
+// smoothed so a marginal link does not flap.
 enum MeshReachability {
-  MESH_REACHABILITY_UNSPECIFIED = 0; // no monitor watches this node
-  REACHABLE = 1;                     // a monitor reached it within the window
-  UNREACHABLE = 2;                   // a monitor has been failing past the window
+  // No monitor watches this node (most nodes). Says nothing about liveness.
+  MESH_REACHABILITY_UNSPECIFIED = 0;
+  // A monitor reached it recently.
+  REACHABLE = 1;
+  // A monitor has been failing to reach it for longer than its window.
+  UNREACHABLE = 2;
 }
 
-// MeshTelemetry is the volatile, per-advert signal state. It is deliberately
-// grouped into one sub-message so store.ContentHash can zero the whole field:
-// none of it mints a revision.
+// MeshTelemetry is a mesh node's volatile signal state and activity clocks. None
+// of it writes a revision, so history snapshots do not reflect it.
+//
+// For "is this node up right now", use `lastRelayedAt` (repeaters relay
+// constantly but advertise only every day or two), then `lastHeardAt`; never
+// the event's `observedAt`.
+//
+// (-- It is deliberately grouped into one sub-message so store.ContentHash can
+// zero the whole field: none of it mints a revision. --)
 message MeshTelemetry {
   // Relay path (`path` = 4, `path_nodes` = 7) moved OUT of the event: a path is a
   // property of a single reception, not of a node, and one frozen sample on the
@@ -314,633 +940,1342 @@ message MeshTelemetry {
   reserved 4, 7;
   reserved "path", "path_nodes";
 
-  // Wrapper types, not bare scalars, for the reason the admin gauges below are:
-  // under the gateway's EmitUnpopulated marshaler an unset scalar is published
-  // as 0, and here that 0 is a claim. A node an operator's monitor reports but
-  // no MQTT bridge has ever heard was going out as `snr: 0, rssi: 0,
+  // Signal-to-noise ratio of the last advert, in dB, as a listening gateway
+  // reported it. Nullable: `null` unless an MQTT bridge heard the advert (then
+  // `lastAdvertAt` is set too).
+  //
+  // (-- Wrapper types, not bare scalars, for the reason the admin gauges below
+  // are: under the gateway's EmitUnpopulated marshaler an unset scalar is
+  // published as 0, and here that 0 is a claim. A node an operator's monitor
+  // reports but no MQTT bridge has ever heard was going out as `snr: 0, rssi: 0,
   // hopCount: 0` — a reading of 0 dB, heard DIRECT, for a node the mesh has not
   // heard at all (observed live 2026-09-15 on three of nine monitored
   // repeaters). hop_count makes it sharpest: 0 hops is a real and meaningful
-  // reading, so it cannot double as "unknown".
-  //
-  // Absent now means absent: these are null unless an MQTT bridge reported the
-  // advert they came from, which `last_advert_at` also marks.
-  google.protobuf.DoubleValue snr = 1;         // last SNR (dB), gateway-reported
-  google.protobuf.Int32Value rssi = 2;         // last RSSI (dBm), gateway-reported
-  google.protobuf.UInt32Value hop_count = 3;   // path length of the last-heard advert
-  repeated string gateways = 5;                // origin ids of the gateways/brokers that heard it
-  google.protobuf.Timestamp last_advert_at = 6; // sender-stamped time of the last advert
+  // reading, so it cannot double as "unknown". --)
+  google.protobuf.DoubleValue snr = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "11.8"}];
+  // Received signal strength of the last advert, in dBm, gateway-reported.
+  // Nullable, like `snr`.
+  google.protobuf.Int32Value rssi = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "-39"}];
+  // Hops the last-heard advert travelled; 0 means heard directly. Nullable,
+  // like `snr`: `null` is unknown, not zero hops.
+  google.protobuf.UInt32Value hop_count = 3 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "4"}];
+  // Ids of the gateways (observer node keys, uppercase hex) that heard the node.
+  repeated string gateways = 5;
+  // Time stamped by the node itself on its last advert (the node's clock, which
+  // can be wrong). `null` if no bridge has heard an advert.
+  google.protobuf.Timestamp last_advert_at = 6;
 
-  // The last sample pushed by an operator-run monitor that logs into the node's
-  // admin interface (internal/pushingest). Nested HERE, inside the block
-  // ContentHash zeroes, because every field of it is a counter or a gauge that
-  // moves on every report: hashed, a 5-minute reporting cadence would mint ~288
-  // revisions per node per day and say nothing.
+  // Latest reading from an operator-run monitor that logs into the node's admin
+  // interface. `null` for nodes no monitor watches. The full series is at
+  // `GET /api/v1/mesh/telemetry?node={publicKey}`.
+  //
+  // (-- Nested HERE, inside the block ContentHash zeroes, because every field of
+  // it is a counter or a gauge that moves on every report: hashed, a 5-minute
+  // reporting cadence would mint ~288 revisions per node per day and say
+  // nothing. --)
   MeshAdminTelemetry admin = 8;
 
-  // When WE last received one of this node's own adverts (our clock, not the
-  // node's: compare last_advert_at). This is the answer to "when did the node
-  // last speak". The event's observed_at is NOT: it moves only when something
-  // hashed changes (identity, position, reachability), so a node advertising
-  // the same thing every day kept an observed_at days old.
+  // When the Grid last received one of this node's own adverts, by our clock
+  // (compare `lastAdvertAt`, the node's clock). Answers "when did the node last
+  // speak". `null` when no advert has been received since activity tracking
+  // began. Filled at read time on current events only; history revisions do not
+  // carry it.
   //
-  // Read-time only. Filled from the store's mesh_activity table when the event
-  // is served and never written into the event blob, so it mints no revision
-  // and costs no blob rewrite. Null when no advert has been received since
-  // activity tracking began.
+  // (-- The event's observed_at is NOT this: it moves only when something
+  // hashed changes (identity, position, reachability), so a node advertising
+  // the same thing every day kept an observed_at days old. Read-time only:
+  // filled from the store's mesh_activity table when the event is served and
+  // never written into the event blob, so it mints no revision and costs no
+  // blob rewrite. --)
   google.protobuf.Timestamp last_heard_at = 9;
 
-  // When we last received a packet that this node had RELAYED: its key's hash
-  // appeared as a hop in the path of a FLOOD-routed packet of any type
-  // (messages, acks, path returns, adverts). A backbone repeater adverts every
-  // day or two but relays constantly, so this, not last_heard_at, is what says
-  // a repeater is up right now.
+  // When the Grid last received a packet this node RELAYED, by our clock. A
+  // repeater advertises every day or two but relays constantly, so this is the
+  // clock that says it is up right now. `null` when no relay has been
+  // attributed. Read-time only, like `lastHeardAt`.
   //
-  // Two limits, both deliberate. A hop is credited only when exactly one
-  // relay-capable node fits it: a 2- or 3-byte hash by unique prefix, a 1-byte
-  // hash only as the one known neighbour of the next hop along (the observer
-  // heard the last hop directly) that carries the byte. A node seen only on
-  // 1-byte paths beside nodes it has never been linked to gets no relay time.
-  // And direct-routed packets never count: their path is the route still to be
-  // travelled, not the one travelled, so a hop there may never have heard the
-  // packet. A relay also keeps an already-known node PRESENT (ACTIVE) for
-  // grid.meshcore.relayPresence after it, the way an advert does; it never
-  // creates a node or changes its identity or position. Read-time only, like
-  // last_heard_at; null when no relay has been attributed.
+  // A hop is credited only when exactly one relay-capable node fits it, so a
+  // node whose traffic is ambiguous gets no relay time (it reads older than on
+  // other mesh tools). Flood-routed packets of any type credit every hop; a
+  // direct-routed packet's remaining route credits its 2- and 3-byte hops only.
+  // A relay also keeps a known node ACTIVE for a while after it, the way an
+  // advert does; it never creates a node or changes its name or position.
+  //
+  // (-- Flood hops: a 2- or 3-byte hash by unique prefix, a 1-byte hash only as
+  // the one known neighbour of the next hop along (the observer heard the last
+  // hop directly) that carries the byte. Direct routes: prefix only, never a
+  // 1-byte hop, never taught to the neighbour graph (FrameHeader.RouteHops).
+  // Presence window: grid.meshcore.relayPresence. See "Two activity clocks" and
+  // "Relay presence" in internal/ingest/CLAUDE.md. --)
   google.protobuf.Timestamp last_relayed_at = 10;
 }
 
-// MeshAdminTelemetry is one sample read off a node's own admin interface by an
-// operator-run monitor and pushed to POST /api/v1/ingest/mesh.repeater. It is
-// the node's self-reported view, which is why it duplicates rather than
-// overwrites the gateway-reported snr/rssi above: those are what a distant
-// listener heard, these are what the node itself measured.
+// MeshAdminTelemetry is one reading taken from a node's own admin interface by an
+// operator-run monitor. It is the node's self-reported view, which is why it
+// sits beside rather than replaces the gateway-reported `snr`/`rssi`: those are
+// what a distant listener heard, these are what the node measured.
 //
-// Gauges are wrapper types, not bare scalars, so "the monitor could not read
-// this" (null) stays distinguishable from a real zero — a 0% battery and an
-// unknown battery must never render alike. Same reasoning as the place summary's
-// activeEvacuations. Counters are lifetime-since-boot and plain: a node that has
-// sent nothing genuinely has sent zero.
+// Gauges are nullable: `null` means the monitor could not read it, which is not
+// the same as 0 (a 0% battery and an unknown battery must not render alike).
+// Counters are plain, count since the node's last boot (they reset at a
+// reboot), and are 64-bit, so they arrive as JSON STRINGS.
 message MeshAdminTelemetry {
-  string reporter_id = 1;                        // which monitor reported it (config id)
-  google.protobuf.Timestamp reported_at = 2;     // when the monitor generated the report
-  google.protobuf.Timestamp last_success_at = 3; // monitor's last successful read of THIS node
-  google.protobuf.Timestamp last_attempt_at = 4; // monitor's last attempt, successful or not
+  // Which monitor reported it (its registry id, also a row on `/api/v1/sources`).
+  string reporter_id = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"alanpi\""}];
+  // When the monitor produced the report. In the archive this is the sample's
+  // own time.
+  google.protobuf.Timestamp reported_at = 2;
+  // The monitor's last successful read of this node. Can be `null` (always
+  // `null` on archived samples).
+  google.protobuf.Timestamp last_success_at = 3;
+  // The monitor's last attempt to read this node, successful or not. Can be
+  // `null` (always `null` on archived samples).
+  google.protobuf.Timestamp last_attempt_at = 4;
 
-  google.protobuf.DoubleValue battery_volts = 10;
-  google.protobuf.DoubleValue battery_percent = 11;
-  // "measured" | "estimated" — an estimate derived from voltage is not a reading,
-  // and a UI that shows 97% should be able to say which it is.
-  string battery_percent_source = 12;
-  google.protobuf.DoubleValue temperature_c = 13;
+  // Battery voltage in volts. Nullable.
+  google.protobuf.DoubleValue battery_volts = 10 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "3.97"}];
+  // Battery charge in percent, 0-100. Nullable. See `batteryPercentSource`.
+  google.protobuf.DoubleValue battery_percent = 11 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "71.1"}];
+  // Whether `batteryPercent` was measured by the node or estimated from
+  // voltage. Empty string when no percentage is reported.
+  string battery_percent_source = 12 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    example: "\"estimated\""
+    enum: ["", "measured", "estimated"]
+  }];
+  // Temperature in degrees Celsius. Nullable.
+  google.protobuf.DoubleValue temperature_c = 13 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "13.5"}];
+  // Relative humidity in percent. Nullable (most nodes have no sensor).
   google.protobuf.DoubleValue humidity = 14;
+  // Barometric pressure in hPa. Nullable (most nodes have no sensor).
   google.protobuf.DoubleValue pressure = 15;
-  google.protobuf.Int32Value noise_floor_dbm = 16;
-  google.protobuf.DoubleValue last_snr_db = 17;   // node-measured, cf. telemetry.snr
-  google.protobuf.Int32Value last_rssi_dbm = 18;  // node-measured, cf. telemetry.rssi
-  google.protobuf.Int32Value tx_queue_len = 19;
+  // Radio noise floor in dBm. Nullable.
+  google.protobuf.Int32Value noise_floor_dbm = 16 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "-105"}];
+  // SNR of the last packet the node itself received, in dB. Nullable.
+  google.protobuf.DoubleValue last_snr_db = 17 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "4.75"}];
+  // RSSI of the last packet the node itself received, in dBm. Nullable.
+  google.protobuf.Int32Value last_rssi_dbm = 18 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "-98"}];
+  // Packets waiting in the transmit queue. Nullable.
+  google.protobuf.Int32Value tx_queue_len = 19 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "0"}];
 
-  int64 uptime_seconds = 30;
-  int64 airtime_ms = 31;
-  int64 rx_airtime_ms = 32;
-  int64 packets_sent = 33;      // nb_sent
-  int64 packets_received = 34;  // nb_recv
+  // Seconds since the node booted. A decrease between samples is a reboot.
+  int64 uptime_seconds = 30 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"98350\""}];
+  // Milliseconds spent transmitting since boot.
+  int64 airtime_ms = 31 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"3095\""}];
+  // Milliseconds spent receiving since boot.
+  int64 rx_airtime_ms = 32 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"13571\""}];
+  // Packets sent since boot.
+  int64 packets_sent = 33 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"9175\""}];
+  // Packets received since boot.
+  int64 packets_received = 34 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"41144\""}];
+  // Flood-routed packets sent since boot.
   int64 sent_flood = 35;
+  // Direct-routed packets sent since boot.
   int64 sent_direct = 36;
+  // Flood-routed packets received since boot.
   int64 recv_flood = 37;
+  // Direct-routed packets received since boot.
   int64 recv_direct = 38;
+  // Duplicate direct-routed packets dropped since boot.
   int64 direct_dups = 39;
+  // Duplicate flood-routed packets dropped since boot.
   int64 flood_dups = 40;
-  int64 full_events = 41;       // full_evts — queue-overflow events
+  // Transmit-queue overflow events since boot.
+  int64 full_events = 41;
+  // Receive errors (undecodable packets) since boot.
   int64 recv_errors = 42;
 }
 
-// PG&E electric outages and Public Safety Power Shutoffs (Layer_POWER). One
-// message covers both, because they are the same thing to a reader — the power
-// is out, or is about to be — and they differ only in which block is populated:
-// an unplanned/planned outage carries outage_id + crew_status, a PSPS carries
-// the event/stage/de-energization window. The envelope `category`
-// (unplanned|planned|psps) says which.
+// PowerDetail is the POWER detail block, for a PG&E outage or a Public Safety
+// Power Shutoff (PSPS). The envelope `category` says which: `unplanned` and
+// `planned` outages fill the outage fields; `psps` fills the PSPS fields. The
+// other group is zero, empty or `null`.
+//
+// Every PG&E time here is an estimate PG&E often overruns, so none of them is
+// mapped onto the envelope `expires` or drives the lifecycle.
 message PowerDetail {
   // --- outage (source `pge`) ---
-  string outage_id = 1;             // PG&E OUTAGE_ID, the native id half of "pge:{id}"
-  string cause = 2;                 // raw PG&E code: "PLNND SHUTDOWN", "TREE CONTACT", "FIRE"
-  int32 customers_affected = 3;     // EST_CUSTOMERS (statewide median is 1 — see the severity mapping)
-  string crew_status = 4;           // "Awaiting T-Man" | "Crew On Site" | "No Access" | …
+  // PG&E outage id, the native half of `pge:{id}`. Empty string for PSPS.
+  string outage_id = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"383765\""}];
+  // Raw PG&E cause code, e.g. "PLNND SHUTDOWN", "TREE CONTACT", "EMERG REPAIRS".
+  // Empty string for PSPS.
+  string cause = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"EMERG REPAIRS\""}];
+  // Estimated customers without power. 0 means PG&E gave no count. Statewide,
+  // the median outage affects one customer.
+  int32 customers_affected = 3 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "2082"}];
+  // PG&E crew status, verbatim: "Awaiting T-Man", "T-Man On Site", "Crew On
+  // Site", "No Access", ... Empty string for PSPS.
+  string crew_status = 4 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"T-Man On Site\""}];
 
-  // Estimated time of restoration. This is an ESTIMATE and is routinely wrong
-  // (observed: an ETOR of 19:00Z on an outage still active at 22:00Z), so it is
-  // deliberately NOT mapped onto the envelope `expires`: `expires` is what
-  // shouldExpire terminates an event on, and a missed estimate must never
-  // retire a live outage.
+  // PG&E's estimated time of restoration. An estimate that is often missed;
+  // `null` when not given.
+  //
+  // (-- Observed: an ETOR of 19:00Z on an outage still active at 22:00Z.
+  // `expires` is what shouldExpire terminates an event on, and a missed
+  // estimate must never retire a live outage. --)
   google.protobuf.Timestamp estimated_restoration = 5;
 
   // --- PSPS (source `psps`) ---
-  string event_id = 6;              // PG&E PSPS EventID
-  string event_name = 7;            // "PSPS_05172026"
-  string time_period = 8;           // "TP02_05172026" — the de-energization window slice
-  string stage = 9;                 // Watch | Warning
-  // Medical-baseline customers in the footprint — people whose medical
-  // equipment depends on grid power. No other feed we carry reports this.
-  int32 medical_baseline_affected = 10;
+  // PG&E PSPS event id. Empty string for outages.
+  string event_id = 6 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"23794\""}];
+  // PG&E PSPS event name. Empty string for outages.
+  string event_name = 7 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"PSPS_10142026\""}];
+  // The de-energization time-period slice this event covers. Empty string for
+  // outages.
+  string time_period = 8 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"TP07_10142026\""}];
+  // PSPS stage: `Watch` (shutoff under consideration, MODERATE) or `Warning`
+  // (shutoff committed, SEVERE). Empty string for outages.
+  string stage = 9 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    example: "\"Warning\""
+    enum: ["", "Watch", "Warning"]
+  }];
+  // Medical-baseline customers in the shutoff footprint: people whose medical
+  // equipment depends on grid power. No other feed reports this.
+  int32 medical_baseline_affected = 10 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "1372"}];
+  // Planned start of de-energization. `null` for outages.
   google.protobuf.Timestamp de_energization_start = 11;
+  // Planned end of de-energization (an estimate). `null` for outages.
   google.protobuf.Timestamp de_energization_end = 12;
 
-  // PG&E's all-clear time for the window. This is a PLANNED time, not proof the
-  // shutoff ended: it is populated on rows still at stage `Watch`, where it
-  // simply mirrors de_energization_end. It therefore MUST NOT drive lifecycle —
-  // resolving an event on it would clear a shutoff that is still on, which is
-  // the worst thing this layer could do. It is carried so a client can show the
-  // expected all-clear alongside the other estimates.
+  // PG&E's planned all-clear time. A plan, not proof the shutoff ended: it is
+  // set even while the stage is still Watch. Never use it to decide the power
+  // is back; use `status`.
+  //
+  // (-- It is populated on rows still at stage `Watch`, where it simply mirrors
+  // de_energization_end. It therefore MUST NOT drive lifecycle: resolving an
+  // event on it would clear a shutoff that is still on. --)
   google.protobuf.Timestamp all_clear = 13;
 }
 
-// Residential/outdoor burning status for one county (Layer_BURN_STATUS).
+// BurnStatusDetail is the BURN_STATUS detail block: whether residential/outdoor
+// burning is allowed today in one county.
 //
-// TWO INDEPENDENT AUTHORITIES gate a legal burn, and BOTH must permit it:
+// Two independent authorities must BOTH permit a burn, and each is a separate
+// facet because they fail independently: `burnDay`, the county air district's
+// daily permissive-burn-day call (read from its recorded phone line), and
+// `calfireStatus`, CAL FIRE's seasonal suspension of burn permits on State
+// Responsibility Area land (changes about twice a year). `permission` combines
+// them pessimistically.
 //
-//  1. `burn_day` — the county air district's permissive-burn-day call, decided
-//     daily from meteorology and air quality. Flips weekly in winter/spring.
-//  2. `calfire_status` — CAL FIRE's seasonal suspension of residential burn
-//     permits on State Responsibility Area land. Moves about twice a year.
-//
-// They are carried separately, never merged into one upstream value, because
-// they fail independently: the county line can be unreachable while CAL FIRE's
-// page is fine, and vice versa. `permission` is the only derived answer, and it
-// is deliberately pessimistic (see below).
-//
-// This is AMBIENT state, not a hazard: the event exists for a county at all
-// times and is excluded from the summary hazard rollup, exactly like mesh-node
-// presence. Its VALUE is the revision history — "when did it change" is the
-// question this layer answers.
+// The event exists for each tracked county at all times, is always INFO and
+// ACTIVE, and is left out of the summary's hazard rollup (it has its own `burn`
+// domain). `GET /api/v1/events/burn:{county slug}/history` shows when it changed.
 message BurnStatusDetail {
-  BurnDay burn_day = 1;
-  CalfireBurnStatus calfire_status = 2;
+  // The county line's answer for today, merged across `burnLines` taking the
+  // most restrictive (any NO wins, then any MARGINAL; YES needs every dialed
+  // line to answer). BURN_DAY_UNKNOWN when unread or the reading is older than
+  // 36 hours.
+  BurnDay burn_day = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"BURN_DAY_YES\""}];
+  // CAL FIRE's permit status for the county's SRA land. Carried forward from the
+  // last good read while CAL FIRE's page is unreachable; check
+  // `calfireObservedAt`.
+  CalfireBurnStatus calfire_status = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"CALFIRE_PERMIT_REQUIRED\""}];
 
-  // Derived: the MORE RESTRICTIVE of the two facets, never the more permissive.
-  // UNKNOWN whenever either facet is unknown or stale — a missing answer must
-  // never read as ALLOWED. Someone acts on this with a match in their hand.
-  BurnPermission permission = 3;
+  // The answer to "may I burn today?": PROHIBITED if either facet prohibits
+  // burning (no-burn day, marginal day, or CAL FIRE suspension); ALLOWED only
+  // when both facets are known and permissive; otherwise UNKNOWN. A missing
+  // answer never reads as ALLOWED.
+  BurnPermission permission = 3 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"BURN_PERMISSION_ALLOWED\""}];
 
   // --- CAL FIRE facet (source `calfire-burn`) ---
-  // When the suspension took effect. The county phone line only ever says
-  // "until further notice"; this date exists nowhere else we read.
+  // When CAL FIRE's current status took effect (the county line only ever says
+  // "until further notice"). `null` when CAL FIRE gives no date.
   google.protobuf.Timestamp calfire_effective = 4;
-  string calfire_area = 5;          // "All SRA" — the land classes covered
+  // Land classes CAL FIRE's status covers.
+  string calfire_area = 5 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"All SRA\""}];
 
   // --- county facet (source `burnline`) ---
-  // Every recorded line that speaks for this county, each with its own reading.
-  //
-  // Repeated rather than one phone number because the line-to-county mapping is
-  // not 1:1 in EITHER direction: a county can have more than one relevant
-  // recording, and one air-district line routinely covers several counties.
-  // `burn_day` above is these lines merged, taking the most restrictive.
-  //
-  // A line with no usable reading still appears here, with burn_day UNKNOWN and
-  // its phone populated — that is the honest thing to show, and it is what lets
-  // a consumer say "we could not read it, here is the number".
+  // Every recorded phone line that speaks for this county, each with its own
+  // reading. One line can serve several counties, and a county can have several
+  // lines. A line we could not read still appears, with `burnDay`
+  // BURN_DAY_UNKNOWN and its phone number, so a reader can call it.
   repeated BurnLineReading burn_lines = 6;
 
-  // When the CAL FIRE page was last read successfully. EXCLUDED from the content
-  // hash (store.ContentHash), like the per-line observations: it moves every
-  // tick and would otherwise mint a revision every tick.
+  // When CAL FIRE's page was last read successfully. The only way to tell that
+  // `calfireStatus` is being carried forward rather than freshly confirmed. Can
+  // be `null`.
   //
-  // It exists because the envelope's own observed_at cannot answer this. When
-  // the CAL FIRE scrape fails, that facet is carried forward from the stored
-  // event while observed_at still advances (we did poll) — so this is the only
-  // way a consumer can see the suspension value is not freshly confirmed.
+  // (-- EXCLUDED from the content hash (store.ContentHash), like the per-line
+  // observations: it moves every tick and would otherwise mint a revision every
+  // tick. The envelope's own observed_at cannot answer this: when the CAL FIRE
+  // scrape fails, that facet is carried forward from the stored event while
+  // observed_at still advances. --)
   google.protobuf.Timestamp calfire_observed_at = 7;
 }
 
 // BurnLineReading is one recorded phone line's answer for today.
 message BurnLineReading {
-  string id = 1;            // stable config id ("calaveras-apcd")
-  string name = 2;          // "Calaveras County APCD burn line"
-  string phone = 3;         // the number a resident can call
-  BurnDay burn_day = 4;     // this line's own answer; UNKNOWN if unread or stale
+  // Stable line id.
+  string id = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"calaveras-apcd\""}];
+  // Display name of the line.
+  string name = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"Calaveras County burn line\""}];
+  // The number a resident can call, E.164.
+  string phone = 3 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"+12097546600\""}];
+  // This line's own answer. BURN_DAY_UNKNOWN if not read or stale. A change
+  // writes a revision.
+  BurnDay burn_day = 4 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"BURN_DAY_YES\""}];
 
-  // Volatile per-observation fields — EXCLUDED from the content hash (see
-  // store.ContentHash), so they refresh without minting a revision. The line's
-  // burn_day above IS hashed: a line changing its answer, or going unreadable,
-  // is a real transition worth recording.
+  // The latest call: message, transcript, confidence and time. `null` when the
+  // line has never been read. Changes daily without writing a revision.
+  //
+  // (-- Volatile per-observation fields, EXCLUDED from the content hash (see
+  // store.ContentHash), so they refresh without minting a revision. --)
   BurnObservation observation = 5;
 }
 
-// BurnObservation is the volatile half of a burn status reading. It is grouped
-// into its own sub-message so store.ContentHash can zero the whole field.
+// BurnObservation is the latest reading of one burn line. The line's message
+// names the date, so it changes every day even when the answer does not; that
+// is why it writes no revision.
 //
-// This is load-bearing, not tidiness. The county line's message NAMES THE DATE
-// ("Today, September 10th, is a burn day in Calaveras County"), so the text
-// differs every single day even when the answer has not changed. Hashed, it
-// would mint a revision daily and bury the handful of real transitions — the
-// only thing this layer exists to record — in 365 rows of noise a year.
+// (-- Grouped into its own sub-message so store.ContentHash can zero the whole
+// field. Hashed, it would mint a revision daily and bury the handful of real
+// transitions in 365 rows of noise a year. --)
 message BurnObservation {
-  string message = 1;               // the line's plain-language answer
-  string transcript = 2;            // cleaned transcript of the recording
-  // The transcription model's own confidence, 0-100. Surfaced rather than
-  // thresholded: this is an LLM reading of phone audio, and a consumer deserves
-  // to see when the read was shaky.
-  int32 confidence = 3;
-  google.protobuf.Timestamp observed_at = 4;   // when this line was last called
+  // The line's answer in plain language, extracted by a model from the
+  // transcript.
+  string message = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"Today is a burn day with no elevation restrictions.\""}];
+  // Cleaned machine transcript of the recording.
+  string transcript = 2;
+  // The model's confidence in the reading, 0-100. Shown rather than
+  // thresholded: this is an AI reading of phone audio, so show it when it is low.
+  int32 confidence = 3 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "95"}];
+  // When the line was called.
+  google.protobuf.Timestamp observed_at = 4;
 
   reserved 5;                       // was calfire_observed_at, now on BurnStatusDetail
   reserved "calfire_observed_at";
 }
 
+// BurnDay is the county air district's call for today.
 enum BurnDay {
-  BURN_DAY_UNKNOWN = 0;    // not reached, or the reading was unusable/stale
-  BURN_DAY_YES = 1;        // permissive burn day — burning allowed
-  BURN_DAY_NO = 2;         // no-burn day — burning prohibited
-  BURN_DAY_MARGINAL = 3;   // restricted/partial (the line's "orange")
+  // Not read, unreadable, or older than 36 hours. Never treat as permissive.
+  BURN_DAY_UNKNOWN = 0;
+  // Permissive burn day: burning allowed (subject to CAL FIRE's status).
+  BURN_DAY_YES = 1;
+  // No-burn day: burning prohibited.
+  BURN_DAY_NO = 2;
+  // Restricted or partial day (for example elevation limits). Treated as a
+  // restriction, not a yes.
+  BURN_DAY_MARGINAL = 3;
 }
 
+// CalfireBurnStatus is CAL FIRE's permit status for State Responsibility Area
+// land in the county.
 enum CalfireBurnStatus {
+  // Unknown: CAL FIRE's page has not been read.
   CALFIRE_BURN_STATUS_UNKNOWN = 0;
-  CALFIRE_BURNING_SUSPENDED = 1;    // permits suspended; no residential burning
-  CALFIRE_PERMIT_REQUIRED = 2;      // burning allowed with a valid permit
-  CALFIRE_NO_PERMIT_REQUIRED = 3;   // off-season; no permit needed
+  // Permits suspended: no residential burning.
+  CALFIRE_BURNING_SUSPENDED = 1;
+  // Burning allowed with a valid CAL FIRE permit.
+  CALFIRE_PERMIT_REQUIRED = 2;
+  // Off-season: no permit needed.
+  CALFIRE_NO_PERMIT_REQUIRED = 3;
 }
 
+// BurnPermission is the combined answer, deliberately pessimistic.
 enum BurnPermission {
-  BURN_PERMISSION_UNKNOWN = 0;      // at least one facet unknown — assume nothing
-  BURN_PERMISSION_ALLOWED = 1;      // both facets permit burning today
-  BURN_PERMISSION_PROHIBITED = 2;   // at least one facet prohibits it
+  // At least one facet is unknown or stale and none prohibits: assume nothing.
+  BURN_PERMISSION_UNKNOWN = 0;
+  // Both facets are known and permit burning today.
+  BURN_PERMISSION_ALLOWED = 1;
+  // At least one facet prohibits burning today.
+  BURN_PERMISSION_PROHIBITED = 2;
 }
 
-// List / response wrappers for the hand-built /v1 handlers.
+// List / response wrappers.
 
+// EventList is one page of events.
 message EventList {
+  // Events on this page, ordered by severity (highest first), then
+  // `observedAt` (newest first), then id.
   repeated Event events = 1;
+  // Token for the next page; pass it as `pageToken` with the same filters.
+  // Empty string on the last page.
   string next_page_token = 2;
 }
 
+// EventRevision is one stored snapshot of an event.
 message EventRevision {
-  uint32 revision = 1;
+  // Revision number, from 1.
+  uint32 revision = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "3"}];
+  // The upstream content time of this revision (`event.observedAt`).
   google.protobuf.Timestamp observed_at = 2;
+  // When the Grid stored this revision.
   google.protobuf.Timestamp ingested_at = 3;
+  // The full event as it was at this revision. Mesh activity clocks
+  // (`lastHeardAt`, `lastRelayedAt`) are not filled on history snapshots.
   Event event = 4;
 }
 
+// EventRevisionList is one page of revisions.
 message EventRevisionList {
+  // Revisions on this page. Per-event history: newest revision first. The
+  // archive (`/api/v1/history`): `observedAt` newest first, then event id, then
+  // revision newest first.
   repeated EventRevision revisions = 1;
+  // Token for the next page; pass it as `pageToken` with the same filters.
+  // Empty string on the last page.
   string next_page_token = 2;
 }
 
+// PlaceList is the place directory.
 message PlaceList {
+  // Places, ordered by kind and then name.
   repeated Place places = 1;
 }
 
+// SourceList is the source registry.
 message SourceList {
+  // Every source, ordered by id, including the health-only push-reporter rows.
   repeated Source sources = 1;
 }
 
 // GridService is the read-only /api/v1 entity + query surface (gRPC-Gateway).
-// Ported endpoint-by-endpoint from the hand-built /v1 handlers; see
-// docs/design/grpc-gateway-migration-plan.md §7 for the full endpoint map.
+// See docs/design/grpc-gateway-migration-plan.md §7 for the endpoint map.
+//
+// Each RPC comment's first paragraph is its OpenAPI summary and the rest its
+// description; the operation option adds the tag and documented responses.
 service GridService {
-  // ListEvents returns store-backed events filtered by place, layer, status,
-  // severity_min, and since, with keyset pagination.
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_tag) = {
+    description: "Every /api/v1 RPC. The resource tags (Places, Events, Conditions, Sources, Mesh) group the same operations."
+  };
+
+  // Query events across layers.
+  //
+  // The main event feed, from the grid event store. Defaults: status ACTIVE and
+  // SCHEDULED, every layer, every place, every severity, 50 per page.
+  //
+  // An unscoped query is dominated by MESH nodes (hundreds of INFO community
+  // radio nodes, many outside every place) and SCHEDULED Caltrans roadwork. For
+  // a hazard feed pass `place` and `status=ACTIVE`, and either
+  // `severityMin=MINOR` or an explicit `layer` list. Use
+  // `layer=ROAD_INCIDENT&place={corridor}` for a highway's incidents and
+  // `layer=WEATHER_ALERT` for NWS alerts. Sorted by severity, then most recently
+  // observed. Supports ETag / If-None-Match.
   rpc ListEvents(ListEventsRequest) returns (EventList) {
     option (google.api.http) = {get: "/api/v1/events"};
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      tags: "Events"
+      responses: {
+        key: "304"
+        value: {description: "Not Modified: the `If-None-Match` ETag still matches."}
+      }
+      responses: {
+        key: "400"
+        value: {description: "INVALID_ARGUMENT: an unknown layer, status or severity, a timestamp that is not RFC 3339, a negative page size, or a bad page token."}
+      }
+      responses: {
+        key: "404"
+        value: {description: "NOT_FOUND: unknown place."}
+      }
+      responses: {
+        key: "429"
+        value: {description: "RESOURCE_EXHAUSTED: the page exceeded the 4 MiB response limit (large perimeters); retry with a smaller `pageSize`."}
+      }
+    };
   }
-  // GetEvent returns the current revision of one event by id.
+
+  // Get one event.
+  //
+  // The current revision of one event, any status. Ids contain colons
+  // (`chp:261106ST0341`); URL-encode them if your client requires it. Ids that
+  // appear in the summary's domain headlines with `kind: CONDITION`
+  // (`road:...`, `cc:...`, `fw:...`) are map features, not events, and return
+  // 404 here. Supports ETag / If-None-Match.
   rpc GetEvent(GetEventRequest) returns (Event) {
     option (google.api.http) = {get: "/api/v1/events/{id}"};
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      tags: "Events"
+      responses: {
+        key: "304"
+        value: {description: "Not Modified: the `If-None-Match` ETag still matches."}
+      }
+      responses: {
+        key: "404"
+        value: {description: "NOT_FOUND: no event has this id."}
+      }
+    };
   }
-  // GetEventHistory returns one event's revisions, newest first, paginated.
+
+  // List one event's revisions.
+  //
+  // Every stored revision of one event, newest first, each a full snapshot. A
+  // status change (for example ACTIVE to RESOLVED) is a revision, so the last
+  // entries show when it ended. 50 per page by default, up to 200. Supports
+  // ETag / If-None-Match.
   rpc GetEventHistory(GetEventHistoryRequest) returns (EventRevisionList) {
     option (google.api.http) = {get: "/api/v1/events/{id}/history"};
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      tags: "Events"
+      responses: {
+        key: "304"
+        value: {description: "Not Modified: the `If-None-Match` ETag still matches."}
+      }
+      responses: {
+        key: "400"
+        value: {description: "INVALID_ARGUMENT: a negative page size or a bad page token."}
+      }
+      responses: {
+        key: "404"
+        value: {description: "NOT_FOUND: no event has this id."}
+      }
+    };
   }
-  // ListHistory returns revisions across events over a [from, to) window.
+
+  // Query revisions across events (the archive).
+  //
+  // Revisions of all events, optionally filtered by place and layer, over a
+  // half-open `[from, to)` window on each revision's `observedAt`. With no
+  // window it covers all history. Ordered newest first. Place and layer
+  // filters use each event's CURRENT place attachments and layer. Use it for
+  // "what happened here last week". Supports ETag / If-None-Match.
   rpc ListHistory(ListHistoryRequest) returns (EventRevisionList) {
     option (google.api.http) = {get: "/api/v1/history"};
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      tags: "Events"
+      responses: {
+        key: "304"
+        value: {description: "Not Modified: the `If-None-Match` ETag still matches."}
+      }
+      responses: {
+        key: "400"
+        value: {description: "INVALID_ARGUMENT: an unknown layer, a timestamp that is not RFC 3339, a negative page size, or a bad page token."}
+      }
+      responses: {
+        key: "404"
+        value: {description: "NOT_FOUND: unknown place."}
+      }
+      responses: {
+        key: "429"
+        value: {description: "RESOURCE_EXHAUSTED: the page exceeded the 4 MiB response limit; retry with a smaller `pageSize`."}
+      }
+    };
   }
-  // ListPlaces returns the place directory filtered by kind and a name query.
+
+  // List places.
+  //
+  // The place directory, with geometry: coverage areas, counties, towns and
+  // highway corridors (about 20 today). Filter by `kind` and a case-insensitive
+  // name substring `q`. Not paginated. Supports ETag / If-None-Match.
   rpc ListPlaces(ListPlacesRequest) returns (PlaceList) {
     option (google.api.http) = {get: "/api/v1/places"};
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      tags: "Places"
+      responses: {
+        key: "304"
+        value: {description: "Not Modified: the `If-None-Match` ETag still matches."}
+      }
+      responses: {
+        key: "400"
+        value: {description: "INVALID_ARGUMENT: unknown kind."}
+      }
+    };
   }
-  // ResolvePlace maps a lat/lng or address to the containing places,
-  // most-specific first (SITE, EVAC_ZONE, TOWN, CORRIDOR, COUNTY, AREA).
+
+  // Resolve a point or an address to places.
+  //
+  // Returns every place containing the point, most specific first (SITE,
+  // EVAC_ZONE, TOWN, CORRIDOR, COUNTY, AREA). A town matches within 3 km of its
+  // point (nearest town first); a corridor within about 1.5 km of its line. Give
+  // `lat` and `lng`, or `address` (geocoded with the US Census geocoder), not
+  // both. An empty `places` list means the point is outside the covered region.
   rpc ResolvePlace(ResolvePlaceRequest) returns (ResolvePlaceResponse) {
     // AIP custom-method form (colon verb) so it can't be shadowed by the
     // GetPlace {place} wildcard.
     option (google.api.http) = {get: "/api/v1/places:resolve"};
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      tags: "Places"
+      responses: {
+        key: "400"
+        value: {description: "INVALID_ARGUMENT: neither or both of lat+lng and address, only one of lat/lng, or a value out of range."}
+      }
+      responses: {
+        key: "404"
+        value: {description: "NOT_FOUND: the geocoder found no match for the address (add city, state or ZIP)."}
+      }
+      responses: {
+        key: "503"
+        value: {description: "UNAVAILABLE: the address geocoder is down; retry later or resolve by lat/lng."}
+      }
+    };
   }
-  // GetPlace returns one place by slug or namespaced id.
+
+  // Get one place.
+  //
+  // One place by slug (`arnold`) or namespaced id (`town:arnold`), with its
+  // geometry. Supports ETag / If-None-Match.
   rpc GetPlace(GetPlaceRequest) returns (Place) {
     option (google.api.http) = {get: "/api/v1/places/{place}"};
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      tags: "Places"
+      responses: {
+        key: "304"
+        value: {description: "Not Modified: the `If-None-Match` ETag still matches."}
+      }
+      responses: {
+        key: "404"
+        value: {description: "NOT_FOUND: unknown place."}
+      }
+    };
   }
-  // GetPlaceSummary is the one-call place rollup: mode, a cross-layer severity
-  // summary, per-domain status, top events, the evacuation invariant, and a
-  // source-health sidecar. (3-segment path; no collision with GetPlace.)
+
+  // Summarize a place in one call.
+  //
+  // The dashboard headline: `mode` (QUIET, WATCH, ACTIVE), a cross-layer hazard
+  // rollup (`summary`), one block per domain (`domains`), and a source-health
+  // sidecar (`sources`). Built from the place's ACTIVE and SCHEDULED events
+  // plus the live condition layers (road segments, chain control, fire
+  // weather).
+  //
+  // Ambient state is kept out of the hazard rollup (`totalActive`,
+  // `severityCounts`, `topEvents`, `mode`): MESH nodes, BURN_STATUS, INFO-level
+  // POWER outages, and SCHEDULED road closures. MESH and BURN_STATUS appear only
+  // in their own `comms` and `burn` domains. The `evacuation` invariant: see
+  // `summary.activeEvacuations`. Computed fresh on each call; no ETag.
   rpc GetPlaceSummary(GetPlaceSummaryRequest) returns (PlaceSummary) {
     option (google.api.http) = {get: "/api/v1/places/{place}/summary"};
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      tags: "Places"
+      responses: {
+        key: "404"
+        value: {description: "NOT_FOUND: unknown place."}
+      }
+    };
   }
-  // ListScanners returns Broadcastify scanner feeds, optionally scoped to a
-  // place (an area serves its feeds; otherwise every area's feeds, deduped).
+
+  // List police, fire and CHP scanner feeds.
+  //
+  // Broadcastify audio feeds that cover the region. With `place` naming an AREA,
+  // that area's feeds; with any other place, or none, every configured feed,
+  // deduplicated. Links only; audio is served by Broadcastify.
   rpc ListScanners(ListScannersRequest) returns (ScannerList) {
     option (google.api.http) = {get: "/api/v1/scanners"};
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      tags: "Conditions"
+      responses: {
+        key: "404"
+        value: {description: "NOT_FOUND: unknown place."}
+      }
+    };
   }
-  // ListCameras returns Caltrans traffic cameras (CCTV) in or near the
-  // coverage areas: a snapshot image and, where Caltrans publishes one, an HLS
-  // stream per camera. Links only — the images and streams are served by
-  // Caltrans, never proxied. ?place narrows the set to cameras within the same
-  // radius of that place, nearest first. Cameras are reference views, not
-  // events: nothing here is a hazard and an empty list means no camera nearby.
+
+  // List Caltrans traffic cameras.
+  //
+  // In-service Caltrans CCTV cameras within 25 km of a coverage area, each with
+  // a snapshot image URL and, where Caltrans publishes one, an HLS stream URL.
+  // Links only: images and streams are served by Caltrans, never proxied. With
+  // `place`, only cameras within 25 km of that place, nearest first. Cameras are
+  // reference views, not events: nothing here is a hazard, and an empty list
+  // means no camera nearby. Refreshed every 6 hours; check `sourceStatus`.
+  // Supports ETag / If-None-Match.
   rpc ListCameras(ListCamerasRequest) returns (CameraList) {
     option (google.api.http) = {get: "/api/v1/cameras"};
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      tags: "Conditions"
+      responses: {
+        key: "304"
+        value: {description: "Not Modified: the `If-None-Match` ETag still matches."}
+      }
+      responses: {
+        key: "404"
+        value: {description: "NOT_FOUND: unknown place."}
+      }
+    };
   }
-  // GetConditions returns current, non-event state: per-location weather and
-  // the region's fire-weather classification, optionally scoped to a place.
-  // (Weather alerts are events; road conditions are the road_segment /
-  // chain_control GeoJSON layers.)
+
+  // Get current weather, forecasts and fire weather.
+  //
+  // Current conditions per weather location (OpenWeatherMap, refreshed every 15
+  // minutes), a 48-hour NWS forecast per location, and the region's fire-weather
+  // state. With `place`, only the weather locations inside the place's bounding
+  // box (and their forecasts); `fireWeather` is region-wide either way. Weather
+  // ALERTS are events (`/api/v1/events?layer=WEATHER_ALERT`); road conditions
+  // are the `road_segment` and `chain_control` map layers.
   rpc GetConditions(GetConditionsRequest) returns (Conditions) {
     option (google.api.http) = {get: "/api/v1/conditions"};
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      tags: "Conditions"
+      responses: {
+        key: "404"
+        value: {description: "NOT_FOUND: unknown place."}
+      }
+    };
   }
-  // ListSources returns the source registry with per-source health — the
-  // honesty mechanism clients key layer trust off.
+
+  // List sources and their health.
+  //
+  // The upstream source registry with per-source health (OK, STALE,
+  // UNAVAILABLE), last success, last attempt and last error. This is how a
+  // client decides how far to trust each layer. It also lists one health-only
+  // row per operator push reporter.
   rpc ListSources(ListSourcesRequest) returns (SourceList) {
     option (google.api.http) = {get: "/api/v1/sources"};
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {tags: "Sources"};
   }
-  // GetMeshTelemetry returns ONE node's archived operator-monitor samples — the
-  // series behind a battery, temperature or airtime chart.
+
+  // Get one mesh node's telemetry series.
   //
-  // The event carries a node's LATEST reading; this carries every reading, and
-  // only the second can be graphed. Per node by design: this is one node's
-  // chart, and a cross-node dump would be a different (and far larger) product.
+  // Every archived operator-monitor reading for one MeshCore node over a
+  // window, oldest first: the data behind a battery, temperature or airtime
+  // chart. The event carries only the latest reading
+  // (`mesh.telemetry.admin`). Only nodes an operator monitors have samples.
+  // The default window is the 24 hours before `to` (default now); windows over
+  // 400 days are clamped. At most 20,000 samples are returned (`truncated`
+  // says so).
+  //
+  // (-- Per node by design: this is one node's chart, and a cross-node dump
+  // would be a different (and far larger) product. --)
   rpc GetMeshTelemetry(GetMeshTelemetryRequest) returns (MeshTelemetryArchive) {
     option (google.api.http) = {get: "/api/v1/mesh/telemetry"};
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      tags: "Mesh"
+      responses: {
+        key: "400"
+        value: {description: "INVALID_ARGUMENT: `node` missing or not 8-64 even-length hex (optionally prefixed `meshcore:`), or `from` not before `to`."}
+      }
+    };
   }
 }
 
+// GetMeshTelemetryRequest selects one node and a time window.
 message GetMeshTelemetryRequest {
-  string node = 1;                      // the node's full public key, hex
-  google.protobuf.Timestamp from = 2;   // default: 24h before `to`
-  google.protobuf.Timestamp to = 3;     // default: now
+  // Required. The node's public key (`Event.mesh.publicKey`) or its event id
+  // (`meshcore:{key}`), case-insensitive. 8 to 64 hex characters, even length:
+  // a monitor-only node known by a 16-character key prefix is valid. Anything
+  // else is a 400 INVALID_ARGUMENT. A well-formed key the archive does not know
+  // returns 200 with `coverage.samples: 0` and no samples.
+  string node = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    example: "\"a30081749739257489c372a0183f5f7cfd1705eb1dc4441ae11dd30533927c71\""
+    pattern: "^([mM][eE][sS][hH][cC][oO][rR][eE]:)?([0-9a-fA-F]{2}){4,32}$"
+    required: ["node"]
+  }];
+  // Window start, RFC 3339, inclusive. Default: 24 hours before `to`.
+  google.protobuf.Timestamp from = 2;
+  // Window end, RFC 3339, exclusive. Default: now.
+  google.protobuf.Timestamp to = 3;
 }
 
 // MeshTelemetryArchive is one node's samples over a window, with what a chart
 // needs in order not to lie about them.
 message MeshTelemetryArchive {
+  // The requested node, normalized to the bare lowercase key (no `meshcore:`
+  // prefix).
   string node = 1;
+  // Window start actually used (after defaults and clamping).
   google.protobuf.Timestamp from = 2;
+  // Window end actually used.
   google.protobuf.Timestamp to = 3;
 
-  // What the ARCHIVE holds for this node, whatever was asked for. A window
-  // outside it returns no samples because we do not have them — which is not
-  // the same statement as the node having been quiet, and a chart cannot tell
-  // those apart unless it is told.
+  // What the archive holds for this node at all, whatever window was asked
+  // for. A window outside it has no samples because we do not have them, which
+  // is not the same as the node being quiet.
   MeshTelemetryCoverage coverage = 4;
 
-  // The observed MEDIAN gap between samples, so a client knows which gaps are
-  // abnormal enough to break a line on. Null with fewer than two samples: one
-  // point has no cadence. Median, not mean — one multi-hour outage in a day of
-  // 15-minute reports drags a mean past anything the feed does.
-  google.protobuf.Int64Value cadence_seconds = 5;
+  // Median gap between samples in the window, in seconds, so a chart knows which
+  // gaps are abnormal enough to break a line on. 64-bit, so a JSON STRING
+  // (`"1831"`). Nullable: `null` with fewer than two samples.
+  //
+  // (-- Median, not mean: one multi-hour outage in a day of 15-minute reports
+  // drags a mean past anything the feed does. --)
+  google.protobuf.Int64Value cadence_seconds = 5 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"1831\""}];
 
-  // Sample times where the node's uptime went BACKWARDS. Every lifetime counter
-  // restarts there, so a line drawn across one plunges to zero and climbs back —
-  // a graph of our arithmetic rather than of the mesh. Also a fact worth seeing.
+  // Sample times where the node's uptime went backwards, i.e. it rebooted. Every
+  // counter restarts there, so break counter lines at these times. Empty list
+  // when none.
   repeated google.protobuf.Timestamp reboots = 6;
 
-  // The window held more samples than one response carries. Stated, never
-  // silent: a chart that ends early because the server stopped talking must not
-  // look like a chart of a node that stopped.
+  // True when the window held more than the 20,000 samples one response carries;
+  // the series ends early. Narrow the window to see the rest.
   bool truncated = 7;
 
+  // Samples in the window, oldest first.
   repeated MeshTelemetrySample samples = 8;
 }
 
+// MeshTelemetryCoverage is the span of the whole archive for one node.
 message MeshTelemetryCoverage {
+  // Oldest archived sample. `null` when the archive holds none.
   google.protobuf.Timestamp from = 1;
+  // Newest archived sample. `null` when the archive holds none.
   google.protobuf.Timestamp to = 2;
-  int32 samples = 3;
+  // Number of archived samples in total.
+  int32 samples = 3 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "3213"}];
 }
 
 // MeshTelemetrySample is one archived report.
 //
-// The reading is MeshAdminTelemetry itself — the same message the event carries,
-// not a flattened copy of its 23 fields. One definition means the archive and
-// the live event cannot describe the same reading differently, and the gauges
-// keep their wrapper types, so an unread battery stays null here too.
+// (-- The reading is MeshAdminTelemetry itself — the same message the event
+// carries, not a flattened copy of its 23 fields. One definition means the
+// archive and the live event cannot describe the same reading differently, and
+// the gauges keep their wrapper types, so an unread battery stays null here too. --)
 message MeshTelemetrySample {
-  MeshAdminTelemetry reading = 1;             // reported_at is the sample's own time
-  google.protobuf.Timestamp received_at = 2;  // when the Grid first held it
+  // The reading. `reading.reportedAt` is the sample's own time; gauges are
+  // nullable exactly as on the live event.
+  MeshAdminTelemetry reading = 1;
+  // When the Grid first stored it.
+  google.protobuf.Timestamp received_at = 2;
 }
 
+// GetPlaceSummaryRequest names the place.
 message GetPlaceSummaryRequest {
-  string place = 1; // slug or namespaced id
+  // Place slug (`calaveras-county`) or namespaced id (`county:calaveras-county`).
+  string place = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"calaveras-county\""}];
 }
 
-// PlaceSummary is the one-call place rollup (the former hand-built summary,
-// now proto so it is camelCase like the rest of the surface). active_evacuations
-// is a wrapper so it can serialize as an explicit JSON null: null when the
-// evacuation source is UNAVAILABLE (unknown — render "check Genasys"), 0 when
-// confirmed-empty (OK/STALE with no active zones), N when active. An error must
-// never become a 0.
+// PlaceSummary is the one-call rollup for a place.
+//
+// `summary` covers hazards only. Each entry in `domains` covers one subject
+// area, including the ambient ones (`burn`, `comms`) that the hazard rollup
+// leaves out.
 message PlaceSummary {
-  string place = 1; // slug
-  string place_id = 2;
-  string place_name = 3;
+  // The place's slug.
+  string place = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"calaveras-county\""}];
+  // The place's namespaced id.
+  string place_id = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"county:calaveras-county\""}];
+  // The place's display name.
+  string place_name = 3 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"Calaveras County\""}];
+  // When this summary was computed.
   google.protobuf.Timestamp generated_at = 4;
-  string mode = 5; // QUIET | WATCH | ACTIVE
+
+  // Overall posture. The rules below are checked in order and the first match
+  // wins.
+  //
+  // - `ACTIVE`: an active evacuation at ORDER, WARNING or SHELTER_IN_PLACE; or
+  //   any active EXTREME event; or an active wildfire at SEVERE or above.
+  // - `WATCH`: any active SEVERE event; or an active evacuation ADVISORY; or
+  //   fire weather `elevated` (Fire Weather Watch) or `red-flag` (Red Flag
+  //   Warning) for a place inside a coverage area; or the evacuation source
+  //   UNAVAILABLE (unknown is never quiet); or any layer feeding the
+  //   summary UNAVAILABLE while an active event is MODERATE or above.
+  // - `QUIET`: otherwise. A MODERATE or lower event on its own leaves the
+  //   place QUIET.
+  //
+  // Only these inputs can raise it: ACTIVE events on the WILDFIRE,
+  // EVACUATION, WEATHER_ALERT, EARTHQUAKE, ROAD_INCIDENT and POWER layers
+  // (by severity), the fire-weather state, and source health. These never
+  // raise it: SCHEDULED events (a planned closure, a watch or PSPS not yet in
+  // effect), MESH nodes, BURN_STATUS, INFO POWER outages, and every condition
+  // other than fire weather. A CLOSED `road_segment` or a chain control
+  // raises the `roads` domain's `highestSeverity`, not `mode`, so a place can
+  // be QUIET with a closed highway. Show each domain's `status` and
+  // `highestSeverity` alongside `mode`.
+  string mode = 5 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    example: "\"WATCH\""
+    enum: ["QUIET", "WATCH", "ACTIVE"]
+  }];
+  // Cross-layer hazard rollup.
   SummaryStats summary = 6;
+  // One block per domain, always in this order: `fire`, `evacuation`,
+  // `weather`, `roads`, `seismic`, `power`, then `burn` (when burn counties are
+  // configured) and `comms` (when the mesh source is enabled). Both are
+  // configured in production.
   repeated SummaryDomain domains = 7;
+  // Health of the sources behind the summary's layers. Region-wide, not
+  // specific to the place.
   repeated SummarySourceHealth sources = 8;
 }
 
+// SummaryStats is the place's hazard rollup.
+//
+// It counts the place's ACTIVE and SCHEDULED events except four carve-outs:
+// MESH nodes and BURN_STATUS (ambient state, shown in their own domains), POWER
+// outages at INFO (single-customer service calls), and SCHEDULED road closures
+// (planned roadwork). A SCHEDULED weather watch or PSPS still counts. Condition
+// layers never count here.
 message SummaryStats {
-  string highest_severity = 1;
-  int32 highest_severity_rank = 2;
-  map<string, int32> severity_counts = 3;
-  int32 total_active = 4;
-  // NULLABLE: serializes as JSON `null` (not 0) when evacuation data is
-  // UNAVAILABLE. The OpenAPI type is `integer` only because Swagger 2.0 cannot
-  // express a nullable scalar — do NOT coerce null→0 (an error must never become
-  // a 0). null = UNAVAILABLE, 0 = confirmed no active zones, N = active.
-  google.protobuf.Int32Value active_evacuations = 5;
-  string evacuation_status = 6; // OK | STALE | UNAVAILABLE
+  // Highest severity among the counted events; `INFO` when there are none.
+  string highest_severity = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    example: "\"SEVERE\""
+    enum: ["INFO", "MINOR", "MODERATE", "SEVERE", "EXTREME"]
+  }];
+  // Rank of `highestSeverity`, 0 (INFO) to 4 (EXTREME).
+  int32 highest_severity_rank = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    example: "3"
+    minimum: 0
+    maximum: 4
+  }];
+  // Count of counted events per severity name (`INFO` .. `EXTREME`). A severity
+  // with no events is absent rather than 0.
+  map<string, int32> severity_counts = 3 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "{\"INFO\": 1, \"MINOR\": 1, \"SEVERE\": 1}"}];
+  // Number of counted events (ACTIVE and SCHEDULED, after the carve-outs).
+  int32 total_active = 4 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "3"}];
+  // ACTIVE evacuation zones attached to the place. NULLABLE: `null` when the
+  // evacuation source is UNAVAILABLE with nothing stored (unknown: render
+  // "unknown, check Genasys", never "none"). `0` means a healthy fetch found no
+  // active zone ("no active evacuations reported", not a guarantee). Never
+  // coerce `null` to 0.
+  google.protobuf.Int32Value active_evacuations = 5 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "0"}];
+  // Health of the evacuation source as served: `OK`, `STALE` (source failing
+  // but stored zones are served; the count is last-good) or `UNAVAILABLE`
+  // (then `activeEvacuations` is `null`).
+  string evacuation_status = 6 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    example: "\"OK\""
+    enum: ["OK", "STALE", "UNAVAILABLE"]
+  }];
+  // Up to five counted events, most severe first, then most recently observed.
+  // Every id here is an event (`GET /api/v1/events/{id}`).
   repeated SummaryTopEvent top_events = 7;
+  // The authoritative evacuation viewer (Genasys Protect), the same link as
+  // the `evacuation` map layer's `metadata.sourceUrl`. Always set, whatever
+  // `evacuationStatus` says: it is where to send people when the count is
+  // `null` ("unknown, check Genasys") and the place to confirm a 0 or an N.
+  // For one zone's own page use the event's `provenance.sourceUrl`.
+  string evacuation_source_url = 8 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    format: "uri"
+    example: "\"https://protect.genasys.com/\""
+  }];
 }
 
+// SummaryTopEvent is one of the place's most urgent hazard events.
 message SummaryTopEvent {
-  string id = 1;
-  string layer = 2; // lowercase layer slug ("weather_alert")
-  string severity = 3;
-  int32 severity_rank = 4;
-  string headline = 5;
-  string source = 6; // provenance source id ("usgs")
+  // Event id, fetchable at `GET /api/v1/events/{id}`.
+  string id = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"caltrans:d10-C26EA-0001-2026-08-24-070100\""}];
+  // The event's layer as the UPPERCASE enum name, the same value as
+  // `Event.layer`. Never MESH or BURN_STATUS (excluded from the rollup).
+  string layer = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    example: "\"ROAD_INCIDENT\""
+    enum: ["WILDFIRE", "EVACUATION", "WEATHER_ALERT", "EARTHQUAKE", "ROAD_INCIDENT", "POWER"]
+  }];
+  // The event's severity.
+  string severity = 3 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    example: "\"SEVERE\""
+    enum: ["INFO", "MINOR", "MODERATE", "SEVERE", "EXTREME"]
+  }];
+  // Rank of `severity`, 0-4.
+  int32 severity_rank = 4 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "3"}];
+  // The event's headline.
+  string headline = 5 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"Hwy 26 full closure (Roadway Excavation)\""}];
+  // The event's source id (`provenance.sourceId`).
+  string source = 6 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"caltrans\""}];
 }
 
+// SummaryDomain is one subject area's status for the place.
+//
+// Domain inputs: `fire` = WILDFIRE events + the fire_weather condition;
+// `evacuation` = EVACUATION; `weather` = WEATHER_ALERT; `roads` = ROAD_INCIDENT
+// events (not SCHEDULED roadwork) + the chain_control and road_segment
+// conditions; `seismic` = EARTHQUAKE; `power` = POWER (including INFO
+// outages); `burn` = BURN_STATUS; `comms` = MESH. A domain counts every one of
+// its ACTIVE and SCHEDULED events at any severity, but a condition only when it
+// is above INFO (an open road or normal fire weather is not "active").
 message SummaryDomain {
-  string domain = 1; // fire | evacuation | weather | roads | seismic | power (| comms when enabled)
-  string status = 2; // worst source_status across the domain's layers
-  string highest_severity = 3;
-  int32 active_count = 4;
-  repeated SummaryDomainHeadline headlines = 5; // top 3 by severity
+  // Domain name.
+  string domain = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    example: "\"roads\""
+    enum: ["fire", "evacuation", "weather", "roads", "seismic", "power", "burn", "comms"]
+  }];
+  // The WORST source status across the domain's layers, so partial data never
+  // presents as complete. A failing source with stored events reads STALE.
+  string status = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    example: "\"OK\""
+    enum: ["OK", "STALE", "UNAVAILABLE"]
+  }];
+  // Highest severity among the domain's counted items; `INFO` when none.
+  string highest_severity = 3 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    example: "\"SEVERE\""
+    enum: ["INFO", "MINOR", "MODERATE", "SEVERE", "EXTREME"]
+  }];
+  // Number of counted items (events plus above-INFO conditions). It can be
+  // non-zero while `summary.totalActive` is 0: `comms` counts mesh nodes,
+  // `burn` counts burn status, and `power` counts INFO outages.
+  int32 active_count = 4 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "4"}];
+  // Up to three counted items, most severe first (events before conditions on
+  // ties). An item is an event OR a condition-layer feature; check `kind`.
+  repeated SummaryDomainHeadline headlines = 5;
 }
 
+// SummaryDomainHeadline is one item in a domain's headline list: an event, or a
+// live condition-layer feature (a closed road segment, a chain control, a fire
+// weather banner). Use `kind` to tell them apart before following `id`.
 message SummaryDomainHeadline {
-  string id = 1;
-  string severity = 2;
-  string headline = 3;
+  // The item's id. For `kind: EVENT` an event id, fetchable at
+  // `GET /api/v1/events/{id}`. For `kind: CONDITION` a map-feature id
+  // (`road:{segment}`, `cc:{checkpoint}`, `fw:region`): it is NOT an event and
+  // `GET /api/v1/events/{id}` returns 404. Find it as `properties.id` in the
+  // place's `{layer}.geojson` map layer (the layer slug is `layer` lowercased).
+  string id = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"road:hwy4-arnold-bearvalley\""}];
+  // The item's severity.
+  string severity = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    example: "\"SEVERE\""
+    enum: ["INFO", "MINOR", "MODERATE", "SEVERE", "EXTREME"]
+  }];
+  // The item's headline.
+  string headline = 3 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"Hwy 4 — Arnold to Bear Valley\""}];
+  // `EVENT` when `id` is a stored event, `CONDITION` when it is a live
+  // condition-layer map feature with no event record.
+  string kind = 4 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    example: "\"CONDITION\""
+    enum: ["EVENT", "CONDITION"]
+  }];
+  // The item's layer, UPPERCASE. For an event, its `Event.layer`. For a
+  // condition, the condition layer (`ROAD_SEGMENT`, `CHAIN_CONTROL`,
+  // `FIRE_WEATHER`); lowercase it for the `.geojson` map-layer path.
+  string layer = 5 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    example: "\"ROAD_SEGMENT\""
+    enum: ["WILDFIRE", "EVACUATION", "WEATHER_ALERT", "EARTHQUAKE", "ROAD_INCIDENT", "POWER", "MESH", "BURN_STATUS", "ROAD_SEGMENT", "CHAIN_CONTROL", "FIRE_WEATHER"]
+  }];
 }
 
+// SummarySourceHealth is one source registry row behind the summary's layers.
 message SummarySourceHealth {
-  string id = 1;
-  string status = 2;
+  // Source id, as on `/api/v1/sources`.
+  string id = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"caloes\""}];
+  // The source's health. A source never polled reads `UNAVAILABLE`.
+  string status = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    example: "\"OK\""
+    enum: ["OK", "STALE", "UNAVAILABLE"]
+  }];
+  // When the source last polled successfully. `null` if never.
   google.protobuf.Timestamp last_success_at = 3;
 }
 
-// Filter/enum fields are strings (parsed server-side with the shared helpers),
-// matching the query params of the surface being replaced. page_size 0 = default
-// (store clamps to 1..200). enhancement_io opts into the large model I/O fields.
+// ListEventsRequest filters the event feed. All filters combine with AND.
+//
+// (-- Filter/enum fields are strings (parsed server-side with the shared
+// helpers), matching the query params of the surface being replaced.
+// page_size 0 = default (store clamps to 1..200). --)
 message ListEventsRequest {
-  string place = 1;
-  repeated string layer = 2;
-  repeated string status = 3;
-  string severity_min = 4;
-  string since = 5; // RFC 3339
-  int32 page_size = 6;
+  // Only events attached to this place: slug (`arnold`) or namespaced id
+  // (`town:arnold`). Omit for every place, including events outside all places.
+  string place = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"calaveras-county\""}];
+  // Only these layers. Repeat the parameter or comma-separate. Case-insensitive;
+  // lowercase slugs (`road_incident`) and the aliases `mesh_node` and `network`
+  // (for MESH) also work. FIRE_WEATHER, GAUGE, AIR_QUALITY and ANNOUNCEMENT are
+  // accepted but no events carry them. Default: every layer.
+  repeated string layer = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    enum: ["WILDFIRE", "EVACUATION", "WEATHER_ALERT", "EARTHQUAKE", "ROAD_INCIDENT", "POWER", "MESH", "BURN_STATUS"]
+  }];
+  // Only these statuses. Repeat the parameter or comma-separate.
+  // Case-insensitive. Default: ACTIVE and SCHEDULED. Pass `ACTIVE` alone to drop
+  // planned roadwork; add RESOLVED and EXPIRED to include ended events.
+  repeated string status = 3 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    enum: ["ACTIVE", "SCHEDULED", "RESOLVED", "EXPIRED"]
+  }];
+  // Only events at this severity or above. Case-insensitive. Default: no
+  // minimum (same as INFO). `MINOR` drops mesh nodes, burn status and
+  // single-customer outages.
+  string severity_min = 4 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    enum: ["INFO", "MINOR", "MODERATE", "SEVERE", "EXTREME"]
+  }];
+  // Only events whose `observedAt` is at or after this RFC 3339 time, e.g.
+  // `2026-11-06T00:00:00Z`.
+  string since = 5 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {format: "date-time"}];
+  // Page size. 0 or omitted means the default of 50; values over 200 are
+  // clamped to 200; a negative value is a 400 INVALID_ARGUMENT.
+  int32 page_size = 6 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    minimum: 0
+    maximum: 200
+  }];
+  // The previous page's `nextPageToken`. Omit for the first page.
   string page_token = 7;
+  // Include the AI model's full prompt and response (`enhancement.request` and
+  // `enhancement.response`). Large; default false, which returns them as empty
+  // strings.
   bool enhancement_io = 8;
 }
+
+// GetEventRequest names one event.
 message GetEventRequest {
-  string id = 1;
+  // Event id, e.g. `chp:261106ST0341` or `burn:calaveras-county`.
+  string id = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"burn:calaveras-county\""}];
+  // Include `enhancement.request` and `enhancement.response`. Default false.
   bool enhancement_io = 2;
 }
+
+// GetEventHistoryRequest pages one event's revisions.
 message GetEventHistoryRequest {
-  string id = 1;
-  int32 page_size = 2;
+  // Event id.
+  string id = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"burn:calaveras-county\""}];
+  // Page size. 0 or omitted means the default of 50; values over 200 are
+  // clamped to 200; a negative value is a 400 INVALID_ARGUMENT.
+  int32 page_size = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    minimum: 0
+    maximum: 200
+  }];
+  // The previous page's `nextPageToken`. Omit for the first page.
   string page_token = 3;
+  // Include `enhancement.request` and `enhancement.response`. Default false.
   bool enhancement_io = 4;
 }
+
+// ListHistoryRequest filters the revision archive.
 message ListHistoryRequest {
-  string place = 1;
-  repeated string layer = 2;
-  string from = 3; // RFC 3339
-  string to = 4; // RFC 3339
-  int32 page_size = 5;
+  // Only revisions of events currently attached to this place (slug or id).
+  string place = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"calaveras-county\""}];
+  // Only these layers; same rules as on `/api/v1/events`.
+  repeated string layer = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    enum: ["WILDFIRE", "EVACUATION", "WEATHER_ALERT", "EARTHQUAKE", "ROAD_INCIDENT", "POWER", "MESH", "BURN_STATUS"]
+  }];
+  // Window start on each revision's `observedAt`, RFC 3339, inclusive. Default:
+  // no lower bound.
+  string from = 3 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {format: "date-time"}];
+  // Window end, RFC 3339, exclusive. Default: no upper bound.
+  string to = 4 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {format: "date-time"}];
+  // Page size. 0 or omitted means the default of 50; values over 200 are
+  // clamped to 200; a negative value is a 400 INVALID_ARGUMENT.
+  int32 page_size = 5 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    minimum: 0
+    maximum: 200
+  }];
+  // The previous page's `nextPageToken`. Omit for the first page.
   string page_token = 6;
+  // Include `enhancement.request` and `enhancement.response`. Default false.
   bool enhancement_io = 7;
 }
+
+// ListPlacesRequest filters the place directory.
 message ListPlacesRequest {
-  string kind = 1;
+  // Only places of this kind. Case-insensitive. EVAC_ZONE and SITE are accepted
+  // but no places of those kinds exist today. Default: every kind.
+  string kind = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    enum: ["AREA", "COUNTY", "TOWN", "CORRIDOR", "EVAC_ZONE", "SITE"]
+  }];
+  // Case-insensitive substring of the place name, e.g. `calav`.
   string q = 2;
 }
+
+// GetPlaceRequest names one place.
 message GetPlaceRequest {
-  string place = 1;
+  // Place slug (`arnold`) or namespaced id (`town:arnold`).
+  string place = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"arnold\""}];
 }
-// lat/lng are strings so presence + range/NaN validation matches the /v1
-// handler; provide lat+lng OR address, not both.
+
+// ResolvePlaceRequest is a point (lat AND lng) or an address, not both.
+//
+// (-- lat/lng are strings in proto so presence + range/NaN validation matches
+// the /v1 handler; the OpenAPI type is number. --)
 message ResolvePlaceRequest {
-  string lat = 1;
-  string lng = 2;
-  string address = 3;
+  // Latitude in decimal degrees, -90 to 90. Requires `lng`.
+  string lat = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    type: NUMBER
+    format: "double"
+    example: "38.25"
+  }];
+  // Longitude in decimal degrees, -180 to 180 (negative in California).
+  // Requires `lat`.
+  string lng = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    type: NUMBER
+    format: "double"
+    example: "-120.35"
+  }];
+  // A US street address, geocoded with the Census geocoder. Include the city,
+  // state or ZIP for a reliable match.
+  string address = 3 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"1 Main St, Murphys, CA 95247\""}];
 }
+
+// ResolveQuery echoes the point that was resolved.
 message ResolveQuery {
-  double lat = 1;
-  double lng = 2;
+  // Latitude used for the lookup (the geocoded point for an address).
+  double lat = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "38.25"}];
+  // Longitude used for the lookup.
+  double lng = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "-120.35"}];
+  // The address the geocoder matched, normalized. Empty string for a lat/lng
+  // query.
   string matched_address = 3;
 }
+
+// ResolvePlaceResponse lists the places containing a point.
 message ResolvePlaceResponse {
+  // The point that was resolved.
   ResolveQuery query = 1;
+  // Containing places, most specific first. Empty when the point is outside
+  // every place.
   repeated Place places = 2;
 }
+
+// ListScannersRequest optionally scopes the scanner list.
 message ListScannersRequest {
-  string place = 1;
+  // An AREA place (slug or id) returns that area's feeds. Any other place, or
+  // none, returns every feed.
+  string place = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"ebbetts-pass\""}];
 }
+
+// Scanner is one Broadcastify audio feed.
 message Scanner {
-  string feed_id = 1;
-  string channel_label = 2;
-  string agency = 3;
-  string broadcastify_url = 4;
+  // Broadcastify feed id.
+  string feed_id = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"13524\""}];
+  // What the feed carries.
+  string channel_label = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"Sheriff / CAL FIRE Dispatch\""}];
+  // Agencies heard on it.
+  string agency = 3 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"Calaveras SO / CAL FIRE\""}];
+  // Listening page on Broadcastify.
+  string broadcastify_url = 4 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    format: "uri"
+    example: "\"https://www.broadcastify.com/listen/feed/13524\""
+  }];
 }
+
+// ScannerList is the scanner feeds.
 message ScannerList {
+  // Feeds, in configuration order.
   repeated Scanner scanners = 1;
 }
+
+// ListCamerasRequest optionally scopes the camera list.
 message ListCamerasRequest {
-  string place = 1;
+  // Only cameras within 25 km of this place (slug or id), nearest first.
+  // Default: every camera near any coverage area.
+  string place = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"sonora\""}];
 }
+
 // Camera is one Caltrans CCTV camera. Every listed camera is in service and has
 // an image; an out-of-service camera is dropped, not flagged.
 message Camera {
-  string id = 1;                    // "d10-172": Caltrans district + the portal's camera index
-  string name = 2;                  // "EB 108 W/O Soulsbyville Rd"
-  string nearby_place = 3;          // "Soulsbyville"
-  string county = 4;                // "Tuolumne"
-  string route = 5;                 // "SR-108", "US-395"
-  string direction = 6;             // "East" | "West" | "North" | "South"; may be empty
+  // Camera id, `d{district}-{index}`.
+  string id = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"d10-172\""}];
+  // Caltrans's camera name.
+  string name = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"EB 108 W/O Soulsbyville Rd\""}];
+  // Nearest community, per Caltrans.
+  string nearby_place = 3 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"Soulsbyville\""}];
+  // County, per Caltrans.
+  string county = 4 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"Tuolumne\""}];
+  // Route, e.g. "SR-108", "US-395".
+  string route = 5 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"SR-108\""}];
+  // Direction the camera faces along the route. Empty string when not given.
+  string direction = 6 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    example: "\"East\""
+    enum: ["", "North", "South", "East", "West"]
+  }];
+  // Camera position.
   LatLng location = 7;
-  int32 elevation_feet = 8;
-  string image_url = 9;             // the current snapshot JPEG on cwwp2.dot.ca.gov
-  int32 image_refresh_minutes = 10; // how often Caltrans replaces the snapshot; 0 = not reported
-  string stream_url = 11;           // HLS playlist (.m3u8); empty for an image-only camera
-  string description = 12;          // Caltrans's note on the view, e.g. "Looking South"; usually empty
-  // Metres from the requested place — or, without ?place, from the nearest
+  // Elevation in feet.
+  int32 elevation_feet = 8 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "2650"}];
+  // Current snapshot JPEG, hosted by Caltrans (cwwp2.dot.ca.gov).
+  string image_url = 9 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {format: "uri"}];
+  // How often Caltrans replaces the snapshot, in minutes. 0 when not reported.
+  int32 image_refresh_minutes = 10 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "5"}];
+  // HLS playlist (.m3u8) for live video. Empty string for an image-only camera.
+  string stream_url = 11 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {format: "uri"}];
+  // Caltrans's note on the view, e.g. "Looking South". Usually an empty string.
+  string description = 12;
+  // Metres from the requested place, or, without `place`, from the nearest
   // coverage area. 0 means inside it.
-  int32 distance_meters = 13;
+  int32 distance_meters = 13 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "1200"}];
 }
+
+// CameraList is the camera directory.
 message CameraList {
-  repeated Camera cameras = 1;      // nearest first, then by id
-  // OK | STALE | UNAVAILABLE — the camera LIST's health, the same honesty
-  // field the map layers carry. STALE: served from an older fetch (or a
-  // configured district is missing). UNAVAILABLE: no list has been fetched
-  // yet, or no camera districts are configured.
-  string source_status = 2;
-  // When the served list was fetched. Unset when source_status is OK.
+  // Cameras, nearest first, then by id. Empty when none is nearby.
+  repeated Camera cameras = 1;
+  // Health of the camera list. STALE: served from an older fetch, or a
+  // configured district is missing. UNAVAILABLE: no list fetched yet, or no
+  // camera districts configured.
+  string source_status = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    example: "\"OK\""
+    enum: ["OK", "STALE", "UNAVAILABLE"]
+  }];
+  // When the served list was fetched. `null` when `sourceStatus` is OK.
   google.protobuf.Timestamp last_source_update = 3;
-  string attribution = 4;           // "Caltrans"
+  // Attribution to display.
+  string attribution = 4 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"Caltrans\""}];
 }
+
+// GetConditionsRequest optionally scopes the conditions.
 message GetConditionsRequest {
-  string place = 1;
+  // Only weather locations inside this place's bounding box (slug or id). Does
+  // not filter `fireWeather`.
+  string place = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"calaveras-county\""}];
 }
+
+// WeatherConditions is current weather at one location, from OpenWeatherMap.
+// Whole numbers, metric units. A value that could not be read is 0.
 message WeatherConditions {
-  string location_id = 1;
-  string location_name = 2;
-  string weather_main = 3;
-  string weather_description = 4;
-  string weather_icon = 5;
-  int32 temperature_celsius = 6;
-  int32 feels_like_celsius = 7;
-  int32 humidity_percent = 8;
-  int32 wind_speed_kmh = 9;
-  int32 wind_direction_degrees = 10;
-  int32 visibility_km = 11;
+  // Location id; joins to `WeatherForecast.locationId`.
+  string location_id = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"murphys\""}];
+  // Display name.
+  string location_name = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"Murphys, CA\""}];
+  // OpenWeatherMap condition group: "Clear", "Clouds", "Rain", "Snow",
+  // "Thunderstorm", "Drizzle", "Mist", ...
+  string weather_main = 3 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"Clear\""}];
+  // OpenWeatherMap description, lowercase, e.g. "clear sky".
+  string weather_description = 4 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"clear sky\""}];
+  // OpenWeatherMap icon code; the image is
+  // `https://openweathermap.org/img/wn/{icon}@2x.png`.
+  string weather_icon = 5 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"01n\""}];
+  // Air temperature, degrees Celsius.
+  int32 temperature_celsius = 6 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "10"}];
+  // Feels-like temperature, degrees Celsius.
+  int32 feels_like_celsius = 7 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "9"}];
+  // Relative humidity, percent.
+  int32 humidity_percent = 8 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "75"}];
+  // Wind speed, km/h.
+  int32 wind_speed_kmh = 9 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "7"}];
+  // Direction the wind blows FROM, degrees clockwise from north.
+  int32 wind_direction_degrees = 10 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "30"}];
+  // Visibility, km (OpenWeatherMap caps it at 10).
+  int32 visibility_km = 11 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "10"}];
 }
+
+// FireWeatherConditions is the region's fire-weather state, from issued NWS
+// products only. It never claims a Red Flag Warning that NWS has not issued.
 message FireWeatherConditions {
-  string state = 1; // normal | elevated | red-flag
+  // LOWERCASE state: `normal`, `elevated` (a Fire Weather Watch is in effect)
+  // or `red-flag` (a Red Flag Warning is in effect). Empty string when the
+  // state could not be determined.
+  string state = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    example: "\"normal\""
+    enum: ["normal", "elevated", "red-flag", ""]
+  }];
+  // The NWS product's headline. Empty string when the state is normal.
   string headline = 2;
+  // NWS fire-weather zones under the product. Empty when normal.
   repeated string zones = 3;
 }
-// ForecastPeriod is one hourly step of a location's fire-weather forecast (NWS
-// gridpoint). Absent numeric fields serialize as 0, like WeatherConditions.
+
+// ForecastPeriod is one hour of a location's forecast (NWS gridpoint data),
+// rounded to whole numbers. A value NWS did not give is 0.
 message ForecastPeriod {
-  google.protobuf.Timestamp time = 1;      // hourly period start, UTC
-  int32 temperature_celsius = 2;
-  int32 humidity_percent = 3;              // relative humidity
-  int32 wind_speed_kmh = 4;
-  int32 wind_direction_degrees = 5;
-  int32 wind_gust_kmh = 6;
+  // Start of the hour, UTC.
+  google.protobuf.Timestamp time = 1;
+  // Temperature, degrees Celsius.
+  int32 temperature_celsius = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "12"}];
+  // Relative humidity, percent.
+  int32 humidity_percent = 3 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "64"}];
+  // Sustained wind speed, km/h.
+  int32 wind_speed_kmh = 4 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "6"}];
+  // Direction the wind blows FROM, degrees clockwise from north.
+  int32 wind_direction_degrees = 5 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "80"}];
+  // Wind gust, km/h.
+  int32 wind_gust_kmh = 6 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "13"}];
 }
-// WeatherForecast is a location's short-range fire-weather forecast: the raw NWS
-// gridpoint series (wind/gust/RH/temp) plus an at-a-glance summary. Informational
-// only — it never implies a fire-weather WARNING (issued products are in
-// FireWeatherConditions). See docs/design/fire-weather-forecast-design.md.
+
+// WeatherForecast is a location's short-range forecast: the hourly NWS gridpoint
+// series (wind, gust, humidity, temperature) plus an at-a-glance summary.
+// Informational only: it never implies a fire-weather warning (issued products
+// are in `fireWeather`).
+//
+// (-- See docs/design/fire-weather-forecast-design.md. --)
 message WeatherForecast {
-  string location_id = 1;                  // joins to WeatherConditions.location_id
-  string source = 2;                       // e.g. "NWS (STO gridpoint)"
-  google.protobuf.Timestamp issued_at = 3; // grid update time
-  int32 horizon_hours = 4;
+  // Location id; joins to `WeatherConditions.locationId`.
+  string location_id = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"murphys\""}];
+  // Data source and NWS grid cell.
+  string source = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"NWS (STO 73,42)\""}];
+  // When NWS last updated the grid. Can be `null`.
+  google.protobuf.Timestamp issued_at = 3;
+  // Hours covered by `periods`.
+  int32 horizon_hours = 4 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "48"}];
+  // Hourly periods, in time order.
   repeated ForecastPeriod periods = 5;
-  int32 peak_wind_gust_kmh = 6;            // summary: max over the horizon
+  // Highest wind gust over the horizon, km/h.
+  int32 peak_wind_gust_kmh = 6 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "17"}];
+  // When that peak gust is forecast. Can be `null`.
   google.protobuf.Timestamp peak_wind_gust_at = 7;
-  int32 min_humidity_percent = 8;          // summary: min over the horizon
+  // Lowest relative humidity over the horizon, percent. 0 when NWS gave none.
+  int32 min_humidity_percent = 8 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "33"}];
 }
+
+// Conditions is current, non-event state.
 message Conditions {
+  // Current weather per location.
   repeated WeatherConditions weather = 1;
+  // The region's fire-weather state. Region-wide, whatever `place` was asked.
+  // Can be `null` when the weather service has no fire-weather reading.
   FireWeatherConditions fire_weather = 2;
+  // When the weather data was last refreshed.
   google.protobuf.Timestamp last_updated = 3;
-  repeated WeatherForecast forecast = 4;   // per-location, joins by location_id
+  // Per-location forecasts, joined to `weather` by `locationId`. A location
+  // whose forecast could not be fetched is simply missing here.
+  repeated WeatherForecast forecast = 4;
 }
+
+// ListSourcesRequest takes no parameters.
 message ListSourcesRequest {}

@@ -47,7 +47,11 @@ type meshLinksResponse struct {
 // reliability weight so an intermittent mesh reads honestly.
 func (s *Service) serveMeshLinks(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	window := parseMeshWindow(r.URL.Query().Get("window"))
+	window, err := parseMeshWindow(r.URL.Query().Get("window"))
+	if err != nil {
+		invalidArgument(w, err.Error())
+		return
+	}
 	now := s.Now()
 	links, err := s.Store.MeshLinks(ctx, now.Add(-window))
 	if err != nil {
@@ -70,12 +74,28 @@ func (s *Service) serveMeshLinks(w http.ResponseWriter, r *http.Request) {
 			BestSnr:      l.BestSNR,
 		})
 	}
-	body, err := json.Marshal(resp)
+	// The validator covers the window and the links, not generatedAt (which
+	// moves every second and would defeat If-None-Match).
+	lj, err := json.Marshal(resp.Links)
 	if err != nil {
 		internal(ctx, w, err)
 		return
 	}
-	writeJSON(w, r, body, "application/json", maxAgeConditions)
+	body, err := json.Marshal(meshLinksWire{Window: resp.Window, GeneratedAt: resp.GeneratedAt, Links: lj})
+	if err != nil {
+		internal(ctx, w, err)
+		return
+	}
+	const contentType = "application/json"
+	writeJSON(w, r, body, dataETag(contentType, []byte(resp.Window), lj), contentType, maxAgeConditions)
+}
+
+// meshLinksWire is meshLinksResponse with the links already serialized, so
+// they are marshaled once for both the ETag and the body.
+type meshLinksWire struct {
+	Window      string          `json:"window"`
+	GeneratedAt string          `json:"generatedAt"`
+	Links       json.RawMessage `json:"links"`
 }
 
 // windowLabel renders the effective window as a clean "<n>h" for the common
@@ -98,7 +118,11 @@ func windowLabel(d time.Duration) string {
 // window (?window=, default 72h).
 func (s *Service) serveMeshLinkLayer(w http.ResponseWriter, r *http.Request, place *gridv1.Place) {
 	ctx := r.Context()
-	window := parseMeshWindow(r.URL.Query().Get("window"))
+	window, err := parseMeshWindow(r.URL.Query().Get("window"))
+	if err != nil {
+		invalidArgument(w, err.Error())
+		return
+	}
 
 	// Every located mesh node (global) → its source event, keyed by pubkey; then
 	// the subset attached to this place.
@@ -257,17 +281,22 @@ func meshNodeLabel(ev *gridv1.Event) string {
 	return pk
 }
 
-// parseMeshWindow parses the ?window= duration, defaulting and clamping.
-func parseMeshWindow(s string) time.Duration {
+// parseMeshWindow parses the ?window= duration: empty is the default, longer
+// than the retention ceiling is clamped, and anything that is not a positive Go
+// duration is an error naming what is accepted. It used to fall back to the
+// default silently, so a mistyped window came back as a real-looking 72h answer.
+func parseMeshWindow(s string) (time.Duration, error) {
 	if s == "" {
-		return defaultMeshWindow
+		return defaultMeshWindow, nil
 	}
 	d, err := time.ParseDuration(s)
 	if err != nil || d <= 0 {
-		return defaultMeshWindow
+		return 0, fmt.Errorf(
+			"invalid window %q: want a positive Go duration such as 24h, 72h (the default), 168h or 720h; windows over %s are clamped to it",
+			s, windowLabel(maxMeshWindow))
 	}
 	if d > maxMeshWindow {
-		return maxMeshWindow
+		return maxMeshWindow, nil
 	}
-	return d
+	return d, nil
 }

@@ -445,11 +445,10 @@ func gridSourceSeeds(cfg *config.Config) []store.SourceSeed {
 	// as its source (mesh events all stay on `meshcore`), so their disappearance
 	// sweep has nothing to act on.
 	//
-	// PollInterval is the mesh poller's cadence, which is the honest number: it is
-	// how often this row's health is re-evaluated, not how often the monitor
-	// reports — a push source has no poll interval of ours to state. StaleAfter is
-	// the reporter's own silence threshold rather than the store's 3x default.
-	meshTick := gridPollInterval(cfg, "meshcore")
+	// PollInterval is the cadence of the poller that re-evaluates this row's
+	// health (reporterCheckInterval), not how often the monitor reports — a push
+	// source has no poll interval of ours to state. StaleAfter is the reporter's
+	// own silence threshold rather than the store's 3x default.
 	for _, rep := range cfg.Grid.Ingest.Reporters {
 		name := rep.Name
 		if name == "" {
@@ -459,12 +458,38 @@ func gridSourceSeeds(cfg *config.Config) []store.SourceSeed {
 			ID:            rep.ID,
 			Name:          name,
 			Attribution:   "Operator-reported (" + rep.ID + ")",
-			PollInterval:  meshTick,
+			Kind:          gridv1.SourceKind_REPORTER,
+			PollInterval:  reporterCheckInterval(cfg, rep),
 			StaleAfter:    rep.StaleAfterOrDefault(),
 			Disappearance: store.DisappearanceExpire,
 		})
 	}
 	return seeds
+}
+
+// reporterCheckInterval is how often a reporter's health is re-evaluated: the
+// cadence of the poller that reads its stream. Mesh streams are merged by the
+// mesh poller and burn.line by the burn-status poller, which ticks hourly — so
+// stating the mesh tick for burn-line told clients its row was checked every
+// minute. A reporter on several streams is checked by whichever ticks first.
+func reporterCheckInterval(cfg *config.Config, rep config.Reporter) time.Duration {
+	var best time.Duration
+	for _, stream := range rep.Streams {
+		var d time.Duration
+		switch stream {
+		case pushingest.BurnStream:
+			d = gridPollInterval(cfg, "burnline", "calfire-burn")
+		default: // mesh.repeater, mesh.packet
+			d = gridPollInterval(cfg, "meshcore")
+		}
+		if best == 0 || d < best {
+			best = d
+		}
+	}
+	if best == 0 {
+		return gridPollInterval(cfg, "meshcore")
+	}
+	return best
 }
 
 // gridPollInterval is a poller's cadence: the fastest configured interval

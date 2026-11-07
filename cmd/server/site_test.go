@@ -40,6 +40,7 @@ func TestSiteEmbedContainsPages(t *testing.T) {
 		"map.html",
 		"history.html",
 		"docs.html",
+		"changelog.html",
 		// Shared assets and the vendored map lib must embed too.
 		"assets/app.css",
 		"assets/api.js",

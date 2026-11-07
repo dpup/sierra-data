@@ -1,0 +1,1300 @@
+# Hand-written half of the OpenAPI document served at /api/openapi.json.
+#
+# grid.proto describes the GridService RPCs; protoc-gen-openapiv2 turns that into
+# grid.swagger.json. This file describes everything the generator cannot see.
+# cmd/openapi-merge converts the generated file to OpenAPI 3.0, merges this file
+# in, validates the result and writes openapi.json (committed, embedded, served).
+#
+#   make openapi   # after editing this file
+#   make proto     # after editing grid.proto (runs openapi-merge too)
+#
+# Two sections, which differ only in who wins a collision with generated content
+# (rules in internal/openapispec/merge.go):
+#
+#   spec:      content this file OWNS: the hand-built routes, their schemas, the
+#              shared responses, the security scheme. A path or named component
+#              the generator also emits is a build ERROR, so a route that moves
+#              into grid.proto cannot be described twice.
+#   defaults:  annotations on GENERATED content (an error example on an RPC,
+#              codeName on google.rpc.Status). The generated value wins wherever
+#              it exists, so richer proto comments take over without an edit
+#              here; openapi-merge prints which defaults became unused.
+#              Annotating a path, operation or schema the generator no longer
+#              emits is a build ERROR.
+#
+# OpenAPI 3.0.3 throughout: generated schemas are #/components/schemas/<name>.
+# Examples are real production responses (trimmed) unless their summary says
+# "Illustrative"; kin-openapi validates each one against its schema.
+# TestHandBuiltRoutesAreDocumented (cmd/server) fails CI when a route is mounted
+# by hand without a path here.
+
+defaults:
+  info:
+    title: The Grid API
+    version: v1
+  # Public and keyless: no auth unless an operation says otherwise (only ingest does).
+  security: []
+
+  components:
+    schemas:
+      rpcStatus:
+        description: |
+          The error body of every JSON route: the RPCs (gRPC-Gateway rendering of
+          google.rpc.Status) and the hand-built GeoJSON, mesh-links and ingest
+          routes alike. Served with the HTTP status mapped from `code`
+          (3 INVALID_ARGUMENT -> 400, 5 NOT_FOUND -> 404, 13 INTERNAL -> 500,
+          14 UNAVAILABLE -> 503, ...). All four members are always present.
+        properties:
+          code:
+            description: Numeric gRPC status code (5 = NOT_FOUND).
+          codeName:
+            type: string
+            description: |
+              Canonical gRPC code name for `code`, e.g. `NOT_FOUND`,
+              `INVALID_ARGUMENT`, `INTERNAL`. Branch on this rather than the
+              message.
+            enum: [OK, CANCELLED, UNKNOWN, INVALID_ARGUMENT, DEADLINE_EXCEEDED,
+              NOT_FOUND, ALREADY_EXISTS, PERMISSION_DENIED, RESOURCE_EXHAUSTED,
+              FAILED_PRECONDITION, ABORTED, OUT_OF_RANGE, UNIMPLEMENTED, INTERNAL,
+              UNAVAILABLE, DATA_LOSS, UNAUTHENTICATED]
+          message:
+            description: Human-readable explanation. Not stable; do not parse.
+          details:
+            description: Structured error details. Usually empty.
+
+  # grid.proto describes each RPC's error statuses (description only); the
+  # merge completes them (error envelope, no body on a 304) and these defaults
+  # add what proto cannot: the 304 headers and real error bodies. They annotate
+  # the generated response objects in place. Never $ref a shared response here:
+  # a $ref beside the generated description is an invalid Response Object, and
+  # the build rejects it.
+  paths:
+    /api/v1/events:
+      get:
+        responses:
+          "304": &notModified
+            headers:
+              ETag: {$ref: "#/components/headers/ETag"}
+              Cache-Control: {$ref: "#/components/headers/CacheControl"}
+          "400":
+            content:
+              application/json:
+                examples:
+                  unknownLayer:
+                    summary: GET /api/v1/events?layer=bogus
+                    value: {"code": 3, "codeName": "INVALID_ARGUMENT", "message": "unknown layer: \"bogus\"", "details": []}
+                  invalidPageToken:
+                    summary: GET /api/v1/events?pageToken=garbage
+                    value: {"code": 3, "codeName": "INVALID_ARGUMENT", "message": "invalid page_token", "details": []}
+          "404": &unknownPlace
+            content:
+              application/json:
+                examples:
+                  unknownPlace:
+                    summary: "?place=nope"
+                    value: {"code": 5, "codeName": "NOT_FOUND", "message": "unknown place: \"nope\"", "details": []}
+    /api/v1/events/{id}:
+      get:
+        responses:
+          "304": *notModified
+          "404": &unknownEvent
+            content:
+              application/json:
+                examples:
+                  unknownEvent:
+                    summary: GET /api/v1/events/nope:1
+                    value: {"code": 5, "codeName": "NOT_FOUND", "message": "unknown event: \"nope:1\"", "details": []}
+    /api/v1/events/{id}/history:
+      get:
+        responses:
+          "304": *notModified
+          "404": *unknownEvent
+    /api/v1/history:
+      get:
+        responses:
+          "304": *notModified
+          "400":
+            content:
+              application/json:
+                examples:
+                  badTimestamp:
+                    summary: GET /api/v1/history?from=yesterday
+                    value: {"code": 3, "codeName": "INVALID_ARGUMENT", "message": "invalid from: \"yesterday\" is not RFC 3339", "details": []}
+          "404": *unknownPlace
+    /api/v1/places:
+      get:
+        responses:
+          "304": *notModified
+          "400":
+            content:
+              application/json:
+                examples:
+                  unknownKind:
+                    summary: GET /api/v1/places?kind=bogus
+                    value: {"code": 3, "codeName": "INVALID_ARGUMENT", "message": "unknown kind: \"bogus\"", "details": []}
+    /api/v1/places/{place}:
+      get:
+        responses:
+          "304": *notModified
+          "404": *unknownPlace
+    /api/v1/places/{place}/summary:
+      get:
+        responses:
+          "404": *unknownPlace
+    /api/v1/places:resolve:
+      get:
+        responses:
+          "400":
+            content:
+              application/json:
+                examples:
+                  noQuery:
+                    summary: GET /api/v1/places:resolve
+                    value: {"code": 3, "codeName": "INVALID_ARGUMENT", "message": "lat+lng or address query parameters required", "details": []}
+          "404":
+            content:
+              application/json:
+                examples:
+                  noMatch:
+                    summary: GET /api/v1/places:resolve?address=zzzzqqq%20nowhere
+                    value: {"code": 5, "codeName": "NOT_FOUND", "message": "no address match for \"zzzzqqq nowhere\" — try adding city/state/zip, or resolve by lat/lng", "details": []}
+    /api/v1/cameras:
+      get:
+        responses:
+          "304": *notModified
+          "404": *unknownPlace
+    /api/v1/conditions:
+      get:
+        responses:
+          "404": *unknownPlace
+    /api/v1/scanners:
+      get:
+        responses:
+          "404": *unknownPlace
+
+spec:
+  tags:
+    - name: Map layers
+      description: |
+        RFC 7946 GeoJSON, one FeatureCollection per place and layer, ready to hand
+        to MapLibre GL, Leaflet or OpenLayers. Hand-built (proto models geometry
+        poorly), so these routes are described here rather than generated.
+    - name: Ingest
+      description: |
+        The one authenticated WRITE endpoint, for operator-run monitors that push
+        data no upstream feed publishes. Not for UI clients.
+    - name: MCP
+      description: Model Context Protocol endpoint for LLM agents.
+    - name: Meta
+      description: This document.
+
+  components:
+    securitySchemes:
+      ingestBearer:
+        type: http
+        scheme: bearer
+        description: |
+          A per-reporter token issued by the operators (256-bit random, shown once).
+          Only its SHA-256 lives server-side. Identity comes from the token alone:
+          any reporter id in the body is ignored.
+
+    headers:
+      ETag:
+        description: |
+          Validator for conditional GET, weak (`W/"…"`) or strong. Send it back
+          verbatim as `If-None-Match` to get a `304 Not Modified` when nothing
+          changed.
+        schema: {type: string, example: "W/\"8b42f929e5b2b8d55ebb87120b4a12c6\""}
+      CacheControl:
+        description: Freshness lifetime of this response.
+        schema: {type: string, example: "public, max-age=60"}
+      RetryAfter:
+        description: Seconds to wait before retrying.
+        schema: {type: integer, example: 1}
+
+    parameters:
+      Place:
+        name: place
+        in: path
+        required: true
+        description: |
+          A place slug (`calaveras-county`, `ebbetts-pass`, `hwy4-murphys-arnold`)
+          or namespaced id (`county:calaveras-county`). Slugs are globally unique.
+          `GET /api/v1/places` lists them; `GET /api/v1/places:resolve` maps an
+          address or lat/lng to the places containing it.
+        schema: {type: string}
+        examples:
+          area: {value: ebbetts-pass, summary: The whole service area}
+          county: {value: calaveras-county}
+          namespacedId: {value: "county:tuolumne-county"}
+          town: {value: arnold}
+          corridor: {value: hwy4-murphys-arnold}
+      IfNoneMatch:
+        name: If-None-Match
+        in: header
+        required: false
+        description: An `ETag` from an earlier response, for a `304` revalidation.
+        schema: {type: string}
+      MeshWindow:
+        name: window
+        in: query
+        required: false
+        description: |
+          Recency window for relay links: a positive Go duration. The documented
+          choices are `24h`, `72h` (the default), `168h` and `720h`; any positive
+          duration works (`90m`), and values above `9600h` (400 days) are
+          clamped. Anything else (`abc`, `0`, `-1h`) is a `400
+          INVALID_ARGUMENT`. `/api/v1/mesh/links` echoes the applied window in
+          `window`.
+        schema: {type: string, default: 72h, example: 168h}
+        examples:
+          day: {value: 24h}
+          default: {value: 72h}
+          week: {value: 168h}
+          month: {value: 720h}
+
+    responses:
+      NotModified:
+        description: |
+          The `If-None-Match` validator still matches; reuse your cached body.
+          No body.
+        headers:
+          ETag: {$ref: "#/components/headers/ETag"}
+          Cache-Control: {$ref: "#/components/headers/CacheControl"}
+      HandoffUnavailable:
+        description: |
+          The server is handing over to a new instance during a deploy. Retry after
+          `Retry-After` seconds. Plain text, not JSON.
+        headers:
+          Retry-After: {$ref: "#/components/headers/RetryAfter"}
+        content:
+          text/plain:
+            schema: {type: string}
+            example: "service is handing over to a new instance; retry\n"
+      InvalidWindow:
+        description: "`window` is not a positive Go duration (`abc`, `0`, `-1h`)."
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/rpcStatus"}
+            examples:
+              badWindow:
+                summary: GET /api/v1/mesh/links?window=abc (message text illustrative)
+                value: {"code": 3, "codeName": "INVALID_ARGUMENT", "message": "invalid window \"abc\": want a positive duration such as 72h", "details": []}
+      Internal:
+        description: Server-side failure. The real error is logged, never sent.
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/rpcStatus"}
+            example: {"code": 13, "codeName": "INTERNAL", "message": "internal error", "details": []}
+
+    schemas:
+      # ---------------------------------------------------------------- GeoJSON
+
+      MapFeatureCollection:
+        type: object
+        description: |
+          An RFC 7946 FeatureCollection for one place and one layer. `metadata` is
+          an RFC 7946 §6.1 foreign member that map libraries ignore; read it for
+          source health and attribution before drawing.
+        required: [type, features, metadata]
+        properties:
+          type: {type: string, enum: [FeatureCollection]}
+          features:
+            type: array
+            description: Possibly empty. Empty with `sourceStatus` OK means confirmed-empty; empty with UNAVAILABLE means unknown.
+            items: {$ref: "#/components/schemas/MapFeature"}
+          metadata: {$ref: "#/components/schemas/MapLayerMetadata"}
+
+      MapLayerMetadata:
+        type: object
+        description: Provenance and freshness of the whole layer.
+        required: [layer, area, generatedAt, sourceStatus, schemaVersion]
+        properties:
+          layer:
+            type: string
+            description: The lowercase layer slug from the URL (not the UPPERCASE `properties.layer`).
+            enum: [road_incident, chain_control, road_segment, message_sign, weather_alert,
+              fire_weather, earthquake, wildfire, evacuation, power, mesh_node, mesh_link, camera]
+          area: {type: string, description: "Slug of the requested place (even when it was requested by id)."}
+          generatedAt: {type: string, format: date-time, description: "When this body was rendered. Not part of the ETag."}
+          sourceStatus:
+            type: string
+            enum: [OK, STALE, UNAVAILABLE]
+            description: |
+              Health of the feeds behind this layer, the fail-loud contract:
+              `OK` - current and complete. `STALE` - upstream is failing (or one
+              of two feeds is); these features are the last good data, as of
+              `lastSourceUpdate`. Show them with a caveat. `UNAVAILABLE` - nothing
+              trustworthy to show; `features` is always empty and the layer's
+              state is UNKNOWN. Never render it as "no hazards".
+          lastSourceUpdate:
+            type: string
+            format: date-time
+            description: Last successful upstream fetch. Present only when `sourceStatus` is not OK and a success is on record.
+          attribution: {type: string, description: "Credit line to render with the layer whenever it is drawn. Parts are joined with \" · \"."}
+          sourceUrl:
+            type: string
+            format: uri
+            description: The authoritative viewer for the layer, where one exists. Always set on `evacuation` (Genasys Protect), in every state.
+          schemaVersion: {type: integer, enum: [1], description: "Envelope schema version; bumps only on a breaking envelope change."}
+
+      MapFeature:
+        type: object
+        description: An RFC 7946 Feature.
+        required: [type, geometry, properties]
+        properties:
+          type: {type: string, enum: [Feature]}
+          geometry: {$ref: "#/components/schemas/MapGeometry"}
+          properties: {$ref: "#/components/schemas/MapFeatureProperties"}
+
+      MapGeometry:
+        type: object
+        nullable: true
+        description: |
+          An RFC 7946 geometry, or `null` for a feature with no location (NWS zone
+          alerts and the fire-weather region banner): render those as a banner
+          or list row, not a shape.
+
+          A position is `[longitude, latitude]`, longitude FIRST (RFC 7946
+          §3.1.1), the reverse of the `{lat, lng}` objects on the JSON RPCs.
+          Store-derived positions are trimmed to 5 decimals (~1 m).
+
+          Which types appear: Point (most layers: incidents, signs, cameras,
+          chain controls, quakes, mesh nodes, forecast points, unmapped fires);
+          LineString (road_segment routes, mesh_link edges); Polygon or
+          MultiPolygon (power outage areas, evacuation zones, fire perimeters).
+          Geometry passed through from an upstream ArcGIS feed may be any RFC 7946
+          type except GeometryCollection.
+        required: [type, coordinates]
+        properties:
+          type:
+            type: string
+            enum: [Point, MultiPoint, LineString, MultiLineString, Polygon, MultiPolygon]
+          coordinates:
+            type: array
+            description: |
+              Nesting depends on `type`:
+              Point `[lng, lat]`;
+              MultiPoint and LineString `[[lng, lat], ...]` (a LineString has 2+);
+              MultiLineString and Polygon `[[[lng, lat], ...], ...]` (a Polygon's
+              first ring is the exterior; every ring closes on its first position);
+              MultiPolygon `[[[[lng, lat], ...], ...], ...]`.
+            items: {}
+            example: [-120.38806, 37.98152]
+
+      MapFeatureProperties:
+        type: object
+        description: |
+          The envelope shared by every feature of every layer, plus exactly one
+          per-kind block named after the layer (`incident`, `road`,
+          `chainControl`, `messageSign`, `weather`, `fireWeather`, `earthquake`,
+          `wildfire`, `evacuation`, `power`, `mesh`, `meshLink`, `camera`).
+          Optional members are omitted, never `""` or `0`, when they have no value.
+        required: [id, layer, kind, severity, severityRank, headline, source]
+        properties:
+          id:
+            type: string
+            description: |
+              Stable feature id. On event-backed layers it IS the event id, so
+              `GET /api/v1/events/{id}` returns the full record and its history
+              (`wildfire`, `evacuation`, `weather_alert`, `earthquake`,
+              `road_incident`, `power`, `mesh_node`). Condition layers use their
+              own ids (`road:…`, `cc:…`, `cms:…`, `fw:…`, `mesh_link:…`, `d10-…`).
+          layer:
+            type: string
+            description: |
+              UPPERCASE layer of THIS feature. Usually the URL layer upper-cased,
+              except that the `mesh_link` layer mixes `MESH_LINK` edges and
+              `MESH_NODE` points. Only some values equal an Event `layer` enum
+              (`v1Layer`): WILDFIRE, EVACUATION, WEATHER_ALERT, EARTHQUAKE,
+              ROAD_INCIDENT and POWER do. MESH_NODE is the Event layer `MESH`.
+              ROAD_SEGMENT, CHAIN_CONTROL, MESSAGE_SIGN, MESH_LINK and CAMERA are
+              map-only. FIRE_WEATHER exists in the enum but these features are
+              conditions, not events.
+            enum: [ROAD_INCIDENT, CHAIN_CONTROL, ROAD_SEGMENT, MESSAGE_SIGN, WEATHER_ALERT,
+              FIRE_WEATHER, EARTHQUAKE, WILDFIRE, EVACUATION, POWER, MESH_NODE, MESH_LINK, CAMERA]
+          kind:
+            type: string
+            description: Human label for the feature type.
+            example: Road incident
+            enum: [Road incident, Chain control, Road segment, Message sign, Weather alert,
+              Fire weather, Fire-weather forecast, Earthquake, Wildfire, Evacuation,
+              Power outage, Public Safety Power Shutoff, Mesh node, Relay link, Traffic camera]
+          category:
+            type: string
+            description: |
+              Sub-type within the layer. Values by layer:
+              road_incident `incident` (CHP) | `closure` (Caltrans planned lane closure);
+              chain_control `r1` | `r2` | `r3` | `closed`;
+              message_sign `message` | `blank` | `unknown`;
+              weather_alert the NWS event name (`Heat Advisory`, `Red Flag Warning`);
+              fire_weather banner `normal` | `elevated` | `red-flag` (absent on forecast points);
+              wildfire `wildfire`; evacuation the lowercase level (`order`, `warning`, …);
+              power `unplanned` | `planned` | `psps`;
+              mesh_node the node type `repeater` | `companion` | `room_server` | `sensor`.
+              Absent on road_segment, camera and mesh_link edges.
+          severity:
+            type: string
+            enum: [INFO, MINOR, MODERATE, SEVERE, EXTREME]
+            description: |
+              Unified severity. `message_sign`, `camera`, `mesh_node`, `mesh_link`
+              and fire-weather forecast points are always `INFO` (context, not
+              hazards). Most power outages are INFO too: the median outage affects
+              one customer.
+          severityRank:
+            type: integer
+            minimum: 0
+            maximum: 4
+            description: "Numeric severity for sorting and styling: INFO 0, MINOR 1, MODERATE 2, SEVERE 3, EXTREME 4."
+          headline: {type: string, description: "One-line label for a popup or list row."}
+          description:
+            type: string
+            description: |
+              Longer text. road_incident: the readable narrative (AI-enhanced for
+              CHP, composed from Caltrans fields for closures). evacuation: Cal OES
+              public info, verbatim, never paraphrase. weather_alert: the NWS text,
+              verbatim. road_segment: why a road is not OPEN.
+          summary:
+            type: string
+            description: AI-written plain-language summary (same as Event.summary). Absent when the event has none; fall back to `description`.
+          summaryEnhanced:
+            type: object
+            description: Present with `summary` when a model wrote it, so a UI can label it as machine-written.
+            properties:
+              enhancedAt: {type: string, format: date-time}
+          status:
+            type: string
+            description: |
+              Meaning depends on the layer, and it is NOT always the Event
+              `EventStatus`:
+              - wildfire, weather_alert, earthquake, road_incident, power,
+                mesh_node: the lifecycle `ACTIVE` or `SCHEDULED` (an advance watch,
+                a planned closure window not yet set up, a planned shutoff). Map
+                layers never carry RESOLVED or EXPIRED features; those are in
+                `/api/v1/history`.
+              - evacuation: the evacuation LEVEL `ORDER` | `WARNING` | `ADVISORY` |
+                `SHELTER_IN_PLACE`.
+              - road_segment: the road status `OPEN` | `CLOSED` | `RESTRICTED` |
+                `MAINTENANCE` (absent until the road has been measured).
+              - absent on chain_control, message_sign, fire_weather, camera and
+                mesh_link edges.
+            enum: [ACTIVE, SCHEDULED, ORDER, WARNING, ADVISORY, SHELTER_IN_PLACE,
+              OPEN, CLOSED, RESTRICTED, MAINTENANCE, UNSPECIFIED]
+          effective: {type: string, format: date-time, description: "When it began or takes effect (a SCHEDULED feature's start)."}
+          expires: {type: string, format: date-time, description: "Upstream expiry (weather alerts, fire-weather products). Not set from PG&E restoration estimates."}
+          updatedAt: {type: string, format: date-time, description: "Last content revision. For mesh nodes this is NOT liveness; use mesh.lastHeardAt / lastRelayedAt."}
+          areaLabel: {type: string, description: "Where, in words (\"SR 4 at Country Club Drive\", \"Murphys, CA\")."}
+          source: {$ref: "#/components/schemas/MapFeatureSource"}
+          incident: {$ref: "#/components/schemas/MapIncidentProps"}
+          road: {$ref: "#/components/schemas/MapRoadProps"}
+          chainControl: {$ref: "#/components/schemas/MapChainControlProps"}
+          messageSign: {$ref: "#/components/schemas/MapMessageSignProps"}
+          weather: {$ref: "#/components/schemas/MapWeatherProps"}
+          fireWeather: {$ref: "#/components/schemas/MapFireWeatherProps"}
+          earthquake: {$ref: "#/components/schemas/MapEarthquakeProps"}
+          wildfire: {$ref: "#/components/schemas/MapWildfireProps"}
+          evacuation: {$ref: "#/components/schemas/MapEvacuationProps"}
+          power: {$ref: "#/components/schemas/MapPowerProps"}
+          mesh: {$ref: "#/components/schemas/MapMeshProps"}
+          meshLink: {$ref: "#/components/schemas/MapMeshLinkProps"}
+          camera: {$ref: "#/components/schemas/MapCameraProps"}
+
+      MapFeatureSource:
+        type: object
+        description: The upstream feed this feature came from. Render `attribution` with the feature.
+        required: [id, name]
+        properties:
+          id:
+            type: string
+            example: caltrans
+            description: |
+              The upstream's id. Values today: `calfire`, `firis`, `caloes`,
+              `nws`, `usgs`, `chp`, `caltrans`, `google`, `pge`, `psps`,
+              `meshcore`. On the event-backed layers (`wildfire`,
+              `evacuation`, `weather_alert`, `earthquake`, `road_incident`,
+              `power`, `mesh_node`) it is the event's `provenance.sourceId` and
+              has a row in `GET /api/v1/sources` whose `status` is that feed's
+              health.
+
+              The condition layers (`road_segment`, `chain_control`,
+              `message_sign`, `fire_weather`), and `camera` and `mesh_link`, are
+              fetched or computed on request, outside the ingest scheduler that
+              writes the registry. `google` (on `road_segment`) has no registry
+              row at all. `caltrans` and `nws` do have rows, but those track the
+              scheduled lane-closure and alert polls, not the live fetch behind
+              these layers. For these layers judge health by the layer's
+              `metadata.sourceStatus` (the summary's `roads` and `fire` domains
+              fold the same statuses in), never by a missing or unrelated
+              registry row.
+          name: {type: string, example: CHP / Caltrans}
+          url: {type: string, format: uri, description: "Deep link to the upstream record or viewer, when there is one."}
+          attribution: {type: string, example: quickmap.dot.ca.gov}
+          fetchedAt: {type: string, format: date-time}
+
+      MapIncidentProps:
+        type: object
+        description: road_incident block.
+        properties:
+          logNumber: {type: string, description: "CHP log number, or the Caltrans closure id."}
+          closure: {$ref: "#/components/schemas/MapClosureProps"}
+      MapClosureProps:
+        type: object
+        description: |
+          Set on Caltrans planned lane closures (category `closure`) only. One
+          feature per work window. `plannedEnd` is an estimate crews overrun: an
+          ACTIVE closure past it is still on the road until Caltrans records it
+          picked up.
+        required: [windowId]
+        properties:
+          windowId: {type: string}
+          closureType: {type: string, example: Lane}
+          workType: {type: string, example: Drainage Work}
+          lanesClosed: {type: string, description: "Caltrans's lane list, verbatim., example: \"1, 2, LShoulder, RShoulder\""}
+          totalLanes: {type: integer}
+          estimatedDelayMinutes: {type: integer}
+          plannedStart: {type: string, format: date-time}
+          plannedEnd: {type: string, format: date-time}
+          setUpAt: {type: string, format: date-time, description: "When the crew reported the closure set up. Absent while SCHEDULED."}
+      MapRoadProps:
+        type: object
+        description: road_segment block (Google Routes travel time over a configured route). The numbers are absent, not 0, until the route has been measured.
+        required: [roadId]
+        properties:
+          roadId: {type: string}
+          congestion: {type: string, enum: [CLEAR, LIGHT, MODERATE, HEAVY, SEVERE, UNSPECIFIED]}
+          delayMinutes: {type: integer, description: "Minutes over free-flow. 0 is a real reading."}
+          durationMinutes: {type: integer}
+          distanceKm: {type: integer}
+      MapChainControlProps:
+        type: object
+        description: chain_control block. Severity follows the level (R1 MINOR, R2 MODERATE, R3 SEVERE); a seasonal pass closure (`category` closed) is MINOR.
+        properties:
+          level: {type: string, enum: [R1, R2, R3], description: "Absent on a closure."}
+          highway: {type: string}
+          direction: {type: string, example: Eastbound}
+      MapMessageSignProps:
+        type: object
+        description: message_sign block - what a Caltrans changeable message sign is showing, verbatim. Context, not a hazard.
+        required: [signId, district, inService]
+        properties:
+          signId: {type: string, example: V42}
+          district: {type: integer, example: 10}
+          route: {type: string, example: SR-108}
+          direction: {type: string, example: East}
+          inService: {type: boolean}
+          pages:
+            type: array
+            description: One or two pages of exactly three lines; a blank line is "". Absent when the sign is blank or unreadable.
+            items:
+              type: array
+              minItems: 3
+              maxItems: 3
+              items: {type: string}
+      MapWeatherProps:
+        type: object
+        description: weather_alert block. The NWS CAP fields are verbatim; `nwsSeverity` is NWS's own scale, distinct from the unified `severity`.
+        properties:
+          event: {type: string, example: Heat Advisory}
+          source: {type: string, enum: [NWS]}
+          zones: {type: array, items: {type: string}, example: [CAZ137]}
+          nwsSeverity: {type: string, enum: [Extreme, Severe, Moderate, Minor, Unknown]}
+          certainty: {type: string, example: Likely}
+          urgency: {type: string, example: Expected}
+          instruction: {type: string, description: "NWS instruction text. Never paraphrase."}
+      MapFireWeatherProps:
+        type: object
+        description: |
+          fire_weather block. The region banner (id `fw:region`, null geometry)
+          carries the ISSUED `state`; only NWS products set it (Fire Weather Watch
+          -> elevated, Red Flag Warning -> red-flag). Forecast points (id
+          `fw:forecast:<location>`) carry `forecast` instead, are always INFO and
+          never imply a warning.
+        properties:
+          state: {type: string, enum: [normal, elevated, red-flag]}
+          sourceEvent: {type: string, description: "The NWS product behind the state, e.g. Red Flag Warning."}
+          zones: {type: array, items: {type: string}}
+          forecast:
+            type: object
+            properties:
+              source: {type: string, example: "NWS (STO 73,42)"}
+              issuedAt: {type: string, format: date-time}
+              horizonHours: {type: integer}
+              peakWindGustKmh: {type: integer}
+              peakWindGustAt: {type: string, format: date-time}
+              minHumidityPercent: {type: integer}
+      MapEarthquakeProps:
+        type: object
+        description: earthquake block (USGS).
+        required: [magnitude, depthKm]
+        properties:
+          magnitude: {type: number}
+          depthKm: {type: number}
+          felt: {type: integer, description: "USGS \"Did You Feel It?\" reports."}
+      MapWildfireProps:
+        type: object
+        description: wildfire block (CAL FIRE incidents and FIRIS perimeters).
+        required: [containment, hasPerimeter]
+        properties:
+          acres: {type: number}
+          containment: {type: integer, minimum: 0, maximum: 100, description: "Percent contained."}
+          county: {type: string}
+          cause: {type: string}
+          hasPerimeter: {type: boolean, description: "True when the geometry is a mapped perimeter rather than a point."}
+      MapEvacuationProps:
+        type: object
+        description: evacuation block (Cal OES / Genasys zones). Life-safety; reference only, link `source.url`.
+        required: [level]
+        properties:
+          zoneId: {type: string}
+          level: {type: string, enum: [ORDER, WARNING, ADVISORY, SHELTER_IN_PLACE]}
+          eventType: {type: string}
+          county: {type: string}
+      MapPowerProps:
+        type: object
+        description: |
+          power block, both PG&E feeds. `category` unplanned|planned sets the
+          outage fields; `psps` (Public Safety Power Shutoff) sets the PSPS fields.
+          `estimatedRestoration`, `deEnergizationEnd` and `allClear` are PG&E
+          ESTIMATES that are routinely overrun; label them as estimates.
+        properties:
+          outageId: {type: string}
+          cause: {type: string, description: "Raw PG&E cause code, often blank."}
+          customersAffected: {type: integer}
+          crewStatus: {type: string}
+          estimatedRestoration: {type: string, format: date-time}
+          eventName: {type: string}
+          stage: {type: string, enum: [Watch, Warning]}
+          medicalBaselineAffected: {type: integer, description: "Customers whose medical equipment depends on grid power."}
+          deEnergizationStart: {type: string, format: date-time}
+          deEnergizationEnd: {type: string, format: date-time}
+          allClear: {type: string, format: date-time, description: "PG&E's PLANNED all-clear, not proof the shutoff ended."}
+      MapMeshProps:
+        type: object
+        description: |
+          mesh_node block (MeshCore node presence; also on the MESH_NODE points of
+          the mesh_link layer). Signal readings are absent when no bridge heard the
+          node; a present 0 is a reading. A node's freshness is the later of
+          `lastHeardAt` and `lastRelayedAt`, never the feature's `updatedAt`.
+        required: [publicKey]
+        properties:
+          publicKey: {type: string, description: "64-hex Ed25519 public key; joins to MeshLink a/b."}
+          nodeType: {type: string, enum: [companion, repeater, room_server, sensor]}
+          name: {type: string}
+          snr: {type: number, description: "Last-heard SNR, dB."}
+          rssi: {type: integer, description: "Last-heard RSSI, dBm."}
+          hopCount: {type: integer, description: "Hops on the last heard path. 0 = heard direct."}
+          gateways: {type: array, items: {type: string}, description: "Public keys of the observers that heard the node."}
+          lastHeardAt: {type: string, format: date-time, description: "When the node's own signed advert last reached the Grid."}
+          lastRelayedAt: {type: string, format: date-time, description: "When a packet this node relayed last reached the Grid."}
+          inRegion: {type: boolean, description: "mesh_link layer only: true = inside the requested place, false = a neighbour outside it, included because it links in."}
+          reachability: {type: string, enum: [REACHABLE, UNREACHABLE], description: "An operator monitor's verdict on the node's admin interface. Absent when no monitor watches it."}
+          admin: {$ref: "#/components/schemas/MapMeshAdminProps"}
+      MapMeshAdminProps:
+        type: object
+        description: The last sample an operator monitor read off the node itself. Gauges the device did not report are absent, never 0.
+        required: [reporterId]
+        properties:
+          reporterId: {type: string, example: alanpi}
+          reportedAt: {type: string, format: date-time}
+          lastSuccessAt: {type: string, format: date-time}
+          batteryVolts: {type: number}
+          batteryPercent: {type: number}
+          batteryPercentSource: {type: string, example: estimated}
+          temperatureC: {type: number}
+          noiseFloorDbm: {type: integer}
+          txQueueLen: {type: integer}
+          uptimeSeconds: {type: integer, format: int64}
+          airtimeMs: {type: integer, format: int64}
+          rxAirtimeMs: {type: integer, format: int64}
+          packetsSent: {type: integer, format: int64}
+          packetsReceived: {type: integer, format: int64}
+          recvErrors: {type: integer, format: int64}
+      MapMeshLinkProps:
+        type: object
+        description: mesh_link edge block - one undirected relay link between two located nodes. Weight by `daysActive`/`observations`, fade by `lastSeen`.
+        required: [a, b, observations, daysActive]
+        properties:
+          a: {type: string, description: "Public key of one end (a < b)."}
+          b: {type: string, description: "Public key of the other end."}
+          observations: {type: integer, description: "Packets seen traversing the link in the window."}
+          daysActive: {type: integer, description: "Distinct days the link was observed."}
+          firstSeen: {type: string, format: date-time}
+          lastSeen: {type: string, format: date-time}
+          bestSnr: {type: number, description: "Peak SNR of an advert over the link. Absent when 0."}
+      MapCameraProps:
+        type: object
+        description: camera block - a Caltrans CCTV camera, same data as GET /api/v1/cameras?place=. Load the image and stream directly from Caltrans; they are not proxied.
+        required: [imageUrl, distanceMeters]
+        properties:
+          imageUrl: {type: string, format: uri, description: "Snapshot JPEG."}
+          imageRefreshMinutes: {type: integer, description: "How often Caltrans refreshes the snapshot. Absent = not reported."}
+          streamUrl: {type: string, format: uri, description: "HLS .m3u8 live stream. Absent = image only."}
+          route: {type: string}
+          direction: {type: string}
+          county: {type: string}
+          elevationFeet: {type: integer}
+          distanceMeters: {type: integer, description: "Distance from the requested place; 0 = inside it."}
+
+      # ------------------------------------------------------------- mesh links
+
+      MeshLinkList:
+        type: object
+        required: [window, generatedAt, links]
+        properties:
+          window: {type: string, description: "The window applied, e.g. 72h., example: 72h"}
+          generatedAt: {type: string, format: date-time}
+          links:
+            type: array
+            items: {$ref: "#/components/schemas/MeshLink"}
+      MeshLink:
+        type: object
+        description: One undirected relay link. Every member is always present.
+        required: [a, b, observations, daysActive, firstSeen, lastSeen, bestSnr]
+        properties:
+          a: {type: string, description: "Public key (64 hex) of one end; a < b."}
+          b: {type: string, description: "Public key of the other end."}
+          observations: {type: integer, description: "Packets seen traversing the link in the window."}
+          daysActive: {type: integer, description: "Distinct days observed; a reliability weight."}
+          firstSeen: {type: string, format: date-time}
+          lastSeen: {type: string, format: date-time, description: "Drive recency fade from this."}
+          bestSnr: {type: number, description: "Peak SNR (dB) of an advert seen traversing it; 0 when none was measured."}
+
+      # ----------------------------------------------------------------- ingest
+
+      IngestAccepted:
+        type: object
+        description: The 202 body. Validated and queued, not yet stored; it lands on the next ingest cycle (about a minute).
+        required: [reporterId, stream, accepted, receivedAt]
+        properties:
+          reporterId: {type: string, description: "The reporter the token belongs to."}
+          stream: {type: string}
+          accepted:
+            type: integer
+            description: "mesh.repeater: nodes accepted. mesh.packet: ADVERTs applied (not packets received). burn.line: readings staged."
+          warnings:
+            type: array
+            description: Entries skipped without failing the report (bad id, duplicate, unknown line, bad signature). Fix your output if present. mesh.packet lists at most 25, then a count.
+            items: {type: string}
+          receivedAt: {type: string, format: date-time}
+      MeshRepeaterReport:
+        type: object
+        description: |
+          `mesh.repeater` (schema_version 1): an operator monitor's COMPLETE
+          current set of MeshCore repeaters it logged into. A report replaces the
+          reporter's previous set; a node left out is no longer monitored. Request
+          bodies are snake_case. Unknown fields are ignored. Unread values are
+          `null`, never `0`.
+        required: [schema_version, repeaters]
+        properties:
+          schema_version: {type: integer, enum: [1]}
+          generated_at: {type: string, format: date-time, description: "When the report was built. Clamped to the server's clock."}
+          repeaters:
+            type: array
+            maxItems: 1000
+            items: {$ref: "#/components/schemas/MeshRepeaterReading"}
+      MeshRepeaterReading:
+        type: object
+        required: [id]
+        properties:
+          id: {type: string, pattern: "^[0-9a-fA-F]{8,64}$", description: "Node public key or a prefix of it (8-64 hex). A bad id is a warning; the rest of the report still lands."}
+          name: {type: string}
+          last_attempt: {type: integer, format: int64, nullable: true, description: "Unix seconds of the monitor's last attempt on this node."}
+          last_success: {type: integer, format: int64, nullable: true, description: "Unix seconds of the last successful read; null if never. Reachability is derived from its age."}
+          battery_voltage: {type: number, nullable: true}
+          battery_percent: {type: number, nullable: true}
+          battery_percent_source: {type: string, example: estimated}
+          temperature_c: {type: number, nullable: true}
+          humidity: {type: number, nullable: true}
+          pressure: {type: number, nullable: true}
+          uptime_s: {type: integer, format: int64, nullable: true}
+          airtime_ms: {type: integer, format: int64, nullable: true}
+          rx_airtime_ms: {type: integer, format: int64, nullable: true}
+          noise_floor_dbm: {type: integer, nullable: true}
+          last_rssi_dbm: {type: integer, nullable: true}
+          last_snr_db: {type: number, nullable: true}
+          tx_queue_len: {type: integer, nullable: true}
+          nb_sent: {type: integer, format: int64, nullable: true}
+          nb_recv: {type: integer, format: int64, nullable: true}
+          sent_flood: {type: integer, format: int64, nullable: true}
+          sent_direct: {type: integer, format: int64, nullable: true}
+          recv_flood: {type: integer, format: int64, nullable: true}
+          recv_direct: {type: integer, format: int64, nullable: true}
+          direct_dups: {type: integer, format: int64, nullable: true}
+          flood_dups: {type: integer, format: int64, nullable: true}
+          full_evts: {type: integer, format: int64, nullable: true}
+          recv_errors: {type: integer, format: int64, nullable: true}
+          online: {type: boolean, nullable: true, description: "Accepted and logged, but not used; reachability comes from last_success."}
+      MeshPacketReport:
+        type: object
+        description: |
+          `mesh.packet` (schema_version 1): raw MeshCore frames a companion radio
+          heard, in the per-packet envelope the MQTT bridges publish. ADVERTs
+          (packet_type 4) update a node after its Ed25519 signature verifies;
+          other flood-routed packets credit relays. Answers 400 when MeshCore
+          ingest is off on the server.
+        required: [schema_version, packets]
+        properties:
+          schema_version: {type: integer, enum: [1]}
+          generated_at: {type: string, format: date-time}
+          observer: {type: string, pattern: "^[0-9a-fA-F]{8,64}$", description: "Public key (or 4+ byte prefix) of the receiving radio. Defaults to the reporter id."}
+          packets:
+            type: array
+            maxItems: 1000
+            items: {$ref: "#/components/schemas/MeshPacket"}
+      MeshPacket:
+        type: object
+        description: One reception. Extra bridge fields are accepted and ignored.
+        required: [packet_type, raw]
+        properties:
+          packet_type: {type: integer, description: "MeshCore payload type; only 4 (ADVERT) updates a node."}
+          raw: {type: string, description: "The full over-the-air frame as hex (header, path, payload), or a meshcore://<hex> link."}
+          SNR: {description: "Reception SNR in dB (number or numeric string)."}
+          RSSI: {description: "Reception RSSI in dBm (number or numeric string)."}
+          origin_id: {type: string, description: "Receiving radio's public key, if different from `observer`."}
+          timestamp: {type: string, description: "Ignored; the server stamps its own receive time."}
+      BurnLineReport:
+        type: object
+        description: |
+          `burn.line` (schema_version 1): readings of the county burn-day phone
+          recordings, sent as ONE batched report per run (the per-reporter rate
+          limit would 429 a second push). Each reading is staged durably.
+        required: [schema_version, readings]
+        properties:
+          schema_version: {type: integer, enum: [1]}
+          generated_at: {type: string, format: date-time}
+          readings:
+            type: array
+            minItems: 1
+            maxItems: 1000
+            items: {$ref: "#/components/schemas/BurnLineReading"}
+      BurnLineReading:
+        type: object
+        required: [line_id, status, observed_at]
+        properties:
+          line_id: {type: string, description: "A configured line id (grid.burn.lines); unknown ids are warnings."}
+          status: {type: string, enum: [green, red, orange], description: "green = permissive burn day."}
+          message: {type: string}
+          cleaned_transcription: {type: string}
+          confidence: {type: integer, minimum: 0, maximum: 100}
+          observed_at: {type: string, format: date-time, description: "When the line was called. Required; future stamps are clamped."}
+
+      # -------------------------------------------------------------------- MCP
+
+      JsonRpcRequest:
+        type: object
+        description: A JSON-RPC 2.0 request. Omit `id` for a notification (answered 202, no body).
+        required: [jsonrpc, method]
+        properties:
+          jsonrpc: {type: string, enum: ["2.0"]}
+          id: {description: "Request id (string or number), echoed in the response."}
+          method:
+            type: string
+            enum: [initialize, ping, tools/list, tools/call, resources/list, resources/read,
+              prompts/list, prompts/get, notifications/initialized]
+          params: {type: object, additionalProperties: true}
+      JsonRpcResponse:
+        type: object
+        required: [jsonrpc]
+        properties:
+          jsonrpc: {type: string, enum: ["2.0"]}
+          id: {description: "The request's id; null when the request could not be parsed."}
+          result: {type: object, additionalProperties: true, description: "Present on success."}
+          error:
+            type: object
+            description: "Present on failure. -32700 parse error, -32601 method not found, -32602 invalid params, -32603 internal error."
+            required: [code, message]
+            properties:
+              code: {type: integer}
+              message: {type: string}
+
+  paths:
+    /api/v1/places/{place}/map/{layer}.geojson:
+      get:
+        tags: [Map layers]
+        operationId: GetMapLayer
+        summary: One map layer for a place, as GeoJSON
+        description: |
+          An RFC 7946 FeatureCollection of one layer's features within a place.
+          Coordinates are `[longitude, latitude]`. Check `metadata.sourceStatus`
+          before drawing: UNAVAILABLE means unknown (empty `features`), STALE
+          means last-good data.
+
+          | layer | features | backed by |
+          |---|---|---|
+          | `road_incident` | Points: CHP incidents (category `incident`) and Caltrans planned lane closures (`closure`, SCHEDULED until set up) | events |
+          | `chain_control` | Points: active R1/R2/R3 checkpoints and seasonal pass closures | live Caltrans |
+          | `road_segment` | LineStrings: configured routes with travel time; `status` OPEN/CLOSED/RESTRICTED/MAINTENANCE | live Google Routes + Caltrans |
+          | `message_sign` | Points: Caltrans message signs and their text; always INFO | live Caltrans |
+          | `weather_alert` | null geometry: NWS zone watches/warnings/advisories | events |
+          | `fire_weather` | one null-geometry region banner (`fw:region`) plus forecast Points | live NWS |
+          | `earthquake` | Points | events (USGS) |
+          | `wildfire` | Points or (Multi)Polygon perimeters | events (CAL FIRE, FIRIS) |
+          | `evacuation` | (Multi)Polygon zones; `status` is the level | events (Cal OES) |
+          | `power` | Polygons/Points: PG&E outages (`unplanned`/`planned`) and PSPS (`psps`) | events |
+          | `mesh_node` | Points: MeshCore nodes in the place; always INFO | events |
+          | `mesh_link` | LineString relay links touching the place plus the MESH_NODE Points at both ends (neighbours outside the place have `mesh.inRegion: false`); honours `window` | derived |
+          | `camera` | Points: Caltrans CCTV cameras near the place, nearest first; always INFO | live Caltrans |
+
+          Event-backed layers carry only ACTIVE and SCHEDULED features, and each
+          feature `id` is an event id usable with `/api/v1/events/{id}`. The
+          `.geojson` suffix is optional (`/map/wildfire` is the same resource).
+
+          **Caching.** `Cache-Control: public, max-age=60` and a weak `ETag`
+          (`W/"…"`) over the layer's content, excluding `metadata.generatedAt`.
+          Revalidate with `If-None-Match`: the answer is `304` until the
+          features, `sourceStatus`, `lastSourceUpdate` or `attribution` change,
+          so polling a quiet layer costs no body.
+        parameters:
+          - {$ref: "#/components/parameters/Place"}
+          - name: layer
+            in: path
+            required: true
+            description: Layer slug (lowercase).
+            schema:
+              type: string
+              enum: [road_incident, chain_control, road_segment, message_sign, weather_alert,
+                fire_weather, earthquake, wildfire, evacuation, power, mesh_node, mesh_link, camera]
+          - {$ref: "#/components/parameters/MeshWindow"}
+          - {$ref: "#/components/parameters/IfNoneMatch"}
+        responses:
+          "200":
+            description: The layer. Empty `features` is a valid answer; read `metadata.sourceStatus` to know whether it is confirmed-empty or unknown.
+            headers:
+              ETag: {$ref: "#/components/headers/ETag"}
+              Cache-Control: {$ref: "#/components/headers/CacheControl"}
+            content:
+              application/geo+json:
+                schema: {$ref: "#/components/schemas/MapFeatureCollection"}
+                examples:
+                  road_incident:
+                    summary: road_incident - a CHP incident and a Caltrans closure
+                    value: {"type": "FeatureCollection", "features": [
+                      {"type": "Feature", "geometry": {"type": "Point", "coordinates": [-120.36108, 38.24239]}, "properties": {"id": "chp:261106ST0341", "layer": "ROAD_INCIDENT", "kind": "Road incident", "category": "incident", "severity": "MINOR", "severityRank": 1, "headline": "Traffic hazard causing near-miss incidents; CHP responding", "description": "Reported traffic hazard on SR 4 at Country Club Drive. CHP responded; the hazard was causing vehicles to have near-miss incidents. No lanes reported blocked and no injuries indicated in the report.", "summary": "Reported traffic hazard on SR 4 at Country Club Drive. CHP responded; the hazard was causing vehicles to have near-miss incidents. No lanes reported blocked and no injuries indicated in the report.", "summaryEnhanced": {"enhancedAt": "2026-11-07T03:13:58Z"}, "status": "ACTIVE", "effective": "2026-11-07T02:34:00Z", "updatedAt": "2026-11-07T03:13:00Z", "areaLabel": "SR 4 at Country Club Drive", "source": {"id": "chp", "name": "CHP / Caltrans", "attribution": "quickmap.dot.ca.gov"}, "incident": {"logNumber": "261106ST0341"}}},
+                      {"type": "Feature", "geometry": {"type": "Point", "coordinates": [-120.38806, 37.98152]}, "properties": {"id": "caltrans:d10-C49SA-0001-2026-11-06-170100", "layer": "ROAD_INCIDENT", "kind": "Road incident", "category": "closure", "severity": "MODERATE", "severityRank": 2, "headline": "Hwy 49 lane closure (Drainage Work)", "description": "Closed: lane 1, lane 2, left shoulder, right shoulder (of 4 lanes).", "status": "ACTIVE", "effective": "2026-11-06T22:02:00Z", "updatedAt": "2026-11-06T22:03:03Z", "areaLabel": "Hwy 49 from Solinski Street (Left) to Washington Street, near Sonora", "source": {"id": "caltrans", "name": "Caltrans", "attribution": "cwwp2.dot.ca.gov"}, "incident": {"logNumber": "C49SA", "closure": {"windowId": "C49SA-0001-2026-11-06-17:01:00", "closureType": "Lane", "workType": "Drainage Work", "lanesClosed": "1, 2, LShoulder, RShoulder", "totalLanes": 4, "plannedStart": "2026-11-07T01:01:00Z", "plannedEnd": "2026-12-07T08:01:00Z", "setUpAt": "2026-11-06T22:02:00Z"}}}}],
+                      "metadata": {"layer": "road_incident", "area": "ebbetts-pass", "generatedAt": "2026-11-07T04:03:21Z", "sourceStatus": "OK", "attribution": "quickmap.dot.ca.gov · cwwp2.dot.ca.gov", "schemaVersion": 1}}
+                  chain_control:
+                    summary: chain_control - a seasonal pass closure
+                    value: {"type": "FeatureCollection", "features": [
+                      {"type": "Feature", "geometry": {"type": "Point", "coordinates": [-119.99421, 38.48135]}, "properties": {"id": "cc:38.48135,-119.99421", "layer": "CHAIN_CONTROL", "kind": "Chain control", "category": "closed", "severity": "MINOR", "severityRank": 1, "headline": "road closed", "source": {"id": "caltrans", "name": "Caltrans", "attribution": "quickmap.dot.ca.gov"}, "chainControl": {"direction": "Eastbound"}}}],
+                      "metadata": {"layer": "chain_control", "area": "ebbetts-pass", "generatedAt": "2026-11-07T04:03:22Z", "sourceStatus": "OK", "attribution": "cwwp2.dot.ca.gov · quickmap.dot.ca.gov", "schemaVersion": 1}}
+                  road_segment:
+                    summary: road_segment - an OPEN route (coordinates trimmed)
+                    value: {"type": "FeatureCollection", "features": [
+                      {"type": "Feature", "geometry": {"type": "LineString", "coordinates": [[-120.54006, 38.0675], [-120.54015, 38.06759], [-120.54017, 38.06779]]}, "properties": {"id": "road:hwy4-angels-murphys", "layer": "ROAD_SEGMENT", "kind": "Road segment", "severity": "INFO", "severityRank": 0, "headline": "Hwy 4 — Angels Camp to Murphys", "status": "OPEN", "areaLabel": "Angels Camp to Murphys", "source": {"id": "google", "name": "Google Routes + Caltrans", "attribution": "Google · quickmap.dot.ca.gov"}, "road": {"roadId": "hwy4-angels-murphys", "congestion": "CLEAR", "delayMinutes": 0, "durationMinutes": 11, "distanceKm": 13}}}],
+                      "metadata": {"layer": "road_segment", "area": "ebbetts-pass", "generatedAt": "2026-11-07T04:03:23Z", "sourceStatus": "OK", "attribution": "cwwp2.dot.ca.gov · quickmap.dot.ca.gov", "schemaVersion": 1}}
+                  message_sign:
+                    summary: message_sign - a two-page sign and a blank one
+                    value: {"type": "FeatureCollection", "features": [
+                      {"type": "Feature", "geometry": {"type": "Point", "coordinates": [-120.27482, 37.99242]}, "properties": {"id": "cms:10:V42", "layer": "MESSAGE_SIGN", "kind": "Message sign", "category": "message", "severity": "INFO", "severityRank": 0, "headline": "SONORA PASS OPEN / TIOGA PASS OPEN", "effective": "2026-11-05T20:21:06Z", "areaLabel": "EB 108 SOULSBYVILLE", "source": {"id": "caltrans", "name": "Caltrans", "attribution": "cwwp2.dot.ca.gov"}, "messageSign": {"signId": "V42", "district": 10, "route": "SR-108", "direction": "East", "inService": true, "pages": [["SONORA PASS", "OPEN", ""], ["TIOGA PASS", "OPEN", ""]]}}},
+                      {"type": "Feature", "geometry": {"type": "Point", "coordinates": [-120.65032, 38.4077]}, "properties": {"id": "cms:10:V80", "layer": "MESSAGE_SIGN", "kind": "Message sign", "category": "blank", "severity": "INFO", "severityRank": 0, "headline": "Sign is blank", "effective": "2026-11-07T01:40:02Z", "areaLabel": "EB 88 E/O PINE GROVE", "source": {"id": "caltrans", "name": "Caltrans", "attribution": "cwwp2.dot.ca.gov"}, "messageSign": {"signId": "V80", "district": 10, "route": "SR-88", "direction": "East", "inService": true}}}],
+                      "metadata": {"layer": "message_sign", "area": "ebbetts-pass", "generatedAt": "2026-11-07T04:03:24Z", "sourceStatus": "OK", "attribution": "cwwp2.dot.ca.gov · quickmap.dot.ca.gov", "schemaVersion": 1}}
+                  weather_alert:
+                    summary: weather_alert - Illustrative, shaped from a September 2026 Heat Advisory
+                    value: {"type": "FeatureCollection", "features": [
+                      {"type": "Feature", "geometry": null, "properties": {"id": "wx:urn:oid:2.49.0.1.840.0.842def7567d1cdba53e97af002d08acc9cc69f61.001.1", "layer": "WEATHER_ALERT", "kind": "Weather alert", "category": "Heat Advisory", "severity": "MODERATE", "severityRank": 2, "headline": "Heat Advisory", "description": "* WHAT...High temperatures 97 to 104 and low temperatures 65 to 75 expected, with widespread Moderate HeatRisk and areas of Major HeatRisk.", "summary": "Hot temperatures (highs 97–104°F, lows 65–75°F) expected from 10 AM Wednesday to 10 PM PDT Thursday.", "summaryEnhanced": {"enhancedAt": "2026-09-09T17:01:25Z"}, "status": "ACTIVE", "effective": "2026-09-09T17:00:00Z", "expires": "2026-09-11T05:00:00Z", "source": {"id": "nws", "name": "NWS Sacramento CA"}, "weather": {"event": "Heat Advisory", "source": "NWS", "zones": ["CAZ137"], "nwsSeverity": "Moderate", "certainty": "Likely", "urgency": "Expected", "instruction": "Drink plenty of fluids, stay in an air-conditioned room, stay out of the sun, and check up on relatives and neighbors."}}}],
+                      "metadata": {"layer": "weather_alert", "area": "ebbetts-pass", "generatedAt": "2026-09-09T17:05:00Z", "sourceStatus": "OK", "attribution": "NOAA / National Weather Service", "schemaVersion": 1}}
+                  fire_weather:
+                    summary: fire_weather - the region banner and one forecast point
+                    value: {"type": "FeatureCollection", "features": [
+                      {"type": "Feature", "geometry": null, "properties": {"id": "fw:region", "layer": "FIRE_WEATHER", "kind": "Fire weather", "category": "normal", "severity": "INFO", "severityRank": 0, "headline": "Fire weather: normal", "source": {"id": "nws", "name": "National Weather Service", "attribution": "NOAA / National Weather Service"}, "fireWeather": {"state": "normal"}}},
+                      {"type": "Feature", "geometry": {"type": "Point", "coordinates": [-120.45611, 38.13912]}, "properties": {"id": "fw:forecast:murphys", "layer": "FIRE_WEATHER", "kind": "Fire-weather forecast", "severity": "INFO", "severityRank": 0, "headline": "Murphys, CA forecast — peak gust 17 km/h", "areaLabel": "Murphys, CA", "source": {"id": "nws", "name": "National Weather Service", "attribution": "NOAA / National Weather Service"}, "fireWeather": {"forecast": {"source": "NWS (STO 73,42)", "issuedAt": "2026-11-06T21:00:56Z", "horizonHours": 48, "peakWindGustKmh": 17, "peakWindGustAt": "2026-11-07T21:00:00Z", "minHumidityPercent": 33}}}}],
+                      "metadata": {"layer": "fire_weather", "area": "ebbetts-pass", "generatedAt": "2026-11-07T04:03:25Z", "sourceStatus": "OK", "attribution": "NOAA / National Weather Service", "schemaVersion": 1}}
+                  earthquake:
+                    summary: earthquake - Illustrative (no quake in the archive); fields as the projection emits them
+                    value: {"type": "FeatureCollection", "features": [
+                      {"type": "Feature", "geometry": {"type": "Point", "coordinates": [-120.1236, 38.3021]}, "properties": {"id": "usgs:nc75012345", "layer": "EARTHQUAKE", "kind": "Earthquake", "category": "earthquake", "severity": "MINOR", "severityRank": 1, "headline": "M3.4 — 12 km NE of Arnold, CA", "status": "ACTIVE", "effective": "2026-11-02T09:14:07Z", "updatedAt": "2026-11-02T09:31:40Z", "areaLabel": "12 km NE of Arnold, CA", "source": {"id": "usgs", "name": "USGS", "url": "https://earthquake.usgs.gov/earthquakes/eventpage/nc75012345", "attribution": "U.S. Geological Survey"}, "earthquake": {"magnitude": 3.4, "depthKm": 8.2, "felt": 14}}}],
+                      "metadata": {"layer": "earthquake", "area": "ebbetts-pass", "generatedAt": "2026-11-02T09:35:00Z", "sourceStatus": "OK", "attribution": "U.S. Geological Survey", "schemaVersion": 1}}
+                  wildfire:
+                    summary: wildfire - Illustrative, shaped from the 2026 Dome Fire (perimeter trimmed)
+                    value: {"type": "FeatureCollection", "features": [
+                      {"type": "Feature", "geometry": {"type": "MultiPolygon", "coordinates": [[[[-119.6228, 37.5993], [-119.5984, 37.6347], [-119.5828, 37.5982], [-119.6228, 37.5993]]]]}, "properties": {"id": "calfire:4883092e-485f-429d-878d-819f01172840", "layer": "WILDFIRE", "kind": "Wildfire", "category": "wildfire", "severity": "EXTREME", "severityRank": 4, "headline": "Dome Fire — 6,806 ac, 40% contained", "status": "ACTIVE", "effective": "2026-09-15T20:10:00Z", "updatedAt": "2026-09-22T14:02:11Z", "areaLabel": "North of Wawona Dome, Yosemite National Park", "source": {"id": "calfire", "name": "CAL FIRE", "url": "https://www.fire.ca.gov/incidents/2026/9/15/dome-fire/", "attribution": "CAL FIRE / FIRIS"}, "wildfire": {"acres": 6806, "containment": 40, "county": "Mariposa", "hasPerimeter": true}}}],
+                      "metadata": {"layer": "wildfire", "area": "ebbetts-pass", "generatedAt": "2026-09-22T14:05:00Z", "sourceStatus": "OK", "attribution": "CAL FIRE · CAL FIRE / FIRIS / NIFC", "schemaVersion": 1}}
+                  evacuation:
+                    summary: evacuation - Illustrative, shaped from a past Calaveras order (polygon trimmed)
+                    value: {"type": "FeatureCollection", "features": [
+                      {"type": "Feature", "geometry": {"type": "Polygon", "coordinates": [[[-120.6968, 38.19747], [-120.69295, 38.1938], [-120.68443, 38.18446], [-120.6968, 38.19747]]]}, "properties": {"id": "evac:US-CA-XCA-CCU-110-B", "layer": "EVACUATION", "kind": "Evacuation", "category": "order", "severity": "EXTREME", "severityRank": 4, "headline": "Evacuation Order — CALAVERAS", "description": "Evacuation Order: leave now.", "status": "ORDER", "updatedAt": "2026-08-30T22:15:00Z", "areaLabel": "CALAVERAS", "source": {"id": "caloes", "name": "Cal OES", "url": "https://protect.genasys.com/", "attribution": "Cal OES — reference only"}, "evacuation": {"zoneId": "US-CA-XCA-CCU-110-B", "level": "ORDER", "eventType": "Fire", "county": "CALAVERAS"}}}],
+                      "metadata": {"layer": "evacuation", "area": "calaveras-county", "generatedAt": "2026-08-30T22:20:00Z", "sourceStatus": "OK", "attribution": "Cal OES / California County Governments — reference only", "sourceUrl": "https://protect.genasys.com/", "schemaVersion": 1}}
+                  evacuationUnavailable:
+                    summary: evacuation - source down, nothing stored (state UNKNOWN, not clear)
+                    value: {"type": "FeatureCollection", "features": [], "metadata": {"layer": "evacuation", "area": "calaveras-county", "generatedAt": "2026-11-07T04:03:28Z", "sourceStatus": "UNAVAILABLE", "attribution": "Cal OES / California County Governments — reference only", "sourceUrl": "https://protect.genasys.com/", "schemaVersion": 1}}
+                  power:
+                    summary: power - a one-customer unplanned outage (polygon trimmed)
+                    value: {"type": "FeatureCollection", "features": [
+                      {"type": "Feature", "geometry": {"type": "Polygon", "coordinates": [[[-120.1557, 38.08624], [-120.15573, 38.08624], [-120.15577, 38.08625], [-120.1557, 38.08624]]]}, "properties": {"id": "pge:395861", "layer": "POWER", "kind": "Power outage", "category": "unplanned", "severity": "INFO", "severityRank": 0, "headline": "Power outage — 1 customer (crew patrolling the line)", "status": "ACTIVE", "effective": "2026-11-07T00:42:11Z", "updatedAt": "2026-11-07T03:53:58Z", "source": {"id": "pge", "name": "PG&E", "url": "https://pgealerts.alerts.pge.com/outage-tools/outage-map/", "attribution": "Pacific Gas and Electric"}, "power": {"outageId": "395861", "cause": "PATROLLING", "customersAffected": 1, "crewStatus": "T-Man On Site", "estimatedRestoration": "2026-11-07T05:00:00Z"}}}],
+                      "metadata": {"layer": "power", "area": "ebbetts-pass", "generatedAt": "2026-11-07T04:03:28Z", "sourceStatus": "OK", "attribution": "Pacific Gas and Electric", "schemaVersion": 1}}
+                  mesh_node:
+                    summary: mesh_node - a repeater with operator-monitor telemetry
+                    value: {"type": "FeatureCollection", "features": [
+                      {"type": "Feature", "geometry": {"type": "Point", "coordinates": [-120.3698, 38.1951]}, "properties": {"id": "meshcore:a30081749739257489c372a0183f5f7cfd1705eb1dc4441ae11dd30533927c71", "layer": "MESH_NODE", "kind": "Mesh node", "category": "repeater", "severity": "INFO", "severityRank": 0, "headline": "SIERRA Hathaway Pines (repeater)", "status": "ACTIVE", "updatedAt": "2026-11-06T03:29:24Z", "source": {"id": "meshcore", "name": "MeshCore Mesh", "url": "https://corescope.stonekitty.net/#/nodes/a30081749739257489c372a0183f5f7cfd1705eb1dc4441ae11dd30533927c71", "attribution": "MeshCore community mesh"}, "mesh": {"publicKey": "a30081749739257489c372a0183f5f7cfd1705eb1dc4441ae11dd30533927c71", "nodeType": "repeater", "name": "SIERRA Hathaway Pines", "snr": 11.8, "rssi": -39, "hopCount": 4, "gateways": ["E3635C65DCD443E7982D2F2DDBD02853D02C195DD2C9BE071B7EC3AB01B0D609"], "lastHeardAt": "2026-11-06T00:01:49Z", "lastRelayedAt": "2026-11-07T04:07:36Z", "reachability": "REACHABLE", "admin": {"reporterId": "alanpi", "reportedAt": "2026-11-07T04:07:29Z", "lastSuccessAt": "2026-11-07T03:29:40Z", "batteryVolts": 3.97, "batteryPercent": 71.1, "batteryPercentSource": "estimated", "temperatureC": 13.5, "noiseFloorDbm": -105, "txQueueLen": 0, "uptimeSeconds": 98350, "airtimeMs": 3095, "rxAirtimeMs": 13571, "packetsSent": 9175, "packetsReceived": 41144, "recvErrors": 9771}}}}],
+                      "metadata": {"layer": "mesh_node", "area": "calaveras-county", "generatedAt": "2026-11-07T04:03:29Z", "sourceStatus": "OK", "attribution": "MeshCore community mesh", "schemaVersion": 1}}
+                  mesh_link:
+                    summary: mesh_link - one relay link and an out-of-place endpoint
+                    value: {"type": "FeatureCollection", "features": [
+                      {"type": "Feature", "geometry": {"type": "LineString", "coordinates": [[-120.4119, 38.1614], [-121.447, 38.3788]]}, "properties": {"id": "mesh_link:55678f4147f9d04a32c89aa857a1fdb2b7777f3a9144fa7e63702b66081a797d:d1fe836688c7166d33cbe775951d52116b8f0682063e208db47ea14f274028c5", "layer": "MESH_LINK", "kind": "Relay link", "severity": "INFO", "severityRank": 0, "headline": "SIERRA Forest Meadows ↔ Elk Grove Repeater", "updatedAt": "2026-11-07T03:10:33Z", "source": {"id": "meshcore", "name": "MeshCore Mesh", "attribution": "MeshCore community mesh"}, "meshLink": {"a": "55678f4147f9d04a32c89aa857a1fdb2b7777f3a9144fa7e63702b66081a797d", "b": "d1fe836688c7166d33cbe775951d52116b8f0682063e208db47ea14f274028c5", "observations": 1134, "daysActive": 4, "firstSeen": "2026-11-04T00:04:43Z", "lastSeen": "2026-11-07T03:10:33Z", "bestSnr": 13}}},
+                      {"type": "Feature", "geometry": {"type": "Point", "coordinates": [-121.9225, 37.62]}, "properties": {"id": "meshcore:9259259251c5c5db0524ffcf45371fa5fb0d549881b220b06dd4827e8faccf58", "layer": "MESH_NODE", "kind": "Mesh node", "category": "room_server", "severity": "INFO", "severityRank": 0, "headline": "The 925 (room_server)", "status": "ACTIVE", "updatedAt": "2026-10-09T18:44:09Z", "source": {"id": "meshcore", "name": "MeshCore Mesh", "url": "https://corescope.stonekitty.net/#/nodes/9259259251c5c5db0524ffcf45371fa5fb0d549881b220b06dd4827e8faccf58", "attribution": "MeshCore community mesh"}, "mesh": {"publicKey": "9259259251c5c5db0524ffcf45371fa5fb0d549881b220b06dd4827e8faccf58", "nodeType": "room_server", "name": "The 925", "lastHeardAt": "2026-11-07T02:59:57Z", "inRegion": false}}}],
+                      "metadata": {"layer": "mesh_link", "area": "ebbetts-pass", "generatedAt": "2026-11-07T04:03:30Z", "sourceStatus": "OK", "attribution": "MeshCore community mesh", "schemaVersion": 1}}
+                  camera:
+                    summary: camera - a Caltrans camera with a live stream
+                    value: {"type": "FeatureCollection", "features": [
+                      {"type": "Feature", "geometry": {"type": "Point", "coordinates": [-120.2748, 37.99242]}, "properties": {"id": "d10-172", "layer": "CAMERA", "kind": "Traffic camera", "severity": "INFO", "severityRank": 0, "headline": "EB 108 W/O Soulsbyville Rd", "areaLabel": "Soulsbyville", "source": {"id": "caltrans", "name": "Caltrans CCTV", "url": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/179eb108wosoulsbyvillerd/179eb108wosoulsbyvillerd.jpg", "attribution": "Caltrans"}, "camera": {"imageUrl": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/179eb108wosoulsbyvillerd/179eb108wosoulsbyvillerd.jpg", "imageRefreshMinutes": 2, "streamUrl": "https://wzmedia.dot.ca.gov/D10/TUO_EB108_WO_Soulsbyville.stream/playlist.m3u8", "route": "SR-108", "county": "Tuolumne", "elevationFeet": 2926, "distanceMeters": 0}}}],
+                      "metadata": {"layer": "camera", "area": "ebbetts-pass", "generatedAt": "2026-11-07T04:03:32Z", "sourceStatus": "OK", "attribution": "Caltrans", "schemaVersion": 1}}
+          "304": {$ref: "#/components/responses/NotModified"}
+          "400": {$ref: "#/components/responses/InvalidWindow"}
+          "404":
+            description: Unknown place or unknown layer.
+            content:
+              application/json:
+                schema: {$ref: "#/components/schemas/rpcStatus"}
+                examples:
+                  unknownPlace:
+                    summary: GET /api/v1/places/nope/map/wildfire.geojson
+                    value: {"code": 5, "codeName": "NOT_FOUND", "message": "unknown place: \"nope\"", "details": []}
+                  unknownLayer:
+                    summary: GET /api/v1/places/ebbetts-pass/map/bogus.geojson
+                    value: {"code": 5, "codeName": "NOT_FOUND", "message": "unknown map layer: \"bogus\"", "details": []}
+          "500": {$ref: "#/components/responses/Internal"}
+          "501":
+            description: A condition-backed layer is not wired in this deployment (never in production).
+            content:
+              application/json:
+                schema: {$ref: "#/components/schemas/rpcStatus"}
+                example: {"code": 12, "codeName": "UNIMPLEMENTED", "message": "condition-backed map layers are not wired", "details": []}
+          "503": {$ref: "#/components/responses/HandoffUnavailable"}
+
+    /api/v1/mesh/links:
+      get:
+        tags: [Mesh]
+        operationId: ListMeshLinks
+        summary: The MeshCore relay topology, as an edge list
+        description: |
+          Every undirected relay link observed within `window`, mesh-wide (not
+          place-scoped: a mesh spans places). Nodes are identified by public key;
+          to draw a link, join `a` and `b` to `properties.mesh.publicKey` on the
+          `mesh_node` map layer (or `mesh.publicKey` on `layer=MESH` events) for
+          coordinates. For a place-scoped, ready-to-draw version use the
+          `mesh_link` map layer. Weight edges by `daysActive`, fade by `lastSeen`.
+
+          `Cache-Control: public, max-age=60` and a weak `ETag` (`W/"…"`) that
+          excludes `generatedAt`: `If-None-Match` revalidates to `304` until the
+          links change.
+        parameters:
+          - {$ref: "#/components/parameters/MeshWindow"}
+          - {$ref: "#/components/parameters/IfNoneMatch"}
+        responses:
+          "200":
+            description: The links, possibly empty.
+            headers:
+              ETag: {$ref: "#/components/headers/ETag"}
+              Cache-Control: {$ref: "#/components/headers/CacheControl"}
+            content:
+              application/json:
+                schema: {$ref: "#/components/schemas/MeshLinkList"}
+                example: {"window": "72h", "generatedAt": "2026-11-07T04:03:33Z", "links": [
+                  {"a": "1000009e310d729534b70faa33a1abe5cd5e45d594f72f786febccbb770b7e74", "b": "6942089f5f77fa347c8f9c0b27cb8d0b2227c0b845a212259fd1401a3f96a0eb", "observations": 3164, "daysActive": 4, "firstSeen": "2026-11-04T01:46:19Z", "lastSeen": "2026-11-07T04:02:21Z", "bestSnr": 13.3},
+                  {"a": "1000009e310d729534b70faa33a1abe5cd5e45d594f72f786febccbb770b7e74", "b": "c38f9962660d46617418a38abd099ad2927abde3ff784005fecffce33af1a862", "observations": 2416, "daysActive": 4, "firstSeen": "2026-11-04T00:01:19Z", "lastSeen": "2026-11-07T03:57:05Z", "bestSnr": 13.25}]}
+          "304": {$ref: "#/components/responses/NotModified"}
+          "400": {$ref: "#/components/responses/InvalidWindow"}
+          "500": {$ref: "#/components/responses/Internal"}
+          "503": {$ref: "#/components/responses/HandoffUnavailable"}
+
+    /api/v1/ingest/{stream}:
+      post:
+        tags: [Ingest]
+        operationId: IngestReport
+        summary: Push a monitor's report (authenticated)
+        description: |
+          The only write endpoint, for operator-run monitors (see
+          docs/mesh-reporter-guide.md). Each reporter is granted specific streams.
+          A report is validated and queued (202), not stored synchronously: the
+          ingest scheduler merges it on its next tick, and no request writes an
+          event directly.
+
+          Checks run in this order and nothing in the body is read before the
+          caller is known: bearer token (401) -> stream exists (404) -> reporter
+          granted the stream (403) -> rate limit (429) -> body size (413) ->
+          payload (400). A malformed envelope rejects the whole report; a bad
+          entry is skipped and named in `warnings`.
+
+          **Limits.** One accepted report per reporter per stream every 15
+          seconds by default (measured from the last ACCEPTED report, so rejected
+          retries never lock you out); 1 MiB body; 1000 entries. Retries are
+          safe: entries are keyed by node or line.
+
+          **Preflight.** `?preflight=true` checks the token and grant only and
+          answers 204, recording nothing (no rate-limit or health effect). Use it
+          before expensive work such as placing a phone call.
+
+          Errors use the same `rpcStatus` envelope as every other route. Any
+          method other than POST answers `405` with `Allow: POST` (body code 12,
+          `UNIMPLEMENTED`).
+
+          Not callable from a browser cross-origin (CORS allows GET only). The
+          route is mounted only when the deployment configures reporters.
+        security:
+          - ingestBearer: []
+        parameters:
+          - name: stream
+            in: path
+            required: true
+            description: "Payload contract. `mesh.repeater`: repeater admin telemetry (MeshRepeaterReport). `mesh.packet`: forwarded raw MeshCore frames (MeshPacketReport). `burn.line`: county burn-day phone readings (BurnLineReport)."
+            schema: {type: string, enum: [mesh.repeater, mesh.packet, burn.line]}
+          - name: preflight
+            in: query
+            required: false
+            description: "`true`: validate credentials and the stream grant only, then answer 204."
+            schema: {type: boolean}
+        requestBody:
+          required: true
+          description: The stream's payload, snake_case JSON. Pick the schema by the `stream` path parameter.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - {$ref: "#/components/schemas/MeshRepeaterReport"}
+                  - {$ref: "#/components/schemas/MeshPacketReport"}
+                  - {$ref: "#/components/schemas/BurnLineReport"}
+              examples:
+                mesh.repeater:
+                  summary: mesh.repeater - one node read, one unreachable
+                  value: {"schema_version": 1, "generated_at": "2026-09-15T00:23:32Z", "repeaters": [
+                    {"id": "de0715314cfa9b5e", "name": "SIERRA Arnold Summit", "last_attempt": 1789431672, "last_success": 1789431672, "battery_voltage": 4.14, "battery_percent": 97.0, "battery_percent_source": "estimated", "temperature_c": 37.0, "humidity": null, "pressure": null, "uptime_s": 2615083, "airtime_ms": 49646, "rx_airtime_ms": 211238, "noise_floor_dbm": -116, "last_rssi_dbm": -88, "last_snr_db": 12.5, "tx_queue_len": 0, "nb_sent": 150305, "nb_recv": 649331, "recv_errors": 240197, "online": true},
+                    {"id": "6781a18b2b47cb4e", "name": "SIERRA Lilac Park", "last_attempt": 1789421128, "last_success": null, "battery_voltage": null, "battery_percent": null, "temperature_c": null, "uptime_s": null, "nb_sent": null, "online": false}]}
+                mesh.packet:
+                  summary: mesh.packet - one forwarded ADVERT (raw frame truncated)
+                  value: {"schema_version": 1, "generated_at": "2026-10-09T05:00:00Z", "observer": "e3635c65dcd443e7982d2f2ddbd02853d02c195dd2c9be071b7ec3ab01b0d609", "packets": [
+                    {"packet_type": 4, "raw": "11001148edae55676cd38008283a6236e9452f48ab074a85", "SNR": 8.5, "RSSI": -95, "timestamp": "2026-10-09T04:58:12Z"}]}
+                burn.line:
+                  summary: burn.line - one Calaveras reading
+                  value: {"schema_version": 1, "generated_at": "2026-11-06T15:02:10Z", "readings": [
+                    {"line_id": "calaveras", "status": "green", "message": "Today is a permissive burn day.", "cleaned_transcription": "Today, Friday November 6th, is a permissive burn day in Calaveras County.", "confidence": 95, "observed_at": "2026-11-06T15:01:40Z"}]}
+        responses:
+          "202":
+            description: Validated and queued.
+            content:
+              application/json:
+                schema: {$ref: "#/components/schemas/IngestAccepted"}
+                examples:
+                  accepted:
+                    value: {"reporterId": "alanpi", "stream": "mesh.repeater", "accepted": 9, "receivedAt": "2026-09-15T00:23:35Z"}
+                  withWarnings:
+                    value: {"reporterId": "alanpi", "stream": "mesh.repeater", "accepted": 8, "warnings": ["repeaters[3]: id \"nothex!!\" is not 8-64 hex characters; skipped"], "receivedAt": "2026-09-15T00:23:35Z"}
+          "204":
+            description: "`?preflight=true` and the token is granted this stream. No body."
+          "400":
+            description: Malformed JSON, wrong `schema_version`, too many entries, no usable entries, or the stream is not enabled on this server. Do not retry unchanged.
+            content:
+              application/json:
+                schema: {$ref: "#/components/schemas/rpcStatus"}
+                examples:
+                  schemaVersion: {value: {"code": 3, "codeName": "INVALID_ARGUMENT", "message": "unsupported schema_version 2 (want 1)", "details": []}}
+                  packetsOff: {value: {"code": 3, "codeName": "INVALID_ARGUMENT", "message": "mesh.packet is not enabled on this server: MeshCore ingest is off", "details": []}}
+          "401":
+            description: Missing or unrecognized bearer token. Deliberately says nothing more.
+            headers:
+              WWW-Authenticate:
+                schema: {type: string, example: "Bearer realm=\"grid-ingest\""}
+            content:
+              application/json:
+                schema: {$ref: "#/components/schemas/rpcStatus"}
+                example: {"code": 16, "codeName": "UNAUTHENTICATED", "message": "unauthorized", "details": []}
+          "403":
+            description: The token is valid but not granted this stream.
+            content:
+              application/json:
+                schema: {$ref: "#/components/schemas/rpcStatus"}
+                example: {"code": 7, "codeName": "PERMISSION_DENIED", "message": "reporter is not authorized for stream \"burn.line\"", "details": []}
+          "404":
+            description: Unknown stream.
+            content:
+              application/json:
+                schema: {$ref: "#/components/schemas/rpcStatus"}
+                example: {"code": 5, "codeName": "NOT_FOUND", "message": "unknown stream \"mesh.repeaters\"", "details": []}
+          "413":
+            description: Body over the size limit (1 MiB by default).
+            content:
+              application/json:
+                schema: {$ref: "#/components/schemas/rpcStatus"}
+                example: {"code": 3, "codeName": "INVALID_ARGUMENT", "message": "body exceeds 1048576 bytes", "details": []}
+          "429":
+            description: Reporting faster than the reporter's minimum interval. Wait `Retry-After` seconds.
+            headers:
+              Retry-After: {$ref: "#/components/headers/RetryAfter"}
+            content:
+              application/json:
+                schema: {$ref: "#/components/schemas/rpcStatus"}
+                example: {"code": 8, "codeName": "RESOURCE_EXHAUSTED", "message": "reporting faster than the configured minimum interval of 15s", "details": []}
+          "503": {$ref: "#/components/responses/HandoffUnavailable"}
+
+    /mcp:
+      post:
+        tags: [MCP]
+        operationId: Mcp
+        summary: Model Context Protocol (JSON-RPC 2.0 over Streamable HTTP)
+        description: |
+          A read-only MCP server (protocol revision `2025-06-18`, server name
+          `sierra-grid`) for LLM agents. Stateless request/response: POST one
+          JSON-RPC message, get one JSON response (no SSE stream, no session id).
+          A notification (no `id`) is answered `202` with no body. Any other HTTP
+          method is `405`. Tools call this same `/api/v1` surface in-process and
+          every result carries a reference-only disclaimer.
+
+          Tools (`tools/list` for their input schemas):
+          - `grid_situation`: what is happening at a place, address or lat,lng
+            (mode, per-domain status, top headlines). Start here.
+          - `grid_events`: list events, filtered by location, layer, severity,
+            status and time.
+          - `grid_event`: one event in full, by id.
+          - `grid_conditions`: current weather and fire-weather state.
+          - `grid_resolve`: address or lat,lng to the places containing it.
+          - `grid_places`: the place directory.
+          - `grid_sources`: feed health.
+          - `grid_history`: revisions over a time range.
+
+          Resource `grid://reference` (the API reference, Markdown); prompt
+          `hazard_briefing(location)`.
+
+          Not callable from a browser cross-origin (CORS allows GET only).
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/JsonRpcRequest"}
+              examples:
+                toolsList:
+                  value: {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
+                situation:
+                  value: {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "grid_situation", "arguments": {"location": "arnold"}}}
+        responses:
+          "200":
+            description: A JSON-RPC response (success or JSON-RPC error; the HTTP status is 200 either way).
+            content:
+              application/json:
+                schema: {$ref: "#/components/schemas/JsonRpcResponse"}
+                examples:
+                  methodNotFound:
+                    value: {"jsonrpc": "2.0", "id": 3, "error": {"code": -32601, "message": "method not found: tools/frobnicate"}}
+          "202":
+            description: The message was a notification. No body.
+          "405":
+            description: Not a POST.
+            headers:
+              Allow:
+                schema: {type: string, example: POST}
+            content:
+              text/plain:
+                schema: {type: string}
+                example: "MCP endpoint accepts POST (JSON-RPC)\n"
+          "503": {$ref: "#/components/responses/HandoffUnavailable"}
+
+    /api/openapi.json:
+      get:
+        tags: [Meta]
+        operationId: GetOpenApiSpec
+        summary: This OpenAPI document
+        description: "OpenAPI 3.0, built from grid.proto plus a hand-written overlay. `Cache-Control: public, max-age=300`."
+        responses:
+          "200":
+            description: The document.
+            content:
+              application/json:
+                schema: {type: object, additionalProperties: true}
