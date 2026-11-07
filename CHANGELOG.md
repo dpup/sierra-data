@@ -24,6 +24,16 @@ the proto-defined `/api/v1` gateway on 2026-07-09.
 
 ## 2026-11-07 (later)
 
+### An unreachable monitored repeater keeps its last readings
+
+A repeater the SIERRA Mesh Relay polls (a shared repeater) stays on the mesh
+layer while it is unreachable, with `mesh.reachability: UNREACHABLE` and its
+last `mesh.telemetry.admin` block (whose `lastSuccessAt` says how old it is).
+It used to drop out of the layer, or come back with no telemetry, 45 minutes
+after its last successful read. A node any monitor reports that relays keep
+present also keeps that monitor's last readings now. No client change.
+
+
 ### BREAKING: a page can hold fewer than `pageSize` items
 
 `GET /api/v1/events`, `/api/v1/events/{id}/history` and `/api/v1/history` now

@@ -346,8 +346,12 @@ func (n *NetworkNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult,
 	// signed advert already established (a full key with a stored event). A
 	// prefix nobody has heard advertise, or a node the monitor can no longer
 	// reach and the mesh no longer shows, is left to the sweep like any other.
+	// The reports of a node dropped here are kept aside: if relay presence
+	// below keeps the node, they still decorate it.
+	unheld := map[string][]pushingest.MeshNodeReport{}
 	for key, m := range merged {
 		if m.mqtt == nil && !n.monitorHolds(m, prior, now) {
+			unheld[key] = m.pushed
 			delete(merged, key)
 		}
 	}
@@ -369,7 +373,7 @@ func (n *NetworkNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult,
 		if stored == nil || !inScope {
 			continue
 		}
-		merged[key] = &mergedNode{key: key, relayedAt: at}
+		merged[key] = &mergedNode{key: key, relayedAt: at, pushed: unheld[key]}
 	}
 
 	events := make([]*gridv1.Event, 0, len(merged))
@@ -664,15 +668,22 @@ func (n *NetworkNormalizer) reporterHealth(snap pushingest.MeshSnapshot) map[str
 // revision each time. A signed advert beats a monitor's reading; among monitors,
 // configured priority then reporter id.
 // monitorHolds reports whether a node no advert or relay is presenting this
-// tick stays present on a monitor's word alone: the mesh established it (a
-// full key we already hold as an event, which only an advert can mint), and a
-// monitor reached it successfully within the unreachable window.
+// tick stays present on a monitor's word alone. The mesh must have
+// established it (a full key we already hold as an event, which only an
+// advert can mint), and either a monitor reached it within the unreachable
+// window, or an enumerating reporter (the relay's shared repeaters) still
+// lists it by full key. A host asked us to watch that one, so "watched and
+// unreachable", with its last readings, is what the Grid shows, not a blank
+// node; it leaves when the host stops sharing it.
 func (n *NetworkNormalizer) monitorHolds(m *mergedNode, prior Prior, now time.Time) bool {
 	if len(m.key) != meshPubKeyHex || priorByID(prior, meshSourceID+":"+m.key) == nil {
 		return false
 	}
 	window := n.cfg.Grid.Ingest.UnreachableAfterOrDefault()
 	for _, r := range m.pushed {
+		if r.Enumerates && len(r.NodeID) == meshPubKeyHex {
+			return true
+		}
 		if !r.LastSuccess.IsZero() && now.Sub(r.LastSuccess) <= window {
 			return true
 		}
