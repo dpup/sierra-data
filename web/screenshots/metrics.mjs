@@ -36,6 +36,7 @@ const PAGES = [
   ['history', '/history.html'],
   ['docs', '/docs.html'],
   ['mcp-guide', '/mcp-guide.html'],
+  ['changelog', '/changelog.html'],
 ];
 
 const WIDTHS = [390, 414, 768, 1280, 1440, 1920];

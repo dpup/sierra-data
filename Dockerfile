@@ -19,6 +19,9 @@ COPY web/package.json web/package-lock.json ./
 RUN npm ci
 
 COPY web/ ./
+# /changelog renders the repo-root CHANGELOG.md at build time; the page imports
+# it as ../../../CHANGELOG.md from /web/src/pages, which resolves to /CHANGELOG.md.
+COPY CHANGELOG.md /CHANGELOG.md
 
 # astro.config.mjs sets outDir '../site/dist', so WORKDIR /web puts the build at
 # /site/dist. The pruned root-level *.mjs are Astro build-internal stubs

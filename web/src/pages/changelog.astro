@@ -1,0 +1,106 @@
+---
+import Shell from '../layouts/Shell.astro';
+import PageHead from '../components/PageHead.astro';
+// The repo-root CHANGELOG.md, rendered at build time. It is the one document a
+// consuming site reads before updating, and it lives at the root because that
+// is where the CLAUDE.md rule ("record API changes in CHANGELOG.md") sends
+// every author. Importing it here means the page cannot drift from the file:
+// there is no second copy. The Makefile's SITE_SRC and the Dockerfile's
+// site-builder stage both include ../CHANGELOG.md so an edit rebuilds the site.
+import { compiledContent, getHeadings } from '../../../CHANGELOG.md';
+
+// Post-process the rendered HTML into the design system's primitives rather
+// than restyling raw markdown output: the H1 is replaced by PageHead, tables
+// become .data-table inside a scrolling .table-wrap (several entries carry
+// wide before/after tables that would otherwise scroll a phone sideways), and
+// fenced code becomes the ink .code block.
+const html = (await compiledContent())
+  .replace(/^\s*<h1[^>]*>[\s\S]*?<\/h1>\s*/, '')
+  .replace(/<table>/g, '<div class="table-wrap"><table class="data-table">')
+  .replace(/<\/table>/g, '</table></div>')
+  .replace(/<pre>/g, '<pre class="code">')
+  .replace(/<code>/g, '<code class="inline">')
+  // the class above is for inline code only; code inside a <pre> stays plain
+  .replace(/(<pre class="code"><code)( class="inline")/g, '$1');
+
+// One link per month to its newest entry. Dated sections are `## YYYY-MM-DD…`.
+const months = [];
+for (const h of getHeadings()) {
+  if (h.depth !== 2) continue;
+  const m = /^(\d{4}-\d{2})-\d{2}/.exec(h.text);
+  if (m && !months.some((x) => x.month === m[1])) months.push({ month: m[1], slug: h.slug });
+}
+const entries = getHeadings().filter((h) => h.depth === 3).length;
+const breaking = getHeadings().filter((h) => h.depth === 3 && h.text.startsWith('BREAKING:')).length;
+---
+<Shell
+  current="changelog"
+  title="Changelog · The Grid"
+  description="Dated record of API-facing changes to The Grid /api/v1, newest first. Entries headed BREAKING: change an existing response and carry a migration note."
+>
+  <style is:global slot="head">
+    /* Markdown output is plain h2/h3/p/ul/table/pre. It sits in .rail-main, so
+       the running-text measure is restated here (app.css applies it to direct
+       children of main and its sections only). */
+    .cl-log > p, .cl-log > ul, .cl-log > ol, .cl-log > blockquote { max-width: var(--measure); }
+    .cl-log > h2 {
+      border-bottom: 3px solid var(--rule-strong);
+      padding-bottom: 7px;
+      margin: var(--space-section) 0 16px;
+      scroll-margin-top: 16px;
+    }
+    .cl-log > h2:first-child { margin-top: 0; }
+    .cl-log > h3 {
+      border-bottom: 1px solid var(--rule);
+      padding-bottom: 5px;
+      margin: var(--space-sub) 0 12px;
+      scroll-margin-top: 16px;
+    }
+    .cl-log .data-table td { white-space: normal; min-width: 8rem; }
+    /* Field paths and URLs are single unbroken tokens; on a phone they must
+       break rather than scroll the page sideways. */
+    .cl-log code.inline { overflow-wrap: anywhere; }
+    /* The rail takes whatever the main column does not need. This page is all
+       prose, and with the default 300px rail the 540px measure filled only
+       64-69% of the main column (784px at 1440, 838px at 1920), leaving a void
+       beside every paragraph. Pinning the main column near 760px (rail = width
+       minus 760 minus the 48px gap, never under 300px) keeps prose at ~71%. */
+    .cl-wrap { --rail-w: max(300px, calc(100% - 808px)); }
+    .cl-months { display: flex; flex-wrap: wrap; gap: 4px 14px; list-style: none; padding: 0; margin: 0; }
+    .cl-months a { font-family: var(--font-mono); font-size: 11.5px; }
+  </style>
+
+  <PageHead kicker="The Grid · /api/v1" title="Changelog">
+    <p class="lead">Every API-facing change, newest first.</p>
+  </PageHead>
+
+  <p class="rail-caption">
+    <b>Source</b><code class="inline">CHANGELOG.md</code> in the repository, rendered at build
+    time · {entries} entries, {breaking} of them breaking
+  </p>
+
+  <div class="with-rail cl-wrap">
+    <div class="rail-main cl-log">
+      <Fragment set:html={html} />
+    </div>
+    <aside class="page-rail" aria-label="About this log">
+      <div class="rail-block">
+        <div class="rail-label">Format</div>
+        <p>No versioned releases: the service deploys from main, so each entry is
+          dated. A heading that starts with <code class="inline">BREAKING:</code> changes
+          something a client may depend on and says how to migrate. Everything else
+          is additive.</p>
+      </div>
+      <div class="rail-block">
+        <div class="rail-label">Jump to month</div>
+        <ul class="cl-months">
+          {months.map((m) => <li><a href={'#' + m.slug}>{m.month}</a></li>)}
+        </ul>
+      </div>
+      <div class="rail-block">
+        <div class="rail-label">Reference</div>
+        <p><a href="/docs">API reference</a> · <a href="/api/openapi.json">OpenAPI spec</a></p>
+      </div>
+    </aside>
+  </div>
+</Shell>

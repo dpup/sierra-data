@@ -1,18 +1,26 @@
 # Changelog
 
-All notable **API-facing** changes to The Grid (the S.I.E.R.R.A data service at
-`data.sierragridteam.org`). This is the document to read before updating a
-consuming site (e.g. ersn.net, sierragridteam.org).
+All notable **API-facing** changes to The Grid, the S.I.E.R.R.A data service at
+`https://data.sierragridteam.org`. Read it before updating a consuming site (for
+example ersn.net or sierragridteam.org). It is published at
+<https://data.sierragridteam.org/changelog>; the API reference is at
+<https://data.sierragridteam.org/docs> and the OpenAPI spec at
+<https://data.sierragridteam.org/api/openapi.json>.
 
-There are no formal releases — the service deploys from `main`. Each entry below
-is timestamped; add a new dated section at the top when the API surface changes.
-The API is JSON over HTTP. As of 2026-07-09 there is a single surface,
-`/api/v1/...`, served by gRPC + gRPC-Gateway (field names **camelCase**
-throughout; errors are gRPC-standard `{code, codeName, message, details}`). The
-`.geojson` map layers stay hand-built (RFC 7946 geometry) but are also camelCase.
-(History: `/api/v1` originally hosted a different hand-built REST surface, replaced
-by a snake_case `/v1` surface on 2026-07-05, which was in turn folded back onto the
-proto-defined `/api/v1` gateway on 2026-07-09 — see those entries.)
+**Format.** There are no versioned releases: the service deploys from `main`, so
+each entry is a dated `##` section, newest first (several on one day are marked
+"(later)"). Each `###` heading under it is one change. A heading that starts
+with **`BREAKING:`** changes an existing URL, field, value or behaviour that a
+consumer may depend on, and the entry says how to migrate. Every other entry is
+additive or internal and needs no client change.
+
+**Current surface.** One API, `/api/v1/...`, served by gRPC + gRPC-Gateway:
+field names are camelCase, timestamps RFC 3339, errors gRPC-standard
+`{code, codeName, message, details}`. The `.geojson` map layers are served by a
+hand-built handler and are camelCase too. Older entries describe surfaces that no
+longer exist: `/api/v1` originally hosted a different hand-built REST surface,
+replaced by a snake_case `/v1` surface on 2026-07-05, which was folded back onto
+the proto-defined `/api/v1` gateway on 2026-07-09.
 
 ## 2026-11-04 (later)
 
@@ -571,7 +579,7 @@ the same list as GeoJSON.
   camera index.
 - Not paginated. Carries a weak `ETag`; the list refreshes every 6 hours.
 
-### `road_incident`: Caltrans lane closures from CWWP2, scheduled windows included
+### BREAKING: `road_incident`: Caltrans lane closures from CWWP2, scheduled windows included
 
 **Breaking for consumers that read every `road_incident` row as "happening
 now".** Applies to `GET /api/v1/events` (`layer=road_incident`),
@@ -739,7 +747,7 @@ remain are real changes.
 
 ## 2026-09-15 (later)
 
-### Breaking: `mesh.telemetry.snr`, `.rssi` and `.hopCount` are now nullable
+### BREAKING: `mesh.telemetry.snr`, `.rssi` and `.hopCount` are now nullable
 
 **Migration: treat `null` as "no bridge has heard this node", and stop reading a
 `0` as a measurement.** A consumer that only displays these values needs no
@@ -1546,7 +1554,7 @@ the `calfire:` event.
 
 ## 2026-07-27
 
-### BREAKING — wildfire perimeter source WFIGS → CAL FIRE / FIRIS combo feed
+### BREAKING: wildfire perimeter source WFIGS → CAL FIRE / FIRIS combo feed
 
 The `wildfire` layer's perimeter source moved from the NIFC WFIGS interagency
 upload to the **CAL FIRE / FIRIS combo feed** (`CA_Perimeters_NIFC_FIRIS_public_
@@ -1615,7 +1623,7 @@ Adds a short-range NWS fire-weather forecast — keyless, additive, informationa
 
 ## 2026-07-25
 
-### BREAKING — mesh-node presence layer renamed `NETWORK` → `MESH`
+### BREAKING: mesh-node presence layer renamed `NETWORK` → `MESH`
 
 The mesh-node presence layer was enum `NETWORK` while the rest of the surface
 called it `mesh_node` (map layer, `/api/v1/mesh` endpoints). That split made the
@@ -1680,7 +1688,7 @@ edge list.
   `a`/`b` to node coordinates from `GET /api/v1/events?layer=network` (or the
   `mesh_node.geojson` layer) to draw the links.
 
-### Removed — `telemetry.path` / `telemetry.pathNodes` (`NETWORK` layer) — **breaking**
+### BREAKING: Removed — `telemetry.path` / `telemetry.pathNodes` (`NETWORK` layer)
 
 - **`telemetry.path` and `telemetry.pathNodes` are gone** from network events
   (`GET /api/v1/events?layer=network`) and from the `mesh_node.geojson` `network`
@@ -1749,7 +1757,7 @@ road, normal fire weather) is excluded, so a quiet domain reports
 layers are unchanged — the full feature set still drives the `.geojson` layers.
 A consumer that rendered `activeCount` will now show fewer (accurate) items.
 
-### Changed — enum values are UPPERCASE on the `.geojson` and `summary` surfaces (BREAKING for map clients)
+### BREAKING: Changed — enum values are UPPERCASE on the `.geojson` and `summary` surfaces (map clients)
 
 The `.geojson` map layers and the place `summary` previously lowercased a few enum
 values that the proto RPCs already emitted as UPPERCASE. They are now consistent:
@@ -1803,7 +1811,7 @@ Also clarified: the `?place=` filter (and `/api/v1/places/{place}`) accept **eit
 the slug** (`hwy4-murphys-arnold`) **or the namespaced id**
 (`corridor:hwy4-murphys-arnold`) — the bare slug is the intended form.
 
-### Changed — the data API is now proto-defined gRPC + gRPC-Gateway at `/api/v1` (BREAKING)
+### BREAKING: Changed — the data API is now proto-defined gRPC + gRPC-Gateway at `/api/v1`
 
 The hand-built snake_case `/v1` surface (added 2026-07-05) has been **removed** and
 its endpoints re-defined as a Protocol Buffers `GridService` served over
@@ -1886,7 +1894,7 @@ in-process instead of `/v1`. Conditional-GET / ETag support is not yet wired
 
 ## 2026-07-08
 
-### Removed — legacy `/api/v1` surface (BREAKING)
+### BREAKING: Removed — legacy `/api/v1` surface
 
 The original `/api/v1` REST surface and its OpenAPI specs have been **removed**;
 those paths now return `404`. Everything it served is available on `/v1` (same
@@ -2046,7 +2054,7 @@ the highway. Same `LineString` geometry type, just more vertices; a straight
 `/v1/places` is seeded statically and remains the 2-point line for now.)
 
 
-### Changed — coverage area renamed `calaveras` → `ebbetts-pass` (**breaking** for `/api/v1` hazard URLs)
+### BREAKING: Changed — coverage area renamed `calaveras` → `ebbetts-pass` (`/api/v1` hazard URLs)
 
 The one configured coverage area was mis-named "Calaveras County" (slug `calaveras`)
 but actually spans **Calaveras and Tuolumne** along the Hwy 4 + Hwy 49 corridor, and
@@ -2288,7 +2296,7 @@ road alerts (model: gpt-5-mini). Additive, non-breaking:
 
 ## 2026-07-04 00:00 UTC
 
-### Changed — weather alerts are now NWS-only (**breaking**); weather refresh 5m → 15m
+### BREAKING: Changed — weather alerts are now NWS-only; weather refresh 5m → 15m
 
 The server was exceeding OpenWeather's One Call 3.0 free cap (1,000 calls/day)
 fetching per-location alerts that, for US locations, are relabeled NWS data we
@@ -2447,10 +2455,10 @@ This is additive — existing endpoints are unchanged.
 
 ## 2026-06-26 16:47 UTC
 
-A large API cleanup pass. Several responses changed shape — see **Breaking
-changes** first.
+A large API cleanup pass. Several responses changed shape — read the BREAKING
+section first.
 
-### ⚠ Breaking changes (consumers must update)
+### BREAKING: response-shape changes (consumers must update)
 
 | Area | Before | After | Migration |
 |------|--------|-------|-----------|

@@ -4,6 +4,84 @@
      stale the moment a section was renamed. -->
 
 <!-- ================================================================ -->
+<section id="quickstart">
+  <h2>Quickstart: building a UI</h2>
+  <p>
+    A place dashboard takes four calls. The machine-readable contract is the
+    <a href="/api/openapi.json">OpenAPI spec</a> (<code class="inline">/api/openapi.json</code>):
+    it covers the whole API, including the GeoJSON layers, and is the source an
+    agent or a code generator should read. This page explains what the fields
+    mean and what a client must render.
+  </p>
+  <ol>
+    <li><strong>Pick a place.</strong> <code class="inline">GET /api/v1/places:resolve?lat=&amp;lng=</code>
+      (or <code class="inline">?address=</code>) returns the places containing a point,
+      most specific first; <code class="inline">GET /api/v1/places</code> lists them all.
+      Use the place's <code class="inline">slug</code> in every call below.</li>
+    <li><strong>Header and status tiles.</strong> <code class="inline">GET /api/v1/places/{place}/summary</code>:
+      <code class="inline">mode</code>, the severity rollup,
+      <code class="inline">activeEvacuations</code>, one entry per domain, the top
+      events and the health of each source.</li>
+    <li><strong>The event list.</strong> <code class="inline">GET /api/v1/events?place={place}&amp;status=ACTIVE</code>,
+      paged with <code class="inline">nextPageToken</code>.</li>
+    <li><strong>The map.</strong> <code class="inline">GET /api/v1/places/{place}/map/{layer}.geojson</code>,
+      one request per layer you draw (<a href="#geojson">§5</a>).</li>
+  </ol>
+  <pre class="code">curl 'https://data.sierragridteam.org/api/v1/places:resolve?lat=38.2650&amp;lng=-120.3337'
+curl  https://data.sierragridteam.org/api/v1/places/calaveras-county/summary
+curl 'https://data.sierragridteam.org/api/v1/events?place=calaveras-county&amp;status=ACTIVE'
+curl  https://data.sierragridteam.org/api/v1/places/calaveras-county/map/wildfire.geojson</pre>
+
+  <h3>What to render when a source is degraded</h3>
+  <div class="table-wrap"><table class="data-table">
+    <thead><tr><th>Value</th><th>Where</th><th>Render</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">sourceStatus: OK</td><td class="wrap">GeoJSON <code>metadata</code>, summary <code>domains[]</code>, <code>/sources</code></td><td class="wrap">Normal.</td></tr>
+      <tr><td class="mono">sourceStatus: STALE</td><td class="wrap">same</td><td class="wrap">The last good data, with its age (from <code>lastSourceUpdate</code> or <code>lastSuccessAt</code>).</td></tr>
+      <tr><td class="mono">sourceStatus: UNAVAILABLE</td><td class="wrap">same</td><td class="wrap">"Unknown" plus a link to <code>sourceUrl</code>. No features arrive; do not draw an empty layer or a green state.</td></tr>
+      <tr><td class="mono">activeEvacuations: null</td><td class="wrap">summary</td><td class="wrap">"Evacuation status unknown — check Genasys Protect." Never 0, never blank.</td></tr>
+      <tr><td class="mono">activeEvacuations: 0</td><td class="wrap">summary</td><td class="wrap">"No active evacuations reported (per Cal OES)", linked to the source. Not a guarantee.</td></tr>
+      <tr><td class="mono">activeEvacuations: N</td><td class="wrap">summary</td><td class="wrap">The count and the zones (<code>layer=evacuation</code>), with the order text verbatim.</td></tr>
+    </tbody>
+  </table></div>
+  <p class="small muted">The full contract is <a href="#evac">§6</a>. A failed request is
+    the same as UNAVAILABLE: render unknown, not zero.</p>
+
+  <h3>Request guidance</h3>
+  <ul>
+    <li><strong>Always pass <code class="inline">place</code>.</strong> An unscoped query
+      returns everything the service ingests, across all eight counties in the
+      directory, which is wider than any one dashboard.</li>
+    <li><strong>Usually pass <code class="inline">status=ACTIVE</code>.</strong> The
+      default, <code class="inline">ACTIVE,SCHEDULED</code>, includes planned Caltrans
+      roadwork that has not started, and the unscoped feed is mostly
+      <code class="inline">MESH</code> nodes at <code class="inline">INFO</code>. Add
+      <code class="inline">severity_min</code> or <code class="inline">layer</code> to narrow
+      further.</li>
+    <li><strong><code class="inline">page_size</code></strong> defaults to 50; larger
+      values are capped at 200. Follow <code class="inline">nextPageToken</code> for more.</li>
+    <li><strong>64-bit integers are JSON strings</strong> (the proto3 JSON mapping), for
+      example the mesh <code class="inline">telemetry.admin</code> counters
+      (<code class="inline">"uptimeSeconds": "7121920"</code>). Parse them; do not compare
+      them as strings.</li>
+    <li><strong>Rate limits.</strong> The read API applies no per-client rate limit and
+      needs no key. Most sources are polled every one to ten minutes
+      (<code class="inline">pollIntervalSeconds</code> on <code class="inline">/api/v1/sources</code>)
+      and responses carry <code class="inline">Cache-Control: max-age=30</code> (GeoJSON 60),
+      so polling a dashboard more than about once a minute returns no newer data.
+      Send <code class="inline">If-None-Match</code> where an <code class="inline">ETag</code>
+      is present. The only rate-limited route is
+      the authenticated push ingest (<a href="#push-ingest">§8</a>).</li>
+    <li><strong>MCP.</strong> <code class="inline">/mcp</code> serves the same read-only data
+      as tools for LLM agents (Model Context Protocol over Streamable HTTP); see the
+      <a href="/mcp-guide">MCP guide</a>.</li>
+    <li><strong>Changes</strong> to the API are recorded, newest first, in the
+      <a href="/changelog">changelog</a>. Entries headed <code class="inline">BREAKING:</code>
+      change an existing response and include a migration note.</li>
+  </ul>
+</section>
+
+<!-- ================================================================ -->
 <section id="overview">
   <h2>1. Overview &amp; conventions</h2>
 
@@ -102,7 +180,7 @@ Content-Type: application/json
   <div class="table-wrap"><table class="data-table">
     <thead><tr><th>Field</th><th>Type</th><th>Semantics</th></tr></thead>
     <tbody>
-      <tr><td class="mono">id</td><td class="mono">string</td><td class="wrap">Globally unique, source-namespaced: <code>{namespace}:{native_id}</code>. Namespaces: <code>chp:</code> (CHP road incidents), <code>caltrans:</code> (Caltrans lane closures, one per work window: <code>caltrans:d{district}-{window}</code>), <code>wx:</code> (weather alerts), <code>usgs:</code> (earthquakes), <code>calfire:</code> (CAL FIRE incidents), <code>firis:</code> (fire perimeters), <code>evac:</code> (evacuation zones), <code>pge:</code> (PG&amp;E outages), <code>psps:</code> (Public Safety Power Shutoffs, <code>psps:{eventId}:{timePeriod}</code>), <code>meshcore:</code> (mesh nodes, keyed by Ed25519 public key). FIRIS standalone ids are <code>firis:{normalized-name}</code> with <code>-2</code>, <code>-3</code> disambiguators.</td></tr>
+      <tr><td class="mono">id</td><td class="mono">string</td><td class="wrap">Globally unique, source-namespaced: <code>{namespace}:{native_id}</code>. Namespaces: <code>chp:</code> (CHP road incidents), <code>caltrans:</code> (Caltrans lane closures, one per work window: <code>caltrans:d{district}-{window}</code>), <code>wx:</code> (weather alerts), <code>usgs:</code> (earthquakes), <code>calfire:</code> (CAL FIRE incidents), <code>firis:</code> (fire perimeters), <code>evac:</code> (evacuation zones), <code>pge:</code> (PG&amp;E outages), <code>psps:</code> (Public Safety Power Shutoffs, <code>psps:{eventId}:{timePeriod}</code>), <code>meshcore:</code> (mesh nodes, keyed by Ed25519 public key), <code>burn:</code> (burn status, one per county: <code>burn:{county slug}</code>). FIRIS standalone ids are <code>firis:{normalized-name}</code> with <code>-2</code>, <code>-3</code> disambiguators.</td></tr>
       <tr><td class="mono">layer</td><td class="mono">Layer</td><td class="wrap">Layer taxonomy (table below)</td></tr>
       <tr><td class="mono">category</td><td class="mono">string</td><td class="wrap">Source sub-type slug (<code>"active"</code>, <code>"order"</code>, …)</td></tr>
       <tr><td class="mono">severity</td><td class="mono">Severity</td><td class="wrap">Unified 5-level scale (table below)</td></tr>
@@ -139,18 +217,17 @@ Content-Type: application/json
       <tr><td class="mono">wildfire</td><td class="wrap mono">acres (double), containment (int32), county, cause (string), hasPerimeter (bool)</td></tr>
       <tr><td class="mono">evacuation</td><td class="wrap mono">zoneId, level (ORDER | WARNING | ADVISORY | SHELTER_IN_PLACE, as string), eventType, county (string)</td></tr>
       <tr><td class="mono">weatherAlert</td><td class="wrap mono">nwsSeverity, certainty, urgency, instruction, areaDesc (string), zones (repeated string)</td></tr>
+      <tr><td class="mono">fireWeather</td><td class="wrap mono">state (normal | elevated | red-flag), sourceEvent (string), zones (repeated string). Reserved: fire weather is served as a condition (<code class="inline">/api/v1/conditions</code> and the <code class="inline">fire_weather</code> map layer), so no event carries this block today.</td></tr>
       <tr><td class="mono">earthquake</td><td class="wrap mono">magnitude (double), depthKm (double), felt (int32)</td></tr>
       <tr><td class="mono">roadIncident</td><td class="wrap mono">logNumber (string), impact, duration (string), metadata (map&lt;string,string&gt;), closure (Caltrans only: windowId, district, closureId, logNumber, route, direction, facility, closureType, workType, lanesClosed, totalLanes, estimatedDelayMinutes, closureDuration, plannedStart, plannedEnd, endIndefinite, setUpAt, beginLocation, endLocation, begin, end)</td></tr>
       <tr><td class="mono">power</td><td class="wrap mono">outageId, cause (string), customersAffected (int32), crewStatus (string), estimatedRestoration (timestamp); PSPS adds eventId, eventName, timePeriod, stage (Watch | Warning, as string), medicalBaselineAffected (int32), deEnergizationStart, deEnergizationEnd, allClear (timestamp). <strong>estimatedRestoration, deEnergizationEnd and allClear are ESTIMATES PG&amp;E routinely overruns</strong> — they are deliberately not mapped onto <code>expires</code>, so never use them to hide an event.</td></tr>
-      <tr><td class="mono">burnStatus</td><td class="wrap mono">burnDay (BURN_DAY_UNKNOWN | _YES | _NO | _MARGINAL), calfireStatus (CALFIRE_BURN_STATUS_UNKNOWN | CALFIRE_BURNING_SUSPENDED | CALFIRE_PERMIT_REQUIRED | CALFIRE_NO_PERMIT_REQUIRED), permission (BURN_PERMISSION_UNKNOWN | _ALLOWED | _PROHIBITED), calfireEffective, calfireObservedAt (timestamp), calfireArea (string), burnLines[] { id, name, phone (string), burnDay, observation { message, transcript (string), confidence (int32), observedAt (timestamp) } }. <strong>burnLines is a LIST</strong> — a county can have more than one recorded line, and one air-district line can speak for several counties. The top-level burnDay is their merge (most restrictive wins); render the per-line answers when they differ. A line we publish but do not read still appears, with burnDay UNKNOWN and its phone populated, so you can always offer the number. <strong>permission is deliberately pessimistic</strong> — PROHIBITED is conclusive from either authority alone, but ALLOWED needs BOTH facets known and permissive; anything else is UNKNOWN. Render UNKNOWN as "call the burn line", never as a green light. <strong>BURN_DAY_MARGINAL means ELEVATION-RESTRICTED</strong> (a burn day only above a stated elevation, typically 3500 ft) — only <code class="inline">observation.message</code> carries the threshold. The burn-day facet is a transcription of a recorded county phone line, not an API, so <code class="inline">observation.confidence</code> is a model's confidence and <code class="inline">burnLinePhone</code> should always be offered next to it.</td></tr>
+      <tr><td class="mono">burnStatus</td><td class="wrap mono">burnDay (BURN_DAY_UNKNOWN | _YES | _NO | _MARGINAL), calfireStatus (CALFIRE_BURN_STATUS_UNKNOWN | CALFIRE_BURNING_SUSPENDED | CALFIRE_PERMIT_REQUIRED | CALFIRE_NO_PERMIT_REQUIRED), permission (BURN_PERMISSION_UNKNOWN | _ALLOWED | _PROHIBITED), calfireEffective, calfireObservedAt (timestamp), calfireArea (string), burnLines[] { id, name, phone (string), burnDay, observation { message, transcript (string), confidence (int32), observedAt (timestamp) } }. <strong>burnLines is a LIST</strong> — a county can have more than one recorded line, and one air-district line can speak for several counties. The top-level burnDay is their merge (most restrictive wins); render the per-line answers when they differ. A line we publish but do not read still appears, with burnDay UNKNOWN and its phone populated, so you can always offer the number. <strong>permission is deliberately pessimistic</strong> — PROHIBITED is conclusive from either authority alone, but ALLOWED needs BOTH facets known and permissive; anything else is UNKNOWN. Render UNKNOWN as "call the burn line", never as a green light. <strong>BURN_DAY_MARGINAL means ELEVATION-RESTRICTED</strong> (a burn day only above a stated elevation, typically 3500 ft) — only <code class="inline">observation.message</code> carries the threshold. The burn-day facet is a transcription of a recorded county phone line, not an API, so <code class="inline">observation.confidence</code> is a model's confidence and the line's number (<code class="inline">burnLines[].phone</code>, E.164, e.g. <code class="inline">+12097546600</code>) should always be offered next to it.</td></tr>
       <tr><td class="mono">mesh</td><td class="wrap mono">publicKey (hex string), nodeType (companion | repeater | room_server | sensor), name (string), reachability (MESH_REACHABILITY_UNSPECIFIED | REACHABLE | UNREACHABLE), telemetry { snr (double), rssi (int32), hopCount (uint32), gateways (repeated string), lastAdvertAt (timestamp), lastHeardAt (timestamp), lastRelayedAt (timestamp), admin { … } }. Relay paths are not on the event: they are per reception, served as topology at <code class="inline">/api/v1/mesh/links</code>.</td></tr>
     </tbody>
   </table></div>
   <p class="small muted">
     Unit-bearing fields name their unit (<code class="inline">depthKm</code>).
-    A <code class="inline">fire_weather</code> detail slot is reserved in the
-    schema but fire weather is condition-backed (a map layer, not an event
-    stream). The <code class="inline">mesh</code> block's
+    The <code class="inline">mesh</code> block's
     <code class="inline">telemetry</code> is the last-heard signal state and is
     volatile — it never mints a new event revision (only a node's identity,
     role, name, location, reachability, or status does). For "is this node
@@ -380,14 +457,14 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
   }
 }</pre>
   <ul>
-    <li><strong>Per-kind data</strong> lives under a single namespaced key (<code class="inline">wildfire</code>, <code class="inline">earthquake</code>, <code class="inline">evacuation</code>, <code class="inline">weather</code>, <code class="inline">incident</code>, <code class="inline">power</code>, <code class="inline">mesh</code>, <code class="inline">camera</code>) — consumers ignore kinds they don't handle; no field collisions.</li>
+    <li><strong>Per-kind data</strong> lives under a single namespaced key, one per layer: <code class="inline">wildfire</code>, <code class="inline">evacuation</code>, <code class="inline">weather</code> (weather_alert), <code class="inline">earthquake</code>, <code class="inline">incident</code> (road_incident), <code class="inline">power</code>, <code class="inline">road</code> (road_segment), <code class="inline">chainControl</code> (chain_control), <code class="inline">messageSign</code> (message_sign), <code class="inline">fireWeather</code> (fire_weather), <code class="inline">mesh</code> (mesh_node), <code class="inline">meshLink</code> (mesh_link) and <code class="inline">camera</code>. Consumers ignore kinds they don't handle; no field collisions.</li>
     <li><strong>Coordinate order is <code class="inline">[longitude, latitude]</code></strong> (GeoJSON axis order), WGS84, trimmed to 5 decimals (~1.1 m). Polygons are simplified to keep features small.</li>
     <li><strong>Null geometry is valid</strong> (e.g. a county-wide advisory): the feature has <code class="inline">"geometry": null</code> with the same properties envelope. Exclude it from the map layer and render it as a full-width banner/list card sorted by <code class="inline">severityRank</code> alongside located features, showing <code class="inline">headline</code>, <code class="inline">source.name</code>, <code class="inline">updatedAt</code>, and <code class="inline">source.url</code>.</li>
     <li><strong>URL fields are scheme-validated upstream</strong>: any upstream-sourced URL that is not <code class="inline">https://</code>/<code class="inline">http://</code> is dropped before it reaches the response. Treat all upstream text (headlines, descriptions) as untrusted anyway.</li>
     <li><strong><code class="inline">summary</code> sits beside <code class="inline">description</code>, never instead of it.</strong> It is present only when the event has an AI-written summary (the key is omitted otherwise — fall back to <code class="inline">description</code>), and <code class="inline">summaryEnhanced</code> marks it as machine-written so you can badge it. On <code class="inline">road_incident</code> the <code class="inline">description</code> is already the readable narrative, so the two are usually equal there. On <code class="inline">weather_alert</code>, <code class="inline">weather</code> also carries the NWS <code class="inline">nwsSeverity</code>, <code class="inline">certainty</code>, <code class="inline">urgency</code> and the verbatim <code class="inline">instruction</code>; the summary never restates the instruction, so render it yourself.</li>
     <li>Unit-bearing fields name their unit (<code class="inline">windGustMph</code>, <code class="inline">depthKm</code>).</li>
     <li><strong><code class="inline">layer</code> has two forms, by role.</strong> As a <em>value</em> — <code class="inline">properties.layer</code> here, and <code class="inline">event.layer</code> / <code class="inline">topEvents[].layer</code> elsewhere — it is the UPPERCASE Layer enum name (<code class="inline">WILDFIRE</code>). As an <em>address</em> — the <code class="inline">{layer}</code> path segment, the <code class="inline">?layer=</code> query value, and the <code class="inline">metadata.layer</code> / <code class="inline">metadata.area</code> echoes above — it is the lowercase slug (<code class="inline">wildfire</code>). One rule: values are enum names, URLs and the metadata block are slugs. <strong>Mesh-node presence is the one layer whose slug (<code class="inline">mesh_node</code>) is not just the lowercased enum name (<code class="inline">MESH</code>)</strong>: as a <code class="inline">?layer=</code> value the query accepts <code class="inline">mesh</code> (the enum name), <code class="inline">mesh_node</code> (the slug), and the legacy <code class="inline">network</code> — all resolve to the same layer. (Before 2026-07-25 this layer's enum was <code class="inline">NETWORK</code>; it was renamed to <code class="inline">MESH</code>, with <code class="inline">network</code> kept as a legacy query alias.)</li>
-    <li><strong>This endpoint is not in the <a href="/api/openapi.json">OpenAPI spec</a>.</strong> The <code class="inline">.geojson</code> layers are hand-built (RFC 7946 geometry doesn't model cleanly in proto3), so a client generated from the spec alone will be missing all eight map layers — integrate them from this section.</li>
+    <li><strong>The <a href="/api/openapi.json">OpenAPI spec</a> covers the whole API, including these layers.</strong> They are served by a hand-built handler rather than a proto RPC (RFC 7946 geometry does not model cleanly in proto3), so this section is the reference for their rendering rules.</li>
   </ul>
   <div class="live-examples">
     <a href="/api/v1/places/ebbetts-pass/map/wildfire.geojson">/api/v1/places/ebbetts-pass/map/wildfire.geojson</a>
@@ -455,7 +532,7 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
     <h3>The summary shape (quoted from the contract)</h3>
     <pre class="code">{
   "place": "ebbetts-pass", "placeId": "area:ebbetts-pass",
-  "placeName": "Calaveras County", "generatedAt": "RFC3339",
+  "placeName": "Ebbetts Pass Corridor", "generatedAt": "RFC3339",
   "mode": "QUIET|WATCH|ACTIVE",
   "summary": {
     "highestSeverity": "SEVERE", "highestSeverityRank": 3,
@@ -467,6 +544,17 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
                "headlines":[{"id","severity","headline"}]}],
   "sources": [{"id","status","lastSuccessAt"}]
 }</pre>
+    <p class="small muted">
+      <code class="inline">domains[].domain</code> is one of
+      <code class="inline">fire</code>, <code class="inline">evacuation</code>,
+      <code class="inline">weather</code>, <code class="inline">roads</code>,
+      <code class="inline">seismic</code>, <code class="inline">power</code>,
+      <code class="inline">burn</code> and, when the MeshCore source is enabled,
+      <code class="inline">comms</code>. Mesh presence and burn status are ambient
+      INFO state: they appear only in their own domain, never in
+      <code class="inline">totalActive</code>, <code class="inline">severityCounts</code>,
+      <code class="inline">topEvents</code> or <code class="inline">mode</code>.
+    </p>
     <div class="live-examples">
       <a href="/api/v1/places/ebbetts-pass/summary">/api/v1/places/ebbetts-pass/summary</a>
     </div>
@@ -502,7 +590,9 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
       <tr><td class="mono">pge</td><td class="wrap">PG&amp;E electric outages (planned and unplanned), affected-area polygons joined onto the reported point</td><td class="mono">pge:</td><td class="mono">5m</td><td class="wrap"><code>resolve</code> — active-only feed; missing ⇒ RESOLVED</td></tr>
       <tr><td class="mono">psps</td><td class="wrap">PG&amp;E Public Safety Power Shutoff coverage; one event per de-energization window, <strong>empty outside an event</strong></td><td class="mono">psps:</td><td class="mono">5m</td><td class="wrap"><code>resolve</code></td></tr>
       <tr><td class="mono">meshcore</td><td class="wrap">Mesh-node presence, from community MeshCore MQTT bridges <em>and</em> operator-run monitors (§8). Every mesh event stays on this source whichever input observed it.</td><td class="mono">meshcore:</td><td class="mono">60s</td><td class="wrap"><code>expire</code> — a mesh has no goodbye packet, so silence is not proof of absence</td></tr>
-      <tr><td class="mono"><em>reporter ids</em></td><td class="wrap">One row per configured push reporter (§8), e.g. <code>alan-pi</code>. <strong>Health only</strong> — no event is attributed to a reporter; the row answers "is that monitor still reporting?"</td><td class="mono">—</td><td class="mono">—</td><td class="wrap">—</td></tr>
+      <tr><td class="mono">burnline</td><td class="wrap">County permissive-burn-day phone lines, read once a day and pushed through <code>burn.line</code> (§8) — the <code>burnDay</code> facet of burn_status events</td><td class="mono">burn:</td><td class="mono">1h</td><td class="wrap">— the per-county event stays ACTIVE; a reading older than 36h is UNKNOWN</td></tr>
+      <tr><td class="mono">calfire-burn</td><td class="wrap">CAL FIRE burn-permit suspension by county (State Responsibility Area) — the <code>calfireStatus</code> facet of burn_status events</td><td class="mono">burn:</td><td class="mono">1h</td><td class="wrap">— the per-county event stays ACTIVE</td></tr>
+      <tr><td class="mono"><em>reporter ids</em></td><td class="wrap">One row per configured push reporter (§8), e.g. <code>alanpi</code>, <code>relay</code>, <code>burn-line</code>. <strong>Health only</strong> — no event is attributed to a reporter; the row answers "is that monitor still reporting?"</td><td class="mono">—</td><td class="mono">—</td><td class="wrap">—</td></tr>
     </tbody>
   </table></div>
   <p class="small muted">
