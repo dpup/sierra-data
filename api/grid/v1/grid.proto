@@ -75,9 +75,9 @@ option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
       "5. Context: `GET /api/v1/conditions?place={slug}` for current weather, "
       "forecasts and the fire-weather state, `GET /api/v1/cameras?place={slug}` for "
       "traffic cameras, and `GET /api/v1/sources` for source-health badges.\n\n"
-      "Poll every 30 to 60 seconds. Responses are cacheable for 30 seconds "
-      "(`Cache-Control: public, max-age=30`); upstream feeds refresh every 2 to 15 "
-      "minutes.\n\n"
+      "Poll every 30 to 60 seconds. JSON responses are cacheable for 30 seconds "
+      "(`Cache-Control: public, max-age=30`), GeoJSON layers and mesh links for 60; "
+      "upstream feeds refresh every 2 to 15 minutes.\n\n"
       "## Filter the event feed\n\n"
       "An unscoped `GET /api/v1/events` is mostly MESH nodes: hundreds of community "
       "radio nodes across Northern California, all INFO, many outside every place. "
@@ -128,7 +128,9 @@ option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
       "with a mapped HTTP status: 400 `INVALID_ARGUMENT` (bad enum, timestamp or "
       "page token), 404 `NOT_FOUND` (unknown place, event or address), 429 "
       "`RESOURCE_EXHAUSTED` (response too large), 503 `UNAVAILABLE` (address "
-      "geocoder down), 500 `INTERNAL`.\n\n"
+      "geocoder down), 500 `INTERNAL`. Branch on `codeName`. During a deploy "
+      "handoff any route can briefly answer `503` with a plain-text body and "
+      "`Retry-After: 1`; retry after the delay.\n\n"
       "## Severity and status\n\n"
       "Every event and map feature uses one severity scale: INFO (rank 0), MINOR (1), "
       "MODERATE (2), SEVERE (3), EXTREME (4). It expresses how urgently the public "
@@ -197,7 +199,7 @@ option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
     },
     {
       name: "Mesh"
-      description: "MeshCore community radio mesh. Node presence is the MESH event layer; this tag holds the per-node telemetry archive."
+      description: "The MeshCore community radio mesh: node presence is the MESH event layer and the mesh_node map layer; relay topology is /api/v1/mesh/links and the mesh_link map layer; per-node history is GetMeshTelemetry."
     }
   ]
   external_docs: {

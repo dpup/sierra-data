@@ -32,63 +32,8 @@ defaults:
   info:
     title: The Grid API
     version: v1
-    description: |
-      The Grid is the S.I.E.R.R.A data service: public, read-only, keyless hazard,
-      road, weather, power and mesh-network data for the central Sierra Nevada
-      (Calaveras and Tuolumne counties and their corridors). Everything is under
-      `/api/v1`.
-
-      **Conventions that hold across the surface**
-
-      - JSON field names are camelCase. Timestamps are RFC 3339 UTC strings.
-        Enum values are their UPPERCASE names.
-      - A place is addressed by its slug (`calaveras-county`) or its namespaced id
-        (`county:calaveras-county`); both resolve everywhere. List them with
-        `GET /api/v1/places`.
-      - Events (`/api/v1/events`) are the system of record for hazards: one row per
-        wildfire, evacuation zone, weather alert, earthquake, road incident, power
-        outage or mesh node, each with a revision history.
-      - Map clients use the GeoJSON layers at
-        `/api/v1/places/{place}/map/{layer}.geojson`. GeoJSON coordinates are
-        `[longitude, latitude]`; the JSON RPCs use `{lat, lng}` objects.
-      - Severity is one scale everywhere: `INFO` < `MINOR` < `MODERATE` <
-        `SEVERE` < `EXTREME` (rank 0-4).
-      - **Fail loud.** Every layer and summary domain reports source health as
-        `OK`, `STALE` (serving the last good data, see `lastSourceUpdate`) or
-        `UNAVAILABLE` (nothing to show; the state is UNKNOWN, not clear). Never
-        render an UNAVAILABLE layer or a `null` count as "all clear".
-      - Evacuation and other life-safety text is reference only. Show it verbatim
-        and link the authoritative source (`sourceUrl`).
-
-      **Caching.** Read responses carry `Cache-Control: public, max-age=30`
-      (GeoJSON layers and mesh links: 60). The RPCs marked with a `304` response
-      honour `If-None-Match`; send back the `ETag` you received.
-
-      **Errors.** Every JSON route, generated or hand-built, answers errors as
-      `{code, codeName, message, details}` (`rpcStatus`) with the HTTP status
-      mapped from the gRPC code. Branch on `codeName`. During a deploy handoff
-      any route can briefly answer `503` with a plain-text body and
-      `Retry-After: 1`.
-
-      **CORS** is open (`Access-Control-Allow-Origin: *`) for GET only. The two
-      POST routes (`/api/v1/ingest/{stream}`, `/mcp`) are not callable
-      cross-origin from a browser.
-
-      The JSON RPCs also accept proto field names for query parameters
-      (`page_token` as well as `pageToken`).
-    contact:
-      name: S.I.E.R.R.A
-      url: https://data.sierragridteam.org
-  servers:
-    - url: https://data.sierragridteam.org
-      description: Production
   # Public and keyless: no auth unless an operation says otherwise (only ingest does).
   security: []
-  tags:
-    - name: GridService
-      description: |
-        The proto-defined read surface: events and their history, places, place
-        summaries, conditions, sources, cameras, scanners and mesh telemetry.
 
   components:
     schemas:
@@ -166,11 +111,6 @@ spec:
         RFC 7946 GeoJSON, one FeatureCollection per place and layer, ready to hand
         to MapLibre GL, Leaflet or OpenLayers. Hand-built (proto models geometry
         poorly), so these routes are described here rather than generated.
-    - name: Mesh
-      description: |
-        The MeshCore community mesh: node presence is the `mesh_node` map layer
-        and `layer=MESH` events; the relay topology is `/api/v1/mesh/links` and
-        the `mesh_link` map layer; per-node history is `GetMeshTelemetry`.
     - name: Ingest
       description: |
         The one authenticated WRITE endpoint, for operator-run monitors that push

@@ -6969,8 +6969,8 @@ const file_grid_proto_rawDesc = "" +
 	"\x10GetMeshTelemetry\x12 .grid.v1.GetMeshTelemetryRequest\x1a\x1d.grid.v1.MeshTelemetryArchive\"\xae\x01\x92A\x8c\x01\n" +
 	"\x04MeshJ\x83\x01\n" +
 	"\x03400\x12|\n" +
-	"zINVALID_ARGUMENT: `node` missing or not 8-64 even-length hex (optionally prefixed `meshcore:`), or `from` not before `to`.\x82\xd3\xe4\x93\x02\x18\x12\x16/api/v1/mesh/telemetry\x1ap\x92Am\x12kEvery /api/v1 RPC. The resource tags (Places, Events, Conditions, Sources, Mesh) group the same operations.B\xa6N\x92A\xf2M\x12\xa8G\n" +
-	"\fThe Grid API\x12\x88FPublic, read-only JSON API of **The Grid**, the S.I.E.R.R.A. data service. It gathers hazard and situational-awareness feeds for California's central Sierra Nevada, centred on Calaveras and Tuolumne counties: the Highway 4 / Ebbetts Pass corridor (Angels Camp, Murphys, Arnold, Dorrington, Bear Valley) and the Highway 49/108 towns (Sonora, Columbia, Twain Harte). Neighbouring counties (Alpine, Amador, El Dorado, Mariposa, San Joaquin, Stanislaus) are in the place directory because hazards cross county lines.\n" +
+	"zINVALID_ARGUMENT: `node` missing or not 8-64 even-length hex (optionally prefixed `meshcore:`), or `from` not before `to`.\x82\xd3\xe4\x93\x02\x18\x12\x16/api/v1/mesh/telemetry\x1ap\x92Am\x12kEvery /api/v1 RPC. The resource tags (Places, Events, Conditions, Sources, Mesh) group the same operations.B\xc1P\x92A\x8dP\x12\xe8H\n" +
+	"\fThe Grid API\x12\xc8GPublic, read-only JSON API of **The Grid**, the S.I.E.R.R.A. data service. It gathers hazard and situational-awareness feeds for California's central Sierra Nevada, centred on Calaveras and Tuolumne counties: the Highway 4 / Ebbetts Pass corridor (Angels Camp, Murphys, Arnold, Dorrington, Bear Valley) and the Highway 49/108 towns (Sonora, Columbia, Twain Harte). Neighbouring counties (Alpine, Amador, El Dorado, Mariposa, San Joaquin, Stanislaus) are in the place directory because hazards cross county lines.\n" +
 	"\n" +
 	"Upstream sources: CAL FIRE and FIRIS (wildfires and perimeters), Cal OES / Genasys (evacuation zones), the National Weather Service (alerts, fire weather, forecasts), USGS (earthquakes), CHP and Caltrans (incidents, lane closures, chain control, cameras, message signs), PG&E (outages and Public Safety Power Shutoffs), county burn lines and CAL FIRE burn permits, the MeshCore community radio mesh, Google Routes and OpenWeatherMap.\n" +
 	"\n" +
@@ -6992,7 +6992,7 @@ const file_grid_proto_rawDesc = "" +
 	"4. Map: `GET /api/v1/places/{slug}/map/{layer}.geojson` serves one RFC 7946 FeatureCollection per layer (documented separately from the RPCs below).\n" +
 	"5. Context: `GET /api/v1/conditions?place={slug}` for current weather, forecasts and the fire-weather state, `GET /api/v1/cameras?place={slug}` for traffic cameras, and `GET /api/v1/sources` for source-health badges.\n" +
 	"\n" +
-	"Poll every 30 to 60 seconds. Responses are cacheable for 30 seconds (`Cache-Control: public, max-age=30`); upstream feeds refresh every 2 to 15 minutes.\n" +
+	"Poll every 30 to 60 seconds. JSON responses are cacheable for 30 seconds (`Cache-Control: public, max-age=30`), GeoJSON layers and mesh links for 60; upstream feeds refresh every 2 to 15 minutes.\n" +
 	"\n" +
 	"## Filter the event feed\n" +
 	"\n" +
@@ -7010,7 +7010,7 @@ const file_grid_proto_rawDesc = "" +
 	"- **Pagination** is keyset-based. `pageSize` 0 or omitted means 50, values over 200 are clamped to 200, and a negative value is a 400. Pass `nextPageToken` back as `pageToken` with the same filters until it comes back empty. Tokens are opaque. Pages stay stable while new events arrive. A large page of perimeter-heavy events can exceed the server's 4 MiB response limit and fail with HTTP 429 `RESOURCE_EXHAUSTED`; keep `pageSize` at or below 50 when you include RESOLVED or EXPIRED events.\n" +
 	"- **Conditional GET**: event lists, event detail, event history, the revision archive, places and cameras return a weak `ETag`. Send it back in `If-None-Match` to get `304 Not Modified`. The tag changes whenever the body would, including in-place refreshes that write no revision (AI text, mesh telemetry, burn-line observations, place re-attachment). The summary, conditions, sources, resolve, scanners and mesh-telemetry endpoints do not yet send ETags.\n" +
 	"- **No authentication, no API key.** CORS is open (`Access-Control-Allow-Origin: *`), GET only, no credentials, so a browser page on any origin can call the API directly.\n" +
-	"- **Errors** are the gRPC status as JSON, `{code, codeName, message, details}`, with a mapped HTTP status: 400 `INVALID_ARGUMENT` (bad enum, timestamp or page token), 404 `NOT_FOUND` (unknown place, event or address), 429 `RESOURCE_EXHAUSTED` (response too large), 503 `UNAVAILABLE` (address geocoder down), 500 `INTERNAL`.\n" +
+	"- **Errors** are the gRPC status as JSON, `{code, codeName, message, details}`, with a mapped HTTP status: 400 `INVALID_ARGUMENT` (bad enum, timestamp or page token), 404 `NOT_FOUND` (unknown place, event or address), 429 `RESOURCE_EXHAUSTED` (response too large), 503 `UNAVAILABLE` (address geocoder down), 500 `INTERNAL`. Branch on `codeName`. During a deploy handoff any route can briefly answer `503` with a plain-text body and `Retry-After: 1`; retry after the delay.\n" +
 	"\n" +
 	"## Severity and status\n" +
 	"\n" +
@@ -7040,8 +7040,8 @@ const file_grid_proto_rawDesc = "" +
 	"\x06Events\x12\x8b\x01Hazard and ambient-state events from the grid event store: the cross-layer feed, one event, its revision history, and the revision archive.j\x9e\x01\n" +
 	"\n" +
 	"Conditions\x12\x8f\x01Current, non-event state: weather, forecasts and fire weather, plus reference data (traffic cameras and scanner feeds). None of it is an event.jp\n" +
-	"\aSources\x12eThe upstream source registry and per-source health, which tells a client how far to trust each layer.j|\n" +
-	"\x04Mesh\x12tMeshCore community radio mesh. Node presence is the MESH event layer; this tag holds the per-node telemetry archive.rM\n" +
+	"\aSources\x12eThe upstream source registry and per-source health, which tells a client how far to trust each layer.j\xd6\x01\n" +
+	"\x04Mesh\x12\xcd\x01The MeshCore community radio mesh: node presence is the MESH event layer and the mesh_node map layer; relay topology is /api/v1/mesh/links and the mesh_link map layer; per-node history is GetMeshTelemetry.rM\n" +
 	"%The Grid site and human-readable docs\x12$https://data.sierragridteam.org/docsZ.github.com/dpup/sierra-data/api/grid/v1;gridv1b\x06proto3"
 
 var (

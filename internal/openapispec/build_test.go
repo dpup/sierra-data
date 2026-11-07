@@ -184,12 +184,47 @@ defaults:
 spec:
   tags:
     - {name: Map layers, description: GeoJSON.}
+  paths:
+    /api/v1/map:
+      get:
+        tags: [Map layers]
+        responses:
+          "200": {description: ok}
 `)
 	require.NoError(t, err)
 	tags := doc["tags"].([]any)
 	require.Len(t, tags, 2)
 	assert.Equal(t, map[string]any{"name": "GridService", "description": "The read surface."}, tags[0])
 	assert.Equal(t, "Map layers", tags[1].(map[string]any)["name"])
+}
+
+func TestBuild_PrunesUnusedTags(t *testing.T) {
+	doc, _, err := build(t, `
+spec:
+  tags:
+    - {name: Orphan, description: No operation carries this.}
+`)
+	require.NoError(t, err)
+	var names []string
+	for _, tag := range doc["tags"].([]any) {
+		names = append(names, tag.(map[string]any)["name"].(string))
+	}
+	assert.Equal(t, []string{"GridService"}, names)
+}
+
+func TestBuild_ServerURLHasNoTrailingSlash(t *testing.T) {
+	// The generator emits host + schemes when grid.proto sets them.
+	swagger := strings.Replace(fixtureSwagger, `"swagger": "2.0",`, `"swagger": "2.0", "host": "example.org", "schemes": ["https"],`, 1)
+	require.NotEqual(t, fixtureSwagger, swagger, "fixture shape changed")
+	out, _, err := Build([]byte(swagger), nil)
+	require.NoError(t, err)
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(out, &doc))
+	servers := doc["servers"].([]any)
+	require.NotEmpty(t, servers)
+	for _, srv := range servers {
+		assert.NotRegexp(t, `/$`, srv.(map[string]any)["url"])
+	}
 }
 
 func TestBuild_DanglingRefFails(t *testing.T) {

@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/getkin/kin-openapi/openapi2"
 	"github.com/getkin/kin-openapi/openapi2conv"
@@ -69,6 +70,8 @@ func Build(swaggerJSON, overlayYAML []byte) ([]byte, Report, error) {
 	if err := mergeDefaults(base, ov.Defaults, "", &rep); err != nil {
 		return nil, rep, fmt.Errorf("overlay defaults: %w", err)
 	}
+	pruneUnusedTags(base)
+	trimServerSlashes(base)
 	if err := checkRefs(base); err != nil {
 		return nil, rep, err
 	}
@@ -185,4 +188,52 @@ func validate(doc []byte) error {
 		return fmt.Errorf("merged spec is invalid: %w", err)
 	}
 	return nil
+}
+
+// pruneUnusedTags drops top-level tags no operation carries. protoc-gen-openapiv2
+// always lists the service name (GridService) as a tag even when every RPC is
+// tagged by resource, and an empty group only clutters a generated UI.
+func pruneUnusedTags(doc map[string]any) {
+	used := map[string]bool{}
+	paths, _ := doc["paths"].(map[string]any)
+	for _, item := range paths {
+		ops, _ := item.(map[string]any)
+		for _, op := range ops {
+			o, _ := op.(map[string]any)
+			tags, _ := o["tags"].([]any)
+			for _, t := range tags {
+				if name, ok := t.(string); ok {
+					used[name] = true
+				}
+			}
+		}
+	}
+	tags, ok := doc["tags"].([]any)
+	if !ok {
+		return
+	}
+	kept := tags[:0]
+	for _, t := range tags {
+		if m, ok := t.(map[string]any); ok {
+			if name, _ := m["name"].(string); !used[name] {
+				continue
+			}
+		}
+		kept = append(kept, t)
+	}
+	doc["tags"] = kept
+}
+
+// trimServerSlashes drops the trailing slash kin-openapi's v2→v3 conversion
+// leaves on a server URL built from host + basePath "/": paths already start
+// with "/", so "https://host/" + "/api/v1/..." would join to a double slash.
+func trimServerSlashes(doc map[string]any) {
+	servers, _ := doc["servers"].([]any)
+	for _, s := range servers {
+		if m, ok := s.(map[string]any); ok {
+			if u, ok := m["url"].(string); ok {
+				m["url"] = strings.TrimRight(u, "/")
+			}
+		}
+	}
 }
