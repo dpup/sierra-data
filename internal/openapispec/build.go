@@ -11,10 +11,12 @@
 //     shared error responses, and the security scheme.
 //
 // Build converts the generated document to OpenAPI 3.0 (3.0 says nullable, oneOf
-// and per-response content types, which Swagger 2.0 cannot), merges the overlay
-// into it under the rules in merge.go, checks every $ref resolves, validates the
-// result with kin-openapi, and renders it with a stable key order. The output is
-// api/grid/v1/openapi.json, which is committed and embedded.
+// and per-response content types, which Swagger 2.0 cannot), marks the
+// properties the gateway can serialize as null (nullable.go, from the proto
+// descriptor), completes the generated error responses (responses.go), merges the overlay into it under the rules in merge.go, checks
+// every $ref resolves, validates the result with kin-openapi, and renders it
+// with a stable key order. The output is api/grid/v1/openapi.json, which is
+// committed and embedded.
 package openapispec
 
 import (
@@ -26,6 +28,7 @@ import (
 	"github.com/getkin/kin-openapi/openapi2"
 	"github.com/getkin/kin-openapi/openapi2conv"
 	"github.com/getkin/kin-openapi/openapi3"
+	"google.golang.org/protobuf/reflect/protoreflect"
 	"gopkg.in/yaml.v3"
 )
 
@@ -53,12 +56,18 @@ type Report struct {
 }
 
 // Build produces the served OpenAPI document from the generated Swagger 2.0
-// JSON and the overlay YAML.
-func Build(swaggerJSON, overlayYAML []byte) ([]byte, Report, error) {
+// JSON and the overlay YAML. proto is the descriptor of the .proto file the
+// swagger was generated from (gridv1.File_grid_proto); it decides which
+// properties are nullable. A nil descriptor marks none.
+func Build(swaggerJSON, overlayYAML []byte, proto protoreflect.FileDescriptor) ([]byte, Report, error) {
 	base, err := convertToV3(swaggerJSON)
 	if err != nil {
 		return nil, Report{}, err
 	}
+	if err := markNullable(base, nullableFields(proto)); err != nil {
+		return nil, Report{}, err
+	}
+	completeGeneratedResponses(base)
 	ov, err := parseOverlay(overlayYAML)
 	if err != nil {
 		return nil, Report{}, err
@@ -72,6 +81,9 @@ func Build(swaggerJSON, overlayYAML []byte) ([]byte, Report, error) {
 	}
 	pruneUnusedTags(base)
 	trimServerSlashes(base)
+	if err := checkResponses(base); err != nil {
+		return nil, rep, err
+	}
 	if err := checkRefs(base); err != nil {
 		return nil, rep, err
 	}
@@ -88,8 +100,17 @@ func Build(swaggerJSON, overlayYAML []byte) ([]byte, Report, error) {
 // convertToV3 converts the generated Swagger 2.0 document to OpenAPI 3.0 and
 // returns it as a generic JSON tree, the form the merge works on.
 func convertToV3(swaggerJSON []byte) (map[string]any, error) {
+	var raw map[string]any
+	if err := json.Unmarshal(swaggerJSON, &raw); err != nil {
+		return nil, fmt.Errorf("parse generated swagger: %w", err)
+	}
+	keepRefSiblings(raw)
+	pre, err := json.Marshal(raw)
+	if err != nil {
+		return nil, fmt.Errorf("re-encode generated swagger: %w", err)
+	}
 	var v2 openapi2.T
-	if err := json.Unmarshal(swaggerJSON, &v2); err != nil {
+	if err := json.Unmarshal(pre, &v2); err != nil {
 		return nil, fmt.Errorf("parse generated swagger: %w", err)
 	}
 	v3, err := openapi2conv.ToV3(&v2)

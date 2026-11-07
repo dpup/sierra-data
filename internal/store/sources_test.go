@@ -189,3 +189,23 @@ func TestSeedSourcesRoundTripsHomepageURL(t *testing.T) {
 	assert.Equal(t, "https://pgealerts.alerts.pge.com/psps-updates/",
 		getSource(t, s, "psps").GetHomepageUrl())
 }
+
+// Kind is config-owned like the homepage: a row seeded as a reporter reads
+// REPORTER, an unspecified seed reads FEED, and a re-seed can change it.
+func TestSeedSourcesRoundTripsKind(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+
+	require.NoError(t, s.SeedSources(ctx, []SourceSeed{
+		{ID: "calfire", Name: "CAL FIRE", PollInterval: 5 * time.Minute},
+		{ID: "alanpi", Name: "Alan's monitor", Kind: gridv1.SourceKind_REPORTER, PollInterval: time.Minute},
+	}))
+	assert.Equal(t, gridv1.SourceKind_FEED, getSource(t, s, "calfire").GetKind(),
+		"an unspecified seed is a feed, never UNSPECIFIED on the wire")
+	assert.Equal(t, gridv1.SourceKind_REPORTER, getSource(t, s, "alanpi").GetKind())
+
+	require.NoError(t, s.SeedSources(ctx, []SourceSeed{
+		{ID: "calfire", Name: "CAL FIRE", Kind: gridv1.SourceKind_REPORTER, PollInterval: 5 * time.Minute},
+	}))
+	assert.Equal(t, gridv1.SourceKind_REPORTER, getSource(t, s, "calfire").GetKind(), "re-seed updates kind")
+}

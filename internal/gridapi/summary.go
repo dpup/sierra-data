@@ -253,6 +253,9 @@ func (s *Service) buildPlaceSummary(ctx context.Context, hb hazardsBuilder, plac
 	// nothing stored", where unknown really is unknown.
 	evacStatus := eventLayerStatus(hazards.LayerEvacuation)
 	stats.EvacuationStatus = evacStatus
+	// The link the fail-loud text sends people to, set in every state (above
+	// all UNAVAILABLE): the same URL the evacuation map layer's metadata carries.
+	_, stats.EvacuationSourceUrl = eventLayerMeta(hazards.LayerEvacuation, sources)
 	if evacStatus == "OK" || evacStatus == "STALE" {
 		var n int32
 		for _, ev := range events {

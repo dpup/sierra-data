@@ -410,8 +410,13 @@ func (s *Service) roadSegments(ctx context.Context, area config.HazardArea) ([]F
 
 	var out []Feature
 	for _, mr := range s.cfg.Roads.MonitoredRoads {
-		// Include the segment if either endpoint is in the area.
-		if !area.Bounds.Contains(mr.Origin.Latitude, mr.Origin.Longitude) &&
+		// Include the segment if either endpoint is in the area, and always on
+		// the segment's own corridor (whose synthesized area id is the road id).
+		// The corridor's bbox comes from its 5-decimal road path, which can sit
+		// a few metres inside the configured endpoints, so the endpoint test
+		// alone dropped every corridor's own segment from its map and summary.
+		if mr.ID != area.ID &&
+			!area.Bounds.Contains(mr.Origin.Latitude, mr.Origin.Longitude) &&
 			!area.Bounds.Contains(mr.Destination.Latitude, mr.Destination.Longitude) {
 			continue
 		}

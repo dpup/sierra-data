@@ -26,6 +26,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
+	"github.com/dpup/sierra-data/internal/clients/caloes"
 	"github.com/dpup/sierra-data/internal/config"
 	"github.com/dpup/sierra-data/internal/hazards"
 	"github.com/dpup/sierra-data/internal/store"
@@ -111,6 +112,7 @@ type summaryOut struct {
 		TotalActive         int            `json:"totalActive"`
 		ActiveEvacuations   *int           `json:"activeEvacuations"`
 		EvacuationStatus    string         `json:"evacuationStatus"`
+		EvacuationSourceURL string         `json:"evacuationSourceUrl"`
 		TopEvents           []struct {
 			ID           string `json:"id"`
 			Layer        string `json:"layer"`
@@ -427,6 +429,30 @@ func TestSummary_EvacInvariant(t *testing.T) {
 		assert.Contains(t, rec.Body.String(), `"activeEvacuations":null`, "null must be explicit, not omitted")
 		assert.Equal(t, "UNAVAILABLE", out.Summary.EvacuationStatus)
 		assert.NotEqual(t, ModeQuiet, out.Mode, "unknown evac state is never quiet")
+	})
+}
+
+// TestSummary_EvacuationSourceURL: the summary links the authoritative
+// evacuation viewer in every evacuation state, above all UNAVAILABLE (where
+// the fail-loud text says "check Genasys"), and it is the same URL the
+// evacuation map layer's metadata.sourceUrl carries.
+func TestSummary_EvacuationSourceURL(t *testing.T) {
+	_, layerURL := eventLayerMeta(hazards.LayerEvacuation, nil)
+	require.Equal(t, caloes.SourceURL, layerURL, "the map layer's metadata.sourceUrl")
+
+	t.Run("UNAVAILABLE", func(t *testing.T) {
+		s := newTestService(t) // caloes never seeded
+		out := decodeSummary(t, getSummaryWith(t, s, condOKBuilder("normal"), "calaveras"))
+		require.Equal(t, "UNAVAILABLE", out.Summary.EvacuationStatus)
+		assert.Equal(t, layerURL, out.Summary.EvacuationSourceURL)
+	})
+	t.Run("OK", func(t *testing.T) {
+		s := newTestService(t)
+		seedSource(t, s.Store, "caloes")
+		recordOK(t, s.Store, "caloes")
+		out := decodeSummary(t, getSummaryWith(t, s, condOKBuilder("normal"), "calaveras"))
+		require.Equal(t, "OK", out.Summary.EvacuationStatus)
+		assert.Equal(t, layerURL, out.Summary.EvacuationSourceURL)
 	})
 }
 

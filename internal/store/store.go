@@ -241,11 +241,18 @@ CREATE TABLE mesh_activity (
 // is bookkeeping for a validator, not content.
 const migrationV10 = `ALTER TABLE events ADD COLUMN refreshes INTEGER NOT NULL DEFAULT 0`
 
+// migrationV11 records what each source registry row is (gridv1.SourceKind):
+// a scheduled FEED or a push REPORTER. Before it a client could not tell the
+// two apart, and judged a reporter by a poll cadence it does not have.
+// DEFAULT 1 (FEED) is right for every pre-existing row until the next boot's
+// SeedSources rewrites the reporters' rows.
+const migrationV11 = `ALTER TABLE sources ADD COLUMN kind INTEGER NOT NULL DEFAULT 1`
+
 // migrations[i] is the DDL for schema version i+1. Applied versions are
 // recorded in schema_migrations; already-applied versions are skipped, so
 // Open is idempotent across restarts and an existing dev DB at an older
 // version picks up only the missing migrations.
-var migrations = []string{schemaV1, migrationV2, migrationV3, migrationV4, migrationV5, migrationV6, migrationV7, migrationV8, migrationV9, migrationV10}
+var migrations = []string{schemaV1, migrationV2, migrationV3, migrationV4, migrationV5, migrationV6, migrationV7, migrationV8, migrationV9, migrationV10, migrationV11}
 
 // ErrNotFound is returned by point lookups (GetEvent, GetPlace) when no row
 // matches. Callers map it to a 404.

@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 
+	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
 	"github.com/dpup/sierra-data/internal/openapispec"
 )
 
@@ -45,7 +46,7 @@ func run(swaggerPath, overlayPath, outPath string, check bool) error {
 	if err != nil {
 		return err
 	}
-	out, rep, err := openapispec.Build(swagger, overlay)
+	out, rep, err := openapispec.Build(swagger, overlay, gridv1.File_grid_proto)
 	if err != nil {
 		return err
 	}

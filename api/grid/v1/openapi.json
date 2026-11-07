@@ -5,7 +5,7 @@
       "name": "The Grid (S.I.E.R.R.A. data service)",
       "url": "https://github.com/dpup/sierra-data"
     },
-    "description": "Public, read-only JSON API of **The Grid**, the S.I.E.R.R.A. data service. It gathers hazard and situational-awareness feeds for California's central Sierra Nevada, centred on Calaveras and Tuolumne counties: the Highway 4 / Ebbetts Pass corridor (Angels Camp, Murphys, Arnold, Dorrington, Bear Valley) and the Highway 49/108 towns (Sonora, Columbia, Twain Harte). Neighbouring counties (Alpine, Amador, El Dorado, Mariposa, San Joaquin, Stanislaus) are in the place directory because hazards cross county lines.\n\nUpstream sources: CAL FIRE and FIRIS (wildfires and perimeters), Cal OES / Genasys (evacuation zones), the National Weather Service (alerts, fire weather, forecasts), USGS (earthquakes), CHP and Caltrans (incidents, lane closures, chain control, cameras, message signs), PG&E (outages and Public Safety Power Shutoffs), county burn lines and CAL FIRE burn permits, the MeshCore community radio mesh, Google Routes and OpenWeatherMap.\n\nThis service is an aggregator, not an authority. For a life-safety decision, link the official source: every event carries `canonicalUrl` and `provenance.sourceUrl`.\n\n## Resource model\n\n- **Event**: one item from one upstream source, such as a fire, an evacuation zone, a weather alert, a road incident, an outage, a mesh radio node or a county's burn status. The id is stable (`{source}:{native id}`, e.g. `chp:261106ST0341`) and every change is kept as a numbered revision.\n- **Layer**: the event taxonomy (`Event.layer`). The *event layers* are stored and queryable at `/api/v1/events`: WILDFIRE, EVACUATION, WEATHER_ALERT, EARTHQUAKE, ROAD_INCIDENT, POWER, MESH and BURN_STATUS. The *condition layers* (`road_segment`, `chain_control`, `fire_weather`, `message_sign`) are live projections of current state, not events: they appear only on the `.geojson` map layers, in `GET /api/v1/conditions`, and in the place summary's domains.\n- **Place**: a named geography (AREA, COUNTY, TOWN, CORRIDOR). Events attach to places geometrically and every event lists its `placeIds`.\n- **Source**: an upstream feed with live health (`GET /api/v1/sources`).\n- **PlaceSummary**: the one-call rollup for a place (mode, per-domain status, top events, evacuation count).\n\n## Quickstart: build a dashboard for a place\n\n1. Pick a place: `GET /api/v1/places` lists them all (about 20). Or map a point or an address to places with `GET /api/v1/places:resolve?lat=38.25&lng=-120.35` or `?address=...`. Use the `slug`, e.g. `calaveras-county`, `arnold`, `hwy4-murphys-arnold`.\n2. Headline status: `GET /api/v1/places/{slug}/summary` returns `mode` (QUIET, WATCH or ACTIVE), one block per domain (fire, evacuation, weather, roads, seismic, power, burn, comms), the top five hazards and `activeEvacuations`.\n3. Event feed: `GET /api/v1/events?place={slug}&status=ACTIVE&severityMin=MINOR`. Then `GET /api/v1/events/{id}` for detail and `/api/v1/events/{id}/history` for its timeline.\n4. Map: `GET /api/v1/places/{slug}/map/{layer}.geojson` serves one RFC 7946 FeatureCollection per layer (documented separately from the RPCs below).\n5. Context: `GET /api/v1/conditions?place={slug}` for current weather, forecasts and the fire-weather state, `GET /api/v1/cameras?place={slug}` for traffic cameras, and `GET /api/v1/sources` for source-health badges.\n\nPoll every 30 to 60 seconds. JSON responses are cacheable for 30 seconds (`Cache-Control: public, max-age=30`), GeoJSON layers and mesh links for 60; upstream feeds refresh every 2 to 15 minutes.\n\n## Filter the event feed\n\nAn unscoped `GET /api/v1/events` is mostly MESH nodes: hundreds of community radio nodes across Northern California, all INFO, many outside every place. It also holds a week of planned Caltrans roadwork (ROAD_INCIDENT, status SCHEDULED). For a hazard feed, pass `place`, pass `status=ACTIVE`, and either pass `severityMin=MINOR` or list the layers you want. POWER events at INFO are single-customer outages.\n\n## Conventions\n\n- **JSON field names are camelCase.** Every field is always present. An unset message or timestamp is `null`. An unset scalar is `0`, `\"\"` or `false`. Wrapper-typed fields (documented as nullable) are `null` when unknown, so a real `0` is never confused with \"no reading\".\n- **Enums serialize as their name strings** (`\"SEVERE\"`), never as numbers.\n- **Timestamps** are RFC 3339 in UTC (`2026-11-07T03:13:00Z`), with up to nanosecond fractions.\n- **64-bit integers are JSON strings** (protobuf JSON mapping): mesh counters such as `uptimeSeconds: \"98350\"` and `cadenceSeconds: \"1831\"`. Parse them; 32-bit integers are plain numbers.\n- **`geometry.geojson` is base64.** It is a protobuf `bytes` field, so the RFC 7946 geometry JSON arrives base64-encoded: `JSON.parse(atob(event.geometry.geojson))`. Coordinates inside are `[longitude, latitude]`. `geometry.bbox` and `geometry.centroid` are plain numbers and need no decoding. For maps, the `.geojson` layer endpoints serve decoded geometry directly.\n- **Query parameters**: this spec names them in camelCase (`severityMin`, `pageSize`, `pageToken`, `enhancementIo`). The snake_case forms (`severity_min`, `page_size`, ...) work too. Enum values are case-insensitive. A repeated parameter can be repeated (`layer=WILDFIRE&layer=POWER`) or comma-separated (`layer=WILDFIRE,POWER`).\n- **Place addressing**: anywhere a place is named, the slug (`arnold`) or the namespaced id (`town:arnold`) works.\n- **Pagination** is keyset-based. `pageSize` 0 or omitted means 50, values over 200 are clamped to 200, and a negative value is a 400. Pass `nextPageToken` back as `pageToken` with the same filters until it comes back empty. Tokens are opaque. Pages stay stable while new events arrive. A large page of perimeter-heavy events can exceed the server's 4 MiB response limit and fail with HTTP 429 `RESOURCE_EXHAUSTED`; keep `pageSize` at or below 50 when you include RESOLVED or EXPIRED events.\n- **Conditional GET**: event lists, event detail, event history, the revision archive, places and cameras return a weak `ETag`. Send it back in `If-None-Match` to get `304 Not Modified`. The tag changes whenever the body would, including in-place refreshes that write no revision (AI text, mesh telemetry, burn-line observations, place re-attachment). The summary, conditions, sources, resolve, scanners and mesh-telemetry endpoints do not yet send ETags.\n- **No authentication, no API key.** CORS is open (`Access-Control-Allow-Origin: *`), GET only, no credentials, so a browser page on any origin can call the API directly.\n- **Errors** are the gRPC status as JSON, `{code, codeName, message, details}`, with a mapped HTTP status: 400 `INVALID_ARGUMENT` (bad enum, timestamp or page token), 404 `NOT_FOUND` (unknown place, event or address), 429 `RESOURCE_EXHAUSTED` (response too large), 503 `UNAVAILABLE` (address geocoder down), 500 `INTERNAL`. Branch on `codeName`. During a deploy handoff any route can briefly answer `503` with a plain-text body and `Retry-After: 1`; retry after the delay.\n\n## Severity and status\n\nEvery event and map feature uses one severity scale: INFO (rank 0), MINOR (1), MODERATE (2), SEVERE (3), EXTREME (4). It expresses how urgently the public should respond, not physical magnitude. `severityRank` is the same value as a number, for sorting and colour ramps. `/api/v1/events` sorts by severity, then most recently observed.\n\nStatus lifecycle: SCHEDULED (planned, not yet in effect) → ACTIVE → RESOLVED (the authoritative feed stopped listing it) or EXPIRED (it aged out). An event that reappears goes back to ACTIVE with a new revision. The end of an event is a revision too, so history keeps the all-clear.\n\n## Fail-loud honesty\n\nThe API never turns a failure into an all-clear.\n\n- Source health is `OK`, `STALE` (serving last-good data while the upstream fails) or `UNAVAILABLE` (nothing trustworthy to serve). It appears on `/api/v1/sources`, on each summary domain, in the summary's `sources` sidecar, on `/api/v1/cameras`, and in each map layer's `metadata.sourceStatus`. UNAVAILABLE with no items means *unknown*. Render it as \"unknown, check the source\", never as \"none\".\n- Evacuations: `summary.activeEvacuations` is `null` when the evacuation source is UNAVAILABLE (unknown; send people to Genasys), `0` when a healthy fetch found no active zone (\"none reported\", not a guarantee), and `N` when zones are active.\n- A failed fetch never resolves or expires events. They stay as they were and the source reads STALE.\n- The fire-weather state comes only from issued NWS products. The API never infers a Red Flag Warning that NWS has not issued.\n\n## Casing quirks (kept for compatibility)\n\n- Layer names in responses (`Event.layer`, `summary.topEvents[].layer`) are UPPERCASE enum names (`ROAD_INCIDENT`). Map-layer path segments are lowercase slugs (`road_incident.geojson`). `?layer=` accepts either, plus the aliases `mesh_node` and `network` for MESH.\n- `fireWeather.state` is lowercase: `normal`, `elevated` or `red-flag`.\n- Burn-status enum values carry a prefix (`BURN_DAY_YES`, `CALFIRE_PERMIT_REQUIRED`, `BURN_PERMISSION_ALLOWED`).\n\nAPI changes are listed, dated, in [CHANGELOG.md](https://github.com/dpup/sierra-data/blob/main/CHANGELOG.md).",
+    "description": "Public, read-only JSON API of **The Grid**, the S.I.E.R.R.A. data service. It gathers hazard and situational-awareness feeds for California's central Sierra Nevada, centred on Calaveras and Tuolumne counties: the Highway 4 / Ebbetts Pass corridor (Angels Camp, Murphys, Arnold, Dorrington, Bear Valley) and the Highway 49/108 towns (Sonora, Columbia, Twain Harte). Neighbouring counties (Alpine, Amador, El Dorado, Mariposa, San Joaquin, Stanislaus) are in the place directory because hazards cross county lines.\n\nUpstream sources: CAL FIRE and FIRIS (wildfires and perimeters), Cal OES / Genasys (evacuation zones), the National Weather Service (alerts, fire weather, forecasts), USGS (earthquakes), CHP and Caltrans (incidents, lane closures, chain control, cameras, message signs), PG&E (outages and Public Safety Power Shutoffs), county burn lines and CAL FIRE burn permits, the MeshCore community radio mesh, Google Routes and OpenWeatherMap.\n\nThis service is an aggregator, not an authority. For a life-safety decision, link the official source. An event's link is `canonicalUrl` (the item's own page), else `provenance.sourceUrl`, else the `homepageUrl` of its source (`GET /api/v1/sources`, joined on `provenance.sourceId`). Either event field can be an empty string: CHP incidents, Caltrans lane closures, FIRIS perimeters and NWS alerts have neither, so their link is the source homepage. Every map feature carries `properties.source`, and evacuation views link Genasys (`metadata.sourceUrl`, `summary.evacuationSourceUrl`).\n\n## Resource model\n\n- **Event**: one item from one upstream source, such as a fire, an evacuation zone, a weather alert, a road incident, an outage, a mesh radio node or a county's burn status. The id is stable (`{source}:{native id}`, e.g. `chp:261106ST0341`) and every change is kept as a numbered revision.\n- **Layer**: the event taxonomy (`Event.layer`). The *event layers* are stored and queryable at `/api/v1/events`: WILDFIRE, EVACUATION, WEATHER_ALERT, EARTHQUAKE, ROAD_INCIDENT, POWER, MESH and BURN_STATUS. The *condition layers* (`road_segment`, `chain_control`, `fire_weather`, `message_sign`) are live projections of current state, not events: they appear only on the `.geojson` map layers, in `GET /api/v1/conditions`, and in the place summary's domains.\n- **Place**: a named geography (AREA, COUNTY, TOWN, CORRIDOR). Events attach to places geometrically and every event lists its `placeIds`.\n- **Source**: an upstream feed with live health (`GET /api/v1/sources`).\n- **PlaceSummary**: the one-call rollup for a place (mode, per-domain status, top events, evacuation count).\n\n## Quickstart: build a dashboard for a place\n\n1. Pick a place: `GET /api/v1/places` lists them all (about 20). For a dashboard use an AREA (`ebbetts-pass`), a COUNTY (`calaveras-county`) or a CORRIDOR (`hwy4-arnold-bearvalley`): those have a footprint, so events and conditions attach to them. Do not build a dashboard on a TOWN (`arnold`). A town is a point, so an event attaches to it only when the event's polygon covers it (an evacuation zone, a fire perimeter), a wildfire comes near, or the fact is county-wide (burn status). Point events (road incidents, outages, earthquakes) and road conditions never attach, so a town's summary can read QUIET with an open `roads` domain while its highway is closed. Use a town to label a location and to find its county (`parentId`), or map a point or an address with `GET /api/v1/places:resolve?lat=38.25&lng=-120.35` (or `?address=...`) and pick the most specific non-town place it returns. Use the `slug` in paths.\n2. Headline status: `GET /api/v1/places/{slug}/summary` returns `mode` (QUIET, WATCH or ACTIVE), one block per domain (fire, evacuation, weather, roads, seismic, power, burn, comms), the top five hazards and `activeEvacuations`. Show each domain's `status` and `highestSeverity` next to `mode`: road and chain-control conditions (a closed highway) raise the `roads` domain but never `mode`.\n3. Event feed: `GET /api/v1/events?place={slug}&status=ACTIVE&severityMin=MINOR`. Then `GET /api/v1/events/{id}` for detail and `/api/v1/events/{id}/history` for its timeline.\n4. Map: `GET /api/v1/places/{slug}/map/{layer}.geojson` serves one RFC 7946 FeatureCollection per layer (documented separately from the RPCs below).\n5. Context: `GET /api/v1/conditions?place={slug}` for current weather, forecasts and the fire-weather state, `GET /api/v1/cameras?place={slug}` for traffic cameras, and `GET /api/v1/sources` for source-health badges.\n\nPoll every 30 to 60 seconds. JSON responses are cacheable for 30 seconds (`Cache-Control: public, max-age=30`), GeoJSON layers and mesh links for 60; upstream feeds refresh every 2 to 15 minutes.\n\n## Filter the event feed\n\nAn unscoped `GET /api/v1/events` is mostly MESH nodes: hundreds of community radio nodes across Northern California, all INFO, many outside every place. It also holds a week of planned Caltrans roadwork (ROAD_INCIDENT, status SCHEDULED). For a hazard feed, pass `place`, pass `status=ACTIVE`, and either pass `severityMin=MINOR` or list the layers you want. POWER events at INFO are single-customer outages.\n\n## Conventions\n\n- **JSON field names are camelCase.** Every field is present, except the per-layer detail blocks on an event (only the one matching `layer` is sent). An unset message or timestamp is `null`; the spec marks every such field `nullable`. An unset scalar is `0`, `\"\"` or `false`, never `null`. Wrapper-typed fields (`activeEvacuations`, the mesh gauges) are `null` when unknown, so a real `0` is never confused with \"no reading\". Arrays are `[]` and maps `{}` when empty.\n- **Enums serialize as their name strings** (`\"SEVERE\"`), never as numbers.\n- **Timestamps** are RFC 3339 in UTC (`2026-11-07T03:13:00Z`), with up to nanosecond fractions.\n- **64-bit integers are JSON strings** (protobuf JSON mapping): mesh counters such as `uptimeSeconds: \"98350\"` and `cadenceSeconds: \"1831\"`. Parse them; 32-bit integers are plain numbers.\n- **`geometry.geojson` is base64.** It is a protobuf `bytes` field, so the RFC 7946 geometry JSON arrives base64-encoded: `JSON.parse(atob(event.geometry.geojson))`. Coordinates inside are `[longitude, latitude]`. `geometry.bbox` and `geometry.centroid` are plain numbers and need no decoding. For maps, the `.geojson` layer endpoints serve decoded geometry directly.\n- **Query parameters**: this spec names them in camelCase (`severityMin`, `pageSize`, `pageToken`, `enhancementIo`). The snake_case forms (`severity_min`, `page_size`, ...) work too. Enum values are case-insensitive. A repeated parameter can be repeated (`layer=WILDFIRE&layer=POWER`) or comma-separated (`layer=WILDFIRE,POWER`).\n- **Place addressing**: anywhere a place is named, the slug (`arnold`) or the namespaced id (`town:arnold`) works.\n- **Pagination** is keyset-based. `pageSize` 0 or omitted means 50, values over 200 are clamped to 200, and a negative value is a 400. Pass `nextPageToken` back as `pageToken` with the same filters until it comes back empty. Tokens are opaque. Pages stay stable while new events arrive. A large page of perimeter-heavy events can exceed the server's 4 MiB response limit and fail with HTTP 429 `RESOURCE_EXHAUSTED`; keep `pageSize` at or below 50 when you include RESOLVED or EXPIRED events.\n- **Conditional GET**: event lists, event detail, event history, the revision archive, places and cameras return a weak `ETag`. Send it back in `If-None-Match` to get `304 Not Modified`. The tag changes whenever the body would, including in-place refreshes that write no revision (AI text, mesh telemetry, burn-line observations, place re-attachment). The summary, conditions, sources, resolve, scanners and mesh-telemetry endpoints do not yet send ETags.\n- **No authentication, no API key.** CORS is open (`Access-Control-Allow-Origin: *`), GET only, no credentials, so a browser page on any origin can call the API directly.\n- **Errors** are the gRPC status as JSON, `{code, codeName, message, details}`, with a mapped HTTP status: 400 `INVALID_ARGUMENT` (bad enum, timestamp or page token), 404 `NOT_FOUND` (unknown place, event or address), 429 `RESOURCE_EXHAUSTED` (response too large), 503 `UNAVAILABLE` (address geocoder down), 500 `INTERNAL`. Branch on `codeName`. During a deploy handoff any route can briefly answer `503`: the RPCs with the JSON error (`UNAVAILABLE`), the hand-built routes (`.geojson`, mesh links) with a plain-text body and `Retry-After: 1`. Retry after a second.\n\n## Severity and status\n\nEvery event and map feature uses one severity scale: INFO (rank 0), MINOR (1), MODERATE (2), SEVERE (3), EXTREME (4). It expresses how urgently the public should respond, not physical magnitude. `severityRank` is the same value as a number, for sorting and colour ramps. `/api/v1/events` sorts by severity, then most recently observed.\n\nStatus lifecycle: SCHEDULED (planned, not yet in effect) → ACTIVE → RESOLVED (the authoritative feed stopped listing it) or EXPIRED (it aged out). An event that reappears goes back to ACTIVE with a new revision. The end of an event is a revision too, so history keeps the all-clear.\n\n## Fail-loud honesty\n\nThe API never turns a failure into an all-clear.\n\n- Source health is `OK`, `STALE` (serving last-good data while the upstream fails) or `UNAVAILABLE` (nothing trustworthy to serve). It appears on `/api/v1/sources`, on each summary domain, in the summary's `sources` sidecar, on `/api/v1/cameras`, and in each map layer's `metadata.sourceStatus`. UNAVAILABLE with no items means *unknown*. Render it as \"unknown, check the source\", never as \"none\".\n- Evacuations: `summary.activeEvacuations` is `null` when the evacuation source is UNAVAILABLE (unknown; send people to Genasys at `summary.evacuationSourceUrl`), `0` when a healthy fetch found no active zone (\"none reported\", not a guarantee), and `N` when zones are active.\n- A failed fetch never resolves or expires events. They stay as they were and the source reads STALE.\n- The fire-weather state comes only from issued NWS products. The API never infers a Red Flag Warning that NWS has not issued.\n\n## Casing quirks (kept for compatibility)\n\n- Layer names in responses (`Event.layer`, `summary.topEvents[].layer`) are UPPERCASE enum names (`ROAD_INCIDENT`). Map-layer path segments are lowercase slugs (`road_incident.geojson`). `?layer=` accepts either, plus the aliases `mesh_node` and `network` for MESH.\n- `fireWeather.state` is lowercase: `normal`, `elevated` or `red-flag`.\n- Burn-status enum values carry a prefix (`BURN_DAY_YES`, `CALFIRE_PERMIT_REQUIRED`, `BURN_PERMISSION_ALLOWED`).\n\nAPI changes are listed, dated, in [CHANGELOG.md](https://github.com/dpup/sierra-data/blob/main/CHANGELOG.md).",
     "license": {
       "name": "MIT",
       "url": "https://github.com/dpup/sierra-data/blob/main/LICENSE"
@@ -111,19 +111,33 @@
             "description": "A successful response."
           },
           "304": {
-            "$ref": "#/components/responses/NotModified",
-            "content": {
-              "application/json": {
-                "schema": {}
+            "description": "Not Modified: the `If-None-Match` ETag still matches.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
               }
-            },
-            "description": "Not Modified: the `If-None-Match` ETag still matches."
+            }
           },
           "404": {
-            "$ref": "#/components/responses/NotFound",
             "content": {
               "application/json": {
-                "schema": {}
+                "examples": {
+                  "unknownPlace": {
+                    "summary": "?place=nope",
+                    "value": {
+                      "code": 5,
+                      "codeName": "NOT_FOUND",
+                      "details": [],
+                      "message": "unknown place: \"nope\""
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
               }
             },
             "description": "NOT_FOUND: unknown place."
@@ -173,7 +187,20 @@
           "404": {
             "content": {
               "application/json": {
-                "schema": {}
+                "examples": {
+                  "unknownPlace": {
+                    "summary": "?place=nope",
+                    "value": {
+                      "code": 5,
+                      "codeName": "NOT_FOUND",
+                      "details": [],
+                      "message": "unknown place: \"nope\""
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
               }
             },
             "description": "NOT_FOUND: unknown place."
@@ -312,28 +339,63 @@
             "description": "A successful response."
           },
           "304": {
-            "$ref": "#/components/responses/NotModified",
-            "content": {
-              "application/json": {
-                "schema": {}
+            "description": "Not Modified: the `If-None-Match` ETag still matches.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
               }
-            },
-            "description": "Not Modified: the `If-None-Match` ETag still matches."
+            }
           },
           "400": {
-            "$ref": "#/components/responses/InvalidArgument",
             "content": {
               "application/json": {
-                "schema": {}
+                "examples": {
+                  "invalidPageToken": {
+                    "summary": "GET /api/v1/events?pageToken=garbage",
+                    "value": {
+                      "code": 3,
+                      "codeName": "INVALID_ARGUMENT",
+                      "details": [],
+                      "message": "invalid page_token"
+                    }
+                  },
+                  "unknownLayer": {
+                    "summary": "GET /api/v1/events?layer=bogus",
+                    "value": {
+                      "code": 3,
+                      "codeName": "INVALID_ARGUMENT",
+                      "details": [],
+                      "message": "unknown layer: \"bogus\""
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
               }
             },
             "description": "INVALID_ARGUMENT: an unknown layer, status or severity, a timestamp that is not RFC 3339, a negative page size, or a bad page token."
           },
           "404": {
-            "$ref": "#/components/responses/NotFound",
             "content": {
               "application/json": {
-                "schema": {}
+                "examples": {
+                  "unknownPlace": {
+                    "summary": "?place=nope",
+                    "value": {
+                      "code": 5,
+                      "codeName": "NOT_FOUND",
+                      "details": [],
+                      "message": "unknown place: \"nope\""
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
               }
             },
             "description": "NOT_FOUND: unknown place."
@@ -341,7 +403,9 @@
           "429": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
               }
             },
             "description": "RESOURCE_EXHAUSTED: the page exceeded the 4 MiB response limit (large perimeters); retry with a smaller `pageSize`."
@@ -398,19 +462,33 @@
             "description": "A successful response."
           },
           "304": {
-            "$ref": "#/components/responses/NotModified",
-            "content": {
-              "application/json": {
-                "schema": {}
+            "description": "Not Modified: the `If-None-Match` ETag still matches.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
               }
-            },
-            "description": "Not Modified: the `If-None-Match` ETag still matches."
+            }
           },
           "404": {
-            "$ref": "#/components/responses/NotFound",
             "content": {
               "application/json": {
-                "schema": {}
+                "examples": {
+                  "unknownEvent": {
+                    "summary": "GET /api/v1/events/nope:1",
+                    "value": {
+                      "code": 5,
+                      "codeName": "NOT_FOUND",
+                      "details": [],
+                      "message": "unknown event: \"nope:1\""
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
               }
             },
             "description": "NOT_FOUND: no event has this id."
@@ -484,27 +562,43 @@
             "description": "A successful response."
           },
           "304": {
-            "$ref": "#/components/responses/NotModified",
-            "content": {
-              "application/json": {
-                "schema": {}
+            "description": "Not Modified: the `If-None-Match` ETag still matches.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
               }
-            },
-            "description": "Not Modified: the `If-None-Match` ETag still matches."
+            }
           },
           "400": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
               }
             },
             "description": "INVALID_ARGUMENT: a negative page size or a bad page token."
           },
           "404": {
-            "$ref": "#/components/responses/NotFound",
             "content": {
               "application/json": {
-                "schema": {}
+                "examples": {
+                  "unknownEvent": {
+                    "summary": "GET /api/v1/events/nope:1",
+                    "value": {
+                      "code": 5,
+                      "codeName": "NOT_FOUND",
+                      "details": [],
+                      "message": "unknown event: \"nope:1\""
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
               }
             },
             "description": "NOT_FOUND: no event has this id."
@@ -618,28 +712,54 @@
             "description": "A successful response."
           },
           "304": {
-            "$ref": "#/components/responses/NotModified",
-            "content": {
-              "application/json": {
-                "schema": {}
+            "description": "Not Modified: the `If-None-Match` ETag still matches.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
               }
-            },
-            "description": "Not Modified: the `If-None-Match` ETag still matches."
+            }
           },
           "400": {
-            "$ref": "#/components/responses/InvalidArgument",
             "content": {
               "application/json": {
-                "schema": {}
+                "examples": {
+                  "badTimestamp": {
+                    "summary": "GET /api/v1/history?from=yesterday",
+                    "value": {
+                      "code": 3,
+                      "codeName": "INVALID_ARGUMENT",
+                      "details": [],
+                      "message": "invalid from: \"yesterday\" is not RFC 3339"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
               }
             },
             "description": "INVALID_ARGUMENT: an unknown layer, a timestamp that is not RFC 3339, a negative page size, or a bad page token."
           },
           "404": {
-            "$ref": "#/components/responses/NotFound",
             "content": {
               "application/json": {
-                "schema": {}
+                "examples": {
+                  "unknownPlace": {
+                    "summary": "?place=nope",
+                    "value": {
+                      "code": 5,
+                      "codeName": "NOT_FOUND",
+                      "details": [],
+                      "message": "unknown place: \"nope\""
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
               }
             },
             "description": "NOT_FOUND: unknown place."
@@ -647,7 +767,9 @@
           "429": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
               }
             },
             "description": "RESOURCE_EXHAUSTED: the page exceeded the 4 MiB response limit; retry with a smaller `pageSize`."
@@ -1092,7 +1214,9 @@
           "400": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
               }
             },
             "description": "INVALID_ARGUMENT: `node` missing or not 8-64 even-length hex (optionally prefixed `meshcore:`), or `from` not before `to`."
@@ -1156,18 +1280,33 @@
             "description": "A successful response."
           },
           "304": {
-            "$ref": "#/components/responses/NotModified",
-            "content": {
-              "application/json": {
-                "schema": {}
+            "description": "Not Modified: the `If-None-Match` ETag still matches.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
               }
-            },
-            "description": "Not Modified: the `If-None-Match` ETag still matches."
+            }
           },
           "400": {
             "content": {
               "application/json": {
-                "schema": {}
+                "examples": {
+                  "unknownKind": {
+                    "summary": "GET /api/v1/places?kind=bogus",
+                    "value": {
+                      "code": 3,
+                      "codeName": "INVALID_ARGUMENT",
+                      "details": [],
+                      "message": "unknown kind: \"bogus\""
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
               }
             },
             "description": "INVALID_ARGUMENT: unknown kind."
@@ -1216,19 +1355,33 @@
             "description": "A successful response."
           },
           "304": {
-            "$ref": "#/components/responses/NotModified",
-            "content": {
-              "application/json": {
-                "schema": {}
+            "description": "Not Modified: the `If-None-Match` ETag still matches.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
               }
-            },
-            "description": "Not Modified: the `If-None-Match` ETag still matches."
+            }
           },
           "404": {
-            "$ref": "#/components/responses/NotFound",
             "content": {
               "application/json": {
-                "schema": {}
+                "examples": {
+                  "unknownPlace": {
+                    "summary": "?place=nope",
+                    "value": {
+                      "code": 5,
+                      "codeName": "NOT_FOUND",
+                      "details": [],
+                      "message": "unknown place: \"nope\""
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
               }
             },
             "description": "NOT_FOUND: unknown place."
@@ -2297,10 +2450,22 @@
             "description": "A successful response."
           },
           "404": {
-            "$ref": "#/components/responses/NotFound",
             "content": {
               "application/json": {
-                "schema": {}
+                "examples": {
+                  "unknownPlace": {
+                    "summary": "?place=nope",
+                    "value": {
+                      "code": 5,
+                      "codeName": "NOT_FOUND",
+                      "details": [],
+                      "message": "unknown place: \"nope\""
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
               }
             },
             "description": "NOT_FOUND: unknown place."
@@ -2368,7 +2533,20 @@
           "400": {
             "content": {
               "application/json": {
-                "schema": {}
+                "examples": {
+                  "noQuery": {
+                    "summary": "GET /api/v1/places:resolve",
+                    "value": {
+                      "code": 3,
+                      "codeName": "INVALID_ARGUMENT",
+                      "details": [],
+                      "message": "lat+lng or address query parameters required"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
               }
             },
             "description": "INVALID_ARGUMENT: neither or both of lat+lng and address, only one of lat/lng, or a value out of range."
@@ -2376,7 +2554,20 @@
           "404": {
             "content": {
               "application/json": {
-                "schema": {}
+                "examples": {
+                  "noMatch": {
+                    "summary": "GET /api/v1/places:resolve?address=zzzzqqq%20nowhere",
+                    "value": {
+                      "code": 5,
+                      "codeName": "NOT_FOUND",
+                      "details": [],
+                      "message": "no address match for \"zzzzqqq nowhere\" — try adding city/state/zip, or resolve by lat/lng"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
               }
             },
             "description": "NOT_FOUND: the geocoder found no match for the address (add city, state or ZIP)."
@@ -2384,7 +2575,9 @@
           "503": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
               }
             },
             "description": "UNAVAILABLE: the address geocoder is down; retry later or resolve by lat/lng."
@@ -2434,7 +2627,20 @@
           "404": {
             "content": {
               "application/json": {
-                "schema": {}
+                "examples": {
+                  "unknownPlace": {
+                    "summary": "?place=nope",
+                    "value": {
+                      "code": 5,
+                      "codeName": "NOT_FOUND",
+                      "details": [],
+                      "message": "unknown place: \"nope\""
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
               }
             },
             "description": "NOT_FOUND: unknown place."
@@ -2700,27 +2906,6 @@
         },
         "description": "Server-side failure. The real error is logged, never sent."
       },
-      "InvalidArgument": {
-        "content": {
-          "application/json": {
-            "examples": {
-              "invalidPageToken": {
-                "summary": "GET /api/v1/events?page_token=garbage",
-                "value": {
-                  "code": 3,
-                  "codeName": "INVALID_ARGUMENT",
-                  "details": [],
-                  "message": "invalid page_token"
-                }
-              }
-            },
-            "schema": {
-              "$ref": "#/components/schemas/rpcStatus"
-            }
-          }
-        },
-        "description": "A malformed parameter (bad `pageToken`, unknown enum, bad timestamp)."
-      },
       "InvalidWindow": {
         "content": {
           "application/json": {
@@ -2741,27 +2926,6 @@
           }
         },
         "description": "`window` is not a positive Go duration (`abc`, `0`, `-1h`)."
-      },
-      "NotFound": {
-        "content": {
-          "application/json": {
-            "examples": {
-              "unknownPlace": {
-                "summary": "GET /api/v1/places/nope",
-                "value": {
-                  "code": 5,
-                  "codeName": "NOT_FOUND",
-                  "details": [],
-                  "message": "unknown place: \"nope\""
-                }
-              }
-            },
-            "schema": {
-              "$ref": "#/components/schemas/rpcStatus"
-            }
-          }
-        },
-        "description": "The named place, event or other resource does not exist."
       },
       "NotModified": {
         "description": "The `If-None-Match` validator still matches; reuse your cached body.\nNo body.\n",
@@ -3347,7 +3511,7 @@
             "type": "string"
           },
           "id": {
-            "description": "Source registry id (see GET /api/v1/sources): chp, caltrans, google, nws, usgs, calfire, firis, caloes, pge, psps, meshcore.",
+            "description": "The upstream's id. Values today: `calfire`, `firis`, `caloes`,\n`nws`, `usgs`, `chp`, `caltrans`, `google`, `pge`, `psps`,\n`meshcore`. On the event-backed layers (`wildfire`,\n`evacuation`, `weather_alert`, `earthquake`, `road_incident`,\n`power`, `mesh_node`) it is the event's `provenance.sourceId` and\nhas a row in `GET /api/v1/sources` whose `status` is that feed's\nhealth.\n\nThe condition layers (`road_segment`, `chain_control`,\n`message_sign`, `fire_weather`), and `camera` and `mesh_link`, are\nfetched or computed on request, outside the ingest scheduler that\nwrites the registry. `google` (on `road_segment`) has no registry\nrow at all. `caltrans` and `nws` do have rows, but those track the\nscheduled lane-closure and alert polls, not the live fetch behind\nthese layers. For these layers judge health by the layer's\n`metadata.sourceStatus` (the summary's `roads` and `fire` domains\nfold the same statuses in), never by a missing or unrelated\nregistry row.\n",
             "example": "caltrans",
             "type": "string"
           },
@@ -4303,7 +4467,13 @@
         "description": "BurnLineReading is one recorded phone line's answer for today.",
         "properties": {
           "burnDay": {
-            "$ref": "#/components/schemas/v1BurnDay"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/v1BurnDay"
+              }
+            ],
+            "description": "This line's own answer. BURN_DAY_UNKNOWN if not read or stale. A change\nwrites a revision.",
+            "example": "BURN_DAY_YES"
           },
           "id": {
             "description": "Stable line id.",
@@ -4316,7 +4486,14 @@
             "type": "string"
           },
           "observation": {
-            "$ref": "#/components/schemas/v1BurnObservation"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/v1BurnObservation"
+              }
+            ],
+            "description": "The latest call: message, transcript, confidence and time. `null` when the\nline has never been read. Changes daily without writing a revision.\n",
+            "nullable": true,
+            "type": "object"
           },
           "phone": {
             "description": "The number a resident can call, E.164.",
@@ -4343,6 +4520,7 @@
           "observedAt": {
             "description": "When the line was called.",
             "format": "date-time",
+            "nullable": true,
             "type": "string"
           },
           "transcript": {
@@ -4366,7 +4544,13 @@
         "description": "BurnStatusDetail is the BURN_STATUS detail block: whether residential/outdoor\nburning is allowed today in one county.\n\nTwo independent authorities must BOTH permit a burn, and each is a separate\nfacet because they fail independently: `burnDay`, the county air district's\ndaily permissive-burn-day call (read from its recorded phone line), and\n`calfireStatus`, CAL FIRE's seasonal suspension of burn permits on State\nResponsibility Area land (changes about twice a year). `permission` combines\nthem pessimistically.\n\nThe event exists for each tracked county at all times, is always INFO and\nACTIVE, and is left out of the summary's hazard rollup (it has its own `burn`\ndomain). `GET /api/v1/events/burn:{county slug}/history` shows when it changed.",
         "properties": {
           "burnDay": {
-            "$ref": "#/components/schemas/v1BurnDay"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/v1BurnDay"
+              }
+            ],
+            "description": "The county line's answer for today, merged across `burnLines` taking the\nmost restrictive (any NO wins, then any MARGINAL; YES needs every dialed\nline to answer). BURN_DAY_UNKNOWN when unread or the reading is older than\n36 hours.",
+            "example": "BURN_DAY_YES"
           },
           "burnLines": {
             "description": "--- county facet (source `burnline`) ---\nEvery recorded phone line that speaks for this county, each with its own\nreading. One line can serve several counties, and a county can have several\nlines. A line we could not read still appears, with `burnDay`\nBURN_DAY_UNKNOWN and its phone number, so a reader can call it.",
@@ -4383,18 +4567,32 @@
           "calfireEffective": {
             "description": "--- CAL FIRE facet (source `calfire-burn`) ---\nWhen CAL FIRE's current status took effect (the county line only ever says\n\"until further notice\"). `null` when CAL FIRE gives no date.",
             "format": "date-time",
+            "nullable": true,
             "type": "string"
           },
           "calfireObservedAt": {
             "description": "When CAL FIRE's page was last read successfully. The only way to tell that\n`calfireStatus` is being carried forward rather than freshly confirmed. Can\nbe `null`.\n",
             "format": "date-time",
+            "nullable": true,
             "type": "string"
           },
           "calfireStatus": {
-            "$ref": "#/components/schemas/v1CalfireBurnStatus"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/v1CalfireBurnStatus"
+              }
+            ],
+            "description": "CAL FIRE's permit status for the county's SRA land. Carried forward from the\nlast good read while CAL FIRE's page is unreachable; check\n`calfireObservedAt`.",
+            "example": "CALFIRE_PERMIT_REQUIRED"
           },
           "permission": {
-            "$ref": "#/components/schemas/v1BurnPermission"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/v1BurnPermission"
+              }
+            ],
+            "description": "The answer to \"may I burn today?\": PROHIBITED if either facet prohibits\nburning (no-burn day, marginal day, or CAL FIRE suspension); ALLOWED only\nwhen both facets are known and permissive; otherwise UNKNOWN. A missing\nanswer never reads as ALLOWED.",
+            "example": "BURN_PERMISSION_ALLOWED"
           }
         },
         "type": "object"
@@ -4463,7 +4661,14 @@
             "type": "string"
           },
           "location": {
-            "$ref": "#/components/schemas/v1LatLng"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/v1LatLng"
+              }
+            ],
+            "description": "Camera position.",
+            "nullable": true,
+            "type": "object"
           },
           "name": {
             "description": "Caltrans's camera name.",
@@ -4506,6 +4711,7 @@
           "lastSourceUpdate": {
             "description": "When the served list was fetched. `null` when `sourceStatus` is OK.",
             "format": "date-time",
+            "nullable": true,
             "type": "string"
           },
           "sourceStatus": {
@@ -4525,7 +4731,14 @@
         "description": "Conditions is current, non-event state.",
         "properties": {
           "fireWeather": {
-            "$ref": "#/components/schemas/v1FireWeatherConditions"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/v1FireWeatherConditions"
+              }
+            ],
+            "description": "The region's fire-weather state. Region-wide, whatever `place` was asked.\nCan be `null` when the weather service has no fire-weather reading.",
+            "nullable": true,
+            "type": "object"
           },
           "forecast": {
             "description": "Per-location forecasts, joined to `weather` by `locationId`. A location\nwhose forecast could not be fetched is simply missing here.",
@@ -4537,6 +4750,7 @@
           "lastUpdated": {
             "description": "When the weather data was last refreshed.",
             "format": "date-time",
+            "nullable": true,
             "type": "string"
           },
           "weather": {
@@ -4579,6 +4793,7 @@
           "enhancedAt": {
             "description": "When the text was generated.",
             "format": "date-time",
+            "nullable": true,
             "type": "string"
           },
           "fields": {
@@ -4649,10 +4864,15 @@
             "type": "string"
           },
           "burnStatus": {
-            "$ref": "#/components/schemas/v1BurnStatusDetail"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/v1BurnStatusDetail"
+              }
+            ],
+            "description": "BURN_STATUS detail (one county's residential burning status)."
           },
           "canonicalUrl": {
-            "description": "Link to the authoritative page for THIS item (a USGS event page, a CAL FIRE\nincident page, a mesh node's CoreScope page). Always http(s). Empty string\nwhen the source has no per-item page; fall back to `provenance.sourceUrl`.",
+            "description": "Link to the authoritative page for THIS item: a USGS event page, a CAL FIRE\nincident page, a mesh node's CoreScope page, PG&E's outage or PSPS page, the\nCAL FIRE burn-permit page for burn status. Always http(s) when set. Empty\nstring when the source has no per-item page, which today means CHP\nincidents, Caltrans lane closures, FIRIS perimeters, NWS alerts and\nevacuation zones. Fall back to `provenance.sourceUrl`, then to the source's\n`homepageUrl` (`GET /api/v1/sources`, joined on `provenance.sourceId`).",
             "format": "uri",
             "type": "string"
           },
@@ -4666,29 +4886,60 @@
             "type": "string"
           },
           "earthquake": {
-            "$ref": "#/components/schemas/v1EarthquakeDetail"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/v1EarthquakeDetail"
+              }
+            ],
+            "description": "EARTHQUAKE detail."
           },
           "effective": {
             "description": "When the event took or takes effect: alert onset, incident start, outage\nstart, closure set-up time. `null` when the source does not say.",
             "format": "date-time",
+            "nullable": true,
             "type": "string"
           },
           "enhancement": {
-            "$ref": "#/components/schemas/v1Enhancement"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/v1Enhancement"
+              }
+            ],
+            "description": "Present when an AI model generated some of this event's text; lists which\nfields. `null` for events with no AI involvement.",
+            "nullable": true,
+            "type": "object"
           },
           "evacuation": {
-            "$ref": "#/components/schemas/v1EvacuationDetail"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/v1EvacuationDetail"
+              }
+            ],
+            "description": "EVACUATION detail."
           },
           "expires": {
             "description": "The upstream's declared end, such as an NWS alert's expiry. `null` for most\nlayers. Restoration estimates and planned closure ends are never put here\n(they are routinely overrun); they live in the detail blocks.",
             "format": "date-time",
+            "nullable": true,
             "type": "string"
           },
           "fireWeather": {
-            "$ref": "#/components/schemas/v1FireWeatherDetail"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/v1FireWeatherDetail"
+              }
+            ],
+            "description": "Never populated on an event: fire weather is a condition\n(`GET /api/v1/conditions`, the `fire_weather` map layer)."
           },
           "geometry": {
-            "$ref": "#/components/schemas/v1Geometry"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/v1Geometry"
+              }
+            ],
+            "description": "Where the event is. `null` for events with no footprint of their own: NWS\nzone alerts (they attach to places by zone instead) and burn status (a fact\nabout a county).",
+            "nullable": true,
+            "type": "object"
           },
           "headline": {
             "description": "One-line, card-ready title. Present on every event. For CHP incidents it\nmay be AI-written (see `enhancement.fields`); for NWS alerts it is composed\nfrom the product, never by AI.",
@@ -4703,17 +4954,30 @@
           "ingestedAt": {
             "description": "When the Grid stored this revision.",
             "format": "date-time",
+            "nullable": true,
             "type": "string"
           },
           "layer": {
-            "$ref": "#/components/schemas/v1Layer"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/v1Layer"
+              }
+            ],
+            "description": "Which layer this event belongs to. It decides which detail block is\npopulated.",
+            "example": "ROAD_INCIDENT"
           },
           "mesh": {
-            "$ref": "#/components/schemas/v1MeshDetail"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/v1MeshDetail"
+              }
+            ],
+            "description": "MESH detail (one MeshCore radio node)."
           },
           "observedAt": {
             "description": "When the upstream last changed this event's content. It moves only when a\nnew revision is written, so it is NOT \"last seen\". For a mesh node's\nliveness use `mesh.telemetry.lastHeardAt` / `lastRelayedAt`; for burn\nstatus it follows each new phone-line reading.",
             "format": "date-time",
+            "nullable": true,
             "type": "string"
           },
           "placeIds": {
@@ -4724,10 +4988,22 @@
             "type": "array"
           },
           "power": {
-            "$ref": "#/components/schemas/v1PowerDetail"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/v1PowerDetail"
+              }
+            ],
+            "description": "POWER detail (PG&E outage or Public Safety Power Shutoff)."
           },
           "provenance": {
-            "$ref": "#/components/schemas/v1Provenance"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/v1Provenance"
+              }
+            ],
+            "description": "Which source published it, with attribution text to display.",
+            "nullable": true,
+            "type": "object"
           },
           "revision": {
             "description": "Revision number, starting at 1. It increases by one on every content change\nor status transition. `/api/v1/events/{id}/history` lists every revision.",
@@ -4736,13 +5012,30 @@
             "type": "integer"
           },
           "roadIncident": {
-            "$ref": "#/components/schemas/v1RoadIncidentDetail"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/v1RoadIncidentDetail"
+              }
+            ],
+            "description": "ROAD_INCIDENT detail (CHP incidents and Caltrans lane closures)."
           },
           "severity": {
-            "$ref": "#/components/schemas/v1Severity"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/v1Severity"
+              }
+            ],
+            "description": "Unified severity, INFO..EXTREME. Response urgency, not magnitude. See the\nSeverity enum for how each layer is graded. `enhancement.fields` lists\n`severity` when an AI model assessed it (CHP incidents).",
+            "example": "MINOR"
           },
           "status": {
-            "$ref": "#/components/schemas/v1EventStatus"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/v1EventStatus"
+              }
+            ],
+            "description": "Lifecycle status. `/api/v1/events` returns ACTIVE and SCHEDULED unless you\nask for others.",
+            "example": "ACTIVE"
           },
           "summary": {
             "description": "AI-written plain-language summary of two or three sentences, for CHP\nincidents and NWS alerts. Empty string when none was generated. The original\ntext is always kept in `description`.",
@@ -4750,10 +5043,20 @@
             "type": "string"
           },
           "weatherAlert": {
-            "$ref": "#/components/schemas/v1WeatherAlertDetail"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/v1WeatherAlertDetail"
+              }
+            ],
+            "description": "WEATHER_ALERT detail."
           },
           "wildfire": {
-            "$ref": "#/components/schemas/v1WildfireDetail"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/v1WildfireDetail"
+              }
+            ],
+            "description": "WILDFIRE detail."
           }
         },
         "type": "object"
@@ -4779,16 +5082,25 @@
         "description": "EventRevision is one stored snapshot of an event.",
         "properties": {
           "event": {
-            "$ref": "#/components/schemas/v1Event"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/v1Event"
+              }
+            ],
+            "description": "The full event as it was at this revision. Mesh activity clocks\n(`lastHeardAt`, `lastRelayedAt`) are not filled on history snapshots.",
+            "nullable": true,
+            "type": "object"
           },
           "ingestedAt": {
             "description": "When the Grid stored this revision.",
             "format": "date-time",
+            "nullable": true,
             "type": "string"
           },
           "observedAt": {
             "description": "The upstream content time of this revision (`event.observedAt`).",
             "format": "date-time",
+            "nullable": true,
             "type": "string"
           },
           "revision": {
@@ -4901,6 +5213,7 @@
           "time": {
             "description": "Start of the hour, UTC.",
             "format": "date-time",
+            "nullable": true,
             "type": "string"
           },
           "windDirectionDegrees": {
@@ -4928,10 +5241,24 @@
         "description": "Geometry is an event's or place's footprint.",
         "properties": {
           "bbox": {
-            "$ref": "#/components/schemas/v1BoundingBox"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/v1BoundingBox"
+              }
+            ],
+            "description": "Bounding box of the geometry, in decimal degrees. Always set when geometry\nis present.",
+            "nullable": true,
+            "type": "object"
           },
           "centroid": {
-            "$ref": "#/components/schemas/v1LatLng"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/v1LatLng"
+              }
+            ],
+            "description": "Representative point for markers and list views: the point itself for a\nPoint, otherwise the middle of the bounding box (which can fall outside an\nirregular polygon).",
+            "nullable": true,
+            "type": "object"
           },
           "geojson": {
             "description": "The RFC 7946 GeoJSON geometry object (Point, LineString, Polygon,\nMultiPolygon, ...) as UTF-8 JSON, BASE64-ENCODED in this JSON response\nbecause the field is protobuf `bytes`. Decode with\n`JSON.parse(atob(geojson))`. Coordinates are `[longitude, latitude]`.\nWildfire perimeters and evacuation zones can be tens of kilobytes.",
@@ -4946,7 +5273,14 @@
         "description": "LaneClosureDetail is one Caltrans planned lane-closure WINDOW from the CWWP2\ndata portal. Every field is Caltrans data; none of it is AI-generated.\n\nA multi-day job is one window (one event) per day, and neither `closureId`\nnor `logNumber` identifies a job; `windowId` is the only unique key. A window\nis SCHEDULED until the crew radios it set up (`setUpAt`), then ACTIVE until\nthey radio it picked up, or until `plannedEnd` plus a 12-hour overrun grace\npasses with no pickup call, when it is presumed over and RESOLVED. The\nplanned end is an estimate crews overrun, so it is never mapped onto the\nenvelope `expires`.",
         "properties": {
           "begin": {
-            "$ref": "#/components/schemas/v1LatLng"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/v1LatLng"
+              }
+            ],
+            "description": "Start point.",
+            "nullable": true,
+            "type": "object"
           },
           "beginLocation": {
             "description": "Where the closure starts, verbatim, e.g. \"Avery\".",
@@ -4985,7 +5319,14 @@
             "type": "integer"
           },
           "end": {
-            "$ref": "#/components/schemas/v1LatLng"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/v1LatLng"
+              }
+            ],
+            "description": "End point.",
+            "nullable": true,
+            "type": "object"
           },
           "endIndefinite": {
             "description": "True when the window has no planned end.",
@@ -5019,11 +5360,13 @@
           "plannedEnd": {
             "description": "Planned end of the window. `null` when `endIndefinite`.",
             "format": "date-time",
+            "nullable": true,
             "type": "string"
           },
           "plannedStart": {
             "description": "Planned start of the window.",
             "format": "date-time",
+            "nullable": true,
             "type": "string"
           },
           "route": {
@@ -5034,6 +5377,7 @@
           "setUpAt": {
             "description": "When the crew radioed the closure set up (the 10-97 call). `null` while it\nis SCHEDULED.",
             "format": "date-time",
+            "nullable": true,
             "type": "string"
           },
           "totalLanes": {
@@ -5106,6 +5450,7 @@
             "description": "Battery charge in percent, 0-100. Nullable. See `batteryPercentSource`.",
             "example": 71.1,
             "format": "double",
+            "nullable": true,
             "type": "number"
           },
           "batteryPercentSource": {
@@ -5122,6 +5467,7 @@
             "description": "Battery voltage in volts. Nullable.",
             "example": 3.97,
             "format": "double",
+            "nullable": true,
             "type": "number"
           },
           "directDups": {
@@ -5142,34 +5488,40 @@
           "humidity": {
             "description": "Relative humidity in percent. Nullable (most nodes have no sensor).",
             "format": "double",
+            "nullable": true,
             "type": "number"
           },
           "lastAttemptAt": {
             "description": "The monitor's last attempt to read this node, successful or not. Can be\n`null` (always `null` on archived samples).",
             "format": "date-time",
+            "nullable": true,
             "type": "string"
           },
           "lastRssiDbm": {
             "description": "RSSI of the last packet the node itself received, in dBm. Nullable.",
             "example": -98,
             "format": "int32",
+            "nullable": true,
             "type": "integer"
           },
           "lastSnrDb": {
             "description": "SNR of the last packet the node itself received, in dB. Nullable.",
             "example": 4.75,
             "format": "double",
+            "nullable": true,
             "type": "number"
           },
           "lastSuccessAt": {
             "description": "The monitor's last successful read of this node. Can be `null` (always\n`null` on archived samples).",
             "format": "date-time",
+            "nullable": true,
             "type": "string"
           },
           "noiseFloorDbm": {
             "description": "Radio noise floor in dBm. Nullable.",
             "example": -105,
             "format": "int32",
+            "nullable": true,
             "type": "integer"
           },
           "packetsReceived": {
@@ -5187,6 +5539,7 @@
           "pressure": {
             "description": "Barometric pressure in hPa. Nullable (most nodes have no sensor).",
             "format": "double",
+            "nullable": true,
             "type": "number"
           },
           "recvDirect": {
@@ -5207,6 +5560,7 @@
           "reportedAt": {
             "description": "When the monitor produced the report. In the archive this is the sample's\nown time.",
             "format": "date-time",
+            "nullable": true,
             "type": "string"
           },
           "reporterId": {
@@ -5234,12 +5588,14 @@
             "description": "Temperature in degrees Celsius. Nullable.",
             "example": 13.5,
             "format": "double",
+            "nullable": true,
             "type": "number"
           },
           "txQueueLen": {
             "description": "Packets waiting in the transmit queue. Nullable.",
             "example": 0,
             "format": "int32",
+            "nullable": true,
             "type": "integer"
           },
           "uptimeSeconds": {
@@ -5277,10 +5633,23 @@
             "type": "string"
           },
           "reachability": {
-            "$ref": "#/components/schemas/v1MeshReachability"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/v1MeshReachability"
+              }
+            ],
+            "description": "Whether an operator-run monitor can reach this node's admin interface.\nMESH_REACHABILITY_UNSPECIFIED for the many nodes no monitor watches. A\nchange writes a revision, so the history answers \"how often is this\nrepeater down?\".\n",
+            "example": "REACHABLE"
           },
           "telemetry": {
-            "$ref": "#/components/schemas/v1MeshTelemetry"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/v1MeshTelemetry"
+              }
+            ],
+            "description": "Signal readings and activity clocks. These change without a new revision.\n",
+            "nullable": true,
+            "type": "object"
           }
         },
         "type": "object"
@@ -5299,7 +5668,14 @@
         "description": "MeshTelemetry is a mesh node's volatile signal state and activity clocks. None\nof it writes a revision, so history snapshots do not reflect it.\n\nFor \"is this node up right now\", use `lastRelayedAt` (repeaters relay\nconstantly but advertise only every day or two), then `lastHeardAt`; never\nthe event's `observedAt`.\n",
         "properties": {
           "admin": {
-            "$ref": "#/components/schemas/v1MeshAdminTelemetry"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/v1MeshAdminTelemetry"
+              }
+            ],
+            "description": "Latest reading from an operator-run monitor that logs into the node's admin\ninterface. `null` for nodes no monitor watches. The full series is at\n`GET /api/v1/mesh/telemetry?node={publicKey}`.\n",
+            "nullable": true,
+            "type": "object"
           },
           "gateways": {
             "description": "Ids of the gateways (observer node keys, uppercase hex) that heard the node.",
@@ -5312,33 +5688,39 @@
             "description": "Hops the last-heard advert travelled; 0 means heard directly. Nullable,\nlike `snr`: `null` is unknown, not zero hops.",
             "example": 4,
             "format": "int64",
+            "nullable": true,
             "type": "integer"
           },
           "lastAdvertAt": {
             "description": "Time stamped by the node itself on its last advert (the node's clock, which\ncan be wrong). `null` if no bridge has heard an advert.",
             "format": "date-time",
+            "nullable": true,
             "type": "string"
           },
           "lastHeardAt": {
             "description": "When the Grid last received one of this node's own adverts, by our clock\n(compare `lastAdvertAt`, the node's clock). Answers \"when did the node last\nspeak\". `null` when no advert has been received since activity tracking\nbegan. Filled at read time on current events only; history revisions do not\ncarry it.\n",
             "format": "date-time",
+            "nullable": true,
             "type": "string"
           },
           "lastRelayedAt": {
             "description": "When the Grid last received a packet this node RELAYED, by our clock. A\nrepeater advertises every day or two but relays constantly, so this is the\nclock that says it is up right now. `null` when no relay has been\nattributed. Read-time only, like `lastHeardAt`.\n\nA hop is credited only when exactly one relay-capable node fits it, so a\nnode whose traffic is ambiguous gets no relay time (it reads older than on\nother mesh tools). Flood-routed packets of any type credit every hop; a\ndirect-routed packet's remaining route credits its 2- and 3-byte hops only.\nA relay also keeps a known node ACTIVE for a while after it, the way an\nadvert does; it never creates a node or changes its name or position.\n",
             "format": "date-time",
+            "nullable": true,
             "type": "string"
           },
           "rssi": {
             "description": "Received signal strength of the last advert, in dBm, gateway-reported.\nNullable, like `snr`.",
             "example": -39,
             "format": "int32",
+            "nullable": true,
             "type": "integer"
           },
           "snr": {
             "description": "Signal-to-noise ratio of the last advert, in dB, as a listening gateway\nreported it. Nullable: `null` unless an MQTT bridge heard the advert (then\n`lastAdvertAt` is set too).\n",
             "example": 11.8,
             "format": "double",
+            "nullable": true,
             "type": "number"
           }
         },
@@ -5351,14 +5733,23 @@
             "description": "Median gap between samples in the window, in seconds, so a chart knows which\ngaps are abnormal enough to break a line on. 64-bit, so a JSON STRING\n(`\"1831\"`). Nullable: `null` with fewer than two samples.\n",
             "example": "1831",
             "format": "int64",
+            "nullable": true,
             "type": "string"
           },
           "coverage": {
-            "$ref": "#/components/schemas/v1MeshTelemetryCoverage"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/v1MeshTelemetryCoverage"
+              }
+            ],
+            "description": "What the archive holds for this node at all, whatever window was asked\nfor. A window outside it has no samples because we do not have them, which\nis not the same as the node being quiet.",
+            "nullable": true,
+            "type": "object"
           },
           "from": {
             "description": "Window start actually used (after defaults and clamping).",
             "format": "date-time",
+            "nullable": true,
             "type": "string"
           },
           "node": {
@@ -5383,6 +5774,7 @@
           "to": {
             "description": "Window end actually used.",
             "format": "date-time",
+            "nullable": true,
             "type": "string"
           },
           "truncated": {
@@ -5398,6 +5790,7 @@
           "from": {
             "description": "Oldest archived sample. `null` when the archive holds none.",
             "format": "date-time",
+            "nullable": true,
             "type": "string"
           },
           "samples": {
@@ -5409,6 +5802,7 @@
           "to": {
             "description": "Newest archived sample. `null` when the archive holds none.",
             "format": "date-time",
+            "nullable": true,
             "type": "string"
           }
         },
@@ -5418,11 +5812,19 @@
         "description": "MeshTelemetrySample is one archived report.\n",
         "properties": {
           "reading": {
-            "$ref": "#/components/schemas/v1MeshAdminTelemetry"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/v1MeshAdminTelemetry"
+              }
+            ],
+            "description": "The reading. `reading.reportedAt` is the sample's own time; gauges are\nnullable exactly as on the live event.",
+            "nullable": true,
+            "type": "object"
           },
           "receivedAt": {
             "description": "When the Grid first stored it.",
             "format": "date-time",
+            "nullable": true,
             "type": "string"
           }
         },
@@ -5432,7 +5834,14 @@
         "description": "Place is a named geography that events attach to.",
         "properties": {
           "geometry": {
-            "$ref": "#/components/schemas/v1Geometry"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/v1Geometry"
+              }
+            ],
+            "description": "The place's shape: a Polygon for counties and areas, a LineString for\ncorridors, a Point for towns.",
+            "nullable": true,
+            "type": "object"
           },
           "id": {
             "description": "Namespaced id, `{kind}:{slug}`.",
@@ -5440,7 +5849,13 @@
             "type": "string"
           },
           "kind": {
-            "$ref": "#/components/schemas/v1PlaceKind"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/v1PlaceKind"
+              }
+            ],
+            "description": "What kind of place this is.",
+            "example": "TOWN"
           },
           "name": {
             "description": "Display name.",
@@ -5500,10 +5915,11 @@
           "generatedAt": {
             "description": "When this summary was computed.",
             "format": "date-time",
+            "nullable": true,
             "type": "string"
           },
           "mode": {
-            "description": "Overall posture, from the place's ACTIVE hazard events (SCHEDULED events\nnever raise it; MESH, BURN_STATUS and INFO POWER never count). The rules\nbelow are checked in order and the first match wins.\n\n- `ACTIVE`: an active evacuation at ORDER, WARNING or SHELTER_IN_PLACE; or\n  any active EXTREME event; or an active wildfire at SEVERE or above.\n- `WATCH`: any active SEVERE event; or an evacuation ADVISORY; or fire\n  weather `elevated` or `red-flag` (for places in a coverage area); or the\n  evacuation source UNAVAILABLE (unknown is never quiet); or any layer\n  UNAVAILABLE while an active event is MODERATE or above.\n- `QUIET`: otherwise.",
+            "description": "Overall posture. The rules below are checked in order and the first match\nwins.\n\n- `ACTIVE`: an active evacuation at ORDER, WARNING or SHELTER_IN_PLACE; or\n  any active EXTREME event; or an active wildfire at SEVERE or above.\n- `WATCH`: any active SEVERE event; or an active evacuation ADVISORY; or\n  fire weather `elevated` (Fire Weather Watch) or `red-flag` (Red Flag\n  Warning) for a place inside a coverage area; or the evacuation source\n  UNAVAILABLE (unknown is never quiet); or any layer feeding the\n  summary UNAVAILABLE while an active event is MODERATE or above.\n- `QUIET`: otherwise. A MODERATE or lower event on its own leaves the\n  place QUIET.\n\nOnly these inputs can raise it: ACTIVE events on the WILDFIRE,\nEVACUATION, WEATHER_ALERT, EARTHQUAKE, ROAD_INCIDENT and POWER layers\n(by severity), the fire-weather state, and source health. These never\nraise it: SCHEDULED events (a planned closure, a watch or PSPS not yet in\neffect), MESH nodes, BURN_STATUS, INFO POWER outages, and every condition\nother than fire weather. A CLOSED `road_segment` or a chain control\nraises the `roads` domain's `highestSeverity`, not `mode`, so a place can\nbe QUIET with a closed highway. Show each domain's `status` and\n`highestSeverity` alongside `mode`.",
             "enum": [
               "QUIET",
               "WATCH",
@@ -5535,7 +5951,14 @@
             "type": "array"
           },
           "summary": {
-            "$ref": "#/components/schemas/v1SummaryStats"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/v1SummaryStats"
+              }
+            ],
+            "description": "Cross-layer hazard rollup.",
+            "nullable": true,
+            "type": "object"
           }
         },
         "type": "object"
@@ -5546,6 +5969,7 @@
           "allClear": {
             "description": "PG&E's planned all-clear time. A plan, not proof the shutoff ended: it is\nset even while the stage is still Watch. Never use it to decide the power\nis back; use `status`.\n",
             "format": "date-time",
+            "nullable": true,
             "type": "string"
           },
           "cause": {
@@ -5567,16 +5991,19 @@
           "deEnergizationEnd": {
             "description": "Planned end of de-energization (an estimate). `null` for outages.",
             "format": "date-time",
+            "nullable": true,
             "type": "string"
           },
           "deEnergizationStart": {
             "description": "Planned start of de-energization. `null` for outages.",
             "format": "date-time",
+            "nullable": true,
             "type": "string"
           },
           "estimatedRestoration": {
             "description": "PG&E's estimated time of restoration. An estimate that is often missed;\n`null` when not given.\n",
             "format": "date-time",
+            "nullable": true,
             "type": "string"
           },
           "eventId": {
@@ -5629,6 +6056,7 @@
           "fetchedAt": {
             "description": "When the Grid fetched the upstream data behind this revision.",
             "format": "date-time",
+            "nullable": true,
             "type": "string"
           },
           "sourceId": {
@@ -5656,7 +6084,7 @@
             "type": "string"
           },
           "sourceUrl": {
-            "description": "Link to the publisher's page for this item or feed (for evacuations, the\nGenasys zone page). Empty string when none.",
+            "description": "Link to the publisher's page for this item or feed (for evacuations, the\nGenasys or county zone viewer). Empty string when none, which today means\nCHP incidents, Caltrans lane closures, FIRIS perimeters, NWS alerts and\nburn status. Fall back to `Source.homepageUrl` for `sourceId`.",
             "format": "uri",
             "type": "string"
           }
@@ -5674,7 +6102,14 @@
             "type": "array"
           },
           "query": {
-            "$ref": "#/components/schemas/v1ResolveQuery"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/v1ResolveQuery"
+              }
+            ],
+            "description": "The point that was resolved.",
+            "nullable": true,
+            "type": "object"
           }
         },
         "type": "object"
@@ -5705,7 +6140,14 @@
         "description": "RoadIncidentDetail is the ROAD_INCIDENT detail block, for a CHP incident or a\nCaltrans lane-closure window. The incident type is the envelope `category`,\nthe location is `areaLabel`, and the short line is `headline`.",
         "properties": {
           "closure": {
-            "$ref": "#/components/schemas/v1LaneClosureDetail"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/v1LaneClosureDetail"
+              }
+            ],
+            "description": "The Caltrans closure window, for source `caltrans` only; `null` for CHP\nincidents.",
+            "nullable": true,
+            "type": "object"
           },
           "duration": {
             "description": "AI-estimated duration (CHP incidents only). Empty string when not assessed.",
@@ -5803,7 +6245,7 @@
         "type": "string"
       },
       "v1Source": {
-        "description": "Source is one upstream feed in the registry, with its health.\n\nThe registry also holds one health-only row per push reporter (operator-run\nmonitors such as `alanpi`, `relay`, `burn-line`); those rows own no events.",
+        "description": "Source is one row of the source registry, with its health.\n\nTwo kinds of row, told apart by `kind`: a FEED is an upstream the Grid\nfetches on a schedule, and its id is what events carry in\n`provenance.sourceId`. A REPORTER is an operator-run monitor that pushes data\nto the Grid (`alanpi`, `relay`, `burn-line`); its row carries health only and\nno event names it as its source.\n\nTo judge health, read `status`. It is rewritten at every attempt, so as a\nsecond check against the Grid itself stalling, treat a row as suspect when\n`lastAttemptAt` is older than `staleAfterSeconds`. Do not compare\n`lastAttemptAt` with `pollIntervalSeconds`: that misfires for reporters.\n\nNot every source id that appears in the API has a row. The live condition\nlayers fetch on request, outside the scheduler that writes this registry, so\n`google` (the `road_segment` layer's travel times) has no row, and the\n`caltrans` and `nws` rows describe the scheduled lane-closure and alert\npolls, not the live `chain_control`, `message_sign`, `road_segment` and\n`fire_weather` fetches. For those layers read the map layer's\n`metadata.sourceStatus` or the summary domain's `status`.",
         "properties": {
           "attribution": {
             "description": "Attribution text to display.",
@@ -5816,18 +6258,28 @@
             "type": "integer"
           },
           "homepageUrl": {
-            "description": "Public page for the upstream. Empty string for push reporters.",
+            "description": "Public page for the upstream. Use it as the fallback link for an event\nwhose `canonicalUrl` and `provenance.sourceUrl` are empty (join on\n`provenance.sourceId`). Empty string for REPORTER rows, and for a feed with\nno public page.",
             "format": "uri",
             "type": "string"
           },
           "id": {
-            "description": "Registry id; `Provenance.sourceId` on events joins to it.",
+            "description": "Registry id; `Provenance.sourceId` on events joins to it (FEED rows only).",
             "example": "chp",
             "type": "string"
           },
+          "kind": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/v1SourceKind"
+              }
+            ],
+            "description": "Whether this row is a scheduled feed or a push reporter.",
+            "example": "FEED"
+          },
           "lastAttemptAt": {
-            "description": "When a poll was last attempted, successful or not. `null` if never. Status\nis recorded at each attempt, so if this is far older than\n`pollIntervalSeconds`, treat the source as stale whatever `status` says.",
+            "description": "When the row was last evaluated, successfully or not. `null` if never.\n`status` is rewritten at each attempt, so if this is older than\n`staleAfterSeconds`, the Grid itself has stopped checking: treat the\nsource as STALE whatever `status` says.",
             "format": "date-time",
+            "nullable": true,
             "type": "string"
           },
           "lastError": {
@@ -5835,8 +6287,9 @@
             "type": "string"
           },
           "lastSuccessAt": {
-            "description": "When a poll last succeeded. `null` if never.",
+            "description": "When an attempt last succeeded. `null` if never. For a REPORTER this is the\nlast check that found it reporting on time, not the time of its last\nreport (`lastError` names that once it goes quiet).",
             "format": "date-time",
+            "nullable": true,
             "type": "string"
           },
           "name": {
@@ -5845,22 +6298,38 @@
             "type": "string"
           },
           "pollIntervalSeconds": {
-            "description": "How often the Grid polls it, in seconds.",
+            "description": "How often, in seconds, the Grid re-evaluates this row. For a FEED that is\nits poll interval. For a REPORTER it is the cadence of the Grid's check on\nthe reporter, not how often the reporter reports.",
             "example": 300,
             "format": "int64",
             "type": "integer"
           },
           "staleAfterSeconds": {
-            "description": "Seconds after the last success during which a failing source still reads\nSTALE rather than UNAVAILABLE (default three poll intervals).",
+            "description": "For a FEED: seconds after the last success during which a failing source\nstill reads STALE rather than UNAVAILABLE (default three poll intervals).\nFor a REPORTER: how long it may go without reporting before it stops\nreading OK (it then reads STALE for this long again, then UNAVAILABLE).",
             "example": 900,
             "format": "int64",
             "type": "integer"
           },
           "status": {
-            "$ref": "#/components/schemas/v1SourceStatus"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/v1SourceStatus"
+              }
+            ],
+            "description": "Health of this source. This is the field to judge it by; see the message\ndescription.",
+            "example": "OK"
           }
         },
         "type": "object"
+      },
+      "v1SourceKind": {
+        "default": "SOURCE_KIND_UNSPECIFIED",
+        "description": "SourceKind says what a source registry row describes.\n\n - SOURCE_KIND_UNSPECIFIED: Never returned.\n - FEED: An upstream feed the Grid fetches on a schedule (CAL FIRE, NWS, PG&E, ...).\nEvents name it in `provenance.sourceId`.\n - REPORTER: An operator-run monitor that pushes to the Grid's ingest endpoint. Health\nonly: no event carries its id, and `homepageUrl` is empty.",
+        "enum": [
+          "SOURCE_KIND_UNSPECIFIED",
+          "FEED",
+          "REPORTER"
+        ],
+        "type": "string"
       },
       "v1SourceList": {
         "description": "SourceList is the source registry.",
@@ -6008,6 +6477,7 @@
           "lastSuccessAt": {
             "description": "When the source last polled successfully. `null` if never.",
             "format": "date-time",
+            "nullable": true,
             "type": "string"
           },
           "status": {
@@ -6027,10 +6497,17 @@
         "description": "SummaryStats is the place's hazard rollup.\n\nIt counts the place's ACTIVE and SCHEDULED events except four carve-outs:\nMESH nodes and BURN_STATUS (ambient state, shown in their own domains), POWER\noutages at INFO (single-customer service calls), and SCHEDULED road closures\n(planned roadwork). A SCHEDULED weather watch or PSPS still counts. Condition\nlayers never count here.",
         "properties": {
           "activeEvacuations": {
-            "description": "ACTIVE evacuation zones attached to the place. NULLABLE: `null` when the\nevacuation source is UNAVAILABLE with nothing stored (unknown: render\n\"unknown, check Genasys\", never \"none\"). `0` means a healthy fetch found no\nactive zone (\"no active evacuations reported\", not a guarantee). The\nOpenAPI type says integer because Swagger 2.0 cannot mark a scalar nullable;\nnever coerce `null` to 0.",
+            "description": "ACTIVE evacuation zones attached to the place. NULLABLE: `null` when the\nevacuation source is UNAVAILABLE with nothing stored (unknown: render\n\"unknown, check Genasys\", never \"none\"). `0` means a healthy fetch found no\nactive zone (\"no active evacuations reported\", not a guarantee). Never\ncoerce `null` to 0.",
             "example": 0,
             "format": "int32",
+            "nullable": true,
             "type": "integer"
+          },
+          "evacuationSourceUrl": {
+            "description": "The authoritative evacuation viewer (Genasys Protect), the same link as\nthe `evacuation` map layer's `metadata.sourceUrl`. Always set, whatever\n`evacuationStatus` says: it is where to send people when the count is\n`null` (\"unknown, check Genasys\") and the place to confirm a 0 or an N.\nFor one zone's own page use the event's `provenance.sourceUrl`.",
+            "example": "https://protect.genasys.com/",
+            "format": "uri",
+            "type": "string"
           },
           "evacuationStatus": {
             "description": "Health of the evacuation source as served: `OK`, `STALE` (source failing\nbut stored zones are served; the count is last-good) or `UNAVAILABLE`\n(then `activeEvacuations` is `null`).",
@@ -6283,6 +6760,7 @@
           "issuedAt": {
             "description": "When NWS last updated the grid. Can be `null`.",
             "format": "date-time",
+            "nullable": true,
             "type": "string"
           },
           "locationId": {
@@ -6299,6 +6777,7 @@
           "peakWindGustAt": {
             "description": "When that peak gust is forecast. Can be `null`.",
             "format": "date-time",
+            "nullable": true,
             "type": "string"
           },
           "peakWindGustKmh": {

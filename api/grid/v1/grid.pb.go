@@ -282,6 +282,61 @@ func (EventStatus) EnumDescriptor() ([]byte, []int) {
 	return file_grid_proto_rawDescGZIP(), []int{2}
 }
 
+// SourceKind says what a source registry row describes.
+type SourceKind int32
+
+const (
+	// Never returned.
+	SourceKind_SOURCE_KIND_UNSPECIFIED SourceKind = 0
+	// An upstream feed the Grid fetches on a schedule (CAL FIRE, NWS, PG&E, ...).
+	// Events name it in `provenance.sourceId`.
+	SourceKind_FEED SourceKind = 1
+	// An operator-run monitor that pushes to the Grid's ingest endpoint. Health
+	// only: no event carries its id, and `homepageUrl` is empty.
+	SourceKind_REPORTER SourceKind = 2
+)
+
+// Enum value maps for SourceKind.
+var (
+	SourceKind_name = map[int32]string{
+		0: "SOURCE_KIND_UNSPECIFIED",
+		1: "FEED",
+		2: "REPORTER",
+	}
+	SourceKind_value = map[string]int32{
+		"SOURCE_KIND_UNSPECIFIED": 0,
+		"FEED":                    1,
+		"REPORTER":                2,
+	}
+)
+
+func (x SourceKind) Enum() *SourceKind {
+	p := new(SourceKind)
+	*p = x
+	return p
+}
+
+func (x SourceKind) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (SourceKind) Descriptor() protoreflect.EnumDescriptor {
+	return file_grid_proto_enumTypes[3].Descriptor()
+}
+
+func (SourceKind) Type() protoreflect.EnumType {
+	return &file_grid_proto_enumTypes[3]
+}
+
+func (x SourceKind) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use SourceKind.Descriptor instead.
+func (SourceKind) EnumDescriptor() ([]byte, []int) {
+	return file_grid_proto_rawDescGZIP(), []int{3}
+}
+
 // SourceStatus is a source's health. The same three values appear as strings in
 // the summary's domains and sidecar, on `/api/v1/cameras`, and on the map
 // layers' `metadata.sourceStatus`.
@@ -327,11 +382,11 @@ func (x SourceStatus) String() string {
 }
 
 func (SourceStatus) Descriptor() protoreflect.EnumDescriptor {
-	return file_grid_proto_enumTypes[3].Descriptor()
+	return file_grid_proto_enumTypes[4].Descriptor()
 }
 
 func (SourceStatus) Type() protoreflect.EnumType {
-	return &file_grid_proto_enumTypes[3]
+	return &file_grid_proto_enumTypes[4]
 }
 
 func (x SourceStatus) Number() protoreflect.EnumNumber {
@@ -340,7 +395,7 @@ func (x SourceStatus) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use SourceStatus.Descriptor instead.
 func (SourceStatus) EnumDescriptor() ([]byte, []int) {
-	return file_grid_proto_rawDescGZIP(), []int{3}
+	return file_grid_proto_rawDescGZIP(), []int{4}
 }
 
 // PlaceKind is the type of a place.
@@ -400,11 +455,11 @@ func (x PlaceKind) String() string {
 }
 
 func (PlaceKind) Descriptor() protoreflect.EnumDescriptor {
-	return file_grid_proto_enumTypes[4].Descriptor()
+	return file_grid_proto_enumTypes[5].Descriptor()
 }
 
 func (PlaceKind) Type() protoreflect.EnumType {
-	return &file_grid_proto_enumTypes[4]
+	return &file_grid_proto_enumTypes[5]
 }
 
 func (x PlaceKind) Number() protoreflect.EnumNumber {
@@ -413,7 +468,7 @@ func (x PlaceKind) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use PlaceKind.Descriptor instead.
 func (PlaceKind) EnumDescriptor() ([]byte, []int) {
-	return file_grid_proto_rawDescGZIP(), []int{4}
+	return file_grid_proto_rawDescGZIP(), []int{5}
 }
 
 // MeshReachability is an operator monitor's verdict on a node's admin interface,
@@ -454,11 +509,11 @@ func (x MeshReachability) String() string {
 }
 
 func (MeshReachability) Descriptor() protoreflect.EnumDescriptor {
-	return file_grid_proto_enumTypes[5].Descriptor()
+	return file_grid_proto_enumTypes[6].Descriptor()
 }
 
 func (MeshReachability) Type() protoreflect.EnumType {
-	return &file_grid_proto_enumTypes[5]
+	return &file_grid_proto_enumTypes[6]
 }
 
 func (x MeshReachability) Number() protoreflect.EnumNumber {
@@ -467,7 +522,7 @@ func (x MeshReachability) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use MeshReachability.Descriptor instead.
 func (MeshReachability) EnumDescriptor() ([]byte, []int) {
-	return file_grid_proto_rawDescGZIP(), []int{5}
+	return file_grid_proto_rawDescGZIP(), []int{6}
 }
 
 // BurnDay is the county air district's call for today.
@@ -512,11 +567,11 @@ func (x BurnDay) String() string {
 }
 
 func (BurnDay) Descriptor() protoreflect.EnumDescriptor {
-	return file_grid_proto_enumTypes[6].Descriptor()
+	return file_grid_proto_enumTypes[7].Descriptor()
 }
 
 func (BurnDay) Type() protoreflect.EnumType {
-	return &file_grid_proto_enumTypes[6]
+	return &file_grid_proto_enumTypes[7]
 }
 
 func (x BurnDay) Number() protoreflect.EnumNumber {
@@ -525,7 +580,7 @@ func (x BurnDay) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use BurnDay.Descriptor instead.
 func (BurnDay) EnumDescriptor() ([]byte, []int) {
-	return file_grid_proto_rawDescGZIP(), []int{6}
+	return file_grid_proto_rawDescGZIP(), []int{7}
 }
 
 // CalfireBurnStatus is CAL FIRE's permit status for State Responsibility Area
@@ -570,11 +625,11 @@ func (x CalfireBurnStatus) String() string {
 }
 
 func (CalfireBurnStatus) Descriptor() protoreflect.EnumDescriptor {
-	return file_grid_proto_enumTypes[7].Descriptor()
+	return file_grid_proto_enumTypes[8].Descriptor()
 }
 
 func (CalfireBurnStatus) Type() protoreflect.EnumType {
-	return &file_grid_proto_enumTypes[7]
+	return &file_grid_proto_enumTypes[8]
 }
 
 func (x CalfireBurnStatus) Number() protoreflect.EnumNumber {
@@ -583,7 +638,7 @@ func (x CalfireBurnStatus) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use CalfireBurnStatus.Descriptor instead.
 func (CalfireBurnStatus) EnumDescriptor() ([]byte, []int) {
-	return file_grid_proto_rawDescGZIP(), []int{7}
+	return file_grid_proto_rawDescGZIP(), []int{8}
 }
 
 // BurnPermission is the combined answer, deliberately pessimistic.
@@ -623,11 +678,11 @@ func (x BurnPermission) String() string {
 }
 
 func (BurnPermission) Descriptor() protoreflect.EnumDescriptor {
-	return file_grid_proto_enumTypes[8].Descriptor()
+	return file_grid_proto_enumTypes[9].Descriptor()
 }
 
 func (BurnPermission) Type() protoreflect.EnumType {
-	return &file_grid_proto_enumTypes[8]
+	return &file_grid_proto_enumTypes[9]
 }
 
 func (x BurnPermission) Number() protoreflect.EnumNumber {
@@ -636,7 +691,7 @@ func (x BurnPermission) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use BurnPermission.Descriptor instead.
 func (BurnPermission) EnumDescriptor() ([]byte, []int) {
-	return file_grid_proto_rawDescGZIP(), []int{8}
+	return file_grid_proto_rawDescGZIP(), []int{9}
 }
 
 // Event is one item from one upstream source: a hazard, or a piece of ambient
@@ -691,9 +746,13 @@ type Event struct {
 	// Human-readable location ("SR 4 at Country Club Drive", "Calaveras County").
 	// Empty string when the source gives none.
 	AreaLabel string `protobuf:"bytes,9,opt,name=area_label,json=areaLabel,proto3" json:"area_label,omitempty"`
-	// Link to the authoritative page for THIS item (a USGS event page, a CAL FIRE
-	// incident page, a mesh node's CoreScope page). Always http(s). Empty string
-	// when the source has no per-item page; fall back to `provenance.sourceUrl`.
+	// Link to the authoritative page for THIS item: a USGS event page, a CAL FIRE
+	// incident page, a mesh node's CoreScope page, PG&E's outage or PSPS page, the
+	// CAL FIRE burn-permit page for burn status. Always http(s) when set. Empty
+	// string when the source has no per-item page, which today means CHP
+	// incidents, Caltrans lane closures, FIRIS perimeters, NWS alerts and
+	// evacuation zones. Fall back to `provenance.sourceUrl`, then to the source's
+	// `homepageUrl` (`GET /api/v1/sources`, joined on `provenance.sourceId`).
 	CanonicalUrl string `protobuf:"bytes,10,opt,name=canonical_url,json=canonicalUrl,proto3" json:"canonical_url,omitempty"`
 	// Where the event is. `null` for events with no footprint of their own: NWS
 	// zone alerts (they attach to places by zone instead) and burn status (a fact
@@ -1277,7 +1336,9 @@ type Provenance struct {
 	// empty string.
 	Attribution string `protobuf:"bytes,3,opt,name=attribution,proto3" json:"attribution,omitempty"`
 	// Link to the publisher's page for this item or feed (for evacuations, the
-	// Genasys zone page). Empty string when none.
+	// Genasys or county zone viewer). Empty string when none, which today means
+	// CHP incidents, Caltrans lane closures, FIRIS perimeters, NWS alerts and
+	// burn status. Fall back to `Source.homepageUrl` for `sourceId`.
 	SourceUrl string `protobuf:"bytes,4,opt,name=source_url,json=sourceUrl,proto3" json:"source_url,omitempty"`
 	// When the Grid fetched the upstream data behind this revision.
 	FetchedAt     *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=fetched_at,json=fetchedAt,proto3" json:"fetched_at,omitempty"`
@@ -1439,39 +1500,68 @@ func (x *Enhancement) GetResponse() string {
 	return ""
 }
 
-// Source is one upstream feed in the registry, with its health.
+// Source is one row of the source registry, with its health.
 //
-// The registry also holds one health-only row per push reporter (operator-run
-// monitors such as `alanpi`, `relay`, `burn-line`); those rows own no events.
+// Two kinds of row, told apart by `kind`: a FEED is an upstream the Grid
+// fetches on a schedule, and its id is what events carry in
+// `provenance.sourceId`. A REPORTER is an operator-run monitor that pushes data
+// to the Grid (`alanpi`, `relay`, `burn-line`); its row carries health only and
+// no event names it as its source.
+//
+// To judge health, read `status`. It is rewritten at every attempt, so as a
+// second check against the Grid itself stalling, treat a row as suspect when
+// `lastAttemptAt` is older than `staleAfterSeconds`. Do not compare
+// `lastAttemptAt` with `pollIntervalSeconds`: that misfires for reporters.
+//
+// Not every source id that appears in the API has a row. The live condition
+// layers fetch on request, outside the scheduler that writes this registry, so
+// `google` (the `road_segment` layer's travel times) has no row, and the
+// `caltrans` and `nws` rows describe the scheduled lane-closure and alert
+// polls, not the live `chain_control`, `message_sign`, `road_segment` and
+// `fire_weather` fetches. For those layers read the map layer's
+// `metadata.sourceStatus` or the summary domain's `status`.
 type Source struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Registry id; `Provenance.sourceId` on events joins to it.
+	// Registry id; `Provenance.sourceId` on events joins to it (FEED rows only).
 	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	// Display name, e.g. "CHP (traffic incidents)".
 	Name string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	// Attribution text to display.
 	Attribution string `protobuf:"bytes,3,opt,name=attribution,proto3" json:"attribution,omitempty"`
-	// Public page for the upstream. Empty string for push reporters.
+	// Public page for the upstream. Use it as the fallback link for an event
+	// whose `canonicalUrl` and `provenance.sourceUrl` are empty (join on
+	// `provenance.sourceId`). Empty string for REPORTER rows, and for a feed with
+	// no public page.
 	HomepageUrl string `protobuf:"bytes,4,opt,name=homepage_url,json=homepageUrl,proto3" json:"homepage_url,omitempty"`
-	// How often the Grid polls it, in seconds.
+	// Whether this row is a scheduled feed or a push reporter.
+	Kind SourceKind `protobuf:"varint,12,opt,name=kind,proto3,enum=grid.v1.SourceKind" json:"kind,omitempty"`
+	// How often, in seconds, the Grid re-evaluates this row. For a FEED that is
+	// its poll interval. For a REPORTER it is the cadence of the Grid's check on
+	// the reporter, not how often the reporter reports.
 	PollIntervalSeconds uint32 `protobuf:"varint,5,opt,name=poll_interval_seconds,json=pollIntervalSeconds,proto3" json:"poll_interval_seconds,omitempty"`
-	// Seconds after the last success during which a failing source still reads
-	// STALE rather than UNAVAILABLE (default three poll intervals).
+	// For a FEED: seconds after the last success during which a failing source
+	// still reads STALE rather than UNAVAILABLE (default three poll intervals).
+	// For a REPORTER: how long it may go without reporting before it stops
+	// reading OK (it then reads STALE for this long again, then UNAVAILABLE).
 	StaleAfterSeconds uint32 `protobuf:"varint,10,opt,name=stale_after_seconds,json=staleAfterSeconds,proto3" json:"stale_after_seconds,omitempty"`
 	// For sources whose silence proves nothing (NWS, FIRIS, MeshCore): how long,
 	// in seconds, an event may go unseen before it is EXPIRED. 0 means the source
 	// never auto-expires; its events are RESOLVED when a good poll stops listing
 	// them.
 	ExpireAfterSeconds uint32 `protobuf:"varint,11,opt,name=expire_after_seconds,json=expireAfterSeconds,proto3" json:"expire_after_seconds,omitempty"`
-	// When a poll last succeeded. `null` if never.
+	// When an attempt last succeeded. `null` if never. For a REPORTER this is the
+	// last check that found it reporting on time, not the time of its last
+	// report (`lastError` names that once it goes quiet).
 	LastSuccessAt *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=last_success_at,json=lastSuccessAt,proto3" json:"last_success_at,omitempty"`
-	// When a poll was last attempted, successful or not. `null` if never. Status
-	// is recorded at each attempt, so if this is far older than
-	// `pollIntervalSeconds`, treat the source as stale whatever `status` says.
+	// When the row was last evaluated, successfully or not. `null` if never.
+	// `status` is rewritten at each attempt, so if this is older than
+	// `staleAfterSeconds`, the Grid itself has stopped checking: treat the
+	// source as STALE whatever `status` says.
 	LastAttemptAt *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=last_attempt_at,json=lastAttemptAt,proto3" json:"last_attempt_at,omitempty"`
 	// The last attempt's error text. Empty string after a success.
 	LastError string `protobuf:"bytes,8,opt,name=last_error,json=lastError,proto3" json:"last_error,omitempty"`
-	// Health of this source.
+	// Health of this source. This is the field to judge it by; see the message
+	// description.
 	Status        SourceStatus `protobuf:"varint,9,opt,name=status,proto3,enum=grid.v1.SourceStatus" json:"status,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1533,6 +1623,13 @@ func (x *Source) GetHomepageUrl() string {
 		return x.HomepageUrl
 	}
 	return ""
+}
+
+func (x *Source) GetKind() SourceKind {
+	if x != nil {
+		return x.Kind
+	}
+	return SourceKind_SOURCE_KIND_UNSPECIFIED
 }
 
 func (x *Source) GetPollIntervalSeconds() uint32 {
@@ -4091,17 +4188,28 @@ type PlaceSummary struct {
 	PlaceName string `protobuf:"bytes,3,opt,name=place_name,json=placeName,proto3" json:"place_name,omitempty"`
 	// When this summary was computed.
 	GeneratedAt *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=generated_at,json=generatedAt,proto3" json:"generated_at,omitempty"`
-	// Overall posture, from the place's ACTIVE hazard events (SCHEDULED events
-	// never raise it; MESH, BURN_STATUS and INFO POWER never count). The rules
-	// below are checked in order and the first match wins.
+	// Overall posture. The rules below are checked in order and the first match
+	// wins.
 	//
 	//   - `ACTIVE`: an active evacuation at ORDER, WARNING or SHELTER_IN_PLACE; or
 	//     any active EXTREME event; or an active wildfire at SEVERE or above.
-	//   - `WATCH`: any active SEVERE event; or an evacuation ADVISORY; or fire
-	//     weather `elevated` or `red-flag` (for places in a coverage area); or the
-	//     evacuation source UNAVAILABLE (unknown is never quiet); or any layer
-	//     UNAVAILABLE while an active event is MODERATE or above.
-	//   - `QUIET`: otherwise.
+	//   - `WATCH`: any active SEVERE event; or an active evacuation ADVISORY; or
+	//     fire weather `elevated` (Fire Weather Watch) or `red-flag` (Red Flag
+	//     Warning) for a place inside a coverage area; or the evacuation source
+	//     UNAVAILABLE (unknown is never quiet); or any layer feeding the
+	//     summary UNAVAILABLE while an active event is MODERATE or above.
+	//   - `QUIET`: otherwise. A MODERATE or lower event on its own leaves the
+	//     place QUIET.
+	//
+	// Only these inputs can raise it: ACTIVE events on the WILDFIRE,
+	// EVACUATION, WEATHER_ALERT, EARTHQUAKE, ROAD_INCIDENT and POWER layers
+	// (by severity), the fire-weather state, and source health. These never
+	// raise it: SCHEDULED events (a planned closure, a watch or PSPS not yet in
+	// effect), MESH nodes, BURN_STATUS, INFO POWER outages, and every condition
+	// other than fire weather. A CLOSED `road_segment` or a chain control
+	// raises the `roads` domain's `highestSeverity`, not `mode`, so a place can
+	// be QUIET with a closed highway. Show each domain's `status` and
+	// `highestSeverity` alongside `mode`.
 	Mode string `protobuf:"bytes,5,opt,name=mode,proto3" json:"mode,omitempty"`
 	// Cross-layer hazard rollup.
 	Summary *SummaryStats `protobuf:"bytes,6,opt,name=summary,proto3" json:"summary,omitempty"`
@@ -4224,9 +4332,8 @@ type SummaryStats struct {
 	// ACTIVE evacuation zones attached to the place. NULLABLE: `null` when the
 	// evacuation source is UNAVAILABLE with nothing stored (unknown: render
 	// "unknown, check Genasys", never "none"). `0` means a healthy fetch found no
-	// active zone ("no active evacuations reported", not a guarantee). The
-	// OpenAPI type says integer because Swagger 2.0 cannot mark a scalar nullable;
-	// never coerce `null` to 0.
+	// active zone ("no active evacuations reported", not a guarantee). Never
+	// coerce `null` to 0.
 	ActiveEvacuations *wrapperspb.Int32Value `protobuf:"bytes,5,opt,name=active_evacuations,json=activeEvacuations,proto3" json:"active_evacuations,omitempty"`
 	// Health of the evacuation source as served: `OK`, `STALE` (source failing
 	// but stored zones are served; the count is last-good) or `UNAVAILABLE`
@@ -4234,9 +4341,15 @@ type SummaryStats struct {
 	EvacuationStatus string `protobuf:"bytes,6,opt,name=evacuation_status,json=evacuationStatus,proto3" json:"evacuation_status,omitempty"`
 	// Up to five counted events, most severe first, then most recently observed.
 	// Every id here is an event (`GET /api/v1/events/{id}`).
-	TopEvents     []*SummaryTopEvent `protobuf:"bytes,7,rep,name=top_events,json=topEvents,proto3" json:"top_events,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	TopEvents []*SummaryTopEvent `protobuf:"bytes,7,rep,name=top_events,json=topEvents,proto3" json:"top_events,omitempty"`
+	// The authoritative evacuation viewer (Genasys Protect), the same link as
+	// the `evacuation` map layer's `metadata.sourceUrl`. Always set, whatever
+	// `evacuationStatus` says: it is where to send people when the count is
+	// `null` ("unknown, check Genasys") and the place to confirm a 0 or an N.
+	// For one zone's own page use the event's `provenance.sourceUrl`.
+	EvacuationSourceUrl string `protobuf:"bytes,8,opt,name=evacuation_source_url,json=evacuationSourceUrl,proto3" json:"evacuation_source_url,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *SummaryStats) Reset() {
@@ -4316,6 +4429,13 @@ func (x *SummaryStats) GetTopEvents() []*SummaryTopEvent {
 		return x.TopEvents
 	}
 	return nil
+}
+
+func (x *SummaryStats) GetEvacuationSourceUrl() string {
+	if x != nil {
+		return x.EvacuationSourceUrl
+	}
+	return ""
 }
 
 // SummaryTopEvent is one of the place's most urgent hazard events.
@@ -6399,13 +6519,14 @@ const file_grid_proto_rawDesc = "" +
 	"enhancedAt\x12@\n" +
 	"\x06fields\x18\x03 \x03(\tB(\x92A%J#[\"headline\", \"summary\", \"severity\"]R\x06fields\x12\x18\n" +
 	"\arequest\x18\x04 \x01(\tR\arequest\x12\x1a\n" +
-	"\bresponse\x18\x05 \x01(\tR\bresponse\"\xbb\x04\n" +
+	"\bresponse\x18\x05 \x01(\tR\bresponse\"\xf1\x04\n" +
 	"\x06Source\x12\x1a\n" +
 	"\x02id\x18\x01 \x01(\tB\n" +
 	"\x92A\aJ\x05\"chp\"R\x02id\x122\n" +
 	"\x04name\x18\x02 \x01(\tB\x1e\x92A\x1bJ\x19\"CHP (traffic incidents)\"R\x04name\x12 \n" +
 	"\vattribution\x18\x03 \x01(\tR\vattribution\x12,\n" +
-	"\fhomepage_url\x18\x04 \x01(\tB\t\x92A\x06\xa2\x02\x03uriR\vhomepageUrl\x12<\n" +
+	"\fhomepage_url\x18\x04 \x01(\tB\t\x92A\x06\xa2\x02\x03uriR\vhomepageUrl\x124\n" +
+	"\x04kind\x18\f \x01(\x0e2\x13.grid.v1.SourceKindB\v\x92A\bJ\x06\"FEED\"R\x04kind\x12<\n" +
 	"\x15poll_interval_seconds\x18\x05 \x01(\rB\b\x92A\x05J\x03300R\x13pollIntervalSeconds\x128\n" +
 	"\x13stale_after_seconds\x18\n" +
 	" \x01(\rB\b\x92A\x05J\x03900R\x11staleAfterSeconds\x128\n" +
@@ -6648,7 +6769,7 @@ const file_grid_proto_rawDesc = "" +
 	"\x04mode\x18\x05 \x01(\tB%\x92A\"J\a\"WATCH\"\xf2\x02\x05QUIET\xf2\x02\x05WATCH\xf2\x02\x06ACTIVER\x04mode\x12/\n" +
 	"\asummary\x18\x06 \x01(\v2\x15.grid.v1.SummaryStatsR\asummary\x120\n" +
 	"\adomains\x18\a \x03(\v2\x16.grid.v1.SummaryDomainR\adomains\x126\n" +
-	"\asources\x18\b \x03(\v2\x1c.grid.v1.SummarySourceHealthR\asources\"\x87\x05\n" +
+	"\asources\x18\b \x03(\v2\x1c.grid.v1.SummarySourceHealthR\asources\"\xe6\x05\n" +
 	"\fSummaryStats\x12e\n" +
 	"\x10highest_severity\x18\x01 \x01(\tB:\x92A7J\b\"SEVERE\"\xf2\x02\x04INFO\xf2\x02\x05MINOR\xf2\x02\bMODERATE\xf2\x02\x06SEVERE\xf2\x02\aEXTREMER\x0fhighestSeverity\x12C\n" +
 	"\x15highest_severity_rank\x18\x02 \x01(\x05B\x0f\x92A\fJ\x013Y\x00\x00\x00\x00\x00\x00\x10@R\x13highestSeverityRank\x12}\n" +
@@ -6657,7 +6778,8 @@ const file_grid_proto_rawDesc = "" +
 	"\x12active_evacuations\x18\x05 \x01(\v2\x1b.google.protobuf.Int32ValueB\x06\x92A\x03J\x010R\x11activeEvacuations\x12Q\n" +
 	"\x11evacuation_status\x18\x06 \x01(\tB$\x92A!J\x04\"OK\"\xf2\x02\x02OK\xf2\x02\x05STALE\xf2\x02\vUNAVAILABLER\x10evacuationStatus\x127\n" +
 	"\n" +
-	"top_events\x18\a \x03(\v2\x18.grid.v1.SummaryTopEventR\ttopEvents\x1aA\n" +
+	"top_events\x18\a \x03(\v2\x18.grid.v1.SummaryTopEventR\ttopEvents\x12]\n" +
+	"\x15evacuation_source_url\x18\b \x01(\tB)\x92A&J\x1e\"https://protect.genasys.com/\"\xa2\x02\x03uriR\x13evacuationSourceUrl\x1aA\n" +
 	"\x13SeverityCountsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\x05R\x05value:\x028\x01\"\xc7\x03\n" +
@@ -6853,7 +6975,12 @@ const file_grid_proto_rawDesc = "" +
 	"\n" +
 	"\x06ACTIVE\x10\x02\x12\f\n" +
 	"\bRESOLVED\x10\x03\x12\v\n" +
-	"\aEXPIRED\x10\x04*Q\n" +
+	"\aEXPIRED\x10\x04*A\n" +
+	"\n" +
+	"SourceKind\x12\x1b\n" +
+	"\x17SOURCE_KIND_UNSPECIFIED\x10\x00\x12\b\n" +
+	"\x04FEED\x10\x01\x12\f\n" +
+	"\bREPORTER\x10\x02*Q\n" +
 	"\fSourceStatus\x12\x1d\n" +
 	"\x19SOURCE_STATUS_UNSPECIFIED\x10\x00\x12\x06\n" +
 	"\x02OK\x10\x01\x12\t\n" +
@@ -6969,12 +7096,12 @@ const file_grid_proto_rawDesc = "" +
 	"\x10GetMeshTelemetry\x12 .grid.v1.GetMeshTelemetryRequest\x1a\x1d.grid.v1.MeshTelemetryArchive\"\xae\x01\x92A\x8c\x01\n" +
 	"\x04MeshJ\x83\x01\n" +
 	"\x03400\x12|\n" +
-	"zINVALID_ARGUMENT: `node` missing or not 8-64 even-length hex (optionally prefixed `meshcore:`), or `from` not before `to`.\x82\xd3\xe4\x93\x02\x18\x12\x16/api/v1/mesh/telemetry\x1ap\x92Am\x12kEvery /api/v1 RPC. The resource tags (Places, Events, Conditions, Sources, Mesh) group the same operations.B\xc1P\x92A\x8dP\x12\xe8H\n" +
-	"\fThe Grid API\x12\xc8GPublic, read-only JSON API of **The Grid**, the S.I.E.R.R.A. data service. It gathers hazard and situational-awareness feeds for California's central Sierra Nevada, centred on Calaveras and Tuolumne counties: the Highway 4 / Ebbetts Pass corridor (Angels Camp, Murphys, Arnold, Dorrington, Bear Valley) and the Highway 49/108 towns (Sonora, Columbia, Twain Harte). Neighbouring counties (Alpine, Amador, El Dorado, Mariposa, San Joaquin, Stanislaus) are in the place directory because hazards cross county lines.\n" +
+	"zINVALID_ARGUMENT: `node` missing or not 8-64 even-length hex (optionally prefixed `meshcore:`), or `from` not before `to`.\x82\xd3\xe4\x93\x02\x18\x12\x16/api/v1/mesh/telemetry\x1ap\x92Am\x12kEvery /api/v1 RPC. The resource tags (Places, Events, Conditions, Sources, Mesh) group the same operations.B\xdf\\\x92A\xab\\\x12\x86U\n" +
+	"\fThe Grid API\x12\xe6SPublic, read-only JSON API of **The Grid**, the S.I.E.R.R.A. data service. It gathers hazard and situational-awareness feeds for California's central Sierra Nevada, centred on Calaveras and Tuolumne counties: the Highway 4 / Ebbetts Pass corridor (Angels Camp, Murphys, Arnold, Dorrington, Bear Valley) and the Highway 49/108 towns (Sonora, Columbia, Twain Harte). Neighbouring counties (Alpine, Amador, El Dorado, Mariposa, San Joaquin, Stanislaus) are in the place directory because hazards cross county lines.\n" +
 	"\n" +
 	"Upstream sources: CAL FIRE and FIRIS (wildfires and perimeters), Cal OES / Genasys (evacuation zones), the National Weather Service (alerts, fire weather, forecasts), USGS (earthquakes), CHP and Caltrans (incidents, lane closures, chain control, cameras, message signs), PG&E (outages and Public Safety Power Shutoffs), county burn lines and CAL FIRE burn permits, the MeshCore community radio mesh, Google Routes and OpenWeatherMap.\n" +
 	"\n" +
-	"This service is an aggregator, not an authority. For a life-safety decision, link the official source: every event carries `canonicalUrl` and `provenance.sourceUrl`.\n" +
+	"This service is an aggregator, not an authority. For a life-safety decision, link the official source. An event's link is `canonicalUrl` (the item's own page), else `provenance.sourceUrl`, else the `homepageUrl` of its source (`GET /api/v1/sources`, joined on `provenance.sourceId`). Either event field can be an empty string: CHP incidents, Caltrans lane closures, FIRIS perimeters and NWS alerts have neither, so their link is the source homepage. Every map feature carries `properties.source`, and evacuation views link Genasys (`metadata.sourceUrl`, `summary.evacuationSourceUrl`).\n" +
 	"\n" +
 	"## Resource model\n" +
 	"\n" +
@@ -6986,8 +7113,8 @@ const file_grid_proto_rawDesc = "" +
 	"\n" +
 	"## Quickstart: build a dashboard for a place\n" +
 	"\n" +
-	"1. Pick a place: `GET /api/v1/places` lists them all (about 20). Or map a point or an address to places with `GET /api/v1/places:resolve?lat=38.25&lng=-120.35` or `?address=...`. Use the `slug`, e.g. `calaveras-county`, `arnold`, `hwy4-murphys-arnold`.\n" +
-	"2. Headline status: `GET /api/v1/places/{slug}/summary` returns `mode` (QUIET, WATCH or ACTIVE), one block per domain (fire, evacuation, weather, roads, seismic, power, burn, comms), the top five hazards and `activeEvacuations`.\n" +
+	"1. Pick a place: `GET /api/v1/places` lists them all (about 20). For a dashboard use an AREA (`ebbetts-pass`), a COUNTY (`calaveras-county`) or a CORRIDOR (`hwy4-arnold-bearvalley`): those have a footprint, so events and conditions attach to them. Do not build a dashboard on a TOWN (`arnold`). A town is a point, so an event attaches to it only when the event's polygon covers it (an evacuation zone, a fire perimeter), a wildfire comes near, or the fact is county-wide (burn status). Point events (road incidents, outages, earthquakes) and road conditions never attach, so a town's summary can read QUIET with an open `roads` domain while its highway is closed. Use a town to label a location and to find its county (`parentId`), or map a point or an address with `GET /api/v1/places:resolve?lat=38.25&lng=-120.35` (or `?address=...`) and pick the most specific non-town place it returns. Use the `slug` in paths.\n" +
+	"2. Headline status: `GET /api/v1/places/{slug}/summary` returns `mode` (QUIET, WATCH or ACTIVE), one block per domain (fire, evacuation, weather, roads, seismic, power, burn, comms), the top five hazards and `activeEvacuations`. Show each domain's `status` and `highestSeverity` next to `mode`: road and chain-control conditions (a closed highway) raise the `roads` domain but never `mode`.\n" +
 	"3. Event feed: `GET /api/v1/events?place={slug}&status=ACTIVE&severityMin=MINOR`. Then `GET /api/v1/events/{id}` for detail and `/api/v1/events/{id}/history` for its timeline.\n" +
 	"4. Map: `GET /api/v1/places/{slug}/map/{layer}.geojson` serves one RFC 7946 FeatureCollection per layer (documented separately from the RPCs below).\n" +
 	"5. Context: `GET /api/v1/conditions?place={slug}` for current weather, forecasts and the fire-weather state, `GET /api/v1/cameras?place={slug}` for traffic cameras, and `GET /api/v1/sources` for source-health badges.\n" +
@@ -7000,7 +7127,7 @@ const file_grid_proto_rawDesc = "" +
 	"\n" +
 	"## Conventions\n" +
 	"\n" +
-	"- **JSON field names are camelCase.** Every field is always present. An unset message or timestamp is `null`. An unset scalar is `0`, `\"\"` or `false`. Wrapper-typed fields (documented as nullable) are `null` when unknown, so a real `0` is never confused with \"no reading\".\n" +
+	"- **JSON field names are camelCase.** Every field is present, except the per-layer detail blocks on an event (only the one matching `layer` is sent). An unset message or timestamp is `null`; the spec marks every such field `nullable`. An unset scalar is `0`, `\"\"` or `false`, never `null`. Wrapper-typed fields (`activeEvacuations`, the mesh gauges) are `null` when unknown, so a real `0` is never confused with \"no reading\". Arrays are `[]` and maps `{}` when empty.\n" +
 	"- **Enums serialize as their name strings** (`\"SEVERE\"`), never as numbers.\n" +
 	"- **Timestamps** are RFC 3339 in UTC (`2026-11-07T03:13:00Z`), with up to nanosecond fractions.\n" +
 	"- **64-bit integers are JSON strings** (protobuf JSON mapping): mesh counters such as `uptimeSeconds: \"98350\"` and `cadenceSeconds: \"1831\"`. Parse them; 32-bit integers are plain numbers.\n" +
@@ -7010,7 +7137,7 @@ const file_grid_proto_rawDesc = "" +
 	"- **Pagination** is keyset-based. `pageSize` 0 or omitted means 50, values over 200 are clamped to 200, and a negative value is a 400. Pass `nextPageToken` back as `pageToken` with the same filters until it comes back empty. Tokens are opaque. Pages stay stable while new events arrive. A large page of perimeter-heavy events can exceed the server's 4 MiB response limit and fail with HTTP 429 `RESOURCE_EXHAUSTED`; keep `pageSize` at or below 50 when you include RESOLVED or EXPIRED events.\n" +
 	"- **Conditional GET**: event lists, event detail, event history, the revision archive, places and cameras return a weak `ETag`. Send it back in `If-None-Match` to get `304 Not Modified`. The tag changes whenever the body would, including in-place refreshes that write no revision (AI text, mesh telemetry, burn-line observations, place re-attachment). The summary, conditions, sources, resolve, scanners and mesh-telemetry endpoints do not yet send ETags.\n" +
 	"- **No authentication, no API key.** CORS is open (`Access-Control-Allow-Origin: *`), GET only, no credentials, so a browser page on any origin can call the API directly.\n" +
-	"- **Errors** are the gRPC status as JSON, `{code, codeName, message, details}`, with a mapped HTTP status: 400 `INVALID_ARGUMENT` (bad enum, timestamp or page token), 404 `NOT_FOUND` (unknown place, event or address), 429 `RESOURCE_EXHAUSTED` (response too large), 503 `UNAVAILABLE` (address geocoder down), 500 `INTERNAL`. Branch on `codeName`. During a deploy handoff any route can briefly answer `503` with a plain-text body and `Retry-After: 1`; retry after the delay.\n" +
+	"- **Errors** are the gRPC status as JSON, `{code, codeName, message, details}`, with a mapped HTTP status: 400 `INVALID_ARGUMENT` (bad enum, timestamp or page token), 404 `NOT_FOUND` (unknown place, event or address), 429 `RESOURCE_EXHAUSTED` (response too large), 503 `UNAVAILABLE` (address geocoder down), 500 `INTERNAL`. Branch on `codeName`. During a deploy handoff any route can briefly answer `503`: the RPCs with the JSON error (`UNAVAILABLE`), the hand-built routes (`.geojson`, mesh links) with a plain-text body and `Retry-After: 1`. Retry after a second.\n" +
 	"\n" +
 	"## Severity and status\n" +
 	"\n" +
@@ -7023,7 +7150,7 @@ const file_grid_proto_rawDesc = "" +
 	"The API never turns a failure into an all-clear.\n" +
 	"\n" +
 	"- Source health is `OK`, `STALE` (serving last-good data while the upstream fails) or `UNAVAILABLE` (nothing trustworthy to serve). It appears on `/api/v1/sources`, on each summary domain, in the summary's `sources` sidecar, on `/api/v1/cameras`, and in each map layer's `metadata.sourceStatus`. UNAVAILABLE with no items means *unknown*. Render it as \"unknown, check the source\", never as \"none\".\n" +
-	"- Evacuations: `summary.activeEvacuations` is `null` when the evacuation source is UNAVAILABLE (unknown; send people to Genasys), `0` when a healthy fetch found no active zone (\"none reported\", not a guarantee), and `N` when zones are active.\n" +
+	"- Evacuations: `summary.activeEvacuations` is `null` when the evacuation source is UNAVAILABLE (unknown; send people to Genasys at `summary.evacuationSourceUrl`), `0` when a healthy fetch found no active zone (\"none reported\", not a guarantee), and `N` when zones are active.\n" +
 	"- A failed fetch never resolves or expires events. They stay as they were and the source reads STALE.\n" +
 	"- The fire-weather state comes only from issued NWS products. The API never infers a Red Flag Warning that NWS has not issued.\n" +
 	"\n" +
@@ -7056,229 +7183,231 @@ func file_grid_proto_rawDescGZIP() []byte {
 	return file_grid_proto_rawDescData
 }
 
-var file_grid_proto_enumTypes = make([]protoimpl.EnumInfo, 9)
+var file_grid_proto_enumTypes = make([]protoimpl.EnumInfo, 10)
 var file_grid_proto_msgTypes = make([]protoimpl.MessageInfo, 62)
 var file_grid_proto_goTypes = []any{
 	(Layer)(0),                      // 0: grid.v1.Layer
 	(Severity)(0),                   // 1: grid.v1.Severity
 	(EventStatus)(0),                // 2: grid.v1.EventStatus
-	(SourceStatus)(0),               // 3: grid.v1.SourceStatus
-	(PlaceKind)(0),                  // 4: grid.v1.PlaceKind
-	(MeshReachability)(0),           // 5: grid.v1.MeshReachability
-	(BurnDay)(0),                    // 6: grid.v1.BurnDay
-	(CalfireBurnStatus)(0),          // 7: grid.v1.CalfireBurnStatus
-	(BurnPermission)(0),             // 8: grid.v1.BurnPermission
-	(*Event)(nil),                   // 9: grid.v1.Event
-	(*Geometry)(nil),                // 10: grid.v1.Geometry
-	(*BoundingBox)(nil),             // 11: grid.v1.BoundingBox
-	(*LatLng)(nil),                  // 12: grid.v1.LatLng
-	(*Provenance)(nil),              // 13: grid.v1.Provenance
-	(*Enhancement)(nil),             // 14: grid.v1.Enhancement
-	(*Source)(nil),                  // 15: grid.v1.Source
-	(*Place)(nil),                   // 16: grid.v1.Place
-	(*WildfireDetail)(nil),          // 17: grid.v1.WildfireDetail
-	(*EvacuationDetail)(nil),        // 18: grid.v1.EvacuationDetail
-	(*WeatherAlertDetail)(nil),      // 19: grid.v1.WeatherAlertDetail
-	(*FireWeatherDetail)(nil),       // 20: grid.v1.FireWeatherDetail
-	(*EarthquakeDetail)(nil),        // 21: grid.v1.EarthquakeDetail
-	(*RoadIncidentDetail)(nil),      // 22: grid.v1.RoadIncidentDetail
-	(*LaneClosureDetail)(nil),       // 23: grid.v1.LaneClosureDetail
-	(*MeshDetail)(nil),              // 24: grid.v1.MeshDetail
-	(*MeshTelemetry)(nil),           // 25: grid.v1.MeshTelemetry
-	(*MeshAdminTelemetry)(nil),      // 26: grid.v1.MeshAdminTelemetry
-	(*PowerDetail)(nil),             // 27: grid.v1.PowerDetail
-	(*BurnStatusDetail)(nil),        // 28: grid.v1.BurnStatusDetail
-	(*BurnLineReading)(nil),         // 29: grid.v1.BurnLineReading
-	(*BurnObservation)(nil),         // 30: grid.v1.BurnObservation
-	(*EventList)(nil),               // 31: grid.v1.EventList
-	(*EventRevision)(nil),           // 32: grid.v1.EventRevision
-	(*EventRevisionList)(nil),       // 33: grid.v1.EventRevisionList
-	(*PlaceList)(nil),               // 34: grid.v1.PlaceList
-	(*SourceList)(nil),              // 35: grid.v1.SourceList
-	(*GetMeshTelemetryRequest)(nil), // 36: grid.v1.GetMeshTelemetryRequest
-	(*MeshTelemetryArchive)(nil),    // 37: grid.v1.MeshTelemetryArchive
-	(*MeshTelemetryCoverage)(nil),   // 38: grid.v1.MeshTelemetryCoverage
-	(*MeshTelemetrySample)(nil),     // 39: grid.v1.MeshTelemetrySample
-	(*GetPlaceSummaryRequest)(nil),  // 40: grid.v1.GetPlaceSummaryRequest
-	(*PlaceSummary)(nil),            // 41: grid.v1.PlaceSummary
-	(*SummaryStats)(nil),            // 42: grid.v1.SummaryStats
-	(*SummaryTopEvent)(nil),         // 43: grid.v1.SummaryTopEvent
-	(*SummaryDomain)(nil),           // 44: grid.v1.SummaryDomain
-	(*SummaryDomainHeadline)(nil),   // 45: grid.v1.SummaryDomainHeadline
-	(*SummarySourceHealth)(nil),     // 46: grid.v1.SummarySourceHealth
-	(*ListEventsRequest)(nil),       // 47: grid.v1.ListEventsRequest
-	(*GetEventRequest)(nil),         // 48: grid.v1.GetEventRequest
-	(*GetEventHistoryRequest)(nil),  // 49: grid.v1.GetEventHistoryRequest
-	(*ListHistoryRequest)(nil),      // 50: grid.v1.ListHistoryRequest
-	(*ListPlacesRequest)(nil),       // 51: grid.v1.ListPlacesRequest
-	(*GetPlaceRequest)(nil),         // 52: grid.v1.GetPlaceRequest
-	(*ResolvePlaceRequest)(nil),     // 53: grid.v1.ResolvePlaceRequest
-	(*ResolveQuery)(nil),            // 54: grid.v1.ResolveQuery
-	(*ResolvePlaceResponse)(nil),    // 55: grid.v1.ResolvePlaceResponse
-	(*ListScannersRequest)(nil),     // 56: grid.v1.ListScannersRequest
-	(*Scanner)(nil),                 // 57: grid.v1.Scanner
-	(*ScannerList)(nil),             // 58: grid.v1.ScannerList
-	(*ListCamerasRequest)(nil),      // 59: grid.v1.ListCamerasRequest
-	(*Camera)(nil),                  // 60: grid.v1.Camera
-	(*CameraList)(nil),              // 61: grid.v1.CameraList
-	(*GetConditionsRequest)(nil),    // 62: grid.v1.GetConditionsRequest
-	(*WeatherConditions)(nil),       // 63: grid.v1.WeatherConditions
-	(*FireWeatherConditions)(nil),   // 64: grid.v1.FireWeatherConditions
-	(*ForecastPeriod)(nil),          // 65: grid.v1.ForecastPeriod
-	(*WeatherForecast)(nil),         // 66: grid.v1.WeatherForecast
-	(*Conditions)(nil),              // 67: grid.v1.Conditions
-	(*ListSourcesRequest)(nil),      // 68: grid.v1.ListSourcesRequest
-	nil,                             // 69: grid.v1.RoadIncidentDetail.MetadataEntry
-	nil,                             // 70: grid.v1.SummaryStats.SeverityCountsEntry
-	(*timestamppb.Timestamp)(nil),   // 71: google.protobuf.Timestamp
-	(*wrapperspb.DoubleValue)(nil),  // 72: google.protobuf.DoubleValue
-	(*wrapperspb.Int32Value)(nil),   // 73: google.protobuf.Int32Value
-	(*wrapperspb.UInt32Value)(nil),  // 74: google.protobuf.UInt32Value
-	(*wrapperspb.Int64Value)(nil),   // 75: google.protobuf.Int64Value
+	(SourceKind)(0),                 // 3: grid.v1.SourceKind
+	(SourceStatus)(0),               // 4: grid.v1.SourceStatus
+	(PlaceKind)(0),                  // 5: grid.v1.PlaceKind
+	(MeshReachability)(0),           // 6: grid.v1.MeshReachability
+	(BurnDay)(0),                    // 7: grid.v1.BurnDay
+	(CalfireBurnStatus)(0),          // 8: grid.v1.CalfireBurnStatus
+	(BurnPermission)(0),             // 9: grid.v1.BurnPermission
+	(*Event)(nil),                   // 10: grid.v1.Event
+	(*Geometry)(nil),                // 11: grid.v1.Geometry
+	(*BoundingBox)(nil),             // 12: grid.v1.BoundingBox
+	(*LatLng)(nil),                  // 13: grid.v1.LatLng
+	(*Provenance)(nil),              // 14: grid.v1.Provenance
+	(*Enhancement)(nil),             // 15: grid.v1.Enhancement
+	(*Source)(nil),                  // 16: grid.v1.Source
+	(*Place)(nil),                   // 17: grid.v1.Place
+	(*WildfireDetail)(nil),          // 18: grid.v1.WildfireDetail
+	(*EvacuationDetail)(nil),        // 19: grid.v1.EvacuationDetail
+	(*WeatherAlertDetail)(nil),      // 20: grid.v1.WeatherAlertDetail
+	(*FireWeatherDetail)(nil),       // 21: grid.v1.FireWeatherDetail
+	(*EarthquakeDetail)(nil),        // 22: grid.v1.EarthquakeDetail
+	(*RoadIncidentDetail)(nil),      // 23: grid.v1.RoadIncidentDetail
+	(*LaneClosureDetail)(nil),       // 24: grid.v1.LaneClosureDetail
+	(*MeshDetail)(nil),              // 25: grid.v1.MeshDetail
+	(*MeshTelemetry)(nil),           // 26: grid.v1.MeshTelemetry
+	(*MeshAdminTelemetry)(nil),      // 27: grid.v1.MeshAdminTelemetry
+	(*PowerDetail)(nil),             // 28: grid.v1.PowerDetail
+	(*BurnStatusDetail)(nil),        // 29: grid.v1.BurnStatusDetail
+	(*BurnLineReading)(nil),         // 30: grid.v1.BurnLineReading
+	(*BurnObservation)(nil),         // 31: grid.v1.BurnObservation
+	(*EventList)(nil),               // 32: grid.v1.EventList
+	(*EventRevision)(nil),           // 33: grid.v1.EventRevision
+	(*EventRevisionList)(nil),       // 34: grid.v1.EventRevisionList
+	(*PlaceList)(nil),               // 35: grid.v1.PlaceList
+	(*SourceList)(nil),              // 36: grid.v1.SourceList
+	(*GetMeshTelemetryRequest)(nil), // 37: grid.v1.GetMeshTelemetryRequest
+	(*MeshTelemetryArchive)(nil),    // 38: grid.v1.MeshTelemetryArchive
+	(*MeshTelemetryCoverage)(nil),   // 39: grid.v1.MeshTelemetryCoverage
+	(*MeshTelemetrySample)(nil),     // 40: grid.v1.MeshTelemetrySample
+	(*GetPlaceSummaryRequest)(nil),  // 41: grid.v1.GetPlaceSummaryRequest
+	(*PlaceSummary)(nil),            // 42: grid.v1.PlaceSummary
+	(*SummaryStats)(nil),            // 43: grid.v1.SummaryStats
+	(*SummaryTopEvent)(nil),         // 44: grid.v1.SummaryTopEvent
+	(*SummaryDomain)(nil),           // 45: grid.v1.SummaryDomain
+	(*SummaryDomainHeadline)(nil),   // 46: grid.v1.SummaryDomainHeadline
+	(*SummarySourceHealth)(nil),     // 47: grid.v1.SummarySourceHealth
+	(*ListEventsRequest)(nil),       // 48: grid.v1.ListEventsRequest
+	(*GetEventRequest)(nil),         // 49: grid.v1.GetEventRequest
+	(*GetEventHistoryRequest)(nil),  // 50: grid.v1.GetEventHistoryRequest
+	(*ListHistoryRequest)(nil),      // 51: grid.v1.ListHistoryRequest
+	(*ListPlacesRequest)(nil),       // 52: grid.v1.ListPlacesRequest
+	(*GetPlaceRequest)(nil),         // 53: grid.v1.GetPlaceRequest
+	(*ResolvePlaceRequest)(nil),     // 54: grid.v1.ResolvePlaceRequest
+	(*ResolveQuery)(nil),            // 55: grid.v1.ResolveQuery
+	(*ResolvePlaceResponse)(nil),    // 56: grid.v1.ResolvePlaceResponse
+	(*ListScannersRequest)(nil),     // 57: grid.v1.ListScannersRequest
+	(*Scanner)(nil),                 // 58: grid.v1.Scanner
+	(*ScannerList)(nil),             // 59: grid.v1.ScannerList
+	(*ListCamerasRequest)(nil),      // 60: grid.v1.ListCamerasRequest
+	(*Camera)(nil),                  // 61: grid.v1.Camera
+	(*CameraList)(nil),              // 62: grid.v1.CameraList
+	(*GetConditionsRequest)(nil),    // 63: grid.v1.GetConditionsRequest
+	(*WeatherConditions)(nil),       // 64: grid.v1.WeatherConditions
+	(*FireWeatherConditions)(nil),   // 65: grid.v1.FireWeatherConditions
+	(*ForecastPeriod)(nil),          // 66: grid.v1.ForecastPeriod
+	(*WeatherForecast)(nil),         // 67: grid.v1.WeatherForecast
+	(*Conditions)(nil),              // 68: grid.v1.Conditions
+	(*ListSourcesRequest)(nil),      // 69: grid.v1.ListSourcesRequest
+	nil,                             // 70: grid.v1.RoadIncidentDetail.MetadataEntry
+	nil,                             // 71: grid.v1.SummaryStats.SeverityCountsEntry
+	(*timestamppb.Timestamp)(nil),   // 72: google.protobuf.Timestamp
+	(*wrapperspb.DoubleValue)(nil),  // 73: google.protobuf.DoubleValue
+	(*wrapperspb.Int32Value)(nil),   // 74: google.protobuf.Int32Value
+	(*wrapperspb.UInt32Value)(nil),  // 75: google.protobuf.UInt32Value
+	(*wrapperspb.Int64Value)(nil),   // 76: google.protobuf.Int64Value
 }
 var file_grid_proto_depIdxs = []int32{
 	0,   // 0: grid.v1.Event.layer:type_name -> grid.v1.Layer
 	1,   // 1: grid.v1.Event.severity:type_name -> grid.v1.Severity
 	2,   // 2: grid.v1.Event.status:type_name -> grid.v1.EventStatus
-	10,  // 3: grid.v1.Event.geometry:type_name -> grid.v1.Geometry
-	13,  // 4: grid.v1.Event.provenance:type_name -> grid.v1.Provenance
-	71,  // 5: grid.v1.Event.effective:type_name -> google.protobuf.Timestamp
-	71,  // 6: grid.v1.Event.expires:type_name -> google.protobuf.Timestamp
-	71,  // 7: grid.v1.Event.observed_at:type_name -> google.protobuf.Timestamp
-	71,  // 8: grid.v1.Event.ingested_at:type_name -> google.protobuf.Timestamp
-	14,  // 9: grid.v1.Event.enhancement:type_name -> grid.v1.Enhancement
-	17,  // 10: grid.v1.Event.wildfire:type_name -> grid.v1.WildfireDetail
-	18,  // 11: grid.v1.Event.evacuation:type_name -> grid.v1.EvacuationDetail
-	19,  // 12: grid.v1.Event.weather_alert:type_name -> grid.v1.WeatherAlertDetail
-	20,  // 13: grid.v1.Event.fire_weather:type_name -> grid.v1.FireWeatherDetail
-	21,  // 14: grid.v1.Event.earthquake:type_name -> grid.v1.EarthquakeDetail
-	22,  // 15: grid.v1.Event.road_incident:type_name -> grid.v1.RoadIncidentDetail
-	24,  // 16: grid.v1.Event.mesh:type_name -> grid.v1.MeshDetail
-	27,  // 17: grid.v1.Event.power:type_name -> grid.v1.PowerDetail
-	28,  // 18: grid.v1.Event.burn_status:type_name -> grid.v1.BurnStatusDetail
-	11,  // 19: grid.v1.Geometry.bbox:type_name -> grid.v1.BoundingBox
-	12,  // 20: grid.v1.Geometry.centroid:type_name -> grid.v1.LatLng
-	71,  // 21: grid.v1.Provenance.fetched_at:type_name -> google.protobuf.Timestamp
-	71,  // 22: grid.v1.Enhancement.enhanced_at:type_name -> google.protobuf.Timestamp
-	71,  // 23: grid.v1.Source.last_success_at:type_name -> google.protobuf.Timestamp
-	71,  // 24: grid.v1.Source.last_attempt_at:type_name -> google.protobuf.Timestamp
-	3,   // 25: grid.v1.Source.status:type_name -> grid.v1.SourceStatus
-	4,   // 26: grid.v1.Place.kind:type_name -> grid.v1.PlaceKind
-	10,  // 27: grid.v1.Place.geometry:type_name -> grid.v1.Geometry
-	69,  // 28: grid.v1.RoadIncidentDetail.metadata:type_name -> grid.v1.RoadIncidentDetail.MetadataEntry
-	23,  // 29: grid.v1.RoadIncidentDetail.closure:type_name -> grid.v1.LaneClosureDetail
-	71,  // 30: grid.v1.LaneClosureDetail.planned_start:type_name -> google.protobuf.Timestamp
-	71,  // 31: grid.v1.LaneClosureDetail.planned_end:type_name -> google.protobuf.Timestamp
-	71,  // 32: grid.v1.LaneClosureDetail.set_up_at:type_name -> google.protobuf.Timestamp
-	12,  // 33: grid.v1.LaneClosureDetail.begin:type_name -> grid.v1.LatLng
-	12,  // 34: grid.v1.LaneClosureDetail.end:type_name -> grid.v1.LatLng
-	25,  // 35: grid.v1.MeshDetail.telemetry:type_name -> grid.v1.MeshTelemetry
-	5,   // 36: grid.v1.MeshDetail.reachability:type_name -> grid.v1.MeshReachability
-	72,  // 37: grid.v1.MeshTelemetry.snr:type_name -> google.protobuf.DoubleValue
-	73,  // 38: grid.v1.MeshTelemetry.rssi:type_name -> google.protobuf.Int32Value
-	74,  // 39: grid.v1.MeshTelemetry.hop_count:type_name -> google.protobuf.UInt32Value
-	71,  // 40: grid.v1.MeshTelemetry.last_advert_at:type_name -> google.protobuf.Timestamp
-	26,  // 41: grid.v1.MeshTelemetry.admin:type_name -> grid.v1.MeshAdminTelemetry
-	71,  // 42: grid.v1.MeshTelemetry.last_heard_at:type_name -> google.protobuf.Timestamp
-	71,  // 43: grid.v1.MeshTelemetry.last_relayed_at:type_name -> google.protobuf.Timestamp
-	71,  // 44: grid.v1.MeshAdminTelemetry.reported_at:type_name -> google.protobuf.Timestamp
-	71,  // 45: grid.v1.MeshAdminTelemetry.last_success_at:type_name -> google.protobuf.Timestamp
-	71,  // 46: grid.v1.MeshAdminTelemetry.last_attempt_at:type_name -> google.protobuf.Timestamp
-	72,  // 47: grid.v1.MeshAdminTelemetry.battery_volts:type_name -> google.protobuf.DoubleValue
-	72,  // 48: grid.v1.MeshAdminTelemetry.battery_percent:type_name -> google.protobuf.DoubleValue
-	72,  // 49: grid.v1.MeshAdminTelemetry.temperature_c:type_name -> google.protobuf.DoubleValue
-	72,  // 50: grid.v1.MeshAdminTelemetry.humidity:type_name -> google.protobuf.DoubleValue
-	72,  // 51: grid.v1.MeshAdminTelemetry.pressure:type_name -> google.protobuf.DoubleValue
-	73,  // 52: grid.v1.MeshAdminTelemetry.noise_floor_dbm:type_name -> google.protobuf.Int32Value
-	72,  // 53: grid.v1.MeshAdminTelemetry.last_snr_db:type_name -> google.protobuf.DoubleValue
-	73,  // 54: grid.v1.MeshAdminTelemetry.last_rssi_dbm:type_name -> google.protobuf.Int32Value
-	73,  // 55: grid.v1.MeshAdminTelemetry.tx_queue_len:type_name -> google.protobuf.Int32Value
-	71,  // 56: grid.v1.PowerDetail.estimated_restoration:type_name -> google.protobuf.Timestamp
-	71,  // 57: grid.v1.PowerDetail.de_energization_start:type_name -> google.protobuf.Timestamp
-	71,  // 58: grid.v1.PowerDetail.de_energization_end:type_name -> google.protobuf.Timestamp
-	71,  // 59: grid.v1.PowerDetail.all_clear:type_name -> google.protobuf.Timestamp
-	6,   // 60: grid.v1.BurnStatusDetail.burn_day:type_name -> grid.v1.BurnDay
-	7,   // 61: grid.v1.BurnStatusDetail.calfire_status:type_name -> grid.v1.CalfireBurnStatus
-	8,   // 62: grid.v1.BurnStatusDetail.permission:type_name -> grid.v1.BurnPermission
-	71,  // 63: grid.v1.BurnStatusDetail.calfire_effective:type_name -> google.protobuf.Timestamp
-	29,  // 64: grid.v1.BurnStatusDetail.burn_lines:type_name -> grid.v1.BurnLineReading
-	71,  // 65: grid.v1.BurnStatusDetail.calfire_observed_at:type_name -> google.protobuf.Timestamp
-	6,   // 66: grid.v1.BurnLineReading.burn_day:type_name -> grid.v1.BurnDay
-	30,  // 67: grid.v1.BurnLineReading.observation:type_name -> grid.v1.BurnObservation
-	71,  // 68: grid.v1.BurnObservation.observed_at:type_name -> google.protobuf.Timestamp
-	9,   // 69: grid.v1.EventList.events:type_name -> grid.v1.Event
-	71,  // 70: grid.v1.EventRevision.observed_at:type_name -> google.protobuf.Timestamp
-	71,  // 71: grid.v1.EventRevision.ingested_at:type_name -> google.protobuf.Timestamp
-	9,   // 72: grid.v1.EventRevision.event:type_name -> grid.v1.Event
-	32,  // 73: grid.v1.EventRevisionList.revisions:type_name -> grid.v1.EventRevision
-	16,  // 74: grid.v1.PlaceList.places:type_name -> grid.v1.Place
-	15,  // 75: grid.v1.SourceList.sources:type_name -> grid.v1.Source
-	71,  // 76: grid.v1.GetMeshTelemetryRequest.from:type_name -> google.protobuf.Timestamp
-	71,  // 77: grid.v1.GetMeshTelemetryRequest.to:type_name -> google.protobuf.Timestamp
-	71,  // 78: grid.v1.MeshTelemetryArchive.from:type_name -> google.protobuf.Timestamp
-	71,  // 79: grid.v1.MeshTelemetryArchive.to:type_name -> google.protobuf.Timestamp
-	38,  // 80: grid.v1.MeshTelemetryArchive.coverage:type_name -> grid.v1.MeshTelemetryCoverage
-	75,  // 81: grid.v1.MeshTelemetryArchive.cadence_seconds:type_name -> google.protobuf.Int64Value
-	71,  // 82: grid.v1.MeshTelemetryArchive.reboots:type_name -> google.protobuf.Timestamp
-	39,  // 83: grid.v1.MeshTelemetryArchive.samples:type_name -> grid.v1.MeshTelemetrySample
-	71,  // 84: grid.v1.MeshTelemetryCoverage.from:type_name -> google.protobuf.Timestamp
-	71,  // 85: grid.v1.MeshTelemetryCoverage.to:type_name -> google.protobuf.Timestamp
-	26,  // 86: grid.v1.MeshTelemetrySample.reading:type_name -> grid.v1.MeshAdminTelemetry
-	71,  // 87: grid.v1.MeshTelemetrySample.received_at:type_name -> google.protobuf.Timestamp
-	71,  // 88: grid.v1.PlaceSummary.generated_at:type_name -> google.protobuf.Timestamp
-	42,  // 89: grid.v1.PlaceSummary.summary:type_name -> grid.v1.SummaryStats
-	44,  // 90: grid.v1.PlaceSummary.domains:type_name -> grid.v1.SummaryDomain
-	46,  // 91: grid.v1.PlaceSummary.sources:type_name -> grid.v1.SummarySourceHealth
-	70,  // 92: grid.v1.SummaryStats.severity_counts:type_name -> grid.v1.SummaryStats.SeverityCountsEntry
-	73,  // 93: grid.v1.SummaryStats.active_evacuations:type_name -> google.protobuf.Int32Value
-	43,  // 94: grid.v1.SummaryStats.top_events:type_name -> grid.v1.SummaryTopEvent
-	45,  // 95: grid.v1.SummaryDomain.headlines:type_name -> grid.v1.SummaryDomainHeadline
-	71,  // 96: grid.v1.SummarySourceHealth.last_success_at:type_name -> google.protobuf.Timestamp
-	54,  // 97: grid.v1.ResolvePlaceResponse.query:type_name -> grid.v1.ResolveQuery
-	16,  // 98: grid.v1.ResolvePlaceResponse.places:type_name -> grid.v1.Place
-	57,  // 99: grid.v1.ScannerList.scanners:type_name -> grid.v1.Scanner
-	12,  // 100: grid.v1.Camera.location:type_name -> grid.v1.LatLng
-	60,  // 101: grid.v1.CameraList.cameras:type_name -> grid.v1.Camera
-	71,  // 102: grid.v1.CameraList.last_source_update:type_name -> google.protobuf.Timestamp
-	71,  // 103: grid.v1.ForecastPeriod.time:type_name -> google.protobuf.Timestamp
-	71,  // 104: grid.v1.WeatherForecast.issued_at:type_name -> google.protobuf.Timestamp
-	65,  // 105: grid.v1.WeatherForecast.periods:type_name -> grid.v1.ForecastPeriod
-	71,  // 106: grid.v1.WeatherForecast.peak_wind_gust_at:type_name -> google.protobuf.Timestamp
-	63,  // 107: grid.v1.Conditions.weather:type_name -> grid.v1.WeatherConditions
-	64,  // 108: grid.v1.Conditions.fire_weather:type_name -> grid.v1.FireWeatherConditions
-	71,  // 109: grid.v1.Conditions.last_updated:type_name -> google.protobuf.Timestamp
-	66,  // 110: grid.v1.Conditions.forecast:type_name -> grid.v1.WeatherForecast
-	47,  // 111: grid.v1.GridService.ListEvents:input_type -> grid.v1.ListEventsRequest
-	48,  // 112: grid.v1.GridService.GetEvent:input_type -> grid.v1.GetEventRequest
-	49,  // 113: grid.v1.GridService.GetEventHistory:input_type -> grid.v1.GetEventHistoryRequest
-	50,  // 114: grid.v1.GridService.ListHistory:input_type -> grid.v1.ListHistoryRequest
-	51,  // 115: grid.v1.GridService.ListPlaces:input_type -> grid.v1.ListPlacesRequest
-	53,  // 116: grid.v1.GridService.ResolvePlace:input_type -> grid.v1.ResolvePlaceRequest
-	52,  // 117: grid.v1.GridService.GetPlace:input_type -> grid.v1.GetPlaceRequest
-	40,  // 118: grid.v1.GridService.GetPlaceSummary:input_type -> grid.v1.GetPlaceSummaryRequest
-	56,  // 119: grid.v1.GridService.ListScanners:input_type -> grid.v1.ListScannersRequest
-	59,  // 120: grid.v1.GridService.ListCameras:input_type -> grid.v1.ListCamerasRequest
-	62,  // 121: grid.v1.GridService.GetConditions:input_type -> grid.v1.GetConditionsRequest
-	68,  // 122: grid.v1.GridService.ListSources:input_type -> grid.v1.ListSourcesRequest
-	36,  // 123: grid.v1.GridService.GetMeshTelemetry:input_type -> grid.v1.GetMeshTelemetryRequest
-	31,  // 124: grid.v1.GridService.ListEvents:output_type -> grid.v1.EventList
-	9,   // 125: grid.v1.GridService.GetEvent:output_type -> grid.v1.Event
-	33,  // 126: grid.v1.GridService.GetEventHistory:output_type -> grid.v1.EventRevisionList
-	33,  // 127: grid.v1.GridService.ListHistory:output_type -> grid.v1.EventRevisionList
-	34,  // 128: grid.v1.GridService.ListPlaces:output_type -> grid.v1.PlaceList
-	55,  // 129: grid.v1.GridService.ResolvePlace:output_type -> grid.v1.ResolvePlaceResponse
-	16,  // 130: grid.v1.GridService.GetPlace:output_type -> grid.v1.Place
-	41,  // 131: grid.v1.GridService.GetPlaceSummary:output_type -> grid.v1.PlaceSummary
-	58,  // 132: grid.v1.GridService.ListScanners:output_type -> grid.v1.ScannerList
-	61,  // 133: grid.v1.GridService.ListCameras:output_type -> grid.v1.CameraList
-	67,  // 134: grid.v1.GridService.GetConditions:output_type -> grid.v1.Conditions
-	35,  // 135: grid.v1.GridService.ListSources:output_type -> grid.v1.SourceList
-	37,  // 136: grid.v1.GridService.GetMeshTelemetry:output_type -> grid.v1.MeshTelemetryArchive
-	124, // [124:137] is the sub-list for method output_type
-	111, // [111:124] is the sub-list for method input_type
-	111, // [111:111] is the sub-list for extension type_name
-	111, // [111:111] is the sub-list for extension extendee
-	0,   // [0:111] is the sub-list for field type_name
+	11,  // 3: grid.v1.Event.geometry:type_name -> grid.v1.Geometry
+	14,  // 4: grid.v1.Event.provenance:type_name -> grid.v1.Provenance
+	72,  // 5: grid.v1.Event.effective:type_name -> google.protobuf.Timestamp
+	72,  // 6: grid.v1.Event.expires:type_name -> google.protobuf.Timestamp
+	72,  // 7: grid.v1.Event.observed_at:type_name -> google.protobuf.Timestamp
+	72,  // 8: grid.v1.Event.ingested_at:type_name -> google.protobuf.Timestamp
+	15,  // 9: grid.v1.Event.enhancement:type_name -> grid.v1.Enhancement
+	18,  // 10: grid.v1.Event.wildfire:type_name -> grid.v1.WildfireDetail
+	19,  // 11: grid.v1.Event.evacuation:type_name -> grid.v1.EvacuationDetail
+	20,  // 12: grid.v1.Event.weather_alert:type_name -> grid.v1.WeatherAlertDetail
+	21,  // 13: grid.v1.Event.fire_weather:type_name -> grid.v1.FireWeatherDetail
+	22,  // 14: grid.v1.Event.earthquake:type_name -> grid.v1.EarthquakeDetail
+	23,  // 15: grid.v1.Event.road_incident:type_name -> grid.v1.RoadIncidentDetail
+	25,  // 16: grid.v1.Event.mesh:type_name -> grid.v1.MeshDetail
+	28,  // 17: grid.v1.Event.power:type_name -> grid.v1.PowerDetail
+	29,  // 18: grid.v1.Event.burn_status:type_name -> grid.v1.BurnStatusDetail
+	12,  // 19: grid.v1.Geometry.bbox:type_name -> grid.v1.BoundingBox
+	13,  // 20: grid.v1.Geometry.centroid:type_name -> grid.v1.LatLng
+	72,  // 21: grid.v1.Provenance.fetched_at:type_name -> google.protobuf.Timestamp
+	72,  // 22: grid.v1.Enhancement.enhanced_at:type_name -> google.protobuf.Timestamp
+	3,   // 23: grid.v1.Source.kind:type_name -> grid.v1.SourceKind
+	72,  // 24: grid.v1.Source.last_success_at:type_name -> google.protobuf.Timestamp
+	72,  // 25: grid.v1.Source.last_attempt_at:type_name -> google.protobuf.Timestamp
+	4,   // 26: grid.v1.Source.status:type_name -> grid.v1.SourceStatus
+	5,   // 27: grid.v1.Place.kind:type_name -> grid.v1.PlaceKind
+	11,  // 28: grid.v1.Place.geometry:type_name -> grid.v1.Geometry
+	70,  // 29: grid.v1.RoadIncidentDetail.metadata:type_name -> grid.v1.RoadIncidentDetail.MetadataEntry
+	24,  // 30: grid.v1.RoadIncidentDetail.closure:type_name -> grid.v1.LaneClosureDetail
+	72,  // 31: grid.v1.LaneClosureDetail.planned_start:type_name -> google.protobuf.Timestamp
+	72,  // 32: grid.v1.LaneClosureDetail.planned_end:type_name -> google.protobuf.Timestamp
+	72,  // 33: grid.v1.LaneClosureDetail.set_up_at:type_name -> google.protobuf.Timestamp
+	13,  // 34: grid.v1.LaneClosureDetail.begin:type_name -> grid.v1.LatLng
+	13,  // 35: grid.v1.LaneClosureDetail.end:type_name -> grid.v1.LatLng
+	26,  // 36: grid.v1.MeshDetail.telemetry:type_name -> grid.v1.MeshTelemetry
+	6,   // 37: grid.v1.MeshDetail.reachability:type_name -> grid.v1.MeshReachability
+	73,  // 38: grid.v1.MeshTelemetry.snr:type_name -> google.protobuf.DoubleValue
+	74,  // 39: grid.v1.MeshTelemetry.rssi:type_name -> google.protobuf.Int32Value
+	75,  // 40: grid.v1.MeshTelemetry.hop_count:type_name -> google.protobuf.UInt32Value
+	72,  // 41: grid.v1.MeshTelemetry.last_advert_at:type_name -> google.protobuf.Timestamp
+	27,  // 42: grid.v1.MeshTelemetry.admin:type_name -> grid.v1.MeshAdminTelemetry
+	72,  // 43: grid.v1.MeshTelemetry.last_heard_at:type_name -> google.protobuf.Timestamp
+	72,  // 44: grid.v1.MeshTelemetry.last_relayed_at:type_name -> google.protobuf.Timestamp
+	72,  // 45: grid.v1.MeshAdminTelemetry.reported_at:type_name -> google.protobuf.Timestamp
+	72,  // 46: grid.v1.MeshAdminTelemetry.last_success_at:type_name -> google.protobuf.Timestamp
+	72,  // 47: grid.v1.MeshAdminTelemetry.last_attempt_at:type_name -> google.protobuf.Timestamp
+	73,  // 48: grid.v1.MeshAdminTelemetry.battery_volts:type_name -> google.protobuf.DoubleValue
+	73,  // 49: grid.v1.MeshAdminTelemetry.battery_percent:type_name -> google.protobuf.DoubleValue
+	73,  // 50: grid.v1.MeshAdminTelemetry.temperature_c:type_name -> google.protobuf.DoubleValue
+	73,  // 51: grid.v1.MeshAdminTelemetry.humidity:type_name -> google.protobuf.DoubleValue
+	73,  // 52: grid.v1.MeshAdminTelemetry.pressure:type_name -> google.protobuf.DoubleValue
+	74,  // 53: grid.v1.MeshAdminTelemetry.noise_floor_dbm:type_name -> google.protobuf.Int32Value
+	73,  // 54: grid.v1.MeshAdminTelemetry.last_snr_db:type_name -> google.protobuf.DoubleValue
+	74,  // 55: grid.v1.MeshAdminTelemetry.last_rssi_dbm:type_name -> google.protobuf.Int32Value
+	74,  // 56: grid.v1.MeshAdminTelemetry.tx_queue_len:type_name -> google.protobuf.Int32Value
+	72,  // 57: grid.v1.PowerDetail.estimated_restoration:type_name -> google.protobuf.Timestamp
+	72,  // 58: grid.v1.PowerDetail.de_energization_start:type_name -> google.protobuf.Timestamp
+	72,  // 59: grid.v1.PowerDetail.de_energization_end:type_name -> google.protobuf.Timestamp
+	72,  // 60: grid.v1.PowerDetail.all_clear:type_name -> google.protobuf.Timestamp
+	7,   // 61: grid.v1.BurnStatusDetail.burn_day:type_name -> grid.v1.BurnDay
+	8,   // 62: grid.v1.BurnStatusDetail.calfire_status:type_name -> grid.v1.CalfireBurnStatus
+	9,   // 63: grid.v1.BurnStatusDetail.permission:type_name -> grid.v1.BurnPermission
+	72,  // 64: grid.v1.BurnStatusDetail.calfire_effective:type_name -> google.protobuf.Timestamp
+	30,  // 65: grid.v1.BurnStatusDetail.burn_lines:type_name -> grid.v1.BurnLineReading
+	72,  // 66: grid.v1.BurnStatusDetail.calfire_observed_at:type_name -> google.protobuf.Timestamp
+	7,   // 67: grid.v1.BurnLineReading.burn_day:type_name -> grid.v1.BurnDay
+	31,  // 68: grid.v1.BurnLineReading.observation:type_name -> grid.v1.BurnObservation
+	72,  // 69: grid.v1.BurnObservation.observed_at:type_name -> google.protobuf.Timestamp
+	10,  // 70: grid.v1.EventList.events:type_name -> grid.v1.Event
+	72,  // 71: grid.v1.EventRevision.observed_at:type_name -> google.protobuf.Timestamp
+	72,  // 72: grid.v1.EventRevision.ingested_at:type_name -> google.protobuf.Timestamp
+	10,  // 73: grid.v1.EventRevision.event:type_name -> grid.v1.Event
+	33,  // 74: grid.v1.EventRevisionList.revisions:type_name -> grid.v1.EventRevision
+	17,  // 75: grid.v1.PlaceList.places:type_name -> grid.v1.Place
+	16,  // 76: grid.v1.SourceList.sources:type_name -> grid.v1.Source
+	72,  // 77: grid.v1.GetMeshTelemetryRequest.from:type_name -> google.protobuf.Timestamp
+	72,  // 78: grid.v1.GetMeshTelemetryRequest.to:type_name -> google.protobuf.Timestamp
+	72,  // 79: grid.v1.MeshTelemetryArchive.from:type_name -> google.protobuf.Timestamp
+	72,  // 80: grid.v1.MeshTelemetryArchive.to:type_name -> google.protobuf.Timestamp
+	39,  // 81: grid.v1.MeshTelemetryArchive.coverage:type_name -> grid.v1.MeshTelemetryCoverage
+	76,  // 82: grid.v1.MeshTelemetryArchive.cadence_seconds:type_name -> google.protobuf.Int64Value
+	72,  // 83: grid.v1.MeshTelemetryArchive.reboots:type_name -> google.protobuf.Timestamp
+	40,  // 84: grid.v1.MeshTelemetryArchive.samples:type_name -> grid.v1.MeshTelemetrySample
+	72,  // 85: grid.v1.MeshTelemetryCoverage.from:type_name -> google.protobuf.Timestamp
+	72,  // 86: grid.v1.MeshTelemetryCoverage.to:type_name -> google.protobuf.Timestamp
+	27,  // 87: grid.v1.MeshTelemetrySample.reading:type_name -> grid.v1.MeshAdminTelemetry
+	72,  // 88: grid.v1.MeshTelemetrySample.received_at:type_name -> google.protobuf.Timestamp
+	72,  // 89: grid.v1.PlaceSummary.generated_at:type_name -> google.protobuf.Timestamp
+	43,  // 90: grid.v1.PlaceSummary.summary:type_name -> grid.v1.SummaryStats
+	45,  // 91: grid.v1.PlaceSummary.domains:type_name -> grid.v1.SummaryDomain
+	47,  // 92: grid.v1.PlaceSummary.sources:type_name -> grid.v1.SummarySourceHealth
+	71,  // 93: grid.v1.SummaryStats.severity_counts:type_name -> grid.v1.SummaryStats.SeverityCountsEntry
+	74,  // 94: grid.v1.SummaryStats.active_evacuations:type_name -> google.protobuf.Int32Value
+	44,  // 95: grid.v1.SummaryStats.top_events:type_name -> grid.v1.SummaryTopEvent
+	46,  // 96: grid.v1.SummaryDomain.headlines:type_name -> grid.v1.SummaryDomainHeadline
+	72,  // 97: grid.v1.SummarySourceHealth.last_success_at:type_name -> google.protobuf.Timestamp
+	55,  // 98: grid.v1.ResolvePlaceResponse.query:type_name -> grid.v1.ResolveQuery
+	17,  // 99: grid.v1.ResolvePlaceResponse.places:type_name -> grid.v1.Place
+	58,  // 100: grid.v1.ScannerList.scanners:type_name -> grid.v1.Scanner
+	13,  // 101: grid.v1.Camera.location:type_name -> grid.v1.LatLng
+	61,  // 102: grid.v1.CameraList.cameras:type_name -> grid.v1.Camera
+	72,  // 103: grid.v1.CameraList.last_source_update:type_name -> google.protobuf.Timestamp
+	72,  // 104: grid.v1.ForecastPeriod.time:type_name -> google.protobuf.Timestamp
+	72,  // 105: grid.v1.WeatherForecast.issued_at:type_name -> google.protobuf.Timestamp
+	66,  // 106: grid.v1.WeatherForecast.periods:type_name -> grid.v1.ForecastPeriod
+	72,  // 107: grid.v1.WeatherForecast.peak_wind_gust_at:type_name -> google.protobuf.Timestamp
+	64,  // 108: grid.v1.Conditions.weather:type_name -> grid.v1.WeatherConditions
+	65,  // 109: grid.v1.Conditions.fire_weather:type_name -> grid.v1.FireWeatherConditions
+	72,  // 110: grid.v1.Conditions.last_updated:type_name -> google.protobuf.Timestamp
+	67,  // 111: grid.v1.Conditions.forecast:type_name -> grid.v1.WeatherForecast
+	48,  // 112: grid.v1.GridService.ListEvents:input_type -> grid.v1.ListEventsRequest
+	49,  // 113: grid.v1.GridService.GetEvent:input_type -> grid.v1.GetEventRequest
+	50,  // 114: grid.v1.GridService.GetEventHistory:input_type -> grid.v1.GetEventHistoryRequest
+	51,  // 115: grid.v1.GridService.ListHistory:input_type -> grid.v1.ListHistoryRequest
+	52,  // 116: grid.v1.GridService.ListPlaces:input_type -> grid.v1.ListPlacesRequest
+	54,  // 117: grid.v1.GridService.ResolvePlace:input_type -> grid.v1.ResolvePlaceRequest
+	53,  // 118: grid.v1.GridService.GetPlace:input_type -> grid.v1.GetPlaceRequest
+	41,  // 119: grid.v1.GridService.GetPlaceSummary:input_type -> grid.v1.GetPlaceSummaryRequest
+	57,  // 120: grid.v1.GridService.ListScanners:input_type -> grid.v1.ListScannersRequest
+	60,  // 121: grid.v1.GridService.ListCameras:input_type -> grid.v1.ListCamerasRequest
+	63,  // 122: grid.v1.GridService.GetConditions:input_type -> grid.v1.GetConditionsRequest
+	69,  // 123: grid.v1.GridService.ListSources:input_type -> grid.v1.ListSourcesRequest
+	37,  // 124: grid.v1.GridService.GetMeshTelemetry:input_type -> grid.v1.GetMeshTelemetryRequest
+	32,  // 125: grid.v1.GridService.ListEvents:output_type -> grid.v1.EventList
+	10,  // 126: grid.v1.GridService.GetEvent:output_type -> grid.v1.Event
+	34,  // 127: grid.v1.GridService.GetEventHistory:output_type -> grid.v1.EventRevisionList
+	34,  // 128: grid.v1.GridService.ListHistory:output_type -> grid.v1.EventRevisionList
+	35,  // 129: grid.v1.GridService.ListPlaces:output_type -> grid.v1.PlaceList
+	56,  // 130: grid.v1.GridService.ResolvePlace:output_type -> grid.v1.ResolvePlaceResponse
+	17,  // 131: grid.v1.GridService.GetPlace:output_type -> grid.v1.Place
+	42,  // 132: grid.v1.GridService.GetPlaceSummary:output_type -> grid.v1.PlaceSummary
+	59,  // 133: grid.v1.GridService.ListScanners:output_type -> grid.v1.ScannerList
+	62,  // 134: grid.v1.GridService.ListCameras:output_type -> grid.v1.CameraList
+	68,  // 135: grid.v1.GridService.GetConditions:output_type -> grid.v1.Conditions
+	36,  // 136: grid.v1.GridService.ListSources:output_type -> grid.v1.SourceList
+	38,  // 137: grid.v1.GridService.GetMeshTelemetry:output_type -> grid.v1.MeshTelemetryArchive
+	125, // [125:138] is the sub-list for method output_type
+	112, // [112:125] is the sub-list for method input_type
+	112, // [112:112] is the sub-list for extension type_name
+	112, // [112:112] is the sub-list for extension extendee
+	0,   // [0:112] is the sub-list for field type_name
 }
 
 func init() { file_grid_proto_init() }
@@ -7302,7 +7431,7 @@ func file_grid_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_grid_proto_rawDesc), len(file_grid_proto_rawDesc)),
-			NumEnums:      9,
+			NumEnums:      10,
 			NumMessages:   62,
 			NumExtensions: 0,
 			NumServices:   1,

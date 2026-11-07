@@ -569,13 +569,19 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;
     behind <a href="/api/v1/sources" class="mono">/api/v1/sources</a> (live board:
     <a href="/sources">Sources</a>). Each
     <code class="inline">Source</code> carries
-    <code class="inline">id, name, attribution, homepageUrl,
+    <code class="inline">id, name, attribution, homepageUrl, kind,
     pollIntervalSeconds, staleAfterSeconds, expireAfterSeconds,
     lastSuccessAt, lastAttemptAt, lastError, status</code>.
+    <code class="inline">kind</code> is <code class="inline">FEED</code> (an
+    upstream the Grid polls) or <code class="inline">REPORTER</code> (an
+    operator-run monitor that pushes; health only, no events).
     A source is <code class="inline">STALE</code> once its last success is
     older than <code class="inline">staleAfterSeconds</code> (default 3×
     its poll interval) and <code class="inline">UNAVAILABLE</code> on
-    persistent failure.
+    persistent failure. Judge a row by <code class="inline">status</code>; if
+    <code class="inline">lastAttemptAt</code> is older than
+    <code class="inline">staleAfterSeconds</code>, the Grid itself has stopped
+    checking it.
   </p>
   <div class="table-wrap"><table class="data-table">
     <thead><tr><th>id</th><th>Provides</th><th>Event ids</th><th>Poll</th><th>Disappearance policy</th></tr></thead>

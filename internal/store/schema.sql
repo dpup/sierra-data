@@ -68,6 +68,7 @@ CREATE TABLE sources (
   disappearance         TEXT NOT NULL DEFAULT 'resolve'  -- 'resolve' | 'expire'
 );
 -- v5 (store.go migrationV5) adds: homepage_url TEXT NOT NULL DEFAULT ''
+-- v11 (store.go migrationV11) adds: kind INTEGER NOT NULL DEFAULT 1  -- gridv1.SourceKind
 
 CREATE TABLE subscriptions (         -- phase 2, anticipated
   id           TEXT PRIMARY KEY,

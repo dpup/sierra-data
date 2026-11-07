@@ -219,3 +219,35 @@ func TestRoadSegments_FollowsPolyline(t *testing.T) {
 		}
 	})
 }
+
+// TestRoadSegments_CorridorKeepsItsOwnSegment: a corridor place's synthesized
+// area is its road path's bbox, which (5-decimal coordinates) can sit a few
+// metres inside the configured endpoints. The corridor's own segment must still
+// be in its layer, or a CLOSED highway reads as an open roads domain on the
+// corridor built for it. Production: hwy4-arnold-bearvalley's bbox minLat
+// 38.26502 vs origin 38.265006.
+func TestRoadSegments_CorridorKeepsItsOwnSegment(t *testing.T) {
+	cfg := &config.Config{Roads: config.RoadsConfig{MonitoredRoads: []config.MonitoredRoad{{
+		ID: "hwy4-arnold-bearvalley", Name: "Hwy 4", Section: "Arnold to Bear Valley",
+		Origin:      config.Coordinates{Latitude: 38.265006, Longitude: -120.333654},
+		Destination: config.Coordinates{Latitude: 38.461045, Longitude: -120.042368},
+	}}}}
+	s := &Service{cfg: cfg, roads: fakeRoads{roads: []*api.Road{{Id: "hwy4-arnold-bearvalley"}}}}
+	bounds := config.GeoBounds{MinLatitude: 38.26502, MaxLatitude: 38.46104, MinLongitude: -120.33367, MaxLongitude: -120.04237}
+
+	feats, err := s.roadSegments(context.Background(), config.HazardArea{ID: "hwy4-arnold-bearvalley", Bounds: bounds})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(feats) != 1 {
+		t.Fatalf("corridor's own segment: got %d features, want 1", len(feats))
+	}
+
+	feats, err = s.roadSegments(context.Background(), config.HazardArea{ID: "elsewhere", Bounds: bounds})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(feats) != 0 {
+		t.Fatalf("another place with the same box: got %d features, want 0 (endpoints are outside it)", len(feats))
+	}
+}

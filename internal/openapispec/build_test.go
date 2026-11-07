@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
 )
 
 // fixtureSwagger is a minimal protoc-gen-openapiv2-shaped document: placeholder
@@ -40,7 +42,7 @@ const fixtureSwagger = `{
 
 func build(t *testing.T, overlay string) (map[string]any, Report, error) {
 	t.Helper()
-	out, rep, err := Build([]byte(fixtureSwagger), []byte(overlay))
+	out, rep, err := Build([]byte(fixtureSwagger), []byte(overlay), nil)
 	if err != nil {
 		return nil, rep, err
 	}
@@ -150,7 +152,7 @@ func TestBuild_DefaultsDoNotReplaceRealProtoValues(t *testing.T) {
 	annotated := strings.Replace(fixtureSwagger,
 		`"info": {"title": "grid.proto", "version": "version not set"}`,
 		`"info": {"title": "Grid", "version": "2"}`, 1)
-	out, rep, err := Build([]byte(annotated), []byte("defaults:\n  info: {title: The Grid API, version: v1}\n"))
+	out, rep, err := Build([]byte(annotated), []byte("defaults:\n  info: {title: The Grid API, version: v1}\n"), nil)
 	require.NoError(t, err)
 	assert.Contains(t, string(out), `"title": "Grid"`)
 	assert.ElementsMatch(t, []string{"/info/title", "/info/version"}, rep.Shadowed)
@@ -216,7 +218,7 @@ func TestBuild_ServerURLHasNoTrailingSlash(t *testing.T) {
 	// The generator emits host + schemes when grid.proto sets them.
 	swagger := strings.Replace(fixtureSwagger, `"swagger": "2.0",`, `"swagger": "2.0", "host": "example.org", "schemes": ["https"],`, 1)
 	require.NotEqual(t, fixtureSwagger, swagger, "fixture shape changed")
-	out, _, err := Build([]byte(swagger), nil)
+	out, _, err := Build([]byte(swagger), nil, nil)
 	require.NoError(t, err)
 	var doc map[string]any
 	require.NoError(t, json.Unmarshal(out, &doc))
@@ -286,10 +288,10 @@ func TestBuild_UnknownOverlaySectionFails(t *testing.T) {
 
 func TestBuild_IsDeterministic(t *testing.T) {
 	overlay := "spec:\n  components:\n    schemas:\n      A: {type: object}\n      B: {type: object}\n"
-	first, _, err := Build([]byte(fixtureSwagger), []byte(overlay))
+	first, _, err := Build([]byte(fixtureSwagger), []byte(overlay), nil)
 	require.NoError(t, err)
 	for range 5 {
-		again, _, err := Build([]byte(fixtureSwagger), []byte(overlay))
+		again, _, err := Build([]byte(fixtureSwagger), []byte(overlay), nil)
 		require.NoError(t, err)
 		require.True(t, bytes.Equal(first, again))
 	}
@@ -307,7 +309,7 @@ func TestCommittedSpecIsCurrent(t *testing.T) {
 	committed, err := os.ReadFile(dir + "openapi.json")
 	require.NoError(t, err)
 
-	want, _, err := Build(swagger, overlay)
+	want, _, err := Build(swagger, overlay, gridv1.File_grid_proto)
 	require.NoError(t, err)
 	if !bytes.Equal(want, committed) {
 		t.Fatal("api/grid/v1/openapi.json is stale: run `make openapi` (or `make proto`) and commit the result")

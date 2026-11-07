@@ -91,6 +91,59 @@ gains `kind` (`EVENT` or `CONDITION`) and `layer` (e.g. `ROAD_INCIDENT`,
 map feature, not an event: `GET /api/v1/events/{id}` returns 404 for it. Find
 it by `properties.id` in that layer's `.geojson`. Additive.
 
+### Sources say whether they are a feed or a reporter
+
+Each `GET /api/v1/sources` row gains `kind`: `FEED` (an upstream the Grid
+polls; events name it in `provenance.sourceId`) or `REPORTER` (an operator-run
+monitor that pushes to `/api/v1/ingest/{stream}`: `alanpi`, `relay`,
+`burn-line`; health only). Judge a row by `status`; as a check on the Grid
+itself, treat it as stale when `lastAttemptAt` is older than
+`staleAfterSeconds`. The old advice to compare `lastAttemptAt` with
+`pollIntervalSeconds` misfired for reporters. `burn-line`'s
+`pollIntervalSeconds` now states the burn poller's hourly check (it said 60).
+Additive.
+
+### The summary links the evacuation viewer
+
+`summary.evacuationSourceUrl` in `GET /api/v1/places/{place}/summary` is the
+authoritative evacuation viewer (`https://protect.genasys.com/`), the same URL
+as the `evacuation` map layer's `metadata.sourceUrl`. It is set whatever
+`evacuationStatus` says, so a client can link it next to "unknown, check
+Genasys". Additive.
+
+### A corridor's summary and map include its own road segment
+
+`GET /api/v1/places/{corridor}/summary` and its `road_segment.geojson` left out
+the corridor's own segment, because the corridor's bounding box sits a few
+metres inside the segment's endpoints. `hwy4-arnold-bearvalley` read `roads: OK,
+INFO` while that stretch of Hwy 4 was CLOSED. They now always include it.
+
+### The spec marks nullable fields and has valid responses
+
+- Every field that can be JSON `null` is `nullable: true`: timestamps,
+  wrapper-typed numbers (`summary.activeEvacuations`, the mesh gauges) and
+  message-typed fields such as `geometry` and `enhancement`. A `$ref` field
+  becomes `allOf: [{$ref}]` with `type` and `nullable` beside it. Scalars,
+  enums, arrays and maps are never null, and an event's unused per-layer detail
+  blocks are absent rather than null.
+- Enum- and message-typed fields keep their descriptions, which the 2.0 to 3.0
+  conversion used to drop (`Event.status`, `Event.layer`, ...).
+- Every 304/4xx/5xx response object is valid: a complete inline object (the
+  RPC's own description, the `rpcStatus` body, real error examples, the 304
+  `ETag`/`Cache-Control` headers) or a pure `$ref`, never both. The unused
+  shared `NotFound` and `InvalidArgument` responses are gone.
+- Docs corrections: `canonicalUrl` and `provenance.sourceUrl` can be empty
+  (CHP incidents, Caltrans lane closures, FIRIS perimeters and NWS alerts have
+  neither); fall back to the source's `homepageUrl`. The quickstart recommends
+  AREA, COUNTY or CORRIDOR places for dashboards, not towns. `mode` documents
+  every input that can raise it: road conditions never do, so show domain
+  severity beside it. Map-feature `source.id` says which ids (`google`) have no
+  registry row and to judge those layers by `metadata.sourceStatus`. During a
+  handoff the RPCs answer `503` as JSON `UNAVAILABLE`, not plain text.
+
+No lane-closure `canonicalUrl` was added: Caltrans publishes no per-closure
+page, and a map pin is not an authoritative link.
+
 ### Smaller fixes
 
 - `GET /api/v1/mesh/telemetry` accepts the event id form `node=meshcore:<key>`,

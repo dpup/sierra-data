@@ -62,47 +62,115 @@ defaults:
           details:
             description: Structured error details. Usually empty.
 
+  # grid.proto describes each RPC's error statuses (description only); the
+  # merge completes them (error envelope, no body on a 304) and these defaults
+  # add what proto cannot: the 304 headers and real error bodies. They annotate
+  # the generated response objects in place. Never $ref a shared response here:
+  # a $ref beside the generated description is an invalid Response Object, and
+  # the build rejects it.
   paths:
     /api/v1/events:
       get:
         responses:
-          "304": {$ref: "#/components/responses/NotModified"}
-          "400": {$ref: "#/components/responses/InvalidArgument"}
-          "404": {$ref: "#/components/responses/NotFound"}
+          "304": &notModified
+            headers:
+              ETag: {$ref: "#/components/headers/ETag"}
+              Cache-Control: {$ref: "#/components/headers/CacheControl"}
+          "400":
+            content:
+              application/json:
+                examples:
+                  unknownLayer:
+                    summary: GET /api/v1/events?layer=bogus
+                    value: {"code": 3, "codeName": "INVALID_ARGUMENT", "message": "unknown layer: \"bogus\"", "details": []}
+                  invalidPageToken:
+                    summary: GET /api/v1/events?pageToken=garbage
+                    value: {"code": 3, "codeName": "INVALID_ARGUMENT", "message": "invalid page_token", "details": []}
+          "404": &unknownPlace
+            content:
+              application/json:
+                examples:
+                  unknownPlace:
+                    summary: "?place=nope"
+                    value: {"code": 5, "codeName": "NOT_FOUND", "message": "unknown place: \"nope\"", "details": []}
     /api/v1/events/{id}:
       get:
         responses:
-          "304": {$ref: "#/components/responses/NotModified"}
-          "404": {$ref: "#/components/responses/NotFound"}
+          "304": *notModified
+          "404": &unknownEvent
+            content:
+              application/json:
+                examples:
+                  unknownEvent:
+                    summary: GET /api/v1/events/nope:1
+                    value: {"code": 5, "codeName": "NOT_FOUND", "message": "unknown event: \"nope:1\"", "details": []}
     /api/v1/events/{id}/history:
       get:
         responses:
-          "304": {$ref: "#/components/responses/NotModified"}
-          "404": {$ref: "#/components/responses/NotFound"}
+          "304": *notModified
+          "404": *unknownEvent
     /api/v1/history:
       get:
         responses:
-          "304": {$ref: "#/components/responses/NotModified"}
-          "400": {$ref: "#/components/responses/InvalidArgument"}
-          "404": {$ref: "#/components/responses/NotFound"}
+          "304": *notModified
+          "400":
+            content:
+              application/json:
+                examples:
+                  badTimestamp:
+                    summary: GET /api/v1/history?from=yesterday
+                    value: {"code": 3, "codeName": "INVALID_ARGUMENT", "message": "invalid from: \"yesterday\" is not RFC 3339", "details": []}
+          "404": *unknownPlace
     /api/v1/places:
       get:
         responses:
-          "304": {$ref: "#/components/responses/NotModified"}
+          "304": *notModified
+          "400":
+            content:
+              application/json:
+                examples:
+                  unknownKind:
+                    summary: GET /api/v1/places?kind=bogus
+                    value: {"code": 3, "codeName": "INVALID_ARGUMENT", "message": "unknown kind: \"bogus\"", "details": []}
     /api/v1/places/{place}:
       get:
         responses:
-          "304": {$ref: "#/components/responses/NotModified"}
-          "404": {$ref: "#/components/responses/NotFound"}
+          "304": *notModified
+          "404": *unknownPlace
     /api/v1/places/{place}/summary:
       get:
         responses:
-          "404": {$ref: "#/components/responses/NotFound"}
+          "404": *unknownPlace
+    /api/v1/places:resolve:
+      get:
+        responses:
+          "400":
+            content:
+              application/json:
+                examples:
+                  noQuery:
+                    summary: GET /api/v1/places:resolve
+                    value: {"code": 3, "codeName": "INVALID_ARGUMENT", "message": "lat+lng or address query parameters required", "details": []}
+          "404":
+            content:
+              application/json:
+                examples:
+                  noMatch:
+                    summary: GET /api/v1/places:resolve?address=zzzzqqq%20nowhere
+                    value: {"code": 5, "codeName": "NOT_FOUND", "message": "no address match for \"zzzzqqq nowhere\" — try adding city/state/zip, or resolve by lat/lng", "details": []}
     /api/v1/cameras:
       get:
         responses:
-          "304": {$ref: "#/components/responses/NotModified"}
-          "404": {$ref: "#/components/responses/NotFound"}
+          "304": *notModified
+          "404": *unknownPlace
+    /api/v1/conditions:
+      get:
+        responses:
+          "404": *unknownPlace
+    /api/v1/scanners:
+      get:
+        responses:
+          "404": *unknownPlace
 
 spec:
   tags:
@@ -193,24 +261,6 @@ spec:
         headers:
           ETag: {$ref: "#/components/headers/ETag"}
           Cache-Control: {$ref: "#/components/headers/CacheControl"}
-      InvalidArgument:
-        description: A malformed parameter (bad `pageToken`, unknown enum, bad timestamp).
-        content:
-          application/json:
-            schema: {$ref: "#/components/schemas/rpcStatus"}
-            examples:
-              invalidPageToken:
-                summary: GET /api/v1/events?page_token=garbage
-                value: {"code": 3, "codeName": "INVALID_ARGUMENT", "message": "invalid page_token", "details": []}
-      NotFound:
-        description: The named place, event or other resource does not exist.
-        content:
-          application/json:
-            schema: {$ref: "#/components/schemas/rpcStatus"}
-            examples:
-              unknownPlace:
-                summary: GET /api/v1/places/nope
-                value: {"code": 5, "codeName": "NOT_FOUND", "message": "unknown place: \"nope\"", "details": []}
       HandoffUnavailable:
         description: |
           The server is handing over to a new instance during a deploy. Retry after
@@ -454,7 +504,28 @@ spec:
         description: The upstream feed this feature came from. Render `attribution` with the feature.
         required: [id, name]
         properties:
-          id: {type: string, description: "Source registry id (see GET /api/v1/sources): chp, caltrans, google, nws, usgs, calfire, firis, caloes, pge, psps, meshcore.", example: caltrans}
+          id:
+            type: string
+            example: caltrans
+            description: |
+              The upstream's id. Values today: `calfire`, `firis`, `caloes`,
+              `nws`, `usgs`, `chp`, `caltrans`, `google`, `pge`, `psps`,
+              `meshcore`. On the event-backed layers (`wildfire`,
+              `evacuation`, `weather_alert`, `earthquake`, `road_incident`,
+              `power`, `mesh_node`) it is the event's `provenance.sourceId` and
+              has a row in `GET /api/v1/sources` whose `status` is that feed's
+              health.
+
+              The condition layers (`road_segment`, `chain_control`,
+              `message_sign`, `fire_weather`), and `camera` and `mesh_link`, are
+              fetched or computed on request, outside the ingest scheduler that
+              writes the registry. `google` (on `road_segment`) has no registry
+              row at all. `caltrans` and `nws` do have rows, but those track the
+              scheduled lane-closure and alert polls, not the live fetch behind
+              these layers. For these layers judge health by the layer's
+              `metadata.sourceStatus` (the summary's `roads` and `fire` domains
+              fold the same statuses in), never by a missing or unrelated
+              registry row.
           name: {type: string, example: CHP / Caltrans}
           url: {type: string, format: uri, description: "Deep link to the upstream record or viewer, when there is one."}
           attribution: {type: string, example: quickmap.dot.ca.gov}
