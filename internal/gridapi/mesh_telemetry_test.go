@@ -2,11 +2,14 @@ package gridapi
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
 	"github.com/dpup/sierra-data/internal/store"
@@ -94,8 +97,8 @@ func TestGetMeshTelemetryWindowAndEmptyCoverage(t *testing.T) {
 	assert.Equal(t, int32(1), out.GetCoverage().GetSamples())
 	assert.Nil(t, out.GetCadenceSeconds(), "one sample has no cadence to report")
 
-	// A node we hold nothing for is empty coverage, not an error.
-	out, err = g.GetMeshTelemetry(ctx, &gridv1.GetMeshTelemetryRequest{Node: "nobody"})
+	// A well-formed node we hold nothing for is empty coverage, not an error.
+	out, err = g.GetMeshTelemetry(ctx, &gridv1.GetMeshTelemetryRequest{Node: "0123456789abcdef"})
 	require.NoError(t, err)
 	assert.Empty(t, out.GetSamples())
 	assert.Equal(t, int32(0), out.GetCoverage().GetSamples())
@@ -106,4 +109,48 @@ func TestGetMeshTelemetryRejectsMissingNode(t *testing.T) {
 	g := NewGridServer(newTestService(t))
 	_, err := g.GetMeshTelemetry(context.Background(), &gridv1.GetMeshTelemetryRequest{})
 	require.Error(t, err, "a cross-node dump is a different product; node is required")
+}
+
+// The id a client has in hand is the event id from /api/v1/events
+// ("meshcore:<key>"), so that form must find the same samples as the bare key.
+// It once matched nothing and answered an empty 200, which a chart renders as a
+// node with no history.
+func TestGetMeshTelemetryAcceptsEventIDForm(t *testing.T) {
+	s := newTestService(t)
+	g := NewGridServer(s)
+	ctx := context.Background()
+	full := "de0715314cfa9b5e00112233445566778899aabbccddeeff0011223344556677"
+	prefix := "6781a18b2b47cb4e" // a monitor-only node, archived under its prefix
+	require.NoError(t, s.Store.InsertMeshTelemetry(ctx, []store.MeshTelemetrySample{
+		telemetryAt(full, base.Add(-time.Hour), 97, 100),
+		telemetryAt(prefix, base.Add(-time.Hour), 80, 100),
+	}))
+
+	for _, tc := range []struct{ in, key string }{
+		{full, full},
+		{"meshcore:" + full, full},
+		{"  MESHCORE:" + strings.ToUpper(full) + " ", full},
+		{"meshcore:" + prefix, prefix},
+	} {
+		out, err := g.GetMeshTelemetry(ctx, &gridv1.GetMeshTelemetryRequest{Node: tc.in})
+		require.NoError(t, err, tc.in)
+		assert.Len(t, out.GetSamples(), 1, tc.in)
+		assert.Equal(t, tc.key, out.GetNode(), "the response names the archive key")
+	}
+}
+
+func TestGetMeshTelemetryRejectsMalformedNode(t *testing.T) {
+	g := NewGridServer(newTestService(t))
+	for _, node := range []string{
+		"zz",                     // not hex
+		"de07",                   // too short to name a node
+		"de0715314cfa9b5",        // odd length
+		strings.Repeat("ab", 33), // longer than a public key
+		"meshcore:",              // a namespace with no key
+		"chp:260625SA1034",       // some other layer's event id
+	} {
+		_, err := g.GetMeshTelemetry(context.Background(), &gridv1.GetMeshTelemetryRequest{Node: node})
+		require.Error(t, err, node)
+		assert.Equal(t, codes.InvalidArgument, status.Code(err), node)
+	}
 }

@@ -128,6 +128,20 @@ so a stable long-lived event that drops out of a single poll is not expired
 instantly. Rows predating the `last_seen_at` migration (value 0) fall back to
 `observed_at`, then `ingested_at`, so the grace still terminates them.
 
+## Resolve (`PlacesContaining`) and towns
+
+`PlacesContaining` (behind `GET /api/v1/places:resolve`) uses the same
+polygon/corridor tests as event attachment, plus one rule of its own: a
+**TOWN** is seeded as a point (its weather location), which no
+point-in-polygon test can match, so a town contains a location within
+`townRadius` metres of it (`WithTownRadius`, from
+`grid.places.townRadiusMeters`, default `DefaultTownRadiusMeters` 3 km). Towns
+within range are returned nearest first. The radius is **resolve only**:
+`matchPlaces` does not use it, so events still attach to a town only through
+the wildfire proximity rule or a preset `place_ids` (burn status). Putting it
+into attachment would change every point event's `place_ids`, and so what
+`/events?place=<town>` returns: a separate decision.
+
 ## `event_places` recompute — including the hash-equal path
 
 `matchPlaces` computes geometric attachments (point → PIP for polygon places, or within a ~1.5 km buffer of a corridor **LineString** via `geojson.PointNearLine`/`PointInOrNearGeometry`; polygon → bbox-intersect

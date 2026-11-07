@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -34,15 +35,16 @@ func TestPlacesContaining(t *testing.T) {
 	s := newTestStore(t)
 	seedPlaceDirectory(t, s)
 
-	// Inside both the county and the area; point places can't contain.
-	// Ordering is most-specific-first: COUNTY before AREA.
+	// At the town, inside the county and the area. Ordering is
+	// most-specific-first: TOWN, then COUNTY, then AREA.
 	got, err := s.PlacesContaining(ctx, 38.2554, -120.3521)
 	require.NoError(t, err)
-	ids := make([]string, len(got))
-	for i, p := range got {
-		ids[i] = p.GetId()
-	}
-	assert.Equal(t, []string{"county:calaveras", "area:mother-lode"}, ids)
+	assert.Equal(t, []string{"town:arnold", "county:calaveras", "area:mother-lode"}, placeIDs(got))
+
+	// Inside the county but well away from any town.
+	got, err = s.PlacesContaining(ctx, 38.1, -120.8)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"county:calaveras", "area:mother-lode"}, placeIDs(got))
 
 	// Inside the area but outside every county.
 	got, err = s.PlacesContaining(ctx, 38.7, -120.3)
@@ -54,6 +56,74 @@ func TestPlacesContaining(t *testing.T) {
 	got, err = s.PlacesContaining(ctx, 36.0, -125.0)
 	require.NoError(t, err)
 	assert.Empty(t, got)
+}
+
+func placeIDs(ps []*gridv1.Place) []string {
+	ids := make([]string, len(ps))
+	for i, p := range ps {
+		ids[i] = p.GetId()
+	}
+	return ids
+}
+
+// Towns are seeded as points, which no point-in-polygon test can match, so
+// resolve never returned one. A town now contains a location within the town
+// radius of its point; where two towns are that close, both, nearest first.
+func TestPlacesContainingTownRadius(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t) // DefaultTownRadiusMeters (3 km)
+	// Sonora and Columbia, ~5.9 km apart: the closest pair in prefab.yaml.
+	sonora := [2]float64{37.9841, -120.3827}
+	columbia := [2]float64{38.0349, -120.4016}
+	require.NoError(t, s.UpsertPlace(ctx, testPlace(
+		"town:sonora", "sonora", "Sonora", gridv1.PlaceKind_TOWN, pointGeometry(sonora[0], sonora[1]))))
+	require.NoError(t, s.UpsertPlace(ctx, testPlace(
+		"town:columbia", "columbia", "Columbia", gridv1.PlaceKind_TOWN, pointGeometry(columbia[0], columbia[1]))))
+	// along returns the point a fraction f of the way from Sonora to Columbia.
+	along := func(f float64) (float64, float64) {
+		return sonora[0] + f*(columbia[0]-sonora[0]), sonora[1] + f*(columbia[1]-sonora[1])
+	}
+	const mPerDegLat = 111320.0
+	nearColumbiaLat, nearColumbiaLng := along(0.6) // ~3.5 km from Sonora, ~2.4 km from Columbia
+	overlapLat, overlapLng := along(0.495)         // ~2.92 km from Sonora, ~2.98 km from Columbia
+
+	cases := []struct {
+		name     string
+		lat, lng float64
+		want     []string
+	}{
+		{"at the point", sonora[0], sonora[1], []string{"town:sonora"}},
+		{"2 km out", sonora[0] - 2000/mPerDegLat, sonora[1], []string{"town:sonora"}},
+		{"4 km out", sonora[0] - 4000/mPerDegLat, sonora[1], nil},
+		{"nearer Columbia, outside Sonora", nearColumbiaLat, nearColumbiaLng, []string{"town:columbia"}},
+		{"inside both: nearest first", overlapLat, overlapLng, []string{"town:sonora", "town:columbia"}},
+	}
+
+	for _, tc := range cases {
+		got, err := s.PlacesContaining(ctx, tc.lat, tc.lng)
+		require.NoError(t, err, tc.name)
+		if tc.want == nil {
+			assert.Empty(t, got, tc.name)
+			continue
+		}
+		assert.Equal(t, tc.want, placeIDs(got), tc.name)
+	}
+}
+
+func TestWithTownRadius(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(filepath.Join(t.TempDir(), "grid.db"), WithTownRadius(500))
+	require.NoError(t, err)
+	t.Cleanup(func() { s.Close() })
+	require.NoError(t, s.UpsertPlace(ctx, testPlace(
+		"town:arnold", "arnold", "Arnold", gridv1.PlaceKind_TOWN, pointGeometry(38.2554, -120.3521))))
+
+	got, err := s.PlacesContaining(ctx, 38.2554+400/111320.0, -120.3521)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"town:arnold"}, placeIDs(got), "400 m is inside a 500 m radius")
+	got, err = s.PlacesContaining(ctx, 38.2554+1000/111320.0, -120.3521)
+	require.NoError(t, err)
+	assert.Empty(t, got, "1 km is outside it, though inside the 3 km default")
 }
 
 func TestGetPlaceBySlugOrID(t *testing.T) {

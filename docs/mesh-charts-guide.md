@@ -22,7 +22,8 @@ you are working on it, and it is a state real nodes reach anyway.
 
 ## The request
 
-One node per call. `node` is the full 64-character public key.
+One node per call. `node` is the node's public key, or its event id from
+`/api/v1/events` (`meshcore:<key>`); both find the same samples.
 
 ```
 GET /api/v1/mesh/telemetry?node=<pubkey>&from=<rfc3339>&to=<rfc3339>
@@ -30,7 +31,7 @@ GET /api/v1/mesh/telemetry?node=<pubkey>&from=<rfc3339>&to=<rfc3339>
 
 | param  | meaning | default |
 |--------|---------|---------|
-| `node` | The node's public key, hex. **Required** — a cross-node dump is a different product. | — |
+| `node` | The node's public key, hex, or its event id (`meshcore:<key>`). A node only a monitor reports, not yet matched to a full key, is keyed by the prefix in its event id. **Required** — a cross-node dump is a different product. Anything that is not 8–64 hex characters is `400 INVALID_ARGUMENT`; a well-formed key we hold nothing for is an empty `200` with `coverage.samples: 0`. | — |
 | `from` | Window start, RFC 3339. | `to` − 24h |
 | `to`   | Window end. Windows wider than 400 days are clamped. | now |
 

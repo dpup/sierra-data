@@ -14,8 +14,10 @@ import (
 )
 
 const (
-	defaultPageSize = 50
-	maxPageSize     = 200
+	// DefaultPageSize is what a page_size of 0 (unset) gets; MaxPageSize is the
+	// ceiling a larger request is clamped to.
+	DefaultPageSize = 50
+	MaxPageSize     = 200
 )
 
 // EventQuery filters QueryEvents. Zero values mean "no filter", except
@@ -76,9 +78,9 @@ func decodeToken(token string, v any) error {
 func clampPageSize(n int) int {
 	switch {
 	case n <= 0:
-		return defaultPageSize
-	case n > maxPageSize:
-		return maxPageSize
+		return DefaultPageSize
+	case n > MaxPageSize:
+		return MaxPageSize
 	default:
 		return n
 	}

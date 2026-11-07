@@ -137,6 +137,19 @@ func weakListTag(version string, parts ...string) string {
 	return etag.Weak(version + "-" + hex.EncodeToString(sum[:8]))
 }
 
+// parsePageSize validates a list RPC's page_size. The proto contract is
+// "0 = default (store clamps to 1..200)": 0 takes the store default (50) and
+// anything above the ceiling is clamped by the store, not refused, so a client
+// asking for "as many as you will give me" gets a full page. A negative size has
+// no meaning, and used to be read as 0, so it is refused rather than guessed.
+func parsePageSize(n int32) (int, error) {
+	if n < 0 {
+		return 0, fmt.Errorf("page_size must be >= 0 (0 = the default of %d; above %d is clamped to %d), got %d",
+			store.DefaultPageSize, store.MaxPageSize, store.MaxPageSize, n)
+	}
+	return int(n), nil
+}
+
 // ListEvents returns store-backed events with the place/layer/status/severity/
 // since filters and keyset pagination (order: severity DESC, observed_at DESC,
 // id ASC). page_size 0 defaults via the store's clamp.
@@ -162,7 +175,9 @@ func (g *GridServer) ListEvents(ctx context.Context, req *gridv1.ListEventsReque
 			return nil, invalidErr(err)
 		}
 	}
-	eq.PageSize = int(req.GetPageSize())
+	if eq.PageSize, err = parsePageSize(req.GetPageSize()); err != nil {
+		return nil, invalidErr(err)
+	}
 	eq.PageToken = req.GetPageToken()
 
 	// Filters are validated above (400/404 first); guard on a cheap global data
@@ -245,6 +260,10 @@ func (g *GridServer) GetEvent(ctx context.Context, req *gridv1.GetEventRequest) 
 // (an empty history is indistinguishable from a revision-less event, which
 // cannot exist).
 func (g *GridServer) GetEventHistory(ctx context.Context, req *gridv1.GetEventHistoryRequest) (*gridv1.EventRevisionList, error) {
+	pageSize, err := parsePageSize(req.GetPageSize())
+	if err != nil {
+		return nil, invalidErr(err)
+	}
 	// A cheap revision read doubles as the existence check (replacing a full
 	// blob load) and the ETag validator: history grows only when the current
 	// revision bumps; the page window and IO flag shape the body.
@@ -261,7 +280,7 @@ func (g *GridServer) GetEventHistory(ctx context.Context, req *gridv1.GetEventHi
 	if err := etag.Guard(ctx, tag); err != nil {
 		return nil, err // 304 — skip the history query + blob rehydrate
 	}
-	revs, next, err := g.svc.Store.EventHistory(ctx, req.GetId(), int(req.GetPageSize()), req.GetPageToken())
+	revs, next, err := g.svc.Store.EventHistory(ctx, req.GetId(), pageSize, req.GetPageToken())
 	if err != nil {
 		return nil, tokenOrInternal(ctx, err)
 	}
@@ -290,7 +309,9 @@ func (g *GridServer) ListHistory(ctx context.Context, req *gridv1.ListHistoryReq
 			return nil, invalidErr(err)
 		}
 	}
-	hq.PageSize = int(req.GetPageSize())
+	if hq.PageSize, err = parsePageSize(req.GetPageSize()); err != nil {
+		return nil, invalidErr(err)
+	}
 	hq.PageToken = req.GetPageToken()
 
 	dv, err := g.svc.Store.DataVersion(ctx)
