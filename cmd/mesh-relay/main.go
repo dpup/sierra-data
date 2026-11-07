@@ -251,7 +251,8 @@ func (a *relayApp) startTelemetry(relay *meshrelay.Relay, st *meshrelay.Store) {
 			"so hosts can't share them either")
 	}
 	p := relaytelemetry.New(relaytelemetry.Config{Gateways: a.telemetry.Gateways, Interval: a.telemetry.Interval,
-		RepeaterInterval: a.telemetry.RepeaterInterval, GridURL: a.telemetry.GridURL,
+		RepeaterInterval: a.telemetry.RepeaterInterval, HibernateAfter: a.telemetry.RepeaterHibernateAfter,
+		GridURL: a.telemetry.GridURL,
 		IngestToken: a.telemetry.IngestToken}, relay, st, reps)
 	ctx, cancel := context.WithCancel(a.ctx)
 	done := make(chan struct{})

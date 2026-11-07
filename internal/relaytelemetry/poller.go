@@ -68,10 +68,22 @@ type Config struct {
 	IngestToken string // the Grid mesh.repeater reporter token
 	HTTPClient  *http.Client
 	Now         func() time.Time
-	// RepeaterInterval is how often shared repeaters are read (30m), on
-	// the next cycle after it passes. They're read over the mesh, whose
-	// airtime everyone shares.
+	// RepeaterInterval is how often shared repeaters are read (30m). They're
+	// read over the mesh, whose airtime everyone shares; see schedule.go.
 	RepeaterInterval time.Duration
+	// RepeaterRetries are the waits before each retry on one gateway when a
+	// repeater doesn't answer (DefaultRepeaterRetries: 30s, 60s, 120s).
+	RepeaterRetries []time.Duration
+	// HibernateAfter is how many cycles a repeater can go unread, with
+	// nothing else reporting it alive, before it's polled daily (6).
+	HibernateAfter int
+	// HibernateInterval is the hibernating repeater's cycle (24h).
+	HibernateInterval time.Duration
+	// RepeaterTick is how often repeater work is checked (5s).
+	RepeaterTick time.Duration
+	// ReporterID is this poller's id on the Grid, so its own reports aren't
+	// taken as another monitor's ("relay").
+	ReporterID string
 }
 
 // Poller polls gateway nodes and pushes their telemetry to the Grid.
@@ -82,10 +94,13 @@ type Poller struct {
 
 	reps Repeaters // nil: no shared repeaters
 
-	mu               sync.Mutex
-	nodes            map[string]*nodeState // by gateway
-	repeaters        map[string]*nodeState // shared repeaters, by pubkey
-	lastRepeaterPoll time.Time
+	mu        sync.Mutex
+	nodes     map[string]*nodeState // by gateway
+	repeaters map[string]*nodeState // shared repeaters, by pubkey
+
+	// Shared-repeater schedule, owned by the RepeaterTick goroutine.
+	jobs  map[string]*repeaterJob
+	alive func(ctx context.Context, pubkey string, window time.Duration) (bool, error)
 }
 
 type nodeState struct {
@@ -118,9 +133,26 @@ func New(cfg Config, relay Relay, gws Gateways, reps Repeaters) *Poller {
 	if cfg.RepeaterInterval <= 0 {
 		cfg.RepeaterInterval = 30 * time.Minute
 	}
+	if cfg.RepeaterRetries == nil {
+		cfg.RepeaterRetries = DefaultRepeaterRetries
+	}
+	if cfg.HibernateAfter <= 0 {
+		cfg.HibernateAfter = 6
+	}
+	if cfg.HibernateInterval <= 0 {
+		cfg.HibernateInterval = 24 * time.Hour
+	}
+	if cfg.RepeaterTick <= 0 {
+		cfg.RepeaterTick = 5 * time.Second
+	}
+	if cfg.ReporterID == "" {
+		cfg.ReporterID = "relay"
+	}
 	cfg.GridURL = strings.TrimRight(cfg.GridURL, "/")
-	return &Poller{cfg: cfg, relay: relay, gws: gws, reps: reps, nodes: map[string]*nodeState{},
-		repeaters: map[string]*nodeState{}}
+	p := &Poller{cfg: cfg, relay: relay, gws: gws, reps: reps, nodes: map[string]*nodeState{},
+		repeaters: map[string]*nodeState{}, jobs: map[string]*repeaterJob{}}
+	p.alive = p.gridAlive
+	return p
 }
 
 // Run polls every Interval until ctx ends. The first cycle waits one minute,
@@ -129,6 +161,9 @@ func (p *Poller) Run(ctx context.Context, firstDelay time.Duration) {
 	logging.Infow(ctx, "Relay telemetry poller started", "gateways", p.cfg.Gateways,
 		"interval", p.cfg.Interval, "repeaters", p.reps != nil, "repeaterInterval", p.cfg.RepeaterInterval,
 		"grid", p.cfg.GridURL)
+	if p.reps != nil {
+		go p.runRepeaters(ctx, firstDelay)
+	}
 	t := time.NewTimer(firstDelay)
 	defer t.Stop()
 	for {
@@ -142,7 +177,24 @@ func (p *Poller) Run(ctx context.Context, firstDelay time.Duration) {
 	}
 }
 
-// Cycle polls every opted-in gateway once and pushes the report.
+// runRepeaters runs the shared-repeater schedule (schedule.go) until ctx
+// ends. Its readings go out with each Cycle's report.
+func (p *Poller) runRepeaters(ctx context.Context, firstDelay time.Duration) {
+	t := time.NewTimer(firstDelay)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		p.RepeaterTick(ctx)
+		t.Reset(p.cfg.RepeaterTick)
+	}
+}
+
+// Cycle polls every opted-in gateway once and pushes the report, with the
+// shared repeaters' latest readings.
 func (p *Poller) Cycle(ctx context.Context) {
 	recs, err := p.gws.Gateways()
 	if err != nil {
@@ -163,12 +215,6 @@ func (p *Poller) Cycle(ctx context.Context) {
 			continue
 		}
 		p.pollGateway(ctx, gw, key)
-	}
-	if now := p.cfg.Now(); p.repeaterDue(now) && ctx.Err() == nil {
-		p.pollRepeaters(ctx)
-		p.mu.Lock()
-		p.lastRepeaterPoll = now
-		p.mu.Unlock()
 	}
 	if ctx.Err() != nil {
 		return

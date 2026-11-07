@@ -131,6 +131,9 @@ type MeshRelayTelemetryConfig struct {
 	// repeater with `meshbridge repeater add`) every RepeaterInterval.
 	Repeaters        bool          `koanf:"repeaters"`
 	RepeaterInterval time.Duration `koanf:"repeaterInterval"`
+	// RepeaterHibernateAfter is how many cycles a repeater can go unread,
+	// with nothing else reporting it alive, before it's polled daily.
+	RepeaterHibernateAfter int `koanf:"repeaterHibernateAfter"`
 }
 
 // Enabled reports whether the poller has everything it needs to run.
