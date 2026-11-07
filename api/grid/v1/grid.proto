@@ -4,6 +4,7 @@ package grid.v1;
 
 import "google/api/annotations.proto";
 import "google/api/field_behavior.proto";
+import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/wrappers.proto";
 import "protoc-gen-openapiv2/options/annotations.proto";
@@ -120,12 +121,15 @@ option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
       "- **64-bit integers are JSON strings** (protobuf JSON mapping): mesh "
       "counters such as `uptimeSeconds: \"98350\"` and `cadenceSeconds: \"1831\"`. "
       "Parse them; 32-bit integers are plain numbers.\n"
-      "- **`geometry.geojson` is base64.** It is a protobuf `bytes` field, so the "
-      "RFC 7946 geometry JSON arrives base64-encoded: "
-      "`JSON.parse(atob(event.geometry.geojson))`. Coordinates inside are "
-      "`[longitude, latitude]`. `geometry.bbox` and `geometry.centroid` are plain "
-      "numbers and need no decoding. For maps, the `.geojson` layer endpoints serve "
-      "decoded geometry directly.\n"
+      "- **Geometry: pass `geometryFormat=OBJECT`.** By default (`BASE64`, the "
+      "legacy form kept for existing clients) `geometry.geojson` is a protobuf "
+      "`bytes` field, so the RFC 7946 geometry JSON arrives base64-encoded: "
+      "`JSON.parse(atob(event.geometry.geojson))`. With `geometryFormat=OBJECT` "
+      "(on every route that returns events, revisions or places) the same "
+      "geometry is a plain JSON object in `geometry.object` and `geometry.geojson` "
+      "is empty. Coordinates are `[longitude, latitude]`. `geometry.bbox` and "
+      "`geometry.centroid` are plain numbers in both forms. For maps, the "
+      "`.geojson` layer endpoints serve whole FeatureCollections directly.\n"
       "- **Query parameters**: this spec names them in camelCase (`severityMin`, "
       "`pageSize`, `pageToken`, `enhancementIo`). The snake_case forms "
       "(`severity_min`, `page_size`, ...) work too. Enum values are "
@@ -133,12 +137,15 @@ option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
       "(`layer=WILDFIRE&layer=POWER`) or comma-separated (`layer=WILDFIRE,POWER`).\n"
       "- **Place addressing**: anywhere a place is named, the slug (`arnold`) or the "
       "namespaced id (`town:arnold`) works.\n"
-      "- **Pagination** is keyset-based. `pageSize` 0 or omitted means 50, values "
-      "over 200 are clamped to 200, and a negative value is a 400. Pass `nextPageToken` back as `pageToken` with the same filters "
-      "until it comes back empty. Tokens are opaque. Pages stay stable while new "
-      "events arrive. A large page of perimeter-heavy events can exceed the "
-      "server's 4 MiB response limit and fail with HTTP 429 `RESOURCE_EXHAUSTED`; "
-      "keep `pageSize` at or below 50 when you include RESOLVED or EXPIRED events.\n"
+      "- **Pagination** is keyset-based. `pageSize` is a MAXIMUM: 0 or omitted "
+      "means 50, values over 200 are clamped to 200, and a negative value is a "
+      "400. A page also stops before its encoded size passes about 3 MiB, so a "
+      "page of perimeter-heavy events (fires, evacuation zones, outage areas) "
+      "can hold fewer than `pageSize`; an event larger than that on its own is "
+      "served alone on its page. Pass `nextPageToken` back as `pageToken` with "
+      "the same filters (and the same `geometryFormat`) until it comes back "
+      "empty: an empty token is the only end-of-list signal, never a short "
+      "page. Tokens are opaque. Pages stay stable while new events arrive.\n"
       "- **Conditional GET**: event lists, event detail, event history, the "
       "revision archive, places and cameras return a weak `ETag`. Send it back in "
       "`If-None-Match` to get `304 Not Modified`. The tag changes whenever the body "
@@ -150,12 +157,13 @@ option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
       "page on any origin can call the API directly.\n"
       "- **Errors** are the gRPC status as JSON, `{code, codeName, message, details}`, "
       "with a mapped HTTP status: 400 `INVALID_ARGUMENT` (bad enum, timestamp or "
-      "page token), 404 `NOT_FOUND` (unknown place, event or address), 429 "
-      "`RESOURCE_EXHAUSTED` (response too large), 503 `UNAVAILABLE` (address "
-      "geocoder down), 500 `INTERNAL`. Branch on `codeName`. During a deploy "
-      "handoff any route can briefly answer `503`: the RPCs with the JSON error "
-      "(`UNAVAILABLE`), the hand-built routes (`.geojson`, mesh links) with a "
-      "plain-text body and `Retry-After: 1`. Retry after a second.\n\n"
+      "page token, `geometryFormat`), 404 `NOT_FOUND` (unknown place, event or "
+      "address), 503 `UNAVAILABLE` (address geocoder down, or a request "
+      "interrupted by a deploy), 500 `INTERNAL`. Branch on `codeName`. During a "
+      "deploy handoff any route can briefly answer `503`: the RPCs with the JSON "
+      "error (`UNAVAILABLE`), the hand-built routes (`.geojson`, mesh links) with "
+      "a plain-text body and `Retry-After: 1`. Retry after a second; a retried "
+      "page request with the same `pageToken` resumes exactly where it was.\n\n"
       "## Severity and status\n\n"
       "Every event and map feature uses one severity scale: INFO (rank 0), MINOR (1), "
       "MODERATE (2), SEVERE (3), EXTREME (4). It expresses how urgently the public "
@@ -472,12 +480,19 @@ enum EventStatus {
 }
 
 // Geometry is an event's or place's footprint.
+//
+// The GeoJSON comes in one of two forms, chosen per request with
+// `geometryFormat`: `BASE64` (the default and legacy form) fills `geojson`;
+// `OBJECT` fills `object` and leaves `geojson` empty. `bbox` and `centroid`
+// are the same in both.
 message Geometry {
-  // The RFC 7946 GeoJSON geometry object (Point, LineString, Polygon,
-  // MultiPolygon, ...) as UTF-8 JSON, BASE64-ENCODED in this JSON response
-  // because the field is protobuf `bytes`. Decode with
-  // `JSON.parse(atob(geojson))`. Coordinates are `[longitude, latitude]`.
-  // Wildfire perimeters and evacuation zones can be tens of kilobytes.
+  // LEGACY FORM (the default, `geometryFormat=BASE64`). The RFC 7946 GeoJSON
+  // geometry object (Point, LineString, Polygon, MultiPolygon, ...) as UTF-8
+  // JSON, BASE64-ENCODED in this JSON response because the field is protobuf
+  // `bytes`. Decode with `JSON.parse(atob(geojson))`. Coordinates are
+  // `[longitude, latitude]`. Empty in the `OBJECT` form. Kept unchanged for existing clients; new clients should
+  // request `geometryFormat=OBJECT` and read `object` instead. Perimeters,
+  // evacuation zones and outage areas run from kilobytes to about a megabyte.
   bytes geojson = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"eyJ0eXBlIjoiUG9pbnQiLCJjb29yZGluYXRlcyI6Wy0xMjAuMzYxMDgsMzguMjQyMzldfQ==\""}];
   // Bounding box of the geometry, in decimal degrees. Always set when geometry
   // is present.
@@ -486,6 +501,12 @@ message Geometry {
   // Point, otherwise the middle of the bounding box (which can fall outside an
   // irregular polygon).
   LatLng centroid = 3 [(google.api.field_behavior) = REQUIRED];
+  // The same RFC 7946 geometry as a plain JSON object, e.g.
+  // `{"type": "Point", "coordinates": [-120.36108, 38.24239]}`, ready for
+  // MapLibre, Leaflet or turf with no decoding. Sent only when the request
+  // asks for `geometryFormat=OBJECT`, and then only when the event has
+  // GeoJSON; otherwise the key is absent (never `null`).
+  optional google.protobuf.Struct object = 4;
 }
 
 // BoundingBox is a WGS 84 bounding box in decimal degrees.
@@ -1347,7 +1368,7 @@ service GridService {
   // Query events across layers.
   //
   // The main event feed, from the grid event store. Defaults: status ACTIVE and
-  // SCHEDULED, every layer, every place, every severity, 50 per page.
+  // SCHEDULED, every layer, every place, every severity, up to 50 per page.
   //
   // An unscoped query is dominated by MESH nodes (hundreds of INFO community
   // radio nodes, many outside every place) and SCHEDULED Caltrans roadwork. For
@@ -1355,7 +1376,9 @@ service GridService {
   // `severityMin=MINOR` or an explicit `layer` list. Use
   // `layer=ROAD_INCIDENT&place={corridor}` for a highway's incidents and
   // `layer=WEATHER_ALERT` for NWS alerts. Sorted by severity, then most recently
-  // observed. Supports ETag / If-None-Match.
+  // observed. A page holds at most `pageSize` events and stops early at about
+  // 3 MiB encoded, so follow `nextPageToken` until it is empty. Supports
+  // ETag / If-None-Match.
   rpc ListEvents(ListEventsRequest) returns (EventList) {
     option (google.api.http) = {get: "/api/v1/events"};
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -1366,15 +1389,11 @@ service GridService {
       }
       responses: {
         key: "400"
-        value: {description: "INVALID_ARGUMENT: an unknown layer, status or severity, a timestamp that is not RFC 3339, a negative page size, or a bad page token."}
+        value: {description: "INVALID_ARGUMENT: an unknown layer, status, severity or geometryFormat, a timestamp that is not RFC 3339, a negative page size, or a bad page token."}
       }
       responses: {
         key: "404"
         value: {description: "NOT_FOUND: unknown place."}
-      }
-      responses: {
-        key: "429"
-        value: {description: "RESOURCE_EXHAUSTED: the page exceeded the 4 MiB response limit (large perimeters); retry with a smaller `pageSize`."}
       }
     };
   }
@@ -1395,6 +1414,10 @@ service GridService {
         value: {description: "Not Modified: the `If-None-Match` ETag still matches."}
       }
       responses: {
+        key: "400"
+        value: {description: "INVALID_ARGUMENT: an unknown geometryFormat."}
+      }
+      responses: {
         key: "404"
         value: {description: "NOT_FOUND: no event has this id."}
       }
@@ -1405,7 +1428,9 @@ service GridService {
   //
   // Every stored revision of one event, newest first, each a full snapshot. A
   // status change (for example ACTIVE to RESOLVED) is a revision, so the last
-  // entries show when it ended. 50 per page by default, up to 200. Supports
+  // entries show when it ended. Up to 50 per page by default, up to 200; a
+  // page also stops early at about 3 MiB encoded (a perimeter that grew over
+  // many revisions), so follow `nextPageToken` until it is empty. Supports
   // ETag / If-None-Match.
   rpc GetEventHistory(GetEventHistoryRequest) returns (EventRevisionList) {
     option (google.api.http) = {get: "/api/v1/events/{id}/history"};
@@ -1417,7 +1442,7 @@ service GridService {
       }
       responses: {
         key: "400"
-        value: {description: "INVALID_ARGUMENT: a negative page size or a bad page token."}
+        value: {description: "INVALID_ARGUMENT: a negative page size, a bad page token, or an unknown geometryFormat."}
       }
       responses: {
         key: "404"
@@ -1432,7 +1457,9 @@ service GridService {
   // half-open `[from, to)` window on each revision's `observedAt`. With no
   // window it covers all history. Ordered newest first. Place and layer
   // filters use each event's CURRENT place attachments and layer. Use it for
-  // "what happened here last week". Supports ETag / If-None-Match.
+  // "what happened here last week". A page holds at most `pageSize` revisions
+  // and stops early at about 3 MiB encoded, so follow `nextPageToken` until it
+  // is empty. Supports ETag / If-None-Match.
   rpc ListHistory(ListHistoryRequest) returns (EventRevisionList) {
     option (google.api.http) = {get: "/api/v1/history"};
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -1443,15 +1470,11 @@ service GridService {
       }
       responses: {
         key: "400"
-        value: {description: "INVALID_ARGUMENT: an unknown layer, a timestamp that is not RFC 3339, a negative page size, or a bad page token."}
+        value: {description: "INVALID_ARGUMENT: an unknown layer or geometryFormat, a timestamp that is not RFC 3339, a negative page size, or a bad page token."}
       }
       responses: {
         key: "404"
         value: {description: "NOT_FOUND: unknown place."}
-      }
-      responses: {
-        key: "429"
-        value: {description: "RESOURCE_EXHAUSTED: the page exceeded the 4 MiB response limit; retry with a smaller `pageSize`."}
       }
     };
   }
@@ -1471,7 +1494,7 @@ service GridService {
       }
       responses: {
         key: "400"
-        value: {description: "INVALID_ARGUMENT: unknown kind."}
+        value: {description: "INVALID_ARGUMENT: unknown kind or geometryFormat."}
       }
     };
   }
@@ -1491,7 +1514,7 @@ service GridService {
       tags: "Places"
       responses: {
         key: "400"
-        value: {description: "INVALID_ARGUMENT: neither or both of lat+lng and address, only one of lat/lng, or a value out of range."}
+        value: {description: "INVALID_ARGUMENT: neither or both of lat+lng and address, only one of lat/lng, a value out of range, or an unknown geometryFormat."}
       }
       responses: {
         key: "404"
@@ -1515,6 +1538,10 @@ service GridService {
       responses: {
         key: "304"
         value: {description: "Not Modified: the `If-None-Match` ETag still matches."}
+      }
+      responses: {
+        key: "400"
+        value: {description: "INVALID_ARGUMENT: an unknown geometryFormat."}
       }
       responses: {
         key: "404"
@@ -1964,8 +1991,11 @@ message ListEventsRequest {
   // Only events whose `observedAt` is at or after this RFC 3339 time, e.g.
   // `2026-11-06T00:00:00Z`.
   string since = 5 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {format: "date-time"}];
-  // Page size. 0 or omitted means the default of 50; values over 200 are
-  // clamped to 200; a negative value is a 400 INVALID_ARGUMENT.
+  // Most events per page. 0 or omitted means the default of 50; values over
+  // 200 are clamped to 200; a negative value is a 400 INVALID_ARGUMENT. A page
+  // can hold FEWER events than this, because it also stops before its encoded
+  // size passes about 3 MiB (perimeter-heavy events): keep requesting while
+  // `nextPageToken` is non-empty, and never treat a short page as the end.
   int32 page_size = 6 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
     minimum: 0
     maximum: 200
@@ -1976,6 +2006,14 @@ message ListEventsRequest {
   // `enhancement.response`). Large; default false, which returns them as empty
   // strings.
   bool enhancement_io = 8;
+  // How each event's `geometry` carries its GeoJSON. `BASE64` (default, the
+  // legacy form): the base64 `geometry.geojson` string. `OBJECT`: a plain
+  // JSON object in `geometry.object`, with `geometry.geojson` empty.
+  // Case-insensitive; anything else is a 400.
+  string geometry_format = 9 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    enum: ["BASE64", "OBJECT"]
+    default: "BASE64"
+  }];
 }
 
 // GetEventRequest names one event.
@@ -1984,14 +2022,21 @@ message GetEventRequest {
   string id = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"burn:calaveras-county\""}];
   // Include `enhancement.request` and `enhancement.response`. Default false.
   bool enhancement_io = 2;
+  // `BASE64` (default, legacy) or `OBJECT`; same as on `/api/v1/events`.
+  string geometry_format = 3 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    enum: ["BASE64", "OBJECT"]
+    default: "BASE64"
+  }];
 }
 
 // GetEventHistoryRequest pages one event's revisions.
 message GetEventHistoryRequest {
   // Event id.
   string id = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"burn:calaveras-county\""}];
-  // Page size. 0 or omitted means the default of 50; values over 200 are
-  // clamped to 200; a negative value is a 400 INVALID_ARGUMENT.
+  // Most revisions per page. 0 or omitted means the default of 50; values
+  // over 200 are clamped to 200; a negative value is a 400 INVALID_ARGUMENT. A
+  // page can hold fewer (it stops at about 3 MiB encoded): follow
+  // `nextPageToken` until it is empty.
   int32 page_size = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
     minimum: 0
     maximum: 200
@@ -2000,6 +2045,11 @@ message GetEventHistoryRequest {
   string page_token = 3;
   // Include `enhancement.request` and `enhancement.response`. Default false.
   bool enhancement_io = 4;
+  // `BASE64` (default, legacy) or `OBJECT`; same as on `/api/v1/events`.
+  string geometry_format = 5 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    enum: ["BASE64", "OBJECT"]
+    default: "BASE64"
+  }];
 }
 
 // ListHistoryRequest filters the revision archive.
@@ -2015,8 +2065,10 @@ message ListHistoryRequest {
   string from = 3 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {format: "date-time"}];
   // Window end, RFC 3339, exclusive. Default: no upper bound.
   string to = 4 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {format: "date-time"}];
-  // Page size. 0 or omitted means the default of 50; values over 200 are
-  // clamped to 200; a negative value is a 400 INVALID_ARGUMENT.
+  // Most revisions per page. 0 or omitted means the default of 50; values
+  // over 200 are clamped to 200; a negative value is a 400 INVALID_ARGUMENT. A
+  // page can hold fewer (it stops at about 3 MiB encoded): follow
+  // `nextPageToken` until it is empty.
   int32 page_size = 5 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
     minimum: 0
     maximum: 200
@@ -2025,6 +2077,11 @@ message ListHistoryRequest {
   string page_token = 6;
   // Include `enhancement.request` and `enhancement.response`. Default false.
   bool enhancement_io = 7;
+  // `BASE64` (default, legacy) or `OBJECT`; same as on `/api/v1/events`.
+  string geometry_format = 8 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    enum: ["BASE64", "OBJECT"]
+    default: "BASE64"
+  }];
 }
 
 // ListPlacesRequest filters the place directory.
@@ -2036,12 +2093,23 @@ message ListPlacesRequest {
   }];
   // Case-insensitive substring of the place name, e.g. `calav`.
   string q = 2;
+  // `BASE64` (default, legacy) or `OBJECT` for each place's `geometry`; same
+  // as on `/api/v1/events`.
+  string geometry_format = 3 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    enum: ["BASE64", "OBJECT"]
+    default: "BASE64"
+  }];
 }
 
 // GetPlaceRequest names one place.
 message GetPlaceRequest {
   // Place slug (`arnold`) or namespaced id (`town:arnold`).
   string place = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"arnold\""}];
+  // `BASE64` (default, legacy) or `OBJECT`; same as on `/api/v1/events`.
+  string geometry_format = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    enum: ["BASE64", "OBJECT"]
+    default: "BASE64"
+  }];
 }
 
 // ResolvePlaceRequest is a point (lat AND lng) or an address, not both.
@@ -2065,6 +2133,12 @@ message ResolvePlaceRequest {
   // A US street address, geocoded with the Census geocoder. Include the city,
   // state or ZIP for a reliable match.
   string address = 3 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"1 Main St, Murphys, CA 95247\""}];
+  // `BASE64` (default, legacy) or `OBJECT` for each place's `geometry`; same
+  // as on `/api/v1/events`.
+  string geometry_format = 4 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    enum: ["BASE64", "OBJECT"]
+    default: "BASE64"
+  }];
 }
 
 // ResolveQuery echoes the point that was resolved.

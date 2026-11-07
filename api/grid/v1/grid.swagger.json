@@ -2,7 +2,7 @@
   "swagger": "2.0",
   "info": {
     "title": "The Grid API",
-    "description": "Public, read-only JSON API of **The Grid**, the S.I.E.R.R.A. data service. It gathers hazard and situational-awareness feeds for California's central Sierra Nevada, centred on Calaveras and Tuolumne counties: the Highway 4 / Ebbetts Pass corridor (Angels Camp, Murphys, Arnold, Dorrington, Bear Valley) and the Highway 49/108 towns (Sonora, Columbia, Twain Harte). Neighbouring counties (Alpine, Amador, El Dorado, Mariposa, San Joaquin, Stanislaus) are in the place directory because hazards cross county lines.\n\nUpstream sources: CAL FIRE and FIRIS (wildfires and perimeters), Cal OES / Genasys (evacuation zones), the National Weather Service (alerts, fire weather, forecasts), USGS (earthquakes), CHP and Caltrans (incidents, lane closures, chain control, cameras, message signs), PG\u0026E (outages and Public Safety Power Shutoffs), county burn lines and CAL FIRE burn permits, the MeshCore community radio mesh, Google Routes and OpenWeatherMap.\n\nThis service is an aggregator, not an authority. For a life-safety decision, link the official source. An event's link is `canonicalUrl` (the item's own page), else `provenance.sourceUrl`, else the `homepageUrl` of its source (`GET /api/v1/sources`, joined on `provenance.sourceId`). Either event field can be an empty string: CHP incidents, Caltrans lane closures, FIRIS perimeters and NWS alerts have neither, so their link is the source homepage. Every map feature carries `properties.source`, and evacuation views link Genasys (`metadata.sourceUrl`, `summary.evacuationSourceUrl`).\n\n## Resource model\n\n- **Event**: one item from one upstream source, such as a fire, an evacuation zone, a weather alert, a road incident, an outage, a mesh radio node or a county's burn status. The id is stable (`{source}:{native id}`, e.g. `chp:261106ST0341`) and every change is kept as a numbered revision.\n- **Layer**: the event taxonomy (`Event.layer`). The *event layers* are stored and queryable at `/api/v1/events`: WILDFIRE, EVACUATION, WEATHER_ALERT, EARTHQUAKE, ROAD_INCIDENT, POWER, MESH and BURN_STATUS. The *condition layers* (`road_segment`, `chain_control`, `fire_weather`, `message_sign`) are live projections of current state, not events: they appear only on the `.geojson` map layers, in `GET /api/v1/conditions`, and in the place summary's domains.\n- **Place**: a named geography (AREA, COUNTY, TOWN, CORRIDOR). Events attach to places geometrically and every event lists its `placeIds`.\n- **Source**: an upstream feed with live health (`GET /api/v1/sources`).\n- **PlaceSummary**: the one-call rollup for a place (mode, per-domain status, top events, evacuation count).\n\n## Quickstart: build a dashboard for a place\n\n1. Pick a place: `GET /api/v1/places` lists them all (about 20). For a dashboard use an AREA (`ebbetts-pass`), a COUNTY (`calaveras-county`) or a CORRIDOR (`hwy4-arnold-bearvalley`): those have a footprint, so events and conditions attach to them. Do not build a dashboard on a TOWN (`arnold`). A town is a point, so an event attaches to it only when the event's polygon covers it (an evacuation zone, a fire perimeter), a wildfire comes near, or the fact is county-wide (burn status). Point events (road incidents, outages, earthquakes) and road conditions never attach, so a town's summary can read QUIET with an open `roads` domain while its highway is closed. Use a town to label a location and to find its county (`parentId`), or map a point or an address with `GET /api/v1/places:resolve?lat=38.25\u0026lng=-120.35` (or `?address=...`) and pick the most specific non-town place it returns. Use the `slug` in paths.\n2. Headline status: `GET /api/v1/places/{slug}/summary` returns `mode` (QUIET, WATCH or ACTIVE), one block per domain (fire, evacuation, weather, roads, seismic, power, burn, comms), the top five hazards and `activeEvacuations`. Show each domain's `status` and `highestSeverity` next to `mode`: road and chain-control conditions (a closed highway) raise the `roads` domain but never `mode`.\n3. Event feed: `GET /api/v1/events?place={slug}\u0026status=ACTIVE\u0026severityMin=MINOR`. Then `GET /api/v1/events/{id}` for detail and `/api/v1/events/{id}/history` for its timeline.\n4. Map: `GET /api/v1/places/{slug}/map/{layer}.geojson` serves one RFC 7946 FeatureCollection per layer (documented separately from the RPCs below).\n5. Context: `GET /api/v1/conditions?place={slug}` for current weather, forecasts and the fire-weather state, `GET /api/v1/cameras?place={slug}` for traffic cameras, and `GET /api/v1/sources` for source-health badges.\n\nPoll every 30 to 60 seconds. JSON responses are cacheable for 30 seconds (`Cache-Control: public, max-age=30`), GeoJSON layers and mesh links for 60; upstream feeds refresh every 2 to 15 minutes.\n\n## Filter the event feed\n\nAn unscoped `GET /api/v1/events` is mostly MESH nodes: hundreds of community radio nodes across Northern California, all INFO, many outside every place. It also holds a week of planned Caltrans roadwork (ROAD_INCIDENT, status SCHEDULED). For a hazard feed, pass `place`, pass `status=ACTIVE`, and either pass `severityMin=MINOR` or list the layers you want. POWER events at INFO are single-customer outages.\n\n## Conventions\n\n- **JSON field names are camelCase.** Every field is present, except the per-layer detail blocks on an event (only the one matching `layer` is sent), so the spec lists every other field in its schema's `required`. Only a field the spec marks `nullable` can be `null`: an object, timestamp or wrapper the server can leave unset, such as `geometry`, `expires` or `lastSuccessAt`. Everything else is never `null`. Objects and timestamps the server always fills (`provenance`, `ingestedAt`, `summary`, ...) are not marked nullable. An unset scalar is `0`, `\"\"` or `false`. Arrays are `[]` and maps `{}` when empty. Wrapper-typed fields (`activeEvacuations`, the mesh gauges) are `null` when unknown, so a real `0` is never confused with \"no reading\".\n- **Enums serialize as their name strings** (`\"SEVERE\"`), never as numbers.\n- **Timestamps** are RFC 3339 in UTC (`2026-11-07T03:13:00Z`), with up to nanosecond fractions.\n- **64-bit integers are JSON strings** (protobuf JSON mapping): mesh counters such as `uptimeSeconds: \"98350\"` and `cadenceSeconds: \"1831\"`. Parse them; 32-bit integers are plain numbers.\n- **`geometry.geojson` is base64.** It is a protobuf `bytes` field, so the RFC 7946 geometry JSON arrives base64-encoded: `JSON.parse(atob(event.geometry.geojson))`. Coordinates inside are `[longitude, latitude]`. `geometry.bbox` and `geometry.centroid` are plain numbers and need no decoding. For maps, the `.geojson` layer endpoints serve decoded geometry directly.\n- **Query parameters**: this spec names them in camelCase (`severityMin`, `pageSize`, `pageToken`, `enhancementIo`). The snake_case forms (`severity_min`, `page_size`, ...) work too. Enum values are case-insensitive. A repeated parameter can be repeated (`layer=WILDFIRE\u0026layer=POWER`) or comma-separated (`layer=WILDFIRE,POWER`).\n- **Place addressing**: anywhere a place is named, the slug (`arnold`) or the namespaced id (`town:arnold`) works.\n- **Pagination** is keyset-based. `pageSize` 0 or omitted means 50, values over 200 are clamped to 200, and a negative value is a 400. Pass `nextPageToken` back as `pageToken` with the same filters until it comes back empty. Tokens are opaque. Pages stay stable while new events arrive. A large page of perimeter-heavy events can exceed the server's 4 MiB response limit and fail with HTTP 429 `RESOURCE_EXHAUSTED`; keep `pageSize` at or below 50 when you include RESOLVED or EXPIRED events.\n- **Conditional GET**: event lists, event detail, event history, the revision archive, places and cameras return a weak `ETag`. Send it back in `If-None-Match` to get `304 Not Modified`. The tag changes whenever the body would, including in-place refreshes that write no revision (AI text, mesh telemetry, burn-line observations, place re-attachment). The summary, conditions, sources, resolve, scanners and mesh-telemetry endpoints do not yet send ETags.\n- **No authentication, no API key.** CORS is open (`Access-Control-Allow-Origin: *`), GET only, no credentials, so a browser page on any origin can call the API directly.\n- **Errors** are the gRPC status as JSON, `{code, codeName, message, details}`, with a mapped HTTP status: 400 `INVALID_ARGUMENT` (bad enum, timestamp or page token), 404 `NOT_FOUND` (unknown place, event or address), 429 `RESOURCE_EXHAUSTED` (response too large), 503 `UNAVAILABLE` (address geocoder down), 500 `INTERNAL`. Branch on `codeName`. During a deploy handoff any route can briefly answer `503`: the RPCs with the JSON error (`UNAVAILABLE`), the hand-built routes (`.geojson`, mesh links) with a plain-text body and `Retry-After: 1`. Retry after a second.\n\n## Severity and status\n\nEvery event and map feature uses one severity scale: INFO (rank 0), MINOR (1), MODERATE (2), SEVERE (3), EXTREME (4). It expresses how urgently the public should respond, not physical magnitude. `severityRank` is the same value as a number, for sorting and colour ramps. `/api/v1/events` sorts by severity, then most recently observed.\n\nStatus lifecycle: SCHEDULED (planned, not yet in effect) → ACTIVE → RESOLVED (the authoritative feed stopped listing it) or EXPIRED (it aged out). An event that reappears goes back to ACTIVE with a new revision. The end of an event is a revision too, so history keeps the all-clear.\n\n## Fail-loud honesty\n\nThe API never turns a failure into an all-clear.\n\n- Source health is `OK`, `STALE` (serving last-good data while the upstream fails) or `UNAVAILABLE` (nothing trustworthy to serve). It appears on `/api/v1/sources`, on each summary domain, in the summary's `sources` sidecar, on `/api/v1/cameras`, and in each map layer's `metadata.sourceStatus`. UNAVAILABLE with no items means *unknown*. Render it as \"unknown, check the source\", never as \"none\".\n- Evacuations: `summary.activeEvacuations` is `null` when the evacuation source is UNAVAILABLE (unknown; send people to Genasys at `summary.evacuationSourceUrl`), `0` when a healthy fetch found no active zone (\"none reported\", not a guarantee), and `N` when zones are active.\n- A failed fetch never resolves or expires events. They stay as they were and the source reads STALE.\n- The fire-weather state comes only from issued NWS products. The API never infers a Red Flag Warning that NWS has not issued.\n\n## Casing quirks (kept for compatibility)\n\n- Layer names in responses (`Event.layer`, `summary.topEvents[].layer`) are UPPERCASE enum names (`ROAD_INCIDENT`). Map-layer path segments are lowercase slugs (`road_incident.geojson`). `?layer=` accepts either, plus the aliases `mesh_node` and `network` for MESH.\n- `fireWeather.state` is lowercase: `normal`, `elevated` or `red-flag`.\n- Burn-status enum values carry a prefix (`BURN_DAY_YES`, `CALFIRE_PERMIT_REQUIRED`, `BURN_PERMISSION_ALLOWED`).\n\nAPI changes are listed, dated, in [CHANGELOG.md](https://github.com/dpup/sierra-data/blob/main/CHANGELOG.md).",
+    "description": "Public, read-only JSON API of **The Grid**, the S.I.E.R.R.A. data service. It gathers hazard and situational-awareness feeds for California's central Sierra Nevada, centred on Calaveras and Tuolumne counties: the Highway 4 / Ebbetts Pass corridor (Angels Camp, Murphys, Arnold, Dorrington, Bear Valley) and the Highway 49/108 towns (Sonora, Columbia, Twain Harte). Neighbouring counties (Alpine, Amador, El Dorado, Mariposa, San Joaquin, Stanislaus) are in the place directory because hazards cross county lines.\n\nUpstream sources: CAL FIRE and FIRIS (wildfires and perimeters), Cal OES / Genasys (evacuation zones), the National Weather Service (alerts, fire weather, forecasts), USGS (earthquakes), CHP and Caltrans (incidents, lane closures, chain control, cameras, message signs), PG\u0026E (outages and Public Safety Power Shutoffs), county burn lines and CAL FIRE burn permits, the MeshCore community radio mesh, Google Routes and OpenWeatherMap.\n\nThis service is an aggregator, not an authority. For a life-safety decision, link the official source. An event's link is `canonicalUrl` (the item's own page), else `provenance.sourceUrl`, else the `homepageUrl` of its source (`GET /api/v1/sources`, joined on `provenance.sourceId`). Either event field can be an empty string: CHP incidents, Caltrans lane closures, FIRIS perimeters and NWS alerts have neither, so their link is the source homepage. Every map feature carries `properties.source`, and evacuation views link Genasys (`metadata.sourceUrl`, `summary.evacuationSourceUrl`).\n\n## Resource model\n\n- **Event**: one item from one upstream source, such as a fire, an evacuation zone, a weather alert, a road incident, an outage, a mesh radio node or a county's burn status. The id is stable (`{source}:{native id}`, e.g. `chp:261106ST0341`) and every change is kept as a numbered revision.\n- **Layer**: the event taxonomy (`Event.layer`). The *event layers* are stored and queryable at `/api/v1/events`: WILDFIRE, EVACUATION, WEATHER_ALERT, EARTHQUAKE, ROAD_INCIDENT, POWER, MESH and BURN_STATUS. The *condition layers* (`road_segment`, `chain_control`, `fire_weather`, `message_sign`) are live projections of current state, not events: they appear only on the `.geojson` map layers, in `GET /api/v1/conditions`, and in the place summary's domains.\n- **Place**: a named geography (AREA, COUNTY, TOWN, CORRIDOR). Events attach to places geometrically and every event lists its `placeIds`.\n- **Source**: an upstream feed with live health (`GET /api/v1/sources`).\n- **PlaceSummary**: the one-call rollup for a place (mode, per-domain status, top events, evacuation count).\n\n## Quickstart: build a dashboard for a place\n\n1. Pick a place: `GET /api/v1/places` lists them all (about 20). For a dashboard use an AREA (`ebbetts-pass`), a COUNTY (`calaveras-county`) or a CORRIDOR (`hwy4-arnold-bearvalley`): those have a footprint, so events and conditions attach to them. Do not build a dashboard on a TOWN (`arnold`). A town is a point, so an event attaches to it only when the event's polygon covers it (an evacuation zone, a fire perimeter), a wildfire comes near, or the fact is county-wide (burn status). Point events (road incidents, outages, earthquakes) and road conditions never attach, so a town's summary can read QUIET with an open `roads` domain while its highway is closed. Use a town to label a location and to find its county (`parentId`), or map a point or an address with `GET /api/v1/places:resolve?lat=38.25\u0026lng=-120.35` (or `?address=...`) and pick the most specific non-town place it returns. Use the `slug` in paths.\n2. Headline status: `GET /api/v1/places/{slug}/summary` returns `mode` (QUIET, WATCH or ACTIVE), one block per domain (fire, evacuation, weather, roads, seismic, power, burn, comms), the top five hazards and `activeEvacuations`. Show each domain's `status` and `highestSeverity` next to `mode`: road and chain-control conditions (a closed highway) raise the `roads` domain but never `mode`.\n3. Event feed: `GET /api/v1/events?place={slug}\u0026status=ACTIVE\u0026severityMin=MINOR`. Then `GET /api/v1/events/{id}` for detail and `/api/v1/events/{id}/history` for its timeline.\n4. Map: `GET /api/v1/places/{slug}/map/{layer}.geojson` serves one RFC 7946 FeatureCollection per layer (documented separately from the RPCs below).\n5. Context: `GET /api/v1/conditions?place={slug}` for current weather, forecasts and the fire-weather state, `GET /api/v1/cameras?place={slug}` for traffic cameras, and `GET /api/v1/sources` for source-health badges.\n\nPoll every 30 to 60 seconds. JSON responses are cacheable for 30 seconds (`Cache-Control: public, max-age=30`), GeoJSON layers and mesh links for 60; upstream feeds refresh every 2 to 15 minutes.\n\n## Filter the event feed\n\nAn unscoped `GET /api/v1/events` is mostly MESH nodes: hundreds of community radio nodes across Northern California, all INFO, many outside every place. It also holds a week of planned Caltrans roadwork (ROAD_INCIDENT, status SCHEDULED). For a hazard feed, pass `place`, pass `status=ACTIVE`, and either pass `severityMin=MINOR` or list the layers you want. POWER events at INFO are single-customer outages.\n\n## Conventions\n\n- **JSON field names are camelCase.** Every field is present, except the per-layer detail blocks on an event (only the one matching `layer` is sent), so the spec lists every other field in its schema's `required`. Only a field the spec marks `nullable` can be `null`: an object, timestamp or wrapper the server can leave unset, such as `geometry`, `expires` or `lastSuccessAt`. Everything else is never `null`. Objects and timestamps the server always fills (`provenance`, `ingestedAt`, `summary`, ...) are not marked nullable. An unset scalar is `0`, `\"\"` or `false`. Arrays are `[]` and maps `{}` when empty. Wrapper-typed fields (`activeEvacuations`, the mesh gauges) are `null` when unknown, so a real `0` is never confused with \"no reading\".\n- **Enums serialize as their name strings** (`\"SEVERE\"`), never as numbers.\n- **Timestamps** are RFC 3339 in UTC (`2026-11-07T03:13:00Z`), with up to nanosecond fractions.\n- **64-bit integers are JSON strings** (protobuf JSON mapping): mesh counters such as `uptimeSeconds: \"98350\"` and `cadenceSeconds: \"1831\"`. Parse them; 32-bit integers are plain numbers.\n- **Geometry: pass `geometryFormat=OBJECT`.** By default (`BASE64`, the legacy form kept for existing clients) `geometry.geojson` is a protobuf `bytes` field, so the RFC 7946 geometry JSON arrives base64-encoded: `JSON.parse(atob(event.geometry.geojson))`. With `geometryFormat=OBJECT` (on every route that returns events, revisions or places) the same geometry is a plain JSON object in `geometry.object` and `geometry.geojson` is empty. Coordinates are `[longitude, latitude]`. `geometry.bbox` and `geometry.centroid` are plain numbers in both forms. For maps, the `.geojson` layer endpoints serve whole FeatureCollections directly.\n- **Query parameters**: this spec names them in camelCase (`severityMin`, `pageSize`, `pageToken`, `enhancementIo`). The snake_case forms (`severity_min`, `page_size`, ...) work too. Enum values are case-insensitive. A repeated parameter can be repeated (`layer=WILDFIRE\u0026layer=POWER`) or comma-separated (`layer=WILDFIRE,POWER`).\n- **Place addressing**: anywhere a place is named, the slug (`arnold`) or the namespaced id (`town:arnold`) works.\n- **Pagination** is keyset-based. `pageSize` is a MAXIMUM: 0 or omitted means 50, values over 200 are clamped to 200, and a negative value is a 400. A page also stops before its encoded size passes about 3 MiB, so a page of perimeter-heavy events (fires, evacuation zones, outage areas) can hold fewer than `pageSize`; an event larger than that on its own is served alone on its page. Pass `nextPageToken` back as `pageToken` with the same filters (and the same `geometryFormat`) until it comes back empty: an empty token is the only end-of-list signal, never a short page. Tokens are opaque. Pages stay stable while new events arrive.\n- **Conditional GET**: event lists, event detail, event history, the revision archive, places and cameras return a weak `ETag`. Send it back in `If-None-Match` to get `304 Not Modified`. The tag changes whenever the body would, including in-place refreshes that write no revision (AI text, mesh telemetry, burn-line observations, place re-attachment). The summary, conditions, sources, resolve, scanners and mesh-telemetry endpoints do not yet send ETags.\n- **No authentication, no API key.** CORS is open (`Access-Control-Allow-Origin: *`), GET only, no credentials, so a browser page on any origin can call the API directly.\n- **Errors** are the gRPC status as JSON, `{code, codeName, message, details}`, with a mapped HTTP status: 400 `INVALID_ARGUMENT` (bad enum, timestamp or page token, `geometryFormat`), 404 `NOT_FOUND` (unknown place, event or address), 503 `UNAVAILABLE` (address geocoder down, or a request interrupted by a deploy), 500 `INTERNAL`. Branch on `codeName`. During a deploy handoff any route can briefly answer `503`: the RPCs with the JSON error (`UNAVAILABLE`), the hand-built routes (`.geojson`, mesh links) with a plain-text body and `Retry-After: 1`. Retry after a second; a retried page request with the same `pageToken` resumes exactly where it was.\n\n## Severity and status\n\nEvery event and map feature uses one severity scale: INFO (rank 0), MINOR (1), MODERATE (2), SEVERE (3), EXTREME (4). It expresses how urgently the public should respond, not physical magnitude. `severityRank` is the same value as a number, for sorting and colour ramps. `/api/v1/events` sorts by severity, then most recently observed.\n\nStatus lifecycle: SCHEDULED (planned, not yet in effect) → ACTIVE → RESOLVED (the authoritative feed stopped listing it) or EXPIRED (it aged out). An event that reappears goes back to ACTIVE with a new revision. The end of an event is a revision too, so history keeps the all-clear.\n\n## Fail-loud honesty\n\nThe API never turns a failure into an all-clear.\n\n- Source health is `OK`, `STALE` (serving last-good data while the upstream fails) or `UNAVAILABLE` (nothing trustworthy to serve). It appears on `/api/v1/sources`, on each summary domain, in the summary's `sources` sidecar, on `/api/v1/cameras`, and in each map layer's `metadata.sourceStatus`. UNAVAILABLE with no items means *unknown*. Render it as \"unknown, check the source\", never as \"none\".\n- Evacuations: `summary.activeEvacuations` is `null` when the evacuation source is UNAVAILABLE (unknown; send people to Genasys at `summary.evacuationSourceUrl`), `0` when a healthy fetch found no active zone (\"none reported\", not a guarantee), and `N` when zones are active.\n- A failed fetch never resolves or expires events. They stay as they were and the source reads STALE.\n- The fire-weather state comes only from issued NWS products. The API never infers a Red Flag Warning that NWS has not issued.\n\n## Casing quirks (kept for compatibility)\n\n- Layer names in responses (`Event.layer`, `summary.topEvents[].layer`) are UPPERCASE enum names (`ROAD_INCIDENT`). Map-layer path segments are lowercase slugs (`road_incident.geojson`). `?layer=` accepts either, plus the aliases `mesh_node` and `network` for MESH.\n- `fireWeather.state` is lowercase: `normal`, `elevated` or `red-flag`.\n- Burn-status enum values carry a prefix (`BURN_DAY_YES`, `CALFIRE_PERMIT_REQUIRED`, `BURN_PERMISSION_ALLOWED`).\n\nAPI changes are listed, dated, in [CHANGELOG.md](https://github.com/dpup/sierra-data/blob/main/CHANGELOG.md).",
     "version": "v1",
     "contact": {
       "name": "The Grid (S.I.E.R.R.A. data service)",
@@ -131,7 +131,7 @@
     "/api/v1/events": {
       "get": {
         "summary": "Query events across layers.",
-        "description": "The main event feed, from the grid event store. Defaults: status ACTIVE and\nSCHEDULED, every layer, every place, every severity, 50 per page.\n\nAn unscoped query is dominated by MESH nodes (hundreds of INFO community\nradio nodes, many outside every place) and SCHEDULED Caltrans roadwork. For\na hazard feed pass `place` and `status=ACTIVE`, and either\n`severityMin=MINOR` or an explicit `layer` list. Use\n`layer=ROAD_INCIDENT\u0026place={corridor}` for a highway's incidents and\n`layer=WEATHER_ALERT` for NWS alerts. Sorted by severity, then most recently\nobserved. Supports ETag / If-None-Match.",
+        "description": "The main event feed, from the grid event store. Defaults: status ACTIVE and\nSCHEDULED, every layer, every place, every severity, up to 50 per page.\n\nAn unscoped query is dominated by MESH nodes (hundreds of INFO community\nradio nodes, many outside every place) and SCHEDULED Caltrans roadwork. For\na hazard feed pass `place` and `status=ACTIVE`, and either\n`severityMin=MINOR` or an explicit `layer` list. Use\n`layer=ROAD_INCIDENT\u0026place={corridor}` for a highway's incidents and\n`layer=WEATHER_ALERT` for NWS alerts. Sorted by severity, then most recently\nobserved. A page holds at most `pageSize` events and stops early at about\n3 MiB encoded, so follow `nextPageToken` until it is empty. Supports\nETag / If-None-Match.",
         "operationId": "GridService_ListEvents",
         "responses": {
           "200": {
@@ -145,15 +145,11 @@
             "schema": {}
           },
           "400": {
-            "description": "INVALID_ARGUMENT: an unknown layer, status or severity, a timestamp that is not RFC 3339, a negative page size, or a bad page token.",
+            "description": "INVALID_ARGUMENT: an unknown layer, status, severity or geometryFormat, a timestamp that is not RFC 3339, a negative page size, or a bad page token.",
             "schema": {}
           },
           "404": {
             "description": "NOT_FOUND: unknown place.",
-            "schema": {}
-          },
-          "429": {
-            "description": "RESOURCE_EXHAUSTED: the page exceeded the 4 MiB response limit (large perimeters); retry with a smaller `pageSize`.",
             "schema": {}
           },
           "default": {
@@ -233,7 +229,7 @@
           },
           {
             "name": "pageSize",
-            "description": "Page size. 0 or omitted means the default of 50; values over 200 are\nclamped to 200; a negative value is a 400 INVALID_ARGUMENT.",
+            "description": "Most events per page. 0 or omitted means the default of 50; values over\n200 are clamped to 200; a negative value is a 400 INVALID_ARGUMENT. A page\ncan hold FEWER events than this, because it also stops before its encoded\nsize passes about 3 MiB (perimeter-heavy events): keep requesting while\n`nextPageToken` is non-empty, and never treat a short page as the end.",
             "in": "query",
             "required": false,
             "type": "integer",
@@ -252,6 +248,18 @@
             "in": "query",
             "required": false,
             "type": "boolean"
+          },
+          {
+            "name": "geometryFormat",
+            "description": "How each event's `geometry` carries its GeoJSON. `BASE64` (default, the\nlegacy form): the base64 `geometry.geojson` string. `OBJECT`: a plain\nJSON object in `geometry.object`, with `geometry.geojson` empty.\nCase-insensitive; anything else is a 400.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "enum": [
+              "BASE64",
+              "OBJECT"
+            ],
+            "default": "BASE64"
           }
         ],
         "tags": [
@@ -273,6 +281,10 @@
           },
           "304": {
             "description": "Not Modified: the `If-None-Match` ETag still matches.",
+            "schema": {}
+          },
+          "400": {
+            "description": "INVALID_ARGUMENT: an unknown geometryFormat.",
             "schema": {}
           },
           "404": {
@@ -300,6 +312,18 @@
             "in": "query",
             "required": false,
             "type": "boolean"
+          },
+          {
+            "name": "geometryFormat",
+            "description": "`BASE64` (default, legacy) or `OBJECT`; same as on `/api/v1/events`.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "enum": [
+              "BASE64",
+              "OBJECT"
+            ],
+            "default": "BASE64"
           }
         ],
         "tags": [
@@ -310,7 +334,7 @@
     "/api/v1/events/{id}/history": {
       "get": {
         "summary": "List one event's revisions.",
-        "description": "Every stored revision of one event, newest first, each a full snapshot. A\nstatus change (for example ACTIVE to RESOLVED) is a revision, so the last\nentries show when it ended. 50 per page by default, up to 200. Supports\nETag / If-None-Match.",
+        "description": "Every stored revision of one event, newest first, each a full snapshot. A\nstatus change (for example ACTIVE to RESOLVED) is a revision, so the last\nentries show when it ended. Up to 50 per page by default, up to 200; a\npage also stops early at about 3 MiB encoded (a perimeter that grew over\nmany revisions), so follow `nextPageToken` until it is empty. Supports\nETag / If-None-Match.",
         "operationId": "GridService_GetEventHistory",
         "responses": {
           "200": {
@@ -324,7 +348,7 @@
             "schema": {}
           },
           "400": {
-            "description": "INVALID_ARGUMENT: a negative page size or a bad page token.",
+            "description": "INVALID_ARGUMENT: a negative page size, a bad page token, or an unknown geometryFormat.",
             "schema": {}
           },
           "404": {
@@ -348,7 +372,7 @@
           },
           {
             "name": "pageSize",
-            "description": "Page size. 0 or omitted means the default of 50; values over 200 are\nclamped to 200; a negative value is a 400 INVALID_ARGUMENT.",
+            "description": "Most revisions per page. 0 or omitted means the default of 50; values\nover 200 are clamped to 200; a negative value is a 400 INVALID_ARGUMENT. A\npage can hold fewer (it stops at about 3 MiB encoded): follow\n`nextPageToken` until it is empty.",
             "in": "query",
             "required": false,
             "type": "integer",
@@ -367,6 +391,18 @@
             "in": "query",
             "required": false,
             "type": "boolean"
+          },
+          {
+            "name": "geometryFormat",
+            "description": "`BASE64` (default, legacy) or `OBJECT`; same as on `/api/v1/events`.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "enum": [
+              "BASE64",
+              "OBJECT"
+            ],
+            "default": "BASE64"
           }
         ],
         "tags": [
@@ -377,7 +413,7 @@
     "/api/v1/history": {
       "get": {
         "summary": "Query revisions across events (the archive).",
-        "description": "Revisions of all events, optionally filtered by place and layer, over a\nhalf-open `[from, to)` window on each revision's `observedAt`. With no\nwindow it covers all history. Ordered newest first. Place and layer\nfilters use each event's CURRENT place attachments and layer. Use it for\n\"what happened here last week\". Supports ETag / If-None-Match.",
+        "description": "Revisions of all events, optionally filtered by place and layer, over a\nhalf-open `[from, to)` window on each revision's `observedAt`. With no\nwindow it covers all history. Ordered newest first. Place and layer\nfilters use each event's CURRENT place attachments and layer. Use it for\n\"what happened here last week\". A page holds at most `pageSize` revisions\nand stops early at about 3 MiB encoded, so follow `nextPageToken` until it\nis empty. Supports ETag / If-None-Match.",
         "operationId": "GridService_ListHistory",
         "responses": {
           "200": {
@@ -391,15 +427,11 @@
             "schema": {}
           },
           "400": {
-            "description": "INVALID_ARGUMENT: an unknown layer, a timestamp that is not RFC 3339, a negative page size, or a bad page token.",
+            "description": "INVALID_ARGUMENT: an unknown layer or geometryFormat, a timestamp that is not RFC 3339, a negative page size, or a bad page token.",
             "schema": {}
           },
           "404": {
             "description": "NOT_FOUND: unknown place.",
-            "schema": {}
-          },
-          "429": {
-            "description": "RESOURCE_EXHAUSTED: the page exceeded the 4 MiB response limit; retry with a smaller `pageSize`.",
             "schema": {}
           },
           "default": {
@@ -456,7 +488,7 @@
           },
           {
             "name": "pageSize",
-            "description": "Page size. 0 or omitted means the default of 50; values over 200 are\nclamped to 200; a negative value is a 400 INVALID_ARGUMENT.",
+            "description": "Most revisions per page. 0 or omitted means the default of 50; values\nover 200 are clamped to 200; a negative value is a 400 INVALID_ARGUMENT. A\npage can hold fewer (it stops at about 3 MiB encoded): follow\n`nextPageToken` until it is empty.",
             "in": "query",
             "required": false,
             "type": "integer",
@@ -475,6 +507,18 @@
             "in": "query",
             "required": false,
             "type": "boolean"
+          },
+          {
+            "name": "geometryFormat",
+            "description": "`BASE64` (default, legacy) or `OBJECT`; same as on `/api/v1/events`.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "enum": [
+              "BASE64",
+              "OBJECT"
+            ],
+            "default": "BASE64"
           }
         ],
         "tags": [
@@ -553,7 +597,7 @@
             "schema": {}
           },
           "400": {
-            "description": "INVALID_ARGUMENT: unknown kind.",
+            "description": "INVALID_ARGUMENT: unknown kind or geometryFormat.",
             "schema": {}
           },
           "default": {
@@ -585,6 +629,18 @@
             "in": "query",
             "required": false,
             "type": "string"
+          },
+          {
+            "name": "geometryFormat",
+            "description": "`BASE64` (default, legacy) or `OBJECT` for each place's `geometry`; same\nas on `/api/v1/events`.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "enum": [
+              "BASE64",
+              "OBJECT"
+            ],
+            "default": "BASE64"
           }
         ],
         "tags": [
@@ -608,6 +664,10 @@
             "description": "Not Modified: the `If-None-Match` ETag still matches.",
             "schema": {}
           },
+          "400": {
+            "description": "INVALID_ARGUMENT: an unknown geometryFormat.",
+            "schema": {}
+          },
           "404": {
             "description": "NOT_FOUND: unknown place.",
             "schema": {}
@@ -626,6 +686,18 @@
             "in": "path",
             "required": true,
             "type": "string"
+          },
+          {
+            "name": "geometryFormat",
+            "description": "`BASE64` (default, legacy) or `OBJECT`; same as on `/api/v1/events`.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "enum": [
+              "BASE64",
+              "OBJECT"
+            ],
+            "default": "BASE64"
           }
         ],
         "tags": [
@@ -683,7 +755,7 @@
             }
           },
           "400": {
-            "description": "INVALID_ARGUMENT: neither or both of lat+lng and address, only one of lat/lng, or a value out of range.",
+            "description": "INVALID_ARGUMENT: neither or both of lat+lng and address, only one of lat/lng, a value out of range, or an unknown geometryFormat.",
             "schema": {}
           },
           "404": {
@@ -724,6 +796,18 @@
             "in": "query",
             "required": false,
             "type": "string"
+          },
+          {
+            "name": "geometryFormat",
+            "description": "`BASE64` (default, legacy) or `OBJECT` for each place's `geometry`; same\nas on `/api/v1/events`.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "enum": [
+              "BASE64",
+              "OBJECT"
+            ],
+            "default": "BASE64"
           }
         ],
         "tags": [
@@ -802,6 +886,14 @@
         }
       },
       "additionalProperties": {}
+    },
+    "protobufNullValue": {
+      "type": "string",
+      "enum": [
+        "NULL_VALUE"
+      ],
+      "default": "NULL_VALUE",
+      "description": "`NullValue` is a singleton enumeration to represent the null value for the\n`Value` type union.\n\nThe JSON representation for `NullValue` is JSON `null`.\n\n - NULL_VALUE: Null value."
     },
     "rpcStatus": {
       "type": "object",
@@ -1546,7 +1638,7 @@
           "type": "string",
           "format": "byte",
           "example": "eyJ0eXBlIjoiUG9pbnQiLCJjb29yZGluYXRlcyI6Wy0xMjAuMzYxMDgsMzguMjQyMzldfQ==",
-          "description": "The RFC 7946 GeoJSON geometry object (Point, LineString, Polygon,\nMultiPolygon, ...) as UTF-8 JSON, BASE64-ENCODED in this JSON response\nbecause the field is protobuf `bytes`. Decode with\n`JSON.parse(atob(geojson))`. Coordinates are `[longitude, latitude]`.\nWildfire perimeters and evacuation zones can be tens of kilobytes."
+          "description": "LEGACY FORM (the default, `geometryFormat=BASE64`). The RFC 7946 GeoJSON\ngeometry object (Point, LineString, Polygon, MultiPolygon, ...) as UTF-8\nJSON, BASE64-ENCODED in this JSON response because the field is protobuf\n`bytes`. Decode with `JSON.parse(atob(geojson))`. Coordinates are\n`[longitude, latitude]`. Empty in the `OBJECT` form. Kept unchanged for existing clients; new clients should\nrequest `geometryFormat=OBJECT` and read `object` instead. Perimeters,\nevacuation zones and outage areas run from kilobytes to about a megabyte."
         },
         "bbox": {
           "$ref": "#/definitions/v1BoundingBox",
@@ -1555,9 +1647,13 @@
         "centroid": {
           "$ref": "#/definitions/v1LatLng",
           "description": "Representative point for markers and list views: the point itself for a\nPoint, otherwise the middle of the bounding box (which can fall outside an\nirregular polygon)."
+        },
+        "object": {
+          "type": "object",
+          "description": "The same RFC 7946 geometry as a plain JSON object, e.g.\n`{\"type\": \"Point\", \"coordinates\": [-120.36108, 38.24239]}`, ready for\nMapLibre, Leaflet or turf with no decoding. Sent only when the request\nasks for `geometryFormat=OBJECT`, and then only when the event has\nGeoJSON; otherwise the key is absent (never `null`)."
         }
       },
-      "description": "Geometry is an event's or place's footprint.",
+      "description": "Geometry is an event's or place's footprint.\n\nThe GeoJSON comes in one of two forms, chosen per request with\n`geometryFormat`: `BASE64` (the default and legacy form) fills `geojson`;\n`OBJECT` fills `object` and leaves `geojson` empty. `bbox` and `centroid`\nare the same in both.",
       "required": [
         "bbox",
         "centroid"

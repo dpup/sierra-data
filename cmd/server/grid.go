@@ -487,6 +487,10 @@ func (a *gridApp) Activate(actx context.Context) (err error) {
 		prefab.WithPlugin(etag.Plugin()),
 		prefab.WithGRPCService(&gridv1.GridService_ServiceDesc, gridServer),
 		prefab.WithGRPCGateway(func(ctx context.Context, mux *runtime.ServeMux, endpoint string, opts []grpc.DialOption) error {
+			// Raise the loopback client's 4 MiB receive limit, so an event
+			// bigger than the list page budget is still served (alone on its
+			// page, or from GetEvent). See gridapi.PageByteBudget.
+			opts = append(append([]grpc.DialOption{}, opts...), gridapi.GatewayDialOptions()...)
 			if err := gridv1.RegisterGridServiceHandlerFromEndpoint(ctx, mux, endpoint, opts); err != nil {
 				return err
 			}

@@ -50,25 +50,36 @@ func TestResponsesHonorFieldPresence(t *testing.T) {
 	}
 
 	allStatuses := []string{"ACTIVE", "SCHEDULED", "RESOLVED", "EXPIRED"}
-	events, err := g.ListEvents(ctx, &gridv1.ListEventsRequest{Status: allStatuses, PageSize: 200})
-	check("ListEvents", events, err)
-	require.NotEmpty(t, events.GetEvents())
-	for _, ev := range events.GetEvents() {
-		got, err := g.GetEvent(rpcBG(), &gridv1.GetEventRequest{Id: ev.GetId(), EnhancementIo: true})
-		check("GetEvent "+ev.GetId(), got, err)
-		hist, err := g.GetEventHistory(rpcBG(), &gridv1.GetEventHistoryRequest{Id: ev.GetId()})
-		check("GetEventHistory "+ev.GetId(), hist, err)
+	// Both geometry encodings: the default base64 `geojson`, and OBJECT, which
+	// empties it and fills the optional `object` instead.
+	for _, format := range []string{"", "OBJECT"} {
+		f := " format=" + format
+		events, err := g.ListEvents(ctx, &gridv1.ListEventsRequest{Status: allStatuses, PageSize: 200, GeometryFormat: format})
+		check("ListEvents"+f, events, err)
+		require.NotEmpty(t, events.GetEvents())
+		for _, ev := range events.GetEvents() {
+			got, err := g.GetEvent(rpcBG(), &gridv1.GetEventRequest{Id: ev.GetId(), EnhancementIo: true, GeometryFormat: format})
+			check("GetEvent "+ev.GetId()+f, got, err)
+			hist, err := g.GetEventHistory(rpcBG(), &gridv1.GetEventHistoryRequest{Id: ev.GetId(), GeometryFormat: format})
+			check("GetEventHistory "+ev.GetId()+f, hist, err)
+		}
+		hist, err := g.ListHistory(rpcBG(), &gridv1.ListHistoryRequest{PageSize: 200, GeometryFormat: format})
+		check("ListHistory"+f, hist, err)
+		places, err := g.ListPlaces(rpcBG(), &gridv1.ListPlacesRequest{GeometryFormat: format})
+		check("ListPlaces"+f, places, err)
+		for _, p := range places.GetPlaces() {
+			got, err := g.GetPlace(rpcBG(), &gridv1.GetPlaceRequest{Place: p.GetSlug(), GeometryFormat: format})
+			check("GetPlace "+p.GetSlug()+f, got, err)
+		}
+		res, err := g.ResolvePlace(rpcBG(), &gridv1.ResolvePlaceRequest{Lat: "38.2552", Lng: "-120.3512", GeometryFormat: format})
+		check("ResolvePlace lat/lng"+f, res, err)
 	}
-	hist, err := g.ListHistory(rpcBG(), &gridv1.ListHistoryRequest{PageSize: 200})
-	check("ListHistory", hist, err)
 
 	places, err := g.ListPlaces(rpcBG(), &gridv1.ListPlacesRequest{})
 	check("ListPlaces", places, err)
 	require.NotEmpty(t, places.GetPlaces())
 	for _, p := range places.GetPlaces() {
 		slug := p.GetSlug()
-		got, err := g.GetPlace(rpcBG(), &gridv1.GetPlaceRequest{Place: slug})
-		check("GetPlace "+slug, got, err)
 		sum, err := g.GetPlaceSummary(rpcBG(), &gridv1.GetPlaceSummaryRequest{Place: slug})
 		check("GetPlaceSummary "+slug, sum, err)
 		// The same builder with condition layers wired (the concrete GridServer
@@ -85,9 +96,7 @@ func TestResponsesHonorFieldPresence(t *testing.T) {
 		check("ListScanners place="+slug, scan, err)
 	}
 
-	res, err := g.ResolvePlace(rpcBG(), &gridv1.ResolvePlaceRequest{Lat: "38.2552", Lng: "-120.3512"})
-	check("ResolvePlace lat/lng", res, err)
-	res, err = g.ResolvePlace(rpcBG(), &gridv1.ResolvePlaceRequest{Address: "1 Main St, Arnold, CA"})
+	res, err := g.ResolvePlace(rpcBG(), &gridv1.ResolvePlaceRequest{Address: "1 Main St, Arnold, CA"})
 	check("ResolvePlace address", res, err)
 	res, err = g.ResolvePlace(rpcBG(), &gridv1.ResolvePlaceRequest{Lat: "0", Lng: "0"})
 	check("ResolvePlace outside every place", res, err)

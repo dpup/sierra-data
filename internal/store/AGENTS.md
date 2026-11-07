@@ -378,6 +378,24 @@ vacuous. Denormalizing `status` onto `event_places` would be marginally faster
 tables — and a drift there would silently hide an ACTIVE event from a
 place-scoped query, which is the one failure this service must not have.
 
+## `QueryEvents` sorts keys, then fetches blobs
+
+`idx_events_active` orders by severity within ONE status, so any status list
+(the default `ACTIVE,SCHEDULED` included) sorts in a temp B-tree. When the
+sorted `SELECT` carried `e.proto`, SQLite copied the blob of every matching row
+into the sorter to keep 201. An all-statuses page took 25-40 s in production
+whatever its `page_size` (pageSize=5 took 25 s), and a 253 MB local fixture
+measured 35 ms against 0.8 ms. That long read is also what a deploy's drain
+cancelled into a 500. `eventsPageSQL` sorts `(id, severity, observed_at)` in a
+subquery, which reads only the leaf pages ahead of the blob and never its
+overflow chain, and joins back by primary key for the page's rows alone.
+`TestQueryEventsSortsKeysNotBlobs` pins that shape. Do not add the blob back to
+the inner select.
+
+Every page read returns a `Page[T]` with a resume token per row (`After[i]`),
+so a caller can serve a prefix (gridapi cuts at a byte budget) and the walk
+stays complete. The tokens are the same keyset cursors as before.
+
 ## The mesh tables are measurements, not records
 
 Four tables hang off the mesh subsystem and none of them is proto-blob

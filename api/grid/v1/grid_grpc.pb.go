@@ -47,7 +47,7 @@ type GridServiceClient interface {
 	// Query events across layers.
 	//
 	// The main event feed, from the grid event store. Defaults: status ACTIVE and
-	// SCHEDULED, every layer, every place, every severity, 50 per page.
+	// SCHEDULED, every layer, every place, every severity, up to 50 per page.
 	//
 	// An unscoped query is dominated by MESH nodes (hundreds of INFO community
 	// radio nodes, many outside every place) and SCHEDULED Caltrans roadwork. For
@@ -55,7 +55,9 @@ type GridServiceClient interface {
 	// `severityMin=MINOR` or an explicit `layer` list. Use
 	// `layer=ROAD_INCIDENT&place={corridor}` for a highway's incidents and
 	// `layer=WEATHER_ALERT` for NWS alerts. Sorted by severity, then most recently
-	// observed. Supports ETag / If-None-Match.
+	// observed. A page holds at most `pageSize` events and stops early at about
+	// 3 MiB encoded, so follow `nextPageToken` until it is empty. Supports
+	// ETag / If-None-Match.
 	ListEvents(ctx context.Context, in *ListEventsRequest, opts ...grpc.CallOption) (*EventList, error)
 	// Get one event.
 	//
@@ -69,7 +71,9 @@ type GridServiceClient interface {
 	//
 	// Every stored revision of one event, newest first, each a full snapshot. A
 	// status change (for example ACTIVE to RESOLVED) is a revision, so the last
-	// entries show when it ended. 50 per page by default, up to 200. Supports
+	// entries show when it ended. Up to 50 per page by default, up to 200; a
+	// page also stops early at about 3 MiB encoded (a perimeter that grew over
+	// many revisions), so follow `nextPageToken` until it is empty. Supports
 	// ETag / If-None-Match.
 	GetEventHistory(ctx context.Context, in *GetEventHistoryRequest, opts ...grpc.CallOption) (*EventRevisionList, error)
 	// Query revisions across events (the archive).
@@ -78,7 +82,9 @@ type GridServiceClient interface {
 	// half-open `[from, to)` window on each revision's `observedAt`. With no
 	// window it covers all history. Ordered newest first. Place and layer
 	// filters use each event's CURRENT place attachments and layer. Use it for
-	// "what happened here last week". Supports ETag / If-None-Match.
+	// "what happened here last week". A page holds at most `pageSize` revisions
+	// and stops early at about 3 MiB encoded, so follow `nextPageToken` until it
+	// is empty. Supports ETag / If-None-Match.
 	ListHistory(ctx context.Context, in *ListHistoryRequest, opts ...grpc.CallOption) (*EventRevisionList, error)
 	// List places.
 	//
@@ -311,7 +317,7 @@ type GridServiceServer interface {
 	// Query events across layers.
 	//
 	// The main event feed, from the grid event store. Defaults: status ACTIVE and
-	// SCHEDULED, every layer, every place, every severity, 50 per page.
+	// SCHEDULED, every layer, every place, every severity, up to 50 per page.
 	//
 	// An unscoped query is dominated by MESH nodes (hundreds of INFO community
 	// radio nodes, many outside every place) and SCHEDULED Caltrans roadwork. For
@@ -319,7 +325,9 @@ type GridServiceServer interface {
 	// `severityMin=MINOR` or an explicit `layer` list. Use
 	// `layer=ROAD_INCIDENT&place={corridor}` for a highway's incidents and
 	// `layer=WEATHER_ALERT` for NWS alerts. Sorted by severity, then most recently
-	// observed. Supports ETag / If-None-Match.
+	// observed. A page holds at most `pageSize` events and stops early at about
+	// 3 MiB encoded, so follow `nextPageToken` until it is empty. Supports
+	// ETag / If-None-Match.
 	ListEvents(context.Context, *ListEventsRequest) (*EventList, error)
 	// Get one event.
 	//
@@ -333,7 +341,9 @@ type GridServiceServer interface {
 	//
 	// Every stored revision of one event, newest first, each a full snapshot. A
 	// status change (for example ACTIVE to RESOLVED) is a revision, so the last
-	// entries show when it ended. 50 per page by default, up to 200. Supports
+	// entries show when it ended. Up to 50 per page by default, up to 200; a
+	// page also stops early at about 3 MiB encoded (a perimeter that grew over
+	// many revisions), so follow `nextPageToken` until it is empty. Supports
 	// ETag / If-None-Match.
 	GetEventHistory(context.Context, *GetEventHistoryRequest) (*EventRevisionList, error)
 	// Query revisions across events (the archive).
@@ -342,7 +352,9 @@ type GridServiceServer interface {
 	// half-open `[from, to)` window on each revision's `observedAt`. With no
 	// window it covers all history. Ordered newest first. Place and layer
 	// filters use each event's CURRENT place attachments and layer. Use it for
-	// "what happened here last week". Supports ETag / If-None-Match.
+	// "what happened here last week". A page holds at most `pageSize` revisions
+	// and stops early at about 3 MiB encoded, so follow `nextPageToken` until it
+	// is empty. Supports ETag / If-None-Match.
 	ListHistory(context.Context, *ListHistoryRequest) (*EventRevisionList, error)
 	// List places.
 	//

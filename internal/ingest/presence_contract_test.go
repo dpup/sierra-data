@@ -70,9 +70,10 @@ func TestNormalizersHonorFieldPresence(t *testing.T) {
 		assert.Empty(t, problems, "%s violates the spec's presence contract", what)
 	}
 	stored := map[string]bool{} // source ids with at least one stored event
-	sweep := func(phase string) []string {
+	sweep := func(phase, format string) []string {
+		phase += " format=" + format
 		var ids []string
-		req := &gridv1.ListEventsRequest{Status: []string{"ACTIVE", "SCHEDULED", "RESOLVED", "EXPIRED"}, PageSize: 200}
+		req := &gridv1.ListEventsRequest{Status: []string{"ACTIVE", "SCHEDULED", "RESOLVED", "EXPIRED"}, PageSize: 200, GeometryFormat: format}
 		var events []*gridv1.Event
 		for {
 			list, err := g.ListEvents(rpcStreamCtx(), req)
@@ -86,17 +87,18 @@ func TestNormalizersHonorFieldPresence(t *testing.T) {
 		for _, ev := range events {
 			ids = append(ids, ev.GetId())
 			stored[ev.GetProvenance().GetSourceId()] = true
-			got, err := g.GetEvent(rpcStreamCtx(), &gridv1.GetEventRequest{Id: ev.GetId(), EnhancementIo: true})
+			got, err := g.GetEvent(rpcStreamCtx(), &gridv1.GetEventRequest{Id: ev.GetId(), EnhancementIo: true, GeometryFormat: format})
 			check(phase+" GetEvent "+ev.GetId(), got, err)
-			hist, err := g.GetEventHistory(rpcStreamCtx(), &gridv1.GetEventHistoryRequest{Id: ev.GetId()})
+			hist, err := g.GetEventHistory(rpcStreamCtx(), &gridv1.GetEventHistoryRequest{Id: ev.GetId(), GeometryFormat: format})
 			check(phase+" GetEventHistory "+ev.GetId(), hist, err)
 		}
-		hist, err := g.ListHistory(rpcStreamCtx(), &gridv1.ListHistoryRequest{PageSize: 200})
+		hist, err := g.ListHistory(rpcStreamCtx(), &gridv1.ListHistoryRequest{PageSize: 200, GeometryFormat: format})
 		check(phase+" ListHistory", hist, err)
 		return ids
 	}
 
-	ids := sweep("ingested")
+	sweep("ingested", "OBJECT") // the opt-in plain-JSON geometry form
+	ids := sweep("ingested", "")
 	for name, n := range pollers {
 		found := false
 		for _, src := range n.SourceIDs() {
@@ -105,7 +107,8 @@ func TestNormalizersHonorFieldPresence(t *testing.T) {
 		assert.True(t, found, "poller %s stored no events: its fixture no longer exercises the contract", name)
 	}
 	require.NoError(t, st.TransitionEvents(ctx, ids, gridv1.EventStatus_RESOLVED, time.Now()))
-	sweep("resolved")
+	sweep("resolved", "")
+	sweep("resolved", "OBJECT")
 
 	event := gridv1.File_grid_proto.Messages().ByName("Event")
 	revisions := gridv1.File_grid_proto.Messages().ByName("EventRevisionList")
