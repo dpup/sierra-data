@@ -702,7 +702,7 @@ restart rehydrates events + history with no re-fetch. The in-memory TTL caches
 
 `cmd/mesh-relay` runs the relay library `github.com/dpup/sierra-meshrelay/relay`
 (imported as `meshrelay`; code, tests and docs live in
-[dpup/sierra-meshrelay](https://github.com/dpup/sierra-meshrelay) alongside the
+[sierragridteam/sierra-meshrelay](https://github.com/sierragridteam/sierra-meshrelay) alongside the
 wire protocol and the bridge). It is the meeting point for MeshCore gateway
 bridges at volunteers' houses (they dial OUT over WSS) and the authenticated
 clients that use a node through them, at `/mesh/relay/*`. **It is not part of
