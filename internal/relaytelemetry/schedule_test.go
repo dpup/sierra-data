@@ -253,6 +253,38 @@ func TestScheduleResumesAfterARestart(t *testing.T) {
 	assert.NotEqual(t, off, p.offset(strings.Repeat("b", 64)))
 }
 
+func TestReportKeepsTheLastReadingAcrossARestart(t *testing.T) {
+	h := newSched(t, []string{"a"}, map[string][]error{"a": {nil}}, meshrelay.RepeaterPollState{})
+	h.at(0)
+	require.Len(t, h.calls(), 1)
+	require.NotEmpty(t, h.reps.state.Reading, "the reading is saved with the schedule")
+
+	// Restart: a new poller, the relay's stamps from that read.
+	h.reps.cred.LastAttemptAt, h.reps.cred.LastOKAt = ptr(t0), ptr(t0)
+	h.now = t0.Add(5 * time.Minute)
+	p := New(Config{GridURL: "http://grid.invalid", IngestToken: "x", Now: func() time.Time { return h.now }},
+		nil, fakeGateways{"a"}, h.reps)
+	p.RepeaterTick(h.ctx)
+	assert.Len(t, h.calls(), 1, "not polled again: the schedule holds")
+	rep := p.Report()
+	require.Len(t, rep.Repeaters, 1, "still reported before its next cycle")
+	e := rep.Repeaters[0]
+	assert.True(t, e.Online)
+	assert.Equal(t, t0.Unix(), *e.LastSuccess)
+	require.NotNil(t, e.BatteryVoltage)
+	assert.InDelta(t, 4.0, *e.BatteryVoltage, 0.001)
+
+	// One that was failing reports the failure with its last reading.
+	h.reps.cred.LastAttemptAt, h.reps.cred.LastError = ptr(t0.Add(time.Minute)), "no answer"
+	p = New(Config{GridURL: "http://grid.invalid", IngestToken: "x", Now: func() time.Time { return h.now }},
+		nil, fakeGateways{"a"}, h.reps)
+	p.RepeaterTick(h.ctx)
+	e = p.Report().Repeaters[0]
+	assert.False(t, e.Online)
+	assert.Equal(t, t0.Unix(), *e.LastSuccess)
+	assert.NotNil(t, e.BatteryVoltage)
+}
+
 func gws(cs []call) []string {
 	var out []string
 	for _, c := range cs {

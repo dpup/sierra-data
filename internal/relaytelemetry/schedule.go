@@ -28,8 +28,9 @@ package relaytelemetry
 // those cycles), hibernates: one cycle a day, checked against the Grid each
 // interval so it wakes as soon as something else hears it.
 //
-// The state is saved in the relay (SetRepeaterPollState), so a restart
-// resumes the schedule rather than polling everything at once.
+// The state is saved in the relay (SetRepeaterPollState), with the last
+// reading, so a restart resumes the schedule rather than polling everything
+// at once, and the report keeps each repeater's readings meanwhile.
 
 import (
 	"context"
@@ -134,6 +135,7 @@ func (p *Poller) tickRepeater(ctx context.Context, c meshrelay.RepeaterCredentia
 			j.state.NextCycle = now.Add(p.offset(c.Pubkey))
 		}
 		p.jobs[c.Pubkey] = j
+		p.restore(c)
 	}
 	// A refused password waits for the share to be updated.
 	if r := j.state.RefusedAt; r != nil {
@@ -229,6 +231,9 @@ func (p *Poller) endCycle(ctx context.Context, j *repeaterJob, c meshrelay.Repea
 	case res != nil:
 		outcome = outcomeOK
 		st.Primary, st.FailedCycles, st.HibernatingSince = cy.via, 0, nil
+		if b, err := json.Marshal(sampleFromCheck(*res)); err == nil {
+			st.Reading = b
+		}
 	case errors.Is(cy.lastErr, meshops.ErrLoginFailed):
 		outcome = outcomeFailed
 		st.RefusedAt = ptr(now)
@@ -292,6 +297,34 @@ func (p *Poller) endCycle(ctx context.Context, j *repeaterJob, c meshrelay.Repea
 	} else {
 		logging.Debugw(ctx, "Relay telemetry repeater poll", kv...)
 	}
+}
+
+// restore puts a repeater the poller hasn't read since it started back in
+// the report, from what the relay kept: the last attempt and success, and
+// the saved reading. The report is the complete set, so without this a
+// restart would blank its readings on the Grid until its next cycle.
+func (p *Poller) restore(c meshrelay.RepeaterCredential) {
+	if c.LastAttemptAt == nil {
+		return // never tried: not reported yet
+	}
+	ns := &nodeState{pubkey: c.Pubkey, name: c.Name, lastAttempt: *c.LastAttemptAt, outcome: outcomeFailed}
+	if c.LastOKAt != nil {
+		ns.lastSuccess = *c.LastOKAt
+		if c.LastError == "" {
+			ns.outcome = outcomeOK
+		}
+	}
+	if len(c.Poll.Reading) > 0 && !ns.lastSuccess.IsZero() {
+		var s Sample
+		if err := json.Unmarshal(c.Poll.Reading, &s); err == nil {
+			ns.sample = &s
+		}
+	}
+	p.mu.Lock()
+	if p.repeaters[c.Pubkey] == nil {
+		p.repeaters[c.Pubkey] = ns
+	}
+	p.mu.Unlock()
 }
 
 // candidates orders the gateways to try for a repeater: its primary (or the
