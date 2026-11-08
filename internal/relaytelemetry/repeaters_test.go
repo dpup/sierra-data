@@ -20,8 +20,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dpup/sierra-meshrelay/meshops/meshsim"
-	meshrelay "github.com/dpup/sierra-meshrelay/relay"
+	"github.com/sierragridteam/sierra-meshrelay/meshops/meshsim"
+	meshrelay "github.com/sierragridteam/sierra-meshrelay/relay"
 )
 
 // newRepeaterHarness is newHarness with a secret key, so repeaters can be

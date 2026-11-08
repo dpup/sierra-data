@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
-	"github.com/dpup/sierra-data/internal/lib/geojson"
+	gridv1 "github.com/sierragridteam/sierra-data/api/grid/v1"
+	"github.com/sierragridteam/sierra-data/internal/lib/geojson"
 	"google.golang.org/protobuf/proto"
 )
 

@@ -12,16 +12,16 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
 
-	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
-	api "github.com/dpup/sierra-data/api/v1"
-	"github.com/dpup/sierra-data/internal/clients/caloes"
-	"github.com/dpup/sierra-data/internal/clients/cwwp2"
-	"github.com/dpup/sierra-data/internal/clients/meshcore"
-	"github.com/dpup/sierra-data/internal/clients/usgs"
-	"github.com/dpup/sierra-data/internal/config"
-	"github.com/dpup/sierra-data/internal/gridapi"
-	"github.com/dpup/sierra-data/internal/openapispec"
-	"github.com/dpup/sierra-data/internal/places"
+	gridv1 "github.com/sierragridteam/sierra-data/api/grid/v1"
+	api "github.com/sierragridteam/sierra-data/api/v1"
+	"github.com/sierragridteam/sierra-data/internal/clients/caloes"
+	"github.com/sierragridteam/sierra-data/internal/clients/cwwp2"
+	"github.com/sierragridteam/sierra-data/internal/clients/meshcore"
+	"github.com/sierragridteam/sierra-data/internal/clients/usgs"
+	"github.com/sierragridteam/sierra-data/internal/config"
+	"github.com/sierragridteam/sierra-data/internal/gridapi"
+	"github.com/sierragridteam/sierra-data/internal/openapispec"
+	"github.com/sierragridteam/sierra-data/internal/places"
 )
 
 // TestNormalizersHonorFieldPresence is the normalizer half of the spec's

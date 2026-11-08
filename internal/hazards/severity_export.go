@@ -3,7 +3,7 @@ package hazards
 import (
 	"strings"
 
-	api "github.com/dpup/sierra-data/api/v1"
+	api "github.com/sierragridteam/sierra-data/api/v1"
 )
 
 // Exported wrappers over this package's pure severity/normalization helpers,

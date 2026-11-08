@@ -8,11 +8,7 @@
 // LABELs) and diff the JSON to classify each spacing issue as a migration
 // regression vs. pre-existing, and to pinpoint the exact element + property.
 //
-// Uses the Playwright + Chromium provided by the Moat `playwright` dependency
-// (see moat.yaml) — no local install. Because that Playwright is installed
-// globally and ESM `import` ignores NODE_PATH, resolve it with a CommonJS
-// require (which does honor NODE_PATH); `make site-shots` sets NODE_PATH to the
-// global npm root.
+// Uses the locked Playwright dependency from web/ (installed by make site-modules).
 //
 // Usage (server must already be running at BASE_URL):
 //   BASE_URL=http://localhost:8190 LABEL=after node shots.mjs
@@ -23,7 +19,7 @@ import { createRequire } from 'node:module';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
-const { chromium } = createRequire(import.meta.url)('playwright');
+const { chromium } = createRequire(new URL('../../web/package.json', import.meta.url))('playwright');
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:8190';
 const LABEL = process.env.LABEL || 'current';

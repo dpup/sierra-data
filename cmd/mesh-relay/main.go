@@ -1,6 +1,6 @@
 // Command mesh-relay is the SIERRA Mesh Relay: the service MeshCore gateway
 // bridges dial out to, and that authenticated clients reach a node through.
-// The relay itself is the library github.com/dpup/sierra-meshrelay/relay;
+// The relay itself is the library github.com/sierragridteam/sierra-meshrelay/relay;
 // see docs/relay.md there. This command wires it into sierra-data's prefab
 // config and deploy handoff.
 //
@@ -31,11 +31,11 @@ import (
 	"github.com/dpup/prefab"
 	"github.com/dpup/prefab/logging"
 
-	"github.com/dpup/sierra-data/internal/config"
-	"github.com/dpup/sierra-data/internal/handoff"
-	"github.com/dpup/sierra-data/internal/relaytelemetry"
+	"github.com/sierragridteam/sierra-data/internal/config"
+	"github.com/sierragridteam/sierra-data/internal/handoff"
+	"github.com/sierragridteam/sierra-data/internal/relaytelemetry"
 
-	meshrelay "github.com/dpup/sierra-meshrelay/relay"
+	meshrelay "github.com/sierragridteam/sierra-meshrelay/relay"
 )
 
 const defaultPort = 8090

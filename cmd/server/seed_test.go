@@ -6,8 +6,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/dpup/sierra-data/internal/clients/meshcore"
-	"github.com/dpup/sierra-data/internal/store"
+	"github.com/sierragridteam/sierra-data/internal/clients/meshcore"
+	"github.com/sierragridteam/sierra-data/internal/store"
 )
 
 func TestSeedPathsDropsBrokerFallbackObserver(t *testing.T) {

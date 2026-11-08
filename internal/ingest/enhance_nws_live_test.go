@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dpup/sierra-data/internal/clients/nws"
-	"github.com/dpup/sierra-data/internal/config"
+	"github.com/sierragridteam/sierra-data/internal/clients/nws"
+	"github.com/sierragridteam/sierra-data/internal/config"
 )
 
 // TestNWSEnhancerLive runs the real prompt against the real model on a real

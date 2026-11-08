@@ -8,8 +8,8 @@ import (
 
 	"github.com/dpup/prefab/logging"
 
-	"github.com/dpup/sierra-data/internal/clients/caltrans"
-	"github.com/dpup/sierra-data/internal/clients/cwwp2"
+	"github.com/sierragridteam/sierra-data/internal/clients/caltrans"
+	"github.com/sierragridteam/sierra-data/internal/clients/cwwp2"
 )
 
 // LaneClosureFetcher is the slice of *cwwp2.Client segment status uses.

@@ -70,7 +70,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dpup/sierra-data/internal/config"
+	"github.com/sierragridteam/sierra-data/internal/config"
 )
 
 // reporterDeadMultiple bounds how long a silent reporter may suppress the

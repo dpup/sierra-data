@@ -35,7 +35,7 @@ import (
 
 	"github.com/dpup/prefab/logging"
 
-	meshrelay "github.com/dpup/sierra-meshrelay/relay"
+	meshrelay "github.com/sierragridteam/sierra-meshrelay/relay"
 )
 
 // ClientName is the lease holder's name in the relay's lease audit and the

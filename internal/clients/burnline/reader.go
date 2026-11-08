@@ -33,7 +33,7 @@ import (
 
 	openai "github.com/sashabaranov/go-openai"
 
-	"github.com/dpup/sierra-data/internal/clients/twilio"
+	"github.com/sierragridteam/sierra-data/internal/clients/twilio"
 )
 
 // Status is the extracted burn-day answer, in the vocabulary the ingest push

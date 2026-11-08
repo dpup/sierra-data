@@ -259,7 +259,6 @@ import PageHead from '../components/PageHead.astro';
 
   <!-- renderEventDetail draws each record's geometry when MapLibre is present;
        without it the detail column silently degrades to bbox/centroid text. -->
-  <script is:inline src="/lib/maplibre-gl.js"></script>
   <script is:inline type="module">
     import { initEventsPage } from '/assets/pages/events.js';
     initEventsPage();

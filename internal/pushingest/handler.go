@@ -15,7 +15,7 @@ import (
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"google.golang.org/grpc/codes"
 
-	"github.com/dpup/sierra-data/internal/lib/httperr"
+	"github.com/sierragridteam/sierra-data/internal/lib/httperr"
 )
 
 // streamHandler consumes one validated request body for one stream. Adding a

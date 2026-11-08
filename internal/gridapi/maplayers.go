@@ -9,12 +9,12 @@ import (
 	"strings"
 	"time"
 
-	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
-	"github.com/dpup/sierra-data/internal/clients/caloes"
-	"github.com/dpup/sierra-data/internal/config"
-	"github.com/dpup/sierra-data/internal/hazards"
-	"github.com/dpup/sierra-data/internal/lib/geojson"
-	"github.com/dpup/sierra-data/internal/store"
+	gridv1 "github.com/sierragridteam/sierra-data/api/grid/v1"
+	"github.com/sierragridteam/sierra-data/internal/clients/caloes"
+	"github.com/sierragridteam/sierra-data/internal/config"
+	"github.com/sierragridteam/sierra-data/internal/hazards"
+	"github.com/sierragridteam/sierra-data/internal/lib/geojson"
+	"github.com/sierragridteam/sierra-data/internal/store"
 )
 
 // GET /api/v1/places/{place}/map/{layer}.geojson (plan §2.3, task T12b-1).

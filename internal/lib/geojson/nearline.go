@@ -1,6 +1,6 @@
 package geojson
 
-import "github.com/dpup/sierra-data/internal/lib/geo"
+import "github.com/sierragridteam/sierra-data/internal/lib/geo"
 
 // PointInOrNearGeometry reports whether (lat, lng) is inside a polygon geometry
 // (exact point-in-polygon) OR within meters of a line geometry (corridor

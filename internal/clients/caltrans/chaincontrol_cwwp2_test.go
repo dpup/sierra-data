@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dpup/sierra-data/internal/clients/cwwp2"
+	"github.com/sierragridteam/sierra-data/internal/clients/cwwp2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

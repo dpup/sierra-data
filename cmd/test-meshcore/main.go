@@ -38,7 +38,7 @@ import (
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 
-	"github.com/dpup/sierra-data/internal/clients/meshcore"
+	"github.com/sierragridteam/sierra-data/internal/clients/meshcore"
 )
 
 type envelope struct {

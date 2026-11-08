@@ -1,3 +1,4 @@
+import * as maplibregl from '/lib/maplibre-gl.mjs';
 // places.js — /places: directory by kind, place detail with geometry, and the
 // resolve tester (secretly the zone-import QA tool).
 //

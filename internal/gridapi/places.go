@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
+	gridv1 "github.com/sierragridteam/sierra-data/api/grid/v1"
 )
 
 // parseKind maps a place-kind param (enum name, case-insensitive, so

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/dpup/sierra-data/site"
+	"github.com/sierragridteam/sierra-data/site"
 )
 
 // siteETags memoizes each embedded file's content hash. The embedded FS is

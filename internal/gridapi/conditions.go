@@ -3,9 +3,9 @@ package gridapi
 import (
 	"context"
 
-	api "github.com/dpup/sierra-data/api/v1"
-	"github.com/dpup/sierra-data/internal/config"
-	"github.com/dpup/sierra-data/internal/lib/geojson"
+	api "github.com/sierragridteam/sierra-data/api/v1"
+	"github.com/sierragridteam/sierra-data/internal/config"
+	"github.com/sierragridteam/sierra-data/internal/lib/geojson"
 )
 
 // Shared conditions helpers for the ?place= bbox filter. GridServer.GetConditions

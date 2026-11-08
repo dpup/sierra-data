@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dpup/sierra-data/internal/store"
+	"github.com/sierragridteam/sierra-data/internal/store"
 )
 
 // BurnStream carries county burn-day readings: the answer a county air

@@ -12,8 +12,8 @@ import (
 	"github.com/dpup/prefab"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dpup/sierra-data/internal/config"
-	meshrelay "github.com/dpup/sierra-meshrelay/relay"
+	"github.com/sierragridteam/sierra-data/internal/config"
+	meshrelay "github.com/sierragridteam/sierra-meshrelay/relay"
 )
 
 // TestE2EAgainstRelay runs the tool's full e2e scenario against an in-process

@@ -2,7 +2,7 @@
 
 The Grid is the S.I.E.R.R.A data service (primary domain `data.sierragridteam.org`;
 `info.ersn.net` is a legacy CNAME alias, ersn.net a consuming site). The Go module
-path and GitHub repo are `github.com/dpup/sierra-data` (renamed 2026-07-06 from
+path and GitHub repo are `github.com/sierragridteam/sierra-data` (renamed 2026-07-06 from
 `github.com/dpup/info.ersn.net/server`).
 
 These notes live in `AGENTS.md` files (this one and one per subsystem:
@@ -14,7 +14,7 @@ Last updated: 2026-07-06
 
 ## Active Technologies
 
-**Language/Version**: Go 1.25+ (`go.mod` declares 1.25.0 — a transitive dep, `golang.org/x/sys`, requires it; the Dockerfile builds on `golang:1.25-alpine`)  
+**Language/Version**: Go 1.27.3 (`go.mod` and the Docker builder use Go 1.27.3)
 **Primary Dependencies**: gRPC, gRPC Gateway, Prefab framework (github.com/dpup/prefab), Protocol Buffers  
 **Storage**: SQLite (pure-Go `modernc.org/sqlite`, WAL) is the grid event store's system of record — events, revision history, the place directory, and source health, persisted at `grid.dbPath` (`PF__GRID__DB_PATH`). In-memory TTL caches remain on the read path for the roads/weather/hazards services.  
 **Testing**: Go testing framework with testify, contract tests for gRPC services  
@@ -75,8 +75,8 @@ Whenever possible you MUST use a command provided by the makefile. If you need a
 discuss with the operator improvements to the makefile commands.
 
 **Toolchain note**: The sandbox does not ship Go or protoc preinstalled. To build
-or run tests you need Go 1.25+ on `PATH`. `make build`/`server`/`run`/`test` also
-need **Node 22+**, because they build the embedded site; plain `go build ./...`
+or run tests you need Go 1.27.3+ on `PATH`. `make build`/`server`/`run`/`test` also
+need **Node 26.13.0+**, because they build the embedded site; plain `go build ./...`
 and `go test ./...` stay Node-free (the site tests skip when `site/dist` holds
 only its placeholder). `make proto` additionally requires
 `protoc` plus the plugins `protoc-gen-go`, `protoc-gen-go-grpc`,
@@ -275,7 +275,7 @@ stays listed but nothing authenticates as it, so a local server still starts
   it) plus `burnDayStaleAfter`, the equivalent freeze detector for a pushed
   burn-line reading.
 - Environment variables override config file values for secrets
-- Use `.envrc` for local development (already in .gitignore)
+- Use the parent workspace `.envrc` for local development (loaded by direnv; keep secrets outside the repository)
 
 ## External API Integration
 
@@ -700,7 +700,7 @@ restart rehydrates events + history with no re-fetch. The in-memory TTL caches
 
 ## Mesh Relay (separate service)
 
-`cmd/mesh-relay` runs the relay library `github.com/dpup/sierra-meshrelay/relay`
+`cmd/mesh-relay` runs the relay library `github.com/sierragridteam/sierra-meshrelay/relay`
 (imported as `meshrelay`; code, tests and docs live in
 [sierragridteam/sierra-meshrelay](https://github.com/sierragridteam/sierra-meshrelay) alongside the
 wire protocol and the bridge). It is the meeting point for MeshCore gateway
@@ -735,7 +735,7 @@ the DB (audit writes are queued). Wire protocol
 (`PROTOCOL.md`), service spec, decisions and the deploy checklist
 (`docs/relay.md`) are all in sierra-meshrelay. **To change relay behaviour,
 change it there** (one PR covers the protocol, relay, bridge and their
-end-to-end tests), tag it, then `go get github.com/dpup/sierra-meshrelay@<tag>`
+end-to-end tests), tag it, then `go get github.com/sierragridteam/sierra-meshrelay@<tag>`
 here and deploy. What stays here: `cmd/mesh-relay` (prefab app wiring,
 `relayConfigFrom` for `prefab.yaml`'s `meshRelay:` section, and the
 `internal/handoff` gate passed in as `Config.Gate`), the Docker target, and
@@ -877,7 +877,7 @@ guide, API table, first-migration and rollback notes:
 - Validate structured output parsing for robustness
 
 **Security Guidelines**:
-- API keys are stored in `.envrc` (git-ignored)
+- API keys are stored in the parent workspace `.envrc`, outside the repository
 - Never commit real API keys to the repository
 - Use placeholder examples in documentation and configs
 - Rotate API keys if they're accidentally exposed

@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	api "github.com/dpup/sierra-data/api/v1"
-	"github.com/dpup/sierra-data/internal/cache"
-	"github.com/dpup/sierra-data/internal/clients/caltrans"
-	"github.com/dpup/sierra-data/internal/config"
-	"github.com/dpup/sierra-data/internal/lib/alerts"
+	api "github.com/sierragridteam/sierra-data/api/v1"
+	"github.com/sierragridteam/sierra-data/internal/cache"
+	"github.com/sierragridteam/sierra-data/internal/clients/caltrans"
+	"github.com/sierragridteam/sierra-data/internal/config"
+	"github.com/sierragridteam/sierra-data/internal/lib/alerts"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

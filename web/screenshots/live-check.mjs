@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 // live-check.mjs — drive the BUILT page against the real API.
 //
 // WHY THIS EXISTS. `fixtures.mjs` answers every request deterministically, which
@@ -28,8 +29,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const ORIGIN = process.env.GRID_ORIGIN || 'https://data.sierragridteam.org';
-const ROOT = '/workspace/site/dist';
-const TYPES = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript',
+const ROOT = fileURLToPath(new URL('../../site/dist/', import.meta.url));
+const TYPES = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.mjs': 'text/javascript',
   '.json': 'application/json', '.woff2': 'font/woff2', '.svg': 'image/svg+xml', '.png': 'image/png' };
 
 const argv = process.argv.slice(2);
@@ -48,7 +49,7 @@ const server = http.createServer((req, res) => {
 await new Promise((r) => server.listen(0, r));
 const port = server.address().port;
 
-const browser = await chromium.launch();
+const browser = await chromium.launch({ args: ['--enable-unsafe-swiftshader'] });
 const ctx = await browser.newContext({ viewport: { width, height: 900 }, deviceScaleFactor: 2 });
 
 const calls = [];

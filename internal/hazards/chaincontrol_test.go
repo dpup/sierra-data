@@ -12,10 +12,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dpup/sierra-data/internal/cache"
-	"github.com/dpup/sierra-data/internal/clients/caltrans"
-	"github.com/dpup/sierra-data/internal/clients/cwwp2"
-	"github.com/dpup/sierra-data/internal/config"
+	"github.com/sierragridteam/sierra-data/internal/cache"
+	"github.com/sierragridteam/sierra-data/internal/clients/caltrans"
+	"github.com/sierragridteam/sierra-data/internal/clients/cwwp2"
+	"github.com/sierragridteam/sierra-data/internal/config"
 )
 
 // emptyCCKML is cc.kml as served on a quiet day: a document with no placemarks.

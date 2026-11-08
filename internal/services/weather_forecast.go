@@ -6,8 +6,8 @@ import (
 
 	"github.com/dpup/prefab/logging"
 
-	"github.com/dpup/sierra-data/internal/clients/nws"
-	"github.com/dpup/sierra-data/internal/config"
+	"github.com/sierragridteam/sierra-data/internal/clients/nws"
+	"github.com/sierragridteam/sierra-data/internal/config"
 )
 
 const (

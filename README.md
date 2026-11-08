@@ -55,7 +55,7 @@ curl https://data.sierragridteam.org/api/v1/places/calaveras-county/map/wildfire
 ### Prerequisites
 
 - Go 1.25+
-- Node 22+ (`make build`, `make run` and `make test` build the embedded site)
+- Node 26.13.0+ (`make build`, `make run` and `make test` build the embedded site)
 - API keys for Google Routes, OpenWeatherMap and OpenAI. The server refuses to
   start without an OpenAI key (it enhances CHP road incidents); for a local run
   without enhancement, any non-empty placeholder lets it start.
@@ -208,7 +208,7 @@ make stop
 ### Testing
 
 ```bash
-# Run all tests (builds the embedded site first; needs Node 22+)
+# Run all tests (builds the embedded site first; needs Node 26.13.0+)
 make test
 
 # Go tests only, without Node (site tests skip when the site is not built)

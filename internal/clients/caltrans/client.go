@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	api "github.com/dpup/sierra-data/api/v1"
-	"github.com/dpup/sierra-data/internal/lib/geo"
+	api "github.com/sierragridteam/sierra-data/api/v1"
+	"github.com/sierragridteam/sierra-data/internal/lib/geo"
 )
 
 // CaltransFeedType represents the type of Caltrans feed

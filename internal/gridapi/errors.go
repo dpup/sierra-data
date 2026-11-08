@@ -7,7 +7,7 @@ import (
 	"github.com/dpup/prefab/logging"
 	"google.golang.org/grpc/codes"
 
-	"github.com/dpup/sierra-data/internal/lib/httperr"
+	"github.com/sierragridteam/sierra-data/internal/lib/httperr"
 )
 
 // writeStatus emits the /api/v1 error envelope ({code, codeName, message,

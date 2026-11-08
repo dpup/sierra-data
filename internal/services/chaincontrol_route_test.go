@@ -7,10 +7,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	api "github.com/dpup/sierra-data/api/v1"
-	"github.com/dpup/sierra-data/internal/clients/caltrans"
-	"github.com/dpup/sierra-data/internal/lib/geo"
-	"github.com/dpup/sierra-data/internal/lib/routing"
+	api "github.com/sierragridteam/sierra-data/api/v1"
+	"github.com/sierragridteam/sierra-data/internal/clients/caltrans"
+	"github.com/sierragridteam/sierra-data/internal/lib/geo"
+	"github.com/sierragridteam/sierra-data/internal/lib/routing"
 )
 
 // A CWWP2-shaped control ("Highway 4", checkpoint index as MessageID) matches

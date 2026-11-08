@@ -74,7 +74,7 @@ const VIEWPORTS = [
 ];
 
 const MIME = {
-  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
+  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
   '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.json': 'application/json', '.svg': 'image/svg+xml', '.woff2': 'font/woff2',
   '.png': 'image/png', '.webmanifest': 'application/manifest+json',
@@ -111,7 +111,7 @@ async function main() {
   const viewports = onlyArg ? VIEWPORTS.filter((v) => onlyArg.split(',').includes(v.name)) : VIEWPORTS;
 
   if (!existsSync(DIST)) {
-    console.error(`No build at ${DIST}. Run \`npm run build\` (or \`make site\`) first.`);
+    console.error(`No build at ${DIST}. Run \`pnpm run build\` (or \`make site\`) first.`);
     process.exit(1);
   }
 
@@ -121,7 +121,7 @@ async function main() {
   console.log(`Serving ${DIST} at ${base}`);
   console.log(`Fixtures: ${FIXTURE_META.events} events, ${FIXTURE_META.places} places, ${FIXTURE_META.sources} sources`);
 
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({ args: ['--enable-unsafe-swiftshader'] });
   let shots = 0;
   const apiMisses = new Set();
 

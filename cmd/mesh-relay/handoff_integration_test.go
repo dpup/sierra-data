@@ -18,9 +18,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dpup/sierra-data/internal/config"
-	"github.com/dpup/sierra-data/internal/handoff"
-	meshrelay "github.com/dpup/sierra-meshrelay/relay"
+	"github.com/sierragridteam/sierra-data/internal/config"
+	"github.com/sierragridteam/sierra-data/internal/handoff"
+	meshrelay "github.com/sierragridteam/sierra-meshrelay/relay"
 )
 
 // The REAL relayApp under the handoff controller, as main runs it. The first

@@ -20,8 +20,6 @@ import EventDetailStyles from '../components/EventDetailStyles.astro';
        SAME renderer the /events browser mounts in its right-hand column — so the
        two screens cannot drift. This page supplies only the container. -->
   <div id="ed-root" style="margin-top:22px;"></div>
-
-  <script is:inline src="/lib/maplibre-gl.js"></script>
   <script is:inline type="module">
     import { initEventPage } from '/assets/pages/event-detail.js';
     initEventPage();

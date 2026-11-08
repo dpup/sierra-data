@@ -11,9 +11,9 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
-	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
-	"github.com/dpup/sierra-data/internal/clients/caloes"
-	"github.com/dpup/sierra-data/internal/hazards"
+	gridv1 "github.com/sierragridteam/sierra-data/api/grid/v1"
+	"github.com/sierragridteam/sierra-data/internal/clients/caloes"
+	"github.com/sierragridteam/sierra-data/internal/hazards"
 )
 
 // ts is a fixed-instant proto timestamp helper.

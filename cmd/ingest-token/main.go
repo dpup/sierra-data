@@ -27,7 +27,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/dpup/sierra-data/internal/pushingest"
+	"github.com/sierragridteam/sierra-data/internal/pushingest"
 )
 
 // idPattern constrains a reporter id. It becomes a source-registry row id and

@@ -11,11 +11,11 @@ import (
 
 	"github.com/dpup/prefab/plugins/etag"
 
-	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
-	"github.com/dpup/sierra-data/internal/clients/cwwp2"
-	"github.com/dpup/sierra-data/internal/hazards"
-	"github.com/dpup/sierra-data/internal/lib/geojson"
-	"github.com/dpup/sierra-data/internal/store"
+	gridv1 "github.com/sierragridteam/sierra-data/api/grid/v1"
+	"github.com/sierragridteam/sierra-data/internal/clients/cwwp2"
+	"github.com/sierragridteam/sierra-data/internal/hazards"
+	"github.com/sierragridteam/sierra-data/internal/lib/geojson"
+	"github.com/sierragridteam/sierra-data/internal/store"
 )
 
 // cameraAttribution credits the camera images, which Caltrans serves.

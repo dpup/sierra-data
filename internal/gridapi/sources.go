@@ -1,7 +1,7 @@
 package gridapi
 
 import (
-	"github.com/dpup/sierra-data/internal/config"
+	"github.com/sierragridteam/sierra-data/internal/config"
 )
 
 // allScannerFeeds is every configured area's feeds deduped by feed_id,

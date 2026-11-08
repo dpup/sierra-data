@@ -48,9 +48,9 @@ import (
 
 	openai "github.com/sashabaranov/go-openai"
 
-	"github.com/dpup/sierra-data/internal/clients/burnline"
-	"github.com/dpup/sierra-data/internal/clients/twilio"
-	"github.com/dpup/sierra-data/internal/config"
+	"github.com/sierragridteam/sierra-data/internal/clients/burnline"
+	"github.com/sierragridteam/sierra-data/internal/clients/twilio"
+	"github.com/sierragridteam/sierra-data/internal/config"
 )
 
 func main() {

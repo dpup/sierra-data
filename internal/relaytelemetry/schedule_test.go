@@ -14,8 +14,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dpup/sierra-meshrelay/meshops"
-	meshrelay "github.com/dpup/sierra-meshrelay/relay"
+	"github.com/sierragridteam/sierra-meshrelay/meshops"
+	meshrelay "github.com/sierragridteam/sierra-meshrelay/relay"
 )
 
 // fakeReps is a scripted repeater registry and mesh: each gateway answers

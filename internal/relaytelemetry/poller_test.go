@@ -23,7 +23,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	meshrelay "github.com/dpup/sierra-meshrelay/relay"
+	meshrelay "github.com/sierragridteam/sierra-meshrelay/relay"
 )
 
 const pubkeyA = "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90"

@@ -36,9 +36,9 @@ import (
 
 	openai "github.com/sashabaranov/go-openai"
 
-	"github.com/dpup/sierra-data/internal/clients/burnline"
-	"github.com/dpup/sierra-data/internal/ingest"
-	"github.com/dpup/sierra-data/internal/lib/alerts"
+	"github.com/sierragridteam/sierra-data/internal/clients/burnline"
+	"github.com/sierragridteam/sierra-data/internal/ingest"
+	"github.com/sierragridteam/sierra-data/internal/lib/alerts"
 )
 
 func main() {

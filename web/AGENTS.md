@@ -12,7 +12,7 @@ Two committed `.gitkeep` files keep that working, and neither is decoration.
 when the directory is missing — without it, a fresh clone would not build Go
 until someone ran Node. `web/public/.gitkeep` exists because `astro build`
 **empties `outDir`**, deleting the first one; Astro copies `public/` in
-verbatim, so every build path — `make site`, a bare `npm run build`, the image
+verbatim, so every build path — `make site`, a bare `pnpm run build`, the image
 stage — puts it straight back.
 
 No client framework: pages are `.astro` files rendering static markup, and the

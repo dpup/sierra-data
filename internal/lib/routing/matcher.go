@@ -6,7 +6,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/dpup/sierra-data/internal/lib/geo"
+	"github.com/sierragridteam/sierra-data/internal/lib/geo"
 )
 
 // routeMatcher implements the RouteMatcher interface
