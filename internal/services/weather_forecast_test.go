@@ -12,9 +12,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dpup/sierra-data/internal/cache"
-	"github.com/dpup/sierra-data/internal/config"
-	"github.com/dpup/sierra-data/internal/clients/nws"
+	"github.com/sierragridteam/sierra-data/internal/cache"
+	"github.com/sierragridteam/sierra-data/internal/config"
+	"github.com/sierragridteam/sierra-data/internal/clients/nws"
 )
 
 // forecastDoer routes /points → the points body and gridpoints → the grid body,

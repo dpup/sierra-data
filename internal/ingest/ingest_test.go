@@ -12,13 +12,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
-	"github.com/dpup/sierra-data/internal/clients/calfire"
-	"github.com/dpup/sierra-data/internal/clients/caloes"
-	"github.com/dpup/sierra-data/internal/clients/firis"
-	"github.com/dpup/sierra-data/internal/clients/pge"
-	"github.com/dpup/sierra-data/internal/clients/usgs"
-	"github.com/dpup/sierra-data/internal/config"
+	gridv1 "github.com/sierragridteam/sierra-data/api/grid/v1"
+	"github.com/sierragridteam/sierra-data/internal/clients/calfire"
+	"github.com/sierragridteam/sierra-data/internal/clients/caloes"
+	"github.com/sierragridteam/sierra-data/internal/clients/firis"
+	"github.com/sierragridteam/sierra-data/internal/clients/pge"
+	"github.com/sierragridteam/sierra-data/internal/clients/usgs"
+	"github.com/sierragridteam/sierra-data/internal/config"
 )
 
 // testCtx carries a logger so normalizers' logging.Warnw calls don't panic.

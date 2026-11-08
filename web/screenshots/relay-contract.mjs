@@ -20,7 +20,7 @@ import { dirname, join, extname } from 'node:path';
 import { routeFor } from './fixtures.mjs';
 
 const DIST = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'site', 'dist');
-const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.woff2': 'font/woff2', '.svg': 'image/svg+xml' };
+const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.woff2': 'font/woff2', '.svg': 'image/svg+xml' };
 
 const server = http.createServer(async (req, res) => {
   const u = new URL(req.url, 'http://localhost');
@@ -34,7 +34,7 @@ await new Promise((r) => server.listen(0, r));
 const base = `http://localhost:${server.address().port}`;
 
 let mode = 'ok'; // ok | down | empty
-const browser = await chromium.launch();
+const browser = await chromium.launch({ args: ['--enable-unsafe-swiftshader'] });
 const ctx = await browser.newContext();
 await ctx.route('**/*', async (route) => {
   const u = new URL(route.request().url());

@@ -17,12 +17,12 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
-	api "github.com/dpup/sierra-data/api/v1"
-	"github.com/dpup/sierra-data/internal/clients/nws"
-	"github.com/dpup/sierra-data/internal/config"
-	"github.com/dpup/sierra-data/internal/places"
-	"github.com/dpup/sierra-data/internal/store"
+	gridv1 "github.com/sierragridteam/sierra-data/api/grid/v1"
+	api "github.com/sierragridteam/sierra-data/api/v1"
+	"github.com/sierragridteam/sierra-data/internal/clients/nws"
+	"github.com/sierragridteam/sierra-data/internal/config"
+	"github.com/sierragridteam/sierra-data/internal/places"
+	"github.com/sierragridteam/sierra-data/internal/store"
 )
 
 // base is the fixed reference time all seeded events hang off.

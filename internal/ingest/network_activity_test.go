@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
-	"github.com/dpup/sierra-data/internal/clients/meshcore"
-	"github.com/dpup/sierra-data/internal/store"
+	gridv1 "github.com/sierragridteam/sierra-data/api/grid/v1"
+	"github.com/sierragridteam/sierra-data/internal/clients/meshcore"
+	"github.com/sierragridteam/sierra-data/internal/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/timestamppb"

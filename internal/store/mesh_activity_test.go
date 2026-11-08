@@ -2,7 +2,7 @@ package store
 
 import (
 	"context"
-	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
+	gridv1 "github.com/sierragridteam/sierra-data/api/grid/v1"
 	"testing"
 	"time"
 

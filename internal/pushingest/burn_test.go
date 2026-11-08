@@ -12,8 +12,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dpup/sierra-data/internal/config"
-	"github.com/dpup/sierra-data/internal/store"
+	"github.com/sierragridteam/sierra-data/internal/config"
+	"github.com/sierragridteam/sierra-data/internal/store"
 )
 
 // burnRegistry builds a registry whose reporter is granted burn.line, backed by

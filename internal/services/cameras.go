@@ -10,7 +10,7 @@ import (
 
 	"github.com/dpup/prefab/logging"
 
-	"github.com/dpup/sierra-data/internal/clients/cwwp2"
+	"github.com/sierragridteam/sierra-data/internal/clients/cwwp2"
 )
 
 // DefaultCameraRefresh is how often the camera directory refetches each

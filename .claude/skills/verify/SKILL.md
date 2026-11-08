@@ -18,7 +18,7 @@ export PATH="$HOME/sdk/go/bin:$PATH"
 plugins. If the diff has no proto changes, build directly instead:
 ```bash
 go build -o bin/server ./cmd/server
-set -a && source .envrc && set +a    # real API keys (git-ignored)
+eval "$(direnv export bash)"    # loads the parent workspace environment
 nohup ./bin/server > server.log 2>&1 & echo $! > server.pid
 sleep 3   # startup triggers roads warmup (Google Routes calls) immediately
 ```

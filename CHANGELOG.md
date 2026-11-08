@@ -2259,7 +2259,7 @@ Cosmetic metadata updated to match: the OpenAPI docs served at
 `/api/docs/{roads,weather}.swagger.json` now carry the title "The Grid — Roads/Weather
 API" and contact `data.sierragridteam.org`, and the NWS `User-Agent` identifies
 `data.sierragridteam.org`. The Go module path and GitHub repo were **renamed**
-`github.com/dpup/info.ersn.net/server` → **`github.com/dpup/sierra-data`**
+`github.com/dpup/info.ersn.net/server` → **`github.com/sierragridteam/sierra-data`**
 (internal identity only — no effect on the HTTP API or its consumers).
 
 ### Added — road geometry: `Road.polyline`, and `road_segment` follows the highway

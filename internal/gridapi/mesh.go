@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
-	"github.com/dpup/sierra-data/internal/hazards"
-	"github.com/dpup/sierra-data/internal/store"
+	gridv1 "github.com/sierragridteam/sierra-data/api/grid/v1"
+	"github.com/sierragridteam/sierra-data/internal/hazards"
+	"github.com/sierragridteam/sierra-data/internal/store"
 )
 
 // defaultMeshWindow is the recency window for GET /api/v1/mesh/links when the

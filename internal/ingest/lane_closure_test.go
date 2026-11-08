@@ -11,10 +11,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
-	"github.com/dpup/sierra-data/internal/clients/cwwp2"
-	"github.com/dpup/sierra-data/internal/config"
-	"github.com/dpup/sierra-data/internal/store"
+	gridv1 "github.com/sierragridteam/sierra-data/api/grid/v1"
+	"github.com/sierragridteam/sierra-data/internal/clients/cwwp2"
+	"github.com/sierragridteam/sierra-data/internal/config"
+	"github.com/sierragridteam/sierra-data/internal/store"
 )
 
 // lcsFixtureNow is just after the D10 capture's record stamp (the same instant

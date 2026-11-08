@@ -6,9 +6,9 @@ import (
 
 	"github.com/dpup/prefab/errors"
 
-	"github.com/dpup/sierra-data/internal/config"
+	"github.com/sierragridteam/sierra-data/internal/config"
 
-	meshrelay "github.com/dpup/sierra-meshrelay/relay"
+	meshrelay "github.com/sierragridteam/sierra-meshrelay/relay"
 )
 
 // relayConfigFrom maps prefab.yaml's meshRelay section onto the relay's

@@ -8,8 +8,8 @@ import (
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
-	"github.com/dpup/sierra-data/internal/store"
+	gridv1 "github.com/sierragridteam/sierra-data/api/grid/v1"
+	"github.com/sierragridteam/sierra-data/internal/store"
 )
 
 // Mesh activity is the one part of a MESH event served from outside its blob.

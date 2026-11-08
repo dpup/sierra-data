@@ -49,8 +49,8 @@ import (
 
 	"github.com/dpup/prefab/logging"
 
-	"github.com/dpup/sierra-meshrelay/meshops"
-	meshrelay "github.com/dpup/sierra-meshrelay/relay"
+	"github.com/sierragridteam/sierra-meshrelay/meshops"
+	meshrelay "github.com/sierragridteam/sierra-meshrelay/relay"
 )
 
 // maxMeshTries bounds gateways that transmit for one repeater in a cycle.

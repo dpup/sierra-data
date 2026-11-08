@@ -20,8 +20,8 @@ import (
 	"fmt"
 	"os"
 
-	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
-	"github.com/dpup/sierra-data/internal/openapispec"
+	gridv1 "github.com/sierragridteam/sierra-data/api/grid/v1"
+	"github.com/sierragridteam/sierra-data/internal/openapispec"
 )
 
 func main() {

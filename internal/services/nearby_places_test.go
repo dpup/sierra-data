@@ -3,8 +3,8 @@ package services
 import (
 	"testing"
 
-	"github.com/dpup/sierra-data/internal/config"
-	"github.com/dpup/sierra-data/internal/lib/geo"
+	"github.com/sierragridteam/sierra-data/internal/config"
+	"github.com/sierragridteam/sierra-data/internal/lib/geo"
 )
 
 // realGeoConfig is the SHIPPED prefab.yaml geography, verbatim — all six towns

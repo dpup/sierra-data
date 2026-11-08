@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	api "github.com/dpup/sierra-data/api/v1"
-	"github.com/dpup/sierra-data/internal/clients/nws"
-	"github.com/dpup/sierra-data/internal/config"
+	api "github.com/sierragridteam/sierra-data/api/v1"
+	"github.com/sierragridteam/sierra-data/internal/clients/nws"
+	"github.com/sierragridteam/sierra-data/internal/config"
 )
 
 func TestZonesMatch(t *testing.T) {

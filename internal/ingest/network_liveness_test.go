@@ -9,9 +9,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
-	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
-	"github.com/dpup/sierra-data/internal/clients/meshcore"
-	"github.com/dpup/sierra-data/internal/pushingest"
+	gridv1 "github.com/sierragridteam/sierra-data/api/grid/v1"
+	"github.com/sierragridteam/sierra-data/internal/clients/meshcore"
+	"github.com/sierragridteam/sierra-data/internal/pushingest"
 )
 
 // expiredNode is the stored, EXPIRED event of a repeater a signed advert once

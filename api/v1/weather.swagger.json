@@ -11,7 +11,8 @@
   },
   "tags": [
     {
-      "name": "WeatherService"
+      "name": "WeatherService",
+      "description": "WeatherService provides current weather conditions and alerts"
     }
   ],
   "schemes": [
@@ -124,7 +125,7 @@
           "type": "string"
         }
       },
-      "additionalProperties": {}
+      "additionalProperties": true
     },
     "rpcStatus": {
       "type": "object",
@@ -401,6 +402,6 @@
   },
   "externalDocs": {
     "description": "More about The Grid",
-    "url": "https://github.com/dpup/sierra-data"
+    "url": "https://github.com/sierragridteam/sierra-data"
   }
 }

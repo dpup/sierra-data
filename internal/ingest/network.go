@@ -12,12 +12,12 @@ import (
 
 	"github.com/dpup/prefab/logging"
 
-	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
-	"github.com/dpup/sierra-data/internal/clients/meshcore"
-	"github.com/dpup/sierra-data/internal/config"
-	"github.com/dpup/sierra-data/internal/lib/geojson"
-	"github.com/dpup/sierra-data/internal/pushingest"
-	"github.com/dpup/sierra-data/internal/store"
+	gridv1 "github.com/sierragridteam/sierra-data/api/grid/v1"
+	"github.com/sierragridteam/sierra-data/internal/clients/meshcore"
+	"github.com/sierragridteam/sierra-data/internal/config"
+	"github.com/sierragridteam/sierra-data/internal/lib/geojson"
+	"github.com/sierragridteam/sierra-data/internal/pushingest"
+	"github.com/sierragridteam/sierra-data/internal/store"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )

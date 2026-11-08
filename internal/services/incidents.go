@@ -16,10 +16,10 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	api "github.com/dpup/sierra-data/api/v1"
-	"github.com/dpup/sierra-data/internal/clients/caltrans"
-	"github.com/dpup/sierra-data/internal/config"
-	"github.com/dpup/sierra-data/internal/lib/alerts"
+	api "github.com/sierragridteam/sierra-data/api/v1"
+	"github.com/sierragridteam/sierra-data/internal/clients/caltrans"
+	"github.com/sierragridteam/sierra-data/internal/config"
+	"github.com/sierragridteam/sierra-data/internal/lib/alerts"
 )
 
 // ListIncidents returns region-wide CHP/Caltrans dispatch incidents for a

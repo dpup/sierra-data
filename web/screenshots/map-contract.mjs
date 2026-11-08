@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 // Behaviour probe for the Map screen's fail-loud mount rule.
 //
 // The post-implementation review found two defects on paths that no screenshot
@@ -11,8 +12,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { routeFor } from './fixtures.mjs';
 
-const ROOT = '/workspace/site/dist';
-const TYPES = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript',
+const ROOT = fileURLToPath(new URL('../../site/dist/', import.meta.url));
+const TYPES = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.mjs': 'text/javascript',
   '.json': 'application/json', '.woff2': 'font/woff2', '.svg': 'image/svg+xml', '.png': 'image/png' };
 
 const server = http.createServer((req, res) => {
@@ -26,7 +27,7 @@ const server = http.createServer((req, res) => {
 await new Promise((r) => server.listen(0, r));
 const port = server.address().port;
 
-const browser = await chromium.launch();
+const browser = await chromium.launch({ args: ['--enable-unsafe-swiftshader'] });
 const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 await ctx.route('**/*', async (route) => {
   const url = new URL(route.request().url());

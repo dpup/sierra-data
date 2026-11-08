@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dpup/sierra-data/internal/clients/cwwp2"
+	"github.com/sierragridteam/sierra-data/internal/clients/cwwp2"
 )
 
 // testCWWP2 probes the CWWP2 portal live for one district: what the server's

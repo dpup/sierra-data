@@ -19,7 +19,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
+	gridv1 "github.com/sierragridteam/sierra-data/api/grid/v1"
 )
 
 // serveGateway runs g behind a real gRPC server and a gRPC-Gateway mux dialed

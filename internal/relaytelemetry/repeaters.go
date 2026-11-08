@@ -16,7 +16,7 @@ import (
 
 	"github.com/dpup/prefab/logging"
 
-	meshrelay "github.com/dpup/sierra-meshrelay/relay"
+	meshrelay "github.com/sierragridteam/sierra-meshrelay/relay"
 )
 
 // Repeaters is what the poller needs from the relay's repeater registry:

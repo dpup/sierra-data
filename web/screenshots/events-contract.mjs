@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 // Acceptance checks for the Events page layout spec (§8).
 //
 // These are the mechanical ones — the checks a screenshot cannot make, because
@@ -8,8 +9,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { routeFor } from './fixtures.mjs';
 
-const ROOT = '/workspace/site/dist';
-const TYPES = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript',
+const ROOT = fileURLToPath(new URL('../../site/dist/', import.meta.url));
+const TYPES = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.mjs': 'text/javascript',
   '.json': 'application/json', '.woff2': 'font/woff2', '.svg': 'image/svg+xml', '.png': 'image/png' };
 
 const server = http.createServer((req, res) => {
@@ -24,7 +25,7 @@ await new Promise((r) => server.listen(0, r));
 const port = server.address().port;
 const BASE = `http://localhost:${port}`;
 
-const browser = await chromium.launch();
+const browser = await chromium.launch({ args: ['--enable-unsafe-swiftshader'] });
 const ctx = await browser.newContext({
   viewport: { width: 1280, height: 900 },
   // The copy checks below need a clipboard that resolves rather than rejects.
@@ -90,7 +91,7 @@ const echo = await page.evaluate(() => {
   return {
     url: (document.getElementById('ev-url') || {}).textContent || '',
     // The whole echo, minus the copy button — what a reader sees on the line.
-    body: (box ? box.textContent : '').replace(/copy curl/, '').replace(/\s+/g, ' ').trim(),
+    body: (box ? Array.from(box.childNodes, node => node.textContent).join(' ') : '').replace(/copy curl/, '').replace(/\s+/g, ' ').trim(),
     scope: (document.getElementById('ev-scope-meta') || {}).textContent || '',
   };
 });

@@ -9,7 +9,7 @@ import "google/protobuf/timestamp.proto";
 import "google/protobuf/wrappers.proto";
 import "protoc-gen-openapiv2/options/annotations.proto";
 
-option go_package = "github.com/dpup/sierra-data/api/grid/v1;gridv1";
+option go_package = "github.com/sierragridteam/sierra-data/api/grid/v1;gridv1";
 
 // Canonical grid event model (docs/design/v2-api-spec.md §3) plus GridService, the
 // read-only entity/query API exposed as JSON over gRPC-Gateway at /api/v1/...
@@ -200,14 +200,14 @@ option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
       "- Burn-status enum values carry a prefix (`BURN_DAY_YES`, "
       "`CALFIRE_PERMIT_REQUIRED`, `BURN_PERMISSION_ALLOWED`).\n\n"
       "API changes are listed, dated, in "
-      "[CHANGELOG.md](https://github.com/dpup/sierra-data/blob/main/CHANGELOG.md)."
+      "[CHANGELOG.md](https://github.com/sierragridteam/sierra-data/blob/main/CHANGELOG.md)."
     contact: {
       name: "The Grid (S.I.E.R.R.A. data service)"
-      url: "https://github.com/dpup/sierra-data"
+      url: "https://github.com/sierragridteam/sierra-data"
     }
     license: {
       name: "MIT"
-      url: "https://github.com/dpup/sierra-data/blob/main/LICENSE"
+      url: "https://github.com/sierragridteam/sierra-data/blob/main/LICENSE"
     }
   }
   host: "data.sierragridteam.org"

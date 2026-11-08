@@ -3,7 +3,7 @@ package services
 import (
 	"testing"
 
-	api "github.com/dpup/sierra-data/api/v1"
+	api "github.com/sierragridteam/sierra-data/api/v1"
 )
 
 func TestFilterAlertsByZones(t *testing.T) {

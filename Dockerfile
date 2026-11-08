@@ -8,15 +8,15 @@
 # needed. Runs on the NATIVE build platform - the output is static HTML/CSS/JS,
 # byte-identical for every target arch, so there is nothing to cross-compile and
 # no toolchain to emulate.
-FROM --platform=$BUILDPLATFORM node:22-slim AS site-builder
+FROM --platform=$BUILDPLATFORM node:26.13.0-slim AS site-builder
 
 WORKDIR /web
 
 # Dependencies first, from the lockfile, so this layer (the slow one) stays
-# cached until web/package-lock.json actually changes. Astro is a
+# cached until web/pnpm-lock.yaml actually changes. Astro is a
 # devDependency, so this must NOT be --omit=dev.
-COPY web/package.json web/package-lock.json ./
-RUN npm ci
+COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
+RUN npm install --global pnpm@12.18.0 && pnpm install --frozen-lockfile
 
 COPY web/ ./
 # /changelog renders the repo-root CHANGELOG.md at build time; the page imports
@@ -27,7 +27,7 @@ COPY CHANGELOG.md /CHANGELOG.md
 # /site/dist. The pruned root-level *.mjs are Astro build-internal stubs
 # (content-*.mjs, a hash-named manifest) that the served site never references;
 # `make site` prunes them the same way.
-RUN npm run build && rm -f /site/dist/*.mjs && node screenshots/wiring-check.mjs
+RUN pnpm run build && rm -f /site/dist/*.mjs && node screenshots/wiring-check.mjs
 
 ###############################################################################
 # Stage 2: Build the Go application
@@ -36,7 +36,7 @@ RUN npm run build && rm -f /site/dist/*.mjs && node screenshots/wiring-check.mjs
 # arch. Running an amd64 Go toolchain under QEMU emulation (e.g. building
 # --platform=linux/amd64 on an arm64 host) makes the Go runtime SIGSEGV in
 # netpoll, so we never emulate the toolchain - we cross-compile instead.
-FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS go-builder
+FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine AS go-builder
 
 WORKDIR /app
 
@@ -73,10 +73,10 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
 # Mesh relay image (docker build --target relay) — a SEPARATE service
 ###############################################################################
 # The relay is its own process with its own database so a relay crash or deploy
-# never touches the hazard feeds (the relay is github.com/dpup/sierra-meshrelay/relay). It does not embed the
+# never touches the hazard feeds (the relay is github.com/sierragridteam/sierra-meshrelay/relay). It does not embed the
 # site, so this build skips the Node stage entirely. These stages sit BEFORE the
 # server's final stage so a plain `docker build` still produces the server.
-FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS relay-builder
+FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine AS relay-builder
 WORKDIR /app
 ENV GOTOOLCHAIN=local
 ARG TARGETOS=linux
@@ -87,7 +87,7 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -ldflags="-s -w" -o /mesh-relay ./cmd/mesh-relay
 
-FROM alpine:3.19 AS relay
+FROM alpine:3.24.4 AS relay
 RUN apk add --no-cache ca-certificates tzdata && apk upgrade && \
     addgroup -S sierra && adduser -S sierra -G sierra && \
     mkdir -p /data && chown sierra:sierra /data
@@ -112,7 +112,7 @@ ENTRYPOINT ["/app/mesh-relay"]
 ###############################################################################
 # Stage 3: Final lightweight runtime image
 ###############################################################################
-FROM alpine:3.19
+FROM alpine:3.24.4
 
 WORKDIR /app
 

@@ -182,3 +182,11 @@ server.pid
 # Python deployment-client checks
 __pycache__/
 *.pyc
+
+# Generated from the locked npm dependency during site builds.
+web/public/lib/maplibre-gl.mjs
+web/public/lib/maplibre-gl.css
+web/public/lib/maplibre-gl-worker.mjs
+
+# Locally compiled corridor generator (source is under cmd/).
+/gen-corridors

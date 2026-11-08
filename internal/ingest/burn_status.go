@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
-	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
-	"github.com/dpup/sierra-data/internal/clients/calfireburn"
-	"github.com/dpup/sierra-data/internal/config"
-	"github.com/dpup/sierra-data/internal/pushingest"
-	"github.com/dpup/sierra-data/internal/store"
+	gridv1 "github.com/sierragridteam/sierra-data/api/grid/v1"
+	"github.com/sierragridteam/sierra-data/internal/clients/calfireburn"
+	"github.com/sierragridteam/sierra-data/internal/config"
+	"github.com/sierragridteam/sierra-data/internal/pushingest"
+	"github.com/sierragridteam/sierra-data/internal/store"
 )
 
 // Burn status source constants. Two sources, one poller: they are separate

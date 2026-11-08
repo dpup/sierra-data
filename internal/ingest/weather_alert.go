@@ -4,11 +4,11 @@ import (
 	"context"
 	"time"
 
-	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
-	"github.com/dpup/sierra-data/internal/clients/nws"
-	"github.com/dpup/sierra-data/internal/config"
-	"github.com/dpup/sierra-data/internal/hazards"
-	"github.com/dpup/sierra-data/internal/services"
+	gridv1 "github.com/sierragridteam/sierra-data/api/grid/v1"
+	"github.com/sierragridteam/sierra-data/internal/clients/nws"
+	"github.com/sierragridteam/sierra-data/internal/config"
+	"github.com/sierragridteam/sierra-data/internal/hazards"
+	"github.com/sierragridteam/sierra-data/internal/services"
 )
 
 // Provenance constants — the attribution must match cmd/server's gridSourceInfo

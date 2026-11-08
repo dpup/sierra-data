@@ -8,7 +8,7 @@ import (
 
 	"github.com/dpup/prefab"
 
-	api "github.com/dpup/sierra-data/api/v1"
+	api "github.com/sierragridteam/sierra-data/api/v1"
 )
 
 // Config represents the complete server configuration

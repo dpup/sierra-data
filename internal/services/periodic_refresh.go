@@ -8,8 +8,8 @@ import (
 	"github.com/dpup/prefab/errors"
 	"github.com/dpup/prefab/logging"
 
-	api "github.com/dpup/sierra-data/api/v1"
-	"github.com/dpup/sierra-data/internal/config"
+	api "github.com/sierragridteam/sierra-data/api/v1"
+	"github.com/sierragridteam/sierra-data/internal/config"
 )
 
 // PeriodicRefreshService simulates regular API requests to maintain cache warmth

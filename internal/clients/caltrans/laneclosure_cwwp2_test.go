@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dpup/sierra-data/internal/clients/cwwp2"
+	"github.com/sierragridteam/sierra-data/internal/clients/cwwp2"
 )
 
 func cwwp2ClosureFixture(t *testing.T, id string) cwwp2.LaneClosure {

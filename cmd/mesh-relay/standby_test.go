@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dpup/sierra-data/internal/config"
+	"github.com/sierragridteam/sierra-data/internal/config"
 )
 
 // A standby relay must not open, create or lock relay.db.

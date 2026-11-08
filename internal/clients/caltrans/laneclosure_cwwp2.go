@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	api "github.com/dpup/sierra-data/api/v1"
-	"github.com/dpup/sierra-data/internal/clients/cwwp2"
+	api "github.com/sierragridteam/sierra-data/api/v1"
+	"github.com/sierragridteam/sierra-data/internal/clients/cwwp2"
 )
 
 // IncidentFromCWWP2LaneClosure adapts one CWWP2 lane-closure window to the

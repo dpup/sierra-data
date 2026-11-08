@@ -1,3 +1,4 @@
+import * as maplibregl from '/lib/maplibre-gl.mjs';
 // map.js — /map layer previews (spec §2 /map, T19).
 //
 // Renders per-layer GeoJSON from GET /api/v1/places/{place}/map/{layer}.geojson on
@@ -13,7 +14,7 @@
 // Pure helpers (URL state, bbox math, feature splitting, color expression)
 // are exported and have zero DOM/network access at import time, so node can
 // import and test this module. All network I/O goes through ../api.js.
-// MapLibre is loaded by map.html as a classic script (window.maplibregl) —
+// MapLibre is loaded as an explicit ES module —
 // this module never imports it, keeping node imports clean.
 
 import { get, ApiError, PUBLIC_ORIGIN } from '../api.js';

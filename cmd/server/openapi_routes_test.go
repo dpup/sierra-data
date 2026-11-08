@@ -12,10 +12,10 @@ import (
 	"strings"
 	"testing"
 
-	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
+	gridv1 "github.com/sierragridteam/sierra-data/api/grid/v1"
 )
 
-const modulePath = "github.com/dpup/sierra-data"
+const modulePath = "github.com/sierragridteam/sierra-data"
 
 // undocumentedRoutes are hand-mounted paths deliberately absent from the spec.
 var undocumentedRoutes = map[string]string{

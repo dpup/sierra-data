@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dpup/sierra-data/internal/config"
+	"github.com/sierragridteam/sierra-data/internal/config"
 )
 
 func TestRelayConfigFrom(t *testing.T) {

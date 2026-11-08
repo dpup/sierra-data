@@ -12,11 +12,11 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
-	"github.com/dpup/sierra-data/internal/clients/cwwp2"
-	"github.com/dpup/sierra-data/internal/clients/nws"
-	"github.com/dpup/sierra-data/internal/openapispec"
-	"github.com/dpup/sierra-data/internal/store"
+	gridv1 "github.com/sierragridteam/sierra-data/api/grid/v1"
+	"github.com/sierragridteam/sierra-data/internal/clients/cwwp2"
+	"github.com/sierragridteam/sierra-data/internal/clients/nws"
+	"github.com/sierragridteam/sierra-data/internal/openapispec"
+	"github.com/sierragridteam/sierra-data/internal/store"
 )
 
 // TestResponsesHonorFieldPresence holds the `(google.api.field_behavior) =

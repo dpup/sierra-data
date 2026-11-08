@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/dpup/sierra-data/internal/lib/geo"
+	"github.com/sierragridteam/sierra-data/internal/lib/geo"
 )
 
 // nearbyPlaceRadiusMeters is how close a configured place must be before we let

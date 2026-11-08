@@ -9,7 +9,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/structpb"
 
-	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
+	gridv1 "github.com/sierragridteam/sierra-data/api/grid/v1"
 )
 
 // geometryFormat is how a response carries each Geometry's GeoJSON

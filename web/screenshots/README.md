@@ -21,8 +21,8 @@ make site-shots-mock PAGES=events,map
 
 # or directly (assumes the site is already built into ../../site/dist):
 cd web
-npm run screenshots          # astro build + capture
-npm run screenshots:only     # capture only (skip the build)
+pnpm run screenshots          # astro build + capture
+pnpm run screenshots:only     # capture only (skip the build)
 node screenshots/capture.mjs --pages sources,roads --only mobile
 ```
 

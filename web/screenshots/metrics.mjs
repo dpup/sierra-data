@@ -42,7 +42,7 @@ const PAGES = [
 const WIDTHS = [390, 414, 768, 1280, 1440, 1920];
 
 const MIME = {
-  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
+  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.json': 'application/json',
   '.woff2': 'font/woff2', '.png': 'image/png', '.svg': 'image/svg+xml',
 };
@@ -245,7 +245,7 @@ async function main() {
 
   const server = await startServer();
   const { port } = server.address();
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({ args: ['--enable-unsafe-swiftshader'] });
 
   const out = {};
   for (const w of widths) {

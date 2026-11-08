@@ -17,12 +17,12 @@ GRID_PROTO_DIR=api/grid/v1
 
 # Pinned proto codegen toolchain — keep aligned with go.mod so regenerating is
 # reproducible. protoc itself is a native binary, pinned in moat.yaml
-# (protoc@29.3); the plugins below are installed by `make proto-tools` into
+# (protoc@36.2); the plugins below are installed by `make proto-tools` into
 # GOPATH/bin, which the proto recipe prepends to PATH (so they win over any
 # floating container-provided versions).
-PROTOC_GEN_GO_VERSION=v1.36.8       # == google.golang.org/protobuf
-PROTOC_GEN_GO_GRPC_VERSION=v1.5.1
-GRPC_GATEWAY_VERSION=v2.27.2        # == github.com/grpc-ecosystem/grpc-gateway/v2 (gateway + openapiv2)
+PROTOC_GEN_GO_VERSION=v1.36.12       # == google.golang.org/protobuf
+PROTOC_GEN_GO_GRPC_VERSION=v1.6.2
+GRPC_GATEWAY_VERSION=v2.33.0        # == github.com/grpc-ecosystem/grpc-gateway/v2 (gateway + openapiv2)
 CMD_DIR=cmd
 
 # Binary names
@@ -119,43 +119,42 @@ $(TEST_PGE_BINARY): proto
 # site-ensure rule below (a prerequisite of every target that embeds it), and
 # for a deploy by the Dockerfile's site-builder stage. So there is nothing to
 # keep in sync and no way to ship a stale site.
-# Uses npm ci into an off-mount dependency store; see SITE_DEPS below.
+# Uses pnpm install --frozen-lockfile into an off-mount dependency store; see SITE_DEPS below.
 # Where the site's npm dependencies actually live.
 #
 # Files written into /workspace — a virtiofs bind mount — bit-corrupt in place
 # (the same fault class as the SQLite corruption in internal/store/AGENTS.md).
-# npm writes ~188MB of them, and one flipped byte in @astrojs/compiler's
+# The package manager writes ~188MB of them, and one flipped byte in @astrojs/compiler's
 # astro.wasm or in any dist/*.js kills the build with an error naming an
 # innocent .astro file. So node_modules lives OFF the mount and web/node_modules
 # is a symlink to it.
 #
-# Crucially the INSTALL also has to happen off the mount: `npm ci` deletes and
+# Crucially the INSTALL also has to happen off the mount: `pnpm install` deletes and
 # recreates node_modules, which replaces the symlink with a real directory back
 # on the corrupting filesystem. So we keep a copy of package.json +
-# package-lock.json in $(SITE_DEPS) and run npm there, then link. Override
+# pnpm-lock.yaml and pnpm-workspace.yaml in $(SITE_DEPS) and run pnpm there, then link. Override
 # SITE_DEPS for a different host.
 SITE_DEPS ?= $(HOME)/.cache/grid-web-deps
 
 site-modules:
-	@command -v npm >/dev/null 2>&1 || { \
-		echo "❌ npm not found. Building the site (web/ → site/dist) needs Node 22+."; \
-		echo "   Go-only work still builds: site/dist/.gitkeep keeps the embed compiling,"; \
-		echo "   the site tests skip, and the deploy image builds the site itself."; \
-		exit 1; }
+	@command -v pnpm >/dev/null 2>&1 || { echo "pnpm 12.18.0 and Node 26.13.0+ are required"; exit 1; }
 	@mkdir -p "$(SITE_DEPS)"
-	@# Reinstall only when the lockfile actually changed.
-	@if ! cmp -s web/package-lock.json "$(SITE_DEPS)/package-lock.json"; then \
-		echo "Installing site deps off-mount → $(SITE_DEPS)"; \
-		cp web/package.json web/package-lock.json "$(SITE_DEPS)/"; \
-		(cd "$(SITE_DEPS)" && npm ci) || exit 1; \
+	@if [ ! -f "$(SITE_DEPS)/.installed" ] || [ ! -d "$(SITE_DEPS)/node_modules" ] || \
+		! cmp -s web/package.json "$(SITE_DEPS)/package.json" || \
+		! cmp -s web/pnpm-lock.yaml "$(SITE_DEPS)/pnpm-lock.yaml" || \
+		! cmp -s web/pnpm-workspace.yaml "$(SITE_DEPS)/pnpm-workspace.yaml"; then \
+		rm -f "$(SITE_DEPS)/.installed"; \
+		cp web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml "$(SITE_DEPS)/"; \
+		(cd "$(SITE_DEPS)" && pnpm install --frozen-lockfile) || exit 1; \
+		touch "$(SITE_DEPS)/.installed"; \
 	fi
-	@# `rm -rf` on a symlink removes the link, not the target.
+	@# Removing the symlink does not remove its off-mount target.
 	@rm -rf web/node_modules
 	@ln -sfn "$(SITE_DEPS)/node_modules" web/node_modules
 
 site: site-modules
 	@echo "Building site (Astro → site/dist)..."
-	cd web && npm run build
+	cd web && pnpm run build
 	@# Astro emits build-internal *.mjs at the dist root (content-*.mjs stubs, a
 	@# hash-named manifest_*.mjs) that are never served. Prune all root-level
 	@# *.mjs; real page JS lives in assets/.
@@ -178,7 +177,7 @@ site: site-modules
 # surviving file's mtime — only its parent directory's — and a deleted page that
 # lingers in site/dist is exactly the kind of staleness this rule exists to stop.
 # CHANGELOG.md is rendered into the site's /changelog page (web/src/pages/changelog.astro).
-SITE_SRC := $(shell find web/src web/public web/astro.config.mjs web/package.json web/package-lock.json CHANGELOG.md \( -type f -o -type d \) 2>/dev/null)
+SITE_SRC := $(shell find web/src web/public web/scripts web/astro.config.mjs web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml CHANGELOG.md \( -type f -o -type d \) 2>/dev/null)
 
 site/dist/index.html: $(SITE_SRC)
 	@$(MAKE) --no-print-directory site
@@ -192,16 +191,15 @@ site-install: site-modules
 # Run the Astro dev server (hot reload) for local site development. Note: /v1 and
 # /api calls still need the Go server running — point the dev site at it or proxy.
 site-dev: site-modules
-	cd web && npm run dev
+	cd web && pnpm run dev
 
 # Screenshot + layout-metrics of the running site for spacing/layout diagnosis.
-# Uses the container's Playwright + Chromium (the moat.yaml `playwright` dep) and
+# Uses the web project's locked Playwright dependency and Chromium with
 # a server already running — point BASE_URL at it (default :8190). Set LABEL to
 # tag a run (e.g. before/after) for numeric diffs. Output lands under
-# tools/screenshots/out/<LABEL>/ (git-ignored). NODE_PATH points at the global
-# npm root so the ESM script's require() finds the globally-installed playwright.
-site-shots:
-	cd tools/screenshots && NODE_PATH=$$(npm root -g) \
+# tools/screenshots/out/<LABEL>/ (git-ignored).
+site-shots: site-modules
+	cd tools/screenshots && \
 		BASE_URL=$(or $(BASE_URL),http://localhost:8190) LABEL=$(or $(LABEL),current) node shots.mjs
 
 # Self-contained screenshots with MOCKED /api/v1 data — no server, no API keys,
@@ -211,9 +209,9 @@ site-shots:
 # (git-ignored). This is the one to reach for when reviewing the rendered UI —
 # especially mobile — without standing up the Go server + live upstreams.
 # Pass PAGES=events,map or ONLY=mobile to narrow a run. Uses web/'s own
-# Playwright devDependency (not the global one site-shots uses).
+# Playwright devDependency, also used by site-shots.
 site-shots-mock: site-modules
-	cd web && npm run build
+	cd web && pnpm run build
 	cd web && node screenshots/capture.mjs $(if $(PAGES),--pages $(PAGES),) $(if $(ONLY),--only $(ONLY),)
 
 # Islands bind to markup by id string, so a rename on one side only surfaces in
@@ -737,3 +735,10 @@ help:
 
 # Forces a file target to rebuild every time.
 FORCE:
+
+# Browser contracts use synthetic fixtures and never contact production services.
+.PHONY: site-test
+site-test: site
+	cd web && node screenshots/map-contract.mjs
+	cd web && node screenshots/events-contract.mjs
+	cd web && node screenshots/relay-contract.mjs

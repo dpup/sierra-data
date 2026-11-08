@@ -36,9 +36,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dpup/sierra-data/internal/clients/pge"
-	"github.com/dpup/sierra-data/internal/hazards"
-	"github.com/dpup/sierra-data/internal/ingest"
+	"github.com/sierragridteam/sierra-data/internal/clients/pge"
+	"github.com/sierragridteam/sierra-data/internal/hazards"
+	"github.com/sierragridteam/sierra-data/internal/ingest"
 )
 
 func main() {

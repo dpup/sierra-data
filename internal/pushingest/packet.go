@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dpup/sierra-data/internal/clients/meshcore"
+	"github.com/sierragridteam/sierra-data/internal/clients/meshcore"
 )
 
 // MeshPacketStream is the stream name for forwarded over-the-air MeshCore

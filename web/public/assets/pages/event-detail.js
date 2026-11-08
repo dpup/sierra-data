@@ -1,3 +1,4 @@
+import * as maplibregl from '/lib/maplibre-gl.mjs';
 // pages/event-detail.js — /event?id=... event detail (site spec §2
 // /events/{id}).
 //
@@ -12,7 +13,7 @@
 // Pure helpers (detail extraction, bounds, diff-value formatting, revision
 // sorting) have no DOM access at import time — node can import and test
 // this module. All DOM work happens inside initEventPage(). MapLibre is
-// loaded by event.html as a classic script (window.maplibregl); this module
+// loaded as an explicit ES module; this module
 // only touches it inside functions and degrades to text when it is absent.
 
 import { get, apiURL, curlFor, ApiError } from '../api.js';
@@ -966,7 +967,7 @@ function fmtCoord(n) {
  * caller keeps the textual bbox/centroid rendering either way.
  */
 function renderEventMap(container, decoded, bounds, severity) {
-  const lib = typeof window !== 'undefined' ? window.maplibregl : undefined;
+  const lib = maplibregl;
   if (!lib || typeof lib.Map !== 'function') return false;
   // On the dark basemap — the ink ramp, not the paper one.
   // PAPER ramp: the basemap is light (see basemap.js).

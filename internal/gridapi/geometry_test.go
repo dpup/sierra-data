@@ -16,7 +16,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
+	gridv1 "github.com/sierragridteam/sierra-data/api/grid/v1"
 )
 
 // marshalJSON renders a response exactly as the gateway does.

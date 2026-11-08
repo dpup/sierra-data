@@ -20,11 +20,11 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
-	api "github.com/dpup/sierra-data/api/v1"
-	"github.com/dpup/sierra-data/internal/clients/census"
-	"github.com/dpup/sierra-data/internal/clients/nws"
-	"github.com/dpup/sierra-data/internal/store"
+	gridv1 "github.com/sierragridteam/sierra-data/api/grid/v1"
+	api "github.com/sierragridteam/sierra-data/api/v1"
+	"github.com/sierragridteam/sierra-data/internal/clients/census"
+	"github.com/sierragridteam/sierra-data/internal/clients/nws"
+	"github.com/sierragridteam/sierra-data/internal/store"
 )
 
 // RegisterGatewayRoutes mounts the .geojson map layers — the one endpoint that

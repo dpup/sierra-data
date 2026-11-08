@@ -20,20 +20,20 @@ grants:
   - ssh:github.com
 dependencies:
   - git
-  - go
+  - go@1.27.3
   - go-extras
   # Proto codegen. protoc is a native binary pinned here; the plugin *versions*
   # are pinned by `make proto-tools` (go install into GOPATH/bin, which the proto
   # recipe prepends to PATH) so they stay aligned with go.mod regardless of what
   # the container ships. These named plugins are a convenience fallback.
-  - protoc@29.3
+  - protoc@36.2
   - protoc-gen-go
   - protoc-gen-go-grpc
   - protoc-gen-grpc-gateway
   - protoc-gen-doc
   - sqlite3
   - mockgen
-  - node
+  - node@26.13.0
   - node-dev
   # Headless browser for the screenshot harnesses — the live-server layout/spacing
   # diagnosis in tools/screenshots (make site-shots) and the self-contained,
@@ -49,7 +49,7 @@ hooks:
   # `playwright` dependency above but makes the install explicit and durable:
   # PLAYWRIGHT_BROWSERS_PATH is /ms-playwright, which is root-owned, so moatuser
   # can't write it — if web/package.json's `playwright` ever pins a version whose
-  # Chromium revision differs from the bundled one, `npx playwright install` as
+  # Chromium revision differs from the bundled one, `pnpm exec playwright install` as
   # the container user fails with EACCES on /ms-playwright/__dirlock. Installing
   # here (root, build time) sidesteps that. `install --with-deps` also runs the
   # apt step for Chromium's shared libraries; `chmod a+rX` keeps the tree readable
@@ -57,6 +57,7 @@ hooks:
   # present is skipped. Keep the version in sync with web/package.json.
   post_build_root: |
     set -e
+    npm install --global pnpm@12.18.0
     export PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-    npx --yes playwright@1.61.1 install --with-deps chromium
+    pnpm dlx playwright@1.65.0 install --with-deps chromium
     chmod -R a+rX /ms-playwright

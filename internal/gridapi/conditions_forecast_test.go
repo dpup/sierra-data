@@ -8,9 +8,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
-	api "github.com/dpup/sierra-data/api/v1"
-	"github.com/dpup/sierra-data/internal/clients/nws"
+	gridv1 "github.com/sierragridteam/sierra-data/api/grid/v1"
+	api "github.com/sierragridteam/sierra-data/api/v1"
+	"github.com/sierragridteam/sierra-data/internal/clients/nws"
 )
 
 func TestProjectForecast(t *testing.T) {

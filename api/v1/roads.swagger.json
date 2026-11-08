@@ -11,7 +11,8 @@
   },
   "tags": [
     {
-      "name": "RoadsService"
+      "name": "RoadsService",
+      "description": "RoadsService provides real-time road conditions and traffic information"
     }
   ],
   "schemes": [
@@ -150,7 +151,7 @@
           "type": "string"
         }
       },
-      "additionalProperties": {}
+      "additionalProperties": true
     },
     "rpcStatus": {
       "type": "object",
@@ -180,7 +181,7 @@
         "DISTANT"
       ],
       "default": "ALERT_CLASSIFICATION_UNSPECIFIED",
-      "title": "- ON_ROUTE: Directly affects route path (\u003c 100m from route)\n - NEARBY: In surrounding area but not blocking route (\u003c route threshold)\n - DISTANT: Too far from route to be relevant (\u003e route threshold)"
+      "description": "- ON_ROUTE: Directly affects route path (\u003c 100m from route)\n - NEARBY: In surrounding area but not blocking route (\u003c route threshold)\n - DISTANT: Too far from route to be relevant (\u003e route threshold)"
     },
     "v1AlertDuration": {
       "type": "string",
@@ -637,11 +638,11 @@
         "MAINTENANCE"
       ],
       "default": "ROAD_STATUS_UNSPECIFIED",
-      "title": "Enumerations"
+      "description": "Enumerations"
     }
   },
   "externalDocs": {
     "description": "More about The Grid",
-    "url": "https://github.com/dpup/sierra-data"
+    "url": "https://github.com/sierragridteam/sierra-data"
   }
 }

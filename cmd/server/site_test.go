@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dpup/sierra-data/site"
+	"github.com/sierragridteam/sierra-data/site"
 )
 
 // requireSiteBuilt skips when site/dist holds only the committed .gitkeep
@@ -41,13 +41,14 @@ func TestSiteEmbedContainsPages(t *testing.T) {
 		"history.html",
 		"docs.html",
 		"changelog.html",
-		// Shared assets and the vendored map lib must embed too.
+		// Shared assets and the npm map library must embed too.
 		"assets/app.css",
 		"assets/api.js",
 		"assets/chrome.js",
 		"assets/pages/events.js",
-		"lib/maplibre-gl.js",
+		"lib/maplibre-gl.mjs",
 		"lib/maplibre-gl.css",
+		"lib/maplibre-gl-worker.mjs",
 	}
 	for _, p := range pages {
 		body, err := fs.ReadFile(site.FS, p)
@@ -137,10 +138,16 @@ func TestSiteHandler(t *testing.T) {
 		assert.Empty(t, rec.Body.String(), "304 carries no body")
 	})
 
-	t.Run("vendored lib caches a day", func(t *testing.T) {
-		rec := get("/lib/maplibre-gl.js")
+	t.Run("map module caches a day", func(t *testing.T) {
+		rec := get("/lib/maplibre-gl.mjs")
 		assert.Equal(t, http.StatusOK, rec.Code)
 		assert.Equal(t, "public, max-age=86400", rec.Header().Get("Cache-Control"))
+	})
+
+	t.Run("map worker serves JavaScript", func(t *testing.T) {
+		rec := get("/lib/maplibre-gl-worker.mjs")
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Contains(t, rec.Header().Get("Content-Type"), "javascript")
 	})
 
 	t.Run("missing file is a minimal html 404", func(t *testing.T) {
@@ -190,7 +197,7 @@ func TestSiteCacheControl(t *testing.T) {
 		// of the window, which threw "markup is missing #ev-scope-place".
 		{"assets/app.css", ".css", "no-cache"},
 		{"assets/pages/home.js", ".js", "no-cache"},
-		{"lib/maplibre-gl.js", ".js", "public, max-age=86400"},
+		{"lib/maplibre-gl.mjs", ".mjs", "public, max-age=86400"},
 		{"lib/fonts/archivo-900.woff2", ".woff2", "public, max-age=86400"},
 		{"robots.txt", ".txt", "no-cache"},
 	}

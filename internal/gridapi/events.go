@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	gridv1 "github.com/dpup/sierra-data/api/grid/v1"
+	gridv1 "github.com/sierragridteam/sierra-data/api/grid/v1"
 )
 
 // stripEventsIO clears enhancement.request/response on each event unless kept.

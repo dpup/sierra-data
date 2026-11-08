@@ -8,8 +8,8 @@ import (
 	"regexp"
 	"strings"
 
-	api "github.com/dpup/sierra-data/api/v1"
-	"github.com/dpup/sierra-data/internal/clients/cwwp2"
+	api "github.com/sierragridteam/sierra-data/api/v1"
+	"github.com/sierragridteam/sierra-data/internal/clients/cwwp2"
 )
 
 // Attribution hosts for ChainControlData.Source.

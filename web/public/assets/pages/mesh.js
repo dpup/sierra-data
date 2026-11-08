@@ -1,3 +1,4 @@
+import * as maplibregl from '/lib/maplibre-gl.mjs';
 // pages/mesh.js — /mesh: the MeshCore relay-topology map.
 //
 // Nodes come from GET /api/v1/events?layer=mesh (each located node is a point,
