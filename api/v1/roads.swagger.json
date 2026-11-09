@@ -409,9 +409,37 @@
           "type": "string",
           "format": "date-time",
           "description": "When the enhancement was produced (the model run, not this fetch — cached\nenhancements keep their original time). Unset when not AI-enhanced."
+        },
+        "log": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1IncidentLogEntry"
+          },
+          "description": "CHP's numbered incident log, oldest first, parsed from the feed's markup.\nEmpty for lane closures and when the feed carries no log lines."
         }
       },
       "description": "Incident is a region-wide CHP/Caltrans dispatch incident, surfaced\nindependently of any monitored road."
+    },
+    "v1IncidentLogEntry": {
+      "type": "object",
+      "properties": {
+        "number": {
+          "type": "integer",
+          "format": "int32",
+          "title": "The line number CHP assigned"
+        },
+        "at": {
+          "type": "string",
+          "format": "date-time",
+          "title": "When CHP logged it"
+        },
+        "text": {
+          "type": "string",
+          "title": "The dispatcher's text, verbatim"
+        }
+      },
+      "description": "IncidentLogEntry is one line of a CHP incident log (\"[3] TOT FIRE\")."
     },
     "v1IncidentStatus": {
       "type": "string",

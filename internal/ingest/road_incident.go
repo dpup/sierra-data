@@ -212,6 +212,7 @@ func (n *RoadIncidentNormalizer) buildEvent(in *api.Incident) *gridv1.Event {
 		Impact:    impactSlug(in.GetImpact()),
 		Duration:  in.GetMetadata()["duration"], // AI extra when the model provided one
 		Metadata:  publicMetadata(in.GetMetadata()),
+		Log:       incidentLog(in.GetLog()),
 	}}
 	// Enhancement provenance only when the incident actually went through the
 	// AI pipeline.
@@ -225,6 +226,19 @@ func (n *RoadIncidentNormalizer) buildEvent(in *api.Incident) *gridv1.Event {
 		}
 	}
 	return ev
+}
+
+// incidentLog carries CHP's parsed log onto the detail block. Nil when empty,
+// so an incident without a log hashes as it did before the field existed.
+func incidentLog(entries []*api.IncidentLogEntry) []*gridv1.IncidentLogEntry {
+	if len(entries) == 0 {
+		return nil
+	}
+	out := make([]*gridv1.IncidentLogEntry, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, &gridv1.IncidentLogEntry{Number: e.GetNumber(), At: e.GetAt(), Text: e.GetText()})
+	}
+	return out
 }
 
 // incidentProvenance splits provenance by feed: CHP dispatch incidents vs

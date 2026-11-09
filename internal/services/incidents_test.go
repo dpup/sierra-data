@@ -855,3 +855,72 @@ func TestSouthWestOf(t *testing.T) {
 		t.Error("nil sorts last")
 	}
 }
+
+// chpLogDescription2026 is a live-shaped CHP infowindow with three numbered log
+// lines, newest first, as CHP publishes them (incident 261109MR0185).
+const chpLogDescription2026 = `<div class="infowindow-content">
+  <div class="iw-header"><div class="iw-header-left">CHP Incident 261109MR0185</div></div>
+  <div class="iw-body">
+    <h2 class="iw-title">FIRE-Report of Fire</h2>
+    <p class="iw-text">Nov 9 2026 11:45AM <br> Mono Way / Sullivan Creek Rd</p>
+    <p class="iw-text">Nov 9 2026 11:46AM [3] TOT FIRE<br />Nov 9 2026 11:46AM [2] UNK WHATS ON FIRE<br />Nov 9 2026 11:45AM [1] BLK SMOKE BEHIND SUBA DEALERSHIP<br /></p>
+    <p class="iw-attribution">Information courtesy of <strong>CHP</strong></p>
+  </div>
+</div>`
+
+func TestParseIncidentDetail_CHPLog(t *testing.T) {
+	d := parseIncidentDetail(caltrans.CaltransIncident{FeedType: caltrans.CHP_INCIDENT, DescriptionHtml: chpLogDescription2026})
+	want := []struct {
+		n    int32
+		at   string
+		text string
+	}{
+		{1, "2026-11-09T19:45:00Z", "BLK SMOKE BEHIND SUBA DEALERSHIP"},
+		{2, "2026-11-09T19:46:00Z", "UNK WHATS ON FIRE"},
+		{3, "2026-11-09T19:46:00Z", "TOT FIRE"},
+	}
+	if len(d.log) != len(want) {
+		t.Fatalf("log = %+v, want %d entries", d.log, len(want))
+	}
+	for i, w := range want {
+		got := d.log[i]
+		if got.number != w.n || got.at.UTC().Format(time.RFC3339) != w.at || got.text != w.text {
+			t.Errorf("log[%d] = {%d %s %q}, want {%d %s %q}", i, got.number, got.at.UTC().Format(time.RFC3339), got.text, w.n, w.at, w.text)
+		}
+	}
+	// The dispatch time (first iw-text) is the report time, not a log entry.
+	if got := d.started.UTC().Format(time.RFC3339); got != "2026-11-09T19:45:00Z" {
+		t.Errorf("started = %s", got)
+	}
+}
+
+func TestParseIncidentDetail_CHPLogLegacyFormat(t *testing.T) {
+	html := `<div><p align="left">Sep 16 2025  9:09AM <br> 1182-Trfc Collision-No Inj <br> 7224 55th St </p>
+  <p align="left">Sep 16 2025  9:14AM [5] VEH ARE NOW AT ABOVE 1020 <br />Sep 16 2025  9:11AM [2] RED TK VS RED FORD ESCAPE <br /> </p><p>Information courtesy of CHP</p></div>`
+	d := parseIncidentDetail(caltrans.CaltransIncident{FeedType: caltrans.CHP_INCIDENT, DescriptionHtml: html})
+	if len(d.log) != 2 || d.log[0].number != 2 || d.log[1].number != 5 || d.log[1].text != "VEH ARE NOW AT ABOVE 1020" {
+		t.Fatalf("log = %+v", d.log)
+	}
+}
+
+func TestParseIncidentDetail_NoLogForClosuresOrPlainText(t *testing.T) {
+	// A segment without a stamp and a [n] marker is not a log entry.
+	html := `<div class="iw-body"><p class="iw-text">Nov 9 2026 11:45AM <br> Hwy 4</p><p class="iw-text">units en route<br />[2] no stamp<br /></p></div>`
+	if d := parseIncidentDetail(caltrans.CaltransIncident{FeedType: caltrans.CHP_INCIDENT, DescriptionHtml: html}); len(d.log) != 0 {
+		t.Fatalf("log = %+v, want none", d.log)
+	}
+	if d := parseIncidentDetail(caltrans.CaltransIncident{FeedType: caltrans.LANE_CLOSURE, DescriptionHtml: chpLogDescription2026}); len(d.log) != 0 {
+		t.Fatalf("lane closure log = %+v, want none", d.log)
+	}
+}
+
+func TestBuildIncident_CarriesCHPLog(t *testing.T) {
+	s := &RoadsService{}
+	inc := s.buildIncident(caltrans.CaltransIncident{
+		FeedType: caltrans.CHP_INCIDENT, Name: "CHP Incident 261109MR0185", DescriptionHtml: chpLogDescription2026,
+		Coordinates: &api.Coordinates{Latitude: 37.9841, Longitude: -120.3827},
+	}, motherLode())
+	if inc == nil || len(inc.GetLog()) != 3 || inc.GetLog()[0].GetNumber() != 1 || inc.GetLog()[2].GetText() != "TOT FIRE" {
+		t.Fatalf("incident log = %+v", inc.GetLog())
+	}
+}

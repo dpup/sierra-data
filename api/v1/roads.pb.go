@@ -728,7 +728,10 @@ type Incident struct {
 	AiResponse string `protobuf:"bytes,17,opt,name=ai_response,json=aiResponse,proto3" json:"ai_response,omitempty"`
 	// When the enhancement was produced (the model run, not this fetch — cached
 	// enhancements keep their original time). Unset when not AI-enhanced.
-	AiEnhancedAt  *timestamppb.Timestamp `protobuf:"bytes,18,opt,name=ai_enhanced_at,json=aiEnhancedAt,proto3" json:"ai_enhanced_at,omitempty"`
+	AiEnhancedAt *timestamppb.Timestamp `protobuf:"bytes,18,opt,name=ai_enhanced_at,json=aiEnhancedAt,proto3" json:"ai_enhanced_at,omitempty"`
+	// CHP's numbered incident log, oldest first, parsed from the feed's markup.
+	// Empty for lane closures and when the feed carries no log lines.
+	Log           []*IncidentLogEntry `protobuf:"bytes,19,rep,name=log,proto3" json:"log,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -889,6 +892,74 @@ func (x *Incident) GetAiEnhancedAt() *timestamppb.Timestamp {
 	return nil
 }
 
+func (x *Incident) GetLog() []*IncidentLogEntry {
+	if x != nil {
+		return x.Log
+	}
+	return nil
+}
+
+// IncidentLogEntry is one line of a CHP incident log ("[3] TOT FIRE").
+type IncidentLogEntry struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Number        int32                  `protobuf:"varint,1,opt,name=number,proto3" json:"number,omitempty"` // The line number CHP assigned
+	At            *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=at,proto3" json:"at,omitempty"`          // When CHP logged it
+	Text          string                 `protobuf:"bytes,3,opt,name=text,proto3" json:"text,omitempty"`      // The dispatcher's text, verbatim
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *IncidentLogEntry) Reset() {
+	*x = IncidentLogEntry{}
+	mi := &file_roads_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *IncidentLogEntry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*IncidentLogEntry) ProtoMessage() {}
+
+func (x *IncidentLogEntry) ProtoReflect() protoreflect.Message {
+	mi := &file_roads_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use IncidentLogEntry.ProtoReflect.Descriptor instead.
+func (*IncidentLogEntry) Descriptor() ([]byte, []int) {
+	return file_roads_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *IncidentLogEntry) GetNumber() int32 {
+	if x != nil {
+		return x.Number
+	}
+	return 0
+}
+
+func (x *IncidentLogEntry) GetAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.At
+	}
+	return nil
+}
+
+func (x *IncidentLogEntry) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
 type ProcessingMetrics struct {
 	state               protoimpl.MessageState `protogen:"open.v1"`
 	TotalRawAlerts      int64                  `protobuf:"varint,1,opt,name=total_raw_alerts,json=totalRawAlerts,proto3" json:"total_raw_alerts,omitempty"`
@@ -902,7 +973,7 @@ type ProcessingMetrics struct {
 
 func (x *ProcessingMetrics) Reset() {
 	*x = ProcessingMetrics{}
-	mi := &file_roads_proto_msgTypes[8]
+	mi := &file_roads_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -914,7 +985,7 @@ func (x *ProcessingMetrics) String() string {
 func (*ProcessingMetrics) ProtoMessage() {}
 
 func (x *ProcessingMetrics) ProtoReflect() protoreflect.Message {
-	mi := &file_roads_proto_msgTypes[8]
+	mi := &file_roads_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -927,7 +998,7 @@ func (x *ProcessingMetrics) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProcessingMetrics.ProtoReflect.Descriptor instead.
 func (*ProcessingMetrics) Descriptor() ([]byte, []int) {
-	return file_roads_proto_rawDescGZIP(), []int{8}
+	return file_roads_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ProcessingMetrics) GetTotalRawAlerts() int64 {
@@ -990,7 +1061,7 @@ type Road struct {
 
 func (x *Road) Reset() {
 	*x = Road{}
-	mi := &file_roads_proto_msgTypes[9]
+	mi := &file_roads_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1002,7 +1073,7 @@ func (x *Road) String() string {
 func (*Road) ProtoMessage() {}
 
 func (x *Road) ProtoReflect() protoreflect.Message {
-	mi := &file_roads_proto_msgTypes[9]
+	mi := &file_roads_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1015,7 +1086,7 @@ func (x *Road) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Road.ProtoReflect.Descriptor instead.
 func (*Road) Descriptor() ([]byte, []int) {
-	return file_roads_proto_rawDescGZIP(), []int{9}
+	return file_roads_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *Road) GetId() string {
@@ -1125,7 +1196,7 @@ type ChainControlInfo struct {
 
 func (x *ChainControlInfo) Reset() {
 	*x = ChainControlInfo{}
-	mi := &file_roads_proto_msgTypes[10]
+	mi := &file_roads_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1137,7 +1208,7 @@ func (x *ChainControlInfo) String() string {
 func (*ChainControlInfo) ProtoMessage() {}
 
 func (x *ChainControlInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_roads_proto_msgTypes[10]
+	mi := &file_roads_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1150,7 +1221,7 @@ func (x *ChainControlInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChainControlInfo.ProtoReflect.Descriptor instead.
 func (*ChainControlInfo) Descriptor() ([]byte, []int) {
-	return file_roads_proto_rawDescGZIP(), []int{10}
+	return file_roads_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ChainControlInfo) GetLevel() ChainControlLevel {
@@ -1227,7 +1298,7 @@ type RoadAlert struct {
 
 func (x *RoadAlert) Reset() {
 	*x = RoadAlert{}
-	mi := &file_roads_proto_msgTypes[11]
+	mi := &file_roads_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1239,7 +1310,7 @@ func (x *RoadAlert) String() string {
 func (*RoadAlert) ProtoMessage() {}
 
 func (x *RoadAlert) ProtoReflect() protoreflect.Message {
-	mi := &file_roads_proto_msgTypes[11]
+	mi := &file_roads_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1252,7 +1323,7 @@ func (x *RoadAlert) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RoadAlert.ProtoReflect.Descriptor instead.
 func (*RoadAlert) Descriptor() ([]byte, []int) {
-	return file_roads_proto_rawDescGZIP(), []int{11}
+	return file_roads_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *RoadAlert) GetType() AlertType {
@@ -1386,7 +1457,7 @@ type TrafficIncident struct {
 
 func (x *TrafficIncident) Reset() {
 	*x = TrafficIncident{}
-	mi := &file_roads_proto_msgTypes[12]
+	mi := &file_roads_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1398,7 +1469,7 @@ func (x *TrafficIncident) String() string {
 func (*TrafficIncident) ProtoMessage() {}
 
 func (x *TrafficIncident) ProtoReflect() protoreflect.Message {
-	mi := &file_roads_proto_msgTypes[12]
+	mi := &file_roads_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1411,7 +1482,7 @@ func (x *TrafficIncident) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TrafficIncident.ProtoReflect.Descriptor instead.
 func (*TrafficIncident) Descriptor() ([]byte, []int) {
-	return file_roads_proto_rawDescGZIP(), []int{12}
+	return file_roads_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *TrafficIncident) GetId() string {
@@ -1463,7 +1534,7 @@ const file_roads_proto_rawDesc = "" +
 	"\x15ListIncidentsResponse\x12.\n" +
 	"\tincidents\x18\x01 \x03(\v2\x10.api.v1.IncidentR\tincidents\x12=\n" +
 	"\flast_updated\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\vlastUpdated\x12\x12\n" +
-	"\x04area\x18\x03 \x01(\tR\x04area\"\xcc\x06\n" +
+	"\x04area\x18\x03 \x01(\tR\x04area\"\xf8\x06\n" +
 	"\bIncident\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12%\n" +
 	"\x04type\x18\x02 \x01(\x0e2\x11.api.v1.AlertTypeR\x04type\x121\n" +
@@ -1486,10 +1557,15 @@ const file_roads_proto_rawDesc = "" +
 	"ai_request\x18\x10 \x01(\tR\taiRequest\x12\x1f\n" +
 	"\vai_response\x18\x11 \x01(\tR\n" +
 	"aiResponse\x12@\n" +
-	"\x0eai_enhanced_at\x18\x12 \x01(\v2\x1a.google.protobuf.TimestampR\faiEnhancedAt\x1a;\n" +
+	"\x0eai_enhanced_at\x18\x12 \x01(\v2\x1a.google.protobuf.TimestampR\faiEnhancedAt\x12*\n" +
+	"\x03log\x18\x13 \x03(\v2\x18.api.v1.IncidentLogEntryR\x03log\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xf7\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"j\n" +
+	"\x10IncidentLogEntry\x12\x16\n" +
+	"\x06number\x18\x01 \x01(\x05R\x06number\x12*\n" +
+	"\x02at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x02at\x12\x12\n" +
+	"\x04text\x18\x03 \x01(\tR\x04text\"\xf7\x01\n" +
 	"\x11ProcessingMetrics\x12(\n" +
 	"\x10total_raw_alerts\x18\x01 \x01(\x03R\x0etotalRawAlerts\x12'\n" +
 	"\x0ffiltered_alerts\x18\x02 \x01(\x03R\x0efilteredAlerts\x12'\n" +
@@ -1612,7 +1688,7 @@ func file_roads_proto_rawDescGZIP() []byte {
 }
 
 var file_roads_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
-var file_roads_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_roads_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_roads_proto_goTypes = []any{
 	(RoadStatus)(0),                     // 0: api.v1.RoadStatus
 	(ChainControlStatus)(0),             // 1: api.v1.ChainControlStatus
@@ -1628,68 +1704,71 @@ var file_roads_proto_goTypes = []any{
 	(*GetRoadResponse)(nil),             // 11: api.v1.GetRoadResponse
 	(*ListIncidentsResponse)(nil),       // 12: api.v1.ListIncidentsResponse
 	(*Incident)(nil),                    // 13: api.v1.Incident
-	(*ProcessingMetrics)(nil),           // 14: api.v1.ProcessingMetrics
-	(*Road)(nil),                        // 15: api.v1.Road
-	(*ChainControlInfo)(nil),            // 16: api.v1.ChainControlInfo
-	(*RoadAlert)(nil),                   // 17: api.v1.RoadAlert
-	(*TrafficIncident)(nil),             // 18: api.v1.TrafficIncident
-	nil,                                 // 19: api.v1.Incident.MetadataEntry
-	nil,                                 // 20: api.v1.RoadAlert.MetadataEntry
-	(*timestamppb.Timestamp)(nil),       // 21: google.protobuf.Timestamp
-	(AlertSeverity)(0),                  // 22: api.v1.AlertSeverity
-	(*Coordinates)(nil),                 // 23: api.v1.Coordinates
-	(IncidentStatus)(0),                 // 24: api.v1.IncidentStatus
-	(AlertImpact)(0),                    // 25: api.v1.AlertImpact
-	(AlertDuration)(0),                  // 26: api.v1.AlertDuration
+	(*IncidentLogEntry)(nil),            // 14: api.v1.IncidentLogEntry
+	(*ProcessingMetrics)(nil),           // 15: api.v1.ProcessingMetrics
+	(*Road)(nil),                        // 16: api.v1.Road
+	(*ChainControlInfo)(nil),            // 17: api.v1.ChainControlInfo
+	(*RoadAlert)(nil),                   // 18: api.v1.RoadAlert
+	(*TrafficIncident)(nil),             // 19: api.v1.TrafficIncident
+	nil,                                 // 20: api.v1.Incident.MetadataEntry
+	nil,                                 // 21: api.v1.RoadAlert.MetadataEntry
+	(*timestamppb.Timestamp)(nil),       // 22: google.protobuf.Timestamp
+	(AlertSeverity)(0),                  // 23: api.v1.AlertSeverity
+	(*Coordinates)(nil),                 // 24: api.v1.Coordinates
+	(IncidentStatus)(0),                 // 25: api.v1.IncidentStatus
+	(AlertImpact)(0),                    // 26: api.v1.AlertImpact
+	(AlertDuration)(0),                  // 27: api.v1.AlertDuration
 }
 var file_roads_proto_depIdxs = []int32{
-	15, // 0: api.v1.ListRoadsResponse.roads:type_name -> api.v1.Road
-	21, // 1: api.v1.ListRoadsResponse.last_updated:type_name -> google.protobuf.Timestamp
-	15, // 2: api.v1.GetRoadResponse.road:type_name -> api.v1.Road
-	21, // 3: api.v1.GetRoadResponse.last_updated:type_name -> google.protobuf.Timestamp
+	16, // 0: api.v1.ListRoadsResponse.roads:type_name -> api.v1.Road
+	22, // 1: api.v1.ListRoadsResponse.last_updated:type_name -> google.protobuf.Timestamp
+	16, // 2: api.v1.GetRoadResponse.road:type_name -> api.v1.Road
+	22, // 3: api.v1.GetRoadResponse.last_updated:type_name -> google.protobuf.Timestamp
 	13, // 4: api.v1.ListIncidentsResponse.incidents:type_name -> api.v1.Incident
-	21, // 5: api.v1.ListIncidentsResponse.last_updated:type_name -> google.protobuf.Timestamp
+	22, // 5: api.v1.ListIncidentsResponse.last_updated:type_name -> google.protobuf.Timestamp
 	4,  // 6: api.v1.Incident.type:type_name -> api.v1.AlertType
-	22, // 7: api.v1.Incident.severity:type_name -> api.v1.AlertSeverity
-	23, // 8: api.v1.Incident.location:type_name -> api.v1.Coordinates
-	24, // 9: api.v1.Incident.status:type_name -> api.v1.IncidentStatus
-	21, // 10: api.v1.Incident.started:type_name -> google.protobuf.Timestamp
-	21, // 11: api.v1.Incident.last_updated:type_name -> google.protobuf.Timestamp
-	25, // 12: api.v1.Incident.impact:type_name -> api.v1.AlertImpact
-	19, // 13: api.v1.Incident.metadata:type_name -> api.v1.Incident.MetadataEntry
-	21, // 14: api.v1.Incident.ai_enhanced_at:type_name -> google.protobuf.Timestamp
-	0,  // 15: api.v1.Road.status:type_name -> api.v1.RoadStatus
-	3,  // 16: api.v1.Road.congestion_level:type_name -> api.v1.CongestionLevel
-	1,  // 17: api.v1.Road.chain_control:type_name -> api.v1.ChainControlStatus
-	17, // 18: api.v1.Road.alerts:type_name -> api.v1.RoadAlert
-	16, // 19: api.v1.Road.chain_control_info:type_name -> api.v1.ChainControlInfo
-	23, // 20: api.v1.Road.polyline:type_name -> api.v1.Coordinates
-	2,  // 21: api.v1.ChainControlInfo.level:type_name -> api.v1.ChainControlLevel
-	21, // 22: api.v1.ChainControlInfo.effective_time:type_name -> google.protobuf.Timestamp
-	4,  // 23: api.v1.RoadAlert.type:type_name -> api.v1.AlertType
-	22, // 24: api.v1.RoadAlert.severity:type_name -> api.v1.AlertSeverity
-	5,  // 25: api.v1.RoadAlert.classification:type_name -> api.v1.AlertClassification
-	21, // 26: api.v1.RoadAlert.start_time:type_name -> google.protobuf.Timestamp
-	21, // 27: api.v1.RoadAlert.end_time:type_name -> google.protobuf.Timestamp
-	21, // 28: api.v1.RoadAlert.last_updated:type_name -> google.protobuf.Timestamp
-	23, // 29: api.v1.RoadAlert.location:type_name -> api.v1.Coordinates
-	25, // 30: api.v1.RoadAlert.impact:type_name -> api.v1.AlertImpact
-	26, // 31: api.v1.RoadAlert.duration:type_name -> api.v1.AlertDuration
-	21, // 32: api.v1.RoadAlert.time_reported:type_name -> google.protobuf.Timestamp
-	20, // 33: api.v1.RoadAlert.metadata:type_name -> api.v1.RoadAlert.MetadataEntry
-	6,  // 34: api.v1.RoadsService.ListRoads:input_type -> api.v1.ListRoadsRequest
-	7,  // 35: api.v1.RoadsService.GetRoad:input_type -> api.v1.GetRoadRequest
-	8,  // 36: api.v1.RoadsService.GetProcessingMetrics:input_type -> api.v1.GetProcessingMetricsRequest
-	9,  // 37: api.v1.RoadsService.ListIncidents:input_type -> api.v1.ListIncidentsRequest
-	10, // 38: api.v1.RoadsService.ListRoads:output_type -> api.v1.ListRoadsResponse
-	11, // 39: api.v1.RoadsService.GetRoad:output_type -> api.v1.GetRoadResponse
-	14, // 40: api.v1.RoadsService.GetProcessingMetrics:output_type -> api.v1.ProcessingMetrics
-	12, // 41: api.v1.RoadsService.ListIncidents:output_type -> api.v1.ListIncidentsResponse
-	38, // [38:42] is the sub-list for method output_type
-	34, // [34:38] is the sub-list for method input_type
-	34, // [34:34] is the sub-list for extension type_name
-	34, // [34:34] is the sub-list for extension extendee
-	0,  // [0:34] is the sub-list for field type_name
+	23, // 7: api.v1.Incident.severity:type_name -> api.v1.AlertSeverity
+	24, // 8: api.v1.Incident.location:type_name -> api.v1.Coordinates
+	25, // 9: api.v1.Incident.status:type_name -> api.v1.IncidentStatus
+	22, // 10: api.v1.Incident.started:type_name -> google.protobuf.Timestamp
+	22, // 11: api.v1.Incident.last_updated:type_name -> google.protobuf.Timestamp
+	26, // 12: api.v1.Incident.impact:type_name -> api.v1.AlertImpact
+	20, // 13: api.v1.Incident.metadata:type_name -> api.v1.Incident.MetadataEntry
+	22, // 14: api.v1.Incident.ai_enhanced_at:type_name -> google.protobuf.Timestamp
+	14, // 15: api.v1.Incident.log:type_name -> api.v1.IncidentLogEntry
+	22, // 16: api.v1.IncidentLogEntry.at:type_name -> google.protobuf.Timestamp
+	0,  // 17: api.v1.Road.status:type_name -> api.v1.RoadStatus
+	3,  // 18: api.v1.Road.congestion_level:type_name -> api.v1.CongestionLevel
+	1,  // 19: api.v1.Road.chain_control:type_name -> api.v1.ChainControlStatus
+	18, // 20: api.v1.Road.alerts:type_name -> api.v1.RoadAlert
+	17, // 21: api.v1.Road.chain_control_info:type_name -> api.v1.ChainControlInfo
+	24, // 22: api.v1.Road.polyline:type_name -> api.v1.Coordinates
+	2,  // 23: api.v1.ChainControlInfo.level:type_name -> api.v1.ChainControlLevel
+	22, // 24: api.v1.ChainControlInfo.effective_time:type_name -> google.protobuf.Timestamp
+	4,  // 25: api.v1.RoadAlert.type:type_name -> api.v1.AlertType
+	23, // 26: api.v1.RoadAlert.severity:type_name -> api.v1.AlertSeverity
+	5,  // 27: api.v1.RoadAlert.classification:type_name -> api.v1.AlertClassification
+	22, // 28: api.v1.RoadAlert.start_time:type_name -> google.protobuf.Timestamp
+	22, // 29: api.v1.RoadAlert.end_time:type_name -> google.protobuf.Timestamp
+	22, // 30: api.v1.RoadAlert.last_updated:type_name -> google.protobuf.Timestamp
+	24, // 31: api.v1.RoadAlert.location:type_name -> api.v1.Coordinates
+	26, // 32: api.v1.RoadAlert.impact:type_name -> api.v1.AlertImpact
+	27, // 33: api.v1.RoadAlert.duration:type_name -> api.v1.AlertDuration
+	22, // 34: api.v1.RoadAlert.time_reported:type_name -> google.protobuf.Timestamp
+	21, // 35: api.v1.RoadAlert.metadata:type_name -> api.v1.RoadAlert.MetadataEntry
+	6,  // 36: api.v1.RoadsService.ListRoads:input_type -> api.v1.ListRoadsRequest
+	7,  // 37: api.v1.RoadsService.GetRoad:input_type -> api.v1.GetRoadRequest
+	8,  // 38: api.v1.RoadsService.GetProcessingMetrics:input_type -> api.v1.GetProcessingMetricsRequest
+	9,  // 39: api.v1.RoadsService.ListIncidents:input_type -> api.v1.ListIncidentsRequest
+	10, // 40: api.v1.RoadsService.ListRoads:output_type -> api.v1.ListRoadsResponse
+	11, // 41: api.v1.RoadsService.GetRoad:output_type -> api.v1.GetRoadResponse
+	15, // 42: api.v1.RoadsService.GetProcessingMetrics:output_type -> api.v1.ProcessingMetrics
+	12, // 43: api.v1.RoadsService.ListIncidents:output_type -> api.v1.ListIncidentsResponse
+	40, // [40:44] is the sub-list for method output_type
+	36, // [36:40] is the sub-list for method input_type
+	36, // [36:36] is the sub-list for extension type_name
+	36, // [36:36] is the sub-list for extension extendee
+	0,  // [0:36] is the sub-list for field type_name
 }
 
 func init() { file_roads_proto_init() }
@@ -1704,7 +1783,7 @@ func file_roads_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_roads_proto_rawDesc), len(file_roads_proto_rawDesc)),
 			NumEnums:      6,
-			NumMessages:   15,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

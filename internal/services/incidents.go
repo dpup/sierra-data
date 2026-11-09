@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -407,6 +408,9 @@ func (s *RoadsService) buildIncident(in caltrans.CaltransIncident, area config.I
 	if !d.started.IsZero() {
 		inc.Started = timestamppb.New(d.started)
 	}
+	for _, e := range d.log {
+		inc.Log = append(inc.Log, &api.IncidentLogEntry{Number: e.number, At: timestamppb.New(e.at), Text: e.text})
+	}
 	if !d.lastUpdated.IsZero() {
 		inc.LastUpdated = timestamppb.New(d.lastUpdated)
 	} else {
@@ -578,6 +582,16 @@ type incidentDetail struct {
 	location         string // human-readable location
 	started          time.Time
 	lastUpdated      time.Time
+	// log is CHP's numbered incident log, oldest first (see chpLogEntries).
+	log []chpLogEntry
+}
+
+// chpLogEntry is one line of a CHP incident's log: "Nov 9 2026 11:46AM [3] TOT FIRE".
+// CHP numbers the lines itself and publishes them newest first.
+type chpLogEntry struct {
+	number int32
+	at     time.Time
+	text   string
 }
 
 var (
@@ -593,6 +607,9 @@ var (
 	legacyParaRe = regexp.MustCompile(`(?is)<p[^>]*align="left"[^>]*>(.*?)</p>`)
 
 	brRe          = regexp.MustCompile(`(?i)<br\s*/?>`)
+	// chpLogEntryRe matches one CHP log segment: a Pacific time stamp, the line
+	// number CHP assigned, then the dispatcher's text.
+	chpLogEntryRe = regexp.MustCompile(`^([A-Z][a-z]{2}\s+\d{1,2}\s+\d{4}\s+\d{1,2}:\d{2}[AaPp][Mm])\s+\[(\d+)\]\s+(.+)$`)
 	tagRe         = regexp.MustCompile(`<[^>]*>`)
 	lastUpdatedRe = regexp.MustCompile(`(?i)Last updated:\s*(?:<strong>\s*)?([0-9]{1,2}/[0-9]{1,2}/[0-9]{4})(?:\s*</strong>)?\s*([0-9]{1,2}:[0-9]{2}[ap]m)`)
 
@@ -639,10 +656,19 @@ func parseIncidentDetail(in caltrans.CaltransIncident) incidentDetail {
 			if len(segs) > 1 {
 				d.location = segs[1]
 			}
+			// The later iw-text blocks hold the log, one <br>-separated line each.
+			for _, t := range texts[1:] {
+				d.log = append(d.log, chpLogEntries(t[1])...)
+			}
 		} else if len(segs) > 0 {
 			d.location = strings.Join(segs, " ")
 		}
 	} else if m := legacyParaRe.FindStringSubmatch(html); len(m) > 1 {
+		if in.FeedType == caltrans.CHP_INCIDENT {
+			for _, p := range legacyParaRe.FindAllStringSubmatch(html, -1)[1:] {
+				d.log = append(d.log, chpLogEntries(p[1])...)
+			}
+		}
 		// Legacy format: "<time> <br> <type> <br> <location>".
 		segs := splitBR(m[1])
 		if len(segs) > 0 {
@@ -656,7 +682,28 @@ func parseIncidentDetail(in caltrans.CaltransIncident) incidentDetail {
 		}
 	}
 
+	sort.SliceStable(d.log, func(i, j int) bool { return d.log[i].number < d.log[j].number })
 	return d
+}
+
+// chpLogEntries parses the log lines in one HTML fragment. A segment without
+// both a parseable stamp and a [n] number is not a log line and is skipped:
+// the narrative stays in the verbatim text either way.
+func chpLogEntries(fragment string) []chpLogEntry {
+	var out []chpLogEntry
+	for _, seg := range splitBR(fragment) {
+		m := chpLogEntryRe.FindStringSubmatch(strings.Join(strings.Fields(seg), " "))
+		if m == nil {
+			continue
+		}
+		at := parseCHPTime(m[1])
+		n, err := strconv.Atoi(m[2])
+		if at.IsZero() || err != nil {
+			continue
+		}
+		out = append(out, chpLogEntry{number: int32(n), at: at, text: strings.TrimSpace(m[3])})
+	}
+	return out
 }
 
 // extractLogNumber pulls the incident's identifier from its name or description.

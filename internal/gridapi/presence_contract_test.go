@@ -168,6 +168,17 @@ func seedPresenceFixtures(t *testing.T, s *Service) {
 		}},
 	})
 
+	// A CHP incident with its parsed log (every entry's `at` is REQUIRED).
+	upsert(t, s.Store, &gridv1.Event{
+		Id: "chp:261109MR0185", Layer: gridv1.Layer_ROAD_INCIDENT, Category: "incident",
+		Severity: gridv1.Severity_INFO, Status: gridv1.EventStatus_ACTIVE,
+		Headline: "Report of fire", Geometry: pointGeom(37.98, -120.38), Provenance: prov("chp"),
+		Detail: &gridv1.Event_RoadIncident{RoadIncident: &gridv1.RoadIncidentDetail{
+			LogNumber: "261109MR0185",
+			Log:       []*gridv1.IncidentLogEntry{{Number: 1, At: timestamppb.New(base), Text: "BLK SMOKE"}},
+		}},
+	})
+
 	upsert(t, s.Store, &gridv1.Event{
 		Id: "pge:1", Layer: gridv1.Layer_POWER, Category: "unplanned",
 		Severity: gridv1.Severity_MINOR, Status: gridv1.EventStatus_ACTIVE,

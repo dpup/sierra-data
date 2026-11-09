@@ -5515,6 +5515,33 @@
         ],
         "type": "object"
       },
+      "v1IncidentLogEntry": {
+        "description": "IncidentLogEntry is one line of a CHP incident log.",
+        "properties": {
+          "at": {
+            "description": "When CHP logged the line (their Pacific time, as an instant).",
+            "format": "date-time",
+            "type": "string"
+          },
+          "number": {
+            "description": "The line number CHP assigned (they publish newest first; `log` is sorted\noldest first by this number).",
+            "example": 3,
+            "format": "int32",
+            "type": "integer"
+          },
+          "text": {
+            "description": "The dispatcher's text, verbatim (CHP abbreviations included).",
+            "example": "TOT FIRE",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "number",
+          "text"
+        ],
+        "type": "object"
+      },
       "v1LaneClosureDetail": {
         "description": "LaneClosureDetail is one Caltrans planned lane-closure WINDOW from the CWWP2\ndata portal. Every field is Caltrans data; none of it is AI-generated.\n\nA multi-day job is one window (one event) per day, and neither `closureId`\nnor `logNumber` identifies a job; `windowId` is the only unique key. A window\nis SCHEDULED until the crew radios it set up (`setUpAt`), then ACTIVE until\nthey radio it picked up, or until `plannedEnd` plus a 12-hour overrun grace\npasses with no pickup call, when it is presumed over and RESOLVED. The\nplanned end is an estimate crews overrun, so it is never mapped onto the\nenvelope `expires`.",
         "properties": {
@@ -6547,6 +6574,13 @@
             "example": "light",
             "type": "string"
           },
+          "log": {
+            "description": "CHP's numbered incident log, oldest first: what dispatch recorded and\nwhen. Parsed from the feed's structure, not AI. The same lines are in\n`description` verbatim. Empty for Caltrans closures and when CHP has\nlogged nothing. A new line is a new revision.",
+            "items": {
+              "$ref": "#/components/schemas/v1IncidentLogEntry"
+            },
+            "type": "array"
+          },
           "logNumber": {
             "description": "CHP log number for an incident; for a Caltrans closure, its closure id.",
             "example": "261106ST0341",
@@ -6568,6 +6602,7 @@
           "closure",
           "duration",
           "impact",
+          "log",
           "logNumber",
           "metadata"
         ],

@@ -54,6 +54,10 @@ func testIncidents() (*api.Incident, *api.Incident, *api.Incident) {
 		AiRequest:           "Parse this traffic incident report...",
 		AiResponse:          `{"details":"Vehicle fire blocking the right lane","impact":"severe"}`,
 		AiEnhancedAt:        timestamppb.New(time.Date(2026, 7, 4, 6, 30, 0, 0, time.UTC)),
+		Log: []*api.IncidentLogEntry{
+			{Number: 1, At: started, Text: "1141 VEH FIRE RHS"},
+			{Number: 2, At: updated, Text: "1 VEH INV"},
+		},
 		Metadata: map[string]string{
 			"duration":           "several hours",
 			"emergency_services": "on scene",
@@ -111,6 +115,13 @@ func TestRoadIncidentPoll(t *testing.T) {
 	assert.Equal(t, -120.35, ev.Geometry.Centroid.Lng)
 	assert.Equal(t, enhanced.Started.AsTime(), ev.Effective.AsTime())
 	assert.Equal(t, enhanced.LastUpdated.AsTime(), ev.ObservedAt.AsTime())
+	// CHP's parsed log rides on the detail block, oldest first.
+	log := ev.GetRoadIncident().GetLog()
+	require.Len(t, log, 2)
+	assert.Equal(t, int32(1), log[0].GetNumber())
+	assert.Equal(t, "1141 VEH FIRE RHS", log[0].GetText())
+	assert.Equal(t, enhanced.Started.AsTime(), log[0].GetAt().AsTime())
+	assert.Nil(t, eventByID(t, res.Events, "caltrans:C4TA-7-abc123").GetRoadIncident().GetLog())
 
 	// CHP dispatch incidents attribute to the "chp" source row.
 	require.NotNil(t, ev.Provenance)

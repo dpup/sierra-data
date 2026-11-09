@@ -828,6 +828,22 @@ message RoadIncidentDetail {
   // The Caltrans closure window, for source `caltrans` only; `null` for CHP
   // incidents.
   LaneClosureDetail closure = 8;
+  // CHP's numbered incident log, oldest first: what dispatch recorded and
+  // when. Parsed from the feed's structure, not AI. The same lines are in
+  // `description` verbatim. Empty for Caltrans closures and when CHP has
+  // logged nothing. A new line is a new revision.
+  repeated IncidentLogEntry log = 9;
+}
+
+// IncidentLogEntry is one line of a CHP incident log.
+message IncidentLogEntry {
+  // The line number CHP assigned (they publish newest first; `log` is sorted
+  // oldest first by this number).
+  int32 number = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "3"}];
+  // When CHP logged the line (their Pacific time, as an instant).
+  google.protobuf.Timestamp at = 2 [(google.api.field_behavior) = REQUIRED];
+  // The dispatcher's text, verbatim (CHP abbreviations included).
+  string text = 3 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"TOT FIRE\""}];
 }
 
 // LaneClosureDetail is one Caltrans planned lane-closure WINDOW from the CWWP2

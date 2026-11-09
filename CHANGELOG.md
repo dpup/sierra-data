@@ -22,6 +22,24 @@ longer exist: `/api/v1` originally hosted a different hand-built REST surface,
 replaced by a snake_case `/v1` surface on 2026-07-05, which was folded back onto
 the proto-defined `/api/v1` gateway on 2026-07-09.
 
+## 2026-11-09
+
+### CHP incidents carry their numbered log (`roadIncident.log`)
+
+A CHP incident's dispatch log is now structured on the detail block:
+`roadIncident.log` is `[{number, at, text}]`, oldest first, one entry per line
+CHP published (`Nov 9 2026 11:46AM [3] TOT FIRE` becomes
+`{"number": 3, "at": "2026-11-09T19:46:00Z", "text": "TOT FIRE"}`). It is
+parsed from the feed's markup, not by AI; the same lines stay verbatim in
+`description`. `at` is CHP's Pacific stamp as an instant and is never null.
+Empty for Caltrans lane closures and for incidents CHP has logged nothing
+on. A new log line is a new revision, as it already was through
+`description`.
+
+The time CHP first reported an incident was already structured: it is the
+event's `effective`. Use it, not `observedAt` (the latest update), as the
+report time.
+
 ## 2026-11-07 (later)
 
 ### An unreachable monitored repeater keeps its last readings

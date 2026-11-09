@@ -141,6 +141,16 @@ message Incident {
   // When the enhancement was produced (the model run, not this fetch — cached
   // enhancements keep their original time). Unset when not AI-enhanced.
   google.protobuf.Timestamp ai_enhanced_at = 18;
+  // CHP's numbered incident log, oldest first, parsed from the feed's markup.
+  // Empty for lane closures and when the feed carries no log lines.
+  repeated IncidentLogEntry log = 19;
+}
+
+// IncidentLogEntry is one line of a CHP incident log ("[3] TOT FIRE").
+message IncidentLogEntry {
+  int32 number = 1;                       // The line number CHP assigned
+  google.protobuf.Timestamp at = 2;       // When CHP logged it
+  string text = 3;                        // The dispatcher's text, verbatim
 }
 
 message ProcessingMetrics {

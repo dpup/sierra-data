@@ -1672,6 +1672,31 @@
         "centroid"
       ]
     },
+    "v1IncidentLogEntry": {
+      "type": "object",
+      "properties": {
+        "number": {
+          "type": "integer",
+          "format": "int32",
+          "example": 3,
+          "description": "The line number CHP assigned (they publish newest first; `log` is sorted\noldest first by this number)."
+        },
+        "at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When CHP logged the line (their Pacific time, as an instant)."
+        },
+        "text": {
+          "type": "string",
+          "example": "TOT FIRE",
+          "description": "The dispatcher's text, verbatim (CHP abbreviations included)."
+        }
+      },
+      "description": "IncidentLogEntry is one line of a CHP incident log.",
+      "required": [
+        "at"
+      ]
+    },
     "v1LaneClosureDetail": {
       "type": "object",
       "properties": {
@@ -2520,6 +2545,14 @@
         "closure": {
           "$ref": "#/definitions/v1LaneClosureDetail",
           "description": "The Caltrans closure window, for source `caltrans` only; `null` for CHP\nincidents."
+        },
+        "log": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1IncidentLogEntry"
+          },
+          "description": "CHP's numbered incident log, oldest first: what dispatch recorded and\nwhen. Parsed from the feed's structure, not AI. The same lines are in\n`description` verbatim. Empty for Caltrans closures and when CHP has\nlogged nothing. A new line is a new revision."
         }
       },
       "description": "RoadIncidentDetail is the ROAD_INCIDENT detail block, for a CHP incident or a\nCaltrans lane-closure window. The incident type is the envelope `category`,\nthe location is `areaLabel`, and the short line is `headline`."
