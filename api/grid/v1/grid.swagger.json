@@ -1378,6 +1378,10 @@
             "$ref": "#/definitions/v1WeatherLocation"
           },
           "description": "The monitored towns (within `place`, when given), with position and\nelevation, in configuration order."
+        },
+        "weatherStatus": {
+          "$ref": "#/definitions/v1SourceStatus",
+          "description": "Health of `weather` (OpenWeatherMap current conditions): OK, STALE when\nit is older than its refresh interval, or UNAVAILABLE when it could not\nbe read at all, in which case `weather` is empty and `lastUpdated` null.\nRender UNAVAILABLE as \"current conditions unknown\", never as no towns.\n`forecast` and `fireWeather` come from NWS and do not depend on it."
         }
       },
       "description": "Conditions is current, non-event state."

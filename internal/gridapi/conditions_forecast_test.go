@@ -116,3 +116,22 @@ func TestPlaceBboxPadsDegenerate(t *testing.T) {
 		t.Errorf("a non-degenerate box must not be widened: %+v -> %+v", poly, got)
 	}
 }
+
+// OpenWeatherMap failing for every town takes only current weather down:
+// towns, NWS forecasts and fire weather are still served, and weatherStatus
+// says current conditions are unknown.
+func TestGetConditions_CurrentWeatherDown(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Weather.Locations = []config.WeatherLocation{{ID: "arnold", Name: "Arnold, CA"}}
+	forecasts := map[string]*nws.Forecast{"arnold": {Points: []nws.ForecastPoint{{Time: time.Now().UTC(), WindKmh: 5, HumidityPct: 40}}}}
+	g := NewGridServer(&Service{Cfg: cfg, Now: time.Now, Weather: &fakeWeather{err: assert.AnError, forecasts: forecasts}})
+
+	resp, err := g.GetConditions(context.Background(), &gridv1.GetConditionsRequest{})
+	require.NoError(t, err)
+	assert.Equal(t, gridv1.SourceStatus_UNAVAILABLE, resp.GetWeatherStatus())
+	assert.Empty(t, resp.GetWeather())
+	assert.Nil(t, resp.GetLastUpdated())
+	assert.Len(t, resp.GetLocations(), 1)
+	assert.Len(t, resp.GetForecast(), 1)
+	assert.Equal(t, "normal", resp.GetFireWeather().GetState())
+}

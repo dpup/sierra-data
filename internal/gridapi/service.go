@@ -34,6 +34,9 @@ type WeatherAPI interface {
 	// LocationForecasts returns per-location fire-weather forecasts (fail-soft;
 	// nil/partial, never an error). See internal/services WeatherService.
 	LocationForecasts(context.Context) map[string]*nws.Forecast
+	// RegionFireWeather is the NWS fire-weather classification alone, for
+	// when current weather (OpenWeatherMap) cannot be read.
+	RegionFireWeather(context.Context) *api.FireWeather
 }
 
 // CensusAPI is the geocoder slice /api/v1/places:resolve?address= consumes

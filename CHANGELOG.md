@@ -130,6 +130,13 @@ whose zones cannot be read keeps the shape it had, or has none yet.
 available. It used to be joined to `weather`, so an OpenWeatherMap failure for
 a town also hid its NWS forecast.
 
+`/conditions` no longer fails when OpenWeatherMap is down for every town. It
+used to answer 500, losing the NWS forecasts and fire weather too. It now
+answers with `weather: []`, `lastUpdated: null` and the new `weatherStatus:
+UNAVAILABLE` (also `OK`, or `STALE` when current weather is older than its
+refresh interval), plus `locations`, `forecast` and `fireWeather` as usual.
+Render UNAVAILABLE as "current conditions unknown", not as no towns.
+
 ### New: `GET /api/v1/events/{id}/timeline`
 
 One event's timeline, oldest first, every entry marked with whose clock it is

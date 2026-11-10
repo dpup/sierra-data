@@ -565,9 +565,18 @@ func fireWeatherSlug(s api.FireWeatherState) string {
 // region's fire-weather classification, optionally scoped to a place's bbox.
 // Weather alerts are dropped — they are events (/api/v1/events?layer=weather_alert).
 func (g *GridServer) GetConditions(ctx context.Context, req *gridv1.GetConditionsRequest) (*gridv1.Conditions, error) {
+	// Current weather (OpenWeatherMap) failing must not take the NWS
+	// forecasts and fire weather down with it: serve those, and say plainly
+	// that current conditions are unknown.
+	weatherStatus := gridv1.SourceStatus_OK
 	resp, err := g.svc.Weather.ListWeather(ctx, &api.ListWeatherRequest{})
 	if err != nil {
-		return nil, internalErr(ctx, err)
+		logError(ctx, "gridapi: current weather unavailable; serving forecasts only", err)
+		weatherStatus = gridv1.SourceStatus_UNAVAILABLE
+		resp = &api.ListWeatherResponse{FireWeather: g.svc.Weather.RegionFireWeather(ctx)}
+	} else if lu := resp.GetLastUpdated(); lu != nil && g.svc.Cfg != nil && g.svc.Cfg.Weather.RefreshInterval > 0 &&
+		g.svc.Now().Sub(lu.AsTime()) > g.svc.Cfg.Weather.RefreshInterval*3/2 {
+		weatherStatus = gridv1.SourceStatus_STALE
 	}
 	data := resp.GetWeatherData()
 	var locations []config.WeatherLocation
@@ -586,7 +595,7 @@ func (g *GridServer) GetConditions(ctx context.Context, req *gridv1.GetCondition
 		locations = filterLocations(locations, box, ok)
 	}
 
-	out := &gridv1.Conditions{LastUpdated: resp.GetLastUpdated()}
+	out := &gridv1.Conditions{LastUpdated: resp.GetLastUpdated(), WeatherStatus: weatherStatus}
 	for _, wd := range data {
 		out.Weather = append(out.Weather, &gridv1.WeatherConditions{
 			LocationId:           wd.GetLocationId(),

@@ -5147,6 +5147,14 @@
               "$ref": "#/components/schemas/v1WeatherConditions"
             },
             "type": "array"
+          },
+          "weatherStatus": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/v1SourceStatus"
+              }
+            ],
+            "description": "Health of `weather` (OpenWeatherMap current conditions): OK, STALE when\nit is older than its refresh interval, or UNAVAILABLE when it could not\nbe read at all, in which case `weather` is empty and `lastUpdated` null.\nRender UNAVAILABLE as \"current conditions unknown\", never as no towns.\n`forecast` and `fireWeather` come from NWS and do not depend on it."
           }
         },
         "required": [
@@ -5154,7 +5162,8 @@
           "forecast",
           "lastUpdated",
           "locations",
-          "weather"
+          "weather",
+          "weatherStatus"
         ],
         "type": "object"
       },

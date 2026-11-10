@@ -163,6 +163,12 @@ func NWSAlertID(a nws.Alert) string {
 	return fmt.Sprintf("nws_%s_%d", a.Event, a.Effective.Unix())
 }
 
+// RegionFireWeather is the region's fire-weather classification from NWS
+// products alone; it does not depend on OpenWeatherMap.
+func (s *WeatherService) RegionFireWeather(ctx context.Context) *api.FireWeather {
+	return s.computeRegionFireWeather(ctx)
+}
+
 // computeRegionFireWeather classifies fire-weather risk for the whole service
 // area from the shared NWS alert list. Fire-weather products are regional, so a
 // single classification applies to every monitored location.

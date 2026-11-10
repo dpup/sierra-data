@@ -2624,6 +2624,12 @@ message Conditions {
   // The monitored towns (within `place`, when given), with position and
   // elevation, in configuration order.
   repeated WeatherLocation locations = 5;
+  // Health of `weather` (OpenWeatherMap current conditions): OK, STALE when
+  // it is older than its refresh interval, or UNAVAILABLE when it could not
+  // be read at all, in which case `weather` is empty and `lastUpdated` null.
+  // Render UNAVAILABLE as "current conditions unknown", never as no towns.
+  // `forecast` and `fireWeather` come from NWS and do not depend on it.
+  SourceStatus weather_status = 6;
 }
 
 // ListSourcesRequest takes no parameters.

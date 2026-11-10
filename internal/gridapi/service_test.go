@@ -88,6 +88,13 @@ type fakeWeather struct {
 func (f *fakeWeather) ListWeather(context.Context, *api.ListWeatherRequest) (*api.ListWeatherResponse, error) {
 	return f.resp, f.err
 }
+
+func (f *fakeWeather) RegionFireWeather(context.Context) *api.FireWeather {
+	if f.resp != nil {
+		return f.resp.GetFireWeather()
+	}
+	return &api.FireWeather{State: api.FireWeatherState_NORMAL}
+}
 func (f *fakeWeather) LocationForecasts(context.Context) map[string]*nws.Forecast { return f.forecasts }
 
 type fakeCensus struct {

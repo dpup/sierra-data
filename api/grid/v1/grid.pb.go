@@ -7416,7 +7416,13 @@ type Conditions struct {
 	Forecast []*WeatherForecast `protobuf:"bytes,4,rep,name=forecast,proto3" json:"forecast,omitempty"`
 	// The monitored towns (within `place`, when given), with position and
 	// elevation, in configuration order.
-	Locations     []*WeatherLocation `protobuf:"bytes,5,rep,name=locations,proto3" json:"locations,omitempty"`
+	Locations []*WeatherLocation `protobuf:"bytes,5,rep,name=locations,proto3" json:"locations,omitempty"`
+	// Health of `weather` (OpenWeatherMap current conditions): OK, STALE when
+	// it is older than its refresh interval, or UNAVAILABLE when it could not
+	// be read at all, in which case `weather` is empty and `lastUpdated` null.
+	// Render UNAVAILABLE as "current conditions unknown", never as no towns.
+	// `forecast` and `fireWeather` come from NWS and do not depend on it.
+	WeatherStatus SourceStatus `protobuf:"varint,6,opt,name=weather_status,json=weatherStatus,proto3,enum=grid.v1.SourceStatus" json:"weather_status,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -7484,6 +7490,13 @@ func (x *Conditions) GetLocations() []*WeatherLocation {
 		return x.Locations
 	}
 	return nil
+}
+
+func (x *Conditions) GetWeatherStatus() SourceStatus {
+	if x != nil {
+		return x.WeatherStatus
+	}
+	return SourceStatus_SOURCE_STATUS_UNSPECIFIED
 }
 
 // ListSourcesRequest takes no parameters.
@@ -8312,14 +8325,15 @@ const file_grid_proto_rawDesc = "" +
 	"\x14min_humidity_percent\x18\b \x01(\x05B\a\x92A\x04J\x0233R\x12minHumidityPercent\x12O\n" +
 	"\x15grid_elevation_meters\x18\t \x01(\v2\x1b.google.protobuf.Int32ValueR\x13gridElevationMeters\x122\n" +
 	"\x05daily\x18\n" +
-	" \x03(\v2\x1c.grid.v1.DailyForecastPeriodR\x05daily\"\xb2\x02\n" +
+	" \x03(\v2\x1c.grid.v1.DailyForecastPeriodR\x05daily\"\xf0\x02\n" +
 	"\n" +
 	"Conditions\x124\n" +
 	"\aweather\x18\x01 \x03(\v2\x1a.grid.v1.WeatherConditionsR\aweather\x12A\n" +
 	"\ffire_weather\x18\x02 \x01(\v2\x1e.grid.v1.FireWeatherConditionsR\vfireWeather\x12=\n" +
 	"\flast_updated\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\vlastUpdated\x124\n" +
 	"\bforecast\x18\x04 \x03(\v2\x18.grid.v1.WeatherForecastR\bforecast\x126\n" +
-	"\tlocations\x18\x05 \x03(\v2\x18.grid.v1.WeatherLocationR\tlocations\"\x14\n" +
+	"\tlocations\x18\x05 \x03(\v2\x18.grid.v1.WeatherLocationR\tlocations\x12<\n" +
+	"\x0eweather_status\x18\x06 \x01(\x0e2\x15.grid.v1.SourceStatusR\rweatherStatus\"\x14\n" +
 	"\x12ListSourcesRequest\"<\n" +
 	"\x0fGetStatsRequest\x12)\n" +
 	"\x05place\x18\x01 \x01(\tB\x13\x92A\x10J\x0e\"ebbetts-pass\"R\x05place\"\xa7\x02\n" +
@@ -8847,47 +8861,48 @@ var file_grid_proto_depIdxs = []int32{
 	86,  // 136: grid.v1.Conditions.last_updated:type_name -> google.protobuf.Timestamp
 	78,  // 137: grid.v1.Conditions.forecast:type_name -> grid.v1.WeatherForecast
 	77,  // 138: grid.v1.Conditions.locations:type_name -> grid.v1.WeatherLocation
-	86,  // 139: grid.v1.Stats.since:type_name -> google.protobuf.Timestamp
-	83,  // 140: grid.v1.Stats.layers:type_name -> grid.v1.LayerStats
-	86,  // 141: grid.v1.Stats.computed_at:type_name -> google.protobuf.Timestamp
-	0,   // 142: grid.v1.LayerStats.layer:type_name -> grid.v1.Layer
-	54,  // 143: grid.v1.GridService.ListEvents:input_type -> grid.v1.ListEventsRequest
-	55,  // 144: grid.v1.GridService.GetEvent:input_type -> grid.v1.GetEventRequest
-	56,  // 145: grid.v1.GridService.GetEventTimeline:input_type -> grid.v1.GetEventTimelineRequest
-	59,  // 146: grid.v1.GridService.GetEventHistory:input_type -> grid.v1.GetEventHistoryRequest
-	60,  // 147: grid.v1.GridService.ListHistory:input_type -> grid.v1.ListHistoryRequest
-	61,  // 148: grid.v1.GridService.ListPlaces:input_type -> grid.v1.ListPlacesRequest
-	63,  // 149: grid.v1.GridService.ResolvePlace:input_type -> grid.v1.ResolvePlaceRequest
-	62,  // 150: grid.v1.GridService.GetPlace:input_type -> grid.v1.GetPlaceRequest
-	47,  // 151: grid.v1.GridService.GetPlaceSummary:input_type -> grid.v1.GetPlaceSummaryRequest
-	66,  // 152: grid.v1.GridService.ListScanners:input_type -> grid.v1.ListScannersRequest
-	69,  // 153: grid.v1.GridService.ListCameras:input_type -> grid.v1.ListCamerasRequest
-	72,  // 154: grid.v1.GridService.GetConditions:input_type -> grid.v1.GetConditionsRequest
-	80,  // 155: grid.v1.GridService.ListSources:input_type -> grid.v1.ListSourcesRequest
-	81,  // 156: grid.v1.GridService.GetStats:input_type -> grid.v1.GetStatsRequest
-	40,  // 157: grid.v1.GridService.GetRoadHistory:input_type -> grid.v1.GetRoadHistoryRequest
-	43,  // 158: grid.v1.GridService.GetMeshTelemetry:input_type -> grid.v1.GetMeshTelemetryRequest
-	35,  // 159: grid.v1.GridService.ListEvents:output_type -> grid.v1.EventList
-	12,  // 160: grid.v1.GridService.GetEvent:output_type -> grid.v1.Event
-	57,  // 161: grid.v1.GridService.GetEventTimeline:output_type -> grid.v1.EventTimeline
-	37,  // 162: grid.v1.GridService.GetEventHistory:output_type -> grid.v1.EventRevisionList
-	37,  // 163: grid.v1.GridService.ListHistory:output_type -> grid.v1.EventRevisionList
-	38,  // 164: grid.v1.GridService.ListPlaces:output_type -> grid.v1.PlaceList
-	65,  // 165: grid.v1.GridService.ResolvePlace:output_type -> grid.v1.ResolvePlaceResponse
-	19,  // 166: grid.v1.GridService.GetPlace:output_type -> grid.v1.Place
-	48,  // 167: grid.v1.GridService.GetPlaceSummary:output_type -> grid.v1.PlaceSummary
-	68,  // 168: grid.v1.GridService.ListScanners:output_type -> grid.v1.ScannerList
-	71,  // 169: grid.v1.GridService.ListCameras:output_type -> grid.v1.CameraList
-	79,  // 170: grid.v1.GridService.GetConditions:output_type -> grid.v1.Conditions
-	39,  // 171: grid.v1.GridService.ListSources:output_type -> grid.v1.SourceList
-	82,  // 172: grid.v1.GridService.GetStats:output_type -> grid.v1.Stats
-	42,  // 173: grid.v1.GridService.GetRoadHistory:output_type -> grid.v1.RoadHistory
-	44,  // 174: grid.v1.GridService.GetMeshTelemetry:output_type -> grid.v1.MeshTelemetryArchive
-	159, // [159:175] is the sub-list for method output_type
-	143, // [143:159] is the sub-list for method input_type
-	143, // [143:143] is the sub-list for extension type_name
-	143, // [143:143] is the sub-list for extension extendee
-	0,   // [0:143] is the sub-list for field type_name
+	4,   // 139: grid.v1.Conditions.weather_status:type_name -> grid.v1.SourceStatus
+	86,  // 140: grid.v1.Stats.since:type_name -> google.protobuf.Timestamp
+	83,  // 141: grid.v1.Stats.layers:type_name -> grid.v1.LayerStats
+	86,  // 142: grid.v1.Stats.computed_at:type_name -> google.protobuf.Timestamp
+	0,   // 143: grid.v1.LayerStats.layer:type_name -> grid.v1.Layer
+	54,  // 144: grid.v1.GridService.ListEvents:input_type -> grid.v1.ListEventsRequest
+	55,  // 145: grid.v1.GridService.GetEvent:input_type -> grid.v1.GetEventRequest
+	56,  // 146: grid.v1.GridService.GetEventTimeline:input_type -> grid.v1.GetEventTimelineRequest
+	59,  // 147: grid.v1.GridService.GetEventHistory:input_type -> grid.v1.GetEventHistoryRequest
+	60,  // 148: grid.v1.GridService.ListHistory:input_type -> grid.v1.ListHistoryRequest
+	61,  // 149: grid.v1.GridService.ListPlaces:input_type -> grid.v1.ListPlacesRequest
+	63,  // 150: grid.v1.GridService.ResolvePlace:input_type -> grid.v1.ResolvePlaceRequest
+	62,  // 151: grid.v1.GridService.GetPlace:input_type -> grid.v1.GetPlaceRequest
+	47,  // 152: grid.v1.GridService.GetPlaceSummary:input_type -> grid.v1.GetPlaceSummaryRequest
+	66,  // 153: grid.v1.GridService.ListScanners:input_type -> grid.v1.ListScannersRequest
+	69,  // 154: grid.v1.GridService.ListCameras:input_type -> grid.v1.ListCamerasRequest
+	72,  // 155: grid.v1.GridService.GetConditions:input_type -> grid.v1.GetConditionsRequest
+	80,  // 156: grid.v1.GridService.ListSources:input_type -> grid.v1.ListSourcesRequest
+	81,  // 157: grid.v1.GridService.GetStats:input_type -> grid.v1.GetStatsRequest
+	40,  // 158: grid.v1.GridService.GetRoadHistory:input_type -> grid.v1.GetRoadHistoryRequest
+	43,  // 159: grid.v1.GridService.GetMeshTelemetry:input_type -> grid.v1.GetMeshTelemetryRequest
+	35,  // 160: grid.v1.GridService.ListEvents:output_type -> grid.v1.EventList
+	12,  // 161: grid.v1.GridService.GetEvent:output_type -> grid.v1.Event
+	57,  // 162: grid.v1.GridService.GetEventTimeline:output_type -> grid.v1.EventTimeline
+	37,  // 163: grid.v1.GridService.GetEventHistory:output_type -> grid.v1.EventRevisionList
+	37,  // 164: grid.v1.GridService.ListHistory:output_type -> grid.v1.EventRevisionList
+	38,  // 165: grid.v1.GridService.ListPlaces:output_type -> grid.v1.PlaceList
+	65,  // 166: grid.v1.GridService.ResolvePlace:output_type -> grid.v1.ResolvePlaceResponse
+	19,  // 167: grid.v1.GridService.GetPlace:output_type -> grid.v1.Place
+	48,  // 168: grid.v1.GridService.GetPlaceSummary:output_type -> grid.v1.PlaceSummary
+	68,  // 169: grid.v1.GridService.ListScanners:output_type -> grid.v1.ScannerList
+	71,  // 170: grid.v1.GridService.ListCameras:output_type -> grid.v1.CameraList
+	79,  // 171: grid.v1.GridService.GetConditions:output_type -> grid.v1.Conditions
+	39,  // 172: grid.v1.GridService.ListSources:output_type -> grid.v1.SourceList
+	82,  // 173: grid.v1.GridService.GetStats:output_type -> grid.v1.Stats
+	42,  // 174: grid.v1.GridService.GetRoadHistory:output_type -> grid.v1.RoadHistory
+	44,  // 175: grid.v1.GridService.GetMeshTelemetry:output_type -> grid.v1.MeshTelemetryArchive
+	160, // [160:176] is the sub-list for method output_type
+	144, // [144:160] is the sub-list for method input_type
+	144, // [144:144] is the sub-list for extension type_name
+	144, // [144:144] is the sub-list for extension extendee
+	0,   // [0:144] is the sub-list for field type_name
 }
 
 func init() { file_grid_proto_init() }
