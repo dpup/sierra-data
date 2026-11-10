@@ -576,6 +576,14 @@
             "$ref": "#/definitions/v1Coordinates"
           },
           "description": "Ordered route path — the decoded Google Routes polyline following the actual\nhighway. Falls back to a straight [origin, destination] line when the routing\ncall is unavailable (e.g. no API key). Empty only if the road can't be built."
+        },
+        "statusCauses": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1RoadStatusCause"
+          },
+          "description": "What set `status` when it is not OPEN: each on-route item, in the order\napplied. Empty when OPEN."
         }
       },
       "title": "Data models"
@@ -667,6 +675,39 @@
       ],
       "default": "ROAD_STATUS_UNSPECIFIED",
       "description": "Enumerations"
+    },
+    "v1RoadStatusCause": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "$ref": "#/definitions/v1RoadStatus",
+          "title": "what this item set (CLOSED or RESTRICTED)"
+        },
+        "source": {
+          "type": "string",
+          "title": "\"incident\" | \"lane_closure\" | \"road_condition\""
+        },
+        "sourceId": {
+          "type": "string",
+          "title": "CHP log number or Caltrans closure id; empty for road conditions"
+        },
+        "title": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string",
+          "title": "restriction details, or the condition text"
+        },
+        "begin": {
+          "$ref": "#/definitions/v1Coordinates",
+          "title": "where it starts; unset for road conditions (text only)"
+        },
+        "end": {
+          "$ref": "#/definitions/v1Coordinates",
+          "title": "where it ends, when the source gives an extent"
+        }
+      },
+      "description": "RoadStatusCause is one item that set a road's status."
     }
   },
   "externalDocs": {

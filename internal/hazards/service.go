@@ -466,6 +466,7 @@ func (s *Service) roadSegments(ctx context.Context, area config.HazardArea) ([]F
 				p.Description = e
 			}
 			s.addRoadHistory(ctx, p.Road, rd, time.Now())
+			p.Road.StatusCauses = roadStatusCauses(rd, pathOf(rd, mr))
 		}
 		p.setSeverity(sev)
 		out = append(out, Feature{Type: "Feature", Geometry: geom, Properties: p})
@@ -631,4 +632,17 @@ func nonEmpty(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// pathOf is the segment's drawn path in internal order: the route polyline,
+// or the straight origin-destination fallback.
+func pathOf(rd *api.Road, mr config.MonitoredRoad) []LatLng {
+	if len(rd.GetPolyline()) >= 2 {
+		pts := make([]LatLng, len(rd.GetPolyline()))
+		for i, c := range rd.GetPolyline() {
+			pts[i] = LatLng{Lat: c.GetLatitude(), Lng: c.GetLongitude()}
+		}
+		return pts
+	}
+	return []LatLng{{Lat: mr.Origin.Latitude, Lng: mr.Origin.Longitude}, {Lat: mr.Destination.Latitude, Lng: mr.Destination.Longitude}}
 }

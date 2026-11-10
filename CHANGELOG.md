@@ -202,6 +202,19 @@ within 10 km of it, is now treated as that fire: no new event, and an existing
 standalone for it is resolved. Existing duplicate events in the archive are
 unchanged.
 
+### Road segments say what closed them, and where (`road.statusCauses`)
+
+A CLOSED or RESTRICTED `road_segment` now lists the items that set that
+status in `road.statusCauses[]`: `{status, source, sourceId, eventId, title,
+description, begin, end, extent, fromKm, toKm}`. `source` is `incident` (CHP),
+`lane_closure` (Caltrans, with `begin` and `end`) or `road_condition`
+(Caltrans highway-conditions text). `extent` says what is known about where it
+applies: `SPAN` (`fromKm`..`toKm` along the segment from its start), `POINT`
+(one place), or `UNKNOWN` (a text-only condition, such as a seasonal pass
+closure, which has no position). Draw SPAN and POINT where they are; for
+UNKNOWN, say the extent is not known rather than painting the whole section
+closed. Absent when the segment is OPEN.
+
 ## 2026-11-09
 
 ### CHP incidents carry their numbered log (`roadIncident.log`)

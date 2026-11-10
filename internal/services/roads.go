@@ -428,6 +428,7 @@ func (s *RoadsService) buildRoadFromRouteAndAlerts(ctx context.Context, monitore
 	var statusExplanation string
 	var enhancedAlerts []*api.RoadAlert
 	var chainControlInfo *api.ChainControlInfo
+	var causes []*api.RoadStatusCause
 
 	for _, classifiedAlert := range classifiedAlerts {
 		// Convert to API road alert and get enhanced data
@@ -444,6 +445,10 @@ func (s *RoadsService) buildRoadFromRouteAndAlerts(ctx context.Context, monitore
 		// Update road status based on AI analysis (only for ON_ROUTE alerts)
 		if classifiedAlert.Classification == routing.OnRoute && enhanced != nil {
 			// Use AI-determined road status
+			switch enhanced.StructuredDescription.RoadStatus {
+			case "closed", "restricted":
+				causes = append(causes, alertCause(classifiedAlert, alert, enhanced))
+			}
 			switch enhanced.StructuredDescription.RoadStatus {
 			case "closed":
 				roadStatus = api.RoadStatus_CLOSED
@@ -472,7 +477,10 @@ func (s *RoadsService) buildRoadFromRouteAndAlerts(ctx context.Context, monitore
 	}
 
 	// Apply road conditions from roads.dot.ca.gov (closures, chain controls)
-	s.applyRoadConditions(ctx, monitoredRoad, roadConditions, &roadStatus, &chainControl, &statusExplanation, &enhancedAlerts)
+	s.applyRoadConditions(ctx, monitoredRoad, roadConditions, &roadStatus, &chainControl, &statusExplanation, &enhancedAlerts, &causes)
+	if roadStatus == api.RoadStatus_OPEN {
+		causes = nil
+	}
 
 	// Find chain control info for this route
 	chainControlInfo = s.findChainControlForRoute(ctx, route, chainControls)
@@ -509,6 +517,7 @@ func (s *RoadsService) buildRoadFromRouteAndAlerts(ctx context.Context, monitore
 		Alerts:            enhancedAlerts,
 		ChainControlInfo:  chainControlInfo,
 		Polyline:          geometry,
+		StatusCauses:      causes,
 	}, nil
 }
 
@@ -982,7 +991,7 @@ func (s *RoadsService) fetchRoadConditions(ctx context.Context) map[string][]cal
 }
 
 // applyRoadConditions processes road conditions from roads.dot.ca.gov and updates road status
-func (s *RoadsService) applyRoadConditions(ctx context.Context, monitoredRoad config.MonitoredRoad, conditions []caltrans.RoadCondition, roadStatus *api.RoadStatus, chainControl *api.ChainControlStatus, statusExplanation *string, alerts *[]*api.RoadAlert) {
+func (s *RoadsService) applyRoadConditions(ctx context.Context, monitoredRoad config.MonitoredRoad, conditions []caltrans.RoadCondition, roadStatus *api.RoadStatus, chainControl *api.ChainControlStatus, statusExplanation *string, alerts *[]*api.RoadAlert, causes *[]*api.RoadStatusCause) {
 	if len(conditions) == 0 {
 		return
 	}
@@ -1008,6 +1017,7 @@ func (s *RoadsService) applyRoadConditions(ctx context.Context, monitoredRoad co
 
 		switch condition.Type {
 		case caltrans.CONDITION_CLOSURE:
+			*causes = append(*causes, conditionCause(api.RoadStatus_CLOSED, condition))
 			*roadStatus = api.RoadStatus_CLOSED
 			*statusExplanation = condition.Description
 			logging.Infow(ctx, "Road condition: CLOSED",
@@ -1024,6 +1034,7 @@ func (s *RoadsService) applyRoadConditions(ctx context.Context, monitoredRoad co
 				"description", condition.Description)
 
 		case caltrans.CONDITION_RESTRICTION:
+			*causes = append(*causes, conditionCause(api.RoadStatus_RESTRICTED, condition))
 			if *roadStatus != api.RoadStatus_CLOSED {
 				*roadStatus = api.RoadStatus_RESTRICTED
 				if *statusExplanation == "" {
@@ -1088,3 +1099,39 @@ func (s *RoadsService) buildRoadConditionAlert(condition caltrans.RoadCondition,
 //
 // 	return "none"
 // }
+
+// alertCause records an on-route alert that set a road's status, with its
+// position: the alert's point, and for a closure with an extent (CWWP2 lane
+// closures carry begin and end) the end too.
+func alertCause(ca routing.ClassifiedAlert, alert *api.RoadAlert, enhanced *alerts.EnhancedAlert) *api.RoadStatusCause {
+	c := &api.RoadStatusCause{
+		Status:      api.RoadStatus_RESTRICTED,
+		Source:      "incident",
+		SourceId:    alert.GetId(),
+		Title:       ca.Title,
+		Description: strings.TrimSpace(enhanced.StructuredDescription.RestrictionDetails),
+		Begin:       &api.Coordinates{Latitude: ca.Location.Latitude, Longitude: ca.Location.Longitude},
+	}
+	if enhanced.StructuredDescription.RoadStatus == "closed" {
+		c.Status = api.RoadStatus_CLOSED
+	}
+	if ca.Type == "closure" {
+		c.Source = "lane_closure"
+	}
+	if c.Description == "" {
+		c.Description = alert.GetDescription()
+	}
+	if pl := ca.AffectedPolyline; pl != nil && len(pl.Points) >= 2 {
+		first, last := pl.Points[0], pl.Points[len(pl.Points)-1]
+		c.Begin = &api.Coordinates{Latitude: first.Latitude, Longitude: first.Longitude}
+		c.End = &api.Coordinates{Latitude: last.Latitude, Longitude: last.Longitude}
+	}
+	return c
+}
+
+// conditionCause records a roads.dot.ca.gov condition that set a road's
+// status. These are text advisories with no geometry, so the cause has no
+// position: its extent on the segment is unknown.
+func conditionCause(status api.RoadStatus, c caltrans.RoadCondition) *api.RoadStatusCause {
+	return &api.RoadStatusCause{Status: status, Source: "road_condition", Description: c.Description}
+}

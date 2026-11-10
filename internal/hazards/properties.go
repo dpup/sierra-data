@@ -131,6 +131,35 @@ type RoadProps struct {
 	// Omitted until there are enough samples.
 	TypicalMinutes *int32 `json:"typicalMinutes,omitempty"`
 	TypicalBasis   string `json:"typicalBasis,omitempty"`
+	// StatusCauses are the items that set a non-OPEN status, so a client can
+	// draw the part of the segment they cover instead of painting all of it.
+	// Omitted when OPEN.
+	StatusCauses []RoadStatusCauseProps `json:"statusCauses,omitempty"`
+}
+
+// RoadStatusCauseProps is one item that set a road segment's status.
+type RoadStatusCauseProps struct {
+	Status string `json:"status"` // CLOSED | RESTRICTED
+	// Source: incident (CHP), lane_closure (Caltrans), road_condition
+	// (Caltrans highway-conditions text, which has no position).
+	Source   string `json:"source"`
+	SourceID string `json:"sourceId,omitempty"` // CHP log number or Caltrans closure id
+	// EventID is the matching /api/v1/events id when known (CHP incidents).
+	EventID     string `json:"eventId,omitempty"`
+	Title       string `json:"title,omitempty"`
+	Description string `json:"description,omitempty"`
+	// Begin and End are [lng, lat]. End only for a closure with an extent.
+	Begin []float64 `json:"begin,omitempty"`
+	End   []float64 `json:"end,omitempty"`
+	// Extent: SPAN (begin and end both on the segment: fromKm..toKm),
+	// POINT (one place: fromKm = toKm), UNKNOWN (no position on the segment,
+	// e.g. a text-only condition; the segment's whole status rests on it but
+	// where it applies is not known).
+	Extent string `json:"extent"`
+	// FromKm and ToKm are distances along the segment from its start (the
+	// configured origin), present when Extent is SPAN or POINT.
+	FromKm *float64 `json:"fromKm,omitempty"`
+	ToKm   *float64 `json:"toKm,omitempty"`
 }
 
 // ChainControlProps is the chain_control kind block.

@@ -590,6 +590,24 @@ spec:
           statusSinceAtLeast: {type: boolean, description: "True when the status already held at the first sample the Grid has, so it began no later than statusSince."}
           typicalMinutes: {type: integer, description: "Median travel time when OPEN over the last eight weeks, at this hour of the week (typicalBasis HOUR_OF_WEEK) or across all hours (ALL_HOURS) when that hour has too few samples. Absent until there are enough."}
           typicalBasis: {type: string, enum: [HOUR_OF_WEEK, ALL_HOURS]}
+          statusCauses:
+            type: array
+            description: "What set a non-OPEN status, so a client can draw the part of the segment each covers instead of painting all of it. Absent when OPEN."
+            items:
+              type: object
+              required: [status, source, extent]
+              properties:
+                status: {type: string, enum: [CLOSED, RESTRICTED]}
+                source: {type: string, enum: [incident, lane_closure, road_condition], description: "road_condition is Caltrans highway-conditions text, which has no position."}
+                sourceId: {type: string, description: CHP log number or Caltrans closure id.}
+                eventId: {type: string, description: "The matching /api/v1/events id when known (CHP incidents)."}
+                title: {type: string}
+                description: {type: string}
+                begin: {type: array, items: {type: number}, description: "[lng, lat]"}
+                end: {type: array, items: {type: number}, description: "[lng, lat]; only for a closure with an extent."}
+                extent: {type: string, enum: [SPAN, POINT, UNKNOWN], description: "SPAN - fromKm..toKm along the segment; POINT - one place (fromKm = toKm); UNKNOWN - no position on the segment (text-only condition, or too far off the line)."}
+                fromKm: {type: number, description: km along the segment from its configured origin.}
+                toKm: {type: number}
       MapChainControlProps:
         type: object
         description: chain_control block. Severity follows the level (R1 MINOR, R2 MODERATE, R3 SEVERE); a seasonal pass closure (`category` closed) is MINOR.

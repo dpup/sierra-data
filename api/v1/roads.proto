@@ -179,6 +179,9 @@ message Road {
   // highway. Falls back to a straight [origin, destination] line when the routing
   // call is unavailable (e.g. no API key). Empty only if the road can't be built.
   repeated Coordinates polyline = 13;
+  // What set `status` when it is not OPEN: each on-route item, in the order
+  // applied. Empty when OPEN.
+  repeated RoadStatusCause status_causes = 14;
 }
 
 // ChainControlInfo provides detailed chain control status for a road
@@ -192,6 +195,17 @@ message ChainControlInfo {
   string description = 7;                // Human-readable requirements description
 }
 
+
+// RoadStatusCause is one item that set a road's status.
+message RoadStatusCause {
+  RoadStatus status = 1;            // what this item set (CLOSED or RESTRICTED)
+  string source = 2;                // "incident" | "lane_closure" | "road_condition"
+  string source_id = 3;             // CHP log number or Caltrans closure id; empty for road conditions
+  string title = 4;
+  string description = 5;           // restriction details, or the condition text
+  Coordinates begin = 6;            // where it starts; unset for road conditions (text only)
+  Coordinates end = 7;              // where it ends, when the source gives an extent
+}
 
 // TrafficCondition merged into Road for simplicity
 

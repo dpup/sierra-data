@@ -4303,6 +4303,80 @@
           "roadId": {
             "type": "string"
           },
+          "statusCauses": {
+            "description": "What set a non-OPEN status, so a client can draw the part of the segment each covers instead of painting all of it. Absent when OPEN.",
+            "items": {
+              "properties": {
+                "begin": {
+                  "description": "[lng, lat]",
+                  "items": {
+                    "type": "number"
+                  },
+                  "type": "array"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "end": {
+                  "description": "[lng, lat]; only for a closure with an extent.",
+                  "items": {
+                    "type": "number"
+                  },
+                  "type": "array"
+                },
+                "eventId": {
+                  "description": "The matching /api/v1/events id when known (CHP incidents).",
+                  "type": "string"
+                },
+                "extent": {
+                  "description": "SPAN - fromKm..toKm along the segment; POINT - one place (fromKm = toKm); UNKNOWN - no position on the segment (text-only condition, or too far off the line).",
+                  "enum": [
+                    "SPAN",
+                    "POINT",
+                    "UNKNOWN"
+                  ],
+                  "type": "string"
+                },
+                "fromKm": {
+                  "description": "km along the segment from its configured origin.",
+                  "type": "number"
+                },
+                "source": {
+                  "description": "road_condition is Caltrans highway-conditions text, which has no position.",
+                  "enum": [
+                    "incident",
+                    "lane_closure",
+                    "road_condition"
+                  ],
+                  "type": "string"
+                },
+                "sourceId": {
+                  "description": "CHP log number or Caltrans closure id.",
+                  "type": "string"
+                },
+                "status": {
+                  "enum": [
+                    "CLOSED",
+                    "RESTRICTED"
+                  ],
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "toKm": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "status",
+                "source",
+                "extent"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
           "statusSince": {
             "description": "When the segment entered its current status, from the Grid's own samples (GET /api/v1/roads/{road}/history). Absent until sampled.",
             "format": "date-time",
