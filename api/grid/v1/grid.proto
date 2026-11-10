@@ -2355,6 +2355,63 @@ message ForecastPeriod {
   int32 wind_direction_degrees = 5 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "80"}];
   // Wind gust, km/h.
   int32 wind_gust_kmh = 6 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "13"}];
+  // The fields below are `null` when NWS gave no value for the hour, never 0:
+  // a forecast 0% chance of rain and no forecast are different statements.
+  //
+  // Probability of precipitation, percent.
+  google.protobuf.Int32Value precipitation_probability_percent = 7;
+  // Liquid-equivalent precipitation in this hour, mm. NWS forecasts amounts
+  // over spans (usually 6 hours); each hour carries an equal share, so sum the
+  // hours for a total.
+  google.protobuf.DoubleValue precipitation_mm = 8;
+  // Snowfall in this hour, mm of snow (not liquid), shared out the same way.
+  google.protobuf.DoubleValue snowfall_mm = 9;
+  // Snow level: the elevation above which precipitation falls as snow,
+  // metres above sea level.
+  google.protobuf.Int32Value snow_level_meters = 10;
+  // Sky cover, percent.
+  google.protobuf.Int32Value sky_cover_percent = 11;
+  // The forecast weather in words, from NWS's grid vocabulary, e.g. "Chance
+  // of light rain showers"; several are joined with "; ". Empty when NWS
+  // forecasts none.
+  string weather = 12 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"Chance of light rain showers\""}];
+}
+
+// DailyForecastPeriod is one of NWS's named 12-hour forecast periods
+// ("Tonight", "Wednesday") for a location's grid cell.
+message DailyForecastPeriod {
+  // NWS's name for the period.
+  string name = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"Wednesday Night\""}];
+  google.protobuf.Timestamp start = 2;
+  google.protobuf.Timestamp end = 3;
+  // Day (high) or night (low) period.
+  bool is_daytime = 4;
+  // The period's high (day) or low (night), degrees Celsius.
+  int32 temperature_celsius = 5 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "8"}];
+  // Probability of precipitation, percent. `null` when NWS gave none.
+  google.protobuf.Int32Value precipitation_probability_percent = 6;
+  // NWS's wind text, e.g. "5 to 10 km/h".
+  string wind_speed = 7;
+  // Compass point the wind blows from, e.g. "SW".
+  string wind_direction = 8;
+  // NWS's short forecast, e.g. "Chance Rain Showers".
+  string short_forecast = 9 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"Chance Rain Showers\""}];
+  // NWS's full sentence forecast.
+  string detailed_forecast = 10;
+}
+
+// WeatherLocation is one monitored town.
+message WeatherLocation {
+  // Joins to `WeatherConditions.locationId` and `WeatherForecast.locationId`.
+  string id = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"arnold\""}];
+  string name = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"Arnold, CA\""}];
+  double latitude = 3;
+  double longitude = 4;
+  // Ground elevation at the location, metres (USGS 3DEP). `null` when not
+  // configured.
+  google.protobuf.Int32Value elevation_meters = 5;
+  // The NWS public forecast zone containing it, e.g. `CAZ138`.
+  string zone = 6;
 }
 
 // WeatherForecast is a location's short-range forecast: the hourly NWS gridpoint
@@ -2380,6 +2437,13 @@ message WeatherForecast {
   google.protobuf.Timestamp peak_wind_gust_at = 7;
   // Lowest relative humidity over the horizon, percent. 0 when NWS gave none.
   int32 min_humidity_percent = 8 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "33"}];
+  // Elevation of the NWS grid cell this forecast is for, metres. It can
+  // differ from the town's own elevation by hundreds of metres. `null` when
+  // NWS gave none.
+  google.protobuf.Int32Value grid_elevation_meters = 9;
+  // The 7-day forecast in NWS's named 12-hour periods, in time order. Empty
+  // when that product could not be fetched.
+  repeated DailyForecastPeriod daily = 10;
 }
 
 // Conditions is current, non-event state.
@@ -2391,9 +2455,14 @@ message Conditions {
   FireWeatherConditions fire_weather = 2;
   // When the weather data was last refreshed.
   google.protobuf.Timestamp last_updated = 3;
-  // Per-location forecasts, joined to `weather` by `locationId`. A location
-  // whose forecast could not be fetched is simply missing here.
+  // Per-location forecasts, joined by `locationId`. Every location in
+  // `locations` whose forecast is available, whether or not its current
+  // `weather` could be read. A location whose forecast could not be fetched
+  // is simply missing here.
   repeated WeatherForecast forecast = 4;
+  // The monitored towns (within `place`, when given), with position and
+  // elevation, in configuration order.
+  repeated WeatherLocation locations = 5;
 }
 
 // ListSourcesRequest takes no parameters.

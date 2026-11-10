@@ -255,16 +255,21 @@ weather:
   # nws.zones above); it scopes which NWS alerts attach to the location.
   # Assignments are elevation-based: 1000-3000 ft → CAZ137, 3000-5000 ft →
   # CAZ138, above 5000 ft → CAZ139 (each verified via api.weather.gov/points).
+  # elevationMeters: ground elevation at the coordinates, from USGS 3DEP
+  # (epqs.nationalmap.gov), queried 2026-11-10. It is the elevation of the
+  # point, not a town's quoted figure (Dorrington's point is 1,637 m / 5,370 ft).
   locations:
     - id: "murphys"
       name: "Murphys, CA"
       zone: "CAZ137"
+      elevationMeters: 667
       coordinates:
         latitude: 38.139117
         longitude: -120.456111
     - id: "arnold"
       name: "Arnold, CA"
       zone: "CAZ138"
+      elevationMeters: 1295
       coordinates:
         latitude: 38.265006
         longitude: -120.333654
@@ -274,6 +279,7 @@ weather:
       # (Sierra Nevada of Calaveras-Tuolumne-S. Alpine above 5000 ft) is the
       # zone NWS /points returns for it.
       zone: "CAZ139"
+      elevationMeters: 2155
       coordinates:
         latitude: 38.461045
         longitude: -120.042368
@@ -281,24 +287,28 @@ weather:
     - id: "sonora"
       name: "Sonora, CA"
       zone: "CAZ137"
+      elevationMeters: 547
       coordinates:
         latitude: 37.984100
         longitude: -120.382700
     - id: "columbia"
       name: "Columbia, CA"
       zone: "CAZ137"
+      elevationMeters: 648
       coordinates:
         latitude: 38.034900
         longitude: -120.401600
     - id: "twainharte"
       name: "Twain Harte, CA"
       zone: "CAZ138"
+      elevationMeters: 1118
       coordinates:
         latitude: 38.038300
         longitude: -120.229400
     - id: "dorrington"
       name: "Dorrington, CA"
       zone: "CAZ139"
+      elevationMeters: 1637
       coordinates:
         latitude: 38.333800
         longitude: -120.271300

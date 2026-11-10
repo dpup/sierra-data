@@ -13,8 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/sierragridteam/sierra-data/internal/cache"
-	"github.com/sierragridteam/sierra-data/internal/config"
 	"github.com/sierragridteam/sierra-data/internal/clients/nws"
+	"github.com/sierragridteam/sierra-data/internal/config"
 )
 
 // forecastDoer routes /points → the points body and gridpoints → the grid body,
@@ -113,6 +113,7 @@ func TestForecasts_ServeStaleThenOmit(t *testing.T) {
 // reResolveDoer 404s the first grid fetch (a re-tiled gridpoint) and serves the
 // grid on the second, so the re-resolve path can be exercised.
 type reResolveDoer struct {
+	dailyCalls             int
 	points, grid           string
 	pointsCalls, gridCalls int
 }
@@ -122,6 +123,8 @@ func (d *reResolveDoer) Do(req *http.Request) (*http.Response, error) {
 	if strings.Contains(req.URL.Path, "/points/") {
 		d.pointsCalls++
 		body = d.points
+	} else if strings.HasSuffix(req.URL.Path, "/forecast") {
+		d.dailyCalls++ // the 7-day product; not part of the re-resolve path
 	} else {
 		d.gridCalls++
 		if d.gridCalls == 1 {
@@ -143,4 +146,5 @@ func TestForecasts_ReResolveOnGrid404(t *testing.T) {
 	require.NotNil(t, svc.LocationForecasts(testCtx())["arnold"], "forecast recovered after a grid 404")
 	assert.Equal(t, 2, d.pointsCalls, "gridpoint URL was re-resolved after the 404")
 	assert.Equal(t, 2, d.gridCalls)
+	assert.Equal(t, 1, d.dailyCalls, "the 7-day product is fetched from the re-resolved grid")
 }

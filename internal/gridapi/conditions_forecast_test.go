@@ -11,6 +11,7 @@ import (
 	gridv1 "github.com/sierragridteam/sierra-data/api/grid/v1"
 	api "github.com/sierragridteam/sierra-data/api/v1"
 	"github.com/sierragridteam/sierra-data/internal/clients/nws"
+	"github.com/sierragridteam/sierra-data/internal/config"
 )
 
 func TestProjectForecast(t *testing.T) {
@@ -51,29 +52,38 @@ func TestProjectForecast_AbsentMinHumidity(t *testing.T) {
 	}
 }
 
-// GetConditions joins the per-location forecast to the weather set it returns
-// (only locations that have a forecast get one) — the integration projectForecast
-// alone doesn't cover.
+// GetConditions lists the configured locations and a forecast for each one
+// that has one, whether or not its current weather could be read (sonora's
+// OpenWeatherMap read is missing here; arnold has no forecast).
 func TestGetConditions_ForecastJoin(t *testing.T) {
 	wresp := &api.ListWeatherResponse{WeatherData: []*api.WeatherData{
 		{LocationId: "arnold", LocationName: "Arnold"},
-		{LocationId: "sonora", LocationName: "Sonora"},
 	}}
+	pop := 30.0
 	forecasts := map[string]*nws.Forecast{
-		"arnold": {Source: "NWS (STO 90,41)", HorizonHours: 48, PeakGustKmh: 40,
-			Points: []nws.ForecastPoint{{Time: time.Now().UTC(), WindKmh: 10, HumidityPct: 20}}},
-		// sonora deliberately absent → no forecast joined for it.
+		"sonora": {Source: "NWS (STO 90,41)", HorizonHours: 48, PeakGustKmh: 40,
+			Points: []nws.ForecastPoint{{Time: time.Now().UTC(), WindKmh: 10, HumidityPct: 20, PopPct: &pop}}},
 	}
-	g := NewGridServer(&Service{Weather: &fakeWeather{resp: wresp, forecasts: forecasts}})
+	cfg := &config.Config{}
+	cfg.Weather.Locations = []config.WeatherLocation{
+		{ID: "arnold", Name: "Arnold, CA", Zone: "CAZ138", ElevationMeters: 1294.8, Coordinates: config.Coordinates{Latitude: 38.265, Longitude: -120.334}},
+		{ID: "sonora", Name: "Sonora, CA", Zone: "CAZ137", Coordinates: config.Coordinates{Latitude: 37.984, Longitude: -120.383}},
+	}
+	g := NewGridServer(&Service{Cfg: cfg, Weather: &fakeWeather{resp: wresp, forecasts: forecasts}})
 
 	resp, err := g.GetConditions(context.Background(), &gridv1.GetConditionsRequest{})
 	require.NoError(t, err)
-	require.Len(t, resp.GetWeather(), 2)
-	require.Len(t, resp.GetForecast(), 1, "forecast joined only for locations that have one")
+	require.Len(t, resp.GetWeather(), 1)
+	require.Len(t, resp.GetLocations(), 2)
+	assert.Equal(t, int32(1295), resp.GetLocations()[0].GetElevationMeters().GetValue())
+	assert.Nil(t, resp.GetLocations()[1].GetElevationMeters(), "unconfigured elevation is null")
+	require.Len(t, resp.GetForecast(), 1, "a forecast for each location that has one")
 	fc := resp.GetForecast()[0]
-	assert.Equal(t, "arnold", fc.GetLocationId())
+	assert.Equal(t, "sonora", fc.GetLocationId())
 	assert.Equal(t, int32(40), fc.GetPeakWindGustKmh())
-	assert.Len(t, fc.GetPeriods(), 1)
+	require.Len(t, fc.GetPeriods(), 1)
+	assert.Equal(t, int32(30), fc.GetPeriods()[0].GetPrecipitationProbabilityPercent().GetValue())
+	assert.Nil(t, fc.GetPeriods()[0].GetSnowLevelMeters(), "no value is null, not 0")
 }
 
 // TestPlaceBboxPadsDegenerate: a TOWN place is a POINT, so its bbox is the

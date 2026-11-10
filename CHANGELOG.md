@@ -106,6 +106,30 @@ zones, others public forecast zones, as NWS lists them. Existing active alerts
 gain the shape on their next poll after deploy (one revision each); an alert
 whose zones cannot be read keeps the shape it had, or has none yet.
 
+### Conditions: precipitation, snow, sky, a 7-day forecast and town elevations
+
+`GET /api/v1/conditions` adds, all additive:
+
+- Each hourly `forecast[].periods[]` entry: `precipitationProbabilityPercent`,
+  `precipitationMm`, `snowfallMm` (mm of snow), `snowLevelMeters`,
+  `skyCoverPercent` and `weather` (NWS's grid weather in words, e.g. "Chance
+  of light rain showers"; empty when none). The numbers are `null` when NWS
+  gave no value for the hour, never 0. NWS forecasts amounts over spans
+  (usually 6 hours); each hour carries an equal share, so sum hours for totals.
+- `forecast[].daily[]`: the 7-day forecast as NWS's named 12-hour periods
+  (`name`, `start`, `end`, `isDaytime`, `temperatureCelsius`,
+  `precipitationProbabilityPercent`, `windSpeed`, `windDirection`,
+  `shortForecast`, `detailedForecast`).
+- `forecast[].gridElevationMeters`: the elevation of the NWS grid cell the
+  forecast is for, which can differ from the town's.
+- `locations[]`: the monitored towns (within `place`) with `latitude`,
+  `longitude`, `elevationMeters` (USGS 3DEP at the configured point) and NWS
+  `zone`.
+
+`forecast` now has an entry for every location in scope whose NWS forecast is
+available. It used to be joined to `weather`, so an OpenWeatherMap failure for
+a town also hid its NWS forecast.
+
 ## 2026-11-09
 
 ### CHP incidents carry their numbered log (`roadIncident.log`)

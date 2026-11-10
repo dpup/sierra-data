@@ -64,6 +64,16 @@ func (s *WeatherService) refreshLocationForecast(ctx context.Context, loc config
 			"location_id", loc.ID, "error", err)
 		return
 	}
+	// The 7-day periods are a second product on the same grid. Fail-soft: a
+	// failure keeps the last-good periods rather than dropping the strip.
+	if daily, derr := s.nwsClient.GetDailyForecast(ctx, gridURL); derr == nil {
+		f.Daily = daily
+	} else {
+		logging.Warnw(ctx, "NWS 7-day forecast failed; keeping last-good periods", "location_id", loc.ID, "error", derr)
+		if prev := s.readForecast(key); prev != nil {
+			f.Daily = prev.Daily
+		}
+	}
 	if len(f.Points) == 0 {
 		// Never cache an empty forecast (it would replay as a false "no data");
 		// keep the last-good entry so a later good fetch fills in.

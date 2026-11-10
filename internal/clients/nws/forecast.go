@@ -30,6 +30,31 @@ type ForecastPoint struct {
 	WindKmh     float64
 	WindDirDeg  float64
 	WindGustKmh float64
+
+	// Precipitation and sky, nil when NWS gave no value for the hour (never 0:
+	// "0% chance" and "no forecast" are different statements).
+	PopPct     *float64 // probability of precipitation
+	QpfMm      *float64 // liquid precipitation, mm in this hour (see accumulate)
+	SnowMm     *float64 // snowfall, mm in this hour
+	SnowLevelM *float64 // snow level, metres above sea level
+	SkyPct     *float64 // sky cover
+	// Weather is the grid's weather for the hour in words, e.g. "Chance of
+	// light rain showers"; empty when NWS forecasts none.
+	Weather string
+}
+
+// DailyPeriod is one of NWS's named 12-hour forecast periods ("Tonight",
+// "Wednesday"), from the point's /forecast product in SI units.
+type DailyPeriod struct {
+	Name             string
+	Start, End       time.Time
+	IsDaytime        bool
+	TempC            float64
+	PopPct           *float64
+	WindSpeed        string // NWS text, e.g. "5 to 10 km/h"
+	WindDirection    string // compass point, e.g. "SW"
+	ShortForecast    string
+	DetailedForecast string
 }
 
 // Forecast is a location's short-range fire-weather forecast (NWS gridpoint): the
@@ -45,6 +70,12 @@ type Forecast struct {
 	PeakGustAt     time.Time
 	MinHumidityPct float64
 	HasMinHumidity bool
+	// GridElevationM is the elevation NWS forecasts the grid cell at, which
+	// can differ from the town's by hundreds of metres. Nil when not given.
+	GridElevationM *float64
+	// Daily is the 7-day forecast in 12-hour periods. Empty when that product
+	// could not be fetched.
+	Daily []DailyPeriod
 }
 
 // ResolveForecastURL maps a coordinate to its NWS forecast-grid URL via
@@ -79,6 +110,15 @@ func (c *Client) GetGridForecast(ctx context.Context, gridURL string, horizon ti
 			WindSpeed        gridVariable `json:"windSpeed"`
 			WindDirection    gridVariable `json:"windDirection"`
 			WindGust         gridVariable `json:"windGust"`
+			Elevation        struct {
+				Value *float64 `json:"value"`
+			} `json:"elevation"`
+			ProbabilityOfPrecipitation gridVariable    `json:"probabilityOfPrecipitation"`
+			QuantitativePrecipitation  gridVariable    `json:"quantitativePrecipitation"`
+			SnowfallAmount             gridVariable    `json:"snowfallAmount"`
+			SnowLevel                  gridVariable    `json:"snowLevel"`
+			SkyCover                   gridVariable    `json:"skyCover"`
+			Weather                    weatherVariable `json:"weather"`
 		} `json:"properties"`
 	}
 	if err := c.getJSON(ctx, gridURL, &out); err != nil {
@@ -93,11 +133,21 @@ func (c *Client) GetGridForecast(ctx context.Context, gridURL string, horizon ti
 	wind := p.WindSpeed.hourly(start, end)
 	dir := p.WindDirection.hourly(start, end)
 	gust := p.WindGust.hourly(start, end)
+	pop := p.ProbabilityOfPrecipitation.hourly(start, end)
+	qpf := p.QuantitativePrecipitation.accumulate(start, end)
+	snow := p.SnowfallAmount.accumulate(start, end)
+	snowLevel := p.SnowLevel.hourly(start, end)
+	sky := p.SkyCover.hourly(start, end)
+	wx := p.Weather.hourly(start, end)
 
 	f := &Forecast{
 		Source:       "NWS (" + gridID(gridURL) + ")",
 		IssuedAt:     parseTime(p.UpdateTime),
 		HorizonHours: int(horizon / time.Hour),
+	}
+	if v := p.Elevation.Value; v != nil {
+		e := *v
+		f.GridElevationM = &e
 	}
 	minRH := math.MaxFloat64
 	for t := start; t.Before(end); t = t.Add(time.Hour) {
@@ -119,6 +169,8 @@ func (c *Client) GetGridForecast(ctx context.Context, gridURL string, horizon ti
 		}
 		f.Points = append(f.Points, ForecastPoint{
 			Time: t, TempC: temp[t], HumidityPct: h, WindKmh: w, WindDirDeg: dir[t], WindGustKmh: gust[t],
+			PopPct: at(pop, t), QpfMm: at(qpf, t), SnowMm: at(snow, t), SnowLevelM: at(snowLevel, t), SkyPct: at(sky, t),
+			Weather: wx[t],
 		})
 	}
 	if f.HasMinHumidity {
@@ -192,6 +244,153 @@ func (v gridVariable) hourly(start, end time.Time) map[time.Time]float64 {
 	return out
 }
 
+// accumulate expands an AMOUNT variable (precipitation, snowfall), whose span
+// value is a total over the span, into an equal share per hour. hourly would
+// repeat a 6-hour total in each of the six hours.
+func (v gridVariable) accumulate(start, end time.Time) map[time.Time]float64 {
+	out := make(map[time.Time]float64)
+	for _, tv := range v.Values {
+		if tv.Value == nil {
+			continue
+		}
+		spanStart, dur, err := parseISOInterval(tv.ValidTime)
+		if err != nil || dur < time.Hour {
+			continue
+		}
+		share := convertUnit(v.UOM, *tv.Value) / float64(dur/time.Hour)
+		spanEnd := spanStart.Add(dur)
+		for t := spanStart.UTC().Truncate(time.Hour); t.Before(spanEnd); t = t.Add(time.Hour) {
+			if !t.Before(start) && t.Before(end) {
+				out[t] = share
+			}
+		}
+	}
+	return out
+}
+
+func at(m map[time.Time]float64, t time.Time) *float64 {
+	if v, ok := m[t]; ok {
+		return &v
+	}
+	return nil
+}
+
+// weatherVariable is the grid's `weather` series: each span lists zero or
+// more conditions (coverage, intensity, weather type) in NWS vocabulary.
+type weatherVariable struct {
+	Values []struct {
+		ValidTime string `json:"validTime"`
+		Value     []struct {
+			Coverage  *string `json:"coverage"`
+			Weather   *string `json:"weather"`
+			Intensity *string `json:"intensity"`
+		} `json:"value"`
+	} `json:"values"`
+}
+
+func (v weatherVariable) hourly(start, end time.Time) map[time.Time]string {
+	out := make(map[time.Time]string)
+	for _, tv := range v.Values {
+		spanStart, dur, err := parseISOInterval(tv.ValidTime)
+		if err != nil {
+			continue
+		}
+		var parts []string
+		for _, c := range tv.Value {
+			if c.Weather == nil || *c.Weather == "" {
+				continue
+			}
+			parts = append(parts, weatherPhrase(deref(c.Coverage), deref(c.Intensity), *c.Weather))
+		}
+		if len(parts) == 0 {
+			continue
+		}
+		text := strings.Join(parts, "; ")
+		spanEnd := spanStart.Add(dur)
+		for t := spanStart.UTC().Truncate(time.Hour); t.Before(spanEnd); t = t.Add(time.Hour) {
+			if !t.Before(start) && t.Before(end) {
+				out[t] = text
+			}
+		}
+	}
+	return out
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+// weatherPhrase renders one NWS grid condition in words, deterministically:
+// ("chance", "light", "rain_showers") -> "Chance of light rain showers".
+func weatherPhrase(coverage, intensity, weather string) string {
+	words := func(s string) string { return strings.ReplaceAll(s, "_", " ") }
+	w := words(weather)
+	if intensity != "" && intensity != "none" {
+		w = words(intensity) + " " + w
+	}
+	var out string
+	switch coverage {
+	case "slight_chance", "chance":
+		out = words(coverage) + " of " + w
+	case "", "definite":
+		out = w
+	default: // likely, areas, patchy, isolated, scattered, numerous, ...
+		out = words(coverage) + " " + w
+	}
+	return strings.ToUpper(out[:1]) + out[1:]
+}
+
+// GetDailyForecast fetches the point's named 12-hour periods (7 days) from
+// the grid's /forecast product in SI units.
+func (c *Client) GetDailyForecast(ctx context.Context, gridURL string) ([]DailyPeriod, error) {
+	var out struct {
+		Properties struct {
+			Periods []struct {
+				Name                       string  `json:"name"`
+				StartTime                  string  `json:"startTime"`
+				EndTime                    string  `json:"endTime"`
+				IsDaytime                  bool    `json:"isDaytime"`
+				Temperature                float64 `json:"temperature"`
+				TemperatureUnit            string  `json:"temperatureUnit"`
+				ProbabilityOfPrecipitation struct {
+					Value *float64 `json:"value"`
+				} `json:"probabilityOfPrecipitation"`
+				WindSpeed        string `json:"windSpeed"`
+				WindDirection    string `json:"windDirection"`
+				ShortForecast    string `json:"shortForecast"`
+				DetailedForecast string `json:"detailedForecast"`
+			} `json:"periods"`
+		} `json:"properties"`
+	}
+	if err := c.getJSON(ctx, strings.TrimSuffix(gridURL, "/")+"/forecast?units=si", &out); err != nil {
+		return nil, err
+	}
+	var periods []DailyPeriod
+	for _, p := range out.Properties.Periods {
+		temp := p.Temperature
+		if p.TemperatureUnit == "F" {
+			temp = (temp - 32) * 5 / 9
+		}
+		d := DailyPeriod{
+			Name: p.Name, Start: parseTime(p.StartTime), End: parseTime(p.EndTime), IsDaytime: p.IsDaytime,
+			TempC: temp, WindSpeed: p.WindSpeed, WindDirection: p.WindDirection,
+			ShortForecast: p.ShortForecast, DetailedForecast: p.DetailedForecast,
+		}
+		if v := p.ProbabilityOfPrecipitation.Value; v != nil {
+			pv := *v
+			d.PopPct = &pv
+		}
+		periods = append(periods, d)
+	}
+	if len(periods) == 0 {
+		return nil, fmt.Errorf("NWS forecast: no periods")
+	}
+	return periods, nil
+}
+
 // parseISOInterval splits "<RFC3339>/<ISO-8601 duration>" into a start time and
 // duration.
 func parseISOInterval(s string) (time.Time, time.Duration, error) {
@@ -256,6 +455,10 @@ func convertUnit(uom string, v float64) float64 {
 		return v * 3.6 // m/s → km/h
 	case strings.Contains(uom, "degF"):
 		return (v - 32) * 5 / 9 // °F → °C
+	case strings.HasSuffix(uom, ":ft"):
+		return v * 0.3048 // ft → m (snow level is normally wmoUnit:m)
+	case strings.HasSuffix(uom, ":in"):
+		return v * 25.4 // in → mm (amounts are normally wmoUnit:mm)
 	default:
 		return v // km_h-1, degC, percent, degree
 	}

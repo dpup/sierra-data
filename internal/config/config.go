@@ -949,6 +949,9 @@ type WeatherLocation struct {
 	// Per-location alerts are the NWS alerts active in this zone, so it must be
 	// one of the zones listed in weather.nws.zones or no alerts will attach.
 	Zone string `koanf:"zone"`
+	// ElevationMeters is the ground elevation at Coordinates (USGS 3DEP via
+	// the National Map EPQS). 0 = not configured.
+	ElevationMeters float64 `koanf:"elevationMeters"`
 }
 
 // Coordinates represents lat/lon coordinates - unified structure

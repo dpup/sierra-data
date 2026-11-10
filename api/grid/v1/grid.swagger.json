@@ -1273,10 +1273,69 @@
             "type": "object",
             "$ref": "#/definitions/v1WeatherForecast"
           },
-          "description": "Per-location forecasts, joined to `weather` by `locationId`. A location\nwhose forecast could not be fetched is simply missing here."
+          "description": "Per-location forecasts, joined by `locationId`. Every location in\n`locations` whose forecast is available, whether or not its current\n`weather` could be read. A location whose forecast could not be fetched\nis simply missing here."
+        },
+        "locations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1WeatherLocation"
+          },
+          "description": "The monitored towns (within `place`, when given), with position and\nelevation, in configuration order."
         }
       },
       "description": "Conditions is current, non-event state."
+    },
+    "v1DailyForecastPeriod": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "example": "Wednesday Night",
+          "description": "NWS's name for the period."
+        },
+        "start": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "end": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "isDaytime": {
+          "type": "boolean",
+          "description": "Day (high) or night (low) period."
+        },
+        "temperatureCelsius": {
+          "type": "integer",
+          "format": "int32",
+          "example": 8,
+          "description": "The period's high (day) or low (night), degrees Celsius."
+        },
+        "precipitationProbabilityPercent": {
+          "type": "integer",
+          "format": "int32",
+          "description": "Probability of precipitation, percent. `null` when NWS gave none."
+        },
+        "windSpeed": {
+          "type": "string",
+          "description": "NWS's wind text, e.g. \"5 to 10 km/h\"."
+        },
+        "windDirection": {
+          "type": "string",
+          "description": "Compass point the wind blows from, e.g. \"SW\"."
+        },
+        "shortForecast": {
+          "type": "string",
+          "example": "Chance Rain Showers",
+          "description": "NWS's short forecast, e.g. \"Chance Rain Showers\"."
+        },
+        "detailedForecast": {
+          "type": "string",
+          "description": "NWS's full sentence forecast."
+        }
+      },
+      "description": "DailyForecastPeriod is one of NWS's named 12-hour forecast periods\n(\"Tonight\", \"Wednesday\") for a location's grid cell."
     },
     "v1EarthquakeDetail": {
       "type": "object",
@@ -1679,6 +1738,36 @@
           "format": "int32",
           "example": 13,
           "description": "Wind gust, km/h."
+        },
+        "precipitationProbabilityPercent": {
+          "type": "integer",
+          "format": "int32",
+          "description": "The fields below are `null` when NWS gave no value for the hour, never 0:\na forecast 0% chance of rain and no forecast are different statements.\n\nProbability of precipitation, percent."
+        },
+        "precipitationMm": {
+          "type": "number",
+          "format": "double",
+          "description": "Liquid-equivalent precipitation in this hour, mm. NWS forecasts amounts\nover spans (usually 6 hours); each hour carries an equal share, so sum the\nhours for a total."
+        },
+        "snowfallMm": {
+          "type": "number",
+          "format": "double",
+          "description": "Snowfall in this hour, mm of snow (not liquid), shared out the same way."
+        },
+        "snowLevelMeters": {
+          "type": "integer",
+          "format": "int32",
+          "description": "Snow level: the elevation above which precipitation falls as snow,\nmetres above sea level."
+        },
+        "skyCoverPercent": {
+          "type": "integer",
+          "format": "int32",
+          "description": "Sky cover, percent."
+        },
+        "weather": {
+          "type": "string",
+          "example": "Chance of light rain showers",
+          "description": "The forecast weather in words, from NWS's grid vocabulary, e.g. \"Chance\nof light rain showers\"; several are joined with \"; \". Empty when NWS\nforecasts none."
         }
       },
       "description": "ForecastPeriod is one hour of a location's forecast (NWS gridpoint data),\nrounded to whole numbers. A value NWS did not give is 0."
@@ -3257,9 +3346,54 @@
           "format": "int32",
           "example": 33,
           "description": "Lowest relative humidity over the horizon, percent. 0 when NWS gave none."
+        },
+        "gridElevationMeters": {
+          "type": "integer",
+          "format": "int32",
+          "description": "Elevation of the NWS grid cell this forecast is for, metres. It can\ndiffer from the town's own elevation by hundreds of metres. `null` when\nNWS gave none."
+        },
+        "daily": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1DailyForecastPeriod"
+          },
+          "description": "The 7-day forecast in NWS's named 12-hour periods, in time order. Empty\nwhen that product could not be fetched."
         }
       },
       "description": "WeatherForecast is a location's short-range forecast: the hourly NWS gridpoint\nseries (wind, gust, humidity, temperature) plus an at-a-glance summary.\nInformational only: it never implies a fire-weather warning (issued products\nare in `fireWeather`).\n"
+    },
+    "v1WeatherLocation": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "example": "arnold",
+          "description": "Joins to `WeatherConditions.locationId` and `WeatherForecast.locationId`."
+        },
+        "name": {
+          "type": "string",
+          "example": "Arnold, CA"
+        },
+        "latitude": {
+          "type": "number",
+          "format": "double"
+        },
+        "longitude": {
+          "type": "number",
+          "format": "double"
+        },
+        "elevationMeters": {
+          "type": "integer",
+          "format": "int32",
+          "description": "Ground elevation at the location, metres (USGS 3DEP). `null` when not\nconfigured."
+        },
+        "zone": {
+          "type": "string",
+          "description": "The NWS public forecast zone containing it, e.g. `CAZ138`."
+        }
+      },
+      "description": "WeatherLocation is one monitored town."
     },
     "v1WildfireDetail": {
       "type": "object",

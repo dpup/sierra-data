@@ -161,3 +161,100 @@ func TestGetGridForecast_GapsDroppedNotZeroed(t *testing.T) {
 		t.Errorf("min RH = %v, want 40", f.MinHumidityPct)
 	}
 }
+
+// precipFixture: 6h from 12:00Z. PoP 20 then 0 (a real zero); QPF 6 mm over
+// the whole 6 h (1 mm/h); snowfall 3 mm over the last 3 h; snow level in m for
+// the first 4 h only; sky 50; a chance of light rain showers for 2 h.
+const precipFixture = `{
+  "properties": {
+    "elevation": {"unitCode": "wmoUnit:m", "value": 715.9},
+    "temperature":      {"uom":"wmoUnit:degC","values":[{"validTime":"2026-07-27T12:00:00+00:00/PT6H","value":2}]},
+    "relativeHumidity": {"uom":"wmoUnit:percent","values":[{"validTime":"2026-07-27T12:00:00+00:00/PT6H","value":90}]},
+    "windSpeed":        {"uom":"wmoUnit:km_h-1","values":[{"validTime":"2026-07-27T12:00:00+00:00/PT6H","value":10}]},
+    "probabilityOfPrecipitation": {"uom":"wmoUnit:percent","values":[
+        {"validTime":"2026-07-27T12:00:00+00:00/PT3H","value":20},
+        {"validTime":"2026-07-27T15:00:00+00:00/PT3H","value":0}]},
+    "quantitativePrecipitation": {"uom":"wmoUnit:mm","values":[{"validTime":"2026-07-27T12:00:00+00:00/PT6H","value":6}]},
+    "snowfallAmount":   {"uom":"wmoUnit:mm","values":[{"validTime":"2026-07-27T15:00:00+00:00/PT3H","value":3}]},
+    "snowLevel":        {"uom":"wmoUnit:m","values":[{"validTime":"2026-07-27T12:00:00+00:00/PT4H","value":1500}]},
+    "skyCover":         {"uom":"wmoUnit:percent","values":[{"validTime":"2026-07-27T12:00:00+00:00/PT6H","value":50}]},
+    "weather": {"values":[
+        {"validTime":"2026-07-27T12:00:00+00:00/PT2H","value":[{"coverage":"chance","weather":"rain_showers","intensity":"light","visibility":{"value":null},"attributes":[]}]},
+        {"validTime":"2026-07-27T14:00:00+00:00/PT4H","value":[{"coverage":null,"weather":null,"intensity":null,"visibility":{"value":null},"attributes":[]}]}]}
+  }
+}`
+
+func TestGetGridForecastPrecipitation(t *testing.T) {
+	c := NewClientWithHTTPDoer("test-agent", "https://nws.test", &fakeDoer{resp: precipFixture})
+	c.now = func() time.Time { return time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC) }
+	f, err := c.GetGridForecast(context.Background(), "https://nws.test/gridpoints/STO/90,41", 6*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.Points) != 6 {
+		t.Fatalf("got %d points", len(f.Points))
+	}
+	if f.GridElevationM == nil || *f.GridElevationM != 715.9 {
+		t.Errorf("grid elevation = %v", f.GridElevationM)
+	}
+	p0, p3, p5 := f.Points[0], f.Points[3], f.Points[5]
+	if p0.PopPct == nil || *p0.PopPct != 20 || p3.PopPct == nil || *p3.PopPct != 0 {
+		t.Errorf("pop = %v / %v; a forecast 0 must stay 0, not absent", p0.PopPct, p3.PopPct)
+	}
+	if p0.QpfMm == nil || *p0.QpfMm != 1 {
+		t.Errorf("qpf = %v, want the 6 mm total spread as 1 mm/h", p0.QpfMm)
+	}
+	if p0.SnowMm != nil || p3.SnowMm == nil || *p3.SnowMm != 1 {
+		t.Errorf("snow = %v / %v", p0.SnowMm, p3.SnowMm)
+	}
+	if p0.SnowLevelM == nil || *p0.SnowLevelM != 1500 || p5.SnowLevelM != nil {
+		t.Errorf("snow level = %v / %v; absent hours stay nil", p0.SnowLevelM, p5.SnowLevelM)
+	}
+	if p0.SkyPct == nil || *p0.SkyPct != 50 {
+		t.Errorf("sky = %v", p0.SkyPct)
+	}
+	if p0.Weather != "Chance of light rain showers" || p3.Weather != "" {
+		t.Errorf("weather = %q / %q", p0.Weather, p3.Weather)
+	}
+}
+
+func TestWeatherPhrase(t *testing.T) {
+	cases := map[[3]string]string{
+		{"slight_chance", "", "snow_showers"}: "Slight chance of snow showers",
+		{"likely", "moderate", "rain"}:        "Likely moderate rain",
+		{"", "", "fog"}:                       "Fog",
+		{"areas", "none", "smoke"}:            "Areas smoke",
+	}
+	for in, want := range cases {
+		if got := weatherPhrase(in[0], in[1], in[2]); got != want {
+			t.Errorf("%v = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestGetDailyForecast(t *testing.T) {
+	doer := &fakeDoer{resp: `{"properties":{"periods":[
+		{"name":"Tonight","startTime":"2026-11-10T18:00:00-08:00","endTime":"2026-11-11T06:00:00-08:00","isDaytime":false,
+		 "temperature":10,"temperatureUnit":"C","probabilityOfPrecipitation":{"value":null},
+		 "windSpeed":"5 km/h","windDirection":"E","shortForecast":"Clear","detailedForecast":"Clear, with a low around 10."},
+		{"name":"Veterans Day","startTime":"2026-11-11T06:00:00-08:00","endTime":"2026-11-11T18:00:00-08:00","isDaytime":true,
+		 "temperature":75,"temperatureUnit":"F","probabilityOfPrecipitation":{"value":0},
+		 "windSpeed":"5 to 10 km/h","windDirection":"SW","shortForecast":"Sunny","detailedForecast":"Sunny."}]}}`}
+	c := NewClientWithHTTPDoer("test-agent", "https://nws.test", doer)
+	d, err := c.GetDailyForecast(context.Background(), "https://api.weather.gov/gridpoints/STO/90,41")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(doer.lastURL, "/gridpoints/STO/90,41/forecast?units=si") {
+		t.Errorf("url = %q", doer.lastURL)
+	}
+	if len(d) != 2 || d[0].Name != "Tonight" || d[0].IsDaytime || d[0].PopPct != nil {
+		t.Errorf("tonight = %+v", d[0])
+	}
+	if d[1].TempC < 23.8 || d[1].TempC > 23.9 || d[1].PopPct == nil || *d[1].PopPct != 0 {
+		t.Errorf("day = %+v", d[1])
+	}
+	if d[0].Start.IsZero() || !d[0].End.After(d[0].Start) {
+		t.Errorf("window = %v..%v", d[0].Start, d[0].End)
+	}
+}

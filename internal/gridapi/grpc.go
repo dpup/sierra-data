@@ -19,6 +19,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
+	"google.golang.org/protobuf/types/known/wrapperspb"
+
+	"github.com/sierragridteam/sierra-data/internal/config"
 
 	gridv1 "github.com/sierragridteam/sierra-data/api/grid/v1"
 	api "github.com/sierragridteam/sierra-data/api/v1"
@@ -567,6 +570,10 @@ func (g *GridServer) GetConditions(ctx context.Context, req *gridv1.GetCondition
 		return nil, internalErr(ctx, err)
 	}
 	data := resp.GetWeatherData()
+	var locations []config.WeatherLocation
+	if g.svc.Cfg != nil {
+		locations = g.svc.Cfg.Weather.Locations
+	}
 	if p := req.GetPlace(); p != "" {
 		box, ok, err := g.svc.placeBbox(ctx, p)
 		if errors.Is(err, store.ErrNotFound) {
@@ -575,7 +582,8 @@ func (g *GridServer) GetConditions(ctx context.Context, req *gridv1.GetCondition
 		if err != nil {
 			return nil, internalErr(ctx, err)
 		}
-		data = filterWeather(data, g.svc.Cfg.Weather.Locations, box, ok)
+		data = filterWeather(data, locations, box, ok)
+		locations = filterLocations(locations, box, ok)
 	}
 
 	out := &gridv1.Conditions{LastUpdated: resp.GetLastUpdated()}
@@ -601,16 +609,56 @@ func (g *GridServer) GetConditions(ctx context.Context, req *gridv1.GetCondition
 			Zones:    fw.GetZones(),
 		}
 	}
-	// Per-location fire-weather forecast (fail-soft), joined to the weather set
-	// we're returning so it inherits the place filter.
+	for _, l := range locations {
+		wl := &gridv1.WeatherLocation{
+			Id: l.ID, Name: l.Name, Zone: l.Zone,
+			Latitude: l.Coordinates.Latitude, Longitude: l.Coordinates.Longitude,
+		}
+		if l.ElevationMeters > 0 {
+			wl.ElevationMeters = wrapperspb.Int32(int32(math.Round(l.ElevationMeters)))
+		}
+		out.Locations = append(out.Locations, wl)
+	}
+	// Per-location forecast (fail-soft) for every location in scope. It used
+	// to be joined to the current-weather set, so an OpenWeatherMap failure
+	// hid NWS forecasts that had nothing to do with it.
 	if fcs := g.svc.Weather.LocationForecasts(ctx); len(fcs) > 0 {
-		for _, wc := range out.Weather {
-			if f := fcs[wc.GetLocationId()]; f != nil {
-				out.Forecast = append(out.Forecast, projectForecast(wc.GetLocationId(), f))
+		for _, l := range locations {
+			if f := fcs[l.ID]; f != nil {
+				out.Forecast = append(out.Forecast, projectForecast(l.ID, f))
 			}
 		}
 	}
 	return out, nil
+}
+
+// filterLocations keeps the configured locations inside the place's box.
+func filterLocations(locations []config.WeatherLocation, b bbox, ok bool) []config.WeatherLocation {
+	if !ok {
+		return nil
+	}
+	var out []config.WeatherLocation
+	for _, l := range locations {
+		if b.contains(l.Coordinates.Latitude, l.Coordinates.Longitude) {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+func wrapI32(v *float64) *wrapperspb.Int32Value {
+	if v == nil {
+		return nil
+	}
+	return wrapperspb.Int32(int32(math.Round(*v)))
+}
+
+// wrapTenth rounds to 0.1 (mm amounts).
+func wrapTenth(v *float64) *wrapperspb.DoubleValue {
+	if v == nil {
+		return nil
+	}
+	return wrapperspb.Double(math.Round(*v*10) / 10)
 }
 
 // projectForecast maps a client forecast onto the proto WeatherForecast. Rounded
@@ -635,6 +683,25 @@ func projectForecast(locID string, f *nws.Forecast) *gridv1.WeatherForecast {
 			WindSpeedKmh:         int32(math.Round(p.WindKmh)),
 			WindDirectionDegrees: int32(math.Round(p.WindDirDeg)),
 			WindGustKmh:          int32(math.Round(p.WindGustKmh)),
+
+			PrecipitationProbabilityPercent: wrapI32(p.PopPct),
+			PrecipitationMm:                 wrapTenth(p.QpfMm),
+			SnowfallMm:                      wrapTenth(p.SnowMm),
+			SnowLevelMeters:                 wrapI32(p.SnowLevelM),
+			SkyCoverPercent:                 wrapI32(p.SkyPct),
+			Weather:                         p.Weather,
+		})
+	}
+	wf.GridElevationMeters = wrapI32(f.GridElevationM)
+	for _, d := range f.Daily {
+		wf.Daily = append(wf.Daily, &gridv1.DailyForecastPeriod{
+			Name: d.Name, Start: tsOrNil(d.Start), End: tsOrNil(d.End), IsDaytime: d.IsDaytime,
+			TemperatureCelsius:              int32(math.Round(d.TempC)),
+			PrecipitationProbabilityPercent: wrapI32(d.PopPct),
+			WindSpeed:                       d.WindSpeed,
+			WindDirection:                   d.WindDirection,
+			ShortForecast:                   d.ShortForecast,
+			DetailedForecast:                d.DetailedForecast,
 		})
 	}
 	return wf
