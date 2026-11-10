@@ -259,9 +259,11 @@ func parseChainControlDescription(html string) (locationName, effectiveTime, des
 		description = strings.TrimSpace(matches[1][1])
 	}
 
-	// Extract effective time
-	// Pattern: Chain control effective from: 12/24/2025 08:19
-	effectivePattern := regexp.MustCompile(`Chain control effective from:\s*(\d{1,2}/\d{1,2}/\d{4}\s+\d{1,2}:\d{2})`)
+	// Extract effective time. A chain control says "Chain control effective
+	// from: 12/24/2025 08:19"; a road closure (the pass gates) says just
+	// "Effective from: 12/24/2025 06:09", which this used to miss, so a
+	// closure carried no time at all.
+	effectivePattern := regexp.MustCompile(`(?i)effective from:\s*(\d{1,2}/\d{1,2}/\d{4}\s+\d{1,2}:\d{2})`)
 	if match := effectivePattern.FindStringSubmatch(html); len(match) > 1 {
 		effectiveTime = parseChainControlTime(match[1])
 	}
@@ -284,26 +286,23 @@ func parseChainControlDescription(html string) (locationName, effectiveTime, des
 	return locationName, effectiveTime, description, lastUpdated, district, messageID
 }
 
-// parseChainControlTime converts Caltrans time format to ISO 8601
-// Input: "12/24/2025 08:19" or "12/24/2025 9:54am"
+// parseChainControlTime converts Caltrans's Pacific wall-clock stamps
+// ("12/24/2025 08:19", "12/24/2025 9:54am") to RFC 3339 with the Pacific
+// offset. They carry no zone marker; parsing them as UTC (as this did until
+// 2026-11-10) put every chain control and pass closure 7-8 hours early.
+// Returns "" when the stamp does not parse, never the raw text.
 func parseChainControlTime(timeStr string) string {
 	timeStr = strings.TrimSpace(timeStr)
-
-	// Try format with am/pm: "12/24/2025 9:54am"
-	if t, err := time.Parse("1/2/2006 3:04pm", timeStr); err == nil {
-		return t.Format(time.RFC3339)
+	loc, err := time.LoadLocation("America/Los_Angeles")
+	if err != nil {
+		loc = time.FixedZone("PST", -8*3600)
 	}
-	if t, err := time.Parse("1/2/2006 3:04am", timeStr); err == nil {
-		return t.Format(time.RFC3339)
+	for _, layout := range []string{"1/2/2006 3:04pm", "1/2/2006 15:04"} {
+		if t, err := time.ParseInLocation(layout, timeStr, loc); err == nil {
+			return t.Format(time.RFC3339)
+		}
 	}
-
-	// Try 24-hour format: "12/24/2025 08:19"
-	if t, err := time.Parse("1/2/2006 15:04", timeStr); err == nil {
-		return t.Format(time.RFC3339)
-	}
-
-	// Return original if parsing fails
-	return timeStr
+	return ""
 }
 
 // ParseLaneClosures processes lane closures KML feed

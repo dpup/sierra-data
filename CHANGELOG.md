@@ -154,6 +154,19 @@ duplicate. The `message_sign` layer's `messageSign.routes` now lists the filed
 route and the one in the sign's name (`["SR-108", "SR-120"]`; Moccasin
 `["SR-120", "SR-49"]`). Absent when the two agree. `route` is unchanged.
 
+### Chain-control and road-closure times are Pacific, and closures have one
+
+Two fixes to entries from Caltrans's `cc.kml` (the `chain_control` layer and
+the roads' chain and closure points):
+
+- **A road closure now has its start time.** The seasonal pass gates say
+  "Effective from: ..." rather than "Chain control effective from: ...", so
+  their `effective` was empty. It is now set.
+- **Times are Pacific.** Caltrans's stamps carry no zone and were read as UTC,
+  so `effective` and the last-updated time were 7-8 hours early (`08:19`
+  Pacific served as `08:19Z`). They are now RFC 3339 with the Pacific offset
+  (`2025-12-24T08:19:00-08:00`). CWWP2 checkpoint times were already right.
+
 ## 2026-11-09
 
 ### CHP incidents carry their numbered log (`roadIncident.log`)
