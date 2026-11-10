@@ -82,6 +82,18 @@ distinct `sources`, `since` (earliest first ingest, null when empty),
 `place` takes a slug or id (404 if unknown) and includes the place's ended
 events. Counts are numbers in JSON and are cached for up to five minutes.
 
+### `geometryFormat=NONE` on `/api/v1/events` for fast lists
+
+`GET /api/v1/events?geometryFormat=NONE` returns every event without its shape:
+`geometry.bbox` and `geometry.centroid` are set, `geometry.geojson` is empty and
+there is no `geometry.object`. Use it for lists that do not draw shapes, then
+fetch `/api/v1/events/{id}` for one event's geometry. Fire perimeters,
+evacuation zones and outage areas were 96% of an all-statuses page's bytes, and
+reading them cold made deep pages take 5-16 s; NONE pages read a separate,
+geometry-free copy of each event. Other RPCs still take only `BASE64` and
+`OBJECT`. Until a newly deployed server finishes backfilling that copy (a few
+minutes after start), NONE pages are correct but not yet faster.
+
 ## 2026-11-09
 
 ### CHP incidents carry their numbered log (`roadIncident.log`)

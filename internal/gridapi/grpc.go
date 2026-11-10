@@ -193,9 +193,14 @@ func (g *GridServer) ListEvents(ctx context.Context, req *gridv1.ListEventsReque
 		return nil, invalidErr(err)
 	}
 	eq.PageToken = req.GetPageToken()
-	geomFmt, err := parseGeometryFormat(req.GetGeometryFormat())
-	if err != nil {
-		return nil, invalidErr(err)
+	// NONE (this RPC only) serves each event's geometry-free copy: bbox and
+	// centroid, no GeoJSON. It is what makes a deep list page cheap, because
+	// the shapes are what a cold read spends its time on (store.migrationV12).
+	var geomFmt geometryFormat
+	if strings.EqualFold(strings.TrimSpace(req.GetGeometryFormat()), "NONE") {
+		eq.Lite = true
+	} else if geomFmt, err = parseGeometryFormat(req.GetGeometryFormat()); err != nil {
+		return nil, invalidErr(fmt.Errorf("%w; /api/v1/events also takes NONE", err))
 	}
 
 	// Filters are validated above (400/404 first); guard on a cheap global data
@@ -218,7 +223,7 @@ func (g *GridServer) ListEvents(ctx context.Context, req *gridv1.ListEventsReque
 		req.GetPlace(), strings.Join(req.GetLayer(), ","), strings.Join(req.GetStatus(), ","),
 		req.GetSeverityMin(), req.GetSince(),
 		strconv.Itoa(int(req.GetPageSize())), req.GetPageToken(), strconv.FormatBool(req.GetEnhancementIo()),
-		geomFmt.String())
+		geomFmt.String(), strconv.FormatBool(eq.Lite))
 	if err := etag.Guard(ctx, tag); err != nil {
 		return nil, err // 304 — skip the query
 	}

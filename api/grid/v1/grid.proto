@@ -2044,10 +2044,14 @@ message ListEventsRequest {
   bool enhancement_io = 8;
   // How each event's `geometry` carries its GeoJSON. `BASE64` (default, the
   // legacy form): the base64 `geometry.geojson` string. `OBJECT`: a plain
-  // JSON object in `geometry.object`, with `geometry.geojson` empty.
-  // Case-insensitive; anything else is a 400.
+  // JSON object in `geometry.object`, with `geometry.geojson` empty. `NONE`:
+  // no shape at all, only `geometry.bbox` and `geometry.centroid`, for lists
+  // that do not draw shapes. Fire perimeters, evacuation zones and outage
+  // areas are most of a page's bytes, so NONE pages are much smaller and
+  // faster; fetch one event for its shape. Case-insensitive; anything else is
+  // a 400.
   string geometry_format = 9 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
-    enum: ["BASE64", "OBJECT"]
+    enum: ["BASE64", "OBJECT", "NONE"]
     default: "BASE64"
   }];
 }

@@ -31,6 +31,10 @@ type EventQuery struct {
 	Since       time.Time // observed_at >= Since
 	PageSize    int       // default 50, max 200
 	PageToken   string
+	// Lite reads each event's geometry-free copy (event_lite): geometry
+	// carries bbox and centroid but no GeoJSON. For lists that do not draw
+	// shapes; see migrationV12 for why it matters.
+	Lite bool
 }
 
 // HistoryQuery filters QueryHistory over event_revisions. The time window is
@@ -186,7 +190,11 @@ func eventsPageSQL(q EventQuery, pageSize int) (string, []any, error) {
 
 	var sb strings.Builder
 	var args []any
-	sb.WriteString(`SELECT e.proto, k.severity, k.observed_at, k.id FROM (` +
+	blobCol := "e.proto"
+	if q.Lite {
+		blobCol = "COALESCE(l.proto, e.proto)"
+	}
+	sb.WriteString(`SELECT ` + blobCol + `, k.severity, k.observed_at, k.id FROM (` +
 		`SELECT e.id, e.severity, e.observed_at FROM events e`)
 	if q.PlaceID != "" {
 		sb.WriteString(` JOIN event_places ep ON ep.event_id = e.id AND ep.place_id = ?`)
@@ -220,8 +228,13 @@ func eventsPageSQL(q EventQuery, pageSize int) (string, []any, error) {
 		args = append(args, cur.S, cur.S, cur.O, cur.S, cur.O, cur.ID)
 	}
 	sb.WriteString(` ORDER BY e.severity DESC, e.observed_at DESC, e.id ASC LIMIT ?) k` +
-		` JOIN events e ON e.id = k.id` +
-		` ORDER BY k.severity DESC, k.observed_at DESC, k.id ASC`)
+		` JOIN events e ON e.id = k.id`)
+	if q.Lite {
+		// COALESCE short-circuits, so e.proto is read only for an event the
+		// backfill has not reached yet.
+		sb.WriteString(` LEFT JOIN event_lite l ON l.event_id = k.id`)
+	}
+	sb.WriteString(` ORDER BY k.severity DESC, k.observed_at DESC, k.id ASC`)
 	args = append(args, pageSize+1)
 	return sb.String(), args, nil
 }

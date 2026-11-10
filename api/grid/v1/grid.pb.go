@@ -4917,8 +4917,12 @@ type ListEventsRequest struct {
 	EnhancementIo bool `protobuf:"varint,8,opt,name=enhancement_io,json=enhancementIo,proto3" json:"enhancement_io,omitempty"`
 	// How each event's `geometry` carries its GeoJSON. `BASE64` (default, the
 	// legacy form): the base64 `geometry.geojson` string. `OBJECT`: a plain
-	// JSON object in `geometry.object`, with `geometry.geojson` empty.
-	// Case-insensitive; anything else is a 400.
+	// JSON object in `geometry.object`, with `geometry.geojson` empty. `NONE`:
+	// no shape at all, only `geometry.bbox` and `geometry.centroid`, for lists
+	// that do not draw shapes. Fire perimeters, evacuation zones and outage
+	// areas are most of a page's bytes, so NONE pages are much smaller and
+	// faster; fetch one event for its shape. Case-insensitive; anything else is
+	// a 400.
 	GeometryFormat string `protobuf:"bytes,9,opt,name=geometry_format,json=geometryFormat,proto3" json:"geometry_format,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
@@ -7204,7 +7208,7 @@ const file_grid_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\tB\r\x92A\n" +
 	"J\b\"caloes\"R\x02id\x12<\n" +
 	"\x06status\x18\x02 \x01(\tB$\x92A!J\x04\"OK\"\xf2\x02\x02OK\xf2\x02\x05STALE\xf2\x02\vUNAVAILABLER\x06status\x12B\n" +
-	"\x0flast_success_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\rlastSuccessAt\"\xbb\x04\n" +
+	"\x0flast_success_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\rlastSuccessAt\"\xc2\x04\n" +
 	"\x11ListEventsRequest\x12-\n" +
 	"\x05place\x18\x01 \x01(\tB\x17\x92A\x14J\x12\"calaveras-county\"R\x05place\x12{\n" +
 	"\x05layer\x18\x02 \x03(\tBe\x92Ab\xf2\x02\bWILDFIRE\xf2\x02\n" +
@@ -7216,8 +7220,8 @@ const file_grid_proto_rawDesc = "" +
 	"\tpage_size\x18\x06 \x01(\x05B\f\x92A\tY\x00\x00\x00\x00\x00\x00i@R\bpageSize\x12\x1d\n" +
 	"\n" +
 	"page_token\x18\a \x01(\tR\tpageToken\x12%\n" +
-	"\x0eenhancement_io\x18\b \x01(\bR\renhancementIo\x12F\n" +
-	"\x0fgeometry_format\x18\t \x01(\tB\x1d\x92A\x1a:\x06BASE64\xf2\x02\x06BASE64\xf2\x02\x06OBJECTR\x0egeometryFormat\"\xae\x01\n" +
+	"\x0eenhancement_io\x18\b \x01(\bR\renhancementIo\x12M\n" +
+	"\x0fgeometry_format\x18\t \x01(\tB$\x92A!:\x06BASE64\xf2\x02\x06BASE64\xf2\x02\x06OBJECT\xf2\x02\x04NONER\x0egeometryFormat\"\xae\x01\n" +
 	"\x0fGetEventRequest\x12,\n" +
 	"\x02id\x18\x01 \x01(\tB\x1c\x92A\x19J\x17\"burn:calaveras-county\"R\x02id\x12%\n" +
 	"\x0eenhancement_io\x18\x02 \x01(\bR\renhancementIo\x12F\n" +

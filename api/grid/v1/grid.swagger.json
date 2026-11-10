@@ -254,13 +254,14 @@
           },
           {
             "name": "geometryFormat",
-            "description": "How each event's `geometry` carries its GeoJSON. `BASE64` (default, the\nlegacy form): the base64 `geometry.geojson` string. `OBJECT`: a plain\nJSON object in `geometry.object`, with `geometry.geojson` empty.\nCase-insensitive; anything else is a 400.",
+            "description": "How each event's `geometry` carries its GeoJSON. `BASE64` (default, the\nlegacy form): the base64 `geometry.geojson` string. `OBJECT`: a plain\nJSON object in `geometry.object`, with `geometry.geojson` empty. `NONE`:\nno shape at all, only `geometry.bbox` and `geometry.centroid`, for lists\nthat do not draw shapes. Fire perimeters, evacuation zones and outage\nareas are most of a page's bytes, so NONE pages are much smaller and\nfaster; fetch one event for its shape. Case-insensitive; anything else is\na 400.",
             "in": "query",
             "required": false,
             "type": "string",
             "enum": [
               "BASE64",
-              "OBJECT"
+              "OBJECT",
+              "NONE"
             ],
             "default": "BASE64"
           }

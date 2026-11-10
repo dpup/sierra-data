@@ -248,11 +248,25 @@ const migrationV10 = `ALTER TABLE events ADD COLUMN refreshes INTEGER NOT NULL D
 // SeedSources rewrites the reporters' rows.
 const migrationV11 = `ALTER TABLE sources ADD COLUMN kind INTEGER NOT NULL DEFAULT 1`
 
+// migrationV12 adds event_lite: each event's current blob with the GeoJSON
+// geometry removed (bbox and centroid kept), for list reads that do not draw
+// shapes. Fire perimeters, evacuation zones and outage areas are 96% of an
+// all-statuses page's bytes, and on EFS a cold read follows a blob's overflow
+// chain one 4 KB page (one network round trip) at a time: page 1 of
+// place=ebbetts-pass took 15.6 s cold and 1.7 s warm (2026-11-10). See
+// lite.go. Rows are written beside every events.proto write and backfilled
+// in batches; a missing row falls back to events.proto.
+const migrationV12 = `
+CREATE TABLE event_lite (
+  event_id TEXT PRIMARY KEY,
+  proto    BLOB NOT NULL
+) WITHOUT ROWID`
+
 // migrations[i] is the DDL for schema version i+1. Applied versions are
 // recorded in schema_migrations; already-applied versions are skipped, so
 // Open is idempotent across restarts and an existing dev DB at an older
 // version picks up only the missing migrations.
-var migrations = []string{schemaV1, migrationV2, migrationV3, migrationV4, migrationV5, migrationV6, migrationV7, migrationV8, migrationV9, migrationV10, migrationV11}
+var migrations = []string{schemaV1, migrationV2, migrationV3, migrationV4, migrationV5, migrationV6, migrationV7, migrationV8, migrationV9, migrationV10, migrationV11, migrationV12}
 
 // ErrNotFound is returned by point lookups (GetEvent, GetPlace) when no row
 // matches. Callers map it to a 404.

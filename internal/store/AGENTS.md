@@ -396,6 +396,23 @@ Every page read returns a `Page[T]` with a resume token per row (`After[i]`),
 so a caller can serve a prefix (gridapi cuts at a byte budget) and the walk
 stays complete. The tokens are the same keyset cursors as before.
 
+## `event_lite` — the list copy without shapes (migrationV12)
+
+`event_lite` holds each event's CURRENT blob with `geometry.geojson` (and
+`object`) removed; bbox and centroid stay. `QueryEvents` reads it when
+`EventQuery.Lite` is set (`/api/v1/events?geometryFormat=NONE`). It exists
+because GeoJSON is ~96% of an all-statuses page, and a cold EFS read walks a
+blob's overflow chain one 4 KB page, one network round trip, at a time: page 1
+of `place=ebbetts-pass` took 15.6 s cold and 1.7 s warm on 2026-11-10.
+
+It is derived state, like `event_places`, and the rule is the same: **every
+write of `events.proto` writes it in the same transaction** (`putLite`: the
+upsert, `TransitionEvents`, the hash-equal refresh). A new write path that
+skips it serves a stale list row. A missing row is not an error: the read
+`COALESCE`s to `events.proto` (correct, just slow), and the scheduler's
+`runLiteBackfill` fills rows for events stored before the migration, 50 per
+short transaction, once per database. Revisions are never lite.
+
 ## The mesh tables are measurements, not records
 
 Four tables hang off the mesh subsystem and none of them is proto-blob

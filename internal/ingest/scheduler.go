@@ -137,6 +137,7 @@ func (s *Scheduler) Start(ctx context.Context) {
 		goTracked(func() { s.runMeshMaintenance(ctx) })
 	}
 	goTracked(func() { s.runStatsRefresh(ctx) })
+	goTracked(func() { s.runLiteBackfill(ctx) })
 	logging.Infow(ctx, "Ingest scheduler started", "pollers", len(s.pollers),
 		"meshMaintenance", s.meshMaint.Interval > 0)
 }
@@ -236,6 +237,56 @@ func (s *Scheduler) runStatsRefresh(ctx context.Context) {
 			logging.Infow(ctx, "Stats refresh: recomputed index statistics",
 				"duration", s.now().Sub(start))
 		}
+	}
+}
+
+// Lite backfill pacing: start after the boot burst, then small batches with
+// a pause between them so ingest writes interleave on the single writer.
+var (
+	liteBackfillAfter = 2 * time.Minute
+	liteBackfillPause = 2 * time.Second
+)
+
+const liteBackfillBatch = 50
+
+// runLiteBackfill writes the geometry-free list copy (store event_lite) for
+// events stored before it existed, then exits. Every new write keeps the copy
+// current, so this runs to completion once per database; afterwards each
+// boot's first batch finds nothing and it returns. Until it finishes a
+// geometryFormat=NONE list falls back to the full blob, which is correct and
+// merely slow.
+func (s *Scheduler) runLiteBackfill(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			logging.Errorw(ctx, "Lite backfill: recovered from panic", "error", r)
+		}
+	}()
+	wait := liteBackfillAfter
+	total := 0
+	for {
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-s.stopping():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+		n, err := s.store.BackfillEventLite(ctx, liteBackfillBatch)
+		if err != nil {
+			logging.Errorw(ctx, "Lite backfill failed; will not retry until restart", "error", err, "written", total)
+			return
+		}
+		total += n
+		if n == 0 {
+			if total > 0 {
+				logging.Infow(ctx, "Lite backfill complete", "written", total)
+			}
+			return
+		}
+		wait = liteBackfillPause
 	}
 }
 

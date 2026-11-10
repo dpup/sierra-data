@@ -218,6 +218,9 @@ func (s *Store) UpsertEvent(ctx context.Context, ev *gridv1.Event) (UpsertResult
 		if err := insertRevision(tx, c.GetId(), res.Revision, observedAt, now.Unix(), blob); err != nil {
 			return err
 		}
+		if err := putLite(tx, c); err != nil {
+			return err
+		}
 		if err := replaceEventPlaces(tx, c.GetId(), c.PlaceIds); err != nil {
 			return err
 		}
@@ -281,6 +284,9 @@ func (s *Store) TransitionEvents(ctx context.Context, ids []string, to gridv1.Ev
 				return fmt.Errorf("store: transition update %s: %w", id, err)
 			}
 			if err := insertRevision(tx, id, ev.GetRevision(), observedAt.Unix(), now.Unix(), newBlob); err != nil {
+				return err
+			}
+			if err := putLite(tx, ev); err != nil {
 				return err
 			}
 		}
@@ -658,6 +664,9 @@ func (s *Store) refreshEventPlaces(tx *sql.Tx, ev *gridv1.Event) (bool, error) {
 	// Columns are indexes re-derived from the blob on every write (see
 	// internal/store/AGENTS.md): the burn refresh moves observed_at, so the
 	// observed_at column moves with it. For every other refresh it is unchanged.
+	if err := putLite(tx, stored); err != nil {
+		return false, err
+	}
 	if stored.GetObservedAt() != nil {
 		if _, err := tx.Exec(`UPDATE events SET proto = ?, observed_at = ?, refreshes = refreshes + 1 WHERE id = ?`,
 			newBlob, stored.GetObservedAt().AsTime().Unix(), ev.GetId()); err != nil {
