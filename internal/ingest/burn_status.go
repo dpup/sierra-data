@@ -341,7 +341,7 @@ func (n *BurnStatusNormalizer) buildEvent(
 		gridv1.Layer_BURN_STATUS,
 		gridv1.Severity_INFO, // ambient advisory state, never a hazard severity
 		gridv1.EventStatus_ACTIVE,
-		burnHeadline(c, detail),
+		burnHeadline(detail),
 	)
 	ev.Category = "burn_status"
 	ev.AreaLabel = c.Name
@@ -508,27 +508,30 @@ func derivePermission(day gridv1.BurnDay, calfire gridv1.CalfireBurnStatus) grid
 // would differ on every tick, mint a revision each time, and bury the real
 // transitions. It also makes it structurally impossible to render a suspension
 // as permission.
-func burnHeadline(c config.BurnCounty, d *gridv1.BurnStatusDetail) string {
-	var parts []string
-	switch d.GetBurnDay() {
-	case gridv1.BurnDay_BURN_DAY_YES:
-		parts = append(parts, "burn day")
-	case gridv1.BurnDay_BURN_DAY_NO:
-		parts = append(parts, "no-burn day")
-	case gridv1.BurnDay_BURN_DAY_MARGINAL:
-		parts = append(parts, "restricted burn day")
-	default:
-		parts = append(parts, "burn day unknown")
+func burnHeadline(d *gridv1.BurnStatusDetail) string {
+	// Lead with the answer a reader holding a match wants. The county is the
+	// event's areaLabel, and each authority's facet is in the detail block
+	// (burnDay, calfireStatus, burnLines), so neither belongs in the headline.
+	// Built from the same pessimistic combination as `permission`, so the
+	// headline can never read more permissive than the structured answer.
+	switch derivePermission(d.GetBurnDay(), d.GetCalfireStatus()) {
+	case gridv1.BurnPermission_BURN_PERMISSION_ALLOWED:
+		return "Burn day"
+	case gridv1.BurnPermission_BURN_PERMISSION_PROHIBITED:
+		// A CAL FIRE suspension lasts the season; a no-burn day is today's
+		// call. Name the longer-lived prohibition when both apply.
+		if d.GetCalfireStatus() == gridv1.CalfireBurnStatus_CALFIRE_BURNING_SUSPENDED {
+			return "Burning suspended by CAL FIRE"
+		}
+		return "No-burn day"
 	}
-	switch d.GetCalfireStatus() {
-	case gridv1.CalfireBurnStatus_CALFIRE_BURNING_SUSPENDED:
-		parts = append(parts, "CAL FIRE burning suspended")
-	case gridv1.CalfireBurnStatus_CALFIRE_PERMIT_REQUIRED:
-		parts = append(parts, "CAL FIRE permit required")
-	case gridv1.CalfireBurnStatus_CALFIRE_NO_PERMIT_REQUIRED:
-		parts = append(parts, "CAL FIRE permit not required")
-	default:
-		parts = append(parts, "CAL FIRE status unknown")
+	// UNKNOWN. An elevation-restricted ("orange") day with a readable CAL
+	// FIRE status is a known, narrower answer; the extraction vocabulary
+	// defines orange as a burn day at 3,500 ft and above.
+	if d.GetBurnDay() == gridv1.BurnDay_BURN_DAY_MARGINAL &&
+		(d.GetCalfireStatus() == gridv1.CalfireBurnStatus_CALFIRE_PERMIT_REQUIRED ||
+			d.GetCalfireStatus() == gridv1.CalfireBurnStatus_CALFIRE_NO_PERMIT_REQUIRED) {
+		return "Burn day above 3,500 ft only"
 	}
-	return fmt.Sprintf("%s — %s", c.Name, strings.Join(parts, "; "))
+	return "Burn status unknown"
 }

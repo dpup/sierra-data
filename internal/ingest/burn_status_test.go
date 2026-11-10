@@ -443,17 +443,34 @@ func TestBurnStatus_ObservationChangeDoesNotMintARevision(t *testing.T) {
 // The headline must be composed deterministically. ContentHash does NOT zero
 // Headline, so a generated/reworded one would differ every tick and mint a
 // revision each time.
-func TestBurnHeadlineIsDeterministicAndNamesBothFacets(t *testing.T) {
-	d := &gridv1.BurnStatusDetail{
-		BurnDay:       gridv1.BurnDay_BURN_DAY_NO,
-		CalfireStatus: gridv1.CalfireBurnStatus_CALFIRE_BURNING_SUSPENDED,
+func TestBurnHeadlineLeadsWithTheAnswer(t *testing.T) {
+	yes, no, orange := gridv1.BurnDay_BURN_DAY_YES, gridv1.BurnDay_BURN_DAY_NO, gridv1.BurnDay_BURN_DAY_MARGINAL
+	permit := gridv1.CalfireBurnStatus_CALFIRE_PERMIT_REQUIRED
+	free := gridv1.CalfireBurnStatus_CALFIRE_NO_PERMIT_REQUIRED
+	suspended := gridv1.CalfireBurnStatus_CALFIRE_BURNING_SUSPENDED
+	cases := []struct {
+		day     gridv1.BurnDay
+		calfire gridv1.CalfireBurnStatus
+		want    string
+	}{
+		{yes, permit, "Burn day"},
+		{yes, free, "Burn day"},
+		{no, permit, "No-burn day"},
+		{no, suspended, "Burning suspended by CAL FIRE"},
+		{yes, suspended, "Burning suspended by CAL FIRE"},
+		{orange, permit, "Burn day above 3,500 ft only"},
+		{orange, suspended, "Burning suspended by CAL FIRE"},
+		// An unread facet is never a green light, and never a narrower one.
+		{orange, gridv1.CalfireBurnStatus_CALFIRE_BURN_STATUS_UNKNOWN, "Burn status unknown"},
+		{yes, gridv1.CalfireBurnStatus_CALFIRE_BURN_STATUS_UNKNOWN, "Burn status unknown"},
+		{gridv1.BurnDay_BURN_DAY_UNKNOWN, permit, "Burn status unknown"},
 	}
-	got := burnHeadline(calaveras, d)
-	assert.Equal(t, "Calaveras County — no-burn day; CAL FIRE burning suspended", got)
-	assert.Equal(t, got, burnHeadline(calaveras, d), "must be stable across calls")
-
-	unknown := burnHeadline(tuolumne, &gridv1.BurnStatusDetail{})
-	assert.Equal(t, "Tuolumne County — burn day unknown; CAL FIRE status unknown", unknown)
+	for _, c := range cases {
+		d := &gridv1.BurnStatusDetail{BurnDay: c.day, CalfireStatus: c.calfire}
+		got := burnHeadline(d)
+		assert.Equal(t, c.want, got, "%v / %v", c.day, c.calfire)
+		assert.Equal(t, got, burnHeadline(d), "must be stable across calls")
+	}
 }
 
 // SourceIDs must not claim the burn line row when no county is dialed, or the

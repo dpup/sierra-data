@@ -34,6 +34,18 @@ server)", "node abcdef12 (companion)". The role stays on `mesh.nodeType` and
 `category`. The headline is content-hashed, so each repeater gets one new
 revision when this deploys.
 
+### Burn-status headlines lead with the answer
+
+A burn-status headline is now the combined answer, not a list of both
+authorities: "Burn day", "No-burn day", "Burning suspended by CAL FIRE",
+"Burn day above 3,500 ft only" (an elevation-restricted day with a readable
+CAL FIRE status) or "Burn status unknown". It used to read "Calaveras County —
+burn day; CAL FIRE permit required". The county is `areaLabel`; each facet stays
+in `burnStatus` (`burnDay`, `calfireStatus`, `burnLines`), and `permission` is
+still the field to act on. The headline follows `permission`, so it never reads
+more permissive than it. Each county gets one new revision on deploy, and a
+reworded CAL FIRE status no longer changes the headline.
+
 ## 2026-11-09
 
 ### CHP incidents carry their numbered log (`roadIncident.log`)
