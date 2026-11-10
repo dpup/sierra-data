@@ -416,6 +416,44 @@
         ]
       }
     },
+    "/api/v1/events/{id}/timeline": {
+      "get": {
+        "summary": "Get one event's timeline.",
+        "description": "What happened and when, in time order, with each entry marked by whose\nclock it is on. `SOURCE` entries are times the upstream stated: when CHP\ntook the report and each line of its log, when a fire started, when a\nclosure was planned and set up, when an alert takes effect and ends,\nwhen a mesh node was last heard. `GRID` entries are when the Grid\nrecorded something: first stored, a status change (resolved, expired,\nback again), a change to severity or a tracked figure (fire size and\ncontainment, evacuation level, customers out). Use this instead of\ninferring times from revision stamps. Built from the current event and up\nto its 500 most recent revisions (`truncated` says when there were more).\nSupports ETag / If-None-Match.",
+        "operationId": "GridService_GetEventTimeline",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1EventTimeline"
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: no event has this id.",
+            "schema": {}
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "description": "Event id, e.g. `chp:261106ST0341`.",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "x-example": "chp:261110MR0204"
+          }
+        ],
+        "tags": [
+          "Events"
+        ]
+      }
+    },
     "/api/v1/history": {
       "get": {
         "summary": "Query revisions across events (the archive).",
@@ -1646,6 +1684,27 @@
       ],
       "default": "EVENT_STATUS_UNSPECIFIED",
       "description": "EventStatus is an event's lifecycle state. Every transition is a revision, so\nthe history keeps when an event started and ended.\n\n - EVENT_STATUS_UNSPECIFIED: Never returned.\n - SCHEDULED: Planned or forecast and not yet in effect, e.g. a Caltrans lane-closure\nwindow the crew has not set up yet.\n - ACTIVE: In effect now.\n - RESOLVED: Over: an authoritatively active-only feed (CAL FIRE, Cal OES, CHP, Caltrans,\nPG\u0026E) stopped listing it after a successful poll, or a closure passed its\nplanned end plus an overrun grace without a pickup call.\n - EXPIRED: Aged out: past its own `expires`, or unseen for longer than the source's\ngrace (`Source.expireAfterSeconds`). Used where a feed going quiet proves\nnothing (NWS alerts, FIRIS perimeters, mesh nodes)."
+    },
+    "v1EventTimeline": {
+      "type": "object",
+      "properties": {
+        "eventId": {
+          "type": "string"
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1TimelineEntry"
+          },
+          "description": "Entries oldest first. At the same instant a SOURCE entry comes before a\nGRID one (the world's event before the Grid's record of it). Planned and\nestimated times can be in the future."
+        },
+        "truncated": {
+          "type": "boolean",
+          "description": "True when the event has more than 500 revisions and only the most recent\n500 were read: GRID change entries before them are missing, and\nFIRST_RECORDED still comes from revision 1."
+        }
+      },
+      "description": "EventTimeline is one event's timeline."
     },
     "v1FireWeatherConditions": {
       "type": "object",
@@ -3168,6 +3227,79 @@
         }
       },
       "description": "SummaryTopEvent is one of the place's most urgent hazard events."
+    },
+    "v1TimelineClock": {
+      "type": "string",
+      "enum": [
+        "TIMELINE_CLOCK_UNSPECIFIED",
+        "TIMELINE_CLOCK_SOURCE",
+        "TIMELINE_CLOCK_GRID"
+      ],
+      "default": "TIMELINE_CLOCK_UNSPECIFIED",
+      "description": "TimelineClock says whose time an entry is.\n\n - TIMELINE_CLOCK_SOURCE: A time the upstream source stated.\n - TIMELINE_CLOCK_GRID: When the Grid recorded something (a revision's ingest time)."
+    },
+    "v1TimelineEntry": {
+      "type": "object",
+      "properties": {
+        "at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "kind": {
+          "$ref": "#/definitions/v1TimelineKind"
+        },
+        "clock": {
+          "$ref": "#/definitions/v1TimelineClock"
+        },
+        "label": {
+          "type": "string",
+          "example": "Reported",
+          "description": "A short label in plain words, e.g. \"Reported\", \"Set up on the road\",\n\"Resolved\", \"Containment 40%\"."
+        },
+        "detail": {
+          "type": "string",
+          "description": "Supporting text: who said it, a log line number, what it was before."
+        },
+        "revision": {
+          "type": "integer",
+          "format": "int64",
+          "description": "For GRID entries, the revision that recorded it; 0 otherwise."
+        },
+        "field": {
+          "type": "string",
+          "description": "For CHANGED and STATUS: the field (`status`, `severity`, `acres`,\n`containment`, `level`, `customersAffected`) and its values before and\nafter, as displayed."
+        },
+        "before": {
+          "type": "string"
+        },
+        "after": {
+          "type": "string"
+        }
+      },
+      "description": "TimelineEntry is one moment in an event's timeline.",
+      "required": [
+        "at"
+      ]
+    },
+    "v1TimelineKind": {
+      "type": "string",
+      "enum": [
+        "TIMELINE_KIND_UNSPECIFIED",
+        "TIMELINE_BEGINS",
+        "TIMELINE_LOG",
+        "TIMELINE_PLANNED_START",
+        "TIMELINE_SET_UP",
+        "TIMELINE_PLANNED_END",
+        "TIMELINE_ENDS",
+        "TIMELINE_ESTIMATE",
+        "TIMELINE_ALL_CLEAR",
+        "TIMELINE_ACTIVITY",
+        "TIMELINE_FIRST_RECORDED",
+        "TIMELINE_STATUS",
+        "TIMELINE_CHANGED"
+      ],
+      "default": "TIMELINE_KIND_UNSPECIFIED",
+      "description": "TimelineKind is what an entry marks.\n\n - TIMELINE_BEGINS: SOURCE. When it began or was reported: CHP's report time, a fire's start,\nan outage's start, an earthquake's origin time, when an alert or\nevacuation takes effect.\n - TIMELINE_LOG: SOURCE. One line of the source's own log (CHP). `detail` is the line\nnumber.\n - TIMELINE_PLANNED_START: SOURCE. A planned start (lane closure window, PSPS de-energization).\n - TIMELINE_SET_UP: SOURCE. The crew reported the closure set up on the road.\n - TIMELINE_PLANNED_END: SOURCE. A planned end.\n - TIMELINE_ENDS: SOURCE. When the source says it ends or expires (an alert's end, an\nevacuation's expiry).\n - TIMELINE_ESTIMATE: SOURCE. An estimate, e.g. PG\u0026E's estimated restoration. Estimates are\nroutinely revised.\n - TIMELINE_ALL_CLEAR: SOURCE. PG\u0026E's all-clear for a shutoff.\n - TIMELINE_ACTIVITY: SOURCE. Latest activity of a mesh node: last advert, last heard, last\nrelayed, a monitor's last read or attempt.\n - TIMELINE_FIRST_RECORDED: GRID. The Grid first stored the event (revision 1).\n - TIMELINE_STATUS: GRID. The event's status changed; `before` and `after` are statuses.\n - TIMELINE_CHANGED: GRID. A tracked value changed between revisions; `field` names it."
     },
     "v1WeatherAlertDetail": {
       "type": "object",

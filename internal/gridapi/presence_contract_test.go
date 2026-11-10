@@ -114,6 +114,8 @@ func TestResponsesHonorFieldPresence(t *testing.T) {
 	check("ListSources", srcs, err)
 	stats, err := g.GetStats(rpcBG(), &gridv1.GetStatsRequest{})
 	check("GetStats", stats, err)
+	tl, err := g.GetEventTimeline(rpcBG(), &gridv1.GetEventTimelineRequest{Id: "caltrans:d10-1"})
+	check("GetEventTimeline", tl, err)
 	scan, err := g.ListScanners(rpcBG(), &gridv1.ListScannersRequest{})
 	check("ListScanners", scan, err)
 

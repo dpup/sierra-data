@@ -21,6 +21,7 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	GridService_ListEvents_FullMethodName       = "/grid.v1.GridService/ListEvents"
 	GridService_GetEvent_FullMethodName         = "/grid.v1.GridService/GetEvent"
+	GridService_GetEventTimeline_FullMethodName = "/grid.v1.GridService/GetEventTimeline"
 	GridService_GetEventHistory_FullMethodName  = "/grid.v1.GridService/GetEventHistory"
 	GridService_ListHistory_FullMethodName      = "/grid.v1.GridService/ListHistory"
 	GridService_ListPlaces_FullMethodName       = "/grid.v1.GridService/ListPlaces"
@@ -68,6 +69,20 @@ type GridServiceClient interface {
 	// (`road:...`, `cc:...`, `fw:...`) are map features, not events, and return
 	// 404 here. Supports ETag / If-None-Match.
 	GetEvent(ctx context.Context, in *GetEventRequest, opts ...grpc.CallOption) (*Event, error)
+	// Get one event's timeline.
+	//
+	// What happened and when, in time order, with each entry marked by whose
+	// clock it is on. `SOURCE` entries are times the upstream stated: when CHP
+	// took the report and each line of its log, when a fire started, when a
+	// closure was planned and set up, when an alert takes effect and ends,
+	// when a mesh node was last heard. `GRID` entries are when the Grid
+	// recorded something: first stored, a status change (resolved, expired,
+	// back again), a change to severity or a tracked figure (fire size and
+	// containment, evacuation level, customers out). Use this instead of
+	// inferring times from revision stamps. Built from the current event and up
+	// to its 500 most recent revisions (`truncated` says when there were more).
+	// Supports ETag / If-None-Match.
+	GetEventTimeline(ctx context.Context, in *GetEventTimelineRequest, opts ...grpc.CallOption) (*EventTimeline, error)
 	// List one event's revisions.
 	//
 	// Every stored revision of one event, newest first, each a full snapshot. A
@@ -199,6 +214,16 @@ func (c *gridServiceClient) GetEvent(ctx context.Context, in *GetEventRequest, o
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(Event)
 	err := c.cc.Invoke(ctx, GridService_GetEvent_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gridServiceClient) GetEventTimeline(ctx context.Context, in *GetEventTimelineRequest, opts ...grpc.CallOption) (*EventTimeline, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EventTimeline)
+	err := c.cc.Invoke(ctx, GridService_GetEventTimeline_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -358,6 +383,20 @@ type GridServiceServer interface {
 	// (`road:...`, `cc:...`, `fw:...`) are map features, not events, and return
 	// 404 here. Supports ETag / If-None-Match.
 	GetEvent(context.Context, *GetEventRequest) (*Event, error)
+	// Get one event's timeline.
+	//
+	// What happened and when, in time order, with each entry marked by whose
+	// clock it is on. `SOURCE` entries are times the upstream stated: when CHP
+	// took the report and each line of its log, when a fire started, when a
+	// closure was planned and set up, when an alert takes effect and ends,
+	// when a mesh node was last heard. `GRID` entries are when the Grid
+	// recorded something: first stored, a status change (resolved, expired,
+	// back again), a change to severity or a tracked figure (fire size and
+	// containment, evacuation level, customers out). Use this instead of
+	// inferring times from revision stamps. Built from the current event and up
+	// to its 500 most recent revisions (`truncated` says when there were more).
+	// Supports ETag / If-None-Match.
+	GetEventTimeline(context.Context, *GetEventTimelineRequest) (*EventTimeline, error)
 	// List one event's revisions.
 	//
 	// Every stored revision of one event, newest first, each a full snapshot. A
@@ -481,6 +520,9 @@ func (UnimplementedGridServiceServer) ListEvents(context.Context, *ListEventsReq
 func (UnimplementedGridServiceServer) GetEvent(context.Context, *GetEventRequest) (*Event, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetEvent not implemented")
 }
+func (UnimplementedGridServiceServer) GetEventTimeline(context.Context, *GetEventTimelineRequest) (*EventTimeline, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetEventTimeline not implemented")
+}
 func (UnimplementedGridServiceServer) GetEventHistory(context.Context, *GetEventHistoryRequest) (*EventRevisionList, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetEventHistory not implemented")
 }
@@ -570,6 +612,24 @@ func _GridService_GetEvent_Handler(srv interface{}, ctx context.Context, dec fun
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(GridServiceServer).GetEvent(ctx, req.(*GetEventRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _GridService_GetEventTimeline_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetEventTimelineRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GridServiceServer).GetEventTimeline(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GridService_GetEventTimeline_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GridServiceServer).GetEventTimeline(ctx, req.(*GetEventTimelineRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -804,6 +864,10 @@ var GridService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetEvent",
 			Handler:    _GridService_GetEvent_Handler,
+		},
+		{
+			MethodName: "GetEventTimeline",
+			Handler:    _GridService_GetEventTimeline_Handler,
 		},
 		{
 			MethodName: "GetEventHistory",

@@ -87,7 +87,7 @@ export const ENDPOINTS = [
       ['since', 'RFC 3339', 'Only events observed at or after this time.', 'no floor'],
       ['page_size', 'int', 'Max events per page; values above 200 are capped at 200, a negative value is a 400. A page can hold fewer (about 3 MiB at most): follow nextPageToken.', '50'],
       ['page_token', 'opaque string', "Cursor from a previous response's nextPageToken.", 'first page'],
-      ['geometry_format', 'BASE64 | OBJECT', 'OBJECT puts each geometry in geometry.object as plain JSON; BASE64 is the legacy base64 geometry.geojson. Also on /events/{id}, /history, the place routes.', 'BASE64'],
+      ['geometry_format', 'BASE64 | OBJECT | NONE', 'OBJECT puts each geometry in geometry.object as plain JSON; BASE64 is the legacy base64 geometry.geojson. NONE (this list only) leaves out the shape and keeps bbox and centroid: much smaller, faster pages for lists that do not draw shapes. BASE64 and OBJECT also work on /events/{id}, /history, the place routes.', 'BASE64'],
     ],
     examples: [
       '/api/v1/events?place=ebbetts-pass&status=ACTIVE',
@@ -108,6 +108,14 @@ export const ENDPOINTS = [
     blurb: 'The per-incident timeline — every revision, newest first.',
     detail:
       'Returns EventRevisionList: each entry is {"revision": n, "observedAt": …, "ingestedAt": …, "event": Event}, paged like /events (page_size is a ceiling; follow nextPageToken). A revision is written only when content actually changes; upstream re-stamps with identical content produce nothing. Lifecycle transitions are themselves revisions, so the record ends with the ending.',
+    params: [],
+    examples: [],
+  },
+  {
+    path: '/api/v1/events/{id}/timeline',
+    blurb: 'What happened and when, each moment marked by whose clock it is on.',
+    detail:
+      'Returns EventTimeline: entries oldest first, each {at, kind, clock, label, detail, revision, field, before, after}. clock SOURCE is a time the upstream stated (CHP report and log lines, a fire start, planned and set-up times of a closure, an alert in effect and ending, mesh activity); clock GRID is when the Grid recorded something (first stored, a status change, a change to severity or a tracked figure). Use it rather than inferring times from revision stamps. Reads up to the 500 most recent revisions (truncated says when there were more).',
     params: [],
     examples: [],
   },
@@ -196,6 +204,14 @@ export const ENDPOINTS = [
       'Per source: poll interval, last successful fetch, last attempt, last error text, and derived status OK | STALE | UNAVAILABLE.',
     params: [],
     examples: ['/api/v1/sources'],
+  },
+  {
+    path: '/api/v1/stats',
+    blurb: 'How much the Grid has recorded: events, revisions, sources, since when.',
+    detail:
+      'Returns Stats: events ever stored (every status), revisions across them (each recorded change), distinct sources, since (first ingest), layers[] per-layer totals and computedAt. Cached up to five minutes.',
+    params: [['place', 'place slug or id', 'Only events attached to this place, including ended ones.', 'everything']],
+    examples: ['/api/v1/stats', '/api/v1/stats?place=ebbetts-pass'],
   },
   {
     path: '/api/v1/mesh/links',

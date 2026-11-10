@@ -2,8 +2,10 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -392,4 +394,15 @@ func scanRevision(scan func(...any) error) (*gridv1.EventRevision, error) {
 		IngestedAt: timestamppb.New(time.Unix(ingestedAt, 0)),
 		Event:      ev,
 	}, nil
+}
+
+// EventRevisionAt returns one revision of an event, or ErrNotFound.
+func (s *Store) EventRevisionAt(ctx context.Context, id string, revision uint32) (*gridv1.EventRevision, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT revision, observed_at, ingested_at, proto FROM event_revisions WHERE event_id = ? AND revision = ?`, id, revision)
+	rev, err := scanRevision(row.Scan)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return rev, err
 }

@@ -1440,6 +1440,30 @@ service GridService {
     };
   }
 
+  // Get one event's timeline.
+  //
+  // What happened and when, in time order, with each entry marked by whose
+  // clock it is on. `SOURCE` entries are times the upstream stated: when CHP
+  // took the report and each line of its log, when a fire started, when a
+  // closure was planned and set up, when an alert takes effect and ends,
+  // when a mesh node was last heard. `GRID` entries are when the Grid
+  // recorded something: first stored, a status change (resolved, expired,
+  // back again), a change to severity or a tracked figure (fire size and
+  // containment, evacuation level, customers out). Use this instead of
+  // inferring times from revision stamps. Built from the current event and up
+  // to its 500 most recent revisions (`truncated` says when there were more).
+  // Supports ETag / If-None-Match.
+  rpc GetEventTimeline(GetEventTimelineRequest) returns (EventTimeline) {
+    option (google.api.http) = {get: "/api/v1/events/{id}/timeline"};
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      tags: "Events"
+      responses: {
+        key: "404"
+        value: {description: "NOT_FOUND: no event has this id."}
+      }
+    };
+  }
+
   // List one event's revisions.
   //
   // Every stored revision of one event, newest first, each a full snapshot. A
@@ -2070,6 +2094,89 @@ message GetEventRequest {
 }
 
 // GetEventHistoryRequest pages one event's revisions.
+// GetEventTimelineRequest names one event.
+message GetEventTimelineRequest {
+  // Event id, e.g. `chp:261106ST0341`.
+  string id = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"chp:261110MR0204\""}];
+}
+
+// EventTimeline is one event's timeline.
+message EventTimeline {
+  string event_id = 1;
+  // Entries oldest first. At the same instant a SOURCE entry comes before a
+  // GRID one (the world's event before the Grid's record of it). Planned and
+  // estimated times can be in the future.
+  repeated TimelineEntry entries = 2;
+  // True when the event has more than 500 revisions and only the most recent
+  // 500 were read: GRID change entries before them are missing, and
+  // FIRST_RECORDED still comes from revision 1.
+  bool truncated = 3;
+}
+
+// TimelineClock says whose time an entry is.
+enum TimelineClock {
+  TIMELINE_CLOCK_UNSPECIFIED = 0;
+  // A time the upstream source stated.
+  TIMELINE_CLOCK_SOURCE = 1;
+  // When the Grid recorded something (a revision's ingest time).
+  TIMELINE_CLOCK_GRID = 2;
+}
+
+// TimelineKind is what an entry marks.
+enum TimelineKind {
+  TIMELINE_KIND_UNSPECIFIED = 0;
+  // SOURCE. When it began or was reported: CHP's report time, a fire's start,
+  // an outage's start, an earthquake's origin time, when an alert or
+  // evacuation takes effect.
+  TIMELINE_BEGINS = 1;
+  // SOURCE. One line of the source's own log (CHP). `detail` is the line
+  // number.
+  TIMELINE_LOG = 2;
+  // SOURCE. A planned start (lane closure window, PSPS de-energization).
+  TIMELINE_PLANNED_START = 3;
+  // SOURCE. The crew reported the closure set up on the road.
+  TIMELINE_SET_UP = 4;
+  // SOURCE. A planned end.
+  TIMELINE_PLANNED_END = 5;
+  // SOURCE. When the source says it ends or expires (an alert's end, an
+  // evacuation's expiry).
+  TIMELINE_ENDS = 6;
+  // SOURCE. An estimate, e.g. PG&E's estimated restoration. Estimates are
+  // routinely revised.
+  TIMELINE_ESTIMATE = 7;
+  // SOURCE. PG&E's all-clear for a shutoff.
+  TIMELINE_ALL_CLEAR = 8;
+  // SOURCE. Latest activity of a mesh node: last advert, last heard, last
+  // relayed, a monitor's last read or attempt.
+  TIMELINE_ACTIVITY = 9;
+  // GRID. The Grid first stored the event (revision 1).
+  TIMELINE_FIRST_RECORDED = 10;
+  // GRID. The event's status changed; `before` and `after` are statuses.
+  TIMELINE_STATUS = 11;
+  // GRID. A tracked value changed between revisions; `field` names it.
+  TIMELINE_CHANGED = 12;
+}
+
+// TimelineEntry is one moment in an event's timeline.
+message TimelineEntry {
+  google.protobuf.Timestamp at = 1 [(google.api.field_behavior) = REQUIRED];
+  TimelineKind kind = 2;
+  TimelineClock clock = 3;
+  // A short label in plain words, e.g. "Reported", "Set up on the road",
+  // "Resolved", "Containment 40%".
+  string label = 4 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"Reported\""}];
+  // Supporting text: who said it, a log line number, what it was before.
+  string detail = 5;
+  // For GRID entries, the revision that recorded it; 0 otherwise.
+  uint32 revision = 6;
+  // For CHANGED and STATUS: the field (`status`, `severity`, `acres`,
+  // `containment`, `level`, `customersAffected`) and its values before and
+  // after, as displayed.
+  string field = 7;
+  string before = 8;
+  string after = 9;
+}
+
 message GetEventHistoryRequest {
   // Event id.
   string id = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"burn:calaveras-county\""}];

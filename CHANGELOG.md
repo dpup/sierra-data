@@ -130,6 +130,21 @@ whose zones cannot be read keeps the shape it had, or has none yet.
 available. It used to be joined to `weather`, so an OpenWeatherMap failure for
 a town also hid its NWS forecast.
 
+### New: `GET /api/v1/events/{id}/timeline`
+
+One event's timeline, oldest first, every entry marked with whose clock it is
+on. `clock: TIMELINE_CLOCK_SOURCE` entries are times the upstream stated:
+CHP's report time and each log line, a fire's start, a lane closure's planned
+start, set-up and planned end, an alert or evacuation in effect and ending,
+PG&E de-energization, estimated restoration and all-clear, a mesh node's last
+advert, heard, relayed and monitor read. `clock: TIMELINE_CLOCK_GRID` entries
+are when the Grid recorded something: first stored, a status change (resolved,
+expired, back again) and changes to severity, fire size and containment,
+evacuation level and customers out, with `before` and `after`. Each entry has
+`kind`, `label`, `detail`, `revision`, `field`. Clients no longer need to infer
+a report time from revision stamps. Reads up to the 500 most recent revisions
+(`truncated`). ETag supported.
+
 ## 2026-11-09
 
 ### CHP incidents carry their numbered log (`roadIncident.log`)

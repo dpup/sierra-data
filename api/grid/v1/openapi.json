@@ -665,6 +665,60 @@
         ]
       }
     },
+    "/api/v1/events/{id}/timeline": {
+      "get": {
+        "description": "What happened and when, in time order, with each entry marked by whose\nclock it is on. `SOURCE` entries are times the upstream stated: when CHP\ntook the report and each line of its log, when a fire started, when a\nclosure was planned and set up, when an alert takes effect and ends,\nwhen a mesh node was last heard. `GRID` entries are when the Grid\nrecorded something: first stored, a status change (resolved, expired,\nback again), a change to severity or a tracked figure (fire size and\ncontainment, evacuation level, customers out). Use this instead of\ninferring times from revision stamps. Built from the current event and up\nto its 500 most recent revisions (`truncated` says when there were more).\nSupports ETag / If-None-Match.",
+        "operationId": "GridService_GetEventTimeline",
+        "parameters": [
+          {
+            "description": "Event id, e.g. `chp:261106ST0341`.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "x-example": "chp:261110MR0204"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1EventTimeline"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "NOT_FOUND: no event has this id."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "summary": "Get one event's timeline.",
+        "tags": [
+          "Events"
+        ]
+      }
+    },
     "/api/v1/history": {
       "get": {
         "description": "Revisions of all events, optionally filtered by place and layer, over a\nhalf-open `[from, to)` window on each revision's `observedAt`. With no\nwindow it covers all history. Ordered newest first. Place and layer\nfilters use each event's CURRENT place attachments and layer. Use it for\n\"what happened here last week\". A page holds at most `pageSize` revisions\nand stops early at about 3 MiB encoded, so follow `nextPageToken` until it\nis empty. Supports ETag / If-None-Match.",
@@ -5480,6 +5534,31 @@
         ],
         "type": "string"
       },
+      "v1EventTimeline": {
+        "description": "EventTimeline is one event's timeline.",
+        "properties": {
+          "entries": {
+            "description": "Entries oldest first. At the same instant a SOURCE entry comes before a\nGRID one (the world's event before the Grid's record of it). Planned and\nestimated times can be in the future.",
+            "items": {
+              "$ref": "#/components/schemas/v1TimelineEntry"
+            },
+            "type": "array"
+          },
+          "eventId": {
+            "type": "string"
+          },
+          "truncated": {
+            "description": "True when the event has more than 500 revisions and only the most recent\n500 were read: GRID change entries before them are missing, and\nFIRST_RECORDED still comes from revision 1.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "entries",
+          "eventId",
+          "truncated"
+        ],
+        "type": "object"
+      },
       "v1FireWeatherConditions": {
         "description": "FireWeatherConditions is the region's fire-weather state, from issued NWS\nproducts only. It never claims a Red Flag Warning that NWS has not issued.",
         "properties": {
@@ -7342,6 +7421,87 @@
           "source"
         ],
         "type": "object"
+      },
+      "v1TimelineClock": {
+        "default": "TIMELINE_CLOCK_UNSPECIFIED",
+        "description": "TimelineClock says whose time an entry is.\n\n - TIMELINE_CLOCK_SOURCE: A time the upstream source stated.\n - TIMELINE_CLOCK_GRID: When the Grid recorded something (a revision's ingest time).",
+        "enum": [
+          "TIMELINE_CLOCK_UNSPECIFIED",
+          "TIMELINE_CLOCK_SOURCE",
+          "TIMELINE_CLOCK_GRID"
+        ],
+        "type": "string"
+      },
+      "v1TimelineEntry": {
+        "description": "TimelineEntry is one moment in an event's timeline.",
+        "properties": {
+          "after": {
+            "type": "string"
+          },
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "before": {
+            "type": "string"
+          },
+          "clock": {
+            "$ref": "#/components/schemas/v1TimelineClock"
+          },
+          "detail": {
+            "description": "Supporting text: who said it, a log line number, what it was before.",
+            "type": "string"
+          },
+          "field": {
+            "description": "For CHANGED and STATUS: the field (`status`, `severity`, `acres`,\n`containment`, `level`, `customersAffected`) and its values before and\nafter, as displayed.",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/v1TimelineKind"
+          },
+          "label": {
+            "description": "A short label in plain words, e.g. \"Reported\", \"Set up on the road\",\n\"Resolved\", \"Containment 40%\".",
+            "example": "Reported",
+            "type": "string"
+          },
+          "revision": {
+            "description": "For GRID entries, the revision that recorded it; 0 otherwise.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "after",
+          "at",
+          "before",
+          "clock",
+          "detail",
+          "field",
+          "kind",
+          "label",
+          "revision"
+        ],
+        "type": "object"
+      },
+      "v1TimelineKind": {
+        "default": "TIMELINE_KIND_UNSPECIFIED",
+        "description": "TimelineKind is what an entry marks.\n\n - TIMELINE_BEGINS: SOURCE. When it began or was reported: CHP's report time, a fire's start,\nan outage's start, an earthquake's origin time, when an alert or\nevacuation takes effect.\n - TIMELINE_LOG: SOURCE. One line of the source's own log (CHP). `detail` is the line\nnumber.\n - TIMELINE_PLANNED_START: SOURCE. A planned start (lane closure window, PSPS de-energization).\n - TIMELINE_SET_UP: SOURCE. The crew reported the closure set up on the road.\n - TIMELINE_PLANNED_END: SOURCE. A planned end.\n - TIMELINE_ENDS: SOURCE. When the source says it ends or expires (an alert's end, an\nevacuation's expiry).\n - TIMELINE_ESTIMATE: SOURCE. An estimate, e.g. PG&E's estimated restoration. Estimates are\nroutinely revised.\n - TIMELINE_ALL_CLEAR: SOURCE. PG&E's all-clear for a shutoff.\n - TIMELINE_ACTIVITY: SOURCE. Latest activity of a mesh node: last advert, last heard, last\nrelayed, a monitor's last read or attempt.\n - TIMELINE_FIRST_RECORDED: GRID. The Grid first stored the event (revision 1).\n - TIMELINE_STATUS: GRID. The event's status changed; `before` and `after` are statuses.\n - TIMELINE_CHANGED: GRID. A tracked value changed between revisions; `field` names it.",
+        "enum": [
+          "TIMELINE_KIND_UNSPECIFIED",
+          "TIMELINE_BEGINS",
+          "TIMELINE_LOG",
+          "TIMELINE_PLANNED_START",
+          "TIMELINE_SET_UP",
+          "TIMELINE_PLANNED_END",
+          "TIMELINE_ENDS",
+          "TIMELINE_ESTIMATE",
+          "TIMELINE_ALL_CLEAR",
+          "TIMELINE_ACTIVITY",
+          "TIMELINE_FIRST_RECORDED",
+          "TIMELINE_STATUS",
+          "TIMELINE_CHANGED"
+        ],
+        "type": "string"
       },
       "v1WeatherAlertDetail": {
         "description": "WeatherAlertDetail is the WEATHER_ALERT detail block, for one NWS product.\n\nIt carries only fields the envelope lacks: the NWS event name is the\nenvelope `category`, and the issuing office is `provenance.sourceName`.",
