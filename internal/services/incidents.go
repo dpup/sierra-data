@@ -606,7 +606,7 @@ var (
 	// Legacy (pre-2026) markup, kept for the older test fixtures.
 	legacyParaRe = regexp.MustCompile(`(?is)<p[^>]*align="left"[^>]*>(.*?)</p>`)
 
-	brRe          = regexp.MustCompile(`(?i)<br\s*/?>`)
+	brRe = regexp.MustCompile(`(?i)<br\s*/?>`)
 	// chpLogEntryRe matches one CHP log segment: a Pacific time stamp, the line
 	// number CHP assigned, then the dispatcher's text.
 	chpLogEntryRe = regexp.MustCompile(`^([A-Z][a-z]{2}\s+\d{1,2}\s+\d{4}\s+\d{1,2}:\d{2}[AaPp][Mm])\s+\[(\d+)\]\s+(.+)$`)
