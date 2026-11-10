@@ -600,7 +600,12 @@ spec:
         properties:
           signId: {type: string, example: V42}
           district: {type: integer, example: 10}
-          route: {type: string, example: SR-108}
+          route: {type: string, example: SR-108, description: The route Caltrans files the sign under. Where routes run together this is one of them.}
+          routes:
+            type: array
+            items: {type: string}
+            example: [SR-108, SR-120]
+            description: Every route the sign is on when that is more than `route` - the filed route first, then the one in the sign's name. Absent otherwise.
           direction: {type: string, example: East}
           inService: {type: boolean}
           pages:

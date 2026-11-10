@@ -249,3 +249,20 @@ func TestMessageSignLayer_CachedAndStaleOnError(t *testing.T) {
 	assert.False(t, last.IsZero(), "STALE carries lastSourceUpdate")
 	assert.Equal(t, 2, src.calls)
 }
+
+func TestSignRoutes(t *testing.T) {
+	cases := []struct {
+		filed, name string
+		want        []string
+	}{
+		{"SR-108", "43 - EB 120 W/O YOSEMITE", []string{"SR-108", "SR-120"}},
+		{"SR-120", "45 - EB 49 (MOCCASIN)", []string{"SR-120", "SR-49"}},
+		{"SR-108", "42 - EB 108 SOULSBYVILLE", nil},
+		{"SR-88", "Virtual CMS : EB SR88 @ Dew Drop", nil},
+		{"US-50", "12 - WB 50 AT TWIN BRIDGES", nil},
+		{"SR-4", "", nil},
+	}
+	for _, c := range cases {
+		assert.Equal(t, c.want, signRoutes(c.filed, c.name), c.name)
+	}
+}

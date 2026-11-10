@@ -145,6 +145,15 @@ evacuation level and customers out, with `before` and `after`. Each entry has
 a report time from revision stamps. Reads up to the 500 most recent revisions
 (`truncated`). ETag supported.
 
+### Message signs name every route they are on (`messageSign.routes`)
+
+Where routes run together Caltrans files a sign under one of them, so the
+Yosemite Junction sign ("EB 120 W/O YOSEMITE") showed as a second SR-108 sign
+beside Soulsbyville's, with the same pass-status message, and read as a
+duplicate. The `message_sign` layer's `messageSign.routes` now lists the filed
+route and the one in the sign's name (`["SR-108", "SR-120"]`; Moccasin
+`["SR-120", "SR-49"]`). Absent when the two agree. `route` is unchanged.
+
 ## 2026-11-09
 
 ### CHP incidents carry their numbered log (`roadIncident.log`)

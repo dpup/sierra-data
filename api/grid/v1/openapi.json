@@ -4117,8 +4117,20 @@
             "type": "array"
           },
           "route": {
+            "description": "The route Caltrans files the sign under. Where routes run together this is one of them.",
             "example": "SR-108",
             "type": "string"
+          },
+          "routes": {
+            "description": "Every route the sign is on when that is more than `route` - the filed route first, then the one in the sign's name. Absent otherwise.",
+            "example": [
+              "SR-108",
+              "SR-120"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "signId": {
             "example": "V42",

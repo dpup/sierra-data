@@ -113,6 +113,7 @@ func messageSignFeature(district int, sg cwwp2.MessageSign, uniqueID bool) Featu
 			SignID:    sg.ID,
 			District:  district,
 			Route:     sg.Location.Route,
+			Routes:    signRoutes(sg.Location.Route, sg.Location.Name),
 			Direction: sg.Location.Direction,
 			InService: sg.InService,
 			Pages:     sg.Pages(),
@@ -120,4 +121,31 @@ func messageSignFeature(district int, sg cwwp2.MessageSign, uniqueID bool) Featu
 	}
 	p.setSeverity(SevInfo)
 	return Feature{Type: "Feature", Geometry: PointGeom(lat, lng), Properties: p}
+}
+
+// signNameRouteRe reads the route a sign's own name gives: "42 - EB 108
+// SOULSBYVILLE", "Virtual CMS : EB SR88 @ Dew Drop".
+var signNameRouteRe = regexp.MustCompile(`\b(?:EB|WB|NB|SB)\s+(?:SR|US|I)?-?\s?(\d{1,3})\b`)
+
+// signRoutes is every route the sign is on: the portal's filed route, plus
+// the one in the sign's name when that differs. Where routes run together
+// the portal files a sign under one of them (the Yosemite Junction sign "EB
+// 120 W/O YOSEMITE" is filed under SR-108; Moccasin "EB 49" under SR-120),
+// and a client listing signs by route showed it under only one, beside a
+// same-message sign 22 km away that looked like a duplicate. Filed route
+// first; nil when there is nothing to add.
+func signRoutes(filed, name string) []string {
+	m := signNameRouteRe.FindStringSubmatch(strings.ToUpper(name))
+	if m == nil || filed == "" {
+		return nil
+	}
+	prefix := "SR-"
+	if i := strings.IndexByte(filed, '-'); i > 0 {
+		prefix = filed[:i+1]
+	}
+	named := prefix + m[1]
+	if named == filed {
+		return nil
+	}
+	return []string{filed, named}
 }

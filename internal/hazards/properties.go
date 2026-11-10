@@ -299,9 +299,13 @@ type MessageSignProps struct {
 	District int    `json:"district"`
 	// Route names ONE route where routes share the road (the Moccasin sign on
 	// EB 49 is filed under SR-120).
-	Route     string `json:"route,omitempty"`
-	Direction string `json:"direction,omitempty"`
-	InService bool   `json:"inService"`
+	Route string `json:"route,omitempty"`
+	// Routes is every route the sign is on when that is more than Route:
+	// the filed route first, then the one in the sign's name ("SR-108",
+	// "SR-120" at Yosemite Junction). Omitted otherwise.
+	Routes    []string `json:"routes,omitempty"`
+	Direction string   `json:"direction,omitempty"`
+	InService bool     `json:"inService"`
 	// Pages is what the sign is showing: one or two pages of exactly three
 	// lines, a blank line kept as "" so a client can draw the sign face.
 	// Omitted when the sign is blank or its message is unknown.
