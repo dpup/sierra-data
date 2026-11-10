@@ -17,7 +17,9 @@ func sample(pubkey string, at time.Time) MeshTelemetrySample {
 		PubKey: pubkey, ReportedAt: at, ReceivedAt: at.Add(30 * time.Second), Reporter: "alanpi",
 		BatteryVolts: f64(4.14), BatteryPct: f64(97), BatteryPctSource: "estimated",
 		TemperatureC: f64(37), NoiseFloorDBm: i64(-116), LastSNRdB: f64(12.5),
-		UptimeS: 2615083, PacketsSent: 150305, PacketsRecv: 649331,
+		// Uptime runs with the clock, as it does on a real node.
+		UptimeS:     2615083 + at.Unix() - time.Date(2026, 9, 15, 0, 0, 0, 0, time.UTC).Unix(),
+		PacketsSent: 150305, PacketsRecv: 649331,
 	}
 }
 
@@ -114,6 +116,27 @@ func TestMeshTelemetrySkipsRepeatedReads(t *testing.T) {
 	got, _, err = s.MeshTelemetry(ctx, "bb22", t0.Add(-time.Hour), t0.Add(time.Hour))
 	require.NoError(t, err)
 	assert.Len(t, got, 2)
+}
+
+// A monitor sometimes re-sends a cached reading as new: a fresh reported_at
+// and last_success_at around the same uptime and counters. The node's clock
+// did not move, so it was not read again, and the archive keeps one row.
+func TestMeshTelemetrySkipsResentCachedReading(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	t0 := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
+	first := sample("aa11", t0)
+	first.LastSuccessAt = t0
+	resent := first
+	resent.ReportedAt, resent.ReceivedAt, resent.LastSuccessAt = t0.Add(30*time.Minute), t0.Add(30*time.Minute), t0.Add(30*time.Minute)
+	next := sample("aa11", t0.Add(60*time.Minute))
+	next.LastSuccessAt = next.ReportedAt
+	require.NoError(t, s.InsertMeshTelemetry(ctx, []MeshTelemetrySample{first, resent, next}))
+
+	got, _, err := s.MeshTelemetry(ctx, "aa11", t0.Add(-time.Hour), t0.Add(2*time.Hour))
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.Equal(t, []int64{t0.Unix(), t0.Add(time.Hour).Unix()}, []int64{got[0].ReportedAt.Unix(), got[1].ReportedAt.Unix()})
 }
 
 func TestMeshTelemetryCoverageAndPrune(t *testing.T) {

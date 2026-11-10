@@ -62,6 +62,16 @@ being handled by responders". `areaLabel` no longer changes wording between
 revisions while the incident's point is unchanged. Cached enhancements are
 invalidated on deploy, so each open CHP incident gets one new revision.
 
+### Mesh telemetry history skips re-sent cached readings
+
+A monitor sometimes re-sends a cached repeater reading as a new one: a new
+`reportedAt` and `lastSuccessAt` with the same `uptimeSeconds` and packet
+counters. The telemetry archive behind `GET /api/v1/mesh/telemetry` now
+keeps one sample for that reading, so a series shows the gap the monitor really
+had instead of a flat line of copies. The live event's `mesh.telemetry.admin`
+still shows what the monitor last sent. Samples archived before this deploy are
+unchanged.
+
 ## 2026-11-09
 
 ### CHP incidents carry their numbered log (`roadIncident.log`)

@@ -87,6 +87,13 @@ const telemetryColumns = `pubkey, reported_at, received_at, reporter, last_succe
 // is that repeat, and is skipped: one reading stays one row, and the cadence a
 // chart sees is the read cadence. Samples without a last_success_at can't be
 // told apart this way and are kept.
+//
+// A monitor can also re-send a CACHED reading as a fresh one: a new
+// reported_at and last_success_at around the same uptime and packet counters
+// (seen 2026-11-10 on Arnold Summit, BigPratherMeadow, Lake Alpine and Forest
+// Meadows). A node's uptime advances between any two real reads, so a sample
+// whose uptime and packet counters equal the previous row's is that repeat
+// and is skipped too; charts then show the gap the monitor really had.
 func (s *Store) InsertMeshTelemetry(ctx context.Context, samples []MeshTelemetrySample) error {
 	if len(samples) == 0 {
 		return nil
@@ -100,7 +107,7 @@ func (s *Store) InsertMeshTelemetry(ctx context.Context, samples []MeshTelemetry
 		}
 		defer stmt.Close()
 		prev, err := tx.PrepareContext(ctx, `
-			SELECT last_success_at FROM mesh_telemetry
+			SELECT last_success_at, uptime_s, packets_sent, packets_recv FROM mesh_telemetry
 			WHERE pubkey = ? AND reporter = ? AND reported_at < ?
 			ORDER BY reported_at DESC LIMIT 1`)
 		if err != nil {
@@ -111,15 +118,16 @@ func (s *Store) InsertMeshTelemetry(ctx context.Context, samples []MeshTelemetry
 			if t.PubKey == "" || t.ReportedAt.IsZero() {
 				continue // no identity or no time: nothing a series could use
 			}
-			if !t.LastSuccessAt.IsZero() {
-				var last sql.NullInt64
-				err := prev.QueryRowContext(ctx, t.PubKey, t.Reporter, t.ReportedAt.Unix()).Scan(&last)
-				switch {
-				case err == nil && last.Valid && last.Int64 == t.LastSuccessAt.Unix():
-					continue // the same read, reported again
-				case err != nil && err != sql.ErrNoRows:
-					return fmt.Errorf("store: looking up mesh telemetry for %s: %w", t.PubKey, err)
-				}
+			var last sql.NullInt64
+			var uptime, sent, recv int64
+			err := prev.QueryRowContext(ctx, t.PubKey, t.Reporter, t.ReportedAt.Unix()).Scan(&last, &uptime, &sent, &recv)
+			switch {
+			case err == nil && !t.LastSuccessAt.IsZero() && last.Valid && last.Int64 == t.LastSuccessAt.Unix():
+				continue // the same read, reported again
+			case err == nil && t.UptimeS > 0 && t.UptimeS == uptime && t.PacketsSent == sent && t.PacketsRecv == recv:
+				continue // a cached reading re-sent as new: the node's clock did not move
+			case err != nil && err != sql.ErrNoRows:
+				return fmt.Errorf("store: looking up mesh telemetry for %s: %w", t.PubKey, err)
 			}
 			if _, err := stmt.ExecContext(ctx,
 				t.PubKey, t.ReportedAt.Unix(), t.ReceivedAt.Unix(), t.Reporter,
