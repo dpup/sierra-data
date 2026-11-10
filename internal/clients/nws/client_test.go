@@ -50,6 +50,7 @@ const sampleGeoJSON = `{
         "onset": "2026-06-27T05:00:00-07:00",
         "ends": "2026-06-28T21:00:00-07:00",
         "geocode": { "UGC": ["CAZ064", "CAZ065"] },
+        "affectedZones": ["https://api.weather.gov/zones/fire/CAZ064", "https://api.weather.gov/zones/fire/caz065", "https://evil.test/x", "https://api.weather.gov/zones/fire/../../x"],
         "parameters": {
           "NWSheadline": ["RED FLAG WARNING IN EFFECT UNTIL 8 PM PDT FOR GUSTY WINDS AND LOW HUMIDITY"],
           "AWIPSidentifier": ["RFWSTO"]
@@ -91,6 +92,10 @@ func TestGetActiveZoneAlerts(t *testing.T) {
 	}
 	if len(rf.Zones) != 2 || rf.Zones[0] != "CAZ064" {
 		t.Errorf("zones = %v", rf.Zones)
+	}
+	// Typed zone paths only; anything else in affectedZones is dropped.
+	if got := strings.Join(rf.ZoneRefs, ","); got != "fire/CAZ064,fire/CAZ065" {
+		t.Errorf("zone refs = %q", got)
 	}
 	if rf.Effective.IsZero() {
 		t.Error("expected effective time parsed")

@@ -17,6 +17,12 @@ type fakeWeatherAPI struct {
 	alerts    []nws.Alert
 	fetchedAt time.Time
 	err       error
+	area      []byte // AlertZoneGeometry's answer
+	areaErr   error
+}
+
+func (f *fakeWeatherAPI) AlertZoneGeometry(ctx context.Context, refs []string) ([]byte, error) {
+	return f.area, f.areaErr
 }
 
 func (f *fakeWeatherAPI) RawNWSAlerts(ctx context.Context) ([]nws.Alert, time.Time, error) {
@@ -219,4 +225,35 @@ func TestWeatherAlertPoll_SenderNameFallback(t *testing.T) {
 	assert.Equal(t, "National Weather Service", p.GetSourceName())
 	assert.Equal(t, "NOAA / National Weather Service", p.GetAttribution(),
 		"attribution is a constant, never derived from the product")
+}
+
+// An alert's geometry is its zones' area. When the zones cannot be read the
+// stored shape rides forward (geometry is hashed); an alert with no typed
+// zone refs gets none.
+func TestWeatherAlertZoneArea(t *testing.T) {
+	now := time.Now()
+	area := []byte(`{"type":"MultiPolygon","coordinates":[[[[-120.5,38.0],[-120.0,38.0],[-120.0,38.5],[-120.5,38.0]]]]}`)
+	alerts := testNWSAlerts(now)
+	alerts[0].ZoneRefs = []string{"fire/CAZ138"}
+	fake := &fakeWeatherAPI{alerts: alerts, fetchedAt: now, area: area}
+	n := NewWeatherAlertNormalizer(testConfig(), fake)
+
+	res, err := n.Poll(testCtx(), nil)
+	require.NoError(t, err)
+	withRefs := res.Events[0]
+	require.NotNil(t, withRefs.GetGeometry())
+	assert.JSONEq(t, string(area), string(withRefs.GetGeometry().GetGeojson()))
+	assert.InDelta(t, 38.5, withRefs.GetGeometry().GetBbox().GetMaxLat(), 1e-9)
+	for _, ev := range res.Events[1:] {
+		assert.Nil(t, ev.GetGeometry(), "no zone refs, no shape")
+	}
+
+	fake.area, fake.areaErr = nil, assert.AnError
+	res, err = n.Poll(testCtx(), &fakePrior{events: []*gridv1.Event{withRefs}})
+	require.NoError(t, err, "a zone outage never fails the poll")
+	assert.Equal(t, withRefs.GetGeometry().GetGeojson(), res.Events[0].GetGeometry().GetGeojson(), "stored shape carried")
+
+	res, err = n.Poll(testCtx(), nil)
+	require.NoError(t, err)
+	assert.Nil(t, res.Events[0].GetGeometry(), "nothing stored, nothing to carry")
 }

@@ -25,6 +25,7 @@ type WeatherService struct {
 	nwsClient     *nws.Client
 	cache         *cache.Cache
 	config        *config.Config
+	areas         alertAreas
 }
 
 // NewWeatherService creates a new WeatherService

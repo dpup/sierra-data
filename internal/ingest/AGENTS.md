@@ -850,6 +850,23 @@ render a Watch as a Warning — the product name is copied from `Event`.
 Both consumers use it: the event card (`weather_alert.go`) and the fire-weather
 banner (`nws.fireWeatherFromAlert`, which does not go through the store).
 
+## Weather-alert geometry: the zones' own boundaries
+
+An NWS alert names zones, not a shape. `attachArea` asks the weather service
+for the combined area of the alert's typed zone refs (`nws.Alert.ZoneRefs`,
+from CAP `affectedZones`: `fire/CAZ138` vs `forecast/CAZ138` are different
+shapes with the same UGC code), simplified to ~1 km (`services.AlertZoneTolerance`)
+and cached per zone for a week. Three rules:
+
+- **All or nothing.** One unreadable zone means no new shape this tick; the
+  STORED shape rides forward (geometry is hashed, and a shape that shrank and
+  grew with fetch failures would mint revision pairs). An alert first seen
+  during an NWS zone outage has no shape until the zones load.
+- **No refs, no shape.** Never guess the zone type from the UGC code.
+- **Geometry changes place attachment**: the store unions geometric matches
+  with the preset area ids, so an alert now also attaches to the counties and
+  towns its zones cover.
+
 ## Enhancement budget + carry-forward
 
 Only the `WEATHER_ALERT` layer is enhanced here (CHP road incidents arrive already

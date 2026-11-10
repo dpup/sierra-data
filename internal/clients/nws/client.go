@@ -14,6 +14,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -82,6 +83,11 @@ type Alert struct {
 	Onset     time.Time
 	Ends      time.Time
 	Zones     []string // UGC zone codes, e.g. ["CAZ064", "CAZ065"]
+	// ZoneRefs are the zones' typed paths from CAP `affectedZones`, e.g.
+	// "forecast/CAZ137" or "fire/CAZ138". The UGC code alone is ambiguous:
+	// Sacramento's fire-weather and public forecast zones share numbers
+	// with different shapes, and a Red Flag Warning names fire zones.
+	ZoneRefs []string
 }
 
 // Begins is when the hazard starts: CAP `onset`, falling back to `effective`
@@ -174,22 +180,24 @@ type alertFeature struct {
 }
 
 type alertProperties struct {
-	ID          string              `json:"id"`
-	Event       string              `json:"event"`
-	Severity    string              `json:"severity"`
-	Certainty   string              `json:"certainty"`
-	Urgency     string              `json:"urgency"`
-	Headline    string              `json:"headline"`
-	Description string              `json:"description"`
-	Instruction string              `json:"instruction"`
-	SenderName  string              `json:"senderName"`
-	AreaDesc    string              `json:"areaDesc"`
-	Effective   string              `json:"effective"`
-	Expires     string              `json:"expires"`
-	Onset       string              `json:"onset"`
-	Ends        string              `json:"ends"`
-	Geocode     alertGeo            `json:"geocode"`
-	Parameters  map[string][]string `json:"parameters"` // NWSheadline lives here
+	ID          string   `json:"id"`
+	Event       string   `json:"event"`
+	Severity    string   `json:"severity"`
+	Certainty   string   `json:"certainty"`
+	Urgency     string   `json:"urgency"`
+	Headline    string   `json:"headline"`
+	Description string   `json:"description"`
+	Instruction string   `json:"instruction"`
+	SenderName  string   `json:"senderName"`
+	AreaDesc    string   `json:"areaDesc"`
+	Effective   string   `json:"effective"`
+	Expires     string   `json:"expires"`
+	Onset       string   `json:"onset"`
+	Ends        string   `json:"ends"`
+	Geocode     alertGeo `json:"geocode"`
+	// AffectedZones are zone URLs, e.g. https://api.weather.gov/zones/fire/CAZ138.
+	AffectedZones []string            `json:"affectedZones"`
+	Parameters    map[string][]string `json:"parameters"` // NWSheadline lives here
 }
 
 type alertGeo struct {
@@ -217,6 +225,7 @@ func (r alertsResponse) toAlerts() []Alert {
 			Onset:       parseTime(p.Onset),
 			Ends:        parseTime(p.Ends),
 			Zones:       p.Geocode.UGC,
+			ZoneRefs:    zoneRefs(p.AffectedZones),
 		})
 	}
 	return alerts
@@ -240,4 +249,44 @@ func parseTime(s string) time.Time {
 		return t
 	}
 	return time.Time{}
+}
+
+// zoneRefs reduces affectedZones URLs to "<type>/<id>" paths, dropping any
+// that do not have that shape. Only the path is kept, so a zone is always
+// fetched from the configured API base, never from a URL in the payload.
+func zoneRefs(urls []string) []string {
+	var out []string
+	for _, u := range urls {
+		i := strings.Index(u, "/zones/")
+		if i < 0 {
+			continue
+		}
+		parts := strings.Split(strings.Trim(u[i+len("/zones/"):], "/"), "/")
+		if len(parts) != 2 || !zoneTypeRe.MatchString(parts[0]) || !zoneIDRe.MatchString(parts[1]) {
+			continue
+		}
+		out = append(out, parts[0]+"/"+strings.ToUpper(parts[1]))
+	}
+	return out
+}
+
+var (
+	zoneTypeRe = regexp.MustCompile(`^[a-z]+$`)
+	zoneIDRe   = regexp.MustCompile(`^[A-Za-z]{2}[CZcz][0-9]{3}$`)
+)
+
+// GetZoneGeometry fetches one zone's boundary (ref is "<type>/<id>", as in
+// Alert.ZoneRefs) and returns its raw GeoJSON geometry. A zone with no
+// geometry is an error: the caller must not read it as "no area".
+func (c *Client) GetZoneGeometry(ctx context.Context, ref string) ([]byte, error) {
+	var out struct {
+		Geometry json.RawMessage `json:"geometry"`
+	}
+	if err := c.getJSON(ctx, c.baseURL+"/zones/"+ref, &out); err != nil {
+		return nil, err
+	}
+	if len(out.Geometry) == 0 || string(out.Geometry) == "null" {
+		return nil, fmt.Errorf("NWS zone %s has no geometry", ref)
+	}
+	return out.Geometry, nil
 }

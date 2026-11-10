@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/dpup/prefab/logging"
+
 	gridv1 "github.com/sierragridteam/sierra-data/api/grid/v1"
 	"github.com/sierragridteam/sierra-data/internal/clients/nws"
 	"github.com/sierragridteam/sierra-data/internal/config"
@@ -40,11 +42,15 @@ const (
 // when serving a last-good stale list, the fetch error alongside the data.
 type weatherAlertsAPI interface {
 	RawNWSAlerts(ctx context.Context) (alerts []nws.Alert, fetchedAt time.Time, err error)
+	// AlertZoneGeometry is the combined, simplified area of an alert's zones
+	// (nws.Alert.ZoneRefs), all or nothing.
+	AlertZoneGeometry(ctx context.Context, refs []string) ([]byte, error)
 }
 
 // WeatherAlertNormalizer ingests NWS zone alerts (id namespace "wx:") via the
-// weather service. Alerts carry NWS forecast zones, not geometry, so
-// place_ids are precomputed here from each configured area's zones.
+// weather service. Alerts carry NWS zones, not geometry: place_ids are
+// precomputed from each configured area's zones, and the geometry is the
+// zones' own boundaries (fetched once, simplified, combined).
 type WeatherAlertNormalizer struct {
 	cfg     *config.Config
 	weather weatherAlertsAPI
@@ -130,6 +136,7 @@ func (n *WeatherAlertNormalizer) Poll(ctx context.Context, prior Prior) (*PollRe
 				ev.PlaceIds = append(ev.PlaceIds, "area:"+area.ID)
 			}
 		}
+		n.attachArea(ctx, ev, a, prior)
 		ev.Provenance = NewProvenance("nws", nonEmpty(a.SenderName, nwsSourceName), nwsAttribution, "")
 		// event name is the envelope category; sender is provenance.source_name —
 		// neither is repeated in the detail.
@@ -144,4 +151,30 @@ func (n *WeatherAlertNormalizer) Poll(ctx context.Context, prior Prior) (*PollRe
 		events = append(events, ev)
 	}
 	return &PollResult{Events: events, PerSource: perSource}, nil
+}
+
+// attachArea sets the alert's geometry to its zones' area. Geometry is
+// hashed, so when a zone cannot be read the stored shape rides forward
+// rather than vanishing for a tick and coming back (two revisions of nothing),
+// and an alert first seen during an NWS zone outage simply has no shape yet.
+// An alert with no typed zone refs has no shape: guessing the zone type from
+// the UGC code would draw a public zone for a fire-weather product.
+func (n *WeatherAlertNormalizer) attachArea(ctx context.Context, ev *gridv1.Event, a nws.Alert, prior Prior) {
+	if len(a.ZoneRefs) == 0 {
+		return
+	}
+	raw, err := n.weather.AlertZoneGeometry(ctx, a.ZoneRefs)
+	if err == nil && len(raw) > 0 {
+		var g *gridv1.Geometry
+		if g, err = GeometryFromGeoJSON(raw); err == nil {
+			ev.Geometry = g
+			return
+		}
+	}
+	if err != nil {
+		logging.Warnw(ctx, "Weather alert: zone area unavailable; keeping the stored shape", "id", ev.GetId(), "error", err)
+	}
+	if pe := priorByID(prior, ev.GetId()); pe != nil {
+		ev.Geometry = pe.GetGeometry()
+	}
 }

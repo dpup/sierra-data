@@ -94,6 +94,18 @@ geometry-free copy of each event. Other RPCs still take only `BASE64` and
 `OBJECT`. Until a newly deployed server finishes backfilling that copy (a few
 minutes after start), NONE pages are correct but not yet faster.
 
+### Weather alerts carry their area
+
+A `WEATHER_ALERT` event's `geometry` is now the area of the NWS zones it names
+(`weatherAlert.zones`): one MultiPolygon, the zones' official boundaries
+simplified to about 1 km (a single zone is ~7 KB, a 30-zone heat advisory ~85
+KB). The `weather_alert` map layer draws them, and an alert also attaches to
+the counties and towns its zones cover. It used to have no geometry at all.
+Fire-weather products (Red Flag Warning, Fire Weather Watch) use NWS fire
+zones, others public forecast zones, as NWS lists them. Existing active alerts
+gain the shape on their next poll after deploy (one revision each); an alert
+whose zones cannot be read keeps the shape it had, or has none yet.
+
 ## 2026-11-09
 
 ### CHP incidents carry their numbered log (`roadIncident.log`)
