@@ -45,6 +45,9 @@ type WildfireNormalizer struct {
 	lastPerimFetch time.Time
 	havePerimCache bool
 	now            func() time.Time // injectable clock (maxPerimCacheAge valve; tests)
+
+	// endedFires lists recently RESOLVED/EXPIRED calfire: events (nil = off).
+	endedFires EndedFires
 }
 
 // maxPerimCacheAge bounds how long the last-good perimeter set is served without a
@@ -58,6 +61,23 @@ const maxPerimCacheAge = 6 * time.Hour
 func NewWildfireNormalizer(cfg *config.Config, cf *calfire.Client, fc *firis.Client) *WildfireNormalizer {
 	return &WildfireNormalizer{cfg: cfg, calfire: cf, firis: fc, now: time.Now}
 }
+
+// EndedFires returns CAL FIRE incidents (calfire: events) that ended at or
+// after since. The store answers it (lite reads, no perimeters).
+type EndedFires func(ctx context.Context, since time.Time) ([]*gridv1.Event, error)
+
+// UseEndedFires lets the poller recognize a perimeter that belongs to a
+// recently ended CAL FIRE incident (see orphanedPerimeters).
+func (n *WildfireNormalizer) UseEndedFires(f EndedFires) { n.endedFires = f }
+
+const (
+	// orphanWindow and orphanMaxKm bound which ended incident a perimeter can
+	// belong to: FIRIS keeps publishing a perimeter for days to weeks after
+	// CAL FIRE drops a contained fire, and two same-named fires 10 km apart
+	// are different fires.
+	orphanWindow = 30 * 24 * time.Hour
+	orphanMaxKm  = 10.0
+)
 
 // SourceIDs implements Normalizer. One poller, two source rows.
 func (n *WildfireNormalizer) SourceIDs() []string { return []string{"calfire", "firis"} }
@@ -216,6 +236,9 @@ func (n *WildfireNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult
 		events = append(events, ev)
 	}
 
+	// A perimeter of a fire CAL FIRE has already ended is that fire, not a
+	// new one: suppress it, and supersede a standalone already minted for it.
+	orphanIDs := n.orphanedPerimeters(ctx, deduped, used, prior)
 	standalone := standalonePerimeterEvents(deduped, used, prior)
 	if ierr != nil {
 		// CAL FIRE is down, so adoption is uncomputable and the used-map above
@@ -248,8 +271,66 @@ func (n *WildfireNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult
 	return &PollResult{
 		Events:     events,
 		PerSource:  perSource,
-		Superseded: supersededStandalones(byName, used, prior),
+		Superseded: append(supersededStandalones(byName, used, prior), orphanIDs...),
 	}, nil
+}
+
+// orphanedPerimeters marks used every unadopted perimeter that matches a CAL
+// FIRE incident which ended within orphanWindow (same normalized name,
+// centroids within orphanMaxKm), and returns the ids of standalones the store
+// already holds for them, to supersede.
+//
+// Without it, a contained fire came back as a second fire: CAL FIRE drops a
+// fire from its active list when it is contained, FIRIS keeps publishing the
+// perimeter, and the perimeter, now unadopted, was minted as a new
+// firis:<name> event. Gann, Dove and Ross each had two events that way
+// (Dove: CAL FIRE resolved 2026-08-02, firis:dove first seen 08-04).
+//
+// Positive evidence only, as Superseded requires: the ended incident is a
+// stored record with the same name in the same place. A failed lookup
+// changes nothing (the old behaviour).
+func (n *WildfireNormalizer) orphanedPerimeters(ctx context.Context, cands []perimCandidate, used map[string]bool, prior Prior) []string {
+	if n.endedFires == nil {
+		return nil
+	}
+	var open []perimCandidate
+	for _, c := range cands {
+		if !used[c.norm] {
+			open = append(open, c)
+		}
+	}
+	if len(open) == 0 {
+		return nil
+	}
+	ended, err := n.endedFires(ctx, n.now().Add(-orphanWindow))
+	if err != nil {
+		logging.Warnw(ctx, "Wildfire: ended-incident lookup failed; perimeters stay standalone", "error", err)
+		return nil
+	}
+	var ids []string
+	for _, c := range open {
+		cc := c.geom.GetCentroid()
+		for _, ev := range ended {
+			name, _, _ := strings.Cut(ev.GetHeadline(), " — ")
+			ec := ev.GetGeometry().GetCentroid()
+			if hazards.NormFireName(name) != c.norm || ec == nil || cc == nil {
+				continue
+			}
+			if geojson.MetersBetween(cc.GetLat(), cc.GetLng(), ec.GetLat(), ec.GetLng()) > orphanMaxKm*1000 {
+				continue
+			}
+			used[c.norm] = true
+			for _, pe := range priorForSource(prior, "firis") {
+				pc := pe.GetGeometry().GetCentroid()
+				if isStandaloneIDForName(pe.GetId(), c.norm) && pc != nil &&
+					geojson.MetersBetween(pc.GetLat(), pc.GetLng(), ec.GetLat(), ec.GetLng()) <= orphanMaxKm*1000 {
+					ids = append(ids, pe.GetId())
+				}
+			}
+			break
+		}
+	}
+	return ids
 }
 
 // supersededStandalones returns the standalone `firis:` ids that this tick's

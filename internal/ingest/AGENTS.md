@@ -1066,6 +1066,16 @@ Two consequences to preserve when touching `wildfire.go`:
   RESOLVE it — a fabricated all-clear, the exact failure the sweep invariant
   above exists to prevent. Scope is part of "the whole truth for the scope".
 
+**A contained fire must not come back as a new one** (`orphanedPerimeters`).
+CAL FIRE drops a fire from its active list when it is contained; FIRIS keeps
+publishing the perimeter for days. Unadopted, that perimeter used to be minted
+as a new `firis:<name>` fire, so Gann, Dove and Ross each had two events. The
+poller now asks the store (`UseEndedFires`, lite reads) for `calfire:`
+incidents that ended in the last 30 days; a perimeter with the same normalized
+name within 10 km is that fire. It is not emitted, and a standalone already
+stored for it is `Superseded` (positive evidence: the named incident). A failed
+lookup changes nothing.
+
 The matching store-side rule (a fire attaching to an area/town place it is
 merely *near*) lives in `store.matchPlaces` — see `internal/store/AGENTS.md`.
 

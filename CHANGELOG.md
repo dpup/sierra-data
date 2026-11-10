@@ -185,6 +185,16 @@ deploy).
   fill in over the days after deploy (typical needs a few weeks of an hour
   slot before it uses `HOUR_OF_WEEK`).
 
+### A contained fire no longer comes back as a second fire
+
+When CAL FIRE drops a contained fire from its active list, FIRIS keeps
+publishing its perimeter, and the Grid used to mint that perimeter as a new
+`firis:<name>` fire (Gann, Dove and Ross each had two events). A perimeter
+with the same name as a CAL FIRE incident that ended in the last 30 days, and
+within 10 km of it, is now treated as that fire: no new event, and an existing
+standalone for it is resolved. Existing duplicate events in the archive are
+unchanged.
+
 ## 2026-11-09
 
 ### CHP incidents carry their numbered log (`roadIncident.log`)

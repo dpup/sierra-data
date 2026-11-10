@@ -267,9 +267,11 @@ func (a *gridApp) Activate(actx context.Context) (err error) {
 	// One poller per upstream scope; weather_alert and road_incident reuse the
 	// services' cached, budgeted pipelines (plan decision 6).
 	roadIncidents := ingest.NewRoadIncidentNormalizer(appConfig, a.roadsService)
+	wildfire := ingest.NewWildfireNormalizer(appConfig, calfire.NewClient(), firis.NewClient())
+	wildfire.UseEndedFires(endedFires(gridStore))
 	pollers := []ingest.PollerSpec{
 		{Normalizer: ingest.NewEarthquakeNormalizer(appConfig, usgs.NewClient()), Interval: gridPollInterval(appConfig, "usgs")},
-		{Normalizer: ingest.NewWildfireNormalizer(appConfig, calfire.NewClient(), firis.NewClient()), Interval: gridPollInterval(appConfig, "calfire", "firis")},
+		{Normalizer: wildfire, Interval: gridPollInterval(appConfig, "calfire", "firis")},
 		{Normalizer: ingest.NewEvacuationNormalizer(appConfig, caloes.NewClient()), Interval: gridPollInterval(appConfig, "caloes")},
 		{Normalizer: ingest.NewWeatherAlertNormalizer(appConfig, a.weatherService), Interval: gridPollInterval(appConfig, "nws")},
 		// chp alone, or chp + caltrans when lane closures still come from

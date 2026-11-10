@@ -1,8 +1,14 @@
 package main
 
+// Store-backed wiring for background readers: road sampling and the
+// wildfire poller's ended-incident lookup.
+
 import (
+	"strings"
+
 	"context"
 	"errors"
+	gridv1 "github.com/sierragridteam/sierra-data/api/grid/v1"
 	"time"
 
 	api "github.com/sierragridteam/sierra-data/api/v1"
@@ -58,4 +64,31 @@ func roadSamples(resp *api.ListRoadsResponse) ([]store.RoadSample, error) {
 		out = append(out, s)
 	}
 	return out, nil
+}
+
+// endedFires lists CAL FIRE incidents that ended since a time, for the
+// wildfire poller's orphaned-perimeter check. Lite reads: no perimeters.
+func endedFires(st *store.Store) ingest.EndedFires {
+	return func(ctx context.Context, since time.Time) ([]*gridv1.Event, error) {
+		var out []*gridv1.Event
+		token := ""
+		for {
+			page, err := st.QueryEventsPage(ctx, store.EventQuery{
+				Layers:   []gridv1.Layer{gridv1.Layer_WILDFIRE},
+				Statuses: []gridv1.EventStatus{gridv1.EventStatus_RESOLVED, gridv1.EventStatus_EXPIRED},
+				Since:    since, PageSize: store.MaxPageSize, PageToken: token, Lite: true,
+			})
+			if err != nil {
+				return nil, err
+			}
+			for _, ev := range page.Items {
+				if strings.HasPrefix(ev.GetId(), "calfire:") {
+					out = append(out, ev)
+				}
+			}
+			if token = page.Next(len(page.Items)); token == "" {
+				return out, nil
+			}
+		}
+	}
 }

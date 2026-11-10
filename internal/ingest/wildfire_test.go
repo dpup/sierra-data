@@ -1,8 +1,11 @@
 package ingest
 
 import (
+	"context"
+
 	"encoding/json"
 	"fmt"
+	"google.golang.org/protobuf/proto"
 	"io"
 	"net/http"
 	"net/url"
@@ -1022,4 +1025,43 @@ func TestCommaNum(t *testing.T) {
 			t.Errorf("commaNum(%v) = %q, want %q", c.in, got, c.want)
 		}
 	}
+}
+
+// A perimeter whose CAL FIRE incident has ended is that fire, not a new one:
+// Lonely matches an ended calfire incident nearby, so it is not minted, and a
+// standalone already stored for it is superseded. A same-named ended incident
+// far away, or a lookup failure, changes nothing.
+func TestWildfirePoll_OrphanedPerimeterOfEndedIncident(t *testing.T) {
+	lonely := &gridv1.Event{Id: "calfire:lonely-uuid", Layer: gridv1.Layer_WILDFIRE, Status: gridv1.EventStatus_RESOLVED,
+		Headline: "Lonely Fire — 250 ac, 100% contained",
+		Geometry: &gridv1.Geometry{Centroid: &gridv1.LatLng{Lat: 38.06, Lng: -119.86}}}
+	stored := &gridv1.Event{Id: "firis:lonely", Layer: gridv1.Layer_WILDFIRE, Status: gridv1.EventStatus_ACTIVE,
+		Provenance: &gridv1.Provenance{SourceId: "firis"},
+		Geometry:   &gridv1.Geometry{Centroid: &gridv1.LatLng{Lat: 38.05, Lng: -119.85}}}
+
+	n := newWildfireNormalizer(&fakeDoer{resp: calfireFixture}, &fakeDoer{resp: firisFixture})
+	n.UseEndedFires(func(ctx context.Context, since time.Time) ([]*gridv1.Event, error) {
+		return []*gridv1.Event{lonely}, nil
+	})
+	res, err := n.Poll(testCtx(), &scriptedPrior{events: []*gridv1.Event{stored}})
+	require.NoError(t, err)
+	assert.NotContains(t, eventIDs(res.Events), "firis:lonely")
+	assert.Contains(t, eventIDs(res.Events), "firis:ambiguous", "other standalones are untouched")
+	assert.Contains(t, res.Superseded, "firis:lonely")
+
+	far := proto.Clone(lonely).(*gridv1.Event)
+	far.Geometry.Centroid = &gridv1.LatLng{Lat: 39.5, Lng: -119.86}
+	n.UseEndedFires(func(ctx context.Context, since time.Time) ([]*gridv1.Event, error) {
+		return []*gridv1.Event{far}, nil
+	})
+	res, err = n.Poll(testCtx(), nil)
+	require.NoError(t, err)
+	assert.Contains(t, eventIDs(res.Events), "firis:lonely", "a same-named fire 160 km away is a different fire")
+
+	n.UseEndedFires(func(ctx context.Context, since time.Time) ([]*gridv1.Event, error) {
+		return nil, assert.AnError
+	})
+	res, err = n.Poll(testCtx(), nil)
+	require.NoError(t, err)
+	assert.Contains(t, eventIDs(res.Events), "firis:lonely", "a failed lookup changes nothing")
 }
