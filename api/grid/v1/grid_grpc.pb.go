@@ -33,6 +33,7 @@ const (
 	GridService_GetConditions_FullMethodName    = "/grid.v1.GridService/GetConditions"
 	GridService_ListSources_FullMethodName      = "/grid.v1.GridService/ListSources"
 	GridService_GetStats_FullMethodName         = "/grid.v1.GridService/GetStats"
+	GridService_GetRoadHistory_FullMethodName   = "/grid.v1.GridService/GetRoadHistory"
 	GridService_GetMeshTelemetry_FullMethodName = "/grid.v1.GridService/GetMeshTelemetry"
 )
 
@@ -177,6 +178,14 @@ type GridServiceClient interface {
 	// change (resolved, expired, reappeared). Polls that changed nothing are
 	// not counted. Totals are computed at most every five minutes.
 	GetStats(ctx context.Context, in *GetStatsRequest, opts ...grpc.CallOption) (*Stats, error)
+	// Get one road segment's history.
+	//
+	// A monitored segment's status and travel time at each roads refresh
+	// (about every 15 minutes), oldest first, over a window: what a "closed
+	// since" line or a travel-time chart needs. The Grid began keeping these
+	// on 2026-11-10; `coverage` says what it holds. Default window: the 7 days
+	// before `to` (default now); windows over 400 days are clamped.
+	GetRoadHistory(ctx context.Context, in *GetRoadHistoryRequest, opts ...grpc.CallOption) (*RoadHistory, error)
 	// Get one mesh node's telemetry series.
 	//
 	// Every archived operator-monitor reading for one MeshCore node over a
@@ -340,6 +349,16 @@ func (c *gridServiceClient) GetStats(ctx context.Context, in *GetStatsRequest, o
 	return out, nil
 }
 
+func (c *gridServiceClient) GetRoadHistory(ctx context.Context, in *GetRoadHistoryRequest, opts ...grpc.CallOption) (*RoadHistory, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RoadHistory)
+	err := c.cc.Invoke(ctx, GridService_GetRoadHistory_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *gridServiceClient) GetMeshTelemetry(ctx context.Context, in *GetMeshTelemetryRequest, opts ...grpc.CallOption) (*MeshTelemetryArchive, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(MeshTelemetryArchive)
@@ -491,6 +510,14 @@ type GridServiceServer interface {
 	// change (resolved, expired, reappeared). Polls that changed nothing are
 	// not counted. Totals are computed at most every five minutes.
 	GetStats(context.Context, *GetStatsRequest) (*Stats, error)
+	// Get one road segment's history.
+	//
+	// A monitored segment's status and travel time at each roads refresh
+	// (about every 15 minutes), oldest first, over a window: what a "closed
+	// since" line or a travel-time chart needs. The Grid began keeping these
+	// on 2026-11-10; `coverage` says what it holds. Default window: the 7 days
+	// before `to` (default now); windows over 400 days are clamped.
+	GetRoadHistory(context.Context, *GetRoadHistoryRequest) (*RoadHistory, error)
 	// Get one mesh node's telemetry series.
 	//
 	// Every archived operator-monitor reading for one MeshCore node over a
@@ -555,6 +582,9 @@ func (UnimplementedGridServiceServer) ListSources(context.Context, *ListSourcesR
 }
 func (UnimplementedGridServiceServer) GetStats(context.Context, *GetStatsRequest) (*Stats, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetStats not implemented")
+}
+func (UnimplementedGridServiceServer) GetRoadHistory(context.Context, *GetRoadHistoryRequest) (*RoadHistory, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetRoadHistory not implemented")
 }
 func (UnimplementedGridServiceServer) GetMeshTelemetry(context.Context, *GetMeshTelemetryRequest) (*MeshTelemetryArchive, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetMeshTelemetry not implemented")
@@ -832,6 +862,24 @@ func _GridService_GetStats_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _GridService_GetRoadHistory_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetRoadHistoryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GridServiceServer).GetRoadHistory(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GridService_GetRoadHistory_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GridServiceServer).GetRoadHistory(ctx, req.(*GetRoadHistoryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _GridService_GetMeshTelemetry_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetMeshTelemetryRequest)
 	if err := dec(in); err != nil {
@@ -912,6 +960,10 @@ var GridService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetStats",
 			Handler:    _GridService_GetStats_Handler,
+		},
+		{
+			MethodName: "GetRoadHistory",
+			Handler:    _GridService_GetRoadHistory_Handler,
 		},
 		{
 			MethodName: "GetMeshTelemetry",

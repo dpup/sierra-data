@@ -167,6 +167,24 @@ the roads' chain and closure points):
   Pacific served as `08:19Z`). They are now RFC 3339 with the Pacific offset
   (`2025-12-24T08:19:00-08:00`). CWWP2 checkpoint times were already right.
 
+### Road segments have a history: "closed since" and travel time vs typical
+
+The Grid now keeps each monitored road segment's status and travel time at
+every roads refresh (about 15 minutes; kept 400 days, starting with this
+deploy).
+
+- New `GET /api/v1/roads/{road}/history[?from=&to=]` returns them:
+  `samples[]` of `{at, status, congestion, durationMinutes, delayMinutes}`,
+  oldest first; default window the last 7 days. `road` is the segment id
+  (`road.roadId`, with or without the `road:` prefix); unknown ids are 404.
+- The `road_segment` layer's `road` block adds `statusSince` (when the
+  current status began, by the Grid's samples; `statusSinceAtLeast` when it
+  already held at the first sample) and `typicalMinutes` with `typicalBasis`
+  (`HOUR_OF_WEEK` or `ALL_HOURS`): the median OPEN travel time over the last
+  eight weeks. Both are absent until there are samples, so expect them to
+  fill in over the days after deploy (typical needs a few weeks of an hour
+  slot before it uses `HOUR_OF_WEEK`).
+
 ## 2026-11-09
 
 ### CHP incidents carry their numbered log (`roadIncident.log`)

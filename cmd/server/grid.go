@@ -213,6 +213,7 @@ func (a *gridApp) Activate(actx context.Context) (err error) {
 	a.mu.Lock()
 	a.store = gridStore
 	a.mu.Unlock()
+	a.hazards.UseRoadHistory(gridStore)
 	a.hook("store-opened")
 
 	// Pragmas are per-connection, so this log line is the only place the store's
@@ -409,6 +410,7 @@ func (a *gridApp) Activate(actx context.Context) (err error) {
 		EnhancerModel:   a.model,
 		BudgetPerTick:   appConfig.Grid.Enhancement.BudgetPerTick,
 		MeshMaintenance: meshMaintenanceConfig(appConfig),
+		RoadSampling:    roadSamplingConfig(a.roadsService),
 
 		StatsRefreshFirstAfter: statsRefreshFirstAfter,
 	})
@@ -652,6 +654,7 @@ func (a *gridApp) Quiesce(_ context.Context) error {
 
 	if !a.quiesced.store && a.store != nil {
 		t := time.Now()
+		a.hazards.UseRoadHistory(nil)
 		if err := a.store.Close(); err != nil {
 			logging.Errorw(ctx, "Quiesce: grid store close failed", "error", err, "duration", time.Since(t))
 			return fmt.Errorf("close grid store: %w", err)

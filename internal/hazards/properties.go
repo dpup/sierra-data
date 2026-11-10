@@ -119,6 +119,18 @@ type RoadProps struct {
 	DelayMinutes    *int32 `json:"delayMinutes,omitempty"`
 	DurationMinutes *int32 `json:"durationMinutes,omitempty"`
 	DistanceKm      *int32 `json:"distanceKm,omitempty"`
+	// StatusSince is when the segment entered its current status, from the
+	// Grid's own samples (RFC 3339). StatusSinceAtLeast: the status already
+	// held at the first sample we have, so it began no later than this.
+	// Omitted until the segment has been sampled.
+	StatusSince        string `json:"statusSince,omitempty"`
+	StatusSinceAtLeast bool   `json:"statusSinceAtLeast,omitempty"`
+	// TypicalMinutes is the median travel time when OPEN over the last eight
+	// weeks of samples, at this hour of the week when there are enough of
+	// those (TypicalBasis HOUR_OF_WEEK), else across all hours (ALL_HOURS).
+	// Omitted until there are enough samples.
+	TypicalMinutes *int32 `json:"typicalMinutes,omitempty"`
+	TypicalBasis   string `json:"typicalBasis,omitempty"`
 }
 
 // ChainControlProps is the chain_control kind block.

@@ -64,6 +64,15 @@ type MeshMaintenance struct {
 	TelemetryRetention   time.Duration // monitor-sample archive age cap
 }
 
+// RoadSampling archives each monitored road segment's status and travel time
+// (store road_samples). Sample reads the roads service's current set; it must
+// not fetch upstream itself. A zero Interval or nil Sample disables it.
+type RoadSampling struct {
+	Interval  time.Duration
+	Retention time.Duration // samples older than this are pruned daily (0 = keep)
+	Sample    func(ctx context.Context) ([]store.RoadSample, error)
+}
+
 // SchedulerConfig wires a Scheduler. Tuning keys are source ids; missing
 // entries default to the resolve policy with no expire grace. A nil Enhancer
 // (or a zero BudgetPerTick) disables weather-alert enhancement.
@@ -74,6 +83,7 @@ type SchedulerConfig struct {
 	EnhancerModel   string          // stamped into Enhancement.model on enhanced events
 	BudgetPerTick   int             // max Enhance calls (attempts, not successes) per tick
 	MeshMaintenance MeshMaintenance // relay-observation compaction + prune (Interval 0 = off)
+	RoadSampling    RoadSampling    // road segment history (Interval 0 = off)
 	// StatsRefreshFirstAfter, when positive, runs the first ANALYZE after this
 	// delay instead of after a full statsRefreshInterval. cmd/server sets it when
 	// boot kept the persisted statistics rather than analyzing synchronously, so
@@ -92,6 +102,7 @@ type Scheduler struct {
 	enhancerModel string
 	budgetPerTick int
 	meshMaint     MeshMaintenance
+	roadSampling  RoadSampling
 	statsFirst    time.Duration // first stats refresh; 0 = statsRefreshInterval
 
 	// Lifecycle (Start/Stop). stopCh asks the loops to exit between ticks;
@@ -114,6 +125,7 @@ func NewScheduler(st *store.Store, cfg SchedulerConfig) *Scheduler {
 		enhancerModel: cfg.EnhancerModel,
 		budgetPerTick: cfg.BudgetPerTick,
 		meshMaint:     cfg.MeshMaintenance,
+		roadSampling:  cfg.RoadSampling,
 		statsFirst:    cfg.StatsRefreshFirstAfter,
 		now:           time.Now,
 		startJitter:   maxStartJitter,
@@ -138,6 +150,9 @@ func (s *Scheduler) Start(ctx context.Context) {
 	}
 	goTracked(func() { s.runStatsRefresh(ctx) })
 	goTracked(func() { s.runLiteBackfill(ctx) })
+	if s.roadSampling.Interval > 0 && s.roadSampling.Sample != nil {
+		goTracked(func() { s.runRoadSampling(ctx) })
+	}
 	logging.Infow(ctx, "Ingest scheduler started", "pollers", len(s.pollers),
 		"meshMaintenance", s.meshMaint.Interval > 0)
 }
@@ -236,6 +251,50 @@ func (s *Scheduler) runStatsRefresh(ctx context.Context) {
 			}
 			logging.Infow(ctx, "Stats refresh: recomputed index statistics",
 				"duration", s.now().Sub(start))
+		}
+	}
+}
+
+// runRoadSampling archives road segment samples on its interval, and prunes
+// old ones once a day. Best-effort: a failed read or write logs and waits for
+// the next tick (a gap in the history, never a fabricated sample).
+func (s *Scheduler) runRoadSampling(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			logging.Errorw(ctx, "Road sampling: recovered from panic", "error", r)
+		}
+	}()
+	rs := s.roadSampling
+	var lastPrune time.Time
+	timer := time.NewTimer(time.Minute) // after the roads cache has warmed
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.stopping():
+			return
+		case <-timer.C:
+		}
+		timer.Reset(rs.Interval)
+		samples, err := rs.Sample(ctx)
+		if err != nil {
+			logging.Warnw(ctx, "Road sampling: roads unavailable; no sample this tick", "error", err)
+			continue
+		}
+		if err := s.store.InsertRoadSamples(ctx, samples); err != nil {
+			logging.Errorw(ctx, "Road sampling: write failed", "error", err)
+			continue
+		}
+		if rs.Retention > 0 && s.now().Sub(lastPrune) > 24*time.Hour {
+			if n, err := s.store.PruneRoadSamples(ctx, s.now().Add(-rs.Retention)); err != nil {
+				logging.Errorw(ctx, "Road sampling: prune failed", "error", err)
+			} else {
+				lastPrune = s.now()
+				if n > 0 {
+					logging.Infow(ctx, "Road sampling: pruned", "rows", n)
+				}
+			}
 		}
 	}
 }

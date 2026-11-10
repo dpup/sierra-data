@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/dpup/prefab/logging"
@@ -47,6 +48,10 @@ type Service struct {
 	// signs and signDistricts back message_sign; set by UseMessageSigns.
 	signs         MessageSignAPI
 	signDistricts []int
+
+	// history backs road_segment's statusSince/typicalMinutes; set by
+	// UseRoadHistory once the store is open.
+	history atomic.Pointer[roadHistoryHolder]
 
 	// layerBuilders is derived once from layerRegistry() so the dispatch map has
 	// one source of truth.
@@ -460,6 +465,7 @@ func (s *Service) roadSegments(ctx context.Context, area config.HazardArea) ([]F
 			if e := rd.GetStatusExplanation(); e != "" {
 				p.Description = e
 			}
+			s.addRoadHistory(ctx, p.Road, rd, time.Now())
 		}
 		p.setSeverity(sev)
 		out = append(out, Feature{Type: "Feature", Geometry: geom, Properties: p})

@@ -262,11 +262,26 @@ CREATE TABLE event_lite (
   proto    BLOB NOT NULL
 ) WITHOUT ROWID`
 
+// migrationV13 adds road_samples: each monitored road segment's status and
+// travel time at every roads refresh. The road_segment layer is a live
+// projection with no memory, so "closed since when?" and "slower than
+// usual?" had no answer. Measurements, not records: see roads.go.
+const migrationV13 = `
+CREATE TABLE road_samples (
+  road_id     TEXT NOT NULL,
+  at          INTEGER NOT NULL,  -- the roads service's refresh time (unix s)
+  status      INTEGER NOT NULL,  -- api.RoadStatus
+  congestion  INTEGER NOT NULL,  -- api.CongestionLevel
+  duration_m  INTEGER,           -- travel time, minutes; NULL = not reported
+  delay_m     INTEGER,
+  PRIMARY KEY (road_id, at)
+) WITHOUT ROWID`
+
 // migrations[i] is the DDL for schema version i+1. Applied versions are
 // recorded in schema_migrations; already-applied versions are skipped, so
 // Open is idempotent across restarts and an existing dev DB at an older
 // version picks up only the missing migrations.
-var migrations = []string{schemaV1, migrationV2, migrationV3, migrationV4, migrationV5, migrationV6, migrationV7, migrationV8, migrationV9, migrationV10, migrationV11, migrationV12}
+var migrations = []string{schemaV1, migrationV2, migrationV3, migrationV4, migrationV5, migrationV6, migrationV7, migrationV8, migrationV9, migrationV10, migrationV11, migrationV12, migrationV13}
 
 // ErrNotFound is returned by point lookups (GetEvent, GetPlace) when no row
 // matches. Callers map it to a 404.

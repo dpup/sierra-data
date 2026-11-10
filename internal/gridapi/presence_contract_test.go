@@ -116,6 +116,9 @@ func TestResponsesHonorFieldPresence(t *testing.T) {
 	check("GetStats", stats, err)
 	tl, err := g.GetEventTimeline(rpcBG(), &gridv1.GetEventTimelineRequest{Id: "caltrans:d10-1"})
 	check("GetEventTimeline", tl, err)
+	seedRoadSamples(t, s, s.Cfg.Roads.MonitoredRoads[0].ID)
+	rh, err := g.GetRoadHistory(rpcBG(), &gridv1.GetRoadHistoryRequest{Road: s.Cfg.Roads.MonitoredRoads[0].ID})
+	check("GetRoadHistory", rh, err)
 	scan, err := g.ListScanners(rpcBG(), &gridv1.ListScannersRequest{})
 	check("ListScanners", scan, err)
 

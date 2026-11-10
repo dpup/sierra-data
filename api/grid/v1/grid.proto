@@ -1704,6 +1704,28 @@ service GridService {
     };
   }
 
+  // Get one road segment's history.
+  //
+  // A monitored segment's status and travel time at each roads refresh
+  // (about every 15 minutes), oldest first, over a window: what a "closed
+  // since" line or a travel-time chart needs. The Grid began keeping these
+  // on 2026-11-10; `coverage` says what it holds. Default window: the 7 days
+  // before `to` (default now); windows over 400 days are clamped.
+  rpc GetRoadHistory(GetRoadHistoryRequest) returns (RoadHistory) {
+    option (google.api.http) = {get: "/api/v1/roads/{road}/history"};
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      tags: "Conditions"
+      responses: {
+        key: "404"
+        value: {description: "NOT_FOUND: `road` is not a monitored road segment id."}
+      }
+      responses: {
+        key: "400"
+        value: {description: "INVALID_ARGUMENT: `from` not before `to`."}
+      }
+    };
+  }
+
   // Get one mesh node's telemetry series.
   //
   // Every archived operator-monitor reading for one MeshCore node over a
@@ -1726,6 +1748,38 @@ service GridService {
       }
     };
   }
+}
+
+// GetRoadHistoryRequest selects a segment and a window.
+message GetRoadHistoryRequest {
+  // A monitored segment id, as `road.roadId` on the road_segment layer
+  // (without the `road:` feature-id prefix).
+  string road = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"hwy4-arnold-bearvalley\""}];
+  // Window start, RFC 3339, inclusive. Default: 7 days before `to`.
+  google.protobuf.Timestamp from = 2;
+  // Window end, RFC 3339, exclusive. Default: now.
+  google.protobuf.Timestamp to = 3;
+}
+
+// RoadSample is a segment at one roads refresh.
+message RoadSample {
+  google.protobuf.Timestamp at = 1 [(google.api.field_behavior) = REQUIRED];
+  // OPEN, RESTRICTED, CLOSED or MAINTENANCE, as on the road_segment layer.
+  string status = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"OPEN\""}];
+  // CLEAR, LIGHT, MODERATE, HEAVY or SEVERE.
+  string congestion = 3;
+  // Travel time and delay, minutes. `null` when that refresh had none.
+  google.protobuf.Int32Value duration_minutes = 4;
+  google.protobuf.Int32Value delay_minutes = 5;
+}
+
+// RoadHistory is one segment's samples over a window.
+message RoadHistory {
+  string road = 1;
+  google.protobuf.Timestamp from = 2 [(google.api.field_behavior) = REQUIRED];
+  google.protobuf.Timestamp to = 3 [(google.api.field_behavior) = REQUIRED];
+  // Oldest first.
+  repeated RoadSample samples = 4;
 }
 
 // GetMeshTelemetryRequest selects one node and a time window.

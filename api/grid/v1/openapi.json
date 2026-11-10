@@ -2757,6 +2757,88 @@
         ]
       }
     },
+    "/api/v1/roads/{road}/history": {
+      "get": {
+        "description": "A monitored segment's status and travel time at each roads refresh\n(about every 15 minutes), oldest first, over a window: what a \"closed\nsince\" line or a travel-time chart needs. The Grid began keeping these\non 2026-11-10; `coverage` says what it holds. Default window: the 7 days\nbefore `to` (default now); windows over 400 days are clamped.",
+        "operationId": "GridService_GetRoadHistory",
+        "parameters": [
+          {
+            "description": "A monitored segment id, as `road.roadId` on the road_segment layer\n(without the `road:` feature-id prefix).",
+            "in": "path",
+            "name": "road",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "x-example": "hwy4-arnold-bearvalley"
+          },
+          {
+            "description": "Window start, RFC 3339, inclusive. Default: 7 days before `to`.",
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Window end, RFC 3339, exclusive. Default: now.",
+            "in": "query",
+            "name": "to",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1RoadHistory"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "INVALID_ARGUMENT: `from` not before `to`."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "NOT_FOUND: `road` is not a monitored road segment id."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "summary": "Get one road segment's history.",
+        "tags": [
+          "Conditions"
+        ]
+      }
+    },
     "/api/v1/scanners": {
       "get": {
         "description": "Broadcastify audio feeds that cover the region. With `place` naming an AREA,\nthat area's feeds; with any other place, or none, every configured feed,\ndeduplicated. Links only; audio is served by Broadcastify.",
@@ -4220,6 +4302,26 @@
           },
           "roadId": {
             "type": "string"
+          },
+          "statusSince": {
+            "description": "When the segment entered its current status, from the Grid's own samples (GET /api/v1/roads/{road}/history). Absent until sampled.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "statusSinceAtLeast": {
+            "description": "True when the status already held at the first sample the Grid has, so it began no later than statusSince.",
+            "type": "boolean"
+          },
+          "typicalBasis": {
+            "enum": [
+              "HOUR_OF_WEEK",
+              "ALL_HOURS"
+            ],
+            "type": "string"
+          },
+          "typicalMinutes": {
+            "description": "Median travel time when OPEN over the last eight weeks, at this hour of the week (typicalBasis HOUR_OF_WEEK) or across all hours (ALL_HOURS) when that hour has too few samples. Absent until there are enough.",
+            "type": "integer"
           }
         },
         "required": [
@@ -6819,6 +6921,36 @@
         ],
         "type": "object"
       },
+      "v1RoadHistory": {
+        "description": "RoadHistory is one segment's samples over a window.",
+        "properties": {
+          "from": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "road": {
+            "type": "string"
+          },
+          "samples": {
+            "description": "Oldest first.",
+            "items": {
+              "$ref": "#/components/schemas/v1RoadSample"
+            },
+            "type": "array"
+          },
+          "to": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "from",
+          "road",
+          "samples",
+          "to"
+        ],
+        "type": "object"
+      },
       "v1RoadIncidentDetail": {
         "description": "RoadIncidentDetail is the ROAD_INCIDENT detail block, for a CHP incident or a\nCaltrans lane-closure window. The incident type is the envelope `category`,\nthe location is `areaLabel`, and the short line is `headline`.",
         "properties": {
@@ -6887,6 +7019,43 @@
           "log",
           "logNumber",
           "metadata"
+        ],
+        "type": "object"
+      },
+      "v1RoadSample": {
+        "description": "RoadSample is a segment at one roads refresh.",
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "congestion": {
+            "description": "CLEAR, LIGHT, MODERATE, HEAVY or SEVERE.",
+            "type": "string"
+          },
+          "delayMinutes": {
+            "format": "int32",
+            "nullable": true,
+            "type": "integer"
+          },
+          "durationMinutes": {
+            "description": "Travel time and delay, minutes. `null` when that refresh had none.",
+            "format": "int32",
+            "nullable": true,
+            "type": "integer"
+          },
+          "status": {
+            "description": "OPEN, RESTRICTED, CLOSED or MAINTENANCE, as on the road_segment layer.",
+            "example": "OPEN",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "congestion",
+          "delayMinutes",
+          "durationMinutes",
+          "status"
         ],
         "type": "object"
       },

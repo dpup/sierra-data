@@ -586,6 +586,10 @@ spec:
           delayMinutes: {type: integer, description: "Minutes over free-flow. 0 is a real reading."}
           durationMinutes: {type: integer}
           distanceKm: {type: integer}
+          statusSince: {type: string, format: date-time, description: "When the segment entered its current status, from the Grid's own samples (GET /api/v1/roads/{road}/history). Absent until sampled."}
+          statusSinceAtLeast: {type: boolean, description: "True when the status already held at the first sample the Grid has, so it began no later than statusSince."}
+          typicalMinutes: {type: integer, description: "Median travel time when OPEN over the last eight weeks, at this hour of the week (typicalBasis HOUR_OF_WEEK) or across all hours (ALL_HOURS) when that hour has too few samples. Absent until there are enough."}
+          typicalBasis: {type: string, enum: [HOUR_OF_WEEK, ALL_HOURS]}
       MapChainControlProps:
         type: object
         description: chain_control block. Severity follows the level (R1 MINOR, R2 MODERATE, R3 SEVERE); a seasonal pass closure (`category` closed) is MINOR.
