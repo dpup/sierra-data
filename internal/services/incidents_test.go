@@ -567,6 +567,8 @@ type mockEnhancer struct {
 	calls int
 }
 
+var reported = "reported"
+
 func (m *mockEnhancer) EnhanceAlert(ctx context.Context, raw alerts.RawAlert) (alerts.EnhancedAlert, error) {
 	m.calls++
 	return alerts.EnhancedAlert{
@@ -575,8 +577,8 @@ func (m *mockEnhancer) EnhanceAlert(ctx context.Context, raw alerts.RawAlert) (a
 		StructuredDescription: alerts.StructuredDescription{
 			Details: "A collision with injuries occurred; emergency services are on scene.",
 			Impact:  "moderate",
-			AdditionalInfo: map[string]string{
-				"injuries": "reported",
+			AdditionalInfo: map[string]*string{
+				"injuries": &reported,
 			},
 		},
 	}, nil

@@ -89,7 +89,7 @@ Chain Control Detection:
 
 Return valid JSON object with these exact fields:
 - details (string) – Plain-language description of what happened
-- condensed_summary (string) – 1-line summary (max 120 chars, no location, no times)
+- condensed_summary (string) – 1-line summary (max 80 chars, no location, no times, no trailing period)
 - location (object) – structured location with:
   - description (string) – human-friendly location, built ONLY from the route, direction and
     cross-streets in the input, optionally naming a place from place_names (see "Place Names" above).
@@ -103,27 +103,34 @@ Return valid JSON object with these exact fields:
 - road_status (enum) – "open" | "restricted" | "closed"
 - restriction_details (string | null) – If restricted/closed, explain limitations (e.g., "2 of 4 lanes closed northbound")
 - chain_status (enum) – "none" | "r1" | "r2" | "active_unspecified"
-- additional_info (object) – key-value pairs for structured facts (keys: alphanumeric/._/- only, all values must be strings)
+- additional_info (object) – the fixed set of structured facts listed below; null for any the input does not state
 
 Guidelines for additional_info metadata:
-- Use consistent field names across similar incidents (e.g., always "incident_type", not "incident_category")
-- Common useful fields: incident_type, emergency_services, vehicles_involved, lanes_blocked, injuries, roadway_status
-- For collisions: vehicle descriptions, lane numbers, injury status, emergency response
-- For construction: work_type, assistance_needed, roadway_status  
-- Values should be concise but descriptive (e.g., "green Toyota Prius", "lanes 1 and 2", "fire department and EMS")
-- Use lowercase for consistency except proper nouns (e.g., "traffic collision", "Toyota Camry")
+- The keys are fixed: incident_type, injuries, vehicles_involved, lanes_blocked, emergency_services, work_type, duration.
+  Set a key to null when the input does not state it. Never guess, and never restate the location, coordinates or times
+  (those are separate fields).
+- incident_type: lowercase type, e.g. "traffic collision", "vehicle fire", "debris in roadway", "road work"
+- injuries: "none", "minor", "major", "fatal" or "unknown", only when the input names injuries at all
+- vehicles_involved: a count or short description, e.g. "2", "big rig and sedan"
+- lanes_blocked: e.g. "lane 1", "right shoulder", "all lanes"
+- emergency_services: who is on scene or responding, e.g. "fire department and EMS", "tow truck"
+- work_type: for planned work, e.g. "paving", "tree work"
+- duration: only when the input states one, e.g. "1-2 hours"
+- Use lowercase except proper nouns; keep each value short.
 
-How to write condensed summaries:
+How to write condensed summaries (used as the headline in lists and on maps):
 - CRITICAL: Do NOT include ANY location details (no highway names, mile markers, cities)
 - CRITICAL: Do NOT include times or dates
+- At most 80 characters. A fragment, not a sentence: no trailing period.
+- Say only what the input states. Do not add filler such as "reported and being handled by responders".
 - Focus on WHAT happened, not WHERE it happened  
 - Imagine someone telling a friend the 3 second version
 - Include enough detail to help someone understand the scope and type of incident, but no more
 
 Good examples:
-- Overturned vehicle off road, not visible from highway, EMS/fire en route.
-- Tire debris in one lane, traffic hazard.
-- 3-vehicle crash (UPS truck, Toyota RAV4, VW sedan), injuries unknown, tow en route.
+- Overturned vehicle off road, not visible from highway, EMS/fire en route
+- Tire debris in one lane
+- 3-vehicle crash (UPS truck, Toyota RAV4, VW sedan), injuries unknown, tow en route
 
 Bad examples (include location):
 - Traffic collision on Route 4 eastbound
@@ -147,8 +154,8 @@ var AlertEnhancementSchema = openai.ChatCompletionResponseFormatJSONSchema{
 			},
 			"condensed_summary": {
 				"type": "string",
-				"maxLength": 120,
-				"description": "Very short summary of incident, no location, max 120 chars"
+				"maxLength": 80,
+				"description": "Very short summary of incident, no location, max 80 chars, no trailing period"
 			},
 			"location": {
 				"type": "object",
@@ -194,12 +201,21 @@ var AlertEnhancementSchema = openai.ChatCompletionResponseFormatJSONSchema{
 			},
 			"additional_info": {
 				"type": "object",
-				"description": "Key-value pairs for structured facts",
-				"patternProperties": { "^[A-Za-z0-9._-]+$": { "type": "string" } },
+				"description": "Fixed structured facts; null when the input does not state one",
+				"properties": {
+					"incident_type": { "type": ["string", "null"] },
+					"injuries": { "type": ["string", "null"] },
+					"vehicles_involved": { "type": ["string", "null"] },
+					"lanes_blocked": { "type": ["string", "null"] },
+					"emergency_services": { "type": ["string", "null"] },
+					"work_type": { "type": ["string", "null"] },
+					"duration": { "type": ["string", "null"] }
+				},
+				"required": ["incident_type", "injuries", "vehicles_involved", "lanes_blocked", "emergency_services", "work_type", "duration"],
 				"additionalProperties": false
 			}
 		},
-		"required": ["time_reported", "details", "location", "last_update", "impact", "condensed_summary", "road_status", "restriction_details", "chain_status"],
+		"required": ["time_reported", "details", "location", "last_update", "impact", "condensed_summary", "road_status", "restriction_details", "chain_status", "additional_info"],
 		"additionalProperties": false
 	}`),
 }

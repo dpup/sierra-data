@@ -19,8 +19,9 @@ func NewContentHasher() *ContentHasher {
 // Much simpler than the complex incident hashing system
 // promptVersion is bumped whenever SystemPrompt changes in a way that should
 // invalidate cached enhancements. v2 added the Place Names grounding rule and
-// the Impact Rating rubric.
-const promptVersion = "2"
+// the Impact Rating rubric. v3 fixed the additional_info keys and tightened
+// the condensed summary (80 chars, no trailing period, no filler).
+const promptVersion = "3"
 
 func (h *ContentHasher) HashRawAlert(raw RawAlert) string {
 	// Normalize the description text for consistent hashing

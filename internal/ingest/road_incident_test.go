@@ -445,3 +445,29 @@ func TestRoadIncidentPoll_ClosuresElsewhere(t *testing.T) {
 	_, err = n.Poll(testCtx(), nil)
 	assert.Error(t, err)
 }
+
+// A new log line re-runs the model, which rewords the location label though
+// the incident has not moved. The stored label holds while the point does;
+// a moved incident takes the new label. The headline loses its full stop.
+func TestRoadIncidentKeepsAreaLabelWhileUnmoved(t *testing.T) {
+	enhanced, _, _ := testIncidents()
+	enhanced.CondensedSummary = "Vehicle fire on Hwy 4."
+	roads := &fakeRoadsAPI{byArea: map[string]*api.ListIncidentsResponse{
+		"mother-lode": {Incidents: []*api.Incident{enhanced}},
+	}}
+	n := NewRoadIncidentNormalizer(testConfig(), roads)
+	first, err := n.Poll(testCtx(), nil)
+	require.NoError(t, err)
+	stored := eventByID(t, first.Events, enhanced.Id)
+	assert.Equal(t, "Vehicle fire on Hwy 4", stored.Headline)
+
+	enhanced.LocationDescription = "State Route 4 at Avery"
+	res, err := n.Poll(testCtx(), &fakePrior{events: []*gridv1.Event{stored}})
+	require.NoError(t, err)
+	assert.Equal(t, "Hwy 4 at Avery", eventByID(t, res.Events, enhanced.Id).AreaLabel)
+
+	enhanced.Location = &api.Coordinates{Latitude: 38.21, Longitude: -120.35}
+	res, err = n.Poll(testCtx(), &fakePrior{events: []*gridv1.Event{stored}})
+	require.NoError(t, err)
+	assert.Equal(t, "State Route 4 at Avery", eventByID(t, res.Events, enhanced.Id).AreaLabel)
+}

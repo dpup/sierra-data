@@ -2,6 +2,7 @@ package alerts
 
 import (
 	"context"
+	"strings"
 	"time"
 )
 
@@ -54,8 +55,10 @@ type StructuredDescription struct {
 	RoadStatus         string             `json:"road_status"`         // enum: open, restricted, closed
 	RestrictionDetails string             `json:"restriction_details"` // Details when restricted/closed
 	ChainStatus        string             `json:"chain_status"`        // enum: none, r1, r2, active_unspecified
-	AdditionalInfo     map[string]string  `json:"additional_info,omitempty"`
-	CondensedSummary   string             `json:"condensed_summary,omitempty"`
+	// AdditionalInfo holds the fixed MetadataKeys (see AlertEnhancementSchema);
+	// a key the input does not state arrives as null and is dropped.
+	AdditionalInfo   map[string]*string `json:"additional_info,omitempty"`
+	CondensedSummary string             `json:"condensed_summary,omitempty"`
 }
 
 // EnhancedAlert represents a fully processed alert with AI enhancement
@@ -82,3 +85,23 @@ type AlertEnhancer interface {
 }
 
 // NewAlertEnhancer is implemented in enhancer.go
+
+// MetadataKeys is the fixed set of facts the model may put in additional_info.
+// A fixed set is what keeps an incident's metadata comparable across
+// revisions: a free-form map let each run name the same fact differently
+// ("intersection" one revision, "location_intersection" the next), so every
+// version diff read as keys removed and added. Order is the schema's.
+var MetadataKeys = []string{"incident_type", "injuries", "vehicles_involved", "lanes_blocked", "emergency_services", "work_type", "duration"}
+
+// Metadata returns the stated facts among MetadataKeys, dropping nulls,
+// blanks and any key outside the set (a cache entry written under an older
+// schema).
+func (s StructuredDescription) Metadata() map[string]string {
+	out := map[string]string{}
+	for _, k := range MetadataKeys {
+		if v := s.AdditionalInfo[k]; v != nil && strings.TrimSpace(*v) != "" {
+			out[k] = strings.TrimSpace(*v)
+		}
+	}
+	return out
+}

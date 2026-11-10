@@ -136,6 +136,7 @@ For the condensed summary, follow the examples provided - do NOT include locatio
 	if structured.CondensedSummary == "" {
 		structured.CondensedSummary = truncateRunes(structured.Details, 147) // Simple fallback
 	}
+	structured.CondensedSummary = CleanCondensed(structured.CondensedSummary)
 
 	// Create enhanced alert. Request/Response record the exact model I/O (the
 	// incident-specific user prompt and the raw structured response) so clients
@@ -245,4 +246,16 @@ func isValidImpact(impact string) bool {
 		}
 	}
 	return false
+}
+
+// CleanCondensed tidies the condensed summary, which is the incident's
+// headline: one trailing full stop is dropped (a headline is a fragment, and
+// the model adds one about half the time, so the same headline differed by
+// punctuation between revisions). An ellipsis is kept.
+func CleanCondensed(s string) string {
+	s = strings.TrimSpace(s)
+	if strings.HasSuffix(s, ".") && !strings.HasSuffix(s, "..") {
+		s = strings.TrimSpace(strings.TrimSuffix(s, "."))
+	}
+	return s
 }

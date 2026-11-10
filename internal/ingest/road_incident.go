@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/sierragridteam/sierra-data/internal/lib/alerts"
 	"strings"
 	"time"
 
@@ -118,6 +119,8 @@ func (n *RoadIncidentNormalizer) Poll(ctx context.Context, prior Prior) (*PollRe
 				if pe := priorByID(prior, ev.Id); pe != nil && pe.GetEnhancement() != nil {
 					ev = pe
 				}
+			} else {
+				keepPriorAreaLabel(ev, priorByID(prior, ev.Id))
 			}
 			seen[ev.Id] = true
 			events = append(events, ev)
@@ -173,9 +176,9 @@ func (n *RoadIncidentNormalizer) buildEvent(in *api.Incident) *gridv1.Event {
 	//                 show it alongside the enhanced text ("translate, never
 	//                 assert" transparency). Dropped only when it would just
 	//                 duplicate the headline (unenhanced, no distinct original).
-	condensed := in.GetCondensedSummary() // AI short (enhanced only)
-	narrative := in.GetDescription()      // AI narrative (enhanced) or readable type line
-	original := in.GetOriginalText()      // raw verbatim feed text
+	condensed := alerts.CleanCondensed(in.GetCondensedSummary()) // AI short (enhanced only)
+	narrative := in.GetDescription()                             // AI narrative (enhanced) or readable type line
+	original := in.GetOriginalText()                             // raw verbatim feed text
 	var headline, summary string
 	if condensed != "" {
 		headline = condensed
@@ -312,4 +315,19 @@ func impactSlug(i api.AlertImpact) string {
 		return ""
 	}
 	return strings.ToLower(strings.TrimPrefix(i.String(), "IMPACT_"))
+}
+
+// keepPriorAreaLabel holds an enhanced incident's location label steady. The
+// label is the model's rewrite of CHP's location text, and every new log line
+// re-runs the model, which rewords it ("SR 132 at N G St", then "State Route
+// 132 at North G Street") though the incident has not moved. While the point
+// is unchanged the stored label stays; a moved incident gets the new one.
+func keepPriorAreaLabel(ev, prior *gridv1.Event) {
+	if prior == nil || prior.GetEnhancement() == nil || prior.GetAreaLabel() == "" {
+		return
+	}
+	if prior.GetGeometry().GetGeojson() == nil || string(prior.GetGeometry().GetGeojson()) != string(ev.GetGeometry().GetGeojson()) {
+		return
+	}
+	ev.AreaLabel = prior.GetAreaLabel()
 }

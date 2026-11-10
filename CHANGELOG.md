@@ -46,6 +46,22 @@ still the field to act on. The headline follows `permission`, so it never reads
 more permissive than it. Each county gets one new revision on deploy, and a
 reworded CAL FIRE status no longer changes the headline.
 
+### CHP incident metadata has a fixed set of keys; steadier headlines and labels
+
+`roadIncident.metadata` on an AI-enhanced CHP incident now uses only these
+keys, each present only when CHP's text states it: `incident_type`, `injuries`,
+`vehicles_involved`, `lanes_blocked`, `emergency_services`, `work_type`. The
+model used to choose its own keys on every run, so one fact appeared as
+`intersection` in one revision and `location_intersection` in the next, and it
+restated location, coordinates and times that are already typed fields
+(`areaLabel`, `geometry`, `effective`, `observedAt`). Those keys are gone.
+
+The incident headline (the model's condensed line) is at most about 80
+characters, carries no trailing full stop and no filler such as "reported and
+being handled by responders". `areaLabel` no longer changes wording between
+revisions while the incident's point is unchanged. Cached enhancements are
+invalidated on deploy, so each open CHP incident gets one new revision.
+
 ## 2026-11-09
 
 ### CHP incidents carry their numbered log (`roadIncident.log`)

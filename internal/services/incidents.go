@@ -336,11 +336,8 @@ func (s *RoadsService) enhanceIncident(ctx context.Context, inc *api.Incident, i
 	if loc := strings.TrimSpace(enhanced.StructuredDescription.Location.Description); loc != "" {
 		inc.LocationDescription = loc
 	}
-	if len(enhanced.StructuredDescription.AdditionalInfo) > 0 {
-		inc.Metadata = make(map[string]string, len(enhanced.StructuredDescription.AdditionalInfo))
-		for k, v := range enhanced.StructuredDescription.AdditionalInfo {
-			inc.Metadata[k] = v
-		}
+	if md := enhanced.StructuredDescription.Metadata(); len(md) > 0 {
+		inc.Metadata = md
 	}
 }
 

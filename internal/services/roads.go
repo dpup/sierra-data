@@ -799,7 +799,7 @@ func (s *RoadsService) buildEnhancedRoadAlert(ctx context.Context, classifiedAle
 			)
 
 			// Reserve metadata only for AI's additional_info
-			for key, value := range enhanced.StructuredDescription.AdditionalInfo {
+			for key, value := range enhanced.StructuredDescription.Metadata() {
 				alert.Metadata[key] = value
 			}
 		}
