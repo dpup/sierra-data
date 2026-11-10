@@ -627,6 +627,19 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;</pre>
     from <a href="/api/v1/sources" class="mono">/api/v1/sources</a> rather than
     hard-coding this table.
   </p>
+  <h3>Ingest totals</h3>
+  <p>
+    <a href="/api/v1/stats" class="mono">/api/v1/stats</a> counts what the Grid
+    has recorded since it began keeping history: <code class="inline">events</code>
+    ever stored (every status), the <code class="inline">revisions</code> across
+    them (each recorded change, whether a source update or a lifecycle change;
+    polls that changed nothing are not counted), distinct
+    <code class="inline">sources</code>, <code class="inline">since</code> (the
+    earliest first ingest) and a per-layer breakdown. <code class="inline">?place=</code>
+    narrows it to events attached to that place, including ones that have since
+    ended. Totals are cached for up to five minutes
+    (<code class="inline">computedAt</code>).
+  </p>
   <h3>Attribution requirements</h3>
   <ul>
     <li>Display the <code class="inline">attribution</code> string (from <code class="inline">Source.attribution</code>, <code class="inline">Event.provenance.attribution</code>, or <code class="inline">metadata.attribution</code> on GeoJSON layers) wherever you render the data.</li>
@@ -635,6 +648,7 @@ const geom = g?.geojson ? JSON.parse(atob(g.geojson)) : null;</pre>
   </ul>
   <div class="live-examples">
     <a href="/api/v1/sources">/api/v1/sources</a>
+    <a href="/api/v1/stats?place=ebbetts-pass">/api/v1/stats?place=ebbetts-pass</a>
   </div>
 </section>
 

@@ -888,6 +888,44 @@
           "Sources"
         ]
       }
+    },
+    "/api/v1/stats": {
+      "get": {
+        "summary": "Get ingest totals.",
+        "description": "How much the Grid has recorded since it started keeping history: events\never stored (every status), the revisions recorded across them, and the\nsources they came from, overall and per layer. `place` (slug or id)\nnarrows it to events attached to that place. A revision is one recorded\nchange: a source update that changed an event's content, or a lifecycle\nchange (resolved, expired, reappeared). Polls that changed nothing are\nnot counted. Totals are computed at most every five minutes.",
+        "operationId": "GridService_GetStats",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1Stats"
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: `place` is not a known place slug or id.",
+            "schema": {}
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "place",
+            "description": "A place slug (`ebbetts-pass`) or id (`area:ebbetts-pass`). Empty: every\nevent the Grid holds.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "x-example": "ebbetts-pass"
+          }
+        ],
+        "tags": [
+          "Sources"
+        ]
+      }
     }
   },
   "definitions": {
@@ -1853,6 +1891,23 @@
       "default": "LAYER_UNSPECIFIED",
       "description": "Layer is the event taxonomy. Response values are these UPPERCASE names; the\n`layer` query parameter also accepts lowercase slugs (`road_incident`).\n\nOnly event layers appear here. The condition layers (`road_segment`,\n`chain_control`, `fire_weather`, `message_sign`) are map layers and summary\ninputs, never events.\n\n - LAYER_UNSPECIFIED: Never returned.\n - WILDFIRE: Wildfires: CAL FIRE incidents joined with FIRIS/NIFC perimeters (sources\n`calfire`, `firis`). Scoped wider than other layers, so a fire approaching\nthe region shows up before it arrives.\n - EVACUATION: Evacuation zones under an order, warning, advisory or shelter-in-place,\nfrom Cal OES / Genasys (source `caloes`). Life-safety: see the summary's\n`activeEvacuations`.\n - WEATHER_ALERT: National Weather Service watches, warnings and advisories for the region's\nforecast zones (source `nws`). No geometry; attached to places by zone.\n - FIRE_WEATHER: Reserved. Fire weather is a condition (`GET /api/v1/conditions`), not an\nevent layer; no event carries it.\n - EARTHQUAKE: USGS earthquakes of magnitude 2.5 or more in the last 7 days (source `usgs`).\n - ROAD_INCIDENT: CHP traffic incidents (source `chp`, AI-summarized) and Caltrans planned\nlane-closure windows (source `caltrans`). Planned windows not yet set up are\nSCHEDULED.\n - POWER: \nPG\u0026E electric outages (source `pge`) and Public Safety Power Shutoffs\n(source `psps`). Most outages affect one customer and are INFO.\n - GAUGE: Reserved for stream gauges; no events today.\n - AIR_QUALITY: Reserved for air quality; no events today.\n - MESH: MeshCore community radio nodes (source `meshcore`), one event per node.\nAmbient INFO state, not a hazard. It dominates an unscoped event query.\n - ANNOUNCEMENT: Reserved for announcements; no events today.\n - BURN_STATUS: One event per tracked county saying whether residential burning is allowed\ntoday (sources `burnline`, `calfire-burn`). Ambient, permanently ACTIVE,\nalways INFO; its revision history is the record of changes."
     },
+    "v1LayerStats": {
+      "type": "object",
+      "properties": {
+        "layer": {
+          "$ref": "#/definitions/v1Layer"
+        },
+        "events": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "revisions": {
+          "type": "integer",
+          "format": "int32"
+        }
+      },
+      "description": "LayerStats is one layer's share of Stats."
+    },
     "v1MeshAdminTelemetry": {
       "type": "object",
       "properties": {
@@ -2711,6 +2766,54 @@
       ],
       "default": "SOURCE_STATUS_UNSPECIFIED",
       "description": "SourceStatus is a source's health. The same three values appear as strings in\nthe summary's domains and sidecar, on `/api/v1/cameras`, and on the map\nlayers' `metadata.sourceStatus`.\n\n - SOURCE_STATUS_UNSPECIFIED: Not polled yet since the registry row was created. Treat as UNAVAILABLE.\n - OK: The last attempt succeeded.\n - STALE: The last attempt failed, but the last success is within\n`staleAfterSeconds`; what is served is last-good data.\n - UNAVAILABLE: Failing beyond `staleAfterSeconds`, or never succeeded. Nothing current can\nbe vouched for: render \"unknown\", never \"none\"."
+    },
+    "v1Stats": {
+      "type": "object",
+      "properties": {
+        "place": {
+          "type": "string",
+          "description": "The resolved place id, or empty for every event."
+        },
+        "events": {
+          "type": "integer",
+          "format": "int32",
+          "example": 18233,
+          "title": "Events ever stored, in every status.\n(int32 so JSON carries a number, not a string.)"
+        },
+        "revisions": {
+          "type": "integer",
+          "format": "int32",
+          "example": 96410,
+          "description": "Revisions recorded across those events (each event's `revision` summed)."
+        },
+        "sources": {
+          "type": "integer",
+          "format": "int32",
+          "description": "Distinct sources those events came from."
+        },
+        "since": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the earliest of those events was first stored. Null when there are\nnone."
+        },
+        "layers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1LayerStats"
+          },
+          "description": "Per-layer totals, largest event count first. Layers with no events are\nleft out."
+        },
+        "computedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When these totals were computed (they are cached for up to five minutes)."
+        }
+      },
+      "description": "Stats is what the Grid has recorded, overall and per layer.",
+      "required": [
+        "computedAt"
+      ]
     },
     "v1SummaryDomain": {
       "type": "object",

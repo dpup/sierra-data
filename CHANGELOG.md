@@ -72,6 +72,16 @@ had instead of a flat line of copies. The live event's `mesh.telemetry.admin`
 still shows what the monitor last sent. Samples archived before this deploy are
 unchanged.
 
+### New: `GET /api/v1/stats` — ingest totals
+
+`GET /api/v1/stats[?place=]` returns what the Grid has recorded since it began
+keeping history: `events` (every status), `revisions` across them (each
+recorded change; a source update that changed nothing is not counted),
+distinct `sources`, `since` (earliest first ingest, null when empty),
+`layers[]` (`{layer, events, revisions}`, largest first) and `computedAt`.
+`place` takes a slug or id (404 if unknown) and includes the place's ended
+events. Counts are numbers in JSON and are cached for up to five minutes.
+
 ## 2026-11-09
 
 ### CHP incidents carry their numbered log (`roadIncident.log`)

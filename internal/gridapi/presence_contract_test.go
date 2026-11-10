@@ -112,6 +112,8 @@ func TestResponsesHonorFieldPresence(t *testing.T) {
 	check("GetConditions", cond, err)
 	srcs, err := g.ListSources(rpcBG(), &gridv1.ListSourcesRequest{})
 	check("ListSources", srcs, err)
+	stats, err := g.GetStats(rpcBG(), &gridv1.GetStatsRequest{})
+	check("GetStats", stats, err)
 	scan, err := g.ListScanners(rpcBG(), &gridv1.ListScannersRequest{})
 	check("ListScanners", scan, err)
 

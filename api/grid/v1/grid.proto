@@ -1660,6 +1660,26 @@ service GridService {
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {tags: "Sources"};
   }
 
+  // Get ingest totals.
+  //
+  // How much the Grid has recorded since it started keeping history: events
+  // ever stored (every status), the revisions recorded across them, and the
+  // sources they came from, overall and per layer. `place` (slug or id)
+  // narrows it to events attached to that place. A revision is one recorded
+  // change: a source update that changed an event's content, or a lifecycle
+  // change (resolved, expired, reappeared). Polls that changed nothing are
+  // not counted. Totals are computed at most every five minutes.
+  rpc GetStats(GetStatsRequest) returns (Stats) {
+    option (google.api.http) = {get: "/api/v1/stats"};
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      tags: "Sources"
+      responses: {
+        key: "404"
+        value: {description: "NOT_FOUND: `place` is not a known place slug or id."}
+      }
+    };
+  }
+
   // Get one mesh node's telemetry series.
   //
   // Every archived operator-monitor reading for one MeshCore node over a
@@ -2374,3 +2394,38 @@ message Conditions {
 
 // ListSourcesRequest takes no parameters.
 message ListSourcesRequest {}
+
+// GetStatsRequest optionally narrows the totals to one place.
+message GetStatsRequest {
+  // A place slug (`ebbetts-pass`) or id (`area:ebbetts-pass`). Empty: every
+  // event the Grid holds.
+  string place = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"ebbetts-pass\""}];
+}
+
+// Stats is what the Grid has recorded, overall and per layer.
+message Stats {
+  // The resolved place id, or empty for every event.
+  string place = 1;
+  // Events ever stored, in every status.
+  // (int32 so JSON carries a number, not a string.)
+  int32 events = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "18233"}];
+  // Revisions recorded across those events (each event's `revision` summed).
+  int32 revisions = 3 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "96410"}];
+  // Distinct sources those events came from.
+  int32 sources = 4;
+  // When the earliest of those events was first stored. Null when there are
+  // none.
+  google.protobuf.Timestamp since = 5;
+  // Per-layer totals, largest event count first. Layers with no events are
+  // left out.
+  repeated LayerStats layers = 6;
+  // When these totals were computed (they are cached for up to five minutes).
+  google.protobuf.Timestamp computed_at = 7 [(google.api.field_behavior) = REQUIRED];
+}
+
+// LayerStats is one layer's share of Stats.
+message LayerStats {
+  Layer layer = 1;
+  int32 events = 2;
+  int32 revisions = 3;
+}

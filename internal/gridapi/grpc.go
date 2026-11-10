@@ -123,6 +123,8 @@ type GridServer struct {
 	// pageBudget is the encoded-size cap on one list page (PageByteBudget;
 	// tests shrink it to keep fixtures small).
 	pageBudget int
+	// stats caches GetStats per place for statsTTL.
+	stats statsCache
 }
 
 // NewGridServer wires the gRPC service over the existing gridapi Service.

@@ -31,6 +31,7 @@ const (
 	GridService_ListCameras_FullMethodName      = "/grid.v1.GridService/ListCameras"
 	GridService_GetConditions_FullMethodName    = "/grid.v1.GridService/GetConditions"
 	GridService_ListSources_FullMethodName      = "/grid.v1.GridService/ListSources"
+	GridService_GetStats_FullMethodName         = "/grid.v1.GridService/GetStats"
 	GridService_GetMeshTelemetry_FullMethodName = "/grid.v1.GridService/GetMeshTelemetry"
 )
 
@@ -151,6 +152,16 @@ type GridServiceClient interface {
 	// client decides how far to trust each layer. It also lists one health-only
 	// row per operator push reporter.
 	ListSources(ctx context.Context, in *ListSourcesRequest, opts ...grpc.CallOption) (*SourceList, error)
+	// Get ingest totals.
+	//
+	// How much the Grid has recorded since it started keeping history: events
+	// ever stored (every status), the revisions recorded across them, and the
+	// sources they came from, overall and per layer. `place` (slug or id)
+	// narrows it to events attached to that place. A revision is one recorded
+	// change: a source update that changed an event's content, or a lifecycle
+	// change (resolved, expired, reappeared). Polls that changed nothing are
+	// not counted. Totals are computed at most every five minutes.
+	GetStats(ctx context.Context, in *GetStatsRequest, opts ...grpc.CallOption) (*Stats, error)
 	// Get one mesh node's telemetry series.
 	//
 	// Every archived operator-monitor reading for one MeshCore node over a
@@ -294,6 +305,16 @@ func (c *gridServiceClient) ListSources(ctx context.Context, in *ListSourcesRequ
 	return out, nil
 }
 
+func (c *gridServiceClient) GetStats(ctx context.Context, in *GetStatsRequest, opts ...grpc.CallOption) (*Stats, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Stats)
+	err := c.cc.Invoke(ctx, GridService_GetStats_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *gridServiceClient) GetMeshTelemetry(ctx context.Context, in *GetMeshTelemetryRequest, opts ...grpc.CallOption) (*MeshTelemetryArchive, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(MeshTelemetryArchive)
@@ -421,6 +442,16 @@ type GridServiceServer interface {
 	// client decides how far to trust each layer. It also lists one health-only
 	// row per operator push reporter.
 	ListSources(context.Context, *ListSourcesRequest) (*SourceList, error)
+	// Get ingest totals.
+	//
+	// How much the Grid has recorded since it started keeping history: events
+	// ever stored (every status), the revisions recorded across them, and the
+	// sources they came from, overall and per layer. `place` (slug or id)
+	// narrows it to events attached to that place. A revision is one recorded
+	// change: a source update that changed an event's content, or a lifecycle
+	// change (resolved, expired, reappeared). Polls that changed nothing are
+	// not counted. Totals are computed at most every five minutes.
+	GetStats(context.Context, *GetStatsRequest) (*Stats, error)
 	// Get one mesh node's telemetry series.
 	//
 	// Every archived operator-monitor reading for one MeshCore node over a
@@ -479,6 +510,9 @@ func (UnimplementedGridServiceServer) GetConditions(context.Context, *GetConditi
 }
 func (UnimplementedGridServiceServer) ListSources(context.Context, *ListSourcesRequest) (*SourceList, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListSources not implemented")
+}
+func (UnimplementedGridServiceServer) GetStats(context.Context, *GetStatsRequest) (*Stats, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetStats not implemented")
 }
 func (UnimplementedGridServiceServer) GetMeshTelemetry(context.Context, *GetMeshTelemetryRequest) (*MeshTelemetryArchive, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetMeshTelemetry not implemented")
@@ -720,6 +754,24 @@ func _GridService_ListSources_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _GridService_GetStats_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetStatsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GridServiceServer).GetStats(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GridService_GetStats_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GridServiceServer).GetStats(ctx, req.(*GetStatsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _GridService_GetMeshTelemetry_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetMeshTelemetryRequest)
 	if err := dec(in); err != nil {
@@ -792,6 +844,10 @@ var GridService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListSources",
 			Handler:    _GridService_ListSources_Handler,
+		},
+		{
+			MethodName: "GetStats",
+			Handler:    _GridService_GetStats_Handler,
 		},
 		{
 			MethodName: "GetMeshTelemetry",

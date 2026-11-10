@@ -2798,6 +2798,59 @@
         ]
       }
     },
+    "/api/v1/stats": {
+      "get": {
+        "description": "How much the Grid has recorded since it started keeping history: events\never stored (every status), the revisions recorded across them, and the\nsources they came from, overall and per layer. `place` (slug or id)\nnarrows it to events attached to that place. A revision is one recorded\nchange: a source update that changed an event's content, or a lifecycle\nchange (resolved, expired, reappeared). Polls that changed nothing are\nnot counted. Totals are computed at most every five minutes.",
+        "operationId": "GridService_GetStats",
+        "parameters": [
+          {
+            "description": "A place slug (`ebbetts-pass`) or id (`area:ebbetts-pass`). Empty: every\nevent the Grid holds.",
+            "in": "query",
+            "name": "place",
+            "schema": {
+              "type": "string"
+            },
+            "x-example": "ebbetts-pass"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1Stats"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "NOT_FOUND: `place` is not a known place slug or id."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "summary": "Get ingest totals.",
+        "tags": [
+          "Sources"
+        ]
+      }
+    },
     "/mcp": {
       "post": {
         "description": "A read-only MCP server (protocol revision `2025-06-18`, server name\n`sierra-grid`) for LLM agents. Stateless request/response: POST one\nJSON-RPC message, get one JSON response (no SSE stream, no session id).\nA notification (no `id`) is answered `202` with no body. Any other HTTP\nmethod is `405`. Tools call this same `/api/v1` surface in-process and\nevery result carries a reference-only disclaimer.\n\nTools (`tools/list` for their input schemas):\n- `grid_situation`: what is happening at a place, address or lat,lng\n  (mode, per-domain status, top headlines). Start here.\n- `grid_events`: list events, filtered by location, layer, severity,\n  status and time.\n- `grid_event`: one event in full, by id.\n- `grid_conditions`: current weather and fire-weather state.\n- `grid_resolve`: address or lat,lng to the places containing it.\n- `grid_places`: the place directory.\n- `grid_sources`: feed health.\n- `grid_history`: revisions over a time range.\n\nResource `grid://reference` (the API reference, Markdown); prompt\n`hazard_briefing(location)`.\n\nNot callable from a browser cross-origin (CORS allows GET only).\n",
@@ -5736,6 +5789,28 @@
         ],
         "type": "string"
       },
+      "v1LayerStats": {
+        "description": "LayerStats is one layer's share of Stats.",
+        "properties": {
+          "events": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "layer": {
+            "$ref": "#/components/schemas/v1Layer"
+          },
+          "revisions": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "events",
+          "layer",
+          "revisions"
+        ],
+        "type": "object"
+      },
       "v1MeshAdminTelemetry": {
         "description": "MeshAdminTelemetry is one reading taken from a node's own admin interface by an\noperator-run monitor. It is the node's self-reported view, which is why it\nsits beside rather than replaces the gateway-reported `snr`/`rssi`: those are\nwhat a distant listener heard, these are what the node measured.\n\nGauges are nullable: `null` means the monitor could not read it, which is not\nthe same as 0 (a 0% battery and an unknown battery must not render alike).\nCounters are plain, count since the node's last boot (they reset at a\nreboot), and are 64-bit, so they arrive as JSON STRINGS.",
         "properties": {
@@ -6796,6 +6871,60 @@
           "UNAVAILABLE"
         ],
         "type": "string"
+      },
+      "v1Stats": {
+        "description": "Stats is what the Grid has recorded, overall and per layer.",
+        "properties": {
+          "computedAt": {
+            "description": "When these totals were computed (they are cached for up to five minutes).",
+            "format": "date-time",
+            "type": "string"
+          },
+          "events": {
+            "example": 18233,
+            "format": "int32",
+            "title": "Events ever stored, in every status.\n(int32 so JSON carries a number, not a string.)",
+            "type": "integer"
+          },
+          "layers": {
+            "description": "Per-layer totals, largest event count first. Layers with no events are\nleft out.",
+            "items": {
+              "$ref": "#/components/schemas/v1LayerStats"
+            },
+            "type": "array"
+          },
+          "place": {
+            "description": "The resolved place id, or empty for every event.",
+            "type": "string"
+          },
+          "revisions": {
+            "description": "Revisions recorded across those events (each event's `revision` summed).",
+            "example": 96410,
+            "format": "int32",
+            "type": "integer"
+          },
+          "since": {
+            "description": "When the earliest of those events was first stored. Null when there are\nnone.",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "sources": {
+            "description": "Distinct sources those events came from.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "computedAt",
+          "events",
+          "layers",
+          "place",
+          "revisions",
+          "since",
+          "sources"
+        ],
+        "type": "object"
       },
       "v1SummaryDomain": {
         "description": "SummaryDomain is one subject area's status for the place.\n\nDomain inputs: `fire` = WILDFIRE events + the fire_weather condition;\n`evacuation` = EVACUATION; `weather` = WEATHER_ALERT; `roads` = ROAD_INCIDENT\nevents (not SCHEDULED roadwork) + the chain_control and road_segment\nconditions; `seismic` = EARTHQUAKE; `power` = POWER (including INFO\noutages); `burn` = BURN_STATUS; `comms` = MESH. A domain counts every one of\nits ACTIVE and SCHEDULED events at any severity, but a condition only when it\nis above INFO (an open road or normal fire weather is not \"active\").",
