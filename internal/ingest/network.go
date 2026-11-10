@@ -1305,8 +1305,12 @@ func inAnyBounds(lat, lng float64, boxes []config.GeoBounds) bool {
 	return false
 }
 
-// meshHeadline renders a card-safe one-liner: "<name> (<role>)", falling back
-// to a short key when a node has no name.
+// meshHeadline renders a card-safe one-liner: the node's name, falling back
+// to a short key when a node has no name. The mesh layer is relay
+// infrastructure, so a repeater is the expected case and its role is noise
+// in every list, header and map label ("Bald Mountain Solar (repeater)"):
+// only a role that is unusual on this layer is named, "<name> (room server)".
+// The role is always on `mesh.nodeType` and `category`.
 func meshHeadline(name, nodeType, key string) string {
 	if name == "" {
 		short := key
@@ -1315,10 +1319,10 @@ func meshHeadline(name, nodeType, key string) string {
 		}
 		name = "node " + short
 	}
-	if nodeType == "" {
+	if nodeType == "" || nodeType == meshcore.RoleRepeater {
 		return name
 	}
-	return fmt.Sprintf("%s (%s)", name, nodeType)
+	return fmt.Sprintf("%s (%s)", name, strings.ReplaceAll(nodeType, "_", " "))
 }
 
 func firstNonBlank(vals ...string) string {

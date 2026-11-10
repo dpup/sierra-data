@@ -103,7 +103,7 @@ func TestNetworkPollBuildsEvents(t *testing.T) {
 	assert.Equal(t, gridv1.Layer_MESH, ev.Layer)
 	assert.Equal(t, gridv1.Severity_INFO, ev.Severity)
 	assert.Equal(t, gridv1.EventStatus_ACTIVE, ev.Status)
-	assert.Equal(t, "Murphys Ridge (repeater)", ev.Headline)
+	assert.Equal(t, "Murphys Ridge", ev.Headline, "a repeater is the norm on this layer; its role is not in the headline")
 	assert.Equal(t, "repeater", ev.Category)
 	// AreaLabel is a description of WHERE, and a mesh node has no such
 	// description — only coordinates. It used to be set to the node's name,
@@ -262,6 +262,12 @@ func TestNetworkPollEmptyScope(t *testing.T) {
 func TestNetworkHeadlineFallback(t *testing.T) {
 	assert.Equal(t, "node abcdef12 (companion)",
 		meshHeadline("", meshcore.RoleCompanion, "abcdef1234567890"))
+}
+
+func TestNetworkHeadlineNamesOnlyUnusualRoles(t *testing.T) {
+	assert.Equal(t, "Bald Mountain Solar", meshHeadline("Bald Mountain Solar", meshcore.RoleRepeater, "k"))
+	assert.Equal(t, "Bald Mountain Solar", meshHeadline("Bald Mountain Solar", "", "k"))
+	assert.Equal(t, "Murphys BBS (room server)", meshHeadline("Murphys BBS", meshcore.RoleRoomServer, "k"))
 }
 
 // GPS noise is not movement.

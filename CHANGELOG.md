@@ -22,6 +22,18 @@ longer exist: `/api/v1` originally hosted a different hand-built REST surface,
 replaced by a snake_case `/v1` surface on 2026-07-05, which was folded back onto
 the proto-defined `/api/v1` gateway on 2026-07-09.
 
+## 2026-11-10
+
+### Mesh headlines drop the "(repeater)" suffix
+
+A mesh event's headline is now the node's name ("Bald Mountain Solar"), not
+"Bald Mountain Solar (repeater)". The mesh layer tracks relay infrastructure,
+so the role was noise in lists and map labels. A role that is unusual on the
+layer is still named, with a space instead of an underscore: "Murphys BBS (room
+server)", "node abcdef12 (companion)". The role stays on `mesh.nodeType` and
+`category`. The headline is content-hashed, so each repeater gets one new
+revision when this deploys.
+
 ## 2026-11-09
 
 ### CHP incidents carry their numbered log (`roadIncident.log`)
