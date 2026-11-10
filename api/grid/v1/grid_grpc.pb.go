@@ -19,22 +19,23 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	GridService_ListEvents_FullMethodName       = "/grid.v1.GridService/ListEvents"
-	GridService_GetEvent_FullMethodName         = "/grid.v1.GridService/GetEvent"
-	GridService_GetEventTimeline_FullMethodName = "/grid.v1.GridService/GetEventTimeline"
-	GridService_GetEventHistory_FullMethodName  = "/grid.v1.GridService/GetEventHistory"
-	GridService_ListHistory_FullMethodName      = "/grid.v1.GridService/ListHistory"
-	GridService_ListPlaces_FullMethodName       = "/grid.v1.GridService/ListPlaces"
-	GridService_ResolvePlace_FullMethodName     = "/grid.v1.GridService/ResolvePlace"
-	GridService_GetPlace_FullMethodName         = "/grid.v1.GridService/GetPlace"
-	GridService_GetPlaceSummary_FullMethodName  = "/grid.v1.GridService/GetPlaceSummary"
-	GridService_ListScanners_FullMethodName     = "/grid.v1.GridService/ListScanners"
-	GridService_ListCameras_FullMethodName      = "/grid.v1.GridService/ListCameras"
-	GridService_GetConditions_FullMethodName    = "/grid.v1.GridService/GetConditions"
-	GridService_ListSources_FullMethodName      = "/grid.v1.GridService/ListSources"
-	GridService_GetStats_FullMethodName         = "/grid.v1.GridService/GetStats"
-	GridService_GetRoadHistory_FullMethodName   = "/grid.v1.GridService/GetRoadHistory"
-	GridService_GetMeshTelemetry_FullMethodName = "/grid.v1.GridService/GetMeshTelemetry"
+	GridService_ListEvents_FullMethodName        = "/grid.v1.GridService/ListEvents"
+	GridService_GetEvent_FullMethodName          = "/grid.v1.GridService/GetEvent"
+	GridService_GetEventTimeline_FullMethodName  = "/grid.v1.GridService/GetEventTimeline"
+	GridService_ListRelatedEvents_FullMethodName = "/grid.v1.GridService/ListRelatedEvents"
+	GridService_GetEventHistory_FullMethodName   = "/grid.v1.GridService/GetEventHistory"
+	GridService_ListHistory_FullMethodName       = "/grid.v1.GridService/ListHistory"
+	GridService_ListPlaces_FullMethodName        = "/grid.v1.GridService/ListPlaces"
+	GridService_ResolvePlace_FullMethodName      = "/grid.v1.GridService/ResolvePlace"
+	GridService_GetPlace_FullMethodName          = "/grid.v1.GridService/GetPlace"
+	GridService_GetPlaceSummary_FullMethodName   = "/grid.v1.GridService/GetPlaceSummary"
+	GridService_ListScanners_FullMethodName      = "/grid.v1.GridService/ListScanners"
+	GridService_ListCameras_FullMethodName       = "/grid.v1.GridService/ListCameras"
+	GridService_GetConditions_FullMethodName     = "/grid.v1.GridService/GetConditions"
+	GridService_ListSources_FullMethodName       = "/grid.v1.GridService/ListSources"
+	GridService_GetStats_FullMethodName          = "/grid.v1.GridService/GetStats"
+	GridService_GetRoadHistory_FullMethodName    = "/grid.v1.GridService/GetRoadHistory"
+	GridService_GetMeshTelemetry_FullMethodName  = "/grid.v1.GridService/GetMeshTelemetry"
 )
 
 // GridServiceClient is the client API for GridService service.
@@ -84,6 +85,20 @@ type GridServiceClient interface {
 	// to its 500 most recent revisions (`truncated` says when there were more).
 	// Supports ETag / If-None-Match.
 	GetEventTimeline(ctx context.Context, in *GetEventTimelineRequest, opts ...grpc.CallOption) (*EventTimeline, error)
+	// List events related to one event.
+	//
+	// Events about the same situation, each with the rule that matched, a
+	// plain reason and a confidence: a fire's evacuation zones (named in the
+	// Cal OES notes, or the nearest fire to a zone issued soon after it
+	// started), outages PG&E attributes to it, shutoffs and road reports near
+	// it; shutoffs, outages and road reports inside a wind, fire-weather or
+	// winter storm product's area while it is in effect. Works from either
+	// side: an evacuation lists its fire. Relations state what the sources say
+	// or how events coincide, never a cause the sources do not state. Computed
+	// at read time from the stored events (every status), so rules can change
+	// without a migration. Related events carry no shapes (as
+	// `geometryFormat=NONE`); fetch one for its geometry.
+	ListRelatedEvents(ctx context.Context, in *ListRelatedEventsRequest, opts ...grpc.CallOption) (*RelatedEventList, error)
 	// List one event's revisions.
 	//
 	// Every stored revision of one event, newest first, each a full snapshot. A
@@ -233,6 +248,16 @@ func (c *gridServiceClient) GetEventTimeline(ctx context.Context, in *GetEventTi
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(EventTimeline)
 	err := c.cc.Invoke(ctx, GridService_GetEventTimeline_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gridServiceClient) ListRelatedEvents(ctx context.Context, in *ListRelatedEventsRequest, opts ...grpc.CallOption) (*RelatedEventList, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RelatedEventList)
+	err := c.cc.Invoke(ctx, GridService_ListRelatedEvents_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -416,6 +441,20 @@ type GridServiceServer interface {
 	// to its 500 most recent revisions (`truncated` says when there were more).
 	// Supports ETag / If-None-Match.
 	GetEventTimeline(context.Context, *GetEventTimelineRequest) (*EventTimeline, error)
+	// List events related to one event.
+	//
+	// Events about the same situation, each with the rule that matched, a
+	// plain reason and a confidence: a fire's evacuation zones (named in the
+	// Cal OES notes, or the nearest fire to a zone issued soon after it
+	// started), outages PG&E attributes to it, shutoffs and road reports near
+	// it; shutoffs, outages and road reports inside a wind, fire-weather or
+	// winter storm product's area while it is in effect. Works from either
+	// side: an evacuation lists its fire. Relations state what the sources say
+	// or how events coincide, never a cause the sources do not state. Computed
+	// at read time from the stored events (every status), so rules can change
+	// without a migration. Related events carry no shapes (as
+	// `geometryFormat=NONE`); fetch one for its geometry.
+	ListRelatedEvents(context.Context, *ListRelatedEventsRequest) (*RelatedEventList, error)
 	// List one event's revisions.
 	//
 	// Every stored revision of one event, newest first, each a full snapshot. A
@@ -550,6 +589,9 @@ func (UnimplementedGridServiceServer) GetEvent(context.Context, *GetEventRequest
 func (UnimplementedGridServiceServer) GetEventTimeline(context.Context, *GetEventTimelineRequest) (*EventTimeline, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetEventTimeline not implemented")
 }
+func (UnimplementedGridServiceServer) ListRelatedEvents(context.Context, *ListRelatedEventsRequest) (*RelatedEventList, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListRelatedEvents not implemented")
+}
 func (UnimplementedGridServiceServer) GetEventHistory(context.Context, *GetEventHistoryRequest) (*EventRevisionList, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetEventHistory not implemented")
 }
@@ -660,6 +702,24 @@ func _GridService_GetEventTimeline_Handler(srv interface{}, ctx context.Context,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(GridServiceServer).GetEventTimeline(ctx, req.(*GetEventTimelineRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _GridService_ListRelatedEvents_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListRelatedEventsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GridServiceServer).ListRelatedEvents(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GridService_ListRelatedEvents_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GridServiceServer).ListRelatedEvents(ctx, req.(*ListRelatedEventsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -916,6 +976,10 @@ var GridService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetEventTimeline",
 			Handler:    _GridService_GetEventTimeline_Handler,
+		},
+		{
+			MethodName: "ListRelatedEvents",
+			Handler:    _GridService_ListRelatedEvents_Handler,
 		},
 		{
 			MethodName: "GetEventHistory",

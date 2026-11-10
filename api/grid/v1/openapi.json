@@ -665,6 +665,60 @@
         ]
       }
     },
+    "/api/v1/events/{id}/related": {
+      "get": {
+        "description": "Events about the same situation, each with the rule that matched, a\nplain reason and a confidence: a fire's evacuation zones (named in the\nCal OES notes, or the nearest fire to a zone issued soon after it\nstarted), outages PG&E attributes to it, shutoffs and road reports near\nit; shutoffs, outages and road reports inside a wind, fire-weather or\nwinter storm product's area while it is in effect. Works from either\nside: an evacuation lists its fire. Relations state what the sources say\nor how events coincide, never a cause the sources do not state. Computed\nat read time from the stored events (every status), so rules can change\nwithout a migration. Related events carry no shapes (as\n`geometryFormat=NONE`); fetch one for its geometry.",
+        "operationId": "GridService_ListRelatedEvents",
+        "parameters": [
+          {
+            "description": "Event id, e.g. `calfire:e51208a8-ae10-49ef-b719-60ba424dda40`.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "x-example": "calfire:e51208a8-ae10-49ef-b719-60ba424dda40"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/v1RelatedEventList"
+                }
+              }
+            },
+            "description": "A successful response."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "NOT_FOUND: no event has this id."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              }
+            },
+            "description": "An unexpected error response."
+          }
+        },
+        "summary": "List events related to one event.",
+        "tags": [
+          "Events"
+        ]
+      }
+    },
     "/api/v1/events/{id}/timeline": {
       "get": {
         "description": "What happened and when, in time order, with each entry marked by whose\nclock it is on. `SOURCE` entries are times the upstream stated: when CHP\ntook the report and each line of its log, when a fire started, when a\nclosure was planned and set up, when an alert takes effect and ends,\nwhen a mesh node was last heard. `GRID` entries are when the Grid\nrecorded something: first stored, a status change (resolved, expired,\nback again), a change to severity or a tracked figure (fire size and\ncontainment, evacuation level, customers out). Use this instead of\ninferring times from revision stamps. Built from the current event and up\nto its 500 most recent revisions (`truncated` says when there were more).\nSupports ETag / If-None-Match.",
@@ -6951,6 +7005,70 @@
           "sourceUrl"
         ],
         "type": "object"
+      },
+      "v1RelatedEvent": {
+        "description": "RelatedEvent is one related event and why.",
+        "properties": {
+          "confidence": {
+            "$ref": "#/components/schemas/v1RelationConfidence"
+          },
+          "event": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/v1Event"
+              }
+            ],
+            "description": "The related event, without its shape (bbox and centroid only)."
+          },
+          "reason": {
+            "description": "One plain sentence, e.g. \"Cal OES notes name the Ross Fire\".",
+            "example": "Cal OES notes name the Ross Fire",
+            "type": "string"
+          },
+          "rule": {
+            "description": "The rule that matched, e.g. `fire-evacuation-named`,\n`fire-evacuation-near`, `fire-outage-cause`, `fire-shutoff-near`,\n`fire-road-named`, `weather-shutoff`, `weather-outage`, `weather-road`.\nNew rules may appear; treat unknown names generically.",
+            "example": "fire-evacuation-named",
+            "type": "string"
+          }
+        },
+        "required": [
+          "confidence",
+          "event",
+          "reason",
+          "rule"
+        ],
+        "type": "object"
+      },
+      "v1RelatedEventList": {
+        "description": "RelatedEventList is the events related to one event, strongest first.",
+        "properties": {
+          "eventId": {
+            "type": "string"
+          },
+          "related": {
+            "items": {
+              "$ref": "#/components/schemas/v1RelatedEvent"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "eventId",
+          "related"
+        ],
+        "type": "object"
+      },
+      "v1RelationConfidence": {
+        "default": "RELATION_CONFIDENCE_UNSPECIFIED",
+        "description": "RelationConfidence is how strongly a relation is supported.\n\n - RELATION_CONTEXT: Coincidence in time and place worth showing as context; no link claimed\n(an outage inside a High Wind Warning's area).\n - RELATION_LOW: Plausible from time and place alone (a shutoff near a burning fire).\n - RELATION_MEDIUM: Time and place plus a corroborating fact (PG&E lists the cause as fire),\nor the nearest fire to an evacuation zone issued soon after it started.\n - RELATION_HIGH: A source names the other event (Cal OES notes name the fire).",
+        "enum": [
+          "RELATION_CONFIDENCE_UNSPECIFIED",
+          "RELATION_CONTEXT",
+          "RELATION_LOW",
+          "RELATION_MEDIUM",
+          "RELATION_HIGH"
+        ],
+        "type": "string"
       },
       "v1ResolvePlaceResponse": {
         "description": "ResolvePlaceResponse lists the places containing a point.",

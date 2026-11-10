@@ -79,3 +79,16 @@ func TestTypicalRoadMinutes(t *testing.T) {
 	_, _, ok, _ = s.TypicalRoadMinutes(ctx, "r", roadOpen, fri, from, to, loc, 100)
 	assert.False(t, ok)
 }
+
+func TestFirstIngested(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedSource(t, s, "usgs")
+	ev := testEvent("usgs:1", 0, 0, "M3")
+	_, err := s.UpsertEvent(ctx, ev)
+	require.NoError(t, err)
+	got, err := s.FirstIngested(ctx, []string{"usgs:1", "nope"})
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.WithinDuration(t, time.Now(), got["usgs:1"], time.Minute)
+}

@@ -1464,6 +1464,30 @@ service GridService {
     };
   }
 
+  // List events related to one event.
+  //
+  // Events about the same situation, each with the rule that matched, a
+  // plain reason and a confidence: a fire's evacuation zones (named in the
+  // Cal OES notes, or the nearest fire to a zone issued soon after it
+  // started), outages PG&E attributes to it, shutoffs and road reports near
+  // it; shutoffs, outages and road reports inside a wind, fire-weather or
+  // winter storm product's area while it is in effect. Works from either
+  // side: an evacuation lists its fire. Relations state what the sources say
+  // or how events coincide, never a cause the sources do not state. Computed
+  // at read time from the stored events (every status), so rules can change
+  // without a migration. Related events carry no shapes (as
+  // `geometryFormat=NONE`); fetch one for its geometry.
+  rpc ListRelatedEvents(ListRelatedEventsRequest) returns (RelatedEventList) {
+    option (google.api.http) = {get: "/api/v1/events/{id}/related"};
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      tags: "Events"
+      responses: {
+        key: "404"
+        value: {description: "NOT_FOUND: no event has this id."}
+      }
+    };
+  }
+
   // List one event's revisions.
   //
   // Every stored revision of one event, newest first, each a full snapshot. A
@@ -2148,6 +2172,47 @@ message GetEventRequest {
 }
 
 // GetEventHistoryRequest pages one event's revisions.
+// ListRelatedEventsRequest names one event.
+message ListRelatedEventsRequest {
+  // Event id, e.g. `calfire:e51208a8-ae10-49ef-b719-60ba424dda40`.
+  string id = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"calfire:e51208a8-ae10-49ef-b719-60ba424dda40\""}];
+}
+
+// RelatedEventList is the events related to one event, strongest first.
+message RelatedEventList {
+  string event_id = 1;
+  repeated RelatedEvent related = 2;
+}
+
+// RelationConfidence is how strongly a relation is supported.
+enum RelationConfidence {
+  RELATION_CONFIDENCE_UNSPECIFIED = 0;
+  // Coincidence in time and place worth showing as context; no link claimed
+  // (an outage inside a High Wind Warning's area).
+  RELATION_CONTEXT = 1;
+  // Plausible from time and place alone (a shutoff near a burning fire).
+  RELATION_LOW = 2;
+  // Time and place plus a corroborating fact (PG&E lists the cause as fire),
+  // or the nearest fire to an evacuation zone issued soon after it started.
+  RELATION_MEDIUM = 3;
+  // A source names the other event (Cal OES notes name the fire).
+  RELATION_HIGH = 4;
+}
+
+// RelatedEvent is one related event and why.
+message RelatedEvent {
+  // The related event, without its shape (bbox and centroid only).
+  Event event = 1 [(google.api.field_behavior) = REQUIRED];
+  // The rule that matched, e.g. `fire-evacuation-named`,
+  // `fire-evacuation-near`, `fire-outage-cause`, `fire-shutoff-near`,
+  // `fire-road-named`, `weather-shutoff`, `weather-outage`, `weather-road`.
+  // New rules may appear; treat unknown names generically.
+  string rule = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"fire-evacuation-named\""}];
+  RelationConfidence confidence = 3;
+  // One plain sentence, e.g. "Cal OES notes name the Ross Fire".
+  string reason = 4 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"Cal OES notes name the Ross Fire\""}];
+}
+
 // GetEventTimelineRequest names one event.
 message GetEventTimelineRequest {
   // Event id, e.g. `chp:261106ST0341`.

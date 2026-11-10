@@ -406,3 +406,34 @@ func (s *Store) EventRevisionAt(ctx context.Context, id string, revision uint32)
 	}
 	return rev, err
 }
+
+// FirstIngested returns when each event's revision 1 was stored, for the ids
+// that have one. It reads only the revisions' leading columns, never a blob.
+func (s *Store) FirstIngested(ctx context.Context, ids []string) (map[string]time.Time, error) {
+	out := make(map[string]time.Time, len(ids))
+	for start := 0; start < len(ids); start += 500 {
+		chunk := ids[start:min(start+500, len(ids))]
+		args := make([]any, len(chunk))
+		for i, id := range chunk {
+			args[i] = id
+		}
+		rows, err := s.db.QueryContext(ctx, `SELECT event_id, ingested_at FROM event_revisions
+			WHERE revision = 1 AND event_id IN (`+placeholders(len(chunk))+`)`, args...)
+		if err != nil {
+			return nil, fmt.Errorf("store: first ingested: %w", err)
+		}
+		for rows.Next() {
+			var id string
+			var at int64
+			if err := rows.Scan(&id, &at); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			out[id] = time.Unix(at, 0).UTC()
+		}
+		if err := rows.Close(); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}

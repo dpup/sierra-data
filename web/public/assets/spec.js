@@ -112,6 +112,14 @@ export const ENDPOINTS = [
     examples: [],
   },
   {
+    path: '/api/v1/events/{id}/related',
+    blurb: 'Events about the same situation, each with a reason and a confidence.',
+    detail:
+      'Returns RelatedEventList: related[] of {event, rule, confidence, reason}, strongest first. A fire lists its evacuation zones (named in the Cal OES notes, or the nearest fire to a zone issued soon after it started), outages PG&E attributes to it, nearby shutoffs and road reports naming it; a wind, fire-weather or winter storm alert lists the shutoffs, outages and road reports inside its area while in effect. Works from either side. Confidence is RELATION_HIGH (a source names the other event), MEDIUM, LOW, or CONTEXT (coincidence only). Relations never claim a cause the sources do not state. Related events carry no shapes.',
+    params: [],
+    examples: [],
+  },
+  {
     path: '/api/v1/events/{id}/timeline',
     blurb: 'What happened and when, each moment marked by whose clock it is on.',
     detail:

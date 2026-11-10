@@ -215,6 +215,28 @@ closure, which has no position). Draw SPAN and POINT where they are; for
 UNKNOWN, say the extent is not known rather than painting the whole section
 closed. Absent when the segment is OPEN.
 
+### New: `GET /api/v1/events/{id}/related`
+
+Events about the same situation as one event, strongest first:
+`related[]` of `{event, rule, confidence, reason}`. Rules today:
+
+| rule | pairs | confidence |
+| --- | --- | --- |
+| `fire-evacuation-named` | fire and an evacuation zone whose Cal OES notes name it | HIGH |
+| `fire-road-named` | fire and a road report naming it | HIGH |
+| `fire-evacuation-near` | fire and a zone within 8 km issued up to 72 h after it started (nearest fire only) | MEDIUM |
+| `fire-outage-cause` | fire and an outage within 10 km that PG&E attributes to fire | MEDIUM |
+| `fire-shutoff-near` | fire and a PSPS shutoff within 25 km while it burned | LOW |
+| `weather-shutoff` | Red Flag / Fire Weather / wind product and a shutoff inside its area while in effect | LOW |
+| `weather-outage` | wind, winter storm or severe storm product and an unplanned outage inside its area | CONTEXT |
+| `weather-road` | the same products and a road report (not planned work) inside its area | CONTEXT |
+
+It works from either side (an evacuation lists its fire). `reason` is one
+plain sentence ("Cal OES notes name the Ross Fire"); relations never claim a
+cause the sources do not state. Related events carry no shapes. New rules
+will appear over time: treat unknown `rule` names generically. Relations are
+computed when asked, so they reflect the current store.
+
 ## 2026-11-09
 
 ### CHP incidents carry their numbered log (`roadIncident.log`)
