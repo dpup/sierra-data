@@ -853,6 +853,14 @@ func (s *Store) matchPlaces(tx *sql.Tx, ev *gridv1.Event) ([]string, error) {
 		minLat: evMinLat, minLng: evMinLng, maxLat: evMaxLat, maxLng: evMaxLng,
 		pointLike: pointLike, polygonal: evPolygonal,
 	}
+	if ev.GetLayer() == gridv1.Layer_WEATHER_ALERT {
+		// An alert's area is its NWS zones, drawn independently of the
+		// Census counties: the two outlines of one border overlap in
+		// slivers, which Intersects counts. Measured on the STO zones:
+		// real county overlaps are 11-71% of the smaller shape, slivers
+		// (Amador, Mariposa) at most 0.4%.
+		eg.minOverlap = alertMinOverlap
+	}
 
 	var matched []string
 	for _, pl := range places {
@@ -872,7 +880,14 @@ type eventGeo struct {
 	centroid                       *gridv1.LatLng
 	minLat, minLng, maxLat, maxLng float64
 	pointLike, polygonal           bool
+	// minOverlap, when set, replaces the touch-counts Intersects test with
+	// an overlap of at least this fraction of the smaller shape.
+	minOverlap float64
 }
+
+// alertMinOverlap is the share of the smaller shape a weather alert's area
+// and a place must overlap for the alert to attach by overlap alone.
+const alertMinOverlap = 0.02
 
 // matches applies the geometry attachment rules documented on matchPlaces. The
 // wildfire proximity rule is separate and layered on by the caller.
@@ -908,7 +923,13 @@ func (e eventGeo) matches(pl parsedPlace) bool {
 	if geojson.PointInGeometry(pl.centLat, pl.centLng, e.geom) {
 		return true
 	}
-	return pl.polygonal && geojson.Intersects(e.geom, pl.geom) // actual overlap, not just bbox
+	if !pl.polygonal {
+		return false
+	}
+	if e.minOverlap > 0 {
+		return geojson.OverlapFraction(e.geom, pl.geom) >= e.minOverlap
+	}
+	return geojson.Intersects(e.geom, pl.geom) // actual overlap, not just bbox
 }
 
 // wildfireBufferedKind reports whether a place kind participates in the wildfire

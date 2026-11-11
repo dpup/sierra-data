@@ -1110,3 +1110,41 @@ func TestUpsertPersistsBurnObservationOnHashEqual(t *testing.T) {
 	require.NoError(t, s.db.QueryRow(`SELECT observed_at FROM events WHERE id = ?`, "burn:calaveras-county").Scan(&col))
 	assert.Equal(t, next.Unix(), col, "index column follows the blob")
 }
+
+// A weather alert's area (its NWS zones) and a Census county are drawn
+// separately, so a shared border overlaps in a sliver. The alert attaches to
+// the county it covers, not to its neighbour across the sliver; a fire with
+// the same outline still over-attaches, by design.
+func TestWeatherAlertNeedsRealOverlap(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	seedSource(t, s, "nws")
+	seedSource(t, s, "firis")
+	require.NoError(t, s.UpsertPlace(ctx, testPlace("county:tuolumne", "tuolumne", "Tuolumne County",
+		gridv1.PlaceKind_COUNTY, polyGeometry(37.8, -120.5, 38.3, -119.9))))
+	// Mariposa's north edge lies 0.003° inside the zone's south edge.
+	require.NoError(t, s.UpsertPlace(ctx, testPlace("county:mariposa", "mariposa", "Mariposa County",
+		gridv1.PlaceKind_COUNTY, polyGeometry(37.3, -120.6, 37.803, -119.8))))
+	zone := polyGeometry(37.8, -120.5, 38.3, -119.9)
+
+	alert := testEvent("nws:alert", gridv1.Severity_MODERATE, gridv1.EventStatus_ACTIVE, "Winter Storm Warning")
+	alert.Layer = gridv1.Layer_WEATHER_ALERT
+	alert.Provenance.SourceId = "nws"
+	alert.Geometry = zone
+	_, err := s.UpsertEvent(ctx, alert)
+	require.NoError(t, err)
+	got, err := s.GetEvent(ctx, "nws:alert")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"county:tuolumne"}, got.GetPlaceIds())
+
+	fire := testEvent("firis:edge", gridv1.Severity_SEVERE, gridv1.EventStatus_ACTIVE, "Edge Fire")
+	fire.Layer = gridv1.Layer_WILDFIRE
+	fire.Provenance.SourceId = "firis"
+	fire.Geometry = polyGeometry(37.8, -120.5, 38.3, -119.9)
+	_, err = s.UpsertEvent(ctx, fire)
+	require.NoError(t, err)
+	got, err = s.GetEvent(ctx, "firis:edge")
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"county:tuolumne", "county:mariposa"}, got.GetPlaceIds(),
+		"perimeters keep the over-attach rule")
+}

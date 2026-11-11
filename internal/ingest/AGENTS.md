@@ -865,7 +865,11 @@ and cached per zone for a week. Three rules:
 - **No refs, no shape.** Never guess the zone type from the UGC code.
 - **Geometry changes place attachment**: the store unions geometric matches
   with the preset area ids, so an alert now also attaches to the counties and
-  towns its zones cover.
+  towns its zones cover. Covers, not touches: zone and county outlines are
+  drawn separately and overlap in slivers along shared borders, so an alert
+  attaches to a polygon place by overlap only when it is at least 2% of the
+  smaller shape (`alertMinOverlap`; STO zones: real overlaps 11-71%, slivers
+  into Amador and Mariposa at most 0.4%).
 
 ## Enhancement budget + carry-forward
 
