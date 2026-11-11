@@ -90,7 +90,8 @@ const payloadAdvert = 4
 // Gateway nodes' own adverts go out the same way, so the Grid can establish
 // a gateway node no broker hears. Each is exported fresh from a successful
 // read, so it is true presence; it is still sent only when its content
-// (role, location, name) changed or the last one is SelfAdvertResend old.
+// (role, location to about 100 m, name) changed or the last one is
+// SelfAdvertResend old.
 func (p *Poller) pushAdverts(ctx context.Context) {
 	type pending struct {
 		st  *nodeState
@@ -108,8 +109,8 @@ func (p *Poller) pushAdverts(ctx context.Context) {
 		if st.advert == nil {
 			continue
 		}
-		same := st.advertSent != nil &&
-			bytes.Equal(selfAdvertOf(st.advert, st.pubkey), selfAdvertOf(st.advertSent, st.pubkey))
+		cur, sent := selfAdvertOf(st.advert, st.pubkey), selfAdvertOf(st.advertSent, st.pubkey)
+		same := st.advertSent != nil && (cur == nil) == (sent == nil) && selfAdvertKey(cur) == selfAdvertKey(sent)
 		if !same || now.Sub(st.advertSentAt) >= p.cfg.SelfAdvertResend {
 			out = append(out, pending{st, st.advert})
 		}

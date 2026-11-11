@@ -32,8 +32,8 @@ The companion node behind every SIERRA mesh-relay gateway is now a `MESH` event
 only gateways opted in one by one were read, and their nodes appeared only if
 a broker happened to hear them advertise. Now the relay forwards each gateway
 node's own signed advert, so it appears even when no broker hears it. A node
-that advertises no location has no geometry; none is invented. Additive: no
-client change.
+that has never advertised a location has no geometry; none is invented. (One
+that stops sharing it keeps its last position.) Additive: no client change.
 
 ## 2026-11-10
 

@@ -180,3 +180,29 @@ func selfAdvertOf(raw []byte, pubkey string) []byte {
 	}
 	return app
 }
+
+// advertFlagLocation is the app-data flag for a following lat/lon pair
+// (int32 micro-degrees each), as internal/clients/meshcore decodes it.
+const advertFlagLocation = 0x10
+
+// selfAdvertKey is what a self-advert's app data says, for change detection:
+// the role flags, the location rounded to 0.001° (about 100 m), and every
+// byte after the location (feature words, name). A GPS node's position
+// wanders a few metres between exports; that alone isn't a change worth
+// forwarding.
+func selfAdvertKey(app []byte) string {
+	if len(app) == 0 || app[0]&advertFlagLocation == 0 || len(app) < 9 {
+		return string(app)
+	}
+	coarse := func(b []byte) int32 {
+		v := int32(binary.LittleEndian.Uint32(b))
+		q := v / 1000
+		if r := v % 1000; r >= 500 {
+			q++
+		} else if r <= -500 {
+			q--
+		}
+		return q
+	}
+	return fmt.Sprintf("%02x|%d,%d|%x", app[0], coarse(app[1:5]), coarse(app[5:9]), app[9:])
+}

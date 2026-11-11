@@ -38,6 +38,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -66,8 +67,11 @@ type Gateways interface {
 
 // Config configures a Poller.
 type Config struct {
-	// ExcludeGateways are never polled or published. Every other paired
-	// gateway is: pairing with SIERRA is the consent. Published telemetry can
+	// ExcludeGateways' radios are never read or published as gateway nodes,
+	// through them or through any other gateway pinning the same radio.
+	// Every other paired gateway is: pairing with SIERRA is the consent.
+	// Exclusion is about publishing the gateway's own radio; the
+	// shared-repeater checks may still use an excluded gateway. Published telemetry can
 	// let someone match a node to its gateway, which the relay's public status
 	// alone does not reveal.
 	ExcludeGateways []string
@@ -136,8 +140,9 @@ type nodeState struct {
 	// accepted, and when.
 	advert, advertSent []byte
 	advertSentAt       time.Time
-	// via is the gateway that last reached a gateway node, for the log.
-	via string
+	// via is the gateway last tried for a gateway node, for the log; okVia
+	// the one that last read it.
+	via, okVia string
 }
 
 // New returns a Poller. reps, when not nil, adds the relay's shared
@@ -265,10 +270,20 @@ func (p *Poller) Cycle(ctx context.Context) {
 // radios groups the gateways to poll by pinned key, each group ordered most
 // recently seen first (then by name), so the gateway a radio is on now is
 // tried before one it left.
+//
+// Exclusion is by radio: excluding a gateway also stops reading its pinned
+// radio through any other gateway that pins the same one. The host asked
+// about their radio, not about a gateway name.
 func (p *Poller) radios(ctx context.Context, recs []*meshrelay.GatewayRecord) map[string][]string {
 	excluded := map[string]bool{}
 	for _, gw := range p.cfg.ExcludeGateways {
 		excluded[gw] = true
+	}
+	excludedRadio := map[string]bool{}
+	for _, r := range recs {
+		if excluded[r.Name] && r.PinnedPubkey != "" {
+			excludedRadio[r.PinnedPubkey] = true
+		}
 	}
 	now := p.cfg.Now()
 	type cand struct {
@@ -277,7 +292,7 @@ func (p *Poller) radios(ctx context.Context, recs []*meshrelay.GatewayRecord) ma
 	}
 	groups := map[string][]cand{}
 	for _, r := range recs {
-		if r.PinnedPubkey == "" || excluded[r.Name] {
+		if r.PinnedPubkey == "" || excluded[r.Name] || excludedRadio[r.PinnedPubkey] {
 			continue
 		}
 		seen := r.LastSeen
@@ -313,17 +328,29 @@ const (
 )
 
 // pollRadio reads one radio through its gateways in order, stopping at the
-// first that reads it. If none does, any skip (busy, paused) means no attempt
-// is recorded: the radio is there but in use. Otherwise it is a failed
-// attempt.
+// first that reads it. If none does:
+//   - a gateway where someone holds the node (busy, preempted) or the relay
+//     is stopping means no attempt is recorded: the radio is there, in use;
+//   - a paused gateway does the same only if it is the gateway that last
+//     read this radio, or no other gateway failed. A pause says the host
+//     wants the node left alone, not that the radio is on that gateway, so it
+//     mustn't hide a radio that is really offline elsewhere;
+//   - otherwise it is a failed attempt.
 func (p *Poller) pollRadio(ctx context.Context, pubkey string, gws []string) {
 	start := p.cfg.Now()
+	p.mu.Lock()
+	var lastOK string
+	if st := p.nodes[pubkey]; st != nil {
+		lastOK = st.okVia
+	}
+	p.mu.Unlock()
 	var (
 		name, via, why string
 		sample         *Sample
 		advert         []byte
 		outcome        = outcomeFailed
-		skipped        bool
+		inUse, failed  bool
+		pausedHere     []string
 	)
 	for _, gw := range gws {
 		if ctx.Err() != nil {
@@ -331,15 +358,21 @@ func (p *Poller) pollRadio(ctx context.Context, pubkey string, gws []string) {
 		}
 		n, s, adv, o, w := p.read(ctx, gw, pubkey)
 		via, why = gw, w
-		if o == outcomeOK {
+		switch {
+		case o == outcomeOK:
 			name, sample, advert, outcome = n, s, adv, o
+		case o == outcomeSkipped && pausedCode(w):
+			pausedHere = append(pausedHere, gw)
+		case o == outcomeSkipped:
+			inUse = true
+		default:
+			failed = true
+		}
+		if outcome == outcomeOK {
 			break
 		}
-		if o == outcomeSkipped {
-			skipped = true
-		}
 	}
-	if outcome != outcomeOK && skipped {
+	if outcome != outcomeOK && (inUse || len(pausedHere) > 0 && (!failed || slices.Contains(pausedHere, lastOK))) {
 		outcome = outcomeSkipped
 	}
 
@@ -352,6 +385,7 @@ func (p *Poller) pollRadio(ctx context.Context, pubkey string, gws []string) {
 	switch outcome {
 	case outcomeOK:
 		st.lastAttempt, st.lastSuccess, st.sample = start, start, sample
+		st.okVia = via
 		st.advert = advert
 		if name != "" {
 			st.name = name
@@ -432,6 +466,12 @@ func skipCode(code string) bool {
 		return true
 	}
 	return false
+}
+
+// pausedCode is a skip because the host paused sharing (rather than someone
+// holding the node, or the relay stopping).
+func pausedCode(code string) bool {
+	return code == meshrelay.ReasonHostPaused || code == "node_"+meshrelay.NodePaused
 }
 
 // exchange is one leased conversation with a node.

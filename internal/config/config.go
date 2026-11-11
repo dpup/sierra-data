@@ -123,7 +123,9 @@ type MeshRelayTelemetryConfig struct {
 	// paired gateway is polled (pairing is the consent). It stays only so a
 	// leftover setting fails startup instead of being silently ignored.
 	Gateways []string `koanf:"gateways"`
-	// ExcludeGateways are never polled or published.
+	// ExcludeGateways' radios are never read or published as gateway nodes
+	// (through any gateway pinning them). Shared-repeater checks may still
+	// use these gateways.
 	ExcludeGateways []string `koanf:"excludeGateways"`
 	// GatewayStaleAfter skips gateways not seen for this long (7 days).
 	GatewayStaleAfter time.Duration `koanf:"gatewayStaleAfter"`

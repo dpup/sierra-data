@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -38,6 +39,31 @@ type harness struct {
 	relay *meshrelay.Relay
 	store *meshrelay.Store
 	base  string
+
+	mu      sync.Mutex
+	bridges map[string]*fakeBridgeConn // by gateway
+}
+
+// fakeBridgeConn is a connected fake bridge's socket, for sending control
+// messages from a test.
+type fakeBridgeConn struct {
+	mu   sync.Mutex
+	ws   *websocket.Conn
+	node *fakeNode
+}
+
+// setNodeState sends node_status, as a bridge does when its host pauses it.
+func (h *harness) setNodeState(gw, state string) {
+	h.t.Helper()
+	h.mu.Lock()
+	b := h.bridges[gw]
+	h.mu.Unlock()
+	require.NotNil(h.t, b, "no bridge for %s", gw)
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	// The node's fields sit beside "type" (meshproto.NodeStatus embeds Node).
+	require.NoError(h.t, b.ws.WriteJSON(map[string]any{"type": "node_status",
+		"state": state, "pubkey": b.node.pubkey, "name": b.node.name}))
 }
 
 func newHarness(t *testing.T) *harness {
@@ -98,6 +124,15 @@ type fakeNode struct {
 	mu       sync.Mutex
 	commands []byte // command bytes received, in order
 	clock    uint32 // advert timestamps: each export is a new one
+	// lat/lon in micro-degrees, advertised when hasLoc.
+	lat, lon int32
+	hasLoc   bool
+}
+
+func (n *fakeNode) setLocation(lat, lon int32) {
+	n.mu.Lock()
+	n.lat, n.lon, n.hasLoc = lat, lon, true
+	n.mu.Unlock()
 }
 
 // newSignedNode is a fakeNode with a real Ed25519 identity, so its adverts
@@ -121,10 +156,16 @@ func (n *fakeNode) setName(name string) {
 func (n *fakeNode) selfAdvert() []byte {
 	n.mu.Lock()
 	n.clock++
-	ts, name := n.clock, n.name
+	ts, name, lat, lon, hasLoc := n.clock, n.name, n.lat, n.lon, n.hasLoc
 	n.mu.Unlock()
 	pub := n.signer.Public().(ed25519.PublicKey)
-	app := append([]byte{0x81}, name...) // companion, name follows
+	app := []byte{0x81} // companion, name follows
+	if hasLoc {
+		app[0] |= advertFlagLocation
+		app = binary.LittleEndian.AppendUint32(app, uint32(lat))
+		app = binary.LittleEndian.AppendUint32(app, uint32(lon))
+	}
+	app = append(app, name...)
 	msg := append(append([]byte{}, pub...), binary.LittleEndian.AppendUint32(nil, ts)...)
 	sig := ed25519.Sign(n.signer, append(append([]byte{}, msg...), app...))
 	f := []byte{payloadAdvert<<2 | 0x01, 0x00} // flood ADVERT, no path
@@ -210,7 +251,14 @@ func (h *harness) bridge(gw string, node *fakeNode) func() {
 		"link":  map[string]any{"kind": "tcp"},
 		"node":  map[string]any{"state": "connected", "pubkey": node.pubkey, "name": node.name},
 	}))
-	var mu sync.Mutex
+	conn := &fakeBridgeConn{ws: ws, node: node}
+	h.mu.Lock()
+	if h.bridges == nil {
+		h.bridges = map[string]*fakeBridgeConn{}
+	}
+	h.bridges[gw] = conn
+	h.mu.Unlock()
+	mu := &conn.mu
 	go func() {
 		for {
 			kind, data, err := ws.ReadMessage()
@@ -571,4 +619,121 @@ func TestReportJSONSendsNullsExplicitly(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, bytes.Contains(b, []byte(`"battery_voltage":null`)), string(b))
 	assert.True(t, bytes.Contains(b, []byte(`"last_success":null`)), string(b))
+}
+
+func TestExcludingAGatewayExcludesItsRadioEverywhere(t *testing.T) {
+	h := newHarness(t)
+	grid := newFakeGrid(t)
+	// One radio, two gateways (bridge-dev and mission-gateway in production).
+	h.bridge("gw-old", &fakeNode{pubkey: pubkeyA, name: "Elmer", firmware: 9})
+	other := &fakeNode{pubkey: pubkeyA, name: "Elmer", firmware: 9}
+	h.bridge("gw-new", other)
+	h.bridge("gw-b", &fakeNode{pubkey: key("b"), name: "B", firmware: 9})
+
+	h.poller(grid, "gw-old").Cycle(h.ctx)
+
+	reps := grid.last(t)
+	require.Len(t, reps, 1)
+	assert.Equal(t, key("b"), reps[0]["id"], "the excluded radio isn't read through the other gateway")
+	other.mu.Lock()
+	defer other.mu.Unlock()
+	assert.Empty(t, other.commands)
+}
+
+func TestAPausedGatewayDoesNotHideAnOfflineRadio(t *testing.T) {
+	h := newHarness(t)
+	grid := newFakeGrid(t)
+	// The radio's own gateway is offline (paired, bridge never connected);
+	// another gateway still pins it, online but paused by its host.
+	require.NoError(t, h.store.CreateGateway("gw-offline", meshrelay.TokenHash("smb_x"), pubkeyA, "",
+		time.Now().Add(-time.Hour)))
+	h.bridge("gw-paused", &fakeNode{pubkey: pubkeyA, name: "Elmer", firmware: 9})
+	h.setNodeState("gw-paused", "paused")
+	h.waitPaused("gw-paused")
+
+	h.poller(grid).Cycle(h.ctx)
+
+	reps := grid.last(t)
+	require.Len(t, reps, 1, "a failed attempt, not a silent skip")
+	assert.Equal(t, false, reps[0]["online"])
+	assert.NotNil(t, reps[0]["last_attempt"])
+}
+
+func TestPausingTheGatewayThatHasTheRadioRecordsNoAttempt(t *testing.T) {
+	h := newHarness(t)
+	grid := newFakeGrid(t)
+	require.NoError(t, h.store.CreateGateway("gw-offline", meshrelay.TokenHash("smb_x"), pubkeyA, "",
+		time.Now().Add(-time.Hour)))
+	h.bridge("gw-home", &fakeNode{pubkey: pubkeyA, name: "Elmer", firmware: 9})
+	p := h.poller(grid)
+	p.Cycle(h.ctx)
+	first := grid.last(t)
+	require.Len(t, first, 1)
+	require.Equal(t, true, first[0]["online"])
+
+	// The host pauses the gateway that last read it: the host's right, not an
+	// outage, even though the other gateway pinning it is offline.
+	h.setNodeState("gw-home", "paused")
+	h.waitPaused("gw-home")
+	later := time.Now().Add(10 * time.Minute) // a recorded attempt would show
+	p.cfg.Now = func() time.Time { return later }
+	p.Cycle(h.ctx)
+	again := grid.last(t)
+	require.Len(t, again, 1)
+	require.NotNil(t, first[0]["last_attempt"])
+	assert.Equal(t, first[0]["last_attempt"], again[0]["last_attempt"], "no attempt recorded")
+	assert.Equal(t, first[0]["last_success"], again[0]["last_success"])
+}
+
+func TestGPSWanderIsNotAChangedAdvert(t *testing.T) {
+	h := newHarness(t)
+	grid := newFakeGrid(t)
+	node := newSignedNode(t, "SIERRA L2PRO")
+	node.setLocation(38_166_983, -120_405_619)
+	h.bridge("gw-a", node)
+	now := time.Now()
+	p := h.poller(grid)
+	p.cfg.Now = func() time.Time { return now }
+
+	p.Cycle(h.ctx)
+	require.Len(t, grid.packets(), 1)
+
+	node.setLocation(38_167_012, -120_405_588) // a few metres
+	now = now.Add(5 * time.Minute)
+	p.Cycle(h.ctx)
+	assert.Len(t, grid.packets(), 1, "GPS jitter isn't forwarded")
+
+	node.setLocation(38_180_000, -120_405_588) // about 1.5 km
+	now = now.Add(5 * time.Minute)
+	p.Cycle(h.ctx)
+	assert.Len(t, grid.packets(), 2, "a real move is")
+}
+
+func TestSelfAdvertKey(t *testing.T) {
+	loc := func(lat, lon int32, rest string) []byte {
+		b := []byte{0x91}
+		b = binary.LittleEndian.AppendUint32(b, uint32(lat))
+		b = binary.LittleEndian.AppendUint32(b, uint32(lon))
+		return append(b, rest...)
+	}
+	assert.Equal(t, selfAdvertKey(loc(38_166_983, -120_405_619, "n")), selfAdvertKey(loc(38_167_100, -120_405_550, "n")))
+	assert.NotEqual(t, selfAdvertKey(loc(38_166_983, -120_405_619, "n")), selfAdvertKey(loc(38_166_983, -120_405_619, "m")))
+	assert.NotEqual(t, selfAdvertKey(loc(38_166_983, -120_405_619, "n")), selfAdvertKey(loc(38_170_000, -120_405_619, "n")))
+	assert.Equal(t, selfAdvertKey([]byte{0x81, 'n'}), "\x81n")
+	assert.Equal(t, "", selfAdvertKey(nil))
+}
+
+// waitPaused waits until the relay refuses gw's node as paused.
+func (h *harness) waitPaused(gw string) {
+	h.t.Helper()
+	eventually(h.t, func() bool {
+		l, err := h.relay.Acquire(meshrelay.LeaseRequest{Gateway: gw, Client: "probe",
+			Role: meshrelay.RoleAgent, Holder: newHolder()})
+		if err == nil {
+			h.relay.Release(l)
+			return false
+		}
+		var u *meshrelay.UnavailableError
+		return errors.As(err, &u) && pausedCode(u.Code)
+	}, "gateway never paused")
 }
