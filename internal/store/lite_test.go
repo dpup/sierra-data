@@ -85,7 +85,7 @@ func TestLiteBackfillWalksPastUnreadableRows(t *testing.T) {
 	}
 	_, err := s.db.ExecContext(ctx, `DELETE FROM event_lite`)
 	require.NoError(t, err)
-	_, err = s.db.ExecContext(ctx, `UPDATE events SET proto = x'ffff' WHERE id = 'usgs:b'`)
+	_, err = s.db.ExecContext(ctx, `UPDATE events SET proto = '\xffff'::bytea WHERE id = 'usgs:b'`)
 	require.NoError(t, err)
 
 	var cursor string

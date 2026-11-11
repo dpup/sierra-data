@@ -41,8 +41,8 @@ func (s *Store) UpsertPlace(ctx context.Context, p *gridv1.Place) error {
 		}
 		if _, err := tx.Exec(`
 			INSERT INTO places (id, kind, name, slug, parent_id, proto)
-			VALUES (?, ?, ?, ?, ?, ?)
-			ON CONFLICT(id) DO UPDATE SET
+			VALUES ($1, $2, $3, $4, $5, $6)
+			ON CONFLICT (id) DO UPDATE SET
 			  kind = excluded.kind, name = excluded.name, slug = excluded.slug,
 			  parent_id = excluded.parent_id, proto = excluded.proto`,
 			p.GetId(), int32(p.GetKind()), p.GetName(), p.GetSlug(), parent, blob,
@@ -52,12 +52,11 @@ func (s *Store) UpsertPlace(ctx context.Context, p *gridv1.Place) error {
 		// Invalidate the parsed-geometry cache (held under mu, which inTx owns).
 		// Conservative on rollback: a stray invalidation only forces a rebuild.
 		s.placesGeoValid = false
-		// Same mutex, same conservatism: bumping this makes the next ingest tick
+		// Same transaction, same conservatism: bumping this makes the next ingest tick
 		// do a FULL reconcile, so an event that arrived before this place existed
 		// still attaches to it. A spurious bump costs one thorough tick; a missed
 		// one would leave attachments permanently stale.
-		s.placesVersion++
-		return nil
+		return bumpVersion(tx, versionPlaces, 1)
 	})
 }
 
@@ -66,17 +65,15 @@ func (s *Store) UpsertPlace(ctx context.Context, p *gridv1.Place) error {
 // match on name. Ordered by kind, name, id.
 func (s *Store) ListPlaces(ctx context.Context, kind gridv1.PlaceKind, q string) ([]*gridv1.Place, error) {
 	var sb strings.Builder
-	var args []any
-	sb.WriteString(`SELECT proto FROM places WHERE 1=1`)
+	var args sqlArgs
+	sb.WriteString(`SELECT proto FROM places WHERE true`)
 	if kind != gridv1.PlaceKind_PLACE_KIND_UNSPECIFIED {
-		sb.WriteString(` AND kind = ?`)
-		args = append(args, int32(kind))
+		sb.WriteString(` AND kind = ` + args.add(int32(kind)))
 	}
 	if q != "" {
-		// instr on lowered strings: substring semantics with no LIKE-wildcard
+		// strpos on lowered strings: substring semantics with no LIKE-wildcard
 		// escaping concerns.
-		sb.WriteString(` AND instr(lower(name), lower(?)) > 0`)
-		args = append(args, q)
+		sb.WriteString(` AND strpos(lower(name), lower(` + args.add(q) + `)) > 0`)
 	}
 	sb.WriteString(` ORDER BY kind, name, id`)
 
@@ -97,7 +94,7 @@ func (s *Store) GetPlace(ctx context.Context, slugOrID string) (*gridv1.Place, e
 		column = "id"
 	}
 	var blob []byte
-	err := s.db.QueryRowContext(ctx, `SELECT proto FROM places WHERE `+column+` = ?`, slugOrID).Scan(&blob)
+	err := s.db.QueryRowContext(ctx, `SELECT proto FROM places WHERE `+column+` = $1`, slugOrID).Scan(&blob)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}

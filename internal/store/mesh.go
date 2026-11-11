@@ -56,7 +56,7 @@ func insertMeshObservations(ctx context.Context, tx *sql.Tx, obs []MeshObservati
 	stmt, err := tx.PrepareContext(ctx, `
 		INSERT INTO mesh_observations
 		  (pubkey, heard_at, broker, gateway, snr, rssi, hop_count, path, path_nodes)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`)
 	if err != nil {
 		return fmt.Errorf("store: prepare mesh observation insert: %w", err)
 	}
@@ -116,7 +116,7 @@ func (s *Store) MeshNodeHeardTimes(ctx context.Context, maxPerNode int) (map[str
 func (s *Store) MeshObservationPaths(ctx context.Context, since time.Time) ([]MeshObservation, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT pubkey, heard_at, broker, gateway, path FROM mesh_observations
-		WHERE heard_at >= ? AND path != '' ORDER BY heard_at`, since.Unix())
+		WHERE heard_at >= $1 AND path <> '' ORDER BY heard_at, id`, since.Unix())
 	if err != nil {
 		return nil, fmt.Errorf("store: reading observation paths: %w", err)
 	}
@@ -194,7 +194,7 @@ func (s *Store) compactChunk(ctx context.Context) (int, error) {
 		}
 		rows, err := tx.QueryContext(ctx, `
 			SELECT id, pubkey, heard_at, snr, path_nodes
-			FROM mesh_observations WHERE id > ? ORDER BY id LIMIT ?`,
+			FROM mesh_observations WHERE id > $1 ORDER BY id LIMIT $2`,
 			watermark, maxCompactBatch)
 		if err != nil {
 			return fmt.Errorf("store: reading observations for compaction: %w", err)
@@ -246,12 +246,12 @@ func (s *Store) compactChunk(ctx context.Context) (int, error) {
 			stmt, err := tx.PrepareContext(ctx, `
 				INSERT INTO mesh_link_rollup
 				  (a_pubkey, b_pubkey, bucket, observations, best_snr, first_seen, last_seen)
-				VALUES (?, ?, ?, ?, ?, ?, ?)
-				ON CONFLICT(a_pubkey, b_pubkey, bucket) DO UPDATE SET
-				  observations = observations + excluded.observations,
-				  best_snr     = max(best_snr, excluded.best_snr),
-				  first_seen   = min(first_seen, excluded.first_seen),
-				  last_seen    = max(last_seen, excluded.last_seen)`)
+				VALUES ($1, $2, $3, $4, $5, $6, $7)
+				ON CONFLICT (a_pubkey, b_pubkey, bucket) DO UPDATE SET
+				  observations = mesh_link_rollup.observations + excluded.observations,
+				  best_snr     = GREATEST(mesh_link_rollup.best_snr, excluded.best_snr),
+				  first_seen   = LEAST(mesh_link_rollup.first_seen, excluded.first_seen),
+				  last_seen    = GREATEST(mesh_link_rollup.last_seen, excluded.last_seen)`)
 			if err != nil {
 				return fmt.Errorf("store: prepare rollup upsert: %w", err)
 			}
@@ -267,8 +267,8 @@ func (s *Store) compactChunk(ctx context.Context) (int, error) {
 		// Advance the watermark past every observation scanned (including ones with
 		// no resolvable edge — they must not be re-scanned each tick).
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO mesh_meta (key, value) VALUES (?, ?)
-			ON CONFLICT(key) DO UPDATE SET value = excluded.value`, watermarkKey, maxID); err != nil {
+			INSERT INTO mesh_meta (key, value) VALUES ($1, $2)
+			ON CONFLICT (key) DO UPDATE SET value = excluded.value`, watermarkKey, maxID); err != nil {
 			return fmt.Errorf("store: advancing compaction watermark: %w", err)
 		}
 		return nil
@@ -279,7 +279,7 @@ func (s *Store) compactChunk(ctx context.Context) (int, error) {
 // readWatermark returns the last compacted observation id (0 if none yet).
 func readWatermark(ctx context.Context, tx *sql.Tx) (int64, error) {
 	var v int64
-	err := tx.QueryRowContext(ctx, `SELECT value FROM mesh_meta WHERE key = ?`, watermarkKey).Scan(&v)
+	err := tx.QueryRowContext(ctx, `SELECT value FROM mesh_meta WHERE key = $1`, watermarkKey).Scan(&v)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return 0, fmt.Errorf("store: reading compaction watermark: %w", err)
 	}
@@ -297,7 +297,7 @@ func (s *Store) PruneMeshObservations(ctx context.Context, cutoff time.Time) (in
 			return err
 		}
 		res, err := tx.ExecContext(ctx,
-			`DELETE FROM mesh_observations WHERE heard_at < ? AND id <= ?`, cutoff.Unix(), watermark)
+			`DELETE FROM mesh_observations WHERE heard_at < $1 AND id <= $2`, cutoff.Unix(), watermark)
 		if err != nil {
 			return fmt.Errorf("store: pruning observations: %w", err)
 		}
@@ -312,7 +312,7 @@ func (s *Store) PruneMeshObservations(ctx context.Context, cutoff time.Time) (in
 func (s *Store) PruneMeshLinkRollup(ctx context.Context, cutoff time.Time) (int64, error) {
 	var affected int64
 	err := s.inTx(ctx, func(tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, `DELETE FROM mesh_link_rollup WHERE bucket < ?`, cutoff.Unix())
+		res, err := tx.ExecContext(ctx, `DELETE FROM mesh_link_rollup WHERE bucket < $1`, cutoff.Unix())
 		if err != nil {
 			return fmt.Errorf("store: pruning rollup: %w", err)
 		}
@@ -406,61 +406,67 @@ func (s *Store) MeshLinks(ctx context.Context, since time.Time) ([]MeshLink, err
 		e.days[day] = struct{}{}
 	}
 
-	// (1) Rollup history — one row per (edge, day); observations already summed.
-	sinceBucket := since.Unix() - since.Unix()%secondsPerDay
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT a_pubkey, b_pubkey, bucket, observations, best_snr, first_seen, last_seen
-		FROM mesh_link_rollup WHERE bucket >= ?`, sinceBucket)
-	if err != nil {
-		return nil, fmt.Errorf("store: querying link rollup: %w", err)
-	}
-	for rows.Next() {
-		var a, b string
-		var bucket, obs, first, last int64
-		var snr sql.NullFloat64
-		if err := rows.Scan(&a, &b, &bucket, &obs, &snr, &first, &last); err != nil {
+	// The rollup, the watermark and the raw tail are three statements; one
+	// REPEATABLE READ snapshot keeps a compaction committing between them from
+	// counting a chunk twice (in the rollup and the tail) or not at all.
+	err := s.readTx(ctx, func(tx *sql.Tx) error {
+		// (1) Rollup history — one row per (edge, day); observations already summed.
+		sinceBucket := since.Unix() - since.Unix()%secondsPerDay
+		rows, err := tx.QueryContext(ctx, `
+			SELECT a_pubkey, b_pubkey, bucket, observations, best_snr, first_seen, last_seen
+			FROM mesh_link_rollup WHERE bucket >= $1`, sinceBucket)
+		if err != nil {
+			return fmt.Errorf("store: querying link rollup: %w", err)
+		}
+		for rows.Next() {
+			var a, b string
+			var bucket, obs, first, last int64
+			var snr sql.NullFloat64
+			if err := rows.Scan(&a, &b, &bucket, &obs, &snr, &first, &last); err != nil {
+				rows.Close()
+				return fmt.Errorf("store: scanning link rollup: %w", err)
+			}
+			// A rollup row is a whole day of this edge: add its summed count, mark the day.
+			note(get(a, b), int(obs), snr, first, last, bucket)
+		}
+		if err := rows.Err(); err != nil {
 			rows.Close()
-			return nil, fmt.Errorf("store: scanning link rollup: %w", err)
+			return fmt.Errorf("store: iterating link rollup: %w", err)
 		}
-		// A rollup row is a whole day of this edge: add its summed count, mark the day.
-		note(get(a, b), int(obs), snr, first, last, bucket)
-	}
-	if err := rows.Err(); err != nil {
 		rows.Close()
-		return nil, fmt.Errorf("store: iterating link rollup: %w", err)
-	}
-	rows.Close()
 
-	// (2) Un-compacted tail — raw receptions past the watermark, within the window.
-	var watermark int64
-	if err := s.db.QueryRowContext(ctx, `SELECT value FROM mesh_meta WHERE key = ?`, watermarkKey).
-		Scan(&watermark); err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return nil, fmt.Errorf("store: reading watermark: %w", err)
-	}
-	rows2, err := s.db.QueryContext(ctx, `
-		SELECT pubkey, heard_at, snr, path_nodes FROM mesh_observations
-		WHERE id > ? AND heard_at >= ?`, watermark, since.Unix())
-	if err != nil {
-		return nil, fmt.Errorf("store: querying observation tail: %w", err)
-	}
-	for rows2.Next() {
-		var pubkey, pathNodes string
-		var heard int64
-		var snr sql.NullFloat64
-		if err := rows2.Scan(&pubkey, &heard, &snr, &pathNodes); err != nil {
-			rows2.Close()
-			return nil, fmt.Errorf("store: scanning observation tail: %w", err)
+		// (2) Un-compacted tail — raw receptions past the watermark, within the window.
+		watermark, err := readWatermark(ctx, tx)
+		if err != nil {
+			return err
 		}
-		day := heard - heard%secondsPerDay
-		eachEdge(pubkey, splitList(pathNodes), func(a, b string) {
-			note(get(a, b), 1, snr, heard, heard, day)
-		})
+		rows2, err := tx.QueryContext(ctx, `
+			SELECT pubkey, heard_at, snr, path_nodes FROM mesh_observations
+			WHERE id > $1 AND heard_at >= $2`, watermark, since.Unix())
+		if err != nil {
+			return fmt.Errorf("store: querying observation tail: %w", err)
+		}
+		defer rows2.Close()
+		for rows2.Next() {
+			var pubkey, pathNodes string
+			var heard int64
+			var snr sql.NullFloat64
+			if err := rows2.Scan(&pubkey, &heard, &snr, &pathNodes); err != nil {
+				return fmt.Errorf("store: scanning observation tail: %w", err)
+			}
+			day := heard - heard%secondsPerDay
+			eachEdge(pubkey, splitList(pathNodes), func(a, b string) {
+				note(get(a, b), 1, snr, heard, heard, day)
+			})
+		}
+		if err := rows2.Err(); err != nil {
+			return fmt.Errorf("store: iterating observation tail: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
-	if err := rows2.Err(); err != nil {
-		rows2.Close()
-		return nil, fmt.Errorf("store: iterating observation tail: %w", err)
-	}
-	rows2.Close()
 
 	out := make([]MeshLink, 0, len(acc))
 	for k, e := range acc {

@@ -27,8 +27,9 @@ func (s *Store) InsertRoadSamples(ctx context.Context, samples []RoadSample) err
 		return nil
 	}
 	return s.inTx(ctx, func(tx *sql.Tx) error {
-		stmt, err := tx.PrepareContext(ctx, `INSERT OR IGNORE INTO road_samples
-			(road_id, at, status, congestion, duration_m, delay_m) VALUES (?, ?, ?, ?, ?, ?)`)
+		stmt, err := tx.PrepareContext(ctx, `INSERT INTO road_samples
+			(road_id, at, status, congestion, duration_m, delay_m) VALUES ($1, $2, $3, $4, $5, $6)
+			ON CONFLICT (road_id, at) DO NOTHING`)
 		if err != nil {
 			return fmt.Errorf("store: prepare road sample insert: %w", err)
 		}
@@ -48,7 +49,7 @@ func (s *Store) InsertRoadSamples(ctx context.Context, samples []RoadSample) err
 // RoadSamples returns one road's samples in [from, to), oldest first.
 func (s *Store) RoadSamples(ctx context.Context, roadID string, from, to time.Time) ([]RoadSample, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT at, status, congestion, duration_m, delay_m FROM road_samples
-		WHERE road_id = ? AND at >= ? AND at < ? ORDER BY at`, roadID, from.Unix(), to.Unix())
+		WHERE road_id = $1 AND at >= $2 AND at < $3 ORDER BY at`, roadID, from.Unix(), to.Unix())
 	if err != nil {
 		return nil, fmt.Errorf("store: road samples %s: %w", roadID, err)
 	}
@@ -80,27 +81,36 @@ func (s *Store) RoadSamples(ctx context.Context, roadID string, from, to time.Ti
 // that reaches back to the first sample we hold is reported from that
 // sample, and atStart says so ("since at least").
 func (s *Store) RoadStatusSince(ctx context.Context, roadID string) (since time.Time, status int32, atStart, ok bool, err error) {
-	var latest int64
-	err = s.db.QueryRowContext(ctx, `SELECT at, status FROM road_samples WHERE road_id = ? ORDER BY at DESC LIMIT 1`, roadID).Scan(&latest, &status)
-	if err == sql.ErrNoRows {
-		return time.Time{}, 0, false, false, nil
-	}
+	// Three statements, one REPEATABLE READ snapshot: a sample landing between
+	// them must not pair one refresh's status with another's run start.
+	var lastOther sql.NullInt64
+	var first int64
+	err = s.readTx(ctx, func(tx *sql.Tx) error {
+		var latest int64
+		err := tx.QueryRowContext(ctx, `SELECT at, status FROM road_samples WHERE road_id = $1 ORDER BY at DESC LIMIT 1`, roadID).Scan(&latest, &status)
+		if err == sql.ErrNoRows {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		ok = true
+		// Two ranges on idx_road_samples_status rather than "status <> $2",
+		// which no index can serve: each reads only the other statuses' rows.
+		if err := tx.QueryRowContext(ctx, `SELECT MAX(m) FROM (
+			SELECT MAX(at) AS m FROM road_samples WHERE road_id = $1 AND status < $2
+			UNION ALL
+			SELECT MAX(at) FROM road_samples WHERE road_id = $1 AND status > $2) AS other`, roadID, status).Scan(&lastOther); err != nil {
+			return err
+		}
+		return tx.QueryRowContext(ctx, `SELECT MIN(at) FROM road_samples WHERE road_id = $1 AND at > $2`,
+			roadID, lastOther.Int64).Scan(&first)
+	})
 	if err != nil {
 		return time.Time{}, 0, false, false, fmt.Errorf("store: road status %s: %w", roadID, err)
 	}
-	// Two ranges on idx_road_samples_status rather than "status != ?",
-	// which no index can serve: each reads only the other statuses' rows.
-	var lastOther sql.NullInt64
-	if err = s.db.QueryRowContext(ctx, `SELECT MAX(m) FROM (
-		SELECT MAX(at) AS m FROM road_samples WHERE road_id = ?1 AND status < ?2
-		UNION ALL
-		SELECT MAX(at) FROM road_samples WHERE road_id = ?1 AND status > ?2)`, roadID, status).Scan(&lastOther); err != nil {
-		return time.Time{}, 0, false, false, fmt.Errorf("store: road status %s: %w", roadID, err)
-	}
-	var first int64
-	if err = s.db.QueryRowContext(ctx, `SELECT MIN(at) FROM road_samples WHERE road_id = ? AND at > ?`,
-		roadID, lastOther.Int64).Scan(&first); err != nil {
-		return time.Time{}, 0, false, false, fmt.Errorf("store: road status %s: %w", roadID, err)
+	if !ok {
+		return time.Time{}, 0, false, false, nil
 	}
 	return time.Unix(first, 0).UTC(), status, !lastOther.Valid, true, nil
 }
@@ -112,7 +122,8 @@ func (s *Store) RoadStatusSince(ctx context.Context, roadID string) (since time.
 // week matters: Friday-evening traffic is not Tuesday-morning traffic.
 func (s *Store) TypicalRoadMinutes(ctx context.Context, roadID string, openStatus int32, at, from, to time.Time, loc *time.Location, minSamples int) (minutes int32, basis string, ok bool, err error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT at, duration_m FROM road_samples
-		WHERE road_id = ? AND status = ? AND duration_m IS NOT NULL AND at >= ? AND at < ?`,
+		WHERE road_id = $1 AND status = $2 AND duration_m IS NOT NULL AND at >= $3 AND at < $4
+		ORDER BY at`,
 		roadID, openStatus, from.Unix(), to.Unix())
 	if err != nil {
 		return 0, "", false, fmt.Errorf("store: typical road minutes %s: %w", roadID, err)
@@ -147,7 +158,7 @@ func (s *Store) TypicalRoadMinutes(ctx context.Context, roadID string, openStatu
 func (s *Store) PruneRoadSamples(ctx context.Context, cutoff time.Time) (int64, error) {
 	var n int64
 	err := s.inTx(ctx, func(tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, `DELETE FROM road_samples WHERE at < ?`, cutoff.Unix())
+		res, err := tx.ExecContext(ctx, `DELETE FROM road_samples WHERE at < $1`, cutoff.Unix())
 		if err != nil {
 			return fmt.Errorf("store: prune road samples: %w", err)
 		}

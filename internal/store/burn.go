@@ -50,8 +50,8 @@ func (s *Store) PutBurnReading(ctx context.Context, r BurnReading) error {
 	return s.inTx(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, `
 			INSERT INTO burn_readings (line_id, status, message, transcript, confidence, observed_at, received_at, reporter_id)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-			ON CONFLICT(line_id) DO UPDATE SET
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			ON CONFLICT (line_id) DO UPDATE SET
 			  status = excluded.status, message = excluded.message,
 			  transcript = excluded.transcript, confidence = excluded.confidence,
 			  observed_at = excluded.observed_at, received_at = excluded.received_at,

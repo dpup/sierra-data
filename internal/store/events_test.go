@@ -2,8 +2,8 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -114,13 +114,13 @@ func TestRefreshMovesValidators(t *testing.T) {
 	}
 	quakes := []gridv1.Layer{gridv1.Layer_EARTHQUAKE}
 	fires := []gridv1.Layer{gridv1.Layer_WILDFIRE}
-	st0, q0, f0, all0 := stamp(), s.RefreshVersion(quakes), s.RefreshVersion(fires), s.RefreshVersion(nil)
+	st0, q0, f0, all0 := stamp(), refreshVersion(t, s, quakes), refreshVersion(t, s, fires), refreshVersion(t, s, nil)
 
 	// No-op re-upsert: nothing rewritten, nothing moves.
 	_, err = s.UpsertEvent(ctx, proto.Clone(ev).(*gridv1.Event))
 	require.NoError(t, err)
 	assert.Equal(t, st0, stamp())
-	assert.Equal(t, q0, s.RefreshVersion(quakes))
+	assert.Equal(t, q0, refreshVersion(t, s, quakes))
 
 	// A re-run enhancement lands in place.
 	next := proto.Clone(ev).(*gridv1.Event)
@@ -132,11 +132,11 @@ func TestRefreshMovesValidators(t *testing.T) {
 	st1 := stamp()
 	assert.Equal(t, st0.Revision, st1.Revision, "no new revision")
 	assert.Greater(t, st1.Refreshes, st0.Refreshes, "the in-place rewrite moves the event stamp")
-	assert.Greater(t, s.RefreshVersion(quakes), q0, "and the layer's list version")
-	assert.Greater(t, s.RefreshVersion(nil), all0, "and the all-layers version")
-	assert.Equal(t, f0, s.RefreshVersion(fires), "another layer's version stays put")
-	assert.Equal(t, s.RefreshVersion(quakes),
-		s.RefreshVersion([]gridv1.Layer{gridv1.Layer_EARTHQUAKE, gridv1.Layer_EARTHQUAKE}),
+	assert.Greater(t, refreshVersion(t, s, quakes), q0, "and the layer's list version")
+	assert.Greater(t, refreshVersion(t, s, nil), all0, "and the all-layers version")
+	assert.Equal(t, f0, refreshVersion(t, s, fires), "another layer's version stays put")
+	assert.Equal(t, refreshVersion(t, s, quakes),
+		refreshVersion(t, s, []gridv1.Layer{gridv1.Layer_EARTHQUAKE, gridv1.Layer_EARTHQUAKE}),
 		"a repeated layer is counted once")
 }
 
@@ -278,7 +278,7 @@ func TestEventPlacesUnionKeepsPresetIDs(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{"area:calaveras", "county:calaveras"}, got.GetPlaceIds())
 
-	rows, err := s.db.Query(`SELECT place_id FROM event_places WHERE event_id = ? ORDER BY place_id`, "wx:alert1")
+	rows, err := s.db.Query(`SELECT place_id FROM event_places WHERE event_id = $1 ORDER BY place_id`, "wx:alert1")
 	require.NoError(t, err)
 	defer rows.Close()
 	var placeIDs []string
@@ -436,24 +436,17 @@ func TestPolygonEventPlaceMatching(t *testing.T) {
 		"genuinely-overlapping county attaches; bbox-only (clipped) and disjoint (faraway) do not")
 }
 
-func TestRtreeConsistencyAcrossGeometryChanges(t *testing.T) {
+// The bbox columns replace the legacy write-only R*Tree: written from the
+// blob on every content write, moved with the geometry, NULL without one.
+func TestBboxColumnsFollowGeometry(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
 	seedSource(t, s, "firis")
 
-	geoRows := func() (n int, minLat, maxLat, minLng, maxLng float64) {
+	bbox := func() (minLat, maxLat, minLng, maxLng sql.NullFloat64) {
 		t.Helper()
-		rows, err := s.db.Query(`
-			SELECT g.min_lat, g.max_lat, g.min_lng, g.max_lng
-			FROM event_geo g JOIN event_geo_map m ON m.rowid = g.rowid
-			WHERE m.event_id = ?`, "firis:fire")
-		require.NoError(t, err)
-		defer rows.Close()
-		for rows.Next() {
-			n++
-			require.NoError(t, rows.Scan(&minLat, &maxLat, &minLng, &maxLng))
-		}
-		require.NoError(t, rows.Err())
+		require.NoError(t, s.db.QueryRow(`SELECT min_lat, max_lat, min_lng, max_lng FROM events WHERE id = $1`,
+			"firis:fire").Scan(&minLat, &maxLat, &minLng, &maxLng))
 		return
 	}
 
@@ -464,42 +457,28 @@ func TestRtreeConsistencyAcrossGeometryChanges(t *testing.T) {
 	_, err := s.UpsertEvent(ctx, ev)
 	require.NoError(t, err)
 
-	// R*Tree stores coordinates as 32-bit floats rounded outward, so compare
-	// at ~1e-4 (a few meters), not float64 precision.
-	n, minLat, maxLat, minLng, maxLng := geoRows()
-	require.Equal(t, 1, n)
-	assert.InDelta(t, 38.1, minLat, 1e-4)
-	assert.InDelta(t, 38.3, maxLat, 1e-4)
-	assert.InDelta(t, -120.6, minLng, 1e-4)
-	assert.InDelta(t, -120.4, maxLng, 1e-4)
+	minLat, maxLat, minLng, maxLng := bbox()
+	assert.Equal(t, []float64{38.1, 38.3, -120.6, -120.4},
+		[]float64{minLat.Float64, maxLat.Float64, minLng.Float64, maxLng.Float64})
 
-	// Perimeter grows: still exactly one R*Tree row, with the new bbox.
+	// Perimeter grows: the columns move with it.
 	ev2 := proto.Clone(ev).(*gridv1.Event)
 	ev2.Headline = "fire v2"
 	ev2.Geometry = polyGeometry(38.0, -120.7, 38.4, -120.2)
 	_, err = s.UpsertEvent(ctx, ev2)
 	require.NoError(t, err)
+	minLat, maxLat, minLng, maxLng = bbox()
+	assert.Equal(t, []float64{38.0, 38.4, -120.7, -120.2},
+		[]float64{minLat.Float64, maxLat.Float64, minLng.Float64, maxLng.Float64})
 
-	n, minLat, maxLat, minLng, maxLng = geoRows()
-	require.Equal(t, 1, n)
-	assert.InDelta(t, 38.0, minLat, 1e-4)
-	assert.InDelta(t, 38.4, maxLat, 1e-4)
-	assert.InDelta(t, -120.7, minLng, 1e-4)
-	assert.InDelta(t, -120.2, maxLng, 1e-4)
-
-	// Geometry dropped entirely: both the rtree row and the map row go away.
+	// Geometry dropped entirely: NULL.
 	ev3 := proto.Clone(ev).(*gridv1.Event)
 	ev3.Headline = "fire v3"
 	ev3.Geometry = nil
 	_, err = s.UpsertEvent(ctx, ev3)
 	require.NoError(t, err)
-
-	n, _, _, _, _ = geoRows()
-	assert.Equal(t, 0, n)
-	var mapRows int
-	require.NoError(t, s.db.QueryRow(
-		`SELECT COUNT(*) FROM event_geo_map WHERE event_id = ?`, "firis:fire").Scan(&mapRows))
-	assert.Equal(t, 0, mapRows)
+	minLat, _, _, maxLng = bbox()
+	assert.False(t, minLat.Valid || maxLng.Valid, "no geometry, no bbox")
 }
 
 func TestContentHashIgnoresVolatileFields(t *testing.T) {
@@ -670,10 +649,7 @@ func TestUpsertPersistsEnhancementOnHashEqual(t *testing.T) {
 // newProximityStore is newTestStore with the wildfire proximity buffer enabled.
 func newProximityStore(t *testing.T, meters float64) *Store {
 	t.Helper()
-	s, err := Open(filepath.Join(t.TempDir(), "grid.db"), WithWildfireProximity(meters))
-	require.NoError(t, err)
-	t.Cleanup(func() { s.Close() })
-	return s
+	return newTestStore(t, WithWildfireProximity(meters))
 }
 
 // seedProximityPlaces lays out one place of each kind around a common
@@ -1107,7 +1083,7 @@ func TestUpsertPersistsBurnObservationOnHashEqual(t *testing.T) {
 
 	// The observed_at index column is re-derived from the blob, not left behind.
 	var col int64
-	require.NoError(t, s.db.QueryRow(`SELECT observed_at FROM events WHERE id = ?`, "burn:calaveras-county").Scan(&col))
+	require.NoError(t, s.db.QueryRow(`SELECT observed_at FROM events WHERE id = $1`, "burn:calaveras-county").Scan(&col))
 	assert.Equal(t, next.Unix(), col, "index column follows the blob")
 }
 

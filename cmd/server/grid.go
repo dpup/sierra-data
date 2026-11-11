@@ -85,13 +85,13 @@ type gridApp struct {
 }
 
 // prepareGrid builds the database-free half of the Grid: config-derived
-// clients and the read-path services. Nothing here opens grid.db, and nothing
+// clients and the read-path services. Nothing here opens the database, and nothing
 // here starts upstream polling (that waits for activation, so a standby never
 // spends API budget). Invalid configuration fails here, before any handoff.
 func prepareGrid(ctx context.Context, appConfig *config.Config) (*gridApp, error) {
 	start := time.Now()
-	if appConfig.Grid.DBPath == "" {
-		return nil, errors.New("grid.dbPath is required (default ./data/grid.db in prefab.yaml)")
+	if appConfig.Grid.Database.URL == "" {
+		return nil, errors.New("grid.database.url is required (PF__GRID__DATABASE__URL; locally `make db-url`)")
 	}
 	if appConfig.OpenAI.APIKey == "" {
 		return nil, errors.New("OpenAI API key is required in configuration for incident enhancement")
@@ -198,17 +198,22 @@ func (a *gridApp) Activate(actx context.Context) (err error) {
 	// normalized hazard events persisted with revision history, per-source
 	// health, and the place directory — the /api/v1 foundation.
 	openStart := time.Now()
-	gridStore, err := store.Open(appConfig.Grid.DBPath,
-		store.WithJournalMode(appConfig.Grid.JournalMode),
-		store.WithCacheSizeMB(appConfig.Grid.CacheSizeMB),
-		store.WithMaxOpenConns(appConfig.Grid.MaxOpenConns),
-		store.WithLockTimeout(appConfig.Grid.LockTimeout),
+	dbCfg := appConfig.Grid.Database
+	gridStore, err := store.Open(dbCfg.URL,
+		store.WithMaxConns(dbCfg.MaxConns),
+		store.WithMinConns(dbCfg.MinConns),
+		store.WithLockTimeout(dbCfg.LockTimeout),
 		// A SIGTERM during the lock wait ends it at once.
 		store.WithLockContext(actx),
+		// Detection only until the P3 lease: losing the lock connection means
+		// another process may write, which an operator must hear about.
+		store.WithLockLost(func(err error) {
+			logging.Errorw(ctx, "Grid store LOST its writer lock; another process may now write", "error", err)
+		}),
 		store.WithWildfireProximity(appConfig.Grid.Wildfire.PlaceBuffer()),
 		store.WithTownRadius(appConfig.Grid.Places.TownRadiusMeters))
 	if err != nil {
-		return fmt.Errorf("open grid store %s: %w", appConfig.Grid.DBPath, err)
+		return fmt.Errorf("open grid store: %w", err)
 	}
 	a.mu.Lock()
 	a.store = gridStore
@@ -216,13 +221,11 @@ func (a *gridApp) Activate(actx context.Context) (err error) {
 	a.hazards.UseRoadHistory(gridStore)
 	a.hook("store-opened")
 
-	// Pragmas are per-connection, so this log line is the only place the store's
-	// effective configuration is observable from outside the process.
-	if st, err := gridStore.Settings(); err == nil {
+	if st, err := gridStore.Settings(actx); err == nil {
 		logging.Infow(ctx, "Grid store opened",
-			"path", appConfig.Grid.DBPath, "journalMode", st.JournalMode,
-			"synchronous", st.Synchronous, "cacheSizeKB", st.CacheSizeKB,
-			"maxOpenConns", st.MaxOpenConns, "duration", time.Since(openStart))
+			"database", st.Database, "serverVersion", st.ServerVersion,
+			"schemaVersion", st.SchemaVersion, "maxConns", st.MaxConns, "minConns", st.MinConns,
+			"duration", time.Since(openStart))
 	}
 	if err := actx.Err(); err != nil {
 		return err
@@ -237,32 +240,6 @@ func (a *gridApp) Activate(actx context.Context) (err error) {
 		return fmt.Errorf("seed grid places: %w", err)
 	}
 	logging.Infow(ctx, "Seeded grid sources and places", "duration", time.Since(seedStart))
-
-	// Index statistics. Without them the place-scoped event query walks every
-	// attachment a place has ever had (see store.Analyze). They persist in the
-	// database file, so only a database that has never been analyzed needs a
-	// synchronous ANALYZE here (cheap: it is new or small). Otherwise the
-	// previous process's statistics stand, and the scheduler refreshes them
-	// shortly after boot: a full ANALYZE measured 59.5s on the EFS store, and
-	// running it before the listener opened was most of a deploy's 502 window.
-	// Fail-soft either way: stale stats make queries slow, never wrong.
-	var statsRefreshFirstAfter time.Duration
-	if has, err := gridStore.HasStatistics(actx); err == nil && has {
-		statsRefreshFirstAfter = bootStatsRefreshDelay
-		logging.Infow(ctx, "Using persisted grid store statistics; refresh deferred",
-			"refreshIn", bootStatsRefreshDelay)
-	} else {
-		analyzeStart := time.Now()
-		if err := gridStore.Analyze(actx); err != nil {
-			logging.Warnw(ctx, "Failed to refresh grid store statistics; place-scoped queries may be slow",
-				"error", err)
-		} else {
-			logging.Infow(ctx, "Refreshed grid store statistics", "duration", time.Since(analyzeStart))
-		}
-	}
-	if err := actx.Err(); err != nil {
-		return err
-	}
 
 	// One poller per upstream scope; weather_alert and road_incident reuse the
 	// services' cached, budgeted pipelines (plan decision 6).
@@ -413,8 +390,6 @@ func (a *gridApp) Activate(actx context.Context) (err error) {
 		BudgetPerTick:   appConfig.Grid.Enhancement.BudgetPerTick,
 		MeshMaintenance: meshMaintenanceConfig(appConfig),
 		RoadSampling:    roadSamplingConfig(a.roadsService),
-
-		StatsRefreshFirstAfter: statsRefreshFirstAfter,
 	})
 	scheduler.Start(runCtx)
 	a.mu.Lock()

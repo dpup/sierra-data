@@ -18,8 +18,7 @@ type MeshActivity struct {
 	LastRelayedAt time.Time
 }
 
-// meshActivityReadChunk bounds one IN (...) list, well under SQLite's
-// host-parameter limit.
+// meshActivityReadChunk bounds one = ANY($1) array.
 const meshActivityReadChunk = 500
 
 // RecordMeshTick writes one mesh poll's measurements in ONE transaction: the
@@ -35,16 +34,18 @@ func (s *Store) RecordMeshTick(ctx context.Context, obs []MeshObservation, act [
 	if len(obs) == 0 && len(act) == 0 {
 		return nil
 	}
-	err := s.inTx(ctx, func(tx *sql.Tx) error {
+	return s.inTx(ctx, func(tx *sql.Tx) error {
 		if err := insertMeshObservations(ctx, tx, obs); err != nil {
 			return err
 		}
-		return upsertMeshActivity(ctx, tx, act)
+		if len(act) == 0 {
+			return nil
+		}
+		if err := upsertMeshActivity(ctx, tx, act); err != nil {
+			return err
+		}
+		return bumpVersion(tx, versionMeshActivity, 1)
 	})
-	if err == nil && len(act) > 0 {
-		s.meshActivityVersion.Add(1)
-	}
-	return err
 }
 
 func upsertMeshActivity(ctx context.Context, tx *sql.Tx, act []MeshActivity) error {
@@ -53,10 +54,10 @@ func upsertMeshActivity(ctx context.Context, tx *sql.Tx, act []MeshActivity) err
 	}
 	stmt, err := tx.PrepareContext(ctx, `
 		INSERT INTO mesh_activity (pubkey, last_heard_at, last_relayed_at)
-		VALUES (?, ?, ?)
-		ON CONFLICT(pubkey) DO UPDATE SET
-		  last_heard_at   = MAX(last_heard_at, excluded.last_heard_at),
-		  last_relayed_at = MAX(last_relayed_at, excluded.last_relayed_at)`)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (pubkey) DO UPDATE SET
+		  last_heard_at   = GREATEST(mesh_activity.last_heard_at, excluded.last_heard_at),
+		  last_relayed_at = GREATEST(mesh_activity.last_relayed_at, excluded.last_relayed_at)`)
 	if err != nil {
 		return fmt.Errorf("store: prepare mesh activity upsert: %w", err)
 	}
@@ -77,7 +78,7 @@ func upsertMeshActivity(ctx context.Context, tx *sql.Tx, act []MeshActivity) err
 // keys (case-insensitive). Keys with no row are absent from the map.
 func (s *Store) MeshActivityFor(ctx context.Context, pubkeys []string) (map[string]MeshActivity, error) {
 	seen := make(map[string]bool, len(pubkeys))
-	keys := make([]any, 0, len(pubkeys))
+	keys := make([]string, 0, len(pubkeys))
 	for _, pk := range pubkeys {
 		pk = strings.ToLower(pk)
 		if pk != "" && !seen[pk] {
@@ -89,8 +90,8 @@ func (s *Store) MeshActivityFor(ctx context.Context, pubkeys []string) (map[stri
 	for start := 0; start < len(keys); start += meshActivityReadChunk {
 		chunk := keys[start:min(start+meshActivityReadChunk, len(keys))]
 		rows, err := s.db.QueryContext(ctx,
-			`SELECT pubkey, last_heard_at, last_relayed_at FROM mesh_activity WHERE pubkey IN (`+placeholders(len(chunk))+`)`,
-			chunk...)
+			`SELECT pubkey, last_heard_at, last_relayed_at FROM mesh_activity WHERE pubkey = ANY($1)`,
+			chunk)
 		if err != nil {
 			return nil, fmt.Errorf("store: reading mesh activity: %w", err)
 		}
@@ -108,13 +109,6 @@ func (s *Store) MeshActivityFor(ctx context.Context, pubkeys []string) (map[stri
 		}
 	}
 	return out, nil
-}
-
-// MeshActivityVersion changes whenever mesh_activity is written by this
-// process. An ETag input only: it is meaningful compared within one process
-// (validators also carry a per-boot nonce), never as a count of anything.
-func (s *Store) MeshActivityVersion() int64 {
-	return s.meshActivityVersion.Load()
 }
 
 func unixOrZero(t time.Time) int64 {

@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -23,6 +22,7 @@ import (
 	"github.com/sierragridteam/sierra-data/internal/config"
 	"github.com/sierragridteam/sierra-data/internal/places"
 	"github.com/sierragridteam/sierra-data/internal/store"
+	"github.com/sierragridteam/sierra-data/internal/storetest"
 )
 
 // base is the fixed reference time all seeded events hang off.
@@ -238,7 +238,7 @@ func seedEvents(t *testing.T, st *store.Store) {
 // dependency fields before issuing requests.
 func newTestService(t *testing.T) *Service {
 	t.Helper()
-	st, err := store.Open(filepath.Join(t.TempDir(), "grid.db"))
+	st, err := store.Open(storetest.URL(t))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = st.Close() })
 

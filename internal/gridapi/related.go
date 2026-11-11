@@ -26,8 +26,11 @@ func (g *GridServer) ListRelatedEvents(ctx context.Context, req *gridv1.ListRela
 	if err != nil {
 		return nil, internalErr(ctx, err)
 	}
-	tag := fmt.Sprintf("%s:related:%s:%d.%s", g.placesVersion, req.GetId(), dv,
-		strconv.FormatInt(g.svc.Store.RefreshVersion(relatedLayers), 10))
+	rv, err := g.svc.Store.RefreshVersion(ctx, relatedLayers)
+	if err != nil {
+		return nil, internalErr(ctx, err)
+	}
+	tag := fmt.Sprintf("%s:related:%s:%d.%s", g.placesVersion, req.GetId(), dv, strconv.FormatInt(rv, 10))
 	if err := etag.Guard(ctx, etag.Weak(tag)); err != nil {
 		return nil, err
 	}

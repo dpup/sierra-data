@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -112,9 +111,7 @@ func TestPlacesContainingTownRadius(t *testing.T) {
 
 func TestWithTownRadius(t *testing.T) {
 	ctx := context.Background()
-	s, err := Open(filepath.Join(t.TempDir(), "grid.db"), WithTownRadius(500))
-	require.NoError(t, err)
-	t.Cleanup(func() { s.Close() })
+	s := newTestStore(t, WithTownRadius(500))
 	require.NoError(t, s.UpsertPlace(ctx, testPlace(
 		"town:arnold", "arnold", "Arnold", gridv1.PlaceKind_TOWN, pointGeometry(38.2554, -120.3521))))
 

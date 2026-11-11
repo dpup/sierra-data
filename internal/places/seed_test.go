@@ -2,7 +2,6 @@ package places
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -12,11 +11,12 @@ import (
 	"github.com/sierragridteam/sierra-data/internal/config"
 	"github.com/sierragridteam/sierra-data/internal/lib/geojson"
 	"github.com/sierragridteam/sierra-data/internal/store"
+	"github.com/sierragridteam/sierra-data/internal/storetest"
 )
 
 func newTestStore(t *testing.T) *store.Store {
 	t.Helper()
-	s, err := store.Open(filepath.Join(t.TempDir(), "grid.db"))
+	s, err := store.Open(storetest.URL(t))
 	require.NoError(t, err)
 	t.Cleanup(func() { s.Close() })
 	return s

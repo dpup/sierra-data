@@ -216,11 +216,18 @@ func (g *GridServer) ListEvents(ctx context.Context, req *gridv1.ListEventsReque
 	// rewrites (enhancement, mesh telemetry, burn observations, place ids)
 	// that change a body without one. Per layer, so an unrelated layer's
 	// refresh leaves this list's 304 alone.
-	version := g.placesVersion + "." + strconv.FormatInt(dv, 10) +
-		".r" + strconv.FormatInt(g.svc.Store.RefreshVersion(eq.Layers), 10)
+	rv, err := g.svc.Store.RefreshVersion(ctx, eq.Layers)
+	if err != nil {
+		return nil, internalErr(ctx, err)
+	}
+	version := g.placesVersion + "." + strconv.FormatInt(dv, 10) + ".r" + strconv.FormatInt(rv, 10)
 	if layersIncludeMesh(eq.Layers) {
 		// Mesh activity is overlaid at read time and moves without a revision.
-		version += ".m" + strconv.FormatInt(g.svc.Store.MeshActivityVersion(), 10)
+		mv, err := g.svc.Store.MeshActivityVersion(ctx)
+		if err != nil {
+			return nil, internalErr(ctx, err)
+		}
+		version += ".m" + strconv.FormatInt(mv, 10)
 	}
 	tag := weakListTag(version,
 		req.GetPlace(), strings.Join(req.GetLayer(), ","), strings.Join(req.GetStatus(), ","),
@@ -377,7 +384,11 @@ func (g *GridServer) ListHistory(ctx context.Context, req *gridv1.ListHistoryReq
 	if hq.PlaceID != "" {
 		// Snapshots never change, but which events a place matches can: a
 		// place re-attachment rewrites event_places without a revision.
-		version += ".r" + strconv.FormatInt(g.svc.Store.RefreshVersion(hq.Layers), 10)
+		rv, err := g.svc.Store.RefreshVersion(ctx, hq.Layers)
+		if err != nil {
+			return nil, internalErr(ctx, err)
+		}
+		version += ".r" + strconv.FormatInt(rv, 10)
 	}
 	tag := weakListTag(version,
 		req.GetPlace(), strings.Join(req.GetLayer(), ","), req.GetFrom(), req.GetTo(),

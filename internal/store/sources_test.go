@@ -109,7 +109,7 @@ func TestRecordAttemptStatusLadder(t *testing.T) {
 	assert.Equal(t, "HTTP 503", src.GetLastError())
 
 	// Success gone stale beyond the window (3x poll = 180s): UNAVAILABLE.
-	_, err := s.db.Exec(`UPDATE sources SET last_success_at = ? WHERE id = 'usgs'`,
+	_, err := s.db.Exec(`UPDATE sources SET last_success_at = $1 WHERE id = 'usgs'`,
 		time.Now().Add(-10*time.Minute).Unix())
 	require.NoError(t, err)
 	require.NoError(t, s.RecordAttempt(ctx, "usgs", errors.New("HTTP 503")))

@@ -57,8 +57,8 @@ func (s *Store) SeedSources(ctx context.Context, seeds []SourceSeed) error {
 			if _, err := tx.Exec(`
 				INSERT INTO sources (id, name, attribution, homepage_url, kind, poll_interval_seconds,
 				                     stale_after_seconds, expire_after_seconds, disappearance)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-				ON CONFLICT(id) DO UPDATE SET
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+				ON CONFLICT (id) DO UPDATE SET
 				  name = excluded.name, attribution = excluded.attribution,
 				  homepage_url = excluded.homepage_url, kind = excluded.kind,
 				  poll_interval_seconds = excluded.poll_interval_seconds,
@@ -83,7 +83,7 @@ func (s *Store) SeedSources(ctx context.Context, seeds []SourceSeed) error {
 // blob and are unaffected (retire them separately via TransitionEvents).
 func (s *Store) DeleteSource(ctx context.Context, id string) error {
 	return s.inTx(ctx, func(tx *sql.Tx) error {
-		if _, err := tx.Exec(`DELETE FROM sources WHERE id = ?`, id); err != nil {
+		if _, err := tx.Exec(`DELETE FROM sources WHERE id = $1`, id); err != nil {
 			return fmt.Errorf("store: delete source %s: %w", id, err)
 		}
 		return nil
@@ -101,7 +101,7 @@ func (s *Store) RecordAttempt(ctx context.Context, id string, attemptErr error) 
 		var pollInterval int64
 		var staleAfter, lastSuccess sql.NullInt64
 		err := tx.QueryRow(
-			`SELECT poll_interval_seconds, stale_after_seconds, last_success_at FROM sources WHERE id = ?`, id,
+			`SELECT poll_interval_seconds, stale_after_seconds, last_success_at FROM sources WHERE id = $1`, id,
 		).Scan(&pollInterval, &staleAfter, &lastSuccess)
 		if err == sql.ErrNoRows {
 			return fmt.Errorf("store: record attempt for unseeded source %q", id)
@@ -112,9 +112,9 @@ func (s *Store) RecordAttempt(ctx context.Context, id string, attemptErr error) 
 
 		if attemptErr == nil {
 			_, err := tx.Exec(`
-				UPDATE sources SET last_attempt_at = ?, last_success_at = ?, last_error = '', status = ?
-				WHERE id = ?`,
-				now.Unix(), now.Unix(), int32(gridv1.SourceStatus_OK), id)
+				UPDATE sources SET last_attempt_at = $1, last_success_at = $1, last_error = '', status = $2
+				WHERE id = $3`,
+				now.Unix(), int32(gridv1.SourceStatus_OK), id)
 			if err != nil {
 				return fmt.Errorf("store: record success %s: %w", id, err)
 			}
@@ -130,7 +130,7 @@ func (s *Store) RecordAttempt(ctx context.Context, id string, attemptErr error) 
 			status = gridv1.SourceStatus_STALE
 		}
 		if _, err := tx.Exec(`
-			UPDATE sources SET last_attempt_at = ?, last_error = ?, status = ? WHERE id = ?`,
+			UPDATE sources SET last_attempt_at = $1, last_error = $2, status = $3 WHERE id = $4`,
 			now.Unix(), attemptErr.Error(), int32(status), id); err != nil {
 			return fmt.Errorf("store: record failure %s: %w", id, err)
 		}

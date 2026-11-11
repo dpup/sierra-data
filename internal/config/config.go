@@ -156,35 +156,12 @@ type MeshRelayAdmin struct {
 }
 
 // GridConfig holds the grid event store + ingest scheduler configuration
-// (docs/design/v2-implementation-plan.md). DBPath locates the SQLite database
-// (production overrides via PF__GRID__DB_PATH); Sources keys are source
-// registry ids ("usgs", "nws", ...) — a poller may span several.
+// (docs/design/v2-implementation-plan.md). Database locates the PostgreSQL
+// store (production injects grid.database.url as PF__GRID__DATABASE__URL);
+// Sources keys are source registry ids ("usgs", "nws", ...) — a poller may
+// span several.
 type GridConfig struct {
-	DBPath string `koanf:"dbPath"`
-	// JournalMode is the SQLite journal mode. Default TRUNCATE (safe on both
-	// local disk and a network filesystem). Use WAL only on a real local disk —
-	// its memory-mapped -shm file does NOT work over NFS/EFS. Empty => TRUNCATE.
-	JournalMode string `koanf:"journalMode"`
-	// CacheSizeMB is SQLite's page cache PER POOLED CONNECTION. It is config
-	// rather than a constant because the right value depends on the task's
-	// memory limit, which is not knowable from the code. Worst-case resident
-	// cache is CacheSizeMB * store.MaxOpenConns. 0 => DefaultCacheSizeMB.
-	//
-	// It matters most on a network filesystem: on EFS a page the cache does not
-	// hold is a network round trip, not a disk read.
-	CacheSizeMB int `koanf:"cacheSizeMb"`
-	// MaxOpenConns bounds concurrent SQLite connections, and so multiplies
-	// CacheSizeMB when budgeting memory. Fewer, fatter connections beat more,
-	// thinner ones on a network filesystem. 0 => store.DefaultMaxOpenConns.
-	MaxOpenConns int `koanf:"maxOpenConns"`
-	// LockTimeout is how long Open waits for the exclusive database lock before
-	// failing. The common contention case is a rolling deploy whose previous task
-	// has not exited yet, so waiting beats dying — a task that gives up just gets
-	// restarted to wait again, which is a crash loop, not a failure. Raise it if
-	// deploys drain slowly. 0 => store.DefaultLockTimeout. Keep the Dockerfile
-	// HEALTHCHECK start-period above this: the listener does not open until the
-	// lock is acquired.
-	LockTimeout time.Duration `koanf:"lockTimeout"`
+	Database GridDatabaseConfig `koanf:"database"`
 	// Control is the Grid's deployment-control plane (internal/handoff).
 	Control     ControlConfig           `koanf:"control"`
 	Enhancement GridEnhancement         `koanf:"enhancement"`
@@ -195,6 +172,27 @@ type GridConfig struct {
 	Power       PowerConfig             `koanf:"power"`
 	Burn        BurnConfig              `koanf:"burn"`
 	Ingest      IngestConfig            `koanf:"ingest"`
+}
+
+// GridDatabaseConfig is the Grid store's PostgreSQL connection.
+type GridDatabaseConfig struct {
+	// URL is a PostgreSQL URL or keyword/value DSN. Required. Production gets
+	// it from a secret as PF__GRID__DATABASE__URL; `make run` points it at the
+	// Docker database (make db-url). The database must use C collation (see
+	// internal/store/migrations/0001_baseline.sql).
+	URL string `koanf:"url"`
+	// MaxConns bounds the connection pool (0 => store.DefaultMaxConns). The
+	// writer lock holds one more, dedicated connection.
+	MaxConns int `koanf:"maxConns"`
+	// MinConns keeps this many connections open while idle (0 =>
+	// store.DefaultMinConns).
+	MinConns int `koanf:"minConns"`
+	// LockTimeout is how long activation waits for the writer lock (another
+	// process holding it: normally the previous deploy draining) before
+	// failing. Waiting beats dying: a task that gives up is restarted to wait
+	// again. 0 => store.DefaultLockTimeout. Keep the Dockerfile HEALTHCHECK
+	// start-period above it while the listener opens only after the lock.
+	LockTimeout time.Duration `koanf:"lockTimeout"`
 }
 
 // Ingest defaults. Each is applied when the corresponding grid.ingest key is
