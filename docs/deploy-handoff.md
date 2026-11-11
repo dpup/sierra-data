@@ -25,6 +25,13 @@ network filesystem).
 The code is `internal/handoff` (state machine, control API, admission gate),
 `cmd/server/grid.go` and `cmd/mesh-relay/main.go`.
 
+**Which branch deploys.** This stack is frozen on `legacy/efs-sqlite`
+(`main` is the PostgreSQL stack and cannot run here). `make ecs-deploy`
+builds only from a checkout of that branch whose HEAD matches
+`origin/legacy/efs-sqlite`; it refuses `main`, a detached HEAD, unpushed
+commits and a stale checkout, before any image is built. Hotfix on the
+legacy branch, merge, pull, deploy, then forward-port to `main`.
+
 ## Flags and configuration
 
 ```

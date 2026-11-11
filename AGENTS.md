@@ -195,6 +195,26 @@ curl -s http://localhost:8181/api/v1/events?layer=road_incident | jq .
 - No authentication required
 - Cache-friendly with appropriate TTLs
 
+## Branches and the legacy stack
+
+Since 2026-11-11 the repository has two lines. `legacy/efs-sqlite` is the
+frozen SQLite-on-EFS stack that runs in the old AWS account; `main` is the
+PostgreSQL stack for the new account and cannot run on the legacy
+infrastructure. The tag `legacy-efs-final` marks where they parted.
+
+A production fix for the old stack is a **hotfix on the legacy branch**:
+branch from `legacy/efs-sqlite`, open the PR against `legacy/efs-sqlite`
+(CI runs on it), merge, then deploy from a checkout of that branch with
+`make ecs-deploy`. The deploy client refuses to build from any other branch
+or from a commit origin does not have (`scripts/deploy.py`, `branch_drift`):
+the images are tagged with the commit, so what runs must be a commit anyone
+can find for a rollback or a forward-port. `--branch` names a different
+branch only for a deliberate exception.
+
+Afterwards, forward-port the fix to `main` (cherry-pick, or a fresh change
+where the store code differs) so it is not lost at cutover. Nothing targets
+`release/*` branches any more.
+
 ## Development Workflow
 
 For new features, follow this structured approach:

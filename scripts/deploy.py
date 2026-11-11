@@ -53,6 +53,9 @@ def configuration(args):
     return config
 
 
+LEGACY_BRANCH = "legacy/efs-sqlite"
+
+
 def dirty_files():
     """Tracked files that differ from HEAD. A --build deploy tags its images
     with the commit, so anything listed here would ship labelled as code it is
@@ -60,6 +63,39 @@ def dirty_files():
     result = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"],
                             cwd=REPO, capture_output=True, text=True, check=True)
     return [line[3:] for line in result.stdout.splitlines() if line.strip()]
+
+
+def git(*command):
+    return subprocess.run(["git", *command], cwd=REPO, capture_output=True, text=True,
+                          check=True).stdout.strip()
+
+
+def branch_drift(branch):
+    """Why HEAD must not be built for the legacy stack, or None.
+
+    The SQLite-on-EFS stack is frozen on one branch; main is the Postgres
+    stack and cannot run on this infrastructure, so a --build deploy ships
+    only that branch. It also ships only a commit origin already has: the
+    images are tagged with the commit, and a rollback, a cherry-pick to main
+    or the next hotfix must be able to find exactly what is running."""
+    current = git("rev-parse", "--abbrev-ref", "HEAD")
+    if current != branch:
+        where = "detached" if current == "HEAD" else "on " + current
+        return ("HEAD is %s, but the legacy stack deploys only from %s\n"
+                "(main is the Postgres stack; hotfix on %s, then git switch to it)"
+                % (where, branch, branch))
+    fetched = subprocess.run(["git", "fetch", "--quiet", "origin", branch], cwd=REPO,
+                             capture_output=True, text=True)
+    if fetched.returncode:
+        return "cannot compare %s with origin: %s" % (branch, fetched.stderr.strip() or "fetch failed")
+    head, remote = git("rev-parse", "HEAD"), git("rev-parse", "origin/" + branch)
+    if head != remote:
+        ahead = git("rev-list", "--count", "origin/%s..HEAD" % branch)
+        behind = git("rev-list", "--count", "HEAD..origin/%s" % branch)
+        return ("%s is %s commit(s) ahead of and %s behind origin/%s\n"
+                "(push or pull until they match; what runs must be on origin)"
+                % (branch, ahead, behind, branch))
+    return None
 
 
 def build_images(args, config):
@@ -316,11 +352,17 @@ def main():
     parser.add_argument("--build", action="store_true", help="build and push both images from this repository before deploying")
     parser.add_argument("--allow-dirty", action="store_true",
                         help="with --build, deploy even though tracked files differ from the commit the images are tagged with")
+    parser.add_argument("--branch", default=os.environ.get("SIERRA_DEPLOY_BRANCH", LEGACY_BRANCH),
+                        help="with --build, the only branch that may be built, and HEAD must match it on origin (default %(default)s)")
     parser.add_argument("--timeout", type=int, default=1800)
     parser.add_argument("--json", action="store_true", help="print raw coordinator responses instead of a summary")
     args = parser.parse_args()
     if args.build and args.action != "deploy":
         parser.error("--build is supported only for deploy")
+    if args.build:
+        drift = branch_drift(args.branch)
+        if drift:
+            parser.error(drift)
     if args.build and not args.allow_dirty:
         changed = dirty_files()
         if changed:

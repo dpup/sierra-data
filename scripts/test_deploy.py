@@ -72,7 +72,7 @@ class DeployTests(unittest.TestCase):
         events = []
         images = {"grid": "grid@sha256:a", "relay": "relay@sha256:b"}
         with patch("sys.argv", ["deploy.py", "deploy", "--build", "--tag", "abc123", "--operation-id", "request", "--wait"]), \
-                patch("deploy.dirty_files", return_value=[]), \
+                patch("deploy.branch_drift", return_value=None), patch("deploy.dirty_files", return_value=[]), \
                 patch("deploy.configuration", return_value=CONFIG), \
                 patch("deploy.build_images", side_effect=lambda *_: events.append("build")), \
                 patch("deploy.images", side_effect=lambda *_: events.append("resolve") or images), \
@@ -86,7 +86,7 @@ class DeployTests(unittest.TestCase):
 
     def test_failed_push_never_requests_a_deployment(self):
         with patch("sys.argv", ["deploy.py", "deploy", "--build", "--tag", "abc123"]), \
-                patch("deploy.dirty_files", return_value=[]), \
+                patch("deploy.branch_drift", return_value=None), patch("deploy.dirty_files", return_value=[]), \
                 patch("deploy.configuration", return_value=CONFIG), \
                 patch("deploy.build_images", side_effect=subprocess.CalledProcessError(1, ["make"])), \
                 patch("deploy.invoke") as invoke, patch("deploy.images") as resolve:
@@ -96,7 +96,7 @@ class DeployTests(unittest.TestCase):
         resolve.assert_not_called()
 
     def test_build_without_tag_uses_repository_commit(self):
-        with patch("sys.argv", ["deploy.py", "deploy", "--build"]), patch("deploy.dirty_files", return_value=[]), \
+        with patch("sys.argv", ["deploy.py", "deploy", "--build"]), patch("deploy.branch_drift", return_value=None), patch("deploy.dirty_files", return_value=[]), \
                 patch("deploy.subprocess.run", return_value=SimpleNamespace(stdout="0123456789ab\n")) as git, \
                 patch("deploy.configuration", return_value=CONFIG), patch("deploy.build_images") as build, \
                 patch("deploy.images", return_value={}), patch("deploy.invoke", return_value={}), \
@@ -108,7 +108,7 @@ class DeployTests(unittest.TestCase):
     def test_dirty_tree_never_builds_or_deploys(self):
         # Images are tagged with the commit; uncommitted changes would ship under it.
         with patch("sys.argv", ["deploy.py", "deploy", "--build", "--tag", "abc123"]), \
-                patch("deploy.dirty_files", return_value=["api/v1/common.pb.go"]), \
+                patch("deploy.branch_drift", return_value=None), patch("deploy.dirty_files", return_value=["api/v1/common.pb.go"]), \
                 patch("deploy.configuration") as config, patch("deploy.build_images") as build, \
                 patch("deploy.invoke") as invoke, contextlib.redirect_stderr(io.StringIO()) as err:
             with self.assertRaises(SystemExit) as exit:
@@ -122,7 +122,7 @@ class DeployTests(unittest.TestCase):
 
     def test_allow_dirty_is_an_explicit_override(self):
         with patch("sys.argv", ["deploy.py", "deploy", "--build", "--tag", "abc123", "--allow-dirty"]), \
-                patch("deploy.dirty_files", return_value=["Makefile"]) as dirty, \
+                patch("deploy.branch_drift", return_value=None), patch("deploy.dirty_files", return_value=["Makefile"]) as dirty, \
                 patch("deploy.configuration", return_value=CONFIG), patch("deploy.build_images") as build, \
                 patch("deploy.images", return_value={}), patch("deploy.invoke", return_value={}), \
                 contextlib.redirect_stdout(io.StringIO()):
@@ -136,6 +136,75 @@ class DeployTests(unittest.TestCase):
             self.assertEqual(deploy.dirty_files(), ["api/v1/common.pb.go", "Makefile"])
         self.assertIn("--untracked-files=no", git.call_args.args[0])
         self.assertEqual(git.call_args.kwargs["cwd"], deploy.REPO)
+
+    def test_wrong_branch_never_builds_or_deploys(self):
+        # main is the Postgres stack; only the frozen legacy branch runs on this infrastructure.
+        with patch("sys.argv", ["deploy.py", "deploy", "--build"]), \
+                patch("deploy.branch_drift", return_value="HEAD is on main, but the legacy stack deploys only from legacy/efs-sqlite"), \
+                patch("deploy.dirty_files") as dirty, patch("deploy.configuration") as config, \
+                patch("deploy.build_images") as build, patch("deploy.invoke") as invoke, \
+                contextlib.redirect_stderr(io.StringIO()) as err:
+            with self.assertRaises(SystemExit) as exit:
+                deploy.main()
+        self.assertEqual(exit.exception.code, 2)
+        self.assertIn("legacy/efs-sqlite", err.getvalue())
+        dirty.assert_not_called()
+        config.assert_not_called()
+        build.assert_not_called()
+        invoke.assert_not_called()
+
+    def test_branch_check_is_only_for_builds(self):
+        # A --tag deploy names images that already exist; the checkout is irrelevant.
+        with patch("sys.argv", ["deploy.py", "deploy", "--tag", "abc123"]), patch("deploy.branch_drift") as drift, \
+                patch("deploy.configuration", return_value=CONFIG), patch("deploy.images", return_value={}), \
+                patch("deploy.invoke", return_value={}), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(deploy.main(), 0)
+        drift.assert_not_called()
+
+    def git_responses(self, **answers):
+        def run(command, **_):
+            key = " ".join(command[1:])
+            if key.startswith("fetch"):
+                return SimpleNamespace(returncode=0, stdout="")
+            return SimpleNamespace(stdout=answers[key] + "\n")
+        return run
+
+    def test_branch_drift_refuses_another_branch_before_touching_origin(self):
+        with patch("deploy.subprocess.run", side_effect=self.git_responses(**{"rev-parse --abbrev-ref HEAD": "main"})) as git:
+            drift = deploy.branch_drift("legacy/efs-sqlite")
+        self.assertIn("on main", drift)
+        self.assertIn("legacy/efs-sqlite", drift)
+        self.assertEqual(len(git.call_args_list), 1)
+
+    def test_branch_drift_names_a_detached_head(self):
+        with patch("deploy.subprocess.run", side_effect=self.git_responses(**{"rev-parse --abbrev-ref HEAD": "HEAD"})):
+            self.assertIn("detached", deploy.branch_drift("legacy/efs-sqlite"))
+
+    def test_branch_drift_fetches_and_compares_with_origin(self):
+        answers = {"rev-parse --abbrev-ref HEAD": "legacy/efs-sqlite", "rev-parse HEAD": "aaa",
+                   "rev-parse origin/legacy/efs-sqlite": "bbb",
+                   "rev-list --count origin/legacy/efs-sqlite..HEAD": "2", "rev-list --count HEAD..origin/legacy/efs-sqlite": "0"}
+        with patch("deploy.subprocess.run", side_effect=self.git_responses(**answers)) as git:
+            drift = deploy.branch_drift("legacy/efs-sqlite")
+        self.assertIn("2 commit(s) ahead of and 0 behind origin/legacy/efs-sqlite", drift)
+        self.assertIn(["git", "fetch", "--quiet", "origin", "legacy/efs-sqlite"], [c.args[0] for c in git.call_args_list])
+        self.assertTrue(all(c.kwargs["cwd"] == deploy.REPO for c in git.call_args_list))
+
+    def test_branch_drift_reports_a_missing_or_unreachable_origin(self):
+        def run(command, **_):
+            if command[1] == "fetch":
+                return SimpleNamespace(returncode=128, stderr="fatal: couldn't find remote ref legacy/efs-sqlite")
+            return SimpleNamespace(stdout="legacy/efs-sqlite\n")
+        with patch("deploy.subprocess.run", side_effect=run):
+            drift = deploy.branch_drift("legacy/efs-sqlite")
+        self.assertIn("cannot compare legacy/efs-sqlite with origin", drift)
+        self.assertIn("couldn't find remote ref", drift)
+
+    def test_branch_drift_is_none_when_head_matches_origin(self):
+        answers = {"rev-parse --abbrev-ref HEAD": "legacy/efs-sqlite", "rev-parse HEAD": "aaa",
+                   "rev-parse origin/legacy/efs-sqlite": "aaa"}
+        with patch("deploy.subprocess.run", side_effect=self.git_responses(**answers)):
+            self.assertIsNone(deploy.branch_drift("legacy/efs-sqlite"))
 
     def test_completed_rollback_returns_nonzero_instead_of_ecs_stable(self):
         state = {"operation": None, "last": {"id": "request", "result": "ROLLED_BACK"}, "owner": {"arn": "owner"}}
@@ -152,6 +221,7 @@ class DeployTests(unittest.TestCase):
 
     def test_unsafe_tag_cannot_reach_make(self):
         with patch("sys.argv", ["deploy.py", "deploy", "--build", "--tag", "$(shell bad)"]), \
+                patch("deploy.branch_drift", return_value=None), patch("deploy.dirty_files", return_value=[]), \
                 patch("deploy.configuration") as config, contextlib.redirect_stderr(io.StringIO()), \
                 self.assertRaises(SystemExit):
             deploy.main()
