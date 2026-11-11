@@ -98,9 +98,10 @@ minutes after start), NONE pages are correct but not yet faster.
 
 A `WEATHER_ALERT` event's `geometry` is now the area of the NWS zones it names
 (`weatherAlert.zones`): one MultiPolygon, the zones' official boundaries
-simplified to about 1 km (a single zone is ~7 KB, a 30-zone heat advisory ~85
-KB). The `weather_alert` map layer draws them, and an alert also attaches to
-the counties and towns its zones cover. It used to have no geometry at all.
+simplified to about 500 m without self-crossing rings (a single zone is ~11
+KB, a 30-zone heat advisory ~170 KB). The `weather_alert` map layer draws
+them, and an alert also attaches to the counties and towns its zones cover
+(by real overlap, not a shared border). It used to have no geometry at all.
 Fire-weather products (Red Flag Warning, Fire Weather Watch) use NWS fire
 zones, others public forecast zones, as NWS lists them. Existing active alerts
 gain the shape on their next poll after deploy (one revision each); an alert

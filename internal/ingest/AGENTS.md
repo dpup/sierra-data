@@ -855,7 +855,7 @@ banner (`nws.fireWeatherFromAlert`, which does not go through the store).
 An NWS alert names zones, not a shape. `attachArea` asks the weather service
 for the combined area of the alert's typed zone refs (`nws.Alert.ZoneRefs`,
 from CAP `affectedZones`: `fire/CAZ138` vs `forecast/CAZ138` are different
-shapes with the same UGC code), simplified to ~1 km (`services.AlertZoneTolerance`)
+shapes with the same UGC code), simplified to ~500 m (`services.AlertZoneTolerance`)
 and cached per zone for a week. Three rules:
 
 - **All or nothing.** One unreadable zone means no new shape this tick; the

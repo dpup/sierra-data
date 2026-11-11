@@ -15,9 +15,11 @@ const (
 	// zoneGeometryTTL: NWS zone boundaries change a few times a decade.
 	zoneGeometryTTL = 7 * 24 * time.Hour
 	// AlertZoneTolerance is the simplification tolerance for alert areas,
-	// in degrees (~1 km). A Sacramento forecast zone is ~8,000 vertices
-	// (190 KB) raw; an advisory can name 40 of them.
-	AlertZoneTolerance = 0.01
+	// in degrees (~500 m). A Sacramento forecast zone is ~8,000 vertices
+	// (190 KB) raw; an advisory can name 40 of them. Measured on CAZ137-139:
+	// 0.01 shifted 5-14% of each narrow elevation band's area (16 KB for
+	// the three); 0.005 shifts 3-8% (32 KB).
+	AlertZoneTolerance = 0.005
 )
 
 // alertAreas memoizes the combined shape per zone set, so a tick does not

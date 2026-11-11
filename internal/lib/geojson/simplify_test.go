@@ -41,3 +41,21 @@ func TestSimplifiedMultiPolygon(t *testing.T) {
 	assert.Nil(t, SimplifiedMultiPolygon(0.005, line))
 	assert.True(t, json.Valid(raw))
 }
+
+// A peak on one side of a narrow strip, under a shallow bump on the other:
+// Douglas-Peucker keeps the peak and drops the bump, so the plain result
+// crosses itself. The repaired ring takes back the bump and does not.
+func TestSimplifiedRingDoesNotCrossItself(t *testing.T) {
+	ring := []Position{
+		{0.45, 0}, {0.5, 0.006}, {0.55, 0}, {1, 0},
+		{1, 0.005}, {0.56, 0.005}, {0.56, 0.0085}, {0.44, 0.0085}, {0.44, 0.005}, {0, 0.005},
+		{0, 0}, {0.45, 0},
+	}
+	plain := pick(ring, keptIndices(dpKeep(ring, 0.005)))
+	require.True(t, ringSelfCrosses(plain), "precondition: plain Douglas-Peucker crosses")
+
+	got := simplifyRingValid(ring, 0.005)
+	assert.False(t, ringSelfCrosses(got))
+	assert.Less(t, len(got), len(ring), "still simplified")
+	assert.Equal(t, got[0], got[len(got)-1], "closed")
+}
