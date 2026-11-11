@@ -16,7 +16,7 @@ Last updated: 2026-07-06
 
 **Language/Version**: Go 1.27.3 (`go.mod` and the Docker builder use Go 1.27.3)
 **Primary Dependencies**: gRPC, gRPC Gateway, Prefab framework (github.com/dpup/prefab), Protocol Buffers  
-**Storage**: SQLite (pure-Go `modernc.org/sqlite`, WAL) is the grid event store's system of record — events, revision history, the place directory, and source health, persisted at `grid.dbPath` (`PF__GRID__DB_PATH`). In-memory TTL caches remain on the read path for the roads/weather/hazards services.  
+**Storage**: PostgreSQL 18 (pgx v5, pure Go) is the grid event store's system of record — events, revision history, the place directory, and source health — at `grid.database.url` (`PF__GRID__DATABASE__URL`). Locally it runs in Docker (`make db-up`; `make test`/`make run` use it). The mesh relay keeps its own SQLite file (`meshRelay.dbPath`). The SQLite-on-EFS Grid store is frozen on the `legacy/efs-sqlite` branch. In-memory TTL caches remain on the read path for the roads/weather/hazards services.  
 **Testing**: Go testing framework with testify, contract tests for gRPC services  
 **Target Platform**: Linux/macOS server, containerizable
 
@@ -43,7 +43,8 @@ Last updated: 2026-07-06
 │   ├── cache/                 # In-memory caching with TTL
 │   ├── config/                # Configuration management
 │   ├── hazards/               # /api/v1 unified GeoJSON hazard layers
-│   ├── store/                 # SQLite grid event store (events, revisions, places, sources)
+│   ├── store/                 # PostgreSQL grid event store (events, revisions, places, sources)
+│   ├── storetest/             # Per-test PostgreSQL databases (TEST_DATABASE_URL)
 │   ├── ingest/                # Poller scheduler + per-source normalizers → the store
 │   ├── pushingest/            # Authenticated push ingest (POST /api/v1/ingest/{stream})
 │   ├── gridapi/               # /api/v1 GridService impl (gRPC) + hand-built GeoJSON
@@ -58,8 +59,9 @@ Last updated: 2026-07-06
 └── Makefile                   # Build automation
 ```
 
-The runtime SQLite database lives under `data/` (`data/grid.db`), which is
-git-ignored; only `data/places/` is checked in.
+The Grid's database is PostgreSQL (locally the Docker container from
+`docker-compose.test.yml`); `data/` is git-ignored except `data/places/`, and
+holds the relay's local `relay.db`.
 
 The embedded site's build output (`site/dist`) is git-ignored too — unlike the
 generated `*.pb.go`, it is **not** committed. `make server`/`run`/`test` rebuild
@@ -87,9 +89,12 @@ deterministic — regenerating unchanged protos produces no diff. `make proto`
 generates both `api/v1` (the older grpc-gateway services) and `api/grid/v1`, which
 now carries the `grid.v1` messages **and** the `GridService` (gateway + openapi) —
 the proto-defined `/api/v1` data surface. Generated `*.pb.go` (incl.
-`*_grpc.pb.go`, `*.pb.gw.go`, `*.swagger.json`) are committed. The grid store uses the pure-Go SQLite driver
-`modernc.org/sqlite`, so the `CGO_ENABLED=0` cross-compile in the Dockerfile
-still works — do not introduce a cgo SQLite driver.
+`*_grpc.pb.go`, `*.pb.gw.go`, `*.swagger.json`) are committed. The grid store uses pgx (pure Go)
+and the relay `modernc.org/sqlite`, so the `CGO_ENABLED=0` cross-compile in the
+Dockerfile still works — do not introduce a cgo database driver. `make test`
+and `make run` need Docker for the PostgreSQL container (`make db-up`); plain
+`go test ./...` skips store-backed tests with a `SKIP: TEST_DATABASE_URL unset`
+line.
 
 ### Build & Development
 ```bash
@@ -137,9 +142,12 @@ path — prefer it over ad-hoc kills. When you must kill a server by hand:
   test the stale binary.
 - Port `8181` may be served by an instance **outside** the sandbox (forwarded
   in) that this container cannot see or kill. To verify a local build, run it on
-  a different port with a throwaway DB (`PF__SERVER__PORT=<port>
-  PF__GRID__DB_PATH=<scratch>/verify.db ./bin/server`) rather than fighting 8181,
-  and confirm you bound it by checking the "Listening for traffic" log line.
+  a different port (`PF__SERVER__PORT=<port> make run-bg`) rather than fighting
+  8181, and confirm you bound it by checking the "Listening for traffic" log
+  line. Only one process at a time can write a database (the writer lock): a
+  second server against the same `PF__GRID__DATABASE__URL` waits
+  `grid.database.lockTimeout` and fails, so give a parallel instance its own
+  database (`createdb` in the container, or a different URL).
 
 ### Testing
 ```bash
@@ -242,15 +250,14 @@ export PF__OPENAI__API_KEY="your-openai-api-key"  # For AI-enhanced alerts
 # Optional Configuration (local dev defaults to 8181 via prefab.yaml)
 export PORT=8181
 
-# Grid event store database path (default ./data/grid.db via prefab.yaml).
-# Production points this at the EFS mount; the Dockerfile sets it and declares
-# a /data volume so events/revisions/source-health survive container replacement.
-# EFS, not EBS — this file said EBS until 2026-08-14 while the Dockerfile and
-# internal/store/AGENTS.md said EFS, and the difference decides whether WAL is
-# safe (it is NOT on EFS: the -shm is memory-mapped). Keep grid.journalMode on
-# TRUNCATE. It also means every random row read is a network round trip, which
-# is why the store's index statistics matter so much — see store.Analyze.
-export PF__GRID__DB_PATH=/data/grid.db
+# Grid event store: a PostgreSQL URL (required; prefab.yaml leaves it empty).
+# Production injects it from a secret; make run / run-bg default it to the
+# Docker database (make db-url). Pool and lock: PF__GRID__DATABASE__MAX_CONNS,
+# __MIN_CONNS, __LOCK_TIMEOUT. The database must use C collation (see
+# internal/store/migrations/0001_baseline.sql). The SQLite-era
+# PF__GRID__DB_PATH / JOURNAL_MODE / CACHE_SIZE_MB / LOCK_TIMEOUT are gone and
+# now stop the server (ValidateEnvOverrides).
+export PF__GRID__DATABASE__URL="postgres://user:password@host:5432/grid?sslmode=verify-full"
 
 # Push-ingest credentials are NOT env vars: a reporter's token hash lives in
 # prefab.yaml (grid.ingest.reporters[].tokenSha256) and the token itself only on
@@ -258,8 +265,9 @@ export PF__GRID__DB_PATH=/data/grid.db
 ```
 
 **Env-var naming — a camelCase config key needs an underscore.** prefab maps
-`PF__A__B_C` → `a.bC`, so `grid.dbPath` is **`PF__GRID__DB_PATH`**;
-`PF__GRID__DBPATH` maps to `grid.dbpath` and matches nothing. This is **enforced,
+`PF__A__B_C` → `a.bC`, so `grid.database.maxConns` is
+**`PF__GRID__DATABASE__MAX_CONNS`**; `PF__GRID__DATABASE__MAXCONNS` maps to
+`grid.database.maxconns` and matches nothing. This is **enforced,
 not just documented**: `config.ValidateEnvOverrides` (called from `LoadConfig`)
 reflects over `Config` and refuses to start on a `PF__` override in our
 namespaces that resolves to no real key, naming the variable you meant. You don't
@@ -283,7 +291,7 @@ stays listed but nothing authenticates as it, so a local server still starts
 
 **Configuration Files**:
 - `prefab.yaml` - Application configuration (API refresh intervals, route
-  definitions, and the `grid` section: `dbPath`, per-source poll intervals +
+  definitions, and the `grid` section: `database` (url, pool, lock timeout), per-source poll intervals +
   disappearance policy, NWS-alert enhancement budget, and `grid.wildfire` —
   the fire layer's own, deliberately **wider** geography: `marginDegrees`
   grows the `hazards.areas` union for fire ingest, `placeBufferMeters` lets an
@@ -707,11 +715,12 @@ cached last-good fetch), never a fabricated clear state.
   always links the authoritative Genasys viewer. Areas configured under
   `hazards.areas` in `prefab.yaml`.
 
-**Persistence** (`internal/store`, SQLite at `grid.dbPath`, WAL mode): **the
+**Persistence** (`internal/store`, PostgreSQL at `grid.database.url`): **the
 store is the system of record** for grid events. The canonical value is the proto
 blob (`grid.v1.Event`) — scalar columns exist only as query indexes and every
 read rehydrates from the blob. Writes are single-writer (the ingest scheduler,
-serialized through a mutex); reads run concurrently under WAL. Every content
+serialized through a mutex, and one writer process per database via an
+advisory lock); reads run concurrently under MVCC. Every content
 change or lifecycle transition is a revision snapshot in `event_revisions`, so a
 restart rehydrates events + history with no re-fetch. The in-memory TTL caches
 (`internal/cache`) remain on the read path for the roads/weather/hazards services

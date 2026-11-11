@@ -1,7 +1,17 @@
 # Deploy handoff: standby startup and explicit database ownership
 
+> **Grid store on PostgreSQL (feat/postgres-store, 2026-11-11).** The Grid's
+> lock is now a PostgreSQL session advisory lock held on a dedicated
+> connection (`internal/store/lease.go`), waited for up to
+> `grid.database.lockTimeout`; "database held" and the state machine below are
+> unchanged. Where this guide says `grid.db`, flock or EFS for the Grid, read
+> "the Grid database" and "the writer lock". The relay keeps its SQLite file.
+> The coordinator flow itself is replaced by the writer lease and native
+> blue/green in the migration plan (P3, P6); this guide is rewritten then.
+
 The Grid (`sierra-server`) and the mesh relay (`mesh-relay`) each hold an
-exclusive lock on their own SQLite file (`grid.db`, `relay.db`). Without
+exclusive lock on their own database (the Grid's PostgreSQL writer lock,
+the relay's SQLite `relay.db`). Without
 handoff, a rolling deploy is stop-then-start: the replacement cannot open the
 database until the old task has drained, been signalled, exited and been
 deprovisioned, and all of that is downtime (measured ~1m35s, most of it

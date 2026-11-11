@@ -1,29 +1,33 @@
-# Grid event store (SQLite persistence)
+# Grid event store (PostgreSQL persistence)
 
 The system of record for the grid service: hazard **events** with full revision
 history, the **place** directory, and the **source** registry. Backs the
 `/api/v1` API (`internal/gridapi`, gRPC-Gateway) and the hazard event layers
 (`internal/hazards`). Design: `docs/design/v2-api-spec.md` §4 +
-`docs/design/v2-implementation-plan.md` §2.2. Pure-Go driver (`modernc.org/sqlite`) so
-the `CGO_ENABLED=0` cross-compile keeps working — do **not** swap in a cgo driver.
+`docs/design/v2-implementation-plan.md` §2.2. Driver: pgx v5 (pure Go), so
+the `CGO_ENABLED=0` cross-compile keeps working — do **not** add a cgo driver.
+Until 2026-11-11 this was SQLite on EFS; that store is frozen on the
+`legacy/efs-sqlite` branch (tag `legacy-efs-final`), and the migration plan is
+the workspace note `notes/2026-11-11-rds-postgres-migration-plan.md`.
 
 ## Schema philosophy — the proto blob is canonical
 
-Every row stores the full `grid.v1` proto as a `BLOB`; the scalar columns
+Every row stores the full `grid.v1` proto as a `bytea`; the scalar columns
 (`layer`, `severity`, `status`, `source_id`, `effective`, `expires`,
 `observed_at`, …) exist **only as query indexes** and are always re-derivable from
 the blob. Every read path (`GetEvent`, `QueryEvents`, `EventHistory`, place/source
 reads) rehydrates from the blob, never from the columns — so a column and the blob
-can never drift into two answers. (The two deliberate exceptions are the ETag
-validators `EventVersion` — `SELECT revision, refreshes` — and `DataVersion` —
-`MAX(rowid)` over `event_revisions`: they read a column/rowid *on purpose*, never
-rehydrating, because they must be cheap and they only ever feed an opaque
+can never drift into two answers. (The deliberate exceptions are the ETag
+validators: `EventVersion` — `SELECT revision, refreshes` — and the `versions`
+counters (`DataVersion`, `RefreshVersion`, …): they read a column *on purpose*,
+never rehydrating, because they must be cheap and they only ever feed an opaque
 change-detection tag, never a response body. The `revision` column is written
 atomically with the blob, so it can't drift from it.) When you add a filterable field, add a column
 **and** keep writing it from the blob at upsert; never let a column become the only
-home of a value. `event_geo` (R*Tree) + `event_geo_map` index geometry bboxes for
-spatial queries; `event_places` is the precomputed event→place join so the hot
-read path never touches geometry.
+home of a value. The geometry bbox is four plain columns on `events`
+(`min_lat`…`max_lng`, NULL without geometry; no reader yet — the SQLite R*Tree
+they replace was never read in production); `event_places` is the precomputed
+event→place join so the hot read path never touches geometry.
 
 ## Content-hash gating — what's zeroed and why
 
@@ -70,15 +74,16 @@ residents the data was stale. If you exclude a new field from the hash, add it
 to that path and to the poller's ForceWrite in the same change.
 
 **That path changes the served body without a revision, so it must move the
-validators.** Each rewrite bumps the row's `refreshes` column (migrationV10)
-and, after the commit, an in-process per-layer counter. `EventVersion` returns
-`EventStamp{Revision, Refreshes}` for the event-detail ETag, and `ListEvents`
-folds `RefreshVersion(layers)` in beside `DataVersion`. Keyed on revision
-alone, a conditional GET answered 304 with the old enhancement, telemetry or
-burn observation. Per layer so a mesh node's telemetry refresh leaves a
-road-incident list's 304 alone; bumped after the commit so a reader can never
-pair the new version with the old blob. A hash-equal poll that rewrites
-nothing moves neither. History is untouched: a revision snapshot never changes.
+validators.** Each rewrite bumps the row's `refreshes` column and, in the same
+transaction, the layer's `refresh:<LAYER>` row in `versions`. `EventVersion`
+returns `EventStamp{Revision, Refreshes}` for the event-detail ETag, and
+`ListEvents` folds `RefreshVersion(layers)` in beside `DataVersion`. Keyed on
+revision alone, a conditional GET answered 304 with the old enhancement,
+telemetry or burn observation. Per layer so a mesh node's telemetry refresh
+leaves a road-incident list's 304 alone; in the writing transaction so a reader
+can never pair the new version with the old blob (and every process serving
+reads sees the same counter). A hash-equal poll that rewrites nothing moves
+neither. History is untouched: a revision snapshot never changes.
 
 `NeedsUpdate` is the read-only pre-check the scheduler uses for the budget
 decision; `UpsertEvent` re-computes the hash itself from the event **as passed**
@@ -88,8 +93,10 @@ equals what the next poll's `ContentHash` yields.
 ## Revision semantics — transitions are revisions; the all-clear is history
 
 - New event → revision 1. Changed content → `old+1`. Every content write also
-  inserts an `event_revisions` snapshot (full blob), recomputes `event_places`,
-  refreshes the R*Tree row, and stamps `last_seen_at`.
+  inserts an `event_revisions` snapshot (full blob; bumps the `revisions`
+  counter behind `DataVersion`), recomputes `event_places`, writes the bbox
+  columns and the lite copy, and stamps `last_seen_at`. `first_ingested_at` is
+  written on insert only (`/stats`' "since", `FirstIngested`).
 - `TransitionEvents` (lifecycle: → RESOLVED/EXPIRED, and any status change) bumps
   the revision and writes a snapshot too. **The all-clear is part of history**, not
   a delete — an event that leaves its feed becomes a RESOLVED/EXPIRED revision, and
@@ -114,13 +121,12 @@ Two different questions, do not conflate:
   revision, never touches the content hash — liveness is not content.
 
   **The cutoff is a performance invariant, not a tidy-up.** Unconditional
-  stamping rewrote ~400 blob-carrying rows every 60 s mesh tick; each commit
-  made every reader connection discard its page cache, and on EFS the first
-  post-tick read re-fetched hundreds of pages cold — the measured 1.7-3.5 s
-  spikes on ~7% of requests, clustered on the tick cadence. With the cutoff,
-  a tick where nothing is stale matches zero rows and **commits nothing** (no
-  journal, no change-counter bump, caches stay warm). Keep the window far
-  below the smallest `expireAfter`; the worst case is an event expiring
+  stamping rewrote ~400 blob-carrying rows every 60 s mesh tick. On the legacy
+  SQLite/EFS store each commit made every reader discard its page cache (the
+  measured 1.7-3.5 s spikes on ~7% of requests); on PostgreSQL every UPDATE
+  writes a new row version, WAL and later vacuum work. With the cutoff, a tick
+  where nothing is stale matches zero rows and writes nothing. Keep the window
+  far below the smallest `expireAfter`; the worst case is an event expiring
   earlier by the lag.
 
 The lifecycle expire grace (`ingest.shouldExpire`) is anchored to `last_seen_at`
@@ -187,223 +193,100 @@ its boundary.
 ## Single-writer discipline
 
 Writes go through `inTx` (or `TouchSeen`), which take the store mutex — the ingest
-scheduler is the **only** writer, serialized. Reads go straight to the connection
-pool and serialize against the writer's short commit via `busy_timeout(5000)`
-(the default TRUNCATE rollback journal has no WAL MVCC, so a reader waits up to
-5s for a commit rather than erroring `SQLITE_BUSY`). Keep write transactions
-small — one `UpsertEvent` per tx — so that window stays tiny; this is why
-`matchPlaces` is cache-backed. `matchPlaces` reads the `places` table inside the
-write transaction (consistent snapshot). Do not add a second writer; if you need
-one, it must also hold `mu`.
+scheduler is the **only** writer, serialized. Across processes, `Open` holds the
+writer lock (below), so exactly one process writes a database. Reads go
+straight to the pool under PostgreSQL MVCC and never wait on the writer. Write
+transactions run at READ COMMITTED; their read-modify-write steps (the upsert's
+revision lookup, `TransitionEvents`, `RecordAttempt`, compaction's watermark)
+are safe only because of the single writer — say so in a comment if you add
+one. Keep write transactions small (one `UpsertEvent` per tx); `matchPlaces`
+is cache-backed for the same reason, and that cache (`placesGeo`) is valid only
+in the writing process. Do not add a second writer; if you need one, it must
+also hold `mu`.
 
-## Journal mode / filesystem (`WithJournalMode`)
+## PostgreSQL
 
-`Open` takes a journal mode; default **TRUNCATE**, config `grid.journalMode`
-(`PF__GRID__JOURNAL_MODE`). It is whitelisted and paired with a `synchronous`
-level in `journalModeSynchronous`:
+- **Driver and pool.** `Open(url, …)` builds a `pgxpool.Pool`
+  (`grid.database.maxConns`/`minConns`, defaults 8/1) and exposes it as
+  `*sql.DB` via `stdlib.OpenDBFromPool`, so the store is plain `database/sql`
+  with `$n` placeholders. `Pool()` returns the native pool for what
+  `database/sql` cannot do (COPY, LISTEN, a dedicated connection). Dynamic
+  lists bind one array: `= ANY($n)` with a Go slice. `TestNoQuestionMarkPlaceholders`
+  fails on a SQLite `?` left in any SQL literal.
+- **Writer lock (`lease.go`).** A session `pg_try_advisory_lock` on a
+  connection taken with `Acquire` and then `Hijack()`ed out of the pool — never
+  a pooled connection, which would carry the session lock into unrelated
+  queries. `Open` waits up to `grid.database.lockTimeout` (90 s; the common
+  contention is a deploy whose previous writer has not released yet, and
+  waiting beats a crash loop), announces the wait once and the acquisition
+  with its duration, and ends early when `WithLockContext`'s context does
+  (SIGTERM during a handoff activation). A heartbeat pings the connection and
+  calls the `WithLockLost` hook if it dies. `Close` unlocks; process or
+  connection death releases it server-side. Migration plan P3 turns this into
+  a lease with epoch fencing and reader/writer roles; until then an advisory
+  lock alone cannot stop a writer that lost its session mid-transaction.
+- **Collation.** Keyset cursors (`id > $1`), golden orderings and Go-side
+  sorting assume byte order. The database must be created
+  `TEMPLATE template0 LC_COLLATE 'C' LC_CTYPE 'C'`; `Open` refuses one that
+  does not compare bytewise (`checkCollation`), and
+  `TestKeysetPagingFollowsByteOrder` walks ids with `:` and `-`.
+- **Validators (`versions.go`).** `DataVersion`, `RefreshVersion`,
+  `MeshActivityVersion` and `PlacesVersion` read rows of the `versions` table,
+  bumped in the same transaction as the write. They used to be process memory
+  (and a `COUNT(*)`), which gives wrong 304s as soon as two processes serve
+  reads.
+- **Read snapshots.** Reads that span statements (`MeshLinks`,
+  `RoadStatusSince`, `Totals`) run in one REPEATABLE READ READ ONLY
+  transaction (`readTx`), so a commit landing between them cannot produce an
+  answer that never existed.
+- **Statistics.** PostgreSQL's autovacuum keeps planner statistics; there is
+  no `Analyze` any more. Plan assertions use `EXPLAIN (FORMAT JSON)` with
+  sequential scans, bitmap scans and sorts disabled (`plan_test.go`), which
+  pins that an index CAN serve a statement's filter and ORDER BY on test-sized
+  tables.
+- **Timestamps** stay `bigint` unix seconds; never `timestamptz` for domain
+  times (`schema_migrations.applied_at` is bookkeeping, not domain data).
+- **Tests.** `internal/storetest.URL(t)` gives each test its own database,
+  copied from a migrated `sierra_template` and dropped afterwards;
+  without `TEST_DATABASE_URL` the test is skipped with a `SKIP:` line.
+  `make test` starts the Docker database (`make db-up`) and sets it.
 
-- **TRUNCATE / DELETE / PERSIST** (rollback journals) → `synchronous=FULL`. No
-  memory-mapped `-shm` file, so they work over a **network filesystem (NFS/EFS)**
-  — which is why this is the default (prod runs on EFS). TRUNCATE zero-truncates
-  the `-journal` instead of unlinking it (one fewer NFS metadata op per commit).
-  FULL keeps the rollback journal crash-safe (NORMAL can corrupt a rollback
-  journal on power loss).
-- **WAL** → `synchronous=NORMAL`. Faster concurrent reads, but the `-shm` is
-  memory-mapped and **breaks over NFS/EFS** — use it only on a real local disk.
-
-**Cross-process guard — `Open` takes an exclusive `flock`.** SQLite's own
-per-file locking is not honored on some shared filesystems — notably the
-**virtiofs bind mount** Docker Desktop uses for `/workspace` — so two processes
-writing the same DB there silently corrupt it (`database disk image is
-malformed`). The classic footgun: the container's dev server *and* a host process
-that mounts the workspace both open `./data/grid.db`. `Open` takes an exclusive
-advisory `flock` on `<path>.lock` and returns a clear "already open by another
-process" error instead of racing; the flock is bound to the fd, so the kernel
-releases it on `Close` or process death (no stale lock) — even under SIGKILL,
-so a hard-killed task never leaves the lock held.
-
-**It WAITS for a contended lock — `grid.lockTimeout`, default 90s — and waiting
-is the point.** The common contention case is a rolling deploy whose previous
-task has not exited yet. A task that gives up is simply restarted to wait again,
-so a short timeout does not produce one clean failure, it produces a **crash
-loop**: the original 15s was shorter than a real ECS drain, and the observed
-result was minutes of 503s with the logs saying only "already open by another
-process". The wait is announced once up front and again on acquisition with the
-duration, so "the deploy was slow because the old task was draining" is
-distinguishable from a genuinely hung lock.
-
-Two constraints that must move together:
-
-- **The Dockerfile `HEALTHCHECK --start-period` must exceed `lockTimeout`**
-  (120s vs 90s today). The listener does not open until the lock is acquired, so
-  a health check firing during the wait kills the task mid-wait — reintroducing
-  the crash loop the wait exists to prevent.
-- **This survives a slow drain; it does not fix one.** prefab shuts down
-  gracefully in ~2s on SIGTERM, so a multi-minute drain is upstream: the load
-  balancer's deregistration delay (AWS default **300s**) and the ECS service's
-  `minimumHealthyPercent` (at 100 the old task is not stopped until the new one
-  is healthy, which it cannot become — a deadlock). It coordinates within
-one kernel only — a writer reaching the file from a separate host via the mount
-can still slip past — so **for dev, keep the DB off the bind mount**: point
-`PF__GRID__DB_PATH` at a container-local path outside `/workspace` (e.g.
-`$HOME/.local/state/grid/grid.db`, set in `.envrc`) rather than relying on the
-lock alone. A single writer is corruption-free on every filesystem; only
-concurrent writers are the hazard.
-
-**The store is a system of record, not a rehydrate-able cache.** A clean restart
-with the DB intact rehydrates everything (that is the point of persistence). But
-if the DB is *lost*, only the **current active snapshot** rebuilds — the pollers
-re-fetch the upstreams' present state and re-insert those events (as revision 1,
-freshly ingested). Everything else is **irreplaceable**, because most sources are
-active-only and ephemeral (CAL FIRE `inactive=false`, Cal OES active-zones,
-CHP/Caltrans current incidents, NWS active alerts): the full revision history,
-every RESOLVED/EXPIRED event (things that already ended are gone from the feeds),
-and the true first-seen times / revision counts of even still-active events
-cannot be recovered. So the durability choices here matter — hence FULL on the
-rollback journal — and the volume deserves real backups, not "it'll just
-rebuild." Match the journal mode to the filesystem, and treat DB loss as data
-loss of history, not a cache miss.
-
-## Connection pool + page cache (`grid.cacheSizeMb`, `grid.maxOpenConns`)
-
-SQLite's page cache is **per connection**, so a connection `database/sql` closes
-takes its warm cache with it. Go's defaults — `MaxIdleConns=2`, unlimited open —
-are the pathological shape here: under concurrency most queries land on a fresh
-connection with a cold 2 MB cache, and **on EFS every page it then misses is a
-network round trip, not a disk read**. That is the amplifier that turned a
-worst-case 69 ms query into seconds in production while measuring in
-milliseconds on local disk.
-
-`Open` therefore sets idle == open (a connection is never closed merely for being
-surplus) and leaves `ConnMaxLifetime` at 0 — recycling buys nothing and discards
-the cache the connection accumulated.
-
-**Size the cache against the HOT set, not the file.** The database is ~150 MiB,
-but `event_revisions` (a full proto blob per revision) and `mesh_observations`
-(the 48 h reception firehose) dominate that and are **cold** for `/events`. The
-hot path is `events` + `event_places` and their indexes.
-
-Resident page cache is `cacheSizeMb × maxOpenConns` — budget them together.
-Defaults are 24 MB × 4 = 96 MB. **Fewer, fatter connections is deliberate**: this
-is a low-traffic read-mostly API, so concurrency past a handful buys nothing,
-while a bigger per-connection cache directly cuts EFS round trips and fewer
-readers pile onto the rollback journal (TRUNCATE has no WAL MVCC, so readers
-serialize against the writer's commit via `busy_timeout`).
-
-`mmap_size` is deliberately **not** set: memory-mapped I/O over NFS is the same
-class of hazard that makes WAL unusable on EFS, and the page cache already covers
-the read path.
-
-**`Open` reads the pragmas back and logs them, and hard-errors if the applied
-`journal_mode` differs from the requested one.** Pragmas are per-connection, so
-that log line is the only way to observe the store's effective configuration from
-outside the process — nothing you run against the file from another connection
-tells you anything. The mismatch is fatal rather than a warning because a journal
-mode can silently *not* apply (WAL degrades to a rollback journal on a filesystem
-that cannot support it — precisely the EFS case), and that difference decides both
-whether readers block on the writer and whether the durability reasoning in
-`journalModeSynchronous` still holds.
-
-## Index statistics are REQUIRED, not tuning (`Analyze`)
-
-`Store.Analyze` runs `ANALYZE`. The ingest scheduler calls it every
-`statsRefreshInterval` (6 h), and it is **load-bearing**: without stats the
-place-scoped event query degrades without bound as the store ages.
-
-**Boot does not analyze unless it has to.** The statistics live in
-`sqlite_stat1`, inside the database file, so a restart inherits the last run's.
-`cmd/server` analyzes synchronously only when `HasStatistics` says the file has
-none for `events`/`event_places` (a new database, where it is cheap); otherwise
-the scheduler's first refresh runs 10 minutes after boot
-(`SchedulerConfig.StatsRefreshFirstAfter`). The unconditional boot ANALYZE
-measured **59.5 s on the production EFS store**, all of it before the listener
-opened, and it was most of a deploy's 502 window. `TestStatisticsSurviveReopen`
-pins the property this relies on. Each refresh holds the writer mutex for its
-whole run, so on EFS ingest writes wait out that minute.
-
-The query is `FROM events e JOIN event_places ep ON … ep.place_id = ? WHERE
-e.status IN (ACTIVE, SCHEDULED)`. **`event_places` attachments are deliberately
-never deleted on a lifecycle transition** — `TransitionEvents` updates `events`
-and writes a revision but leaves `event_places` alone, because place-scoped
-history (`QueryHistory`, and `place=X&status=RESOLVED`) needs them. So a place's
-attachment count grows forever while its live set stays small: measured **62-96%
-dead after five days** on the dev DB.
-
-There is **no index carrying `status` on `event_places`**
-(`idx_event_places_place` is `(place_id, event_id)`), so the dead rows cannot be
-discarded until each candidate has been fetched out of the wide `events` table.
-With no statistics SQLite assumes `ep.place_id = ?` is highly selective and picks
-exactly that plan:
-
-```
-SEARCH ep USING COVERING INDEX idx_event_places_place (place_id=?)
-SEARCH e USING INDEX sqlite_autoindex_events_1 (id=?)      <- one wide-row fetch per dead attachment
-```
-
-With statistics it drives from the bounded ACTIVE set instead, and probes
-`event_places` through a covering index — never fetching an `event_places` row:
-
-```
-SEARCH e USING INDEX idx_events_active (status=?)
-SEARCH ep USING COVERING INDEX idx_event_places_place (place_id=? AND event_id=?)
-```
-
-Measured on a synthetic reproducing production's plan (local disk, warm cache;
-**prod is EFS, where every discarded fetch is an extra network round trip**, so
-the real spread is far wider):
-
-| attachments | no stats | with stats |
-| ----------- | -------- | ---------- |
-| 500         | 2.2 ms   | 2.0 ms     |
-| 6,400       | 10.9 ms  | 4.0 ms     |
-| 50,400      | 69.1 ms  | 3.9 ms     |
-
-This shipped as `/api/v1/events?place=…` taking 1.1-3.7 s while returning 14
-events, and 0.9 s to return 200 — latency **anti-correlated** with the size of
-the answer, which is the signature to recognize.
-
-Two traps:
-
-- **`PRAGMA analysis_limit` does not work here.** At the documented 400-row
-  sample the plan does not change at all (68.8 ms at the largest size) — the
-  sample is far too small to see a 99% skew. Use a full `ANALYZE`; it cost
-  119 ms at 50,400 attachments.
-- **`PRAGMA optimize` is a no-op** on a freshly pooled connection, which is what
-  `database/sql` hands you.
-
-`TestPlaceScopedEventsDoesNotWalkDeadAttachments` pins the join order. It
-reproduces the production plan exactly when `Analyze` is omitted, so it is not
-vacuous. Denormalizing `status` onto `event_places` would be marginally faster
-(2.8 vs 3.9 ms) but needs a migration plus an invariant maintained across two
-tables — and a drift there would silently hide an ACTIVE event from a
-place-scoped query, which is the one failure this service must not have.
+**The store is a system of record, not a rehydrate-able cache.** A clean
+restart rehydrates everything. But if the database is *lost*, only the
+**current active snapshot** rebuilds — the pollers re-fetch the upstreams'
+present state and re-insert those events (as revision 1, freshly ingested).
+Everything else is **irreplaceable**, because most sources are active-only and
+ephemeral (CAL FIRE `inactive=false`, Cal OES active-zones, CHP/Caltrans current
+incidents, NWS active alerts): the full revision history, every
+RESOLVED/EXPIRED event, and the true first-seen times / revision counts of even
+still-active events cannot be recovered. Backups and point-in-time restore are
+part of the deployment, not an afterthought; treat database loss as loss of
+history, not a cache miss.
 
 ## `QueryEvents` sorts keys, then fetches blobs
 
 `idx_events_active` orders by severity within ONE status, so any status list
-(the default `ACTIVE,SCHEDULED` included) sorts in a temp B-tree. When the
-sorted `SELECT` carried `e.proto`, SQLite copied the blob of every matching row
-into the sorter to keep 201. An all-statuses page took 25-40 s in production
-whatever its `page_size` (pageSize=5 took 25 s), and a 253 MB local fixture
-measured 35 ms against 0.8 ms. That long read is also what a deploy's drain
-cancelled into a 500. `eventsPageSQL` sorts `(id, severity, observed_at)` in a
-subquery, which reads only the leaf pages ahead of the blob and never its
-overflow chain, and joins back by primary key for the page's rows alone.
-`TestQueryEventsSortsKeysNotBlobs` pins that shape. Do not add the blob back to
+(the default `ACTIVE,SCHEDULED` included) sorts. When the sorted `SELECT`
+carried `e.proto`, the legacy SQLite store copied the blob of every matching
+row into the sorter to keep 201: an all-statuses page took 25-40 s in
+production whatever its `page_size`. `eventsPageSQL` sorts
+`(id, severity, observed_at)` in a subquery `k` with the LIMIT, and joins back
+by primary key for the page's rows alone. `TestQueryEventsSortsKeysNotBlobs`
+pins that the key query never carries the blob. Do not add the blob back to
 the inner select.
 
 Every page read returns a `Page[T]` with a resume token per row (`After[i]`),
 so a caller can serve a prefix (gridapi cuts at a byte budget) and the walk
 stays complete. The tokens are the same keyset cursors as before.
 
-## `event_lite` — the list copy without shapes (migrationV12)
+## `event_lite` — the list copy without shapes
 
 `event_lite` holds each event's CURRENT blob with `geometry.geojson` (and
 `object`) removed; bbox and centroid stay. `QueryEvents` reads it when
 `EventQuery.Lite` is set (`/api/v1/events?geometryFormat=NONE`). It exists
-because GeoJSON is ~96% of an all-statuses page, and a cold EFS read walks a
-blob's overflow chain one 4 KB page, one network round trip, at a time: page 1
-of `place=ebbetts-pass` took 15.6 s cold and 1.7 s warm on 2026-11-10.
+because GeoJSON is ~96% of an all-statuses page: on the legacy EFS store page 1
+of `place=ebbetts-pass` took 15.6 s cold and 1.7 s warm (2026-11-10), and
+in PostgreSQL every shape is still a TOAST fetch and bytes on the wire.
 
 It is derived state, like `event_places`, and the rule is the same: **every
 write of `events.proto` writes it in the same transaction** (`putLite`: the
@@ -412,7 +295,8 @@ skips it serves a stale list row. A missing row is not an error: the read
 `COALESCE`s to `events.proto` and strips its shape in Go (correct, just slow;
 the body is the same before and after the backfill, so its ETag is too). The
 scheduler's `runLiteBackfill` fills rows for events stored before the
-migration: it walks `events` by id from a cursor (reads outside the writer
+lite copy existed (today only rows imported from the legacy store can lack
+one): it walks `events` by id from a cursor (reads outside the writer
 lock, never rescanning from the start), inserts 50 missing rows per short
 transaction (`DO NOTHING`, so a concurrent upsert's newer copy wins), and skips
 a blob that will not unmarshal rather than stopping on it. Revisions are never
@@ -461,7 +345,7 @@ magnitude larger. Adding one is additive when node count × cadence earns it.
 `telemetry.last_heard_at` and `last_relayed_at` are served on every current
 MESH event but never stored in it. They move every few seconds; carrying them
 in the blob would rewrite every node's proto on every tick, which is the
-EFS-commit cost `TouchSeen`'s coalescing exists to avoid, and the "every
+write cost `TouchSeen`'s coalescing exists to avoid, and the "every
 hash-excluded field needs a way back into the blob" rule above would then mean
 a ForceWrite of ~600 events a minute. So the ingest tick upserts one tiny row
 per node whose clocks moved (`RecordMeshTick`, in the SAME transaction as the
@@ -470,30 +354,35 @@ stamps them on at read time.
 
 Three rules keep that honest:
 
-- **Merge by MAX.** A write never moves a clock backwards, so a replay after a
-  restart, or a late drain, is a no-op rather than a regression.
+- **Merge by MAX** (`GREATEST(mesh_activity.col, excluded.col)` — qualify the
+  target columns; unqualified they are ambiguous in PostgreSQL). A write never
+  moves a clock backwards, so a replay after a restart, or a late drain, is a
+  no-op rather than a regression.
 - **Validators must see it.** The overlay changes a response body without a
   revision, so `DataVersion` and `EventVersion` cannot. `MeshActivityVersion`
-  (an in-process counter bumped per write) is folded into the `ListEvents` tag
+  (the `mesh_activity` row in `versions`, bumped in the writing transaction) is folded into the `ListEvents` tag
   whenever the query can return MESH events, and `GetEvent` folds in the node's
   own row. Leaving it out serves a 304 with a stale "last relayed".
 - **History is not overlaid.** A revision is a snapshot of what was stored.
 
 ## Migration ladder
 
-`migrations[]` is an ordered slice; index `i` is schema version `i+1`. `Open`
-creates `schema_migrations`, reads `MAX(version)`, and applies only the missing
-ones, each in its own transaction, recording the version. This makes `Open`
-idempotent across restarts and lets an older dev DB pick up just the new steps.
-Rules:
+The schema is SQL files embedded in `internal/store/migrations`
+(`NNNN_slug.sql`, NNNN = schema version; `0001_baseline.sql` is the SQLite v14
+schema translated, with the changes listed in its header). The runner applies
+each pending version in its own transaction under `pg_advisory_xact_lock`, and
+records it in `schema_migrations (source, version, applied_at)`; `source` is
+`postgres` for these and `sqlite` for the legacy ladder the importer records.
+Only the writer migrates (`Open`, while holding the writer lock). Rules:
 
-- **Append-only.** Never edit an already-shipped migration (a deployed DB has
-  recorded it as applied and will skip it) — add a new entry instead.
-- `migrations[0]` is the embedded `schema.sql`; later entries are Go string DDL
-  (see `migrationV2` adding `last_seen_at`). Keep `schema.sql`'s trailing comment
-  noting which columns later migrations add, so the file reads as the current
-  shape.
-- A migration that needs a data backfill runs its DML in the same transaction.
+- **Append-only.** Never edit a shipped file (a deployed database has recorded
+  it and will skip it) — add a new one.
+- **Additive only (expand/contract).** A process accepts a database at a
+  schema version `>=` its own (`migrations.CheckVersion`), so a reader one
+  release behind keeps working while a newer writer migrates. Never drop or
+  rename what the previous release still reads in the same release.
+- A migration that needs a data backfill runs its DML in the same file; DDL is
+  transactional, so a failed migration leaves nothing behind.
 
 `ErrNotFound` from point lookups (`GetEvent`, `GetPlace`) maps to HTTP 404 at the
 API layer — return it, don't invent a sentinel.
@@ -501,7 +390,7 @@ API layer — return it, don't invent a sentinel.
 ## `burn_readings` — the one table an HTTP request writes
 
 Every other table here is written by the ingest scheduler. `burn_readings`
-(migrationV7) is written by the `burn.line` stream of the push-ingest endpoint
+is written by the `burn.line` stream of the push-ingest endpoint
 (`internal/pushingest`), and it is the landing spot for a pushed burn-day
 reading. It is the only table an HTTP request writes: the sibling `mesh.repeater`
 stream buffers in memory instead, because it reports every few minutes whereas a

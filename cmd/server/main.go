@@ -35,7 +35,7 @@ import (
 //	sierra-server --standby   # prepare, then wait on the control port for POST /activate
 func main() {
 	standby := flag.Bool("standby", false,
-		"start in STANDBY: prepare without opening grid.db and wait for POST /activate on the control port")
+		"start in STANDBY: prepare without opening the database and wait for POST /activate on the control port")
 	flag.Parse()
 
 	// Initialize structured logging
