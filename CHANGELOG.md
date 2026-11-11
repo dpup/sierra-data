@@ -22,6 +22,19 @@ longer exist: `/api/v1` originally hosted a different hand-built REST surface,
 replaced by a snake_case `/v1` surface on 2026-07-05, which was folded back onto
 the proto-defined `/api/v1` gateway on 2026-07-09.
 
+## 2026-11-11
+
+### Mesh: SIERRA gateway nodes appear on the Grid
+
+The companion node behind every SIERRA mesh-relay gateway is now a `MESH` event
+(`nodeType: "companion"`), with the relay's readings in `telemetry.admin`
+(`reporterId: "relay"`): battery, uptime, airtime and packet counts. Before,
+only gateways opted in one by one were read, and their nodes appeared only if
+a broker happened to hear them advertise. Now the relay forwards each gateway
+node's own signed advert, so it appears even when no broker hears it. A node
+that has never advertised a location has no geometry; none is invented. (One
+that stops sharing it keeps its last position.) Additive: no client change.
+
 ## 2026-11-10
 
 ### Mesh headlines drop the "(repeater)" suffix

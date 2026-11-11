@@ -456,7 +456,10 @@ func runE2E(base, token string, keep bool) int {
 		var total time.Duration
 		for i := 0; i < frames; i++ {
 			f := make([]byte, 1+i*9%176)
-			f[0] = byte(i)
+			// Unassigned opcodes: the relay refuses some real commands to
+			// every lease (sierra-meshrelay nodepolicy), and a random body
+			// behind one (e.g. 9, ADD_UPDATE_CONTACT) can trip it.
+			f[0] = 0xc0 + byte(i)
 			_, _ = rand.Read(f[1:])
 			start := time.Now()
 			if err := client.ws.WriteMessage(websocket.BinaryMessage, f); err != nil {

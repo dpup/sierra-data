@@ -216,12 +216,16 @@ func (a *relayApp) Activate(actx context.Context) (err error) {
 	return nil
 }
 
-// checkTelemetry validates meshRelay.telemetry. Gateways without a token is
-// a local relay, not an error: the poller stays off and says so.
+// checkTelemetry validates meshRelay.telemetry. No token is a local relay,
+// not an error: the poller stays off and says so.
 func checkTelemetry(ctx context.Context, t config.MeshRelayTelemetryConfig) error {
-	for i, gw := range t.Gateways {
+	if len(t.Gateways) > 0 {
+		return fmt.Errorf("meshRelay.telemetry.gateways was removed: every paired gateway is now polled " +
+			"(pairing is the host's consent); list exceptions in meshRelay.telemetry.excludeGateways instead")
+	}
+	for i, gw := range t.ExcludeGateways {
 		if !meshrelay.ValidGatewayName(gw) {
-			return fmt.Errorf("meshRelay.telemetry.gateways[%d]: %q is not a gateway name", i, gw)
+			return fmt.Errorf("meshRelay.telemetry.excludeGateways[%d]: %q is not a gateway name", i, gw)
 		}
 	}
 	if t.GridURL != "" {
@@ -230,9 +234,9 @@ func checkTelemetry(ctx context.Context, t config.MeshRelayTelemetryConfig) erro
 			return fmt.Errorf("meshRelay.telemetry.gridUrl %q must be an http(s) URL", t.GridURL)
 		}
 	}
-	if (len(t.Gateways) > 0 || t.Repeaters) && !t.Enabled() {
+	if !t.Enabled() {
 		logging.Infow(ctx, "Relay telemetry poller off: no ingest token "+
-			"(PF__MESH_RELAY__TELEMETRY__INGEST_TOKEN) or gridUrl", "gateways", t.Gateways, "repeaters", t.Repeaters)
+			"(PF__MESH_RELAY__TELEMETRY__INGEST_TOKEN) or gridUrl", "repeaters", t.Repeaters)
 	}
 	return nil
 }
@@ -250,9 +254,10 @@ func (a *relayApp) startTelemetry(relay *meshrelay.Relay, st *meshrelay.Store) {
 		logging.Warn(a.ctx, "Relay telemetry: shared repeaters are off: no secret key (PF__MESH_RELAY__SECRET_KEY), "+
 			"so hosts can't share them either")
 	}
-	p := relaytelemetry.New(relaytelemetry.Config{Gateways: a.telemetry.Gateways, Interval: a.telemetry.Interval,
+	p := relaytelemetry.New(relaytelemetry.Config{ExcludeGateways: a.telemetry.ExcludeGateways,
+		GatewayStaleAfter: a.telemetry.GatewayStaleAfter, Interval: a.telemetry.Interval,
 		RepeaterInterval: a.telemetry.RepeaterInterval, HibernateAfter: a.telemetry.RepeaterHibernateAfter,
-		GridURL: a.telemetry.GridURL,
+		GridURL:     a.telemetry.GridURL,
 		IngestToken: a.telemetry.IngestToken}, relay, st, reps)
 	ctx, cancel := context.WithCancel(a.ctx)
 	done := make(chan struct{})

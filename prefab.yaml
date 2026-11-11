@@ -681,8 +681,9 @@ grid:
         # Breaks ties when two monitors disagree about a node's identity.
         priority: 10
       # The mesh relay's telemetry poller (meshRelay.telemetry): the companion
-      # node behind each opted-in gateway, read every 5m over the relay. It
-      # reports full keys read from the node itself.
+      # node behind every paired gateway, read every 5m over the relay. It
+      # reports full keys read from the node itself, and forwards each gateway
+      # node's own signed advert on mesh.packet so `enumerates` can admit it.
       #
       # The deploy generates the token and sets it in two places: the relay's
       # PF__MESH_RELAY__TELEMETRY__INGEST_TOKEN, and its lowercase-hex SHA-256
@@ -694,9 +695,10 @@ grid:
       # repeater add`) and forwards each one's signed advert, as a gateway's
       # node stored it, on mesh.packet: that establishes repeaters on islands
       # whose adverts never reach a broker. `enumerates` admits the repeaters
-      # it lists even when their advert has no location ("shadow" repeaters at
-      # sensitive sites, published without geometry) or lies outside the
-      # geofence. Passively heard locationless adverts are still dropped.
+      # and gateway nodes it lists even when their advert has no location
+      # ("shadow" nodes at sensitive sites, published without geometry) or
+      # lies outside the geofence. Passively heard locationless adverts are
+      # still dropped.
       - id: relay
         name: "SIERRA Mesh Relay"
         tokenSuppliedAtDeploy: true
@@ -861,20 +863,29 @@ meshRelay:
   # and channel keys: never set this in production.
   debugPayloadGateways: []
   # The relay's own telemetry poller (internal/relaytelemetry): reads the
-  # companion node behind each listed gateway every `interval` (battery,
+  # companion node behind every paired gateway every `interval` (battery,
   # uptime, airtime, radio and packet counters) and reports it to the Grid as
   # the `relay` mesh.repeater reporter, like alanpi. It takes a background
   # lease, so anyone connecting to the node takes it over, and needs no relay
   # client token.
   #
-  # Opt-in per gateway: publishing a node's telemetry can let someone match
-  # it to its gateway, which the public status deliberately does not do. Ask
-  # the host first.
+  # Every paired gateway is polled: pairing with SIERRA is the host's
+  # consent, and the pairing/invite text says so. Published telemetry can let
+  # someone match a node to its gateway, which the relay's public status alone
+  # does not reveal. Several gateways pinning one radio report it once. A
+  # gateway whose bridge hasn't been seen for gatewayStaleAfter (default 7d)
+  # is skipped. The node's own signed advert is forwarded on mesh.packet
+  # (on change, or every 12h) so the Grid can establish it.
+  # (`gateways`, the old opt-in list, was removed 2026-11-11: setting it
+  # fails startup.)
   #
   # Runs only when the ingest token is set, so local relays never push:
   #   PF__MESH_RELAY__TELEMETRY__INGEST_TOKEN   (grid.ingest.reporters[relay])
   telemetry:
-    gateways: ["my-test-box"]
+    # Gateways whose radio is never read or published (a host who asked us
+    # not to), through them or any other gateway pinning the same radio.
+    # Shared-repeater checks may still use them: pairing covers those.
+    excludeGateways: []
     interval: "5m"
     # Shared repeaters: hosts give SIERRA a repeater's (guest) password with
     # `meshbridge repeater add`; the poller logs in over the mesh through a

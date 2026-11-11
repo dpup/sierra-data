@@ -154,13 +154,14 @@ func TestSharedRepeaterIsPolledThroughAGatewayThatHeardIt(t *testing.T) {
 	h.share(tok, rpt.Pubkey, "look")
 
 	now := time.Now()
+	// The gateways' own nodes are excluded here: this test is about the repeater.
 	p := New(Config{Timeout: time.Second, GridURL: grid.srv.URL, IngestToken: "ingest-secret",
-		Now: func() time.Time { return now }}, h.relay, h.store, h.relay)
+		ExcludeGateways: []string{"cabin", "deaf"}, Now: func() time.Time { return now }}, h.relay, h.store, h.relay)
 	p.dueNow(h.ctx)
 	p.cycleAll(h.ctx)
 
 	reps := grid.last(t)
-	require.Len(t, reps, 1, "only the shared repeater; no gateway node is opted in")
+	require.Len(t, reps, 1, "only the shared repeater")
 	r := reps[0]
 	assert.Equal(t, rpt.Pubkey, r["id"])
 	assert.Equal(t, "Ridge RPT", r["name"])

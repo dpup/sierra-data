@@ -742,16 +742,34 @@ here and deploy. What stays here: `cmd/mesh-relay` (prefab app wiring,
 the deploy.
 
 **Gateway node telemetry** (`internal/relaytelemetry`, run by `cmd/mesh-relay`):
-the relay polls the companion node behind each gateway listed in
-`meshRelay.telemetry.gateways` (opt-in per gateway: published telemetry can
-tie a node to its gateway, which the public status withholds) and pushes it
+the relay polls the companion node behind every paired gateway and pushes it
 to the Grid as the `relay` `mesh.repeater` reporter, the same contract as
-alanpi. It holds an in-process lease at `PriorityBackground` (`relay.Acquire`
+alanpi. There is no per-gateway opt-in (since 2026-11-11): pairing with SIERRA
+is the host's consent, and published telemetry can tie a node to its gateway,
+which the public status alone withholds. `meshRelay.telemetry.excludeGateways`
+lists exceptions, by radio: excluding a gateway also stops its radio being read
+through another gateway that pins it (shared-repeater checks may still use
+it). The old `gateways` opt-in key fails startup. Each radio is
+reported once, by pinned key: several gateways can pin one radio (a host
+moving it to a new computer), tried most recently seen first. A gateway not
+seen for `gatewayStaleAfter` (7d) is skipped. The Grid never creates a node
+from a report, so the poller also exports the node's own signed advert
+(`CMD_EXPORT_CONTACT` with no key; nothing is transmitted) and forwards it on
+`mesh.packet` when its content changes or every 12h, never after a failed
+read; `enumerates` admits it even without a location. "Changed" compares
+role, name and location rounded to 0.001° (~100 m), so GPS wander isn't a
+change. Known limits: a node that stops sharing its location keeps the last
+one on the Grid (ingest carries a position forward; it never clears it); a
+forwarded self-advert counts as a 0-hop reception by `relay` (hop count,
+observation row), as the shared-repeater adverts already do; and a gateway
+held by someone for over 14h forwards no advert, so its node can lapse.
+A paused gateway records no attempt only if it last read the radio or no
+other gateway failed: a pause doesn't hide a radio that is offline elsewhere. It holds an in-process lease at `PriorityBackground` (`relay.Acquire`
 + `relay.Send`), so anyone connecting takes the node over, and it needs no
 relay client token; its only credential is the ingest token
 (`PF__MESH_RELAY__TELEMETRY__INGEST_TOKEN`, unset locally, so a local relay
 never pushes). The deploy generates that token and gives the Grid its SHA-256
-as `PF__GRID__INGEST__REPORTER_TOKEN_SHA256__RELAY`. Busy, paused or preempted polls record no attempt; an offline
+as `PF__GRID__INGEST__REPORTER_TOKEN_SHA256__RELAY`. Busy or preempted polls record no attempt (paused: above); an offline
 bridge or disconnected node is a failed attempt. It starts on activation and
 `relayApp.Quiesce` stops it before relay.db is released.
 

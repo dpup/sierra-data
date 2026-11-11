@@ -86,15 +86,32 @@ const payloadAdvert = 4
 // Grid stamps packets with its own receive time, so re-sending an old one
 // would read as fresh presence. Presence between adverts comes from the
 // repeater report's successful logins instead.
+//
+// Gateway nodes' own adverts go out the same way, so the Grid can establish
+// a gateway node no broker hears. Each is exported fresh from a successful
+// read, so it is true presence; it is still sent only when its content
+// (role, location to about 100 m, name) changed or the last one is
+// SelfAdvertResend old.
 func (p *Poller) pushAdverts(ctx context.Context) {
 	type pending struct {
 		st  *nodeState
 		raw []byte
 	}
 	var out []pending
+	now := p.cfg.Now()
 	p.mu.Lock()
 	for _, st := range p.repeaters {
 		if len(st.advert) > 0 && st.advert[0]>>2&0x0f == payloadAdvert && !bytes.Equal(st.advert, st.advertSent) {
+			out = append(out, pending{st, st.advert})
+		}
+	}
+	for _, st := range p.nodes {
+		if st.advert == nil {
+			continue
+		}
+		cur, sent := selfAdvertOf(st.advert, st.pubkey), selfAdvertOf(st.advertSent, st.pubkey)
+		same := st.advertSent != nil && (cur == nil) == (sent == nil) && selfAdvertKey(cur) == selfAdvertKey(sent)
+		if !same || now.Sub(st.advertSentAt) >= p.cfg.SelfAdvertResend {
 			out = append(out, pending{st, st.advert})
 		}
 	}
@@ -122,8 +139,8 @@ func (p *Poller) pushAdverts(ctx context.Context) {
 	}
 	p.mu.Lock()
 	for _, o := range out {
-		o.st.advertSent = o.raw
+		o.st.advertSent, o.st.advertSentAt = o.raw, now
 	}
 	p.mu.Unlock()
-	logging.Infow(ctx, "Relay telemetry: forwarded repeater adverts", "count", len(out))
+	logging.Infow(ctx, "Relay telemetry: forwarded node adverts", "count", len(out))
 }

@@ -397,7 +397,7 @@ on the reporter.
 
 **Enumerated nodes skip the scope tests (2026-11-06).** A reporter with
 `enumerates: true` (only the relay) lists repeaters their hosts explicitly
-shared. A node it lists by FULL key is admitted on its signed advert even with
+shared, and (since 2026-11-11) the nodes behind paired gateways. A node it lists by FULL key is admitted on its signed advert even with
 no location (a "shadow" repeater at a sensitive site: no geometry is ever
 invented for it) or a location outside the geofence (an island elsewhere), and
 relay credit keeps it present like any in-scope node. The advert is still

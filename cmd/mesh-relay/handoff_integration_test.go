@@ -87,7 +87,7 @@ func TestRelayTelemetryPollerFollowsTheLifecycle(t *testing.T) {
 	app, err := prepareRelay(testCtx(), &config.MeshRelayConfig{
 		DBPath: filepath.Join(t.TempDir(), "relay.db"), Port: port, LockTimeout: time.Second,
 		Control: config.ControlConfig{DrainTimeout: 500 * time.Millisecond, WorkerStopTimeout: 5 * time.Second},
-		Telemetry: config.MeshRelayTelemetryConfig{Gateways: []string{"gw-a"}, Interval: 20 * time.Millisecond,
+		Telemetry: config.MeshRelayTelemetryConfig{Interval: 20 * time.Millisecond,
 			GridURL: grid.URL, IngestToken: "x"},
 	})
 	require.NoError(t, err)
