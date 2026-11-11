@@ -62,13 +62,47 @@ func TestLiteBackfill(t *testing.T) {
 	ctx := context.Background()
 	_, err := s.db.ExecContext(ctx, `DELETE FROM event_lite`)
 	require.NoError(t, err)
-	assert.NotEmpty(t, queryOne(t, s, true).GetGeometry().GetGeojson(), "no lite row yet: the full blob is served")
+	before := queryOne(t, s, true)
+	assert.Empty(t, before.GetGeometry().GetGeojson(), "no lite row yet: the full blob is read, its shape still dropped")
+	assert.NotNil(t, before.GetGeometry().GetBbox(), "bbox stays")
 
-	n, err := s.BackfillEventLite(ctx, 10)
+	b, err := s.BackfillEventLite(ctx, "", 10)
 	require.NoError(t, err)
-	assert.Equal(t, 1, n)
-	n, err = s.BackfillEventLite(ctx, 10)
-	require.NoError(t, err)
-	assert.Zero(t, n, "done")
+	assert.Equal(t, LiteBatch{Written: 1}, b, "one short batch: done")
 	assert.Empty(t, queryOne(t, s, true).GetGeometry().GetGeojson())
+}
+
+// The backfill walks by id, so each call reads only its own rows, and a blob
+// that will not unmarshal is skipped rather than stopping the walk on the
+// same row after every restart.
+func TestLiteBackfillWalksPastUnreadableRows(t *testing.T) {
+	s, _ := liteFixture(t)
+	ctx := context.Background()
+	for _, id := range []string{"usgs:a", "usgs:b", "usgs:c"} {
+		ev := testEvent(id, gridv1.Severity_MINOR, gridv1.EventStatus_ACTIVE, id)
+		_, err := s.UpsertEvent(ctx, ev)
+		require.NoError(t, err)
+	}
+	_, err := s.db.ExecContext(ctx, `DELETE FROM event_lite`)
+	require.NoError(t, err)
+	_, err = s.db.ExecContext(ctx, `UPDATE events SET proto = x'ffff' WHERE id = 'usgs:b'`)
+	require.NoError(t, err)
+
+	var cursor string
+	written, skipped, calls := 0, 0, 0
+	for {
+		b, err := s.BackfillEventLite(ctx, cursor, 1)
+		require.NoError(t, err)
+		written += b.Written
+		skipped += b.Skipped
+		calls++
+		if b.Next == "" {
+			break
+		}
+		require.Greater(t, b.Next, cursor, "the cursor only moves forward")
+		cursor = b.Next
+	}
+	assert.Equal(t, 1, skipped)
+	assert.Equal(t, 3, written, "usgs:a, usgs:c and the fixture event")
+	assert.LessOrEqual(t, calls, 5)
 }

@@ -321,7 +321,8 @@ func (s *Scheduler) runLiteBackfill(ctx context.Context) {
 		}
 	}()
 	wait := liteBackfillAfter
-	total := 0
+	var cursor string
+	written, skipped := 0, 0
 	for {
 		timer := time.NewTimer(wait)
 		select {
@@ -333,18 +334,20 @@ func (s *Scheduler) runLiteBackfill(ctx context.Context) {
 			return
 		case <-timer.C:
 		}
-		n, err := s.store.BackfillEventLite(ctx, liteBackfillBatch)
+		b, err := s.store.BackfillEventLite(ctx, cursor, liteBackfillBatch)
 		if err != nil {
-			logging.Errorw(ctx, "Lite backfill failed; will not retry until restart", "error", err, "written", total)
+			logging.Errorw(ctx, "Lite backfill failed; will not retry until restart", "error", err, "written", written)
 			return
 		}
-		total += n
-		if n == 0 {
-			if total > 0 {
-				logging.Infow(ctx, "Lite backfill complete", "written", total)
+		written += b.Written
+		skipped += b.Skipped
+		if b.Next == "" {
+			if written > 0 || skipped > 0 {
+				logging.Infow(ctx, "Lite backfill complete", "written", written, "skippedUnreadable", skipped)
 			}
 			return
 		}
+		cursor = b.Next
 		wait = liteBackfillPause
 	}
 }

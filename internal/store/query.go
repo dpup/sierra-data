@@ -161,6 +161,12 @@ func (s *Store) QueryEventsPage(ctx context.Context, q EventQuery) (Page[*gridv1
 		if err := proto.Unmarshal(blob, ev); err != nil {
 			return Page[*gridv1.Event]{}, fmt.Errorf("store: unmarshal event %s: %w", cur.ID, err)
 		}
+		if q.Lite {
+			// A row the backfill has not reached yet fell back to the full
+			// blob. Drop its shape here, so a lite page is the same body
+			// before and after the backfill (its ETag does not move).
+			stripShape(ev)
+		}
 		page.Items = append(page.Items, ev)
 		page.After = append(page.After, encodeToken(cur))
 	}

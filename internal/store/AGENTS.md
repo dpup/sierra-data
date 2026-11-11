@@ -409,9 +409,14 @@ It is derived state, like `event_places`, and the rule is the same: **every
 write of `events.proto` writes it in the same transaction** (`putLite`: the
 upsert, `TransitionEvents`, the hash-equal refresh). A new write path that
 skips it serves a stale list row. A missing row is not an error: the read
-`COALESCE`s to `events.proto` (correct, just slow), and the scheduler's
-`runLiteBackfill` fills rows for events stored before the migration, 50 per
-short transaction, once per database. Revisions are never lite.
+`COALESCE`s to `events.proto` and strips its shape in Go (correct, just slow;
+the body is the same before and after the backfill, so its ETag is too). The
+scheduler's `runLiteBackfill` fills rows for events stored before the
+migration: it walks `events` by id from a cursor (reads outside the writer
+lock, never rescanning from the start), inserts 50 missing rows per short
+transaction (`DO NOTHING`, so a concurrent upsert's newer copy wins), and skips
+a blob that will not unmarshal rather than stopping on it. Revisions are never
+lite.
 
 ## The mesh tables are measurements, not records
 
