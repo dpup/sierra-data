@@ -134,9 +134,16 @@ a town also hid its NWS forecast.
 `/conditions` no longer fails when OpenWeatherMap is down for every town. It
 used to answer 500, losing the NWS forecasts and fire weather too. It now
 answers with `weather: []`, `lastUpdated: null` and the new `weatherStatus:
-UNAVAILABLE` (also `OK`, or `STALE` when current weather is older than its
-refresh interval), plus `locations`, `forecast` and `fireWeather` as usual.
-Render UNAVAILABLE as "current conditions unknown", not as no towns.
+UNAVAILABLE` (also `OK`, or `STALE` when current weather, or any one town's
+reading, is older than 1.5x its 15-minute refresh interval), plus `locations`,
+`forecast` and `fireWeather` as usual. Render UNAVAILABLE as "current
+conditions unknown", not as no towns.
+
+Each `weather[]` entry gains `observedAt`, when that town's reading was taken.
+A town whose fetch fails keeps its previous reading, so `observedAt` can be
+older than `lastUpdated`; show its age rather than presenting it as current.
+A 7-day `forecast[].daily` period that has ended is dropped even while the
+NWS 7-day product is failing, so the strip never starts in the past.
 
 ### New: `GET /api/v1/events/{id}/timeline`
 

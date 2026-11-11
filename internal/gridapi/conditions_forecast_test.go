@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	gridv1 "github.com/sierragridteam/sierra-data/api/grid/v1"
 	api "github.com/sierragridteam/sierra-data/api/v1"
@@ -134,4 +135,30 @@ func TestGetConditions_CurrentWeatherDown(t *testing.T) {
 	assert.Len(t, resp.GetLocations(), 1)
 	assert.Len(t, resp.GetForecast(), 1)
 	assert.Equal(t, "normal", resp.GetFireWeather().GetState())
+}
+
+// A town whose fetch keeps failing keeps its old reading inside a freshly
+// refreshed set. Its own observedAt says how old it is, and weatherStatus is
+// STALE rather than OK.
+func TestGetConditions_OldTownReadingIsStale(t *testing.T) {
+	now := time.Now()
+	cfg := &config.Config{}
+	cfg.Weather.RefreshInterval = 15 * time.Minute
+	cfg.Weather.Locations = []config.WeatherLocation{{ID: "arnold", Name: "Arnold, CA"}, {ID: "murphys", Name: "Murphys, CA"}}
+	wresp := &api.ListWeatherResponse{WeatherData: []*api.WeatherData{
+		{LocationId: "arnold"}, {LocationId: "murphys"},
+	}, LastUpdated: timestamppb.New(now.Add(-time.Minute))}
+	fw := &fakeWeather{resp: wresp, readAt: map[string]time.Time{"arnold": now.Add(-time.Minute), "murphys": now.Add(-time.Minute)}}
+	g := NewGridServer(&Service{Cfg: cfg, Now: func() time.Time { return now }, Weather: fw})
+
+	resp, err := g.GetConditions(context.Background(), &gridv1.GetConditionsRequest{})
+	require.NoError(t, err)
+	assert.Equal(t, gridv1.SourceStatus_OK, resp.GetWeatherStatus())
+	assert.Equal(t, now.Add(-time.Minute).Unix(), resp.GetWeather()[0].GetObservedAt().AsTime().Unix())
+
+	fw.readAt["arnold"] = now.Add(-72 * time.Hour)
+	resp, err = g.GetConditions(context.Background(), &gridv1.GetConditionsRequest{})
+	require.NoError(t, err)
+	assert.Equal(t, gridv1.SourceStatus_STALE, resp.GetWeatherStatus())
+	assert.Equal(t, now.Add(-72*time.Hour).Unix(), resp.GetWeather()[0].GetObservedAt().AsTime().Unix())
 }

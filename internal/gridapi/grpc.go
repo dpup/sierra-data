@@ -569,15 +569,19 @@ func (g *GridServer) GetConditions(ctx context.Context, req *gridv1.GetCondition
 	// forecasts and fire weather down with it: serve those, and say plainly
 	// that current conditions are unknown.
 	weatherStatus := gridv1.SourceStatus_OK
+	var staleAfter time.Duration
+	if g.svc.Cfg != nil && g.svc.Cfg.Weather.RefreshInterval > 0 {
+		staleAfter = g.svc.Cfg.Weather.RefreshInterval * 3 / 2
+	}
 	resp, err := g.svc.Weather.ListWeather(ctx, &api.ListWeatherRequest{})
 	if err != nil {
 		logError(ctx, "gridapi: current weather unavailable; serving forecasts only", err)
 		weatherStatus = gridv1.SourceStatus_UNAVAILABLE
 		resp = &api.ListWeatherResponse{FireWeather: g.svc.Weather.RegionFireWeather(ctx)}
-	} else if lu := resp.GetLastUpdated(); lu != nil && g.svc.Cfg != nil && g.svc.Cfg.Weather.RefreshInterval > 0 &&
-		g.svc.Now().Sub(lu.AsTime()) > g.svc.Cfg.Weather.RefreshInterval*3/2 {
+	} else if lu := resp.GetLastUpdated(); lu != nil && staleAfter > 0 && g.svc.Now().Sub(lu.AsTime()) > staleAfter {
 		weatherStatus = gridv1.SourceStatus_STALE
 	}
+	readAt := g.svc.Weather.ReadingTimes()
 	data := resp.GetWeatherData()
 	var locations []config.WeatherLocation
 	if g.svc.Cfg != nil {
@@ -609,8 +613,16 @@ func (g *GridServer) GetConditions(ctx context.Context, req *gridv1.GetCondition
 			WindSpeedKmh:         wd.GetWindSpeedKmh(),
 			WindDirectionDegrees: wd.GetWindDirectionDegrees(),
 			VisibilityKm:         wd.GetVisibilityKm(),
+			ObservedAt:           tsOrNil(readAt[wd.GetLocationId()]),
 		})
+		// A town whose fetch keeps failing rides forward in a fresh set:
+		// the set's own time says OK, the town's says otherwise.
+		if at, ok := readAt[wd.GetLocationId()]; ok && staleAfter > 0 && weatherStatus == gridv1.SourceStatus_OK &&
+			g.svc.Now().Sub(at) > staleAfter {
+			weatherStatus = gridv1.SourceStatus_STALE
+		}
 	}
+	out.WeatherStatus = weatherStatus
 	if fw := resp.GetFireWeather(); fw != nil {
 		out.FireWeather = &gridv1.FireWeatherConditions{
 			State:    fireWeatherSlug(fw.GetState()),

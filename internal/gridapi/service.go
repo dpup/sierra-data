@@ -37,6 +37,9 @@ type WeatherAPI interface {
 	// RegionFireWeather is the NWS fire-weather classification alone, for
 	// when current weather (OpenWeatherMap) cannot be read.
 	RegionFireWeather(context.Context) *api.FireWeather
+	// ReadingTimes is when each location's current weather was last read
+	// successfully, by location id.
+	ReadingTimes() map[string]time.Time
 }
 
 // CensusAPI is the geocoder slice /api/v1/places:resolve?address= consumes

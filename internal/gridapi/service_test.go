@@ -83,7 +83,10 @@ type fakeWeather struct {
 	resp      *api.ListWeatherResponse
 	err       error
 	forecasts map[string]*nws.Forecast
+	readAt    map[string]time.Time
 }
+
+func (f *fakeWeather) ReadingTimes() map[string]time.Time { return f.readAt }
 
 func (f *fakeWeather) ListWeather(context.Context, *api.ListWeatherRequest) (*api.ListWeatherResponse, error) {
 	return f.resp, f.err

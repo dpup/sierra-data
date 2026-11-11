@@ -71,7 +71,7 @@ func (s *WeatherService) refreshLocationForecast(ctx context.Context, loc config
 	} else {
 		logging.Warnw(ctx, "NWS 7-day forecast failed; keeping last-good periods", "location_id", loc.ID, "error", derr)
 		if prev := s.readForecast(key); prev != nil {
-			f.Daily = prev.Daily
+			f.Daily = unexpiredPeriods(prev.Daily, time.Now())
 		}
 	}
 	if len(f.Points) == 0 {
@@ -155,4 +155,18 @@ func (s *WeatherService) forecastHorizonHours() int {
 		return h
 	}
 	return defaultForecastHorizon
+}
+
+// unexpiredPeriods drops the periods that have ended. Carrying the last-good
+// 7-day periods forward re-caches them with a fresh TTL, so without this a
+// /forecast outage that outlasts the gridpoint one would serve "Tonight"
+// from days ago indefinitely; with it the strip shortens and then empties.
+func unexpiredPeriods(ps []nws.DailyPeriod, now time.Time) []nws.DailyPeriod {
+	var out []nws.DailyPeriod
+	for _, p := range ps {
+		if p.End.After(now) {
+			out = append(out, p)
+		}
+	}
+	return out
 }

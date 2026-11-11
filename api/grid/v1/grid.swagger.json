@@ -1419,7 +1419,7 @@
         },
         "weatherStatus": {
           "$ref": "#/definitions/v1SourceStatus",
-          "description": "Health of `weather` (OpenWeatherMap current conditions): OK, STALE when\nit is older than its refresh interval, or UNAVAILABLE when it could not\nbe read at all, in which case `weather` is empty and `lastUpdated` null.\nRender UNAVAILABLE as \"current conditions unknown\", never as no towns.\n`forecast` and `fireWeather` come from NWS and do not depend on it."
+          "description": "Health of `weather` (OpenWeatherMap current conditions): OK; STALE when\nthe set, or any town's reading in it (`weather[].observedAt`), is older\nthan 1.5x its refresh interval (15 minutes); or UNAVAILABLE when it\ncould not be read at all, in which case `weather` is empty and\n`lastUpdated` null.\nRender UNAVAILABLE as \"current conditions unknown\", never as no towns.\n`forecast` and `fireWeather` come from NWS and do not depend on it."
         }
       },
       "description": "Conditions is current, non-event state."
@@ -3640,6 +3640,11 @@
           "format": "int32",
           "example": 10,
           "description": "Visibility, km (OpenWeatherMap caps it at 10)."
+        },
+        "observedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When this town's reading was taken (our fetch time). When a town's\nfetch fails its previous reading is kept, so this can be older than\n`Conditions.lastUpdated`; past 1.5x the refresh interval\n`weatherStatus` is STALE. Null when unknown."
         }
       },
       "description": "WeatherConditions is current weather at one location, from OpenWeatherMap.\nWhole numbers, metric units. A value that could not be read is 0."

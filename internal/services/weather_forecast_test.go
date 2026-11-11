@@ -148,3 +148,18 @@ func TestForecasts_ReResolveOnGrid404(t *testing.T) {
 	assert.Equal(t, 2, d.gridCalls)
 	assert.Equal(t, 1, d.dailyCalls, "the 7-day product is fetched from the re-resolved grid")
 }
+
+// Last-good 7-day periods carried across a /forecast outage drop the periods
+// that have ended, so a long outage empties the strip instead of replaying it.
+func TestUnexpiredPeriods(t *testing.T) {
+	now := time.Date(2026, 11, 12, 18, 0, 0, 0, time.UTC)
+	ps := []nws.DailyPeriod{
+		{Name: "Tonight", Start: now.Add(-48 * time.Hour), End: now.Add(-36 * time.Hour)},
+		{Name: "This Afternoon", Start: now.Add(-6 * time.Hour), End: now.Add(time.Hour)},
+		{Name: "Tomorrow", Start: now.Add(12 * time.Hour), End: now.Add(24 * time.Hour)},
+	}
+	got := unexpiredPeriods(ps, now)
+	require.Len(t, got, 2)
+	assert.Equal(t, "This Afternoon", got[0].Name)
+	assert.Empty(t, unexpiredPeriods(ps, now.Add(48*time.Hour)))
+}

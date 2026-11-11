@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/dpup/prefab/logging"
 	"google.golang.org/grpc/codes"
@@ -26,6 +28,34 @@ type WeatherService struct {
 	cache         *cache.Cache
 	config        *config.Config
 	areas         alertAreas
+
+	// readMu guards readAt: when each town's current weather was last read
+	// successfully. A failed town keeps its previous reading in the cached
+	// set (refreshWeatherData), and this is what keeps that honest.
+	readMu sync.Mutex
+	readAt map[string]time.Time
+}
+
+// ReadingTimes returns when each location's current weather was last read
+// successfully, by location id. A location missing has not been read since
+// the process started.
+func (s *WeatherService) ReadingTimes() map[string]time.Time {
+	s.readMu.Lock()
+	defer s.readMu.Unlock()
+	out := make(map[string]time.Time, len(s.readAt))
+	for k, v := range s.readAt {
+		out[k] = v
+	}
+	return out
+}
+
+func (s *WeatherService) noteRead(id string, at time.Time) {
+	s.readMu.Lock()
+	defer s.readMu.Unlock()
+	if s.readAt == nil {
+		s.readAt = map[string]time.Time{}
+	}
+	s.readAt[id] = at
 }
 
 // NewWeatherService creates a new WeatherService
@@ -217,6 +247,7 @@ func (s *WeatherService) refreshWeatherData(ctx context.Context) ([]*api.Weather
 			continue
 		}
 		weatherDataList = append(weatherDataList, weatherData)
+		s.noteRead(location.ID, time.Now())
 		logging.Infow(ctx, "Successfully processed weather location", "location_id", location.ID)
 	}
 

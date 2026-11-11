@@ -5282,7 +5282,7 @@
                 "$ref": "#/components/schemas/v1SourceStatus"
               }
             ],
-            "description": "Health of `weather` (OpenWeatherMap current conditions): OK, STALE when\nit is older than its refresh interval, or UNAVAILABLE when it could not\nbe read at all, in which case `weather` is empty and `lastUpdated` null.\nRender UNAVAILABLE as \"current conditions unknown\", never as no towns.\n`forecast` and `fireWeather` come from NWS and do not depend on it."
+            "description": "Health of `weather` (OpenWeatherMap current conditions): OK; STALE when\nthe set, or any town's reading in it (`weather[].observedAt`), is older\nthan 1.5x its refresh interval (15 minutes); or UNAVAILABLE when it\ncould not be read at all, in which case `weather` is empty and\n`lastUpdated` null.\nRender UNAVAILABLE as \"current conditions unknown\", never as no towns.\n`forecast` and `fireWeather` come from NWS and do not depend on it."
           }
         },
         "required": [
@@ -7980,6 +7980,12 @@
             "example": "Murphys, CA",
             "type": "string"
           },
+          "observedAt": {
+            "description": "When this town's reading was taken (our fetch time). When a town's\nfetch fails its previous reading is kept, so this can be older than\n`Conditions.lastUpdated`; past 1.5x the refresh interval\n`weatherStatus` is STALE. Null when unknown.",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
           "temperatureCelsius": {
             "description": "Air temperature, degrees Celsius.",
             "example": 10,
@@ -8025,6 +8031,7 @@
           "humidityPercent",
           "locationId",
           "locationName",
+          "observedAt",
           "temperatureCelsius",
           "visibilityKm",
           "weatherDescription",
