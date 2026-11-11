@@ -284,13 +284,62 @@ clean:
 	@# site/embed.go's //go:embed all:dist stops compiling.
 	@mkdir -p site/dist && touch site/dist/.gitkeep
 
+## Database (local PostgreSQL in Docker)
+
+# The Grid store is PostgreSQL. Locally it runs in Docker from
+# docker-compose.test.yml: one server holding the dev database (`sierra`) and
+# the test databases (internal/storetest creates sierra_template plus one
+# throwaway database per test). Without the compose plugin (the Moat sandbox
+# has none) db-up runs the same container with `docker run`; keep the two in
+# step. The credentials are local-only throwaways.
+PG_CONTAINER = sierra-data-pg
+PG_IMAGE = postgres:18.6-alpine
+PG_PORT = 55432
+DB_URL = postgres://sierra:sierra@127.0.0.1:$(PG_PORT)/sierra?sslmode=disable
+# The admin database the test harness connects to before creating its own.
+TEST_DATABASE_URL ?= postgres://sierra:sierra@127.0.0.1:$(PG_PORT)/postgres?sslmode=disable
+# make run / run-bg use the compose database unless the environment says otherwise.
+PF__GRID__DATABASE__URL ?= $(DB_URL)
+
+.PHONY: db-up db-down db-url
+db-up:
+	@if docker compose version >/dev/null 2>&1; then \
+		docker compose -f docker-compose.test.yml up -d --wait >/dev/null; \
+	elif docker container inspect $(PG_CONTAINER) >/dev/null 2>&1; then \
+		docker start $(PG_CONTAINER) >/dev/null; \
+	else \
+		docker run -d --name $(PG_CONTAINER) \
+			-e POSTGRES_USER=sierra -e POSTGRES_PASSWORD=sierra -e POSTGRES_DB=sierra \
+			-e POSTGRES_INITDB_ARGS="--locale=C --encoding=UTF8" \
+			-p 127.0.0.1:$(PG_PORT):5432 -v sierra-data-pg:/var/lib/postgresql \
+			$(PG_IMAGE) postgres -c fsync=off -c full_page_writes=off \
+			-c synchronous_commit=off -c max_connections=400 >/dev/null; \
+	fi
+	@for i in $$(seq 1 60); do \
+		docker exec $(PG_CONTAINER) pg_isready -q -h 127.0.0.1 -U sierra -d sierra && exit 0; \
+		sleep 1; \
+	done; echo "PostgreSQL ($(PG_CONTAINER)) did not become ready"; exit 1
+
+db-down:
+	@if docker compose version >/dev/null 2>&1; then \
+		docker compose -f docker-compose.test.yml stop; \
+	else \
+		docker stop $(PG_CONTAINER) >/dev/null 2>&1 || true; \
+	fi
+
+db-url:
+	@echo "$(DB_URL)"
+
 ## Testing Targets
 
-# Run full test suite. site-ensure so the embed-manifest tests in
-# cmd/server/site_test.go run against a real build — with an unbuilt site/dist
-# they skip (plain `go test ./...` stays Node-free), and a skip proves nothing.
-test: site-ensure
-	$(GOTEST) -v ./...
+# Run full test suite against the Docker PostgreSQL (db-up). site-ensure so
+# the embed-manifest tests in cmd/server/site_test.go run against a real
+# build — with an unbuilt site/dist they skip (plain `go test ./...` stays
+# Node-free), and a skip proves nothing. Plain `go test ./...` without
+# TEST_DATABASE_URL skips every store-backed test with a loud SKIP line.
+# CI provides its own PostgreSQL service and sets SKIP_DB_UP=1.
+test: site-ensure $(if $(SKIP_DB_UP),,db-up)
+	TZ=UTC TEST_DATABASE_URL="$(TEST_DATABASE_URL)" $(GOTEST) -v ./...
 
 # Test incident content processing functionality
 test-incident: $(TEST_CALTRANS_BINARY)
@@ -465,14 +514,15 @@ use-latest-test-data:
 
 ## Development Targets
 
-# Run server with configuration
-run: server
-	./$(SERVER_BINARY)
+# Run server with configuration, against the Docker PostgreSQL unless
+# PF__GRID__DATABASE__URL is already set.
+run: server db-up
+	PF__GRID__DATABASE__URL="$(PF__GRID__DATABASE__URL)" ./$(SERVER_BINARY)
 
 # Run server in background for testing
-run-bg: server stop
+run-bg: server stop db-up
 	@echo "Starting server in background..."
-	@nohup ./$(SERVER_BINARY) > server.log 2>&1 & echo $$! > server.pid
+	@PF__GRID__DATABASE__URL="$(PF__GRID__DATABASE__URL)" nohup ./$(SERVER_BINARY) > server.log 2>&1 & echo $$! > server.pid
 	@sleep 2
 	@if [ -f server.pid ] && kill -0 $$(cat server.pid) 2>/dev/null; then \
 		echo "Server started in background (PID: $$(cat server.pid))"; \
@@ -690,8 +740,13 @@ help:
 	@echo "  ingest-token [REPORTER=id] [NAME=\"...\"] - Mint a push-ingest credential;"
 	@echo "                with REPORTER it writes the hash into prefab.yaml (rotates if it exists)"
 	@echo ""
+	@echo "Database targets:"
+	@echo "  db-up       - Start the local PostgreSQL (Docker) and wait for it"
+	@echo "  db-down     - Stop it (the volume keeps the dev data)"
+	@echo "  db-url      - Print the dev database URL"
+	@echo ""
 	@echo "Testing targets:"
-	@echo "  test        - Run full test suite (unit tests, works offline)"
+	@echo "  test        - Run full test suite against the local PostgreSQL (works offline)"
 	@echo "  test-google [ROUTE_ID=id] [VERBOSE=true]   - Test Google Routes API"
 	@echo "  test-caltrans [VERBOSE=true] [FORMAT=table] - Test Caltrans KML feeds"
 	@echo "  test-weather [LOCATION_ID=id] [VERBOSE=true] - Test OpenWeatherMap API"
