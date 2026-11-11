@@ -162,13 +162,65 @@ func TestWeatherAlertRelations(t *testing.T) {
 func TestFireName(t *testing.T) {
 	for in, want := range map[string]string{
 		"Gann Fire — 10,339 ac, 100% contained": "Gann",
-		"GANN — 6495 ac":                       "Gann",
+		"GANN — 6495 ac":                        "Gann",
 		"Oneil Fire — 3 ac, 0% contained":       "Oneil",
+		"BEAR CREEK — 40 ac":                    "Bear Creek",
+		"McKinney Fire — 60,000 ac":             "McKinney",
+		"Bear Creek Fire — 5 ac":                "Bear Creek",
+		"ÉCOLE — 2 ac":                          "École",
 	} {
 		assert.Equal(t, want, fireName(&gridv1.Event{Headline: in}))
 	}
 	assert.True(t, namesFire("EMERGENCY: Ross Fire near Canyon Ct", "Ross"))
+	assert.True(t, namesFire("Ross Fire - Fire is approximately 19.9 acres", "Ross"))
+	assert.True(t, namesFire("Ross Fire.", "Ross"))
 	assert.False(t, namesFire("Evacuate Ross Rd residents", "Ross"), "the word Fire is required")
+	assert.False(t, namesFire("Collision near Bear Creek Fire Station", "Bear Creek"))
+	assert.False(t, namesFire("Murphys Fire Protection District on scene", "Murphys"))
+	assert.True(t, namesFire("Bear Creek Fire Station staging for the Bear Creek Fire", "Bear Creek"),
+		"any occurrence that is the fire counts")
+}
+
+// Reasons read as sentences, say "within the fire's extent" rather than
+// "at the same place" (the gap is between bounding boxes), and never call a
+// shutoff that began before the fire "while it burned".
+func TestReasons(t *testing.T) {
+	near := Rules()[1].Judge
+	m, ok := near(Pair{GapKm: 0, Lag: 2 * time.Hour})
+	require.True(t, ok)
+	assert.Equal(t, "Issued 2 h after the fire started, within the fire's extent", m.Reason)
+	m, _ = near(Pair{GapKm: 3.14, Lag: 2 * time.Hour})
+	assert.Equal(t, "Issued 2 h after the fire started, 3.1 km from the fire", m.Reason)
+
+	var shutoff Rule
+	for _, r := range Rules() {
+		if r.Name == "fire-shutoff-near" {
+			shutoff = r
+		}
+	}
+	m, _ = shutoff.Judge(Pair{GapKm: 5, Lag: 3 * time.Hour})
+	assert.Equal(t, "PG&E shutoff while it burned, 5.0 km from the fire", m.Reason)
+	m, _ = shutoff.Judge(Pair{GapKm: 5, Lag: -20 * time.Hour})
+	assert.Equal(t, "PG&E shutoff starting 20 h before the fire started, 5.0 km from the fire", m.Reason)
+}
+
+// A zone whose notes name one fire belongs to that fire, even when another
+// fire is nearer: the nearest-fire rule yields to the named rule.
+func TestNamedZoneIsNotGivenToANearerFire(t *testing.T) {
+	ross := ev("calfire:ross", gridv1.Layer_WILDFIRE, "wildfire", "Ross Fire — 20 ac", 0, box(38.11, -120.50, 0.01))
+	gann := ev("calfire:gann", gridv1.Layer_WILDFIRE, "wildfire", "Gann Fire — 900 ac", 0, box(38.20, -120.50, 0.01))
+	zone := ev("evac:z1", gridv1.Layer_EVACUATION, "order", "Evacuation Order — CCU-9", 1, box(38.18, -120.50, 0.005))
+	zone.Description = "Ross Fire - residents of Canyon Ct"
+	e, _ := newEngine(t, ross, gann, zone)
+	ctx := context.Background()
+
+	rs, err := e.Related(ctx, zone)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"calfire:ross": "fire-evacuation-named"}, ids(rs))
+
+	rs, err = e.Related(ctx, gann)
+	require.NoError(t, err)
+	assert.NotContains(t, ids(rs), "evac:z1", "the notes say it is the Ross Fire's")
 }
 
 // A Cal OES zone states no start. Ended days later, its last update is when

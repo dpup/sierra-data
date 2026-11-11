@@ -75,6 +75,10 @@ type Rule struct {
 	// ExclusiveB links each B to at most one A: the best-scoring one. An
 	// evacuation zone belongs to the nearest fire, not every fire nearby.
 	ExclusiveB bool
+	// YieldTo names stronger rules that settle a B on their own: a B any of
+	// them relates to some A is skipped here. A zone whose notes name the
+	// Ross Fire is the Ross Fire's, whichever fire is nearer.
+	YieldTo []string
 	// Judge decides a pair that passed the time and space bounds.
 	Judge func(p Pair) (Match, bool)
 }
@@ -117,6 +121,9 @@ type Engine struct {
 	// firstSeen is when the Grid first stored events that state no start of
 	// their own (Cal OES zones, FIRIS perimeters); see span.
 	firstSeen map[string]time.Time
+	// asMemo holds asFor results per rule and B for one Related call: an
+	// exclusive or yielding rule asks the same question for every candidate.
+	asMemo map[string][]aMatch
 }
 
 // New returns an engine over the default rules.
@@ -128,6 +135,7 @@ func New(st Store) *Engine {
 // matched by several rules appears once, under its strongest rule.
 func (e *Engine) Related(ctx context.Context, subject *gridv1.Event) ([]Relation, error) {
 	e.firstSeen = map[string]time.Time{}
+	e.asMemo = map[string][]aMatch{}
 	if err := e.noteFirstSeen(ctx, []*gridv1.Event{subject}); err != nil {
 		return nil, err
 	}
@@ -187,6 +195,11 @@ func (e *Engine) fromA(ctx context.Context, rule Rule, a *gridv1.Event) ([]Relat
 		if !ok {
 			continue
 		}
+		if claimed, err := e.claimed(ctx, rule, b); err != nil {
+			return nil, err
+		} else if claimed {
+			continue
+		}
 		if rule.ExclusiveB {
 			// Keep it only if no other A suits this B better.
 			bestA, err := e.bestA(ctx, rule, b)
@@ -204,6 +217,9 @@ func (e *Engine) fromA(ctx context.Context, rule Rule, a *gridv1.Event) ([]Relat
 
 // fromB: subject is a B; find As.
 func (e *Engine) fromB(ctx context.Context, rule Rule, b *gridv1.Event) ([]Relation, error) {
+	if claimed, err := e.claimed(ctx, rule, b); err != nil || claimed {
+		return nil, err
+	}
 	matches, err := e.asFor(ctx, rule, b)
 	if err != nil {
 		return nil, err
@@ -223,8 +239,40 @@ type aMatch struct {
 	Match
 }
 
-// asFor lists the As that match b, best (lowest score) first.
+// claimed reports whether a rule that rule yields to relates b to some A.
+func (e *Engine) claimed(ctx context.Context, rule Rule, b *gridv1.Event) (bool, error) {
+	for _, name := range rule.YieldTo {
+		for _, r := range e.Rules {
+			if r.Name != name || !r.B.has(b) {
+				continue
+			}
+			as, err := e.asFor(ctx, r, b)
+			if err != nil {
+				return false, err
+			}
+			if len(as) > 0 {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+// asFor lists the As that match b, best (lowest score) first. Memoized per
+// Related call.
 func (e *Engine) asFor(ctx context.Context, rule Rule, b *gridv1.Event) ([]aMatch, error) {
+	key := rule.Name + "|" + b.GetId()
+	if m, ok := e.asMemo[key]; ok {
+		return m, nil
+	}
+	out, err := e.asForUncached(ctx, rule, b)
+	if err == nil && e.asMemo != nil {
+		e.asMemo[key] = out
+	}
+	return out, err
+}
+
+func (e *Engine) asForUncached(ctx context.Context, rule Rule, b *gridv1.Event) ([]aMatch, error) {
 	bStart, _ := e.span(b)
 	// A's span must reach B's start window: A.start <= bStart+Before and
 	// A.end >= bStart-After. Candidates are read by A's last update.

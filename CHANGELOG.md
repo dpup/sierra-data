@@ -225,9 +225,9 @@ Events about the same situation as one event, strongest first:
 | --- | --- | --- |
 | `fire-evacuation-named` | fire and an evacuation zone whose Cal OES notes name it | HIGH |
 | `fire-road-named` | fire and a road report naming it | HIGH |
-| `fire-evacuation-near` | fire and a zone within 8 km issued up to 72 h after it started (nearest fire only) | MEDIUM |
+| `fire-evacuation-near` | fire and a zone within 8 km issued up to 72 h after it started (nearest fire only; never a zone whose notes name another fire) | MEDIUM |
 | `fire-outage-cause` | fire and an outage within 10 km that PG&E attributes to fire | MEDIUM |
-| `fire-shutoff-near` | fire and a PSPS shutoff within 25 km while it burned | LOW |
+| `fire-shutoff-near` | fire and a PSPS shutoff within 25 km, starting up to a day before it or while it burned | LOW |
 | `weather-shutoff` | Red Flag / Fire Weather / wind product and a shutoff inside its area while in effect | LOW |
 | `weather-outage` | wind, winter storm or severe storm product and an unplanned outage inside its area | CONTEXT |
 | `weather-road` | the same products and a road report (not planned work) inside its area | CONTEXT |
