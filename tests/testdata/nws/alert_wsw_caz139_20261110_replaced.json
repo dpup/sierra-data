@@ -1,0 +1,106 @@
+{
+    "@context": [
+        "https://geojson.org/geojson-ld/geojson-context.jsonld",
+        {
+            "@version": "1.1",
+            "wx": "https://api.weather.gov/ontology#",
+            "@vocab": "https://api.weather.gov/ontology#"
+        }
+    ],
+    "id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.d42764c572d5df8b3ae4c07fd1308e13a2f725b2.001.1",
+    "type": "Feature",
+    "geometry": null,
+    "properties": {
+        "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.d42764c572d5df8b3ae4c07fd1308e13a2f725b2.001.1",
+        "@type": "wx:Alert",
+        "id": "urn:oid:2.49.0.1.840.0.d42764c572d5df8b3ae4c07fd1308e13a2f725b2.001.1",
+        "areaDesc": "Lassen Volcanic National Park; Sierra Nevada of Sierra-Nevada-Placer Counties Above 5000 ft Including Interstate 80; Sierra Nevada of El Dorado-Amador-Northern Alpine Counties Above 5000 ft Including Highway 50; Sierra Nevada of Calaveras-Tuolumne-Southern Alpine Counties Above 5000 ft",
+        "geocode": {
+            "SAME": [
+                "006035",
+                "006103",
+                "006063",
+                "006089",
+                "006091",
+                "006057",
+                "006061",
+                "006017",
+                "006005",
+                "006003",
+                "006009",
+                "006109"
+            ],
+            "UGC": [
+                "CAZ128",
+                "CAZ133",
+                "CAZ136",
+                "CAZ139"
+            ]
+        },
+        "affectedZones": [
+            "https://api.weather.gov/zones/forecast/CAZ128",
+            "https://api.weather.gov/zones/forecast/CAZ133",
+            "https://api.weather.gov/zones/forecast/CAZ136",
+            "https://api.weather.gov/zones/forecast/CAZ139"
+        ],
+        "references": [],
+        "sent": "2026-11-10T11:14:00-08:00",
+        "effective": "2026-11-10T11:14:00-08:00",
+        "onset": "2026-11-13T10:00:00-08:00",
+        "expires": "2026-11-11T16:00:00-08:00",
+        "ends": "2026-11-16T16:00:00-08:00",
+        "status": "Actual",
+        "messageType": "Alert",
+        "category": "Met",
+        "severity": "Severe",
+        "certainty": "Possible",
+        "urgency": "Future",
+        "event": "Winter Storm Watch",
+        "sender": "w-nws.webmaster@noaa.gov",
+        "senderName": "NWS Sacramento CA",
+        "headline": "Winter Storm Watch issued November 10 at 11:14AM PST until November 16 at 4:00PM PST by NWS Sacramento CA",
+        "description": "* WHAT...Snow expected for elevations above 6000 feet. Total snow\naccumulations up to a foot, with up to 2 feet at the highest peaks.\nMinor accumulations of around an 1 inch possible down to 5000 feet.\nWinds could gust as high as 60 mph.\n\n* WHERE...Northern Sierra above 6000 feet, including Highway 50,\nInterstate 80, State Route 4, State Route 108. Southern Cascades\nabove 6000 feet, including Lassen National Park.\n\n* WHEN...From Friday morning through Monday afternoon.\n\n* IMPACTS...Travel could be very difficult. The hazardous conditions\ncould impact the Friday evening and Monday morning commutes. Strong\nwinds could cause downed tree branches and localized power outages.\n\n* ADDITIONAL DETAILS...Snow levels 7000 to 8000 feet Friday, lowering\nto 6500 feet Saturday, then down to around 5000 feet by Monday\nmorning. Heaviest snowfall expected Friday night into Saturday\nmorning. Light flurries to a dusting possible down to 5000 feet\nwith measurable accumulations remaining above 6000 feet. There\ncould be a break during the day Saturday, followed by additional\nsnow Saturday night into Monday.",
+        "instruction": "Check the latest road conditions from Caltrans online at\nquickmap.dot.ca.gov or dial 5 1 1.",
+        "response": "Prepare",
+        "note": null,
+        "parameters": {
+            "AWIPSidentifier": [
+                "WSWSTO"
+            ],
+            "WMOidentifier": [
+                "WWUS46 KSTO 101914"
+            ],
+            "NWSheadline": [
+                "WINTER STORM WATCH IN EFFECT FROM FRIDAY MORNING THROUGH MONDAY AFTERNOON"
+            ],
+            "BLOCKCHANNEL": [
+                "EAS",
+                "NWEM",
+                "CMAS"
+            ],
+            "EAS-ORG": [
+                "WXR"
+            ],
+            "VTEC": [
+                "/O.NEW.KSTO.WS.A.0004.261113T1800Z-261117T0000Z/"
+            ],
+            "eventEndingTime": [
+                "2026-11-16T16:00:00-08:00"
+            ]
+        },
+        "scope": "Public",
+        "code": "IPAWSv1.0",
+        "language": "en-US",
+        "web": "http://www.weather.gov",
+        "eventCode": {
+            "SAME": [
+                "WSA"
+            ],
+            "NationalWeatherService": [
+                "WSA"
+            ]
+        },
+        "replacedBy": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.f6c56adff45810747c6f90ae2eed1598b8c4a58b.001.1",
+        "replacedAt": "2026-11-11T12:03:00-08:00"
+    }
+}

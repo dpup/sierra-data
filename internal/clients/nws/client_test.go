@@ -2,6 +2,7 @@ package nws
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -165,5 +166,43 @@ func TestCleanZones(t *testing.T) {
 		if got[i] != want[i] {
 			t.Errorf("got[%d] = %q, want %q", i, got[i], want[i])
 		}
+	}
+}
+
+func TestGetAlert(t *testing.T) {
+	doer := &fakeDoer{resp: `{"properties": {
+		"id": "urn:oid:2.49.0.1.840.0.old.001.1",
+		"event": "Winter Storm Watch",
+		"messageType": "Alert",
+		"references": [],
+		"replacedBy": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.new.001.1",
+		"replacedAt": "2026-11-11T12:03:00-08:00"
+	}}`}
+	c := NewClientWithHTTPDoer("ua-test", "https://nws.test", doer)
+	a, err := c.GetAlert(context.Background(), "urn:oid:2.49.0.1.840.0.old.001.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doer.lastURL != "https://nws.test/alerts/urn:oid:2.49.0.1.840.0.old.001.1" {
+		t.Errorf("url = %s", doer.lastURL)
+	}
+	if doer.lastUA != "ua-test" {
+		t.Errorf("User-Agent = %q", doer.lastUA)
+	}
+	if a.MessageType != "Alert" || len(a.References) != 0 {
+		t.Errorf("messageType/references = %q %v", a.MessageType, a.References)
+	}
+	if a.ReplacedBy != "urn:oid:2.49.0.1.840.0.new.001.1" {
+		t.Errorf("replacedBy = %q, want the replacing alert's id", a.ReplacedBy)
+	}
+
+	for _, bad := range []string{"", "  ", "../zones/x", "a?b", "a#b"} {
+		if _, err := c.GetAlert(context.Background(), bad); err == nil {
+			t.Errorf("GetAlert(%q) should be refused", bad)
+		}
+	}
+	doer.status = 404
+	if _, err := c.GetAlert(context.Background(), "urn:oid:gone"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("404 err = %v, want ErrNotFound", err)
 	}
 }
