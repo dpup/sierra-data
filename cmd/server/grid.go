@@ -45,7 +45,7 @@ import (
 )
 
 // gridApp is the Grid as internal/handoff drives it. prepareGrid builds
-// everything that does not touch grid.db, which is all a STANDBY process has;
+// everything that does not touch the database, which is all a STANDBY process has;
 // Activate opens the store and starts production service; Quiesce undoes
 // that, in an order that ends with the store closed and its lock released.
 type gridApp struct {
@@ -157,7 +157,7 @@ func prepareGrid(ctx context.Context, appConfig *config.Config) (*gridApp, error
 	return a, nil
 }
 
-// Activate opens grid.db and starts production service. On any error it tears
+// Activate opens the grid store (and its writer lock) and starts production service. On any error it tears
 // down what it started; if that teardown cannot release the database it says
 // so (handoff.ErrStillHeld), and the controller keeps the database counted as
 // held.
@@ -548,7 +548,7 @@ func (a *gridApp) Activate(actx context.Context) (err error) {
 	}
 	// prefab's Start returns nil only after its own SIGTERM shutdown. An error
 	// after this point means production stopped serving while we still hold
-	// grid.db, which the pre-handoff main treated as fatal.
+	// the database, which the pre-handoff main treated as fatal.
 	go func() {
 		<-done
 		a.mu.Lock()
@@ -567,7 +567,7 @@ func (a *gridApp) hook(stage string) {
 	}
 }
 
-// Quiesce releases grid.db. In order: stop admitting and drain requests, stop
+// Quiesce releases the grid store. In order: stop admitting and drain requests, stop
 // the ingest scheduler, disconnect MQTT, cancel and wait for the remaining
 // background work, close the store (which releases its lock). Each step runs
 // once; a retry after a failure resumes at the step that failed.
@@ -640,7 +640,7 @@ func (a *gridApp) Quiesce(_ context.Context) error {
 	}
 	a.quiesced.store = true
 
-	logging.Infow(ctx, "Quiesce: grid.db ownership released", "duration", time.Since(start))
+	logging.Infow(ctx, "Quiesce: database ownership released", "duration", time.Since(start))
 	return nil
 }
 
