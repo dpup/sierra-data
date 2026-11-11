@@ -99,6 +99,22 @@ func (s *WeatherService) RawNWSAlerts(ctx context.Context) (alerts []nws.Alert, 
 	return nil, time.Time{}, err
 }
 
+// NWSAlertReplacedBy asks api.weather.gov whether NWS has replaced one alert
+// (by an Update or a Cancel) and returns the replacing message's id, or ""
+// when it has not. Uncached: the caller (the weather-alert poller) calls it
+// only for an alert it holds that has dropped out of the active list, and
+// keeps its own memory of the answers.
+func (s *WeatherService) NWSAlertReplacedBy(ctx context.Context, id string) (string, error) {
+	if s.nwsClient == nil {
+		return "", fmt.Errorf("nws client not configured")
+	}
+	a, err := s.nwsClient.GetAlert(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	return a.ReplacedBy, nil
+}
+
 // nwsAlertsForZone filters the shared NWS alert list down to alerts active in a
 // single forecast zone, for attaching to the weather location in that zone.
 // An empty zone returns nothing (an unzoned location gets no alerts).

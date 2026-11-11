@@ -213,6 +213,11 @@ of still-unverified winter behavior:
   (configured as `weather.nws.userAgent`). Requests without it get 403s.
 - `GetActiveZoneAlerts(zones)` queries `/alerts/active?zone=CAZ064,...`. An empty
   zone list returns nothing (never a statewide fetch).
+- `Alert.MessageType` / `References` (CAP) and `ReplacedBy` (api.weather.gov,
+  only from `GetAlert`, `/alerts/{id}`) carry NWS's replacement relation. The
+  active list drops a replaced alert and never lists Cancel messages, so a
+  cancellation is visible only as `replacedBy` on the cancelled alert. Fixtures:
+  `tests/testdata/nws/`.
 - `ClassifyFireWeather` derives Normal → Elevated → Red Flag purely from active
   products (Fire Weather Watch → elevated, Red Flag Warning → red-flag). It never
   invents a Red Flag that NWS hasn't issued — see issue #5.

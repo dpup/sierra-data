@@ -19,6 +19,16 @@ type fakeWeatherAPI struct {
 	err       error
 	area      []byte // AlertZoneGeometry's answer
 	areaErr   error
+	// NWSAlertReplacedBy's answers by alert id; a missing id is "not
+	// replaced". lookups records every id asked about.
+	replacedBy  map[string]string
+	replacedErr error
+	lookups     []string
+}
+
+func (f *fakeWeatherAPI) NWSAlertReplacedBy(ctx context.Context, id string) (string, error) {
+	f.lookups = append(f.lookups, id)
+	return f.replacedBy[id], f.replacedErr
 }
 
 func (f *fakeWeatherAPI) AlertZoneGeometry(ctx context.Context, refs []string) ([]byte, error) {
