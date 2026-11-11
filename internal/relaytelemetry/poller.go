@@ -1,7 +1,8 @@
 // Package relaytelemetry is the relay's in-process telemetry poller: it reads
-// the companion node behind each opted-in gateway, the way an operator monitor
+// the companion node behind every paired gateway, the way an operator monitor
 // (alanpi) reads repeaters, and reports to the Grid as a mesh.repeater
-// reporter.
+// reporter. Pairing with SIERRA is the host's consent; there is no per-gateway
+// opt-in (meshRelay.telemetry.excludeGateways is the exception list).
 //
 // It runs inside cmd/mesh-relay because the relay already has the node: it
 // holds a lease like any client (relay.Acquire at PriorityBackground, so any
@@ -17,8 +18,16 @@
 //     polls record NO attempt: none of them says anything about the node.
 //     An offline bridge or disconnected node is a failed attempt.
 //   - A value the node did not answer is null, never zero.
-//   - Each report is the complete set of opted-in gateways whose node key is
-//     pinned; a gateway with no pinned key cannot be named and is left out.
+//   - Each report is the complete set of gateway nodes (radios), once per
+//     pinned key: several gateways can pin the same radio (a host moving it to
+//     a new computer), and each radio is read through the first of them that
+//     answers. A gateway with no pinned key cannot be named and is left out,
+//     as is one excluded or not seen for GatewayStaleAfter.
+//   - A gateway node's own signed advert (CMD_EXPORT_CONTACT with no key; it
+//     transmits nothing) is forwarded on mesh.packet so the Grid can establish
+//     the node, which a report alone never does. It is forwarded only when its
+//     content changes or the last one is SelfAdvertResend old: each export is
+//     freshly signed, and one per poll would be noise.
 package relaytelemetry
 
 import (
@@ -29,6 +38,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -56,11 +66,20 @@ type Gateways interface {
 
 // Config configures a Poller.
 type Config struct {
-	// Gateways whose node is polled and published. Opt-in per gateway: the
-	// relay's public status deliberately does not say which node sits behind
-	// which gateway, and published telemetry can let someone match them up.
-	Gateways []string
-	Interval time.Duration // between polls (5m)
+	// ExcludeGateways are never polled or published. Every other paired
+	// gateway is: pairing with SIERRA is the consent. Published telemetry can
+	// let someone match a node to its gateway, which the relay's public status
+	// alone does not reveal.
+	ExcludeGateways []string
+	// GatewayStaleAfter skips a gateway whose bridge hasn't been seen (or,
+	// never connected, that was created) for this long (7 days), so a
+	// long-gone gateway isn't reported as failing forever. A radio with only
+	// such gateways is dropped from the report.
+	GatewayStaleAfter time.Duration
+	// SelfAdvertResend re-forwards an unchanged gateway self-advert this often
+	// (12h), inside the Grid's 14h advert presence window.
+	SelfAdvertResend time.Duration
+	Interval         time.Duration // between polls (5m)
 	// Timeout bounds one reply from the node (5s). A whole poll is a handful
 	// of round trips.
 	Timeout     time.Duration
@@ -95,7 +114,7 @@ type Poller struct {
 	reps Repeaters // nil: no shared repeaters
 
 	mu        sync.Mutex
-	nodes     map[string]*nodeState // by gateway
+	nodes     map[string]*nodeState // gateway nodes, by pinned pubkey
 	repeaters map[string]*nodeState // shared repeaters, by pubkey
 
 	// Shared-repeater schedule, owned by the RepeaterTick goroutine.
@@ -112,7 +131,13 @@ type nodeState struct {
 	outcome     string  // last poll outcome, to log changes only
 	// Shared repeaters: the last signed advert a gateway's node stored for
 	// it, and the one the Grid last accepted (forwarded only on change).
+	// Gateway nodes: the node's own advert from this poll's read (nil after a
+	// failed read: an old one would claim fresh presence), the one last
+	// accepted, and when.
 	advert, advertSent []byte
+	advertSentAt       time.Time
+	// via is the gateway that last reached a gateway node, for the log.
+	via string
 }
 
 // New returns a Poller. reps, when not nil, adds the relay's shared
@@ -148,6 +173,12 @@ func New(cfg Config, relay Relay, gws Gateways, reps Repeaters) *Poller {
 	if cfg.ReporterID == "" {
 		cfg.ReporterID = "relay"
 	}
+	if cfg.GatewayStaleAfter <= 0 {
+		cfg.GatewayStaleAfter = 7 * 24 * time.Hour
+	}
+	if cfg.SelfAdvertResend <= 0 {
+		cfg.SelfAdvertResend = 12 * time.Hour
+	}
 	cfg.GridURL = strings.TrimRight(cfg.GridURL, "/")
 	p := &Poller{cfg: cfg, relay: relay, gws: gws, reps: reps, nodes: map[string]*nodeState{},
 		repeaters: map[string]*nodeState{}, jobs: map[string]*repeaterJob{}}
@@ -158,7 +189,7 @@ func New(cfg Config, relay Relay, gws Gateways, reps Repeaters) *Poller {
 // Run polls every Interval until ctx ends. The first cycle waits one minute,
 // so bridges that reconnected after a relay restart are back first.
 func (p *Poller) Run(ctx context.Context, firstDelay time.Duration) {
-	logging.Infow(ctx, "Relay telemetry poller started", "gateways", p.cfg.Gateways,
+	logging.Infow(ctx, "Relay telemetry poller started", "excludeGateways", p.cfg.ExcludeGateways,
 		"interval", p.cfg.Interval, "repeaters", p.reps != nil, "repeaterInterval", p.cfg.RepeaterInterval,
 		"grid", p.cfg.GridURL)
 	if p.reps != nil {
@@ -193,34 +224,85 @@ func (p *Poller) runRepeaters(ctx context.Context, firstDelay time.Duration) {
 	}
 }
 
-// Cycle polls every opted-in gateway once and pushes the report, with the
-// shared repeaters' latest readings.
+// Cycle polls every paired gateway's radio once and pushes the report, with
+// the shared repeaters' latest readings, then any adverts the Grid needs.
 func (p *Poller) Cycle(ctx context.Context) {
 	recs, err := p.gws.Gateways()
 	if err != nil {
 		logging.Warnw(ctx, "Relay telemetry: listing gateways failed; skipping this cycle", "error", err)
 		return
 	}
-	pinned := map[string]string{}
-	for _, r := range recs {
-		pinned[r.Name] = r.PinnedPubkey
+	radios := p.radios(ctx, recs)
+	p.mu.Lock()
+	var gone []string
+	for pk := range p.nodes {
+		if _, ok := radios[pk]; !ok {
+			gone = append(gone, pk)
+		}
 	}
-	for _, gw := range p.cfg.Gateways {
+	p.mu.Unlock()
+	for _, pk := range gone {
+		p.forget(ctx, pk)
+	}
+	keys := make([]string, 0, len(radios))
+	for pk := range radios {
+		keys = append(keys, pk)
+	}
+	sort.Strings(keys)
+	for _, pk := range keys {
 		if ctx.Err() != nil {
 			return
 		}
-		key := pinned[gw]
-		if key == "" {
-			p.forget(ctx, gw)
-			continue
-		}
-		p.pollGateway(ctx, gw, key)
+		p.pollRadio(ctx, pk, radios[pk])
 	}
 	if ctx.Err() != nil {
 		return
 	}
 	p.push(ctx)
 	p.pushAdverts(ctx)
+}
+
+// radios groups the gateways to poll by pinned key, each group ordered most
+// recently seen first (then by name), so the gateway a radio is on now is
+// tried before one it left.
+func (p *Poller) radios(ctx context.Context, recs []*meshrelay.GatewayRecord) map[string][]string {
+	excluded := map[string]bool{}
+	for _, gw := range p.cfg.ExcludeGateways {
+		excluded[gw] = true
+	}
+	now := p.cfg.Now()
+	type cand struct {
+		name string
+		seen time.Time
+	}
+	groups := map[string][]cand{}
+	for _, r := range recs {
+		if r.PinnedPubkey == "" || excluded[r.Name] {
+			continue
+		}
+		seen := r.LastSeen
+		if seen.IsZero() {
+			seen = r.CreatedAt // paired, bridge not connected yet
+		}
+		if now.Sub(seen) > p.cfg.GatewayStaleAfter {
+			logging.Debugw(ctx, "Relay telemetry: gateway not seen recently; not polled", "gateway", r.Name, "lastSeen", seen)
+			continue
+		}
+		groups[r.PinnedPubkey] = append(groups[r.PinnedPubkey], cand{r.Name, seen})
+	}
+	out := make(map[string][]string, len(groups))
+	for pk, cs := range groups {
+		sort.Slice(cs, func(i, j int) bool {
+			if !cs[i].seen.Equal(cs[j].seen) {
+				return cs[i].seen.After(cs[j].seen)
+			}
+			return cs[i].name < cs[j].name
+		})
+		for _, c := range cs {
+			out[pk] = append(out[pk], c.name)
+		}
+	}
+	return out
 }
 
 // outcome of one poll.
@@ -230,32 +312,62 @@ const (
 	outcomeFailed  = "failed"  // tried and could not read the node
 )
 
-func (p *Poller) pollGateway(ctx context.Context, gw, pubkey string) {
+// pollRadio reads one radio through its gateways in order, stopping at the
+// first that reads it. If none does, any skip (busy, paused) means no attempt
+// is recorded: the radio is there but in use. Otherwise it is a failed
+// attempt.
+func (p *Poller) pollRadio(ctx context.Context, pubkey string, gws []string) {
 	start := p.cfg.Now()
-	name, sample, outcome, why := p.read(ctx, gw, pubkey)
+	var (
+		name, via, why string
+		sample         *Sample
+		advert         []byte
+		outcome        = outcomeFailed
+		skipped        bool
+	)
+	for _, gw := range gws {
+		if ctx.Err() != nil {
+			return
+		}
+		n, s, adv, o, w := p.read(ctx, gw, pubkey)
+		via, why = gw, w
+		if o == outcomeOK {
+			name, sample, advert, outcome = n, s, adv, o
+			break
+		}
+		if o == outcomeSkipped {
+			skipped = true
+		}
+	}
+	if outcome != outcomeOK && skipped {
+		outcome = outcomeSkipped
+	}
 
 	p.mu.Lock()
-	st := p.nodes[gw]
-	if st == nil || st.pubkey != pubkey {
-		// New, or the gateway's pinned node changed: the old readings were
-		// someone else's.
+	st := p.nodes[pubkey]
+	if st == nil {
 		st = &nodeState{pubkey: pubkey}
-		p.nodes[gw] = st
+		p.nodes[pubkey] = st
 	}
 	switch outcome {
 	case outcomeOK:
 		st.lastAttempt, st.lastSuccess, st.sample = start, start, sample
+		st.advert = advert
 		if name != "" {
 			st.name = name
 		}
 	case outcomeFailed:
 		st.lastAttempt = start
+		st.advert = nil
+	default:
+		st.advert = nil
 	}
-	changed := st.outcome != outcome
-	st.outcome = outcome
+	changed := st.outcome != outcome || st.via != via
+	st.outcome, st.via = outcome, via
 	p.mu.Unlock()
 
-	kv := []any{"gateway", gw, "outcome", outcome, "reason", why, "duration", p.cfg.Now().Sub(start)}
+	kv := []any{"node", shortKey(pubkey), "gateway", via, "gateways", len(gws), "outcome", outcome, "reason", why,
+		"duration", p.cfg.Now().Sub(start)}
 	if changed {
 		logging.Infow(ctx, "Relay telemetry poll", kv...)
 	} else {
@@ -263,48 +375,51 @@ func (p *Poller) pollGateway(ctx context.Context, gw, pubkey string) {
 	}
 }
 
-// forget drops a gateway whose node is no longer pinned (deleted, or reset).
-func (p *Poller) forget(ctx context.Context, gw string) {
+// forget drops a radio no gateway can be polled for any more (removed,
+// re-pinned, excluded or stale).
+func (p *Poller) forget(ctx context.Context, pubkey string) {
 	p.mu.Lock()
-	_, had := p.nodes[gw]
-	delete(p.nodes, gw)
+	delete(p.nodes, pubkey)
 	p.mu.Unlock()
-	if had {
-		logging.Infow(ctx, "Relay telemetry: gateway has no pinned node; dropped from the report", "gateway", gw)
-	} else {
-		logging.Debugw(ctx, "Relay telemetry: gateway has no pinned node; not reported", "gateway", gw)
+	logging.Infow(ctx, "Relay telemetry: gateway node no longer polled; dropped from the report", "node", shortKey(pubkey))
+}
+
+func shortKey(pk string) string {
+	if len(pk) > 8 {
+		return pk[:8]
 	}
+	return pk
 }
 
 // read takes a background lease and reads the node. why is a short reason
 // for the log, never node data.
-func (p *Poller) read(ctx context.Context, gw, pubkey string) (name string, s *Sample, outcome, why string) {
+func (p *Poller) read(ctx context.Context, gw, pubkey string) (name string, s *Sample, advert []byte, outcome, why string) {
 	h := newHolder()
 	lease, err := p.relay.Acquire(meshrelay.LeaseRequest{Gateway: gw, Client: ClientName,
 		Role: meshrelay.RoleAgent, Priority: meshrelay.PriorityBackground, Holder: h})
 	var unavailable *meshrelay.UnavailableError
 	switch {
 	case errors.Is(err, meshrelay.ErrBusy):
-		return "", nil, outcomeSkipped, "busy"
+		return "", nil, nil, outcomeSkipped, "busy"
 	case errors.As(err, &unavailable):
 		if skipCode(unavailable.Code) {
-			return "", nil, outcomeSkipped, unavailable.Code
+			return "", nil, nil, outcomeSkipped, unavailable.Code
 		}
-		return "", nil, outcomeFailed, unavailable.Code
+		return "", nil, nil, outcomeFailed, unavailable.Code
 	case err != nil:
-		return "", nil, outcomeFailed, err.Error()
+		return "", nil, nil, outcomeFailed, err.Error()
 	}
 	defer p.relay.Release(lease)
 
 	x := &exchange{ctx: ctx, relay: p.relay, lease: lease, h: h, timeout: p.cfg.Timeout}
-	name, s, err = x.readNode(pubkey)
+	name, s, advert, err = x.readNode(pubkey)
 	if err != nil {
 		if reason, ended := h.endReason(); ended && skipCode(reason) {
-			return "", nil, outcomeSkipped, reason
+			return "", nil, nil, outcomeSkipped, reason
 		}
-		return "", nil, outcomeFailed, err.Error()
+		return "", nil, nil, outcomeFailed, err.Error()
 	}
-	return name, s, outcomeOK, ""
+	return name, s, advert, outcomeOK, ""
 }
 
 // skipCode is true for a refusal or lease end that says nothing about the
@@ -356,21 +471,22 @@ func (x *exchange) ask(cmd []byte, want func([]byte) bool) ([]byte, error) {
 }
 
 // readNode runs APP_START, checks the node is the pinned one, and reads what
-// it will answer. Only APP_START and the key check are required; a stats
-// command the firmware does not support leaves its fields null.
-func (x *exchange) readNode(pubkey string) (string, *Sample, error) {
+// it will answer, including its own signed advert. Only APP_START and the key
+// check are required; a stats command the firmware does not support leaves
+// its fields null, and a refused advert export leaves advert nil.
+func (x *exchange) readNode(pubkey string) (string, *Sample, []byte, error) {
 	f, err := x.ask(appStartFrame(), isCode(respSelfInfo))
 	if err != nil {
-		return "", nil, fmt.Errorf("APP_START: %w", err)
+		return "", nil, nil, fmt.Errorf("APP_START: %w", err)
 	}
 	got, name, err := parseSelfInfo(f)
 	if err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
 	if got != pubkey {
 		// The relay only leases a node reporting its pinned key, so this is
 		// a node swapped mid-lease. Report nothing under the pinned key.
-		return "", nil, errors.New("node key does not match the pinned key")
+		return "", nil, nil, errors.New("node key does not match the pinned key")
 	}
 
 	s := &Sample{}
@@ -378,14 +494,14 @@ func (x *exchange) readNode(pubkey string) (string, *Sample, error) {
 	if f, err := x.ask(deviceQueryFrame(), isCode(respDeviceInfo)); err == nil {
 		fw, _ = parseFirmwareVersion(f)
 	} else if x.fatal(err) {
-		return "", nil, err
+		return "", nil, nil, err
 	}
 	if f, err := x.ask(battStorageFrame(), isCode(respBattStorage)); err == nil {
 		if v, err := parseBattery(f); err == nil {
 			s.BatteryVoltage = &v
 		}
 	} else if x.fatal(err) {
-		return "", nil, err
+		return "", nil, nil, err
 	}
 	if fw >= statsMinFirmware {
 		for _, st := range []struct {
@@ -395,14 +511,22 @@ func (x *exchange) readNode(pubkey string) (string, *Sample, error) {
 			f, err := x.ask(statsFrame(st.kind), isStats(st.kind))
 			if err != nil {
 				if x.fatal(err) {
-					return "", nil, err
+					return "", nil, nil, err
 				}
 				continue
 			}
 			_ = st.apply(f, s) // a malformed reply leaves its fields null
 		}
 	}
-	return name, s, nil
+	var advert []byte
+	if f, err := x.ask(exportSelfFrame(), isCode(respExportContact)); err == nil {
+		if raw := f[1:]; selfAdvertOf(raw, pubkey) != nil {
+			advert = bytes.Clone(raw)
+		}
+	} else if x.fatal(err) {
+		return "", nil, nil, err
+	}
+	return name, s, advert, nil
 }
 
 // fatal is true when the lease or context is gone, so the rest of the poll

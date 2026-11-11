@@ -116,12 +116,18 @@ type MeshRelayConfig struct {
 }
 
 // MeshRelayTelemetryConfig is meshRelay.telemetry. The poller runs only when
-// GridURL and IngestToken are set, and it has gateways or shared repeaters
-// to read.
+// GridURL and IngestToken are set; it then reads every paired gateway's node
+// (except ExcludeGateways) and, with Repeaters, the shared repeaters.
 type MeshRelayTelemetryConfig struct {
-	// Gateways whose node is polled and published: opt-in per gateway.
-	Gateways []string      `koanf:"gateways"`
-	Interval time.Duration `koanf:"interval"`
+	// Gateways was the per-gateway opt-in list. Removed 2026-11-11: every
+	// paired gateway is polled (pairing is the consent). It stays only so a
+	// leftover setting fails startup instead of being silently ignored.
+	Gateways []string `koanf:"gateways"`
+	// ExcludeGateways are never polled or published.
+	ExcludeGateways []string `koanf:"excludeGateways"`
+	// GatewayStaleAfter skips gateways not seen for this long (7 days).
+	GatewayStaleAfter time.Duration `koanf:"gatewayStaleAfter"`
+	Interval          time.Duration `koanf:"interval"`
 	// GridURL is the Grid the report is pushed to (its ingest endpoint).
 	GridURL string `koanf:"gridUrl"`
 	// IngestToken is the Grid mesh.repeater reporter token for the relay.
@@ -138,7 +144,7 @@ type MeshRelayTelemetryConfig struct {
 
 // Enabled reports whether the poller has everything it needs to run.
 func (t MeshRelayTelemetryConfig) Enabled() bool {
-	return (len(t.Gateways) > 0 || t.Repeaters) && t.GridURL != "" && t.IngestToken != ""
+	return t.GridURL != "" && t.IngestToken != ""
 }
 
 // MeshRelayAdmin is one bootstrap admin.

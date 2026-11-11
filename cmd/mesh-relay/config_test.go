@@ -30,10 +30,10 @@ func TestRelayConfigFrom(t *testing.T) {
 }
 
 func TestCheckTelemetry(t *testing.T) {
-	ok := config.MeshRelayTelemetryConfig{Gateways: []string{"my-test-box"},
+	ok := config.MeshRelayTelemetryConfig{ExcludeGateways: []string{"private-box"},
 		GridURL: "https://data.sierragridteam.org", IngestToken: "x"}
 	require.NoError(t, checkTelemetry(testCtx(), ok))
-	assert.True(t, ok.Enabled())
+	assert.True(t, ok.Enabled(), "a token and a Grid are enough: every paired gateway is polled")
 
 	noToken := ok
 	noToken.IngestToken = ""
@@ -41,10 +41,17 @@ func TestCheckTelemetry(t *testing.T) {
 	assert.False(t, noToken.Enabled(), "and it does not poll")
 
 	badName := ok
-	badName.Gateways = []string{"Not A Gateway"}
+	badName.ExcludeGateways = []string{"Not A Gateway"}
 	assert.Error(t, checkTelemetry(testCtx(), badName))
 
 	badURL := ok
 	badURL.GridURL = "data.sierragridteam.org"
 	assert.Error(t, checkTelemetry(testCtx(), badURL))
+
+	// The old opt-in list must not linger with a different meaning.
+	oldKey := ok
+	oldKey.Gateways = []string{"my-test-box"}
+	err := checkTelemetry(testCtx(), oldKey)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "excludeGateways")
 }

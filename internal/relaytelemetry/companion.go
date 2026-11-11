@@ -14,6 +14,7 @@ import (
 // payloads only: the relay carries no '<'/'>' header or length.
 const (
 	cmdAppStart        byte = 0x01
+	cmdExportContact   byte = 0x11 // 17; with no key: the node's own advert
 	cmdGetBattStorage  byte = 0x14 // 20
 	cmdDeviceQuery     byte = 0x16 // 22
 	cmdGetStats        byte = 0x38 // 56, firmware v8+
@@ -21,6 +22,7 @@ const (
 	respSelfInfo       byte = 0x05
 	respBattStorage    byte = 0x0c // 12
 	respDeviceInfo     byte = 0x0d // 13
+	respExportContact  byte = 0x0b // 11
 	respStats          byte = 0x18 // 24
 	statsCore          byte = 0
 	statsRadio         byte = 1
@@ -41,6 +43,7 @@ func appStartFrame() []byte {
 }
 
 func deviceQueryFrame() []byte    { return []byte{cmdDeviceQuery, deviceQueryVersion} }
+func exportSelfFrame() []byte     { return []byte{cmdExportContact} }
 func battStorageFrame() []byte    { return []byte{cmdGetBattStorage} }
 func statsFrame(kind byte) []byte { return []byte{cmdGetStats, kind} }
 func isCode(code byte) func([]byte) bool {
@@ -136,3 +139,44 @@ func cString(b []byte) string {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// ADVERT payload layout, as internal/clients/meshcore decodes it (advert.go,
+// frame.go): pubkey 32, timestamp 4, signature 64, then app data (flags,
+// optional location, name). The relay only needs the key and the app data,
+// so it doesn't pull in that package (and its MQTT client).
+const (
+	advertSigEnd        = pubkeySize + 4 + 64 // app data starts here
+	routeTransportFlood = 0x00
+	routeTransportDir   = 0x03
+)
+
+// selfAdvertOf returns the app data (role flags, location, name) of raw, an
+// exported ADVERT frame, when it is the advert of pubkey; nil otherwise. Two
+// exports with equal app data say the same thing about the node: only the
+// timestamp and signature differ.
+func selfAdvertOf(raw []byte, pubkey string) []byte {
+	if len(raw) < 2 || raw[0]>>2&0x0f != payloadAdvert {
+		return nil
+	}
+	off := 1
+	if rt := raw[0] & 0x03; rt == routeTransportFlood || rt == routeTransportDir {
+		off += 4 // transport codes
+	}
+	if off >= len(raw) {
+		return nil
+	}
+	pathLen := raw[off]
+	off += 1 + (int(pathLen>>6)+1)*int(pathLen&0x3f)
+	if off+advertSigEnd > len(raw) {
+		return nil
+	}
+	payload := raw[off:]
+	if hex.EncodeToString(payload[:pubkeySize]) != pubkey {
+		return nil
+	}
+	app := payload[advertSigEnd:]
+	if len(app) == 0 {
+		return []byte{} // valid, no app data; not nil
+	}
+	return app
+}
