@@ -605,7 +605,7 @@ spec:
                 description: {type: string}
                 begin: {type: array, items: {type: number}, description: "[lng, lat]"}
                 end: {type: array, items: {type: number}, description: "[lng, lat]; only for a closure with an extent."}
-                extent: {type: string, enum: [SPAN, POINT, UNKNOWN], description: "SPAN - fromKm..toKm along the segment; POINT - one place (fromKm = toKm); UNKNOWN - no position on the segment (text-only condition, or too far off the line)."}
+                extent: {type: string, enum: [SPAN, POINT, UNKNOWN], description: "SPAN - fromKm..toKm along the segment (a closure running past the segment is cut at its end); POINT - one place (fromKm = toKm); UNKNOWN - no position on the segment (text-only condition, or too far off the line)."}
                 fromKm: {type: number, description: km along the segment from its configured origin.}
                 toKm: {type: number}
       MapChainControlProps:

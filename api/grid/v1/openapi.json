@@ -4383,7 +4383,7 @@
                   "type": "string"
                 },
                 "extent": {
-                  "description": "SPAN - fromKm..toKm along the segment; POINT - one place (fromKm = toKm); UNKNOWN - no position on the segment (text-only condition, or too far off the line).",
+                  "description": "SPAN - fromKm..toKm along the segment (a closure running past the segment is cut at its end); POINT - one place (fromKm = toKm); UNKNOWN - no position on the segment (text-only condition, or too far off the line).",
                   "enum": [
                     "SPAN",
                     "POINT",

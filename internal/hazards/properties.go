@@ -151,7 +151,8 @@ type RoadStatusCauseProps struct {
 	// Begin and End are [lng, lat]. End only for a closure with an extent.
 	Begin []float64 `json:"begin,omitempty"`
 	End   []float64 `json:"end,omitempty"`
-	// Extent: SPAN (begin and end both on the segment: fromKm..toKm),
+	// Extent: SPAN (fromKm..toKm; a closure running past the segment is cut
+	// at the segment's end),
 	// POINT (one place: fromKm = toKm), UNKNOWN (no position on the segment,
 	// e.g. a text-only condition; the segment's whole status rests on it but
 	// where it applies is not known).

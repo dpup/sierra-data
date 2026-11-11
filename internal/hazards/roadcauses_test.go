@@ -44,3 +44,29 @@ func TestRoadStatusCauses(t *testing.T) {
 	rd.Status = api.RoadStatus_OPEN
 	assert.Nil(t, roadStatusCauses(rd, path))
 }
+
+// A closure that starts on the segment and ends past it covers the segment
+// from its start to the segment's nearer end, whichever end is off the line.
+func TestRoadStatusCausesRunPastTheSegment(t *testing.T) {
+	path := []LatLng{{Lat: 38.40, Lng: -120.20}, {Lat: 38.40, Lng: -120.10}}
+	rd := &api.Road{Status: api.RoadStatus_CLOSED, StatusCauses: []*api.RoadStatusCause{
+		// Begins 4.4 km in, ends ~3 km past the east end.
+		{Status: api.RoadStatus_CLOSED, Source: "lane_closure",
+			Begin: &api.Coordinates{Latitude: 38.40, Longitude: -120.15}, End: &api.Coordinates{Latitude: 38.40, Longitude: -120.065}},
+		// Ends swapped and running off the west end.
+		{Status: api.RoadStatus_CLOSED, Source: "lane_closure",
+			Begin: &api.Coordinates{Latitude: 38.41, Longitude: -120.24}, End: &api.Coordinates{Latitude: 38.40, Longitude: -120.15}},
+	}}
+	got := roadStatusCauses(rd, path)
+	require.Len(t, got, 2)
+
+	east := got[0]
+	require.Equal(t, "SPAN", east.Extent)
+	assert.InDelta(t, 4.4, *east.FromKm, 0.1)
+	assert.InDelta(t, 8.7, *east.ToKm, 0.1, "to the segment's east end")
+
+	west := got[1]
+	require.Equal(t, "SPAN", west.Extent)
+	assert.Equal(t, 0.0, *west.FromKm, "from the segment's west end")
+	assert.InDelta(t, 4.4, *west.ToKm, 0.1)
+}

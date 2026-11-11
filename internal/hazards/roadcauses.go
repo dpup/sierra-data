@@ -44,6 +44,16 @@ func roadStatusCauses(rd *api.Road, path []LatLng) []RoadStatusCauseProps {
 				to = &km
 			}
 		}
+		// A closure with one end on the segment and the other off it runs
+		// past the segment: it covers the segment from the placed end to
+		// whichever segment end is nearer the other point. The roads service
+		// applies a closure when either end is on the route, so this is the
+		// usual shape of a multi-km closure, not an edge case.
+		if from != nil && to == nil && c.GetEnd() != nil {
+			to = nearerEndKm(path, c.GetEnd().GetLatitude(), c.GetEnd().GetLongitude())
+		} else if to != nil && from == nil && c.GetBegin() != nil {
+			from = nearerEndKm(path, c.GetBegin().GetLatitude(), c.GetBegin().GetLongitude())
+		}
 		switch {
 		case from != nil && to != nil:
 			lo, hi := math.Min(*from, *to), math.Max(*from, *to)
@@ -54,6 +64,23 @@ func roadStatusCauses(rd *api.Road, path []LatLng) []RoadStatusCauseProps {
 		out = append(out, p)
 	}
 	return out
+}
+
+// nearerEndKm is the km position (0 or the path's length) of whichever end
+// of path is nearer (lat, lng); nil for a path too short to have two.
+func nearerEndKm(path []LatLng, lat, lng float64) *float64 {
+	if len(path) < 2 {
+		return nil
+	}
+	first, last := path[0], path[len(path)-1]
+	_, dFirst := alongPath([]LatLng{first, first}, lat, lng)
+	_, dLast := alongPath([]LatLng{last, last}, lat, lng)
+	if dFirst <= dLast {
+		v := 0.0
+		return &v
+	}
+	v, _ := alongPath(path, last.Lat, last.Lng)
+	return &v
 }
 
 // alongPath returns how far along path (km from its first point) the point
