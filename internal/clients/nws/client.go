@@ -88,6 +88,19 @@ type Alert struct {
 	// Sacramento's fire-weather and public forecast zones share numbers
 	// with different shapes, and a Red Flag Warning names fire zones.
 	ZoneRefs []string
+	// MessageType is CAP `msgType`: "Alert" (a new product), "Update" (it
+	// replaces the messages in References; the hazard continues under this
+	// one) or "Cancel" (it ends them).
+	MessageType string
+	// References are the CAP identifiers (the same urns as ID) of the earlier
+	// messages this one updates or cancels. NWS often lists the whole chain
+	// but sometimes only the immediate predecessor.
+	References []string
+	// ReplacedBy is the id of the message api.weather.gov says replaced this
+	// one (its `replacedBy`, an Update or a Cancel), or "". Only GetAlert can
+	// see it: /alerts/active drops a replaced alert, and never lists Cancel
+	// messages at all.
+	ReplacedBy string
 }
 
 // Begins is when the hazard starts: CAP `onset`, falling back to `effective`
@@ -198,6 +211,15 @@ type alertProperties struct {
 	// AffectedZones are zone URLs, e.g. https://api.weather.gov/zones/fire/CAZ138.
 	AffectedZones []string            `json:"affectedZones"`
 	Parameters    map[string][]string `json:"parameters"` // NWSheadline lives here
+	MessageType   string              `json:"messageType"`
+	References    []alertReference    `json:"references"`
+	// ReplacedBy is the replacing alert's URL (https://api.weather.gov/alerts/<id>)
+	// or null.
+	ReplacedBy string `json:"replacedBy"`
+}
+
+type alertReference struct {
+	Identifier string `json:"identifier"`
 }
 
 type alertGeo struct {
@@ -207,28 +229,60 @@ type alertGeo struct {
 func (r alertsResponse) toAlerts() []Alert {
 	var alerts []Alert
 	for _, f := range r.Features {
-		p := f.Properties
-		alerts = append(alerts, Alert{
-			ID:          p.ID,
-			Event:       p.Event,
-			Severity:    p.Severity,
-			Certainty:   p.Certainty,
-			Urgency:     p.Urgency,
-			Headline:    p.Headline,
-			NWSHeadline: firstParam(p.Parameters, "NWSheadline"),
-			Description: p.Description,
-			Instruction: p.Instruction,
-			SenderName:  p.SenderName,
-			AreaDesc:    p.AreaDesc,
-			Effective:   parseTime(p.Effective),
-			Expires:     parseTime(p.Expires),
-			Onset:       parseTime(p.Onset),
-			Ends:        parseTime(p.Ends),
-			Zones:       p.Geocode.UGC,
-			ZoneRefs:    zoneRefs(p.AffectedZones),
-		})
+		alerts = append(alerts, f.Properties.toAlert())
 	}
 	return alerts
+}
+
+func (p alertProperties) toAlert() Alert {
+	a := Alert{
+		ID:          p.ID,
+		Event:       p.Event,
+		Severity:    p.Severity,
+		Certainty:   p.Certainty,
+		Urgency:     p.Urgency,
+		Headline:    p.Headline,
+		NWSHeadline: firstParam(p.Parameters, "NWSheadline"),
+		Description: p.Description,
+		Instruction: p.Instruction,
+		SenderName:  p.SenderName,
+		AreaDesc:    p.AreaDesc,
+		Effective:   parseTime(p.Effective),
+		Expires:     parseTime(p.Expires),
+		Onset:       parseTime(p.Onset),
+		Ends:        parseTime(p.Ends),
+		Zones:       p.Geocode.UGC,
+		ZoneRefs:    zoneRefs(p.AffectedZones),
+		MessageType: p.MessageType,
+	}
+	for _, ref := range p.References {
+		if id := strings.TrimSpace(ref.Identifier); id != "" {
+			a.References = append(a.References, id)
+		}
+	}
+	if p.ReplacedBy != "" {
+		// The last path segment of the alert URL is the replacing alert's id.
+		a.ReplacedBy = p.ReplacedBy[strings.LastIndex(p.ReplacedBy, "/")+1:]
+	}
+	return a
+}
+
+// GetAlert fetches one alert by id from /alerts/{id}. Unlike the active list
+// it answers for replaced and cancelled alerts too, and carries
+// `replacedBy`. A 404 wraps ErrNotFound.
+func (c *Client) GetAlert(ctx context.Context, id string) (Alert, error) {
+	id = strings.TrimSpace(id)
+	if id == "" || strings.ContainsAny(id, "/?#") {
+		return Alert{}, fmt.Errorf("invalid NWS alert id %q", id)
+	}
+	var out alertFeature
+	if err := c.getJSON(ctx, c.baseURL+"/alerts/"+url.PathEscape(id), &out); err != nil {
+		return Alert{}, err
+	}
+	if out.Properties.ID == "" {
+		return Alert{}, fmt.Errorf("NWS alert %s: response has no id", id)
+	}
+	return out.Properties.toAlert(), nil
 }
 
 // firstParam returns the first value of a CAP `parameters` entry, or "".

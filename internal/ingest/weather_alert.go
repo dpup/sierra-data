@@ -2,6 +2,8 @@ package ingest
 
 import (
 	"context"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/dpup/prefab/logging"
@@ -45,6 +47,9 @@ type weatherAlertsAPI interface {
 	// AlertZoneGeometry is the combined, simplified area of an alert's zones
 	// (nws.Alert.ZoneRefs), all or nothing.
 	AlertZoneGeometry(ctx context.Context, refs []string) ([]byte, error)
+	// NWSAlertReplacedBy looks one alert up at api.weather.gov and returns the
+	// id of the message that replaced it, or "" if none has.
+	NWSAlertReplacedBy(ctx context.Context, id string) (string, error)
 }
 
 // WeatherAlertNormalizer ingests NWS zone alerts (id namespace "wx:") via the
@@ -55,12 +60,28 @@ type WeatherAlertNormalizer struct {
 	cfg     *config.Config
 	weather weatherAlertsAPI
 	now     func() time.Time // injectable for the SCHEDULED/ACTIVE cutover tests
+
+	// notReplaced remembers held alerts that NWS said it had NOT replaced
+	// (see replacedHeld), so an alert that merely lapsed is looked up once an
+	// hour rather than every tick until its grace ends. Poll runs on one
+	// goroutine, but the mutex keeps the normalizer safe to share.
+	mu          sync.Mutex
+	notReplaced map[string]time.Time
 }
+
+const (
+	// replacedLookupTTL is how long a "not replaced" answer is trusted. An
+	// Update that appears later is caught from its references without a
+	// lookup, so this only bounds how late a Cancel of a lapsed alert is seen.
+	replacedLookupTTL = time.Hour
+	// maxReplacedLookups bounds the per-tick /alerts/{id} calls.
+	maxReplacedLookups = 8
+)
 
 // NewWeatherAlertNormalizer wires the normalizer to the weather service (the
 // concrete *services.WeatherService satisfies weatherAlertsAPI).
 func NewWeatherAlertNormalizer(cfg *config.Config, weather weatherAlertsAPI) *WeatherAlertNormalizer {
-	return &WeatherAlertNormalizer{cfg: cfg, weather: weather, now: time.Now}
+	return &WeatherAlertNormalizer{cfg: cfg, weather: weather, now: time.Now, notReplaced: map[string]time.Time{}}
 }
 
 // SourceIDs implements Normalizer.
@@ -93,8 +114,21 @@ func (n *WeatherAlertNormalizer) Poll(ctx context.Context, prior Prior) (*PollRe
 	}
 	now := n.now()
 
+	// Every id an Update or Cancel in the list names in its CAP references:
+	// NWS has replaced those messages (see replacedHeld).
+	referenced := referencedAlerts(alerts)
+
 	events := make([]*gridv1.Event, 0, len(alerts))
 	for _, a := range alerts {
+		// A referenced alert still in the list (NWS normally drops it at once)
+		// is not emitted: the scheduler retires it this tick, and emitting it
+		// would write it back to ACTIVE on the next one. A Cancel message is
+		// an all-clear for the alerts it references, not a hazard of its own.
+		// (/alerts/active does not list Cancel messages today; this is a
+		// guard, not a path production exercises.)
+		if referenced[services.NWSAlertID(a)] || strings.EqualFold(a.MessageType, "Cancel") {
+			continue
+		}
 		// An NWS watch is SCHEDULED until it takes effect (decision 8). The
 		// test is against the HAZARD's start (CAP `onset`), not the product's
 		// `effective` — a Watch issued Tuesday morning for Thursday's storms is
@@ -150,7 +184,118 @@ func (n *WeatherAlertNormalizer) Poll(ctx context.Context, prior Prior) (*PollRe
 		}}
 		events = append(events, ev)
 	}
-	return &PollResult{Events: events, PerSource: perSource}, nil
+	res := &PollResult{Events: events, PerSource: perSource}
+	// Only from a clean fetch: a stale-served list proves nothing about
+	// what is still current, and the scheduler would not act on it anyway.
+	if perSource == nil {
+		res.Superseded = n.replacedHeld(ctx, prior, referenced, events, now)
+	}
+	return res, nil
+}
+
+// referencedAlerts is the set of alert ids that some alert in the list names
+// in its CAP references. Every listed message's references count, so a chain
+// whose links are all in the list is covered without walking it.
+func referencedAlerts(alerts []nws.Alert) map[string]bool {
+	out := make(map[string]bool)
+	for _, a := range alerts {
+		self := services.NWSAlertID(a)
+		for _, ref := range a.References {
+			if ref != self {
+				out[ref] = true
+			}
+		}
+	}
+	return out
+}
+
+// replacedHeld returns the stored ACTIVE/SCHEDULED alert events that NWS has
+// replaced, for PollResult.Superseded, which RESOLVES them this tick instead
+// of leaving them for the 24h expire grace (2026-11-11: an Update of the
+// CAZ139 Winter Storm Watch left both copies SCHEDULED, and /live showed two
+// identical cards).
+//
+// Two kinds of positive evidence, both NWS's own replacement relation:
+//
+//   - A listed alert references the held one (CAP `references`). This is the
+//     common case (an Update) and needs no extra request. It is evaluated
+//     against the store on EVERY tick, not only when the Update is first
+//     seen, so an Update ingested before this rule existed still retires
+//     its predecessor.
+//   - A held alert has dropped out of the active list and api.weather.gov
+//     says it was replaced (`replacedBy`). This is the only way a Cancel is
+//     seen, because /alerts/active never lists Cancel messages, and it
+//     catches the links of a chain whose middle we never saw (an Update that
+//     references only its immediate predecessor). It costs one request per
+//     such alert, remembered for replacedLookupTTL when the answer is "not
+//     replaced", and none once the alert is retired.
+//
+// RESOLVED, not EXPIRED, for both: EXPIRED means aged out with nobody saying
+// so, while here the issuing office has said it. A Cancel ends the hazard;
+// an Update ends THIS message, and the hazard continues on the replacing
+// alert, which is its own ACTIVE/SCHEDULED event. That is the Superseded
+// contract the wildfire adoption already uses. Event ids are unchanged; the
+// event carries no field that could point at its replacement, so the link
+// is left to a follow-up (ListRelatedEvents or a detail field).
+//
+// Ids we do not hold are ignored, which also ignores alerts in zones we do
+// not track: we only ever hold alerts from our zones' feed.
+func (n *WeatherAlertNormalizer) replacedHeld(ctx context.Context, prior Prior, referenced map[string]bool, events []*gridv1.Event, now time.Time) []string {
+	held := priorForSource(prior, "nws")
+	if len(held) == 0 {
+		return nil
+	}
+	listed := make(map[string]bool, len(events))
+	for _, ev := range events {
+		listed[ev.GetId()] = true
+	}
+
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.notReplaced == nil {
+		n.notReplaced = map[string]time.Time{}
+	}
+	stillHeld := make(map[string]bool, len(held))
+	var out []string
+	lookups := 0
+	for _, ev := range held {
+		id := strings.TrimPrefix(ev.GetId(), "wx:")
+		stillHeld[id] = true
+		if referenced[id] {
+			out = append(out, ev.GetId())
+			continue
+		}
+		// Still listed means still current; a synthesized id (no NWS id) has
+		// nothing to look up.
+		if listed[ev.GetId()] || !strings.HasPrefix(id, "urn:") {
+			continue
+		}
+		if at, ok := n.notReplaced[id]; ok && now.Sub(at) < replacedLookupTTL {
+			continue
+		}
+		if lookups >= maxReplacedLookups {
+			continue
+		}
+		lookups++
+		by, err := n.weather.NWSAlertReplacedBy(ctx, id)
+		if err != nil {
+			// No evidence either way: the alert keeps its grace.
+			logging.Warnw(ctx, "Weather alert: replacement lookup failed", "id", ev.GetId(), "error", err)
+			continue
+		}
+		if by == "" {
+			n.notReplaced[id] = now
+			continue
+		}
+		logging.Infow(ctx, "Weather alert: NWS replaced a held alert", "id", ev.GetId(), "replacedBy", by)
+		out = append(out, ev.GetId())
+	}
+	for id := range n.notReplaced {
+		if !stillHeld[id] {
+			delete(n.notReplaced, id)
+		}
+	}
+	return out
 }
 
 // attachArea sets the alert's geometry to its zones' area. Geometry is
