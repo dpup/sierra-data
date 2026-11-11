@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -21,6 +20,7 @@ import (
 	"github.com/sierragridteam/sierra-data/internal/config"
 	"github.com/sierragridteam/sierra-data/internal/handoff"
 	"github.com/sierragridteam/sierra-data/internal/store"
+	"github.com/sierragridteam/sierra-data/internal/storetest"
 )
 
 // These tests drive the REAL gridApp through the handoff controller, the way
@@ -36,13 +36,13 @@ const integrationToken = "integration-deploy-token"
 
 func TestGridHandoffLifecycleWithMeshEnabled(t *testing.T) {
 	blockOutbound(t)
-	dbPath := seededGridDB(t)
-	app, port := preparedGrid(t, dbPath)
+	dbURL := seededGridDB(t)
+	app, port := preparedGrid(t, dbURL)
 	h := runController(t, app, true)
 
 	// STANDBY: nothing open, the next owner could take the lock right now.
 	assert.Equal(t, handoff.StateStandby, h.state())
-	assertLockFree(t, dbPath)
+	assertLockFree(t, dbURL)
 
 	h.command("/activate", "it-activate")
 	st := h.waitSettled()
@@ -50,7 +50,7 @@ func TestGridHandoffLifecycleWithMeshEnabled(t *testing.T) {
 	assert.Equal(t, http.StatusOK, httpCode(t, port, "/api/v1/sources"))
 	assert.Equal(t, http.StatusOK, httpCode(t, port, "/api/v1/mesh/links"),
 		"a gated hand-mounted route")
-	assertLockHeld(t, dbPath)
+	assertLockHeld(t, dbURL)
 
 	h.command("/quiesce", "it-release")
 	st = h.waitSettled()
@@ -59,22 +59,22 @@ func TestGridHandoffLifecycleWithMeshEnabled(t *testing.T) {
 	assert.Equal(t, http.StatusServiceUnavailable, httpCode(t, port, "/api/v1/sources"),
 		"released: the gRPC-routed surface refuses (503, not the 499 a cancelled gateway gives)")
 	assert.Equal(t, http.StatusServiceUnavailable, httpCode(t, port, "/api/v1/mesh/links"))
-	assertLockFree(t, dbPath)
+	assertLockFree(t, dbURL)
 
 	assert.Equal(t, 0, h.terminate(), "SIGTERM after release exits cleanly")
 }
 
 func TestGridBootActivationWithMeshEnabled(t *testing.T) {
 	blockOutbound(t)
-	dbPath := seededGridDB(t)
-	app, port := preparedGrid(t, dbPath)
+	dbURL := seededGridDB(t)
+	app, port := preparedGrid(t, dbURL)
 	h := runController(t, app, false)
 
 	require.Eventually(t, func() bool { return h.state() == handoff.StateActive }, 20*time.Second, 20*time.Millisecond,
 		"boot activation never reached ACTIVE (state %s)", h.state())
 	assert.Equal(t, http.StatusOK, httpCode(t, port, "/api/v1/sources"))
 	assert.Equal(t, 0, h.terminate(), "SIGTERM while ACTIVE quiesces and exits 0")
-	assertLockFree(t, dbPath)
+	assertLockFree(t, dbURL)
 }
 
 // --- harness ----------------------------------------------------------------
@@ -98,11 +98,12 @@ func (l loopbackOnly) RoundTrip(r *http.Request) (*http.Response, error) {
 }
 
 // seededGridDB creates a grid store holding one ACTIVE mesh node, so
-// activation's presence rehydration has something to log about.
+// activation's presence rehydration has something to log about. Returns the
+// database URL (a fresh database per test, internal/storetest).
 func seededGridDB(t *testing.T) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "grid.db")
-	st, err := store.Open(path)
+	url := storetest.URL(t)
+	st, err := store.Open(url)
 	require.NoError(t, err)
 	ctx := context.Background()
 	require.NoError(t, st.SeedSources(ctx, []store.SourceSeed{{ID: "meshcore", Name: "MeshCore", PollInterval: time.Minute}}))
@@ -116,19 +117,19 @@ func seededGridDB(t *testing.T) string {
 	})
 	require.NoError(t, err)
 	require.NoError(t, st.Close())
-	return path
+	return url
 }
 
 // preparedGrid is prepareGrid on a minimal config: mesh enabled against a
 // dead broker, a free production port, a short lock wait.
-func preparedGrid(t *testing.T, dbPath string) (*gridApp, int) {
+func preparedGrid(t *testing.T, dbURL string) (*gridApp, int) {
 	t.Helper()
 	port := freePort(t)
 	prefab.LoadConfigDefaults(map[string]any{"server.port": port, "server.host": "127.0.0.1"})
 	cfg := &config.Config{}
 	cfg.OpenAI.APIKey = "test"
-	cfg.Grid.DBPath = dbPath
-	cfg.Grid.LockTimeout = 500 * time.Millisecond
+	cfg.Grid.Database.URL = dbURL
+	cfg.Grid.Database.LockTimeout = 500 * time.Millisecond
 	cfg.Grid.Meshcore.Enabled = true
 	cfg.Grid.Meshcore.Brokers = []config.MeshcoreBroker{{URL: "ws://127.0.0.1:1/mqtt"}}
 	cfg.Grid.Control.DrainTimeout = 500 * time.Millisecond
@@ -222,20 +223,22 @@ func httpCode(t *testing.T, port int, path string) int {
 	return resp.StatusCode
 }
 
-func assertLockFree(t *testing.T, path string) {
+// The writer lock is a PostgreSQL advisory lock per database: a second
+// store on the same database is the contender the next deploy would be.
+func assertLockFree(t *testing.T, url string) {
 	t.Helper()
-	st, err := store.Open(path, store.WithLockTimeout(100*time.Millisecond))
+	st, err := store.Open(url, store.WithLockTimeout(100*time.Millisecond))
 	require.NoError(t, err, "the database lock should be free")
 	require.NoError(t, st.Close())
 }
 
-func assertLockHeld(t *testing.T, path string) {
+func assertLockHeld(t *testing.T, url string) {
 	t.Helper()
-	st, err := store.Open(path, store.WithLockTimeout(100*time.Millisecond))
+	st, err := store.Open(url, store.WithLockTimeout(100*time.Millisecond))
 	if err == nil {
 		st.Close()
 	}
-	assert.Error(t, err, "the active owner must hold the database lock")
+	assert.ErrorIs(t, err, store.ErrLockHeld, "the active owner must hold the database lock")
 }
 
 func freePort(t *testing.T) int {
@@ -253,8 +256,8 @@ func freePort(t *testing.T) int {
 // the strength of someone else's listener.
 func TestGridActivationRefusesABoundPort(t *testing.T) {
 	blockOutbound(t)
-	dbPath := seededGridDB(t)
-	app, port := preparedGrid(t, dbPath)
+	dbURL := seededGridDB(t)
+	app, port := preparedGrid(t, dbURL)
 	squatter, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	require.NoError(t, err)
 	defer squatter.Close()
@@ -265,17 +268,17 @@ func TestGridActivationRefusesABoundPort(t *testing.T) {
 	assert.Equal(t, handoff.StateStandby, st.State)
 	assert.False(t, st.DatabaseHeld)
 	assert.Contains(t, st.Operation.Error, "already in use")
-	assertLockFree(t, dbPath)
+	assertLockFree(t, dbURL)
 }
 
 // SIGTERM during the lock wait ends it at once (WithLockContext), instead of
 // holding shutdown for lockTimeout, past ECS's stop timeout.
 func TestGridTerminateDuringLockWaitIsPrompt(t *testing.T) {
 	blockOutbound(t)
-	dbPath := seededGridDB(t)
-	app, _ := preparedGrid(t, dbPath)
-	app.cfg.Grid.LockTimeout = time.Minute
-	holder, err := store.Open(dbPath)
+	dbURL := seededGridDB(t)
+	app, _ := preparedGrid(t, dbURL)
+	app.cfg.Grid.Database.LockTimeout = time.Minute
+	holder, err := store.Open(dbURL)
 	require.NoError(t, err)
 	defer holder.Close()
 
@@ -292,8 +295,8 @@ func TestGridTerminateDuringLockWaitIsPrompt(t *testing.T) {
 // and returns to STANDBY; a retry then succeeds.
 func TestGridPanicDuringActivationReleasesAndRetries(t *testing.T) {
 	blockOutbound(t)
-	dbPath := seededGridDB(t)
-	app, port := preparedGrid(t, dbPath)
+	dbURL := seededGridDB(t)
+	app, port := preparedGrid(t, dbURL)
 	panicked := false
 	app.activateHook = func(stage string) {
 		if stage == "store-opened" && !panicked {
@@ -307,7 +310,7 @@ func TestGridPanicDuringActivationReleasesAndRetries(t *testing.T) {
 	assert.Equal(t, handoff.StateStandby, st.State, "cleanup ran, so the database is free: %+v", st.Operation)
 	assert.False(t, st.DatabaseHeld)
 	assert.Contains(t, st.Operation.Error, "panic during activation: injected")
-	assertLockFree(t, dbPath)
+	assertLockFree(t, dbURL)
 
 	h.command("/activate", "it-activate-2")
 	st = h.waitSettled()

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -14,13 +13,14 @@ import (
 
 	"github.com/sierragridteam/sierra-data/internal/config"
 	"github.com/sierragridteam/sierra-data/internal/store"
+	"github.com/sierragridteam/sierra-data/internal/storetest"
 )
 
 // burnRegistry builds a registry whose reporter is granted burn.line, backed by
 // a real store (the stream stages rows, so a fake would test nothing).
 func burnRegistry(t *testing.T, lineIDs ...string) (*Registry, *store.Store) {
 	t.Helper()
-	st, err := store.Open(filepath.Join(t.TempDir(), "grid.db"))
+	st, err := store.Open(storetest.URL(t))
 	require.NoError(t, err)
 	t.Cleanup(func() { st.Close() })
 
@@ -214,7 +214,7 @@ func TestBurnStream_HealthSurvivesRestart(t *testing.T) {
 // Rows staged before the reporter id was recorded are credited only when one
 // reporter could have sent them; with two, nothing is guessed.
 func TestRestoreBurnHealth_UnattributedRows(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "grid.db"))
+	st, err := store.Open(storetest.URL(t))
 	require.NoError(t, err)
 	t.Cleanup(func() { st.Close() })
 	received := time.Now().Add(-3 * time.Hour).Truncate(time.Second)
@@ -246,7 +246,7 @@ func TestRestoreBurnHealth_UnattributedRows(t *testing.T) {
 // An accepted report fires the hook (which wakes the burn poller); a rejected
 // one does not, since nothing new was staged.
 func TestBurnStream_AcceptedReportFiresHook(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "grid.db"))
+	st, err := store.Open(storetest.URL(t))
 	require.NoError(t, err)
 	t.Cleanup(func() { st.Close() })
 	calls := 0

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -92,9 +93,26 @@ func clampPageSize(n int) int {
 	}
 }
 
-// placeholders returns "?, ?, ..." for n values.
-func placeholders(n int) string {
-	return strings.TrimSuffix(strings.Repeat("?, ", n), ", ")
+// sqlArgs collects positional parameters for a statement built piece by
+// piece: add appends a value and returns its placeholder ($1, $2, ...), so
+// the numbering can never drift from the argument order.
+type sqlArgs []any
+
+func (a *sqlArgs) add(v any) string {
+	*a = append(*a, v)
+	return "$" + strconv.Itoa(len(*a))
+}
+
+// params returns "$first, $first+1, ..." for n parameters.
+func params(first, n int) string {
+	var sb strings.Builder
+	for i := range n {
+		if i > 0 {
+			sb.WriteString(", ")
+		}
+		sb.WriteString("$" + strconv.Itoa(first+i))
+	}
+	return sb.String()
 }
 
 // Page is one page of a keyset-paginated query, with a resume token per row,
@@ -197,7 +215,7 @@ func eventsPageSQL(q EventQuery, pageSize int) (string, []any, error) {
 	}
 
 	var sb strings.Builder
-	var args []any
+	var args sqlArgs
 	blobCol := "e.proto"
 	if q.Lite {
 		blobCol = "COALESCE(l.proto, e.proto)"
@@ -205,37 +223,28 @@ func eventsPageSQL(q EventQuery, pageSize int) (string, []any, error) {
 	sb.WriteString(`SELECT ` + blobCol + `, k.severity, k.observed_at, k.id FROM (` +
 		`SELECT e.id, e.severity, e.observed_at FROM events e`)
 	if q.PlaceID != "" {
-		sb.WriteString(` JOIN event_places ep ON ep.event_id = e.id AND ep.place_id = ?`)
-		args = append(args, q.PlaceID)
+		sb.WriteString(` JOIN event_places ep ON ep.event_id = e.id AND ep.place_id = ` + args.add(q.PlaceID))
 	}
-	sb.WriteString(` WHERE e.status IN (` + placeholders(len(statuses)) + `)`)
-	for _, st := range statuses {
-		args = append(args, int32(st))
-	}
+	sb.WriteString(` WHERE e.status = ANY(` + args.add(enumInts(statuses)) + `)`)
 	if len(q.Layers) > 0 {
-		sb.WriteString(` AND e.layer IN (` + placeholders(len(q.Layers)) + `)`)
-		for _, l := range q.Layers {
-			args = append(args, int32(l))
-		}
+		sb.WriteString(` AND e.layer = ANY(` + args.add(enumInts(q.Layers)) + `)`)
 	}
 	if q.MinSeverity > gridv1.Severity_INFO {
-		sb.WriteString(` AND e.severity >= ?`)
-		args = append(args, int32(q.MinSeverity))
+		sb.WriteString(` AND e.severity >= ` + args.add(int32(q.MinSeverity)))
 	}
 	if !q.Since.IsZero() {
-		sb.WriteString(` AND e.observed_at >= ?`)
-		args = append(args, q.Since.Unix())
+		sb.WriteString(` AND e.observed_at >= ` + args.add(q.Since.Unix()))
 	}
 	if q.PageToken != "" {
 		var cur eventCursor
 		if err := decodeToken(q.PageToken, &cur); err != nil {
 			return "", nil, err
 		}
-		sb.WriteString(` AND (e.severity < ? OR (e.severity = ? AND e.observed_at < ?)
-			OR (e.severity = ? AND e.observed_at = ? AND e.id > ?))`)
-		args = append(args, cur.S, cur.S, cur.O, cur.S, cur.O, cur.ID)
+		sv, ov, iv := args.add(cur.S), args.add(cur.O), args.add(cur.ID)
+		sb.WriteString(` AND (e.severity < ` + sv + ` OR (e.severity = ` + sv + ` AND e.observed_at < ` + ov + `)
+			OR (e.severity = ` + sv + ` AND e.observed_at = ` + ov + ` AND e.id > ` + iv + `))`)
 	}
-	sb.WriteString(` ORDER BY e.severity DESC, e.observed_at DESC, e.id ASC LIMIT ?) k` +
+	sb.WriteString(` ORDER BY e.severity DESC, e.observed_at DESC, e.id ASC LIMIT ` + args.add(pageSize+1) + `) k` +
 		` JOIN events e ON e.id = k.id`)
 	if q.Lite {
 		// COALESCE short-circuits, so e.proto is read only for an event the
@@ -243,7 +252,6 @@ func eventsPageSQL(q EventQuery, pageSize int) (string, []any, error) {
 		sb.WriteString(` LEFT JOIN event_lite l ON l.event_id = k.id`)
 	}
 	sb.WriteString(` ORDER BY k.severity DESC, k.observed_at DESC, k.id ASC`)
-	args = append(args, pageSize+1)
 	return sb.String(), args, nil
 }
 
@@ -261,18 +269,16 @@ func (s *Store) EventHistory(ctx context.Context, id string, pageSize int, token
 func (s *Store) EventHistoryPage(ctx context.Context, id string, pageSize int, token string) (Page[*gridv1.EventRevision], error) {
 	pageSize = clampPageSize(pageSize)
 	var sb strings.Builder
-	args := []any{id}
-	sb.WriteString(`SELECT revision, observed_at, ingested_at, proto FROM event_revisions WHERE event_id = ?`)
+	var args sqlArgs
+	sb.WriteString(`SELECT revision, observed_at, ingested_at, proto FROM event_revisions WHERE event_id = ` + args.add(id))
 	if token != "" {
 		var cur historyCursor
 		if err := decodeToken(token, &cur); err != nil {
 			return Page[*gridv1.EventRevision]{}, err
 		}
-		sb.WriteString(` AND revision < ?`)
-		args = append(args, cur.R)
+		sb.WriteString(` AND revision < ` + args.add(cur.R))
 	}
-	sb.WriteString(` ORDER BY revision DESC LIMIT ?`)
-	args = append(args, pageSize+1)
+	sb.WriteString(` ORDER BY revision DESC LIMIT ` + args.add(pageSize+1))
 
 	rows, err := s.db.QueryContext(ctx, sb.String(), args...)
 	if err != nil {
@@ -317,39 +323,32 @@ func (s *Store) QueryHistoryPage(ctx context.Context, q HistoryQuery) (Page[*gri
 	pageSize := clampPageSize(q.PageSize)
 
 	var sb strings.Builder
-	var args []any
+	var args sqlArgs
 	sb.WriteString(`SELECT r.revision, r.observed_at, r.ingested_at, r.proto, r.event_id
 		FROM event_revisions r JOIN events e ON e.id = r.event_id`)
 	if q.PlaceID != "" {
-		sb.WriteString(` JOIN event_places ep ON ep.event_id = r.event_id AND ep.place_id = ?`)
-		args = append(args, q.PlaceID)
+		sb.WriteString(` JOIN event_places ep ON ep.event_id = r.event_id AND ep.place_id = ` + args.add(q.PlaceID))
 	}
-	sb.WriteString(` WHERE 1=1`)
+	sb.WriteString(` WHERE true`)
 	if len(q.Layers) > 0 {
-		sb.WriteString(` AND e.layer IN (` + placeholders(len(q.Layers)) + `)`)
-		for _, l := range q.Layers {
-			args = append(args, int32(l))
-		}
+		sb.WriteString(` AND e.layer = ANY(` + args.add(enumInts(q.Layers)) + `)`)
 	}
 	if !q.From.IsZero() {
-		sb.WriteString(` AND r.observed_at >= ?`)
-		args = append(args, q.From.Unix())
+		sb.WriteString(` AND r.observed_at >= ` + args.add(q.From.Unix()))
 	}
 	if !q.To.IsZero() {
-		sb.WriteString(` AND r.observed_at < ?`)
-		args = append(args, q.To.Unix())
+		sb.WriteString(` AND r.observed_at < ` + args.add(q.To.Unix()))
 	}
 	if q.PageToken != "" {
 		var cur historyCursor
 		if err := decodeToken(q.PageToken, &cur); err != nil {
 			return Page[*gridv1.EventRevision]{}, err
 		}
-		sb.WriteString(` AND (r.observed_at < ? OR (r.observed_at = ? AND r.event_id > ?)
-			OR (r.observed_at = ? AND r.event_id = ? AND r.revision < ?))`)
-		args = append(args, cur.O, cur.O, cur.ID, cur.O, cur.ID, cur.R)
+		ov, iv, rv := args.add(cur.O), args.add(cur.ID), args.add(cur.R)
+		sb.WriteString(` AND (r.observed_at < ` + ov + ` OR (r.observed_at = ` + ov + ` AND r.event_id > ` + iv + `)
+			OR (r.observed_at = ` + ov + ` AND r.event_id = ` + iv + ` AND r.revision < ` + rv + `))`)
 	}
-	sb.WriteString(` ORDER BY r.observed_at DESC, r.event_id ASC, r.revision DESC LIMIT ?`)
-	args = append(args, pageSize+1)
+	sb.WriteString(` ORDER BY r.observed_at DESC, r.event_id ASC, r.revision DESC LIMIT ` + args.add(pageSize+1))
 
 	rows, err := s.db.QueryContext(ctx, sb.String(), args...)
 	if err != nil {
@@ -405,7 +404,7 @@ func scanRevision(scan func(...any) error) (*gridv1.EventRevision, error) {
 // EventRevisionAt returns one revision of an event, or ErrNotFound.
 func (s *Store) EventRevisionAt(ctx context.Context, id string, revision uint32) (*gridv1.EventRevision, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT revision, observed_at, ingested_at, proto FROM event_revisions WHERE event_id = ? AND revision = ?`, id, revision)
+		`SELECT revision, observed_at, ingested_at, proto FROM event_revisions WHERE event_id = $1 AND revision = $2`, id, revision)
 	rev, err := scanRevision(row.Scan)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -414,17 +413,14 @@ func (s *Store) EventRevisionAt(ctx context.Context, id string, revision uint32)
 }
 
 // FirstIngested returns when each event's revision 1 was stored, for the ids
-// that have one. It reads only the revisions' leading columns, never a blob.
+// that exist. It reads events.first_ingested_at (written once, on insert),
+// never a revision row or a blob.
 func (s *Store) FirstIngested(ctx context.Context, ids []string) (map[string]time.Time, error) {
 	out := make(map[string]time.Time, len(ids))
-	for start := 0; start < len(ids); start += 500 {
-		chunk := ids[start:min(start+500, len(ids))]
-		args := make([]any, len(chunk))
-		for i, id := range chunk {
-			args[i] = id
-		}
-		rows, err := s.db.QueryContext(ctx, `SELECT event_id, ingested_at FROM event_revisions
-			WHERE revision = 1 AND event_id IN (`+placeholders(len(chunk))+`)`, args...)
+	for start := 0; start < len(ids); start += maxHashBatch {
+		chunk := ids[start:min(start+maxHashBatch, len(ids))]
+		rows, err := s.db.QueryContext(ctx, `SELECT id, first_ingested_at FROM events
+			WHERE id = ANY($1)`, chunk)
 		if err != nil {
 			return nil, fmt.Errorf("store: first ingested: %w", err)
 		}

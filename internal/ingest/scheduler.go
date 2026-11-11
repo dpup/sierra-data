@@ -84,11 +84,6 @@ type SchedulerConfig struct {
 	BudgetPerTick   int             // max Enhance calls (attempts, not successes) per tick
 	MeshMaintenance MeshMaintenance // relay-observation compaction + prune (Interval 0 = off)
 	RoadSampling    RoadSampling    // road segment history (Interval 0 = off)
-	// StatsRefreshFirstAfter, when positive, runs the first ANALYZE after this
-	// delay instead of after a full statsRefreshInterval. cmd/server sets it when
-	// boot kept the persisted statistics rather than analyzing synchronously, so
-	// a run of deploys less than 6h apart still refreshes them.
-	StatsRefreshFirstAfter time.Duration
 }
 
 // Scheduler drives the ingest pollers: one goroutine per PollerSpec, each
@@ -103,7 +98,6 @@ type Scheduler struct {
 	budgetPerTick int
 	meshMaint     MeshMaintenance
 	roadSampling  RoadSampling
-	statsFirst    time.Duration // first stats refresh; 0 = statsRefreshInterval
 
 	// Lifecycle (Start/Stop). stopCh asks the loops to exit between ticks;
 	// cancel aborts a tick in progress; wg counts every goroutine Start ran.
@@ -126,7 +120,6 @@ func NewScheduler(st *store.Store, cfg SchedulerConfig) *Scheduler {
 		budgetPerTick: cfg.BudgetPerTick,
 		meshMaint:     cfg.MeshMaintenance,
 		roadSampling:  cfg.RoadSampling,
-		statsFirst:    cfg.StatsRefreshFirstAfter,
 		now:           time.Now,
 		startJitter:   maxStartJitter,
 	}
@@ -148,7 +141,6 @@ func (s *Scheduler) Start(ctx context.Context) {
 	if s.meshMaint.Interval > 0 {
 		goTracked(func() { s.runMeshMaintenance(ctx) })
 	}
-	goTracked(func() { s.runStatsRefresh(ctx) })
 	goTracked(func() { s.runLiteBackfill(ctx) })
 	if s.roadSampling.Interval > 0 && s.roadSampling.Sample != nil {
 		goTracked(func() { s.runRoadSampling(ctx) })
@@ -209,51 +201,6 @@ func (s *Scheduler) stopping() <-chan struct{} { return s.stopCh }
 // for the full multi-hour grace. If a source is ever configured with an
 // expireAfter anywhere near this window, shrink the window first.
 const touchSeenCoalesce = 10 * time.Minute
-
-// statsRefreshInterval is how often index statistics are recomputed. Not a
-// tuning knob, so deliberately not in config: it exists only so the query
-// planner's picture of the ACTIVE-vs-dead skew keeps up as the store grows.
-// Boot (cmd/server) analyzes synchronously only when the database has no
-// statistics yet; otherwise it keeps the persisted ones and this loop's first
-// pass comes early (SchedulerConfig.StatsRefreshFirstAfter).
-const statsRefreshInterval = 6 * time.Hour
-
-// runStatsRefresh periodically recomputes SQLite index statistics. Without
-// them the place-scoped event query degrades without bound as dead place
-// attachments accumulate — see store.Analyze for the measurements. It shares
-// the store's single writer (Analyze takes the mutex), so it serializes with
-// the pollers rather than being a second writer, and it is best-effort: a
-// failed ANALYZE makes queries slow, never wrong.
-func (s *Scheduler) runStatsRefresh(ctx context.Context) {
-	defer func() {
-		if r := recover(); r != nil {
-			logging.Errorw(ctx, "Stats refresh: recovered from panic", "error", r)
-		}
-	}()
-	first := statsRefreshInterval
-	if s.statsFirst > 0 {
-		first = s.statsFirst
-	}
-	timer := time.NewTimer(first)
-	defer timer.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-s.stopping():
-			return
-		case <-timer.C:
-			timer.Reset(statsRefreshInterval)
-			start := s.now()
-			if err := s.store.Analyze(ctx); err != nil {
-				logging.Errorw(ctx, "Stats refresh: ANALYZE failed", "error", err)
-				continue
-			}
-			logging.Infow(ctx, "Stats refresh: recomputed index statistics",
-				"duration", s.now().Sub(start))
-		}
-	}
-}
 
 // runRoadSampling archives road segment samples on its interval, and prunes
 // old ones once a day. Best-effort: a failed read or write logs and waits for
@@ -462,8 +409,8 @@ func (s *Scheduler) safeTick(ctx context.Context, spec PollerSpec, st *pollerSta
 // run and never shared, so it is goroutine-local by construction and needs no
 // locking — do not hoist it onto Scheduler, which every poller shares.
 type pollerState struct {
-	placesVersion uint64 // store place-set version at the last full reconcile
-	reconciled    bool   // false until the first tick completes
+	placesVersion int64 // store place-set version at the last full reconcile
+	reconciled    bool  // false until the first tick completes
 }
 
 // shouldUpsert decides whether an event needs the write path at all.
@@ -579,7 +526,12 @@ func (s *Scheduler) tick(ctx context.Context, spec PollerSpec, st *pollerState) 
 	// go through the full path once — otherwise an event that arrived before a
 	// place was seeded would never attach to it. The first tick of a poller's
 	// life also reconciles, so a restart re-derives attachments once.
-	placesVersion := s.store.PlacesVersion()
+	placesVersion, pvErr := s.store.PlacesVersion(ctx)
+	if pvErr != nil {
+		// Unknown: reconcile now (conservative), and again next tick.
+		logging.Warnw(ctx, "Ingest tick: reading the places version failed; full reconcile", "error", pvErr)
+		placesVersion = -1
+	}
 	fullReconcile := !st.reconciled || placesVersion != st.placesVersion
 
 	// ONE round trip for the whole poll's hash pre-check (see storedHashes).

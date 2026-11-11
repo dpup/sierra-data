@@ -69,8 +69,8 @@ func ContentHash(ev *gridv1.Event) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// maxHashBatch bounds one ContentHashes round trip. Well under SQLite's
-// variable limit, and large enough that a whole poll is one or two queries.
+// maxHashBatch bounds one ContentHashes round trip (one array parameter), so
+// a whole poll is one or two queries.
 const maxHashBatch = 900
 
 // ContentHashes returns the stored content hash for each of ids that exists, in
@@ -90,12 +90,8 @@ func (s *Store) ContentHashes(ctx context.Context, ids []string) (map[string]str
 	for start := 0; start < len(ids); start += maxHashBatch {
 		end := min(start+maxHashBatch, len(ids))
 		chunk := ids[start:end]
-		args := make([]any, len(chunk))
-		for i, id := range chunk {
-			args[i] = id
-		}
 		rows, err := s.db.QueryContext(ctx,
-			`SELECT id, content_hash FROM events WHERE id IN (`+placeholders(len(chunk))+`)`, args...)
+			`SELECT id, content_hash FROM events WHERE id = ANY($1)`, chunk)
 		if err != nil {
 			return nil, fmt.Errorf("store: content hashes: %w", err)
 		}
@@ -121,7 +117,7 @@ func (s *Store) ContentHashes(ctx context.Context, ids []string) (map[string]str
 // which is one round trip instead of one per event.
 func (s *Store) NeedsUpdate(ctx context.Context, ev *gridv1.Event) (bool, error) {
 	var stored string
-	err := s.db.QueryRowContext(ctx, `SELECT content_hash FROM events WHERE id = ?`, ev.GetId()).Scan(&stored)
+	err := s.db.QueryRowContext(ctx, `SELECT content_hash FROM events WHERE id = $1`, ev.GetId()).Scan(&stored)
 	if err == sql.ErrNoRows {
 		return true, nil
 	}
@@ -140,8 +136,10 @@ func (s *Store) NeedsUpdate(ctx context.Context, ev *gridv1.Event) (bool, error)
 //     place seeded after the event first arrived must still attach;
 //   - hash differs: revision = old+1, row updated.
 //
-// Every content write also inserts an event_revisions snapshot, recomputes
-// event_places, refreshes the R*Tree bbox row, and stamps last_seen_at.
+// Every content write also inserts an event_revisions snapshot (bumping the
+// 'revisions' version), recomputes event_places, writes the bbox columns and
+// the lite copy, and stamps last_seen_at. first_ingested_at is set on insert
+// only.
 // ingested_at is stamped here; callers own observed_at (nil falls back to
 // now for the NOT NULL index column only).
 func (s *Store) UpsertEvent(ctx context.Context, ev *gridv1.Event) (UpsertResult, error) {
@@ -153,11 +151,10 @@ func (s *Store) UpsertEvent(ctx context.Context, ev *gridv1.Event) (UpsertResult
 	hash := ContentHash(ev)
 
 	var res UpsertResult
-	rewrote := false
 	err := s.inTx(ctx, func(tx *sql.Tx) error {
 		var oldRev uint32
 		var oldHash string
-		err := tx.QueryRow(`SELECT revision, content_hash FROM events WHERE id = ?`, ev.GetId()).
+		err := tx.QueryRow(`SELECT revision, content_hash FROM events WHERE id = $1`, ev.GetId()).
 			Scan(&oldRev, &oldHash)
 		switch {
 		case err == sql.ErrNoRows:
@@ -168,8 +165,7 @@ func (s *Store) UpsertEvent(ctx context.Context, ev *gridv1.Event) (UpsertResult
 			res = UpsertResult{Changed: false, Revision: oldRev}
 			// Content unchanged, but the place set may not be: recompute and
 			// sync attachments without touching revision/hash/history.
-			var err error
-			rewrote, err = s.refreshEventPlaces(tx, ev)
+			_, err := s.refreshEventPlaces(tx, ev)
 			return err
 		default:
 			res = UpsertResult{Changed: true, Revision: oldRev + 1}
@@ -200,18 +196,21 @@ func (s *Store) UpsertEvent(ctx context.Context, ev *gridv1.Event) (UpsertResult
 		}
 		if _, err := tx.Exec(`
 			INSERT INTO events (id, layer, severity, status, source_id, effective, expires,
-			                    observed_at, ingested_at, revision, content_hash, proto, last_seen_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			ON CONFLICT(id) DO UPDATE SET
+			                    observed_at, ingested_at, first_ingested_at, revision, content_hash,
+			                    proto, last_seen_at, min_lat, max_lat, min_lng, max_lng)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9, $10, $11, $12, $9, $13, $14, $15, $16)
+			ON CONFLICT (id) DO UPDATE SET
 			  layer = excluded.layer, severity = excluded.severity, status = excluded.status,
 			  source_id = excluded.source_id, effective = excluded.effective,
 			  expires = excluded.expires, observed_at = excluded.observed_at,
 			  ingested_at = excluded.ingested_at, revision = excluded.revision,
 			  content_hash = excluded.content_hash, proto = excluded.proto,
-			  last_seen_at = excluded.last_seen_at`,
-			c.GetId(), int32(c.GetLayer()), int32(c.GetSeverity()), int32(c.GetStatus()),
-			c.GetProvenance().GetSourceId(), unixOrNil(c.GetEffective()), unixOrNil(c.GetExpires()),
-			observedAt, now.Unix(), res.Revision, hash, blob, now.Unix(),
+			  last_seen_at = excluded.last_seen_at,
+			  min_lat = excluded.min_lat, max_lat = excluded.max_lat,
+			  min_lng = excluded.min_lng, max_lng = excluded.max_lng`,
+			append([]any{c.GetId(), int32(c.GetLayer()), int32(c.GetSeverity()), int32(c.GetStatus()),
+				c.GetProvenance().GetSourceId(), unixOrNil(c.GetEffective()), unixOrNil(c.GetExpires()),
+				observedAt, now.Unix(), res.Revision, hash, blob}, bboxArgs(c)...)...,
 		); err != nil {
 			return fmt.Errorf("store: upsert event %s: %w", c.GetId(), err)
 		}
@@ -221,18 +220,10 @@ func (s *Store) UpsertEvent(ctx context.Context, ev *gridv1.Event) (UpsertResult
 		if err := putLite(tx, c); err != nil {
 			return err
 		}
-		if err := replaceEventPlaces(tx, c.GetId(), c.PlaceIds); err != nil {
-			return err
-		}
-		return upsertGeo(tx, c)
+		return replaceEventPlaces(tx, c.GetId(), c.PlaceIds)
 	})
 	if err != nil {
 		return UpsertResult{}, err
-	}
-	if rewrote {
-		// After the commit, never before: a reader that saw the new version
-		// with the old blob would cache the old body under the new validator.
-		s.bumpRefreshVersion(ev.GetLayer())
 	}
 	return res, nil
 }
@@ -249,7 +240,7 @@ func (s *Store) TransitionEvents(ctx context.Context, ids []string, to gridv1.Ev
 	return s.inTx(ctx, func(tx *sql.Tx) error {
 		for _, id := range ids {
 			var blob []byte
-			err := tx.QueryRow(`SELECT proto FROM events WHERE id = ?`, id).Scan(&blob)
+			err := tx.QueryRow(`SELECT proto FROM events WHERE id = $1`, id).Scan(&blob)
 			if err == sql.ErrNoRows {
 				continue
 			}
@@ -275,9 +266,9 @@ func (s *Store) TransitionEvents(ctx context.Context, ids []string, to gridv1.Ev
 			// Status is hashed content: recompute so a later reappearance in
 			// the feed (status differs) correctly writes a revision.
 			if _, err := tx.Exec(`
-				UPDATE events SET status = ?, observed_at = ?, ingested_at = ?,
-				                  revision = ?, content_hash = ?, proto = ?
-				WHERE id = ?`,
+				UPDATE events SET status = $1, observed_at = $2, ingested_at = $3,
+				                  revision = $4, content_hash = $5, proto = $6
+				WHERE id = $7`,
 				int32(to), observedAt.Unix(), now.Unix(),
 				ev.GetRevision(), ContentHash(ev), newBlob, id,
 			); err != nil {
@@ -325,15 +316,9 @@ func (s *Store) TouchSeen(ctx context.Context, ids []string, t, staleBefore time
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	args := make([]any, 0, len(ids)+2)
-	args = append(args, t.Unix())
-	for _, id := range ids {
-		args = append(args, id)
-	}
-	args = append(args, staleBefore.Unix())
 	res, err := s.db.ExecContext(ctx,
-		`UPDATE events SET last_seen_at = ? WHERE id IN (`+placeholders(len(ids))+`) AND last_seen_at < ?`,
-		args...)
+		`UPDATE events SET last_seen_at = $1 WHERE id = ANY($2) AND last_seen_at < $3`,
+		t.Unix(), ids, staleBefore.Unix())
 	if err != nil {
 		return 0, fmt.Errorf("store: touch seen: %w", err)
 	}
@@ -361,7 +346,7 @@ type StoredEvent struct {
 func (s *Store) ActiveEventsBySource(ctx context.Context, sourceID string) ([]StoredEvent, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT proto, last_seen_at FROM events
-		WHERE source_id = ? AND status IN (?, ?)
+		WHERE source_id = $1 AND status IN ($2, $3)
 		ORDER BY id`,
 		sourceID, int32(gridv1.EventStatus_ACTIVE), int32(gridv1.EventStatus_SCHEDULED))
 	if err != nil {
@@ -397,14 +382,10 @@ func (s *Store) EventsBySourceAndStatus(ctx context.Context, sourceID string, st
 	if len(statuses) == 0 {
 		return nil, nil
 	}
-	args := []any{sourceID}
-	for _, st := range statuses {
-		args = append(args, int32(st))
-	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT proto FROM events
-		WHERE source_id = ? AND status IN (`+placeholders(len(statuses))+`)
-		ORDER BY id`, args...)
+		WHERE source_id = $1 AND status = ANY($2)
+		ORDER BY id`, sourceID, enumInts(statuses))
 	if err != nil {
 		return nil, fmt.Errorf("store: events by source %s: %w", sourceID, err)
 	}
@@ -427,7 +408,7 @@ func (s *Store) EventsBySourceAndStatus(ctx context.Context, sourceID string, st
 // GetEvent returns the current revision of an event, or ErrNotFound.
 func (s *Store) GetEvent(ctx context.Context, id string) (*gridv1.Event, error) {
 	var blob []byte
-	err := s.db.QueryRowContext(ctx, `SELECT proto FROM events WHERE id = ?`, id).Scan(&blob)
+	err := s.db.QueryRowContext(ctx, `SELECT proto FROM events WHERE id = $1`, id).Scan(&blob)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}
@@ -456,7 +437,7 @@ type EventStamp struct {
 // as an ETag validator to answer a conditional GET before the expensive load.
 // Revision history only grows with Revision; Refreshes never touches it.
 func (s *Store) EventVersion(ctx context.Context, id string) (stamp EventStamp, ok bool, err error) {
-	err = s.db.QueryRowContext(ctx, `SELECT revision, refreshes FROM events WHERE id = ?`, id).
+	err = s.db.QueryRowContext(ctx, `SELECT revision, refreshes FROM events WHERE id = $1`, id).
 		Scan(&stamp.Revision, &stamp.Refreshes)
 	if err == sql.ErrNoRows {
 		return EventStamp{}, false, nil
@@ -467,73 +448,17 @@ func (s *Store) EventVersion(ctx context.Context, id string) (stamp EventStamp, 
 	return stamp, true, nil
 }
 
-// RefreshVersion changes whenever this process rewrites, in place and without
-// a revision, the blob of an event in any of the given layers (all layers when
-// none are given). DataVersion cannot see those rewrites, so list validators
-// fold this in. It is per layer so a mesh node's telemetry refresh does not
-// invalidate a road-incident list. An ETag input only: meaningful compared
-// within one process (validators also carry a per-boot nonce).
-func (s *Store) RefreshVersion(layers []gridv1.Layer) int64 {
-	s.refreshMu.RLock()
-	defer s.refreshMu.RUnlock()
-	var sum int64
-	if len(layers) == 0 {
-		for _, n := range s.refreshVersions {
-			sum += n
-		}
-		return sum
-	}
-	for _, l := range slices.Compact(slices.Sorted(slices.Values(layers))) {
-		sum += s.refreshVersions[l]
-	}
-	return sum
-}
-
-func (s *Store) bumpRefreshVersion(layer gridv1.Layer) {
-	s.refreshMu.Lock()
-	defer s.refreshMu.Unlock()
-	if s.refreshVersions == nil {
-		s.refreshVersions = make(map[gridv1.Layer]int64)
-	}
-	s.refreshVersions[layer]++
-}
-
-// DataVersion is a cheap, monotonically-increasing global counter of stored
-// event revisions. event_revisions is append-only (a snapshot is written on
-// every content change and every lifecycle transition, never deleted), so this
-// count strictly increases whenever any event's content or status changes — and
-// stays put when nothing does. That makes it a safe conservative ETag validator
-// for the cross-event list/query endpoints: a query's result cannot change
-// without a revision write, so an unchanged count guarantees an unchanged result
-// (it never yields a stale 304). It is deliberately coarse — any write anywhere
-// invalidates every list validator — which is the correct bias for life-safety
-// data.
-//
-// TODO(perf): COUNT(*) scans, so its cost grows with the unbounded revision
-// history. MAX(rowid) would be O(log n) and equally monotonic (rowid strictly
-// increases on append, no deletes), but it trips a modernc.org/sqlite
-// "database disk image is malformed" quirk on the sandbox's overlay filesystem
-// that COUNT(*) does not — so the swap needs validating on a real disk/EFS
-// before it lands. At current history size the COUNT is sub-millisecond.
-func (s *Store) DataVersion(ctx context.Context) (int64, error) {
-	var n int64
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_revisions`).Scan(&n); err != nil {
-		return 0, fmt.Errorf("store: data version: %w", err)
-	}
-	return n, nil
-}
-
 // --- internals ---
 
 func insertRevision(tx *sql.Tx, id string, rev uint32, observedAt, ingestedAt int64, blob []byte) error {
 	if _, err := tx.Exec(`
 		INSERT INTO event_revisions (event_id, revision, observed_at, ingested_at, proto)
-		VALUES (?, ?, ?, ?, ?)`,
+		VALUES ($1, $2, $3, $4, $5)`,
 		id, rev, observedAt, ingestedAt, blob,
 	); err != nil {
 		return fmt.Errorf("store: insert revision %s@%d: %w", id, rev, err)
 	}
-	return nil
+	return bumpVersion(tx, versionRevisions, 1)
 }
 
 // refreshEventPlaces syncs an existing event's place attachments on the
@@ -544,7 +469,8 @@ func insertRevision(tx *sql.Tx, id string, rev uint32, observedAt, ingestedAt in
 // recomputed set differs from the stored rows, event_places and the stored
 // blob's place_ids are updated in place — no new revision, hash and
 // revision untouched. It reports whether it rewrote the row; a rewrite bumps
-// the row's refreshes counter, the validator's view of the change.
+// the row's refreshes counter and the layer's refresh version (in this
+// transaction), the validators' view of the change.
 func (s *Store) refreshEventPlaces(tx *sql.Tx, ev *gridv1.Event) (bool, error) {
 	c := proto.Clone(ev).(*gridv1.Event)
 	ensureGeometryIndex(c)
@@ -554,7 +480,7 @@ func (s *Store) refreshEventPlaces(tx *sql.Tx, ev *gridv1.Event) (bool, error) {
 	}
 	want := unionSorted(ev.GetPlaceIds(), matched)
 
-	rows, err := tx.Query(`SELECT place_id FROM event_places WHERE event_id = ? ORDER BY place_id`, ev.GetId())
+	rows, err := tx.Query(`SELECT place_id FROM event_places WHERE event_id = $1 ORDER BY place_id`, ev.GetId())
 	if err != nil {
 		return false, fmt.Errorf("store: load event_places %s: %w", ev.GetId(), err)
 	}
@@ -576,7 +502,7 @@ func (s *Store) refreshEventPlaces(tx *sql.Tx, ev *gridv1.Event) (bool, error) {
 	// Load the stored blob to compare the hash-excluded fields (place_ids and the
 	// AI enhancement/summary) against the incoming event.
 	var blob []byte
-	if err := tx.QueryRow(`SELECT proto FROM events WHERE id = ?`, ev.GetId()).Scan(&blob); err != nil {
+	if err := tx.QueryRow(`SELECT proto FROM events WHERE id = $1`, ev.GetId()).Scan(&blob); err != nil {
 		return false, fmt.Errorf("store: load event %s for refresh: %w", ev.GetId(), err)
 	}
 	stored := &gridv1.Event{}
@@ -668,28 +594,52 @@ func (s *Store) refreshEventPlaces(tx *sql.Tx, ev *gridv1.Event) (bool, error) {
 		return false, err
 	}
 	if stored.GetObservedAt() != nil {
-		if _, err := tx.Exec(`UPDATE events SET proto = ?, observed_at = ?, refreshes = refreshes + 1 WHERE id = ?`,
+		if _, err := tx.Exec(`UPDATE events SET proto = $1, observed_at = $2, refreshes = refreshes + 1 WHERE id = $3`,
 			newBlob, stored.GetObservedAt().AsTime().Unix(), ev.GetId()); err != nil {
 			return false, fmt.Errorf("store: update event %s for refresh: %w", ev.GetId(), err)
 		}
-		return true, nil
-	}
-	if _, err := tx.Exec(`UPDATE events SET proto = ?, refreshes = refreshes + 1 WHERE id = ?`, newBlob, ev.GetId()); err != nil {
+	} else if _, err := tx.Exec(`UPDATE events SET proto = $1, refreshes = refreshes + 1 WHERE id = $2`, newBlob, ev.GetId()); err != nil {
 		return false, fmt.Errorf("store: update event %s for refresh: %w", ev.GetId(), err)
 	}
-	return true, nil
+	// Same transaction as the rewrite: a reader can never pair the new
+	// version with the old blob.
+	return true, bumpVersion(tx, refreshKey(ev.GetLayer()), 1)
 }
 
+// replaceEventPlaces sets an event's attachments: one DELETE and one
+// multi-row INSERT (unnest), two round trips whatever the place count.
 func replaceEventPlaces(tx *sql.Tx, id string, placeIDs []string) error {
-	if _, err := tx.Exec(`DELETE FROM event_places WHERE event_id = ?`, id); err != nil {
+	if _, err := tx.Exec(`DELETE FROM event_places WHERE event_id = $1`, id); err != nil {
 		return fmt.Errorf("store: clear event_places %s: %w", id, err)
 	}
-	for _, pid := range placeIDs {
-		if _, err := tx.Exec(`INSERT INTO event_places (event_id, place_id) VALUES (?, ?)`, id, pid); err != nil {
-			return fmt.Errorf("store: insert event_places %s->%s: %w", id, pid, err)
-		}
+	if len(placeIDs) == 0 {
+		return nil
+	}
+	if _, err := tx.Exec(`INSERT INTO event_places (event_id, place_id)
+		SELECT $1, p FROM unnest($2::text[]) AS p`, id, placeIDs); err != nil {
+		return fmt.Errorf("store: insert event_places %s: %w", id, err)
 	}
 	return nil
+}
+
+// bboxArgs is the event's bbox as the four nullable column values
+// (min_lat, max_lat, min_lng, max_lng), NULL without a bbox.
+func bboxArgs(ev *gridv1.Event) []any {
+	b := ev.GetGeometry().GetBbox()
+	if b == nil {
+		return []any{nil, nil, nil, nil}
+	}
+	return []any{b.GetMinLat(), b.GetMaxLat(), b.GetMinLng(), b.GetMaxLng()}
+}
+
+// enumInts converts proto enum values to the int32 slice an integer[]
+// parameter (= ANY($n)) takes.
+func enumInts[E ~int32](vs []E) []int32 {
+	out := make([]int32, len(vs))
+	for i, v := range vs {
+		out[i] = int32(v)
+	}
+	return out
 }
 
 // ensureGeometryIndex backfills bbox and centroid from the raw GeoJSON when
@@ -715,44 +665,6 @@ func ensureGeometryIndex(ev *gridv1.Event) {
 		lat, lng := parsed.Centroid()
 		g.Centroid = &gridv1.LatLng{Lat: lat, Lng: lng}
 	}
-}
-
-// upsertGeo keeps exactly one R*Tree row per event with geometry (via the
-// event_geo_map rowid indirection) and none for events without.
-func upsertGeo(tx *sql.Tx, ev *gridv1.Event) error {
-	bbox := ev.GetGeometry().GetBbox()
-	if bbox == nil {
-		if _, err := tx.Exec(`
-			DELETE FROM event_geo WHERE rowid = (SELECT rowid FROM event_geo_map WHERE event_id = ?)`,
-			ev.GetId()); err != nil {
-			return fmt.Errorf("store: clear event_geo %s: %w", ev.GetId(), err)
-		}
-		if _, err := tx.Exec(`DELETE FROM event_geo_map WHERE event_id = ?`, ev.GetId()); err != nil {
-			return fmt.Errorf("store: clear event_geo_map %s: %w", ev.GetId(), err)
-		}
-		return nil
-	}
-	var rowid int64
-	err := tx.QueryRow(`SELECT rowid FROM event_geo_map WHERE event_id = ?`, ev.GetId()).Scan(&rowid)
-	if err == sql.ErrNoRows {
-		r, err := tx.Exec(`INSERT INTO event_geo_map (event_id) VALUES (?)`, ev.GetId())
-		if err != nil {
-			return fmt.Errorf("store: insert event_geo_map %s: %w", ev.GetId(), err)
-		}
-		if rowid, err = r.LastInsertId(); err != nil {
-			return fmt.Errorf("store: event_geo_map rowid %s: %w", ev.GetId(), err)
-		}
-	} else if err != nil {
-		return fmt.Errorf("store: lookup event_geo_map %s: %w", ev.GetId(), err)
-	}
-	if _, err := tx.Exec(`
-		INSERT OR REPLACE INTO event_geo (rowid, min_lat, max_lat, min_lng, max_lng)
-		VALUES (?, ?, ?, ?, ?)`,
-		rowid, bbox.GetMinLat(), bbox.GetMaxLat(), bbox.GetMinLng(), bbox.GetMaxLng(),
-	); err != nil {
-		return fmt.Errorf("store: upsert event_geo %s: %w", ev.GetId(), err)
-	}
-	return nil
 }
 
 // corridorBufferMeters is how close a point event must be to a corridor

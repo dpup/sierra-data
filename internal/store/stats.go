@@ -31,48 +31,54 @@ type Totals struct {
 // placeID.
 //
 // Revisions are summed from events.revision, which is each event's revision
-// count, rather than counted in event_revisions: that table holds a full
-// proto blob per row and is by far the largest, and on EFS a scan of it is
-// a long walk of network reads. `Since` is the earliest revision-1
-// ingested_at, a primary-key prefix lookup per event that reads only the
-// row's leading columns, never its blob.
+// count, rather than counted in event_revisions (by far the largest table: a
+// full proto blob per row). `Since` is the earliest events.first_ingested_at,
+// a column written once when revision 1 was stored: the legacy store joined
+// revision 1 of every event for it, which was most of /stats taking over 30 s
+// on EFS (2026-11-11).
 //
 // Place attachments are kept after a lifecycle transition (see AGENTS.md), so
-// a place's totals include its resolved and expired events.
+// a place's totals include its resolved and expired events. Both statements
+// read one REPEATABLE READ snapshot, so the per-layer rows and the totals line
+// agree.
 func (s *Store) Totals(ctx context.Context, placeID string) (Totals, error) {
-	from, args := "events e", []any{}
+	from, where := "events e", ""
+	var args sqlArgs
 	if placeID != "" {
 		from = "event_places ep JOIN events e ON e.id = ep.event_id"
-		args = append(args, placeID)
-	}
-	where := ""
-	if placeID != "" {
-		where = "WHERE ep.place_id = ?"
-	}
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT e.layer, COUNT(*), SUM(e.revision)
-		FROM `+from+` `+where+`
-		GROUP BY e.layer`, args...)
-	if err != nil {
-		return Totals{}, fmt.Errorf("store: totals: %w", err)
+		where = "WHERE ep.place_id = " + args.add(placeID)
 	}
 	var t Totals
-	for rows.Next() {
-		var lt LayerTotals
-		var layer int32
-		if err := rows.Scan(&layer, &lt.Events, &lt.Revisions); err != nil {
-			rows.Close()
-			return Totals{}, fmt.Errorf("store: totals scan: %w", err)
+	var since sql.NullInt64
+	err := s.readTx(ctx, func(tx *sql.Tx) error {
+		// SUM over bigint is numeric in PostgreSQL; cast back for the scan.
+		rows, err := tx.QueryContext(ctx, `
+			SELECT e.layer, COUNT(*), SUM(e.revision)::bigint
+			FROM `+from+` `+where+`
+			GROUP BY e.layer`, args...)
+		if err != nil {
+			return err
 		}
-		lt.Layer = gridv1.Layer(layer)
-		t.Events += lt.Events
-		t.Revisions += lt.Revisions
-		t.Layers = append(t.Layers, lt)
-	}
-	if err := rows.Close(); err != nil {
-		return Totals{}, fmt.Errorf("store: totals: %w", err)
-	}
-	if err := rows.Err(); err != nil {
+		defer rows.Close()
+		for rows.Next() {
+			var lt LayerTotals
+			var layer int32
+			if err := rows.Scan(&layer, &lt.Events, &lt.Revisions); err != nil {
+				return err
+			}
+			lt.Layer = gridv1.Layer(layer)
+			t.Events += lt.Events
+			t.Revisions += lt.Revisions
+			t.Layers = append(t.Layers, lt)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		return tx.QueryRowContext(ctx, `
+			SELECT COUNT(DISTINCT e.source_id), MIN(e.first_ingested_at)
+			FROM `+from+` `+where, args...).Scan(&t.Sources, &since)
+	})
+	if err != nil {
 		return Totals{}, fmt.Errorf("store: totals: %w", err)
 	}
 	sort.SliceStable(t.Layers, func(i, j int) bool {
@@ -81,14 +87,6 @@ func (s *Store) Totals(ctx context.Context, placeID string) (Totals, error) {
 		}
 		return t.Layers[i].Layer < t.Layers[j].Layer
 	})
-
-	var since sql.NullInt64
-	if err := s.db.QueryRowContext(ctx, `
-		SELECT COUNT(DISTINCT e.source_id), MIN(r.ingested_at)
-		FROM `+from+`
-		LEFT JOIN event_revisions r ON r.event_id = e.id AND r.revision = 1 `+where, args...).Scan(&t.Sources, &since); err != nil {
-		return Totals{}, fmt.Errorf("store: totals since: %w", err)
-	}
 	if since.Valid {
 		t.Since = time.Unix(since.Int64, 0).UTC()
 	}

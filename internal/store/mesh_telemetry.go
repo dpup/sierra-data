@@ -100,15 +100,16 @@ func (s *Store) InsertMeshTelemetry(ctx context.Context, samples []MeshTelemetry
 	}
 	return s.inTx(ctx, func(tx *sql.Tx) error {
 		stmt, err := tx.PrepareContext(ctx, `
-			INSERT OR IGNORE INTO mesh_telemetry (`+telemetryColumns+`)
-			VALUES (`+strings.TrimSuffix(strings.Repeat("?, ", 29), ", ")+`)`)
+			INSERT INTO mesh_telemetry (`+telemetryColumns+`)
+			VALUES (`+params(1, 29)+`)
+			ON CONFLICT (pubkey, reported_at) DO NOTHING`)
 		if err != nil {
 			return fmt.Errorf("store: prepare mesh telemetry insert: %w", err)
 		}
 		defer stmt.Close()
 		prev, err := tx.PrepareContext(ctx, `
 			SELECT last_success_at, uptime_s, packets_sent, packets_recv FROM mesh_telemetry
-			WHERE pubkey = ? AND reporter = ? AND reported_at < ?
+			WHERE pubkey = $1 AND reporter = $2 AND reported_at < $3
 			ORDER BY reported_at DESC LIMIT 1`)
 		if err != nil {
 			return fmt.Errorf("store: prepare mesh telemetry lookup: %w", err)
@@ -151,9 +152,9 @@ func (s *Store) MeshTelemetry(ctx context.Context, pubkey string, from, to time.
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT `+telemetryColumns+`
 		FROM mesh_telemetry
-		WHERE pubkey = ? AND reported_at >= ? AND reported_at < ?
+		WHERE pubkey = $1 AND reported_at >= $2 AND reported_at < $3
 		ORDER BY reported_at ASC
-		LIMIT ?`, pubkey, from.Unix(), to.Unix(), maxTelemetryRows+1)
+		LIMIT $4`, pubkey, from.Unix(), to.Unix(), maxTelemetryRows+1)
 	if err != nil {
 		return nil, false, fmt.Errorf("store: querying mesh telemetry: %w", err)
 	}
@@ -212,7 +213,7 @@ func (s *Store) MeshTelemetry(ctx context.Context, pubkey string, from, to time.
 func (s *Store) MeshTelemetryCoverage(ctx context.Context, pubkey string) (first, last time.Time, n int, err error) {
 	var lo, hi sql.NullInt64
 	row := s.db.QueryRowContext(ctx,
-		`SELECT MIN(reported_at), MAX(reported_at), COUNT(*) FROM mesh_telemetry WHERE pubkey = ?`, pubkey)
+		`SELECT MIN(reported_at), MAX(reported_at), COUNT(*) FROM mesh_telemetry WHERE pubkey = $1`, pubkey)
 	if err := row.Scan(&lo, &hi, &n); err != nil {
 		return time.Time{}, time.Time{}, 0, fmt.Errorf("store: mesh telemetry coverage: %w", err)
 	}
@@ -233,7 +234,7 @@ func (s *Store) MeshTelemetryCoverage(ctx context.Context, pubkey string) (first
 func (s *Store) PruneMeshTelemetry(ctx context.Context, cutoff time.Time) (int64, error) {
 	var affected int64
 	err := s.inTx(ctx, func(tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, `DELETE FROM mesh_telemetry WHERE reported_at < ?`, cutoff.Unix())
+		res, err := tx.ExecContext(ctx, `DELETE FROM mesh_telemetry WHERE reported_at < $1`, cutoff.Unix())
 		if err != nil {
 			return fmt.Errorf("store: pruning mesh telemetry: %w", err)
 		}
@@ -252,22 +253,27 @@ func (s *Store) PruneMeshTelemetry(ctx context.Context, cutoff time.Time) (int64
 // — and without this the battery history would be orphaned under a key nothing
 // refers to any more, silently, exactly once per node, with no way to notice.
 //
-// ON CONFLICT DO NOTHING via the INSERT-less UPDATE OR IGNORE: if both keys
-// somehow hold a sample for the same instant, the full-key row wins and the
-// prefix row is dropped by the delete below.
+// If both keys somehow hold a sample for the same instant, the full-key row
+// wins (ON CONFLICT DO NOTHING) and the prefix row is dropped by the delete.
 func (s *Store) RenameMeshTelemetryPubKey(ctx context.Context, from, to string) (int64, error) {
 	if from == "" || to == "" || from == to {
 		return 0, nil
 	}
 	var affected int64
 	err := s.inTx(ctx, func(tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx,
-			`UPDATE OR IGNORE mesh_telemetry SET pubkey = ? WHERE pubkey = ?`, to, from)
+		// Copy under the new key, skipping a (pubkey, reported_at) the full key
+		// already holds (that read was filed under both: keep the full key's),
+		// then drop the provisional rows. PostgreSQL has no UPDATE OR IGNORE.
+		cols := strings.Replace(telemetryColumns, "pubkey, ", "", 1)
+		res, err := tx.ExecContext(ctx, `
+			INSERT INTO mesh_telemetry (pubkey, `+cols+`)
+			SELECT $1, `+cols+` FROM mesh_telemetry WHERE pubkey = $2
+			ON CONFLICT (pubkey, reported_at) DO NOTHING`, to, from)
 		if err != nil {
 			return fmt.Errorf("store: renaming mesh telemetry key: %w", err)
 		}
 		affected, _ = res.RowsAffected()
-		if _, err := tx.ExecContext(ctx, `DELETE FROM mesh_telemetry WHERE pubkey = ?`, from); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM mesh_telemetry WHERE pubkey = $1`, from); err != nil {
 			return fmt.Errorf("store: clearing superseded mesh telemetry key: %w", err)
 		}
 		return nil

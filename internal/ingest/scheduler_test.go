@@ -2,7 +2,6 @@ package ingest
 
 import (
 	"context"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -15,6 +14,7 @@ import (
 	gridv1 "github.com/sierragridteam/sierra-data/api/grid/v1"
 	"github.com/sierragridteam/sierra-data/internal/config"
 	"github.com/sierragridteam/sierra-data/internal/store"
+	"github.com/sierragridteam/sierra-data/internal/storetest"
 )
 
 // fakeNormalizer returns a canned PollResult (or error), mutable between
@@ -56,7 +56,7 @@ func (f *fakeNWSEnhancer) Enhance(ctx context.Context, headline, description str
 
 func newSchedStore(t *testing.T) *store.Store {
 	t.Helper()
-	s, err := store.Open(filepath.Join(t.TempDir(), "grid.db"))
+	s, err := store.Open(storetest.URL(t))
 	require.NoError(t, err)
 	t.Cleanup(func() { s.Close() })
 	return s
@@ -834,7 +834,7 @@ func (n *signalNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult, 
 // A wake runs a tick now rather than on the next interval: the burn line's
 // pushed reading otherwise waited up to an hour to reach its event.
 func TestSchedulerWakeRunsAnExtraTick(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "grid.db"))
+	st, err := store.Open(storetest.URL(t))
 	require.NoError(t, err)
 	t.Cleanup(func() { st.Close() })
 
@@ -890,33 +890,6 @@ func TestTickPersistsMeshActivity(t *testing.T) {
 	stored, err := st.GetEvent(ctx, "meshcore:"+key)
 	require.NoError(t, err)
 	assert.Nil(t, stored.GetMesh().GetTelemetry().GetLastRelayedAt(), "activity is never written into the blob")
-}
-
-// When boot kept the persisted statistics, the first background ANALYZE comes
-// after StatsRefreshFirstAfter rather than a full statsRefreshInterval, so
-// deploys less than 6h apart cannot leave the statistics stale indefinitely.
-func TestSchedulerEarlyFirstStatsRefresh(t *testing.T) {
-	ctx, cancel := context.WithCancel(testCtx())
-	t.Cleanup(cancel)
-	st := newSchedStore(t)
-	seedSchedSources(t, st, "usgs")
-	require.NoError(t, st.UpsertPlace(ctx, &gridv1.Place{
-		Id: "area:calaveras", Kind: gridv1.PlaceKind_AREA, Name: "Calaveras County", Slug: "calaveras",
-	}))
-	ev := schedEvent("usgs:q", "usgs", gridv1.Layer_EARTHQUAKE)
-	ev.PlaceIds = []string{"area:calaveras"}
-	_, err := st.UpsertEvent(ctx, ev)
-	require.NoError(t, err)
-
-	has, err := st.HasStatistics(ctx)
-	require.NoError(t, err)
-	require.False(t, has)
-
-	NewScheduler(st, SchedulerConfig{StatsRefreshFirstAfter: 10 * time.Millisecond}).Start(ctx)
-	assert.Eventually(t, func() bool {
-		has, err := st.HasStatistics(ctx)
-		return err == nil && has
-	}, 5*time.Second, 10*time.Millisecond, "the first stats refresh should run after StatsRefreshFirstAfter")
 }
 
 // blockingNormalizer's Poll blocks until its context ends (or, with

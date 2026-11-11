@@ -2,7 +2,6 @@ package related
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -13,6 +12,7 @@ import (
 	gridv1 "github.com/sierragridteam/sierra-data/api/grid/v1"
 	"github.com/sierragridteam/sierra-data/internal/lib/geojson"
 	"github.com/sierragridteam/sierra-data/internal/store"
+	"github.com/sierragridteam/sierra-data/internal/storetest"
 )
 
 var t0 = time.Date(2026, 8, 20, 20, 0, 0, 0, time.UTC)
@@ -52,7 +52,7 @@ func cut(id string) (string, string, bool) {
 
 func newEngine(t *testing.T, events ...*gridv1.Event) (*Engine, *store.Store) {
 	t.Helper()
-	st, err := store.Open(filepath.Join(t.TempDir(), "grid.db"))
+	st, err := store.Open(storetest.URL(t))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = st.Close() })
 	ctx := context.Background()

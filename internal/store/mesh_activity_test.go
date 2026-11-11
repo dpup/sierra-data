@@ -14,13 +14,13 @@ func TestMeshActivityMergesByMax(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 	base := time.Date(2026, 11, 3, 6, 0, 0, 0, time.UTC)
-	v0 := s.MeshActivityVersion()
+	v0 := meshActivityVersion(t, s)
 
 	require.NoError(t, s.RecordMeshTick(ctx, nil, []MeshActivity{
 		{PubKey: "AB07CD", LastHeardAt: base, LastRelayedAt: base.Add(time.Minute)},
 		{PubKey: "2cfe00", LastRelayedAt: base},
 	}))
-	assert.Greater(t, s.MeshActivityVersion(), v0, "a write moves the validator")
+	assert.Greater(t, meshActivityVersion(t, s), v0, "a write moves the validator")
 
 	// Older times and zeros never move a clock backwards; newer ones advance it.
 	require.NoError(t, s.RecordMeshTick(ctx, nil, []MeshActivity{
@@ -44,10 +44,10 @@ func TestRecordMeshTickWritesBothInOneCall(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 	at := time.Date(2026, 11, 3, 6, 0, 0, 0, time.UTC)
-	v0 := s.MeshActivityVersion()
+	v0 := meshActivityVersion(t, s)
 
 	require.NoError(t, s.RecordMeshTick(ctx, nil, nil), "an empty tick is a no-op")
-	assert.Equal(t, v0, s.MeshActivityVersion())
+	assert.Equal(t, v0, meshActivityVersion(t, s))
 
 	require.NoError(t, s.RecordMeshTick(ctx,
 		[]MeshObservation{{PubKey: "ab07cd", HeardAt: at, Gateway: "gw", Path: []string{"2cfe"}, PathNodes: []string{""}}},
@@ -60,9 +60,9 @@ func TestRecordMeshTickWritesBothInOneCall(t *testing.T) {
 	assert.Equal(t, at, got["ab07cd"].LastHeardAt)
 
 	// The old entry point still writes observations and leaves activity alone.
-	v1 := s.MeshActivityVersion()
+	v1 := meshActivityVersion(t, s)
 	require.NoError(t, s.InsertMeshObservations(ctx, []MeshObservation{{PubKey: "ab07cd", HeardAt: at.Add(time.Minute)}}))
-	assert.Equal(t, v1, s.MeshActivityVersion())
+	assert.Equal(t, v1, meshActivityVersion(t, s))
 }
 
 // The boot seed re-resolves stored paths itself, so it gets hops, never the

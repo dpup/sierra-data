@@ -283,12 +283,6 @@ func meshMaintenanceConfig(cfg *config.Config) ingest.MeshMaintenance {
 	}
 }
 
-// bootStatsRefreshDelay is when the first background ANALYZE runs after a boot
-// that kept the persisted statistics: late enough to stay off the first ticks'
-// full reconcile, soon enough that frequent deploys never leave them stale for
-// long. The refresh holds the store's writer mutex for its whole run.
-const bootStatsRefreshDelay = 10 * time.Minute
-
 // processStart anchors the boot-duration log line.
 var processStart = time.Now()
 

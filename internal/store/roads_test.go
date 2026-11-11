@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -95,23 +94,21 @@ func TestFirstIngested(t *testing.T) {
 }
 
 // RoadStatusSince's "last other status" read must use the status index, not
-// walk the road's whole history.
+// walk the road's whole history. Seeded with a long single-status history
+// and analyzed, so the planner chooses as it would in production.
 func TestRoadStatusSinceUsesStatusIndex(t *testing.T) {
+	ctx := context.Background()
 	s := newTestStore(t)
-	rows, err := s.db.Query(`EXPLAIN QUERY PLAN SELECT MAX(m) FROM (
-		SELECT MAX(at) AS m FROM road_samples WHERE road_id = ?1 AND status < ?2
-		UNION ALL
-		SELECT MAX(at) FROM road_samples WHERE road_id = ?1 AND status > ?2)`, "hwy4", 1)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO road_samples (road_id, at, status, congestion)
+		SELECT 'hwy4', g, 1, 0 FROM generate_series(1, 20000) AS g`)
 	require.NoError(t, err)
-	defer rows.Close()
-	var plan []string
-	for rows.Next() {
-		var id, parent, notused int
-		var detail string
-		require.NoError(t, rows.Scan(&id, &parent, &notused, &detail))
-		plan = append(plan, detail)
-	}
-	joined := strings.Join(plan, "\n")
-	assert.Contains(t, joined, "idx_road_samples_status")
-	assert.NotContains(t, joined, "SCAN road_samples")
+	_, err = s.db.ExecContext(ctx, `ANALYZE road_samples`)
+	require.NoError(t, err)
+	plan := explain(t, s, false, `SELECT MAX(m) FROM (
+			SELECT MAX(at) AS m FROM road_samples WHERE road_id = $1 AND status < $2
+			UNION ALL
+			SELECT MAX(at) FROM road_samples WHERE road_id = $1 AND status > $2) AS other`, "hwy4", 1)
+	assert.Contains(t, plan.indexes(), "idx_road_samples_status", "plan was:\n%s", plan)
+	_, seq := plan.find(func(n planNode) bool { return n.NodeType == "Seq Scan" })
+	assert.False(t, seq, "plan was:\n%s", plan)
 }

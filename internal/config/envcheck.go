@@ -19,16 +19,16 @@ import (
 // nothing, with no warning, and the config file's value quietly stays.
 //
 // That is not a cosmetic failure. `PF__GRID__DBPATH` (the wrong spelling of
-// `PF__GRID__DB_PATH`) left the event store at prefab.yaml's relative
-// `./data/grid.db` instead of the mounted volume — which on a container means
-// the entire revision history is discarded on every replacement, and in the dev
-// sandbox put the DB on the virtiofs bind mount that corrupts SQLite. Both
-// present as "it works", right up until the data is gone.
+// the SQLite-era `PF__GRID__DB_PATH`) left the event store at prefab.yaml's
+// relative `./data/grid.db` instead of the mounted volume — which on a
+// container meant the entire revision history was discarded on every
+// replacement. It presented as "it works", right up until the data was gone.
 //
 // THE TRAP. Prefab maps `PF__A__B_C` -> `a.bC`: `__` separates path segments and
 // an `_` INSIDE a segment produces the next capital. So a camelCase key needs
-// the underscore — `grid.dbPath` is `PF__GRID__DB_PATH`. Drop it and
-// `PF__GRID__DBPATH` becomes `grid.dbpath`, which matches nothing.
+// the underscore — `grid.database.maxConns` is `PF__GRID__DATABASE__MAX_CONNS`.
+// Drop it and `PF__GRID__DATABASE__MAXCONNS` becomes `grid.database.maxconns`,
+// which matches nothing.
 //
 // Keys are resolved by reflecting over Config, so this stays correct as fields
 // are added — nobody has to remember to register a new one. Env vars outside our
@@ -63,7 +63,7 @@ func ValidateEnvOverrides(environ []string) error {
 	sort.Strings(problems)
 	return fmt.Errorf("silently-ignored environment override(s):\n  - %s\n"+
 		"A camelCase config key needs an underscore in its env var "+
-		"(PF__A__B_C -> a.bC), e.g. grid.dbPath is PF__GRID__DB_PATH",
+		"(PF__A__B_C -> a.bC), e.g. grid.database.maxConns is PF__GRID__DATABASE__MAX_CONNS",
 		strings.Join(problems, "\n  - "))
 }
 

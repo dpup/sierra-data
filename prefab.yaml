@@ -352,61 +352,30 @@ hazards:
 
 # Grid event store + ingest scheduler (docs/design/v2-implementation-plan.md). The
 # scheduler polls each upstream, persists events with revision history in
-# SQLite, and derives per-source health for /v1/sources.
+# PostgreSQL, and derives per-source health for /api/v1/sources.
 grid:
-  # SQLite database. Local dev writes under ./data (git-ignored); production
-  # points at the persistent mount via PF__GRID__DB_PATH=/data/grid.db.
-  dbPath: "./data/grid.db"
-
-  # SQLite journal mode. TRUNCATE works on both local disk and a network
-  # filesystem (NFS/EFS) and is the safe default. WAL is faster for concurrent
-  # reads but its memory-mapped -shm sidecar does NOT work over NFS/EFS — use it
-  # only on a real local disk. TRUNCATE/DELETE/PERSIST run with synchronous=FULL
-  # (crash-safe rollback journal); WAL runs with synchronous=NORMAL.
-  # Override per environment via PF__GRID__JOURNAL_MODE.
-  journalMode: "TRUNCATE"
-
-  # SQLite page cache PER POOLED CONNECTION, in MB, and the connection bound
-  # that multiplies it. Worst-case resident page cache is cacheSizeMb x
-  # maxOpenConns — 24 x 4 = 96 MB here.
-  #
-  # This is the cheapest lever on EFS: a page the cache does not hold costs a
-  # network round trip, not a disk read. Size it against the HOT set, not the
-  # file. The database is ~150 MiB but event_revisions (a full proto blob per
-  # revision) and mesh_observations (the 48h reception firehose) dominate that
-  # and are COLD for /events — the hot path is events + event_places and their
-  # indexes.
-  #
-  # Fewer, fatter connections deliberately: this is a low-traffic read-mostly
-  # API, so concurrency past a handful buys nothing, while a bigger per-connection
-  # cache directly cuts EFS round trips and fewer readers pile onto the rollback
-  # journal (TRUNCATE has no WAL MVCC).
-  #
-  # Raise cacheSizeMb wherever the task memory limit allows. Override per
-  # environment via PF__GRID__CACHE_SIZE_MB / PF__GRID__MAX_OPEN_CONNS.
-  # (Key is cacheSizeMb, not cacheSizeMB: prefab maps PF__A__B_C -> a.bC, so a
-  # capital-B spelling would need the unusable PF__GRID__CACHE_SIZE_M_B.)
-  cacheSizeMb: 24
-  maxOpenConns: 4
-
-  # How long startup waits for the exclusive SQLite lock before giving up.
-  #
-  # The common contention case is a rolling deploy whose previous task has not
-  # exited yet — and WAITING beats dying, because a task that gives up is simply
-  # restarted to wait again. That is a crash loop, not a failure, and it is what
-  # turned a should-be-brief deploy 503 into minutes of downtime.
-  #
-  # Keep the Dockerfile HEALTHCHECK --start-period comfortably ABOVE this: the
-  # listener does not open until the lock is acquired, so a health check that
-  # fires during the wait kills the task mid-wait.
-  #
-  # This does not fix a slow drain, it survives one. If deploys routinely wait
-  # here, the real levers are the load balancer's deregistration delay (AWS
-  # default is 300s) and the service's minimumHealthyPercent.
-  lockTimeout: "90s"
+  database:
+    # PostgreSQL URL. Deliberately empty here: production injects it from a
+    # secret as PF__GRID__DATABASE__URL, and `make run` / `make run-bg` /
+    # `node scripts/dev.mjs data` point it at the local Docker database
+    # (`make db-up`, `make db-url`). The server refuses to start without one.
+    # The database must use C collation (internal/store/migrations/0001_baseline.sql).
+    url: ""
+    # Connection pool bounds (PF__GRID__DATABASE__MAX_CONNS / __MIN_CONNS).
+    # A low-traffic read-mostly API; each connection is a server process on a
+    # small instance that two task sets share during a blue/green deploy. The
+    # writer lock holds one more, dedicated connection.
+    maxConns: 8
+    minConns: 1
+    # How long activation waits for the writer lock (an advisory lock held by
+    # whichever process is writing) before giving up. The common contention
+    # case is a deploy whose previous writer has not released yet, and WAITING
+    # beats dying: a task that gives up is simply restarted to wait again. A
+    # SIGTERM ends the wait at once.
+    lockTimeout: "90s"
 
   # Deployment control (internal/handoff, docs/deploy-handoff.md): a private
-  # listener a deploy coordinator uses to hand grid.db from the old task to a
+  # listener a deploy coordinator uses to hand the database from the old task to a
   # replacement started with --standby. OFF until tokenSha256 is set (the hash
   # only; the token stays with the coordinator), and --standby refuses to start
   # without it. Never route this port from the public load balancer.

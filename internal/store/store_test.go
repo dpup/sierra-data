@@ -2,27 +2,27 @@ package store
 
 import (
 	"context"
-	"database/sql"
-	"path/filepath"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	gridv1 "github.com/sierragridteam/sierra-data/api/grid/v1"
 	"github.com/sierragridteam/sierra-data/internal/lib/geojson"
+	"github.com/sierragridteam/sierra-data/internal/store/migrations"
+	"github.com/sierragridteam/sierra-data/internal/storetest"
 )
 
 var baseTime = time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
 
-// newTestStore opens a store under a nested temp path (exercises the
-// parent-dir mkdir in Open).
-func newTestStore(t *testing.T) *Store {
+// newTestStore opens a store on a fresh, migrated database of its own
+// (internal/storetest; skipped without TEST_DATABASE_URL).
+func newTestStore(t *testing.T, opts ...Option) *Store {
 	t.Helper()
-	s, err := Open(filepath.Join(t.TempDir(), "nested", "grid.db"))
+	s, err := Open(storetest.URL(t), opts...)
 	require.NoError(t, err)
 	t.Cleanup(func() { s.Close() })
 	return s
@@ -72,65 +72,125 @@ func revisionCount(t *testing.T, s *Store, eventID string) int {
 	t.Helper()
 	var n int
 	require.NoError(t, s.db.QueryRow(
-		`SELECT COUNT(*) FROM event_revisions WHERE event_id = ?`, eventID).Scan(&n))
+		`SELECT COUNT(*) FROM event_revisions WHERE event_id = $1`, eventID).Scan(&n))
 	return n
 }
 
 func TestOpenRejectsConcurrentOpener(t *testing.T) {
-	// Keep the contention wait short so the test doesn't sit for the deploy window.
-	defer func(old time.Duration) { lockAcquireTimeout = old }(lockAcquireTimeout)
-	lockAcquireTimeout = 300 * time.Millisecond
-
-	path := filepath.Join(t.TempDir(), "grid.db")
-
-	s1, err := Open(path)
+	url := storetest.URL(t)
+	s1, err := Open(url)
 	require.NoError(t, err)
 
-	// A second opener while the first holds the lock must fail loudly (two
-	// writers corrupt SQLite on shared filesystems), not open and race.
-	_, err = Open(path)
+	// A second opener while the first holds the writer lock must fail loudly
+	// after its wait, not open and become a second writer.
+	start := time.Now()
+	_, err = Open(url, WithLockTimeout(300*time.Millisecond))
 	require.Error(t, err, "second concurrent open must be rejected")
-	assert.Contains(t, err.Error(), "still locked by another process")
-	// The message must name the deploy-time causes: this error's most common
-	// context by far is a rolling deploy whose previous task has not exited, and
-	// an operator reading it at 3am should not have to infer that.
+	assert.True(t, errors.Is(err, ErrLockHeld), "%v", err)
+	assert.GreaterOrEqual(t, time.Since(start), 300*time.Millisecond, "it waited the lock timeout")
+	// The message must name the deploy-time cause: this error's most common
+	// context by far is a deploy whose previous writer has not released yet.
 	assert.Contains(t, err.Error(), "deregistration delay")
 
-	// Closing the first releases the flock, so a fresh open then succeeds.
+	// Closing the first releases the lock, so a fresh open then succeeds.
 	require.NoError(t, s1.Close())
-	s2, err := Open(path)
+	s2, err := Open(url, WithLockTimeout(100*time.Millisecond))
 	require.NoError(t, err, "reopen after close must succeed (lock released)")
 	require.NoError(t, s2.Close())
 }
 
+// The writer lock is a session advisory lock on a dedicated connection: it
+// shows in pg_locks while held and is gone after Close.
+func TestWriterLockVisibleInPgLocks(t *testing.T) {
+	ctx := context.Background()
+	url := storetest.URL(t)
+	s, err := Open(url)
+	require.NoError(t, err)
+	held := func(st *Store) int {
+		var n int
+		require.NoError(t, st.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pg_locks
+			WHERE locktype = 'advisory' AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
+			  AND ((classid::bigint << 32) | objid::bigint) = $1`, writerLockKey).Scan(&n))
+		return n
+	}
+	assert.Equal(t, 1, held(s))
+	require.NoError(t, s.Close())
+	s2, err := Open(url)
+	require.NoError(t, err)
+	defer s2.Close()
+	assert.Equal(t, 1, held(s2), "exactly one holder: the new owner")
+}
+
 func TestOpenMigrateIdempotent(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "grid.db")
+	url := storetest.EmptyURL(t)
 
-	s1, err := Open(path)
+	s1, err := Open(url)
 	require.NoError(t, err)
 	seedSource(t, s1, "usgs")
 	require.NoError(t, s1.Close())
 
 	// Reopen re-runs migrate; applied versions must be skipped.
-	s2, err := Open(path)
+	s2, err := Open(url)
 	require.NoError(t, err)
 	defer s2.Close()
 
 	var applied int
-	require.NoError(t, s2.db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&applied))
-	assert.Equal(t, len(migrations), applied)
+	require.NoError(t, s2.db.QueryRow(`SELECT COUNT(*) FROM schema_migrations WHERE source = 'postgres'`).Scan(&applied))
+	assert.Equal(t, migrations.Latest(), applied)
 
 	srcs, err := s2.ListSources(ctx)
 	require.NoError(t, err)
 	require.Len(t, srcs, 1)
 }
 
+// Additive-only schema policy: a build accepts a database a newer release
+// has migrated past it, and refuses one older than it needs.
+func TestSchemaVersionPolicy(t *testing.T) {
+	ctx := context.Background()
+	url := storetest.URL(t)
+	s, err := Open(url)
+	require.NoError(t, err)
+	_, err = s.db.ExecContext(ctx, `INSERT INTO schema_migrations (source, version) VALUES ('postgres', $1)`, migrations.Latest()+1)
+	require.NoError(t, err)
+	require.NoError(t, s.Close())
+
+	s, err = Open(url)
+	require.NoError(t, err, "a newer schema is accepted")
+	st, err := s.Settings(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, migrations.Latest()+1, st.SchemaVersion)
+
+	_, err = s.db.ExecContext(ctx, `DELETE FROM schema_migrations`)
+	require.NoError(t, err)
+	_, err = migrations.CheckVersion(ctx, s.db)
+	assert.Error(t, err, "an older schema is refused by a reader")
+	require.NoError(t, s.Close())
+}
+
+// Legacy SQLite history lives beside the Postgres ladder under its own
+// source, so recording it (the importer does) cannot collide with version 1.
+func TestSchemaMigrationsKeyedBySource(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO schema_migrations (source, version)
+		SELECT 'sqlite', v FROM generate_series(1, 14) AS v`)
+	require.NoError(t, err)
+	v, err := migrations.Current(ctx, s.db)
+	require.NoError(t, err)
+	assert.Equal(t, migrations.Latest(), v, "the sqlite ladder does not count as Postgres versions")
+}
+
+func TestOpenRequiresAURL(t *testing.T) {
+	_, err := Open("")
+	assert.ErrorContains(t, err, "PF__GRID__DATABASE__URL")
+}
+
 func TestReopenRehydrates(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "grid.db")
+	url := storetest.URL(t)
 
-	s, err := Open(path)
+	s, err := Open(url)
 	require.NoError(t, err)
 	seedSource(t, s, "usgs")
 	require.NoError(t, s.UpsertPlace(ctx, testPlace(
@@ -150,7 +210,7 @@ func TestReopenRehydrates(t *testing.T) {
 	require.NoError(t, s.Close())
 
 	// Restart: data, revisions, place attachments, and indexes must survive.
-	s2, err := Open(path)
+	s2, err := Open(url)
 	require.NoError(t, err)
 	defer s2.Close()
 
@@ -172,62 +232,6 @@ func TestReopenRehydrates(t *testing.T) {
 	assert.Len(t, active, 1)
 }
 
-// An existing dev DB created at schema v1 (before last_seen_at existed)
-// upgrades in place via migration v2 on Open; its pre-migration rows read
-// back with a zero LastSeenAt (the DEFAULT 0), and new writes stamp the
-// column normally.
-func TestMigrateV1DatabaseToV2(t *testing.T) {
-	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "grid.db")
-
-	// Hand-build a v1-only database, exactly as Open() would have created it
-	// before migration v2 existed. schemaV1 is unchanged, so it IS the old
-	// schema (no last_seen_at column).
-	db, err := sql.Open("sqlite", "file:"+path)
-	require.NoError(t, err)
-	_, err = db.Exec(`CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)`)
-	require.NoError(t, err)
-	_, err = db.Exec(schemaV1)
-	require.NoError(t, err)
-	_, err = db.Exec(`INSERT INTO schema_migrations (version, applied_at) VALUES (1, 0)`)
-	require.NoError(t, err)
-	_, err = db.Exec(`INSERT INTO sources (id, name, poll_interval_seconds) VALUES ('usgs', 'USGS', 60)`)
-	require.NoError(t, err)
-	ev := testEvent("usgs:q1", gridv1.Severity_MODERATE, gridv1.EventStatus_ACTIVE, "pre-migration row")
-	blob, err := proto.Marshal(ev)
-	require.NoError(t, err)
-	_, err = db.Exec(`
-		INSERT INTO events (id, layer, severity, status, source_id, observed_at,
-		                    ingested_at, revision, content_hash, proto)
-		VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
-		ev.GetId(), int32(ev.GetLayer()), int32(ev.GetSeverity()), int32(ev.GetStatus()),
-		"usgs", baseTime.Unix(), baseTime.Unix(), ContentHash(ev), blob)
-	require.NoError(t, err)
-	require.NoError(t, db.Close())
-
-	// Reopen through the store: migration v2 must apply.
-	s, err := Open(path)
-	require.NoError(t, err)
-	defer s.Close()
-
-	var maxVersion int
-	require.NoError(t, s.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&maxVersion))
-	assert.Equal(t, len(migrations), maxVersion)
-
-	active, err := s.ActiveEventsBySource(ctx, "usgs")
-	require.NoError(t, err)
-	require.Len(t, active, 1)
-	assert.Equal(t, "usgs:q1", active[0].Event.GetId())
-	assert.True(t, active[0].LastSeenAt.IsZero(), "pre-migration rows have zero last-seen")
-
-	_, err = s.TouchSeen(ctx, []string{"usgs:q1"}, baseTime.Add(time.Hour), baseTime.Add(time.Hour))
-	require.NoError(t, err)
-	active, err = s.ActiveEventsBySource(ctx, "usgs")
-	require.NoError(t, err)
-	require.Len(t, active, 1)
-	assert.Equal(t, baseTime.Add(time.Hour).Unix(), active[0].LastSeenAt.Unix())
-}
-
 func TestGetEventNotFound(t *testing.T) {
 	s := newTestStore(t)
 	_, err := s.GetEvent(context.Background(), "usgs:nope")
@@ -243,33 +247,18 @@ func TestUpsertEventRequiresSeededSource(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestOpenJournalMode(t *testing.T) {
-	// Default (TRUNCATE) and an explicit rollback mode both open and migrate;
-	// an unsupported mode fails fast rather than silently falling back.
-	for _, m := range []string{"", "TRUNCATE", "DELETE", "wal", "PERSIST"} {
-		s, err := Open(filepath.Join(t.TempDir(), "grid.db"), WithJournalMode(m))
-		if err != nil {
-			t.Fatalf("Open(journalMode=%q) failed: %v", m, err)
-		}
-		s.Close()
-	}
-	if _, err := Open(filepath.Join(t.TempDir(), "grid.db"), WithJournalMode("BOGUS")); err == nil {
-		t.Fatal("Open with an unsupported journal mode must error")
-	}
-}
-
 // Released means released (internal/handoff): once a store is closed, the
 // lock is free for the next owner straight away, and the closed store refuses
 // every query rather than reaching the file.
 func TestClosedStoreReleasesTheLockAndRefusesQueries(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "grid.db")
-	s, err := Open(path)
+	url := storetest.URL(t)
+	s, err := Open(url)
 	require.NoError(t, err)
 	seedSource(t, s, "usgs")
 	require.NoError(t, s.Close())
 
-	next, err := Open(path, WithLockTimeout(100*time.Millisecond))
+	next, err := Open(url, WithLockTimeout(100*time.Millisecond))
 	require.NoError(t, err, "the next owner must not wait for the lock")
 	defer next.Close()
 
@@ -282,16 +271,30 @@ func TestClosedStoreReleasesTheLockAndRefusesQueries(t *testing.T) {
 // A lock wait ends when its context does (WithLockContext): a SIGTERM during a
 // handoff activation must not sit out the full lockTimeout.
 func TestOpenLockWaitHonoursContext(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "grid.db")
-	holder, err := Open(path)
+	url := storetest.URL(t)
+	holder, err := Open(url)
 	require.NoError(t, err)
 	defer holder.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	time.AfterFunc(50*time.Millisecond, cancel)
 	start := time.Now()
-	_, err = Open(path, WithLockTimeout(time.Minute), WithLockContext(ctx))
+	_, err = Open(url, WithLockTimeout(time.Minute), WithLockContext(ctx))
 	require.Error(t, err)
 	assert.ErrorIs(t, err, context.Canceled)
 	assert.Less(t, time.Since(start), 5*time.Second, "the wait ended with the context, not the minute")
+}
+
+func refreshVersion(t *testing.T, s *Store, layers []gridv1.Layer) int64 {
+	t.Helper()
+	v, err := s.RefreshVersion(context.Background(), layers)
+	require.NoError(t, err)
+	return v
+}
+
+func meshActivityVersion(t *testing.T, s *Store) int64 {
+	t.Helper()
+	v, err := s.MeshActivityVersion(context.Background())
+	require.NoError(t, err)
+	return v
 }

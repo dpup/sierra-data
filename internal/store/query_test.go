@@ -3,7 +3,8 @@ package store
 import (
 	"context"
 	"fmt"
-	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -327,155 +328,121 @@ func TestQueryHistory(t *testing.T) {
 	assert.Equal(t, []string{"wx:a1@1", "usgs:q1@2", "usgs:q1@1"}, seen)
 }
 
-// planFor returns the EXPLAIN QUERY PLAN detail lines for a query, joined.
-func planFor(t *testing.T, s *Store, query string, args ...any) string {
-	t.Helper()
-	rows, err := s.db.QueryContext(context.Background(), "EXPLAIN QUERY PLAN "+query, args...)
-	require.NoError(t, err)
-	defer rows.Close()
-	var plan string
-	for rows.Next() {
-		var id, parent, notused int
-		var detail string
-		require.NoError(t, rows.Scan(&id, &parent, &notused, &detail))
-		plan += detail + "\n"
-	}
-	require.NoError(t, rows.Err())
-	return plan
-}
-
 // TestQueryHistoryUsesObservedIndex pins the cross-event history query to
-// idx_revisions_observed (migration v4). Without it SQLite scans every revision
-// and sorts into a temp B-tree, which is what took an unscoped /api/v1/history
-// 6-40s in production (measured 2026-08-06). A regression here is invisible in
-// behavior and shows up only as latency, so assert the plan rather than trusting
-// the index to stay matched to QueryHistory's ORDER BY.
+// idx_revisions_observed. Without a matching index the unscoped
+// /api/v1/history scanned every revision and sorted (6-40 s in production on
+// the legacy store, 2026-08-06). A regression is invisible in behaviour and
+// shows only as latency, so assert that the index can serve both the range
+// and the ORDER BY: no Sort node over event_revisions.
 func TestQueryHistoryUsesObservedIndex(t *testing.T) {
 	s := newTestStore(t)
-
-	// The unscoped / time-bounded shape — the pathological one, since without
-	// the index there is nothing to narrow the scan.
 	const unscoped = `SELECT r.revision, r.observed_at, r.ingested_at, r.proto, r.event_id
 		FROM event_revisions r JOIN events e ON e.id = r.event_id
-		WHERE 1=1 AND r.observed_at >= ? AND r.observed_at < ?
-		ORDER BY r.observed_at DESC, r.event_id ASC, r.revision DESC LIMIT ?`
+		WHERE true AND r.observed_at >= $1 AND r.observed_at < $2
+		ORDER BY r.observed_at DESC, r.event_id ASC, r.revision DESC LIMIT $3`
+	plan := explain(t, s, true, unscoped, 0, int64(1)<<40, 51)
+	assert.Contains(t, plan.indexes(), "idx_revisions_observed",
+		"unscoped history must read the observed_at index; plan was:\n%s", plan)
+	isSort := func(n planNode) bool { return n.NodeType == "Sort" || n.NodeType == "Incremental Sort" }
+	_, sorted := plan.find(isSort)
+	assert.False(t, sorted, "the index must satisfy the ORDER BY without a sort; plan was:\n%s", plan)
 
-	plan := planFor(t, s, unscoped, 0, 1<<40, 51)
-	assert.Contains(t, plan, "idx_revisions_observed",
-		"unscoped history must use the observed_at index; plan was:\n%s", plan)
-	assert.NotContains(t, plan, "TEMP B-TREE",
-		"the index must satisfy the ORDER BY without a sort; plan was:\n%s", plan)
-
-	// The place-scoped shape deliberately drives from event_places instead: that
-	// join is far more selective than a time range, so SQLite sorts the narrowed
-	// set rather than walking the observed_at index and filtering. That is the
-	// right plan (place-scoped calls were already ~6x faster than unscoped ones
-	// in the same production measurement) - asserted here so a future index
-	// change that flips it gets noticed rather than silently pessimized.
-	const scoped = `SELECT r.revision, r.observed_at, r.ingested_at, r.proto, r.event_id
-		FROM event_revisions r JOIN events e ON e.id = r.event_id
-		JOIN event_places ep ON ep.event_id = r.event_id AND ep.place_id = ?
-		WHERE 1=1
-		ORDER BY r.observed_at DESC, r.event_id ASC, r.revision DESC LIMIT ?`
-
-	plan = planFor(t, s, scoped, "area:test", 51)
-	assert.Contains(t, plan, "idx_event_places_place",
-		"place-scoped history should drive from event_places; plan was:\n%s", plan)
-}
-
-// eventsPlan returns the query plan of the statement QueryEvents runs for q,
-// split at the outer loop: key is the inner key-only query (filter + sort),
-// fetch is the outer loop that reads the page's blobs.
-func eventsPlan(t *testing.T, s *Store, q EventQuery) (key, fetch string) {
-	t.Helper()
-	query, args, err := eventsPageSQL(q, DefaultPageSize)
+	// Not vacuous: without the index the same check sees a sort.
+	_, err := s.db.Exec(`DROP INDEX idx_revisions_observed`)
 	require.NoError(t, err)
-	plan := planFor(t, s, query, args...)
-	key, fetch, ok := strings.Cut(plan, "SCAN k\n")
-	require.True(t, ok, "QueryEvents must sort keys in a subquery, then fetch blobs; plan was:\n%s", plan)
-	return key, fetch
+	_, sorted = explain(t, s, true, unscoped, 0, int64(1)<<40, 51).find(isSort)
+	assert.True(t, sorted, "without idx_revisions_observed the history query sorts")
 }
 
 // TestQueryEventsSortsKeysNotBlobs pins QueryEvents' two-phase shape. Any
-// status LIST sorts (the index orders by severity within ONE status), and
-// sorting a SELECT that includes the proto blob copied every matching row's
-// blob into the sorter: an all-statuses page took 25-40 s in production
-// regardless of pageSize, long enough for a deploy drain to cancel it into a
-// 500 (2026-11-07). The sort must stay inside the key-only subquery, and the
-// outer loop must fetch by primary key without sorting again.
+// status LIST sorts (the index orders by severity within ONE status), and in
+// the legacy store sorting a SELECT that carried the proto blob copied every
+// matching row's blob into the sorter: an all-statuses page took 25-40 s
+// regardless of pageSize (2026-11-07). The filter, sort and LIMIT stay in the
+// key-only subquery k (PostgreSQL inlines its scan node, so the plan shows its
+// Limit), which must never carry the blob, and the page's blobs are fetched
+// afterwards by primary key.
 func TestQueryEventsSortsKeysNotBlobs(t *testing.T) {
 	s := newTestStore(t)
 	all := []gridv1.EventStatus{gridv1.EventStatus_ACTIVE, gridv1.EventStatus_SCHEDULED,
 		gridv1.EventStatus_RESOLVED, gridv1.EventStatus_EXPIRED}
-	for _, q := range []EventQuery{{}, {Statuses: all}, {Statuses: all, Layers: []gridv1.Layer{gridv1.Layer_WILDFIRE}}} {
-		key, fetch := eventsPlan(t, s, q)
-		assert.Contains(t, key, "CO-ROUTINE k", "%+v", q)
-		assert.Contains(t, key, "TEMP B-TREE FOR ORDER BY", "the key query does the sorting (%+v)", q)
-		assert.Contains(t, fetch, "sqlite_autoindex_events_1 (id=?)", "blobs come by primary key (%+v)", q)
-		assert.NotContains(t, fetch, "TEMP B-TREE", "the blob fetch must not sort (%+v)", q)
+	for _, q := range []EventQuery{{}, {Statuses: all}, {Statuses: all, Layers: []gridv1.Layer{gridv1.Layer_WILDFIRE}},
+		{PlaceID: "county:calaveras"}, {Lite: true, Statuses: all}} {
+		query, args, err := eventsPageSQL(q, DefaultPageSize)
+		require.NoError(t, err)
+		plan := explain(t, s, false, query, args...)
+		k, ok := plan.find(func(n planNode) bool { return n.NodeType == "Limit" })
+		require.True(t, ok, "QueryEvents must limit keys in a subquery k (%+v); plan was:\n%s", q, plan)
+		assert.NotEqual(t, "Limit", plan.NodeType, "the LIMIT is inside the join, not over it (%+v); plan was:\n%s", q, plan)
+		k.walk(func(n planNode) {
+			for _, col := range n.Output {
+				assert.NotContains(t, col, "proto", "the key query must not carry a blob (%+v); plan was:\n%s", q, plan)
+			}
+		})
+		pk := explain(t, s, true, query, args...)
+		assert.Contains(t, pk.indexes(), "events_pkey", "blobs can come by primary key (%+v); plan was:\n%s", q, pk)
 	}
 }
 
-// TestPlaceScopedEventsDoesNotWalkDeadAttachments pins the plan for the
-// place-scoped event query to driving from `events`, not from `event_places`.
-//
-// event_places attachments are deliberately NEVER removed when an event
-// transitions to RESOLVED/EXPIRED — place-scoped history needs them. So the
-// attachments for a place grow without bound while its live set stays small
-// (measured 62-96% dead after five days in the dev DB). With no index
-// statistics SQLite assumes `ep.place_id = ?` is highly selective, drives from
-// event_places, and fetches EVERY event that place ever had out of the wide
-// events table just to discard the dead ones on `e.status`. There is no index
-// carrying status on event_places, so the discard cannot happen any earlier.
-//
-// That is what made /api/v1/events?place=… take 1.1-3.7s in production while
-// returning 14 events, and cost 0.9s to return 200 — latency ANTI-correlated
-// with the answer's size. It is unbounded in the store's age, and on EFS every
-// discarded row fetch is an extra network round trip.
-//
-// ANALYZE is the fix (store.Analyze, run at boot and every statsRefreshInterval).
-// This test fails if that stops working — a regression here is invisible in
-// behavior and shows up only as latency, so assert the plan.
-func TestPlaceScopedEventsDoesNotWalkDeadAttachments(t *testing.T) {
+// TestPlaceScopedEventsSkipsDeadAttachments: event_places attachments are
+// deliberately NEVER removed when an event transitions to RESOLVED/EXPIRED
+// (place-scoped history needs them), so a place's attachments grow without
+// bound while its live set stays small. The default place query must still
+// return only the live set. (The legacy store also pinned SQLite's join order
+// here, which depended on ANALYZE statistics; PostgreSQL keeps statistics
+// itself through autovacuum, and the plan check under realistic volumes is
+// part of the P5 performance pass.)
+func TestPlaceScopedEventsSkipsDeadAttachments(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
 	const live = 20
 	seedDeadAttachmentSkew(t, s, live)
 
-	require.NoError(t, s.Analyze(ctx))
-	assertPlaceScopedPlanDrivesFromActive(t, s)
-
-	// And the query must still be correct: only the live ones come back.
 	got, _, err := s.QueryEvents(ctx, EventQuery{PlaceID: "county:calaveras", PageSize: 500})
 	require.NoError(t, err)
 	assert.Len(t, got, live, "only ACTIVE/SCHEDULED events belong in a default place query")
 }
 
-// TestStatisticsSurviveReopen pins what lets boot skip the synchronous ANALYZE
-// (cmd/server): sqlite_stat1 lives in the database file, so a reopened store
-// plans the place-scoped query correctly without analyzing again, and
-// HasStatistics tells a never-analyzed database apart.
-func TestStatisticsSurviveReopen(t *testing.T) {
+// Keyset paging compares ids as bytes. Ids carry ':' and '-' (usgs:nc-1),
+// which a linguistic collation orders by ignoring punctuation first; the
+// store's database must compare bytewise (C collation, checked by Open) or
+// pages would skip and repeat rows. Walk a page at a time over ids chosen to
+// differ between the two orders and compare with Go's byte order.
+func TestKeysetPagingFollowsByteOrder(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "grid.db")
-	s, err := Open(path)
-	require.NoError(t, err)
+	s := newTestStore(t)
+	seedSource(t, s, "usgs")
+	ids := []string{"usgs:a-z", "usgs:a:a", "usgs:aa", "usgs:a-a", "usgs:A", "usgs:a", "usgs:a.b",
+		"usgs:nc-1", "usgs:nc:1", "usgs:nc1", "usgs:B", "usgs:b-", "usgs:b:"}
+	for _, id := range ids {
+		// Same severity and observed time, so id alone decides the order.
+		_, err := s.UpsertEvent(ctx, testEvent(id, gridv1.Severity_MINOR, gridv1.EventStatus_ACTIVE, id))
+		require.NoError(t, err)
+	}
+	var seen []string
+	token := ""
+	for {
+		page, next, err := s.QueryEvents(ctx, EventQuery{PageSize: 2, PageToken: token})
+		require.NoError(t, err)
+		seen = append(seen, eventIDs(page)...)
+		if next == "" {
+			break
+		}
+		token = next
+	}
+	want := slices.Clone(ids)
+	sort.Strings(want)
+	assert.Equal(t, want, seen, "ids page in byte order, each exactly once")
 
-	has, err := s.HasStatistics(ctx)
+	places := []string{"x:a-z", "x:a:a", "x:aa", "x:A"}
+	for _, id := range places {
+		require.NoError(t, s.UpsertPlace(ctx, testPlace(id, strings.ReplaceAll(id, ":", "_"), "Same", gridv1.PlaceKind_AREA, nil)))
+	}
+	got, err := s.ListPlaces(ctx, gridv1.PlaceKind_AREA, "")
 	require.NoError(t, err)
-	assert.False(t, has, "a new database has no statistics")
-
-	seedDeadAttachmentSkew(t, s, 20)
-	require.NoError(t, s.Analyze(ctx))
-	require.NoError(t, s.Close())
-
-	s, err = Open(path)
-	require.NoError(t, err)
-	t.Cleanup(func() { s.Close() })
-	has, err = s.HasStatistics(ctx)
-	require.NoError(t, err)
-	assert.True(t, has, "statistics persist in the file across a reopen")
-	assertPlaceScopedPlanDrivesFromActive(t, s)
+	wantPlaces := slices.Clone(places)
+	sort.Strings(wantPlaces)
+	assert.Equal(t, wantPlaces, placeIDs(got), "ListPlaces orders ties by id bytewise")
 }
 
 // seedDeadAttachmentSkew reproduces the production skew: a small live set and
@@ -506,36 +473,6 @@ func seedDeadAttachmentSkew(t *testing.T, s *Store, live int) {
 
 	var attached int
 	require.NoError(t, s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM event_places WHERE place_id = ?`, "county:calaveras").Scan(&attached))
+		`SELECT COUNT(*) FROM event_places WHERE place_id = $1`, "county:calaveras").Scan(&attached))
 	require.Equal(t, live+dead, attached, "dead attachments must survive a transition")
-}
-
-// assertPlaceScopedPlanDrivesFromActive checks the join order of the
-// place-scoped event query on a store seeded by seedDeadAttachmentSkew.
-func assertPlaceScopedPlanDrivesFromActive(t *testing.T, s *Store) {
-	t.Helper()
-	// The commonest call on the service: /api/v1/events?place=X with the
-	// default ACTIVE,SCHEDULED statuses and no layer filter. Only the key
-	// query's join order matters here; the blob fetch after it reads the
-	// page's rows by primary key, which is bounded by the page size.
-	plan, _ := eventsPlan(t, s, EventQuery{PlaceID: "county:calaveras"})
-	plan = strings.TrimPrefix(plan, "CO-ROUTINE k\n")
-
-	// What matters is the JOIN ORDER, not which index names appear. The bad plan
-	// drives from event_places and reaches events through its primary key, one
-	// row fetch per dead attachment:
-	//     SEARCH ep USING COVERING INDEX idx_event_places_place (place_id=?)
-	//     SEARCH e USING INDEX sqlite_autoindex_events_1 (id=?)
-	// The good plan drives from the bounded ACTIVE set and probes event_places
-	// through a COVERING index, so it never fetches an event_places row at all:
-	//     SEARCH e USING INDEX idx_events_active (status=?)
-	//     SEARCH ep USING COVERING INDEX idx_event_places_place (place_id=? AND event_id=?)
-	first, _, _ := strings.Cut(plan, "\n")
-	assert.Contains(t, first, "SEARCH e ",
-		"the outer loop must be the events table, not event_places; plan was:\n%s", plan)
-	assert.Contains(t, first, "idx_events_active",
-		"the outer loop must narrow on status via idx_events_active; plan was:\n%s", plan)
-	assert.NotContains(t, plan, "sqlite_autoindex_events_1",
-		"reaching events by primary key means one wide-row fetch per attachment,\n"+
-			"including every dead one. Plan was:\n%s", plan)
 }

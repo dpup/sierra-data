@@ -37,8 +37,8 @@ func putLite(tx *sql.Tx, ev *gridv1.Event) error {
 	if err != nil {
 		return fmt.Errorf("store: marshal lite event %s: %w", ev.GetId(), err)
 	}
-	if _, err := tx.Exec(`INSERT INTO event_lite (event_id, proto) VALUES (?, ?)
-		ON CONFLICT(event_id) DO UPDATE SET proto = excluded.proto`, ev.GetId(), blob); err != nil {
+	if _, err := tx.Exec(`INSERT INTO event_lite (event_id, proto) VALUES ($1, $2)
+		ON CONFLICT (event_id) DO UPDATE SET proto = excluded.proto`, ev.GetId(), blob); err != nil {
 		return fmt.Errorf("store: write lite event %s: %w", ev.GetId(), err)
 	}
 	return nil
@@ -55,7 +55,8 @@ type LiteBatch struct {
 
 // BackfillEventLite walks events in id order from after (exclusive), up to
 // batch rows, and writes a lite copy for each that has none (events stored
-// before migrationV12). Callers loop with Next until it is empty.
+// before the lite copy existed; only an import from the legacy SQLite store
+// can produce them now). Callers loop with Next until it is empty.
 //
 // The read runs outside the writer lock, keyed on the primary key so each
 // call reads only its own rows (no rescan from the start). The write is one
@@ -65,8 +66,8 @@ type LiteBatch struct {
 func (s *Store) BackfillEventLite(ctx context.Context, after string, batch int) (LiteBatch, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT e.id, e.proto FROM events e
-		WHERE e.id > ? AND NOT EXISTS (SELECT 1 FROM event_lite l WHERE l.event_id = e.id)
-		ORDER BY e.id LIMIT ?`, after, batch)
+		WHERE e.id > $1 AND NOT EXISTS (SELECT 1 FROM event_lite l WHERE l.event_id = e.id)
+		ORDER BY e.id LIMIT $2`, after, batch)
 	if err != nil {
 		return LiteBatch{}, fmt.Errorf("store: lite backfill scan: %w", err)
 	}
@@ -104,8 +105,8 @@ func (s *Store) BackfillEventLite(ctx context.Context, after string, batch int) 
 			if err != nil {
 				return fmt.Errorf("store: marshal lite event %s: %w", ev.GetId(), err)
 			}
-			r, err := tx.Exec(`INSERT INTO event_lite (event_id, proto) VALUES (?, ?)
-				ON CONFLICT(event_id) DO NOTHING`, ev.GetId(), blob)
+			r, err := tx.Exec(`INSERT INTO event_lite (event_id, proto) VALUES ($1, $2)
+				ON CONFLICT (event_id) DO NOTHING`, ev.GetId(), blob)
 			if err != nil {
 				return fmt.Errorf("store: write lite event %s: %w", ev.GetId(), err)
 			}
