@@ -1034,7 +1034,8 @@ func TestCommaNum(t *testing.T) {
 func TestWildfirePoll_OrphanedPerimeterOfEndedIncident(t *testing.T) {
 	lonely := &gridv1.Event{Id: "calfire:lonely-uuid", Layer: gridv1.Layer_WILDFIRE, Status: gridv1.EventStatus_RESOLVED,
 		Headline: "Lonely Fire — 250 ac, 100% contained",
-		Geometry: &gridv1.Geometry{Centroid: &gridv1.LatLng{Lat: 38.06, Lng: -119.86}}}
+		Geometry: &gridv1.Geometry{Centroid: &gridv1.LatLng{Lat: 38.06, Lng: -119.86}},
+		Detail:   &gridv1.Event_Wildfire{Wildfire: &gridv1.WildfireDetail{Containment: 100}}}
 	stored := &gridv1.Event{Id: "firis:lonely", Layer: gridv1.Layer_WILDFIRE, Status: gridv1.EventStatus_ACTIVE,
 		Provenance: &gridv1.Provenance{SourceId: "firis"},
 		Geometry:   &gridv1.Geometry{Centroid: &gridv1.LatLng{Lat: 38.05, Lng: -119.85}}}
@@ -1064,4 +1065,53 @@ func TestWildfirePoll_OrphanedPerimeterOfEndedIncident(t *testing.T) {
 	res, err = n.Poll(testCtx(), nil)
 	require.NoError(t, err)
 	assert.Contains(t, eventIDs(res.Events), "firis:lonely", "a failed lookup changes nothing")
+}
+
+// Two same-named fires are two fires. An ended "Ambiguous Fire" beside the
+// southern perimeter claims that one only: the northern perimeter, 44 km
+// away, stays a live standalone and is not superseded.
+func TestWildfirePoll_OrphanMatchIsPerPerimeterNotPerName(t *testing.T) {
+	ended := &gridv1.Event{Id: "calfire:old-ambiguous", Layer: gridv1.Layer_WILDFIRE, Status: gridv1.EventStatus_RESOLVED,
+		Headline: "Ambiguous Fire — 30 ac, 100% contained",
+		Geometry: &gridv1.Geometry{Centroid: &gridv1.LatLng{Lat: 38.0, Lng: -120.25}},
+		Detail:   &gridv1.Event_Wildfire{Wildfire: &gridv1.WildfireDetail{Containment: 100}}}
+	south := &gridv1.Event{Id: "firis:ambiguous", Layer: gridv1.Layer_WILDFIRE, Status: gridv1.EventStatus_ACTIVE,
+		Provenance: &gridv1.Provenance{SourceId: "firis"},
+		Geometry:   &gridv1.Geometry{Centroid: &gridv1.LatLng{Lat: 38.0, Lng: -120.25}}}
+	north := &gridv1.Event{Id: "firis:ambiguous-2", Layer: gridv1.Layer_WILDFIRE, Status: gridv1.EventStatus_ACTIVE,
+		Provenance: &gridv1.Provenance{SourceId: "firis"},
+		Geometry:   &gridv1.Geometry{Centroid: &gridv1.LatLng{Lat: 38.4, Lng: -120.25}}}
+
+	n := newWildfireNormalizer(&fakeDoer{resp: calfireFixture}, &fakeDoer{resp: firisFixture})
+	n.UseEndedFires(func(ctx context.Context, since time.Time) ([]*gridv1.Event, error) {
+		return []*gridv1.Event{ended}, nil
+	})
+	res, err := n.Poll(testCtx(), &scriptedPrior{events: []*gridv1.Event{south, north}})
+	require.NoError(t, err)
+	assert.Contains(t, res.Superseded, "firis:ambiguous")
+	assert.NotContains(t, res.Superseded, "firis:ambiguous-2", "the fire 44 km away is still burning")
+	assert.NotContains(t, eventIDs(res.Events), "firis:ambiguous")
+	got := eventByID(t, res.Events, "firis:ambiguous-2")
+	assert.InDelta(t, 38.4, got.GetGeometry().GetCentroid().GetLat(), 0.01, "the survivor keeps its own id and shape")
+}
+
+// An incident CAL FIRE dropped while uncontained proves nothing: its
+// perimeter is still a fire.
+func TestWildfirePoll_UncontainedEndedIncidentClaimsNothing(t *testing.T) {
+	lonely := &gridv1.Event{Id: "calfire:lonely-uuid", Layer: gridv1.Layer_WILDFIRE, Status: gridv1.EventStatus_RESOLVED,
+		Headline: "Lonely Fire — 250 ac, 40% contained",
+		Geometry: &gridv1.Geometry{Centroid: &gridv1.LatLng{Lat: 38.06, Lng: -119.86}},
+		Detail:   &gridv1.Event_Wildfire{Wildfire: &gridv1.WildfireDetail{Containment: 40}}}
+	stored := &gridv1.Event{Id: "firis:lonely", Layer: gridv1.Layer_WILDFIRE, Status: gridv1.EventStatus_ACTIVE,
+		Provenance: &gridv1.Provenance{SourceId: "firis"},
+		Geometry:   &gridv1.Geometry{Centroid: &gridv1.LatLng{Lat: 38.05, Lng: -119.85}}}
+
+	n := newWildfireNormalizer(&fakeDoer{resp: calfireFixture}, &fakeDoer{resp: firisFixture})
+	n.UseEndedFires(func(ctx context.Context, since time.Time) ([]*gridv1.Event, error) {
+		return []*gridv1.Event{lonely}, nil
+	})
+	res, err := n.Poll(testCtx(), &scriptedPrior{events: []*gridv1.Event{stored}})
+	require.NoError(t, err)
+	assert.Contains(t, eventIDs(res.Events), "firis:lonely")
+	assert.NotContains(t, res.Superseded, "firis:lonely")
 }

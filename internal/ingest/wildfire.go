@@ -77,6 +77,10 @@ const (
 	// are different fires.
 	orphanWindow = 30 * 24 * time.Hour
 	orphanMaxKm  = 10.0
+	// orphanMinContainment is the final containment an ended incident needs
+	// before its name can claim a perimeter. CAL FIRE ends nearly every
+	// incident at 100%; one dropped at 0% may still be burning.
+	orphanMinContainment = 90
 )
 
 // SourceIDs implements Normalizer. One poller, two source rows.
@@ -238,8 +242,8 @@ func (n *WildfireNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult
 
 	// A perimeter of a fire CAL FIRE has already ended is that fire, not a
 	// new one: suppress it, and supersede a standalone already minted for it.
-	orphanIDs := n.orphanedPerimeters(ctx, deduped, used, prior)
-	standalone := standalonePerimeterEvents(deduped, used, prior)
+	open, orphanIDs := n.orphanedPerimeters(ctx, deduped, used, prior)
+	standalone := standalonePerimeterEvents(open, used, prior)
 	if ierr != nil {
 		// CAL FIRE is down, so adoption is uncomputable and the used-map above
 		// is empty: perimeters that are normally folded into calfire:* incidents
@@ -275,10 +279,11 @@ func (n *WildfireNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult
 	}, nil
 }
 
-// orphanedPerimeters marks used every unadopted perimeter that matches a CAL
-// FIRE incident which ended within orphanWindow (same normalized name,
-// centroids within orphanMaxKm), and returns the ids of standalones the store
-// already holds for them, to supersede.
+// orphanedPerimeters drops every unadopted perimeter that matches a CAL FIRE
+// incident which ended contained within orphanWindow (same normalized name,
+// centroids within orphanMaxKm, final containment at least
+// orphanMinContainment), and returns the remaining candidates plus the ids
+// of standalones the store already holds for the dropped ones, to supersede.
 //
 // Without it, a contained fire came back as a second fire: CAL FIRE drops a
 // fire from its active list when it is contained, FIRIS keeps publishing the
@@ -287,50 +292,98 @@ func (n *WildfireNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult
 // (Dove: CAL FIRE resolved 2026-08-02, firis:dove first seen 08-04).
 //
 // Positive evidence only, as Superseded requires: the ended incident is a
-// stored record with the same name in the same place. A failed lookup
-// changes nothing (the old behaviour).
-func (n *WildfireNormalizer) orphanedPerimeters(ctx context.Context, cands []perimCandidate, used map[string]bool, prior Prior) []string {
+// stored record with the same name in the same place, and it was contained
+// when it ended. An incident CAL FIRE dropped while it still burned (a
+// handoff to a federal lead, a feed glitch) proves nothing about its
+// perimeter, so that perimeter stays a standalone fire. The match is per
+// candidate, never per name: two same-named fires are two fires, and only
+// the one beside the ended incident is dropped. A failed lookup changes
+// nothing (the old behaviour).
+func (n *WildfireNormalizer) orphanedPerimeters(ctx context.Context, cands []perimCandidate, used map[string]bool, prior Prior) ([]perimCandidate, []string) {
 	if n.endedFires == nil {
-		return nil
+		return cands, nil
 	}
-	var open []perimCandidate
+	var unadopted []perimCandidate
 	for _, c := range cands {
 		if !used[c.norm] {
-			open = append(open, c)
+			unadopted = append(unadopted, c)
 		}
 	}
-	if len(open) == 0 {
-		return nil
+	if len(unadopted) == 0 {
+		return cands, nil
 	}
 	ended, err := n.endedFires(ctx, n.now().Add(-orphanWindow))
 	if err != nil {
 		logging.Warnw(ctx, "Wildfire: ended-incident lookup failed; perimeters stay standalone", "error", err)
-		return nil
+		return cands, nil
 	}
+	var keep []perimCandidate
 	var ids []string
-	for _, c := range open {
-		cc := c.geom.GetCentroid()
-		for _, ev := range ended {
-			name, _, _ := strings.Cut(ev.GetHeadline(), " — ")
-			ec := ev.GetGeometry().GetCentroid()
-			if hazards.NormFireName(name) != c.norm || ec == nil || cc == nil {
+	for _, c := range cands {
+		if used[c.norm] {
+			keep = append(keep, c)
+			continue
+		}
+		ev := endedIncidentFor(c, ended)
+		if ev == nil {
+			keep = append(keep, c)
+			continue
+		}
+		cc, ec := c.geom.GetCentroid(), ev.GetGeometry().GetCentroid()
+		for _, pe := range priorForSource(prior, "firis") {
+			pc := pe.GetGeometry().GetCentroid()
+			if !isStandaloneIDForName(pe.GetId(), c.norm) || pc == nil {
 				continue
 			}
-			if geojson.MetersBetween(cc.GetLat(), cc.GetLng(), ec.GetLat(), ec.GetLng()) > orphanMaxKm*1000 {
-				continue
+			// The stored standalone is this candidate's when it lies beside
+			// the ended incident and nearer this perimeter than any other
+			// same-named one.
+			if geojson.MetersBetween(pc.GetLat(), pc.GetLng(), ec.GetLat(), ec.GetLng()) <= orphanMaxKm*1000 &&
+				nearestCandidate(pc, cands, c.norm) == cc {
+				ids = append(ids, pe.GetId())
 			}
-			used[c.norm] = true
-			for _, pe := range priorForSource(prior, "firis") {
-				pc := pe.GetGeometry().GetCentroid()
-				if isStandaloneIDForName(pe.GetId(), c.norm) && pc != nil &&
-					geojson.MetersBetween(pc.GetLat(), pc.GetLng(), ec.GetLat(), ec.GetLng()) <= orphanMaxKm*1000 {
-					ids = append(ids, pe.GetId())
-				}
-			}
-			break
 		}
 	}
-	return ids
+	return keep, ids
+}
+
+// endedIncidentFor returns the contained, ended CAL FIRE incident c belongs
+// to, or nil.
+func endedIncidentFor(c perimCandidate, ended []*gridv1.Event) *gridv1.Event {
+	cc := c.geom.GetCentroid()
+	if cc == nil {
+		return nil
+	}
+	for _, ev := range ended {
+		name, _, _ := strings.Cut(ev.GetHeadline(), " — ")
+		ec := ev.GetGeometry().GetCentroid()
+		if hazards.NormFireName(name) != c.norm || ec == nil {
+			continue
+		}
+		if ev.GetWildfire().GetContainment() < orphanMinContainment {
+			continue
+		}
+		if geojson.MetersBetween(cc.GetLat(), cc.GetLng(), ec.GetLat(), ec.GetLng()) <= orphanMaxKm*1000 {
+			return ev
+		}
+	}
+	return nil
+}
+
+// nearestCandidate returns the centroid of the candidate named norm nearest p.
+func nearestCandidate(p *gridv1.LatLng, cands []perimCandidate, norm string) *gridv1.LatLng {
+	var best *gridv1.LatLng
+	bestM := math.Inf(1)
+	for _, c := range cands {
+		cc := c.geom.GetCentroid()
+		if c.norm != norm || cc == nil {
+			continue
+		}
+		if m := geojson.MetersBetween(p.GetLat(), p.GetLng(), cc.GetLat(), cc.GetLng()); m < bestM {
+			best, bestM = cc, m
+		}
+	}
+	return best
 }
 
 // supersededStandalones returns the standalone `firis:` ids that this tick's

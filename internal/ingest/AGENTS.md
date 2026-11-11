@@ -1072,9 +1072,12 @@ publishing the perimeter for days. Unadopted, that perimeter used to be minted
 as a new `firis:<name>` fire, so Gann, Dove and Ross each had two events. The
 poller now asks the store (`UseEndedFires`, lite reads) for `calfire:`
 incidents that ended in the last 30 days; a perimeter with the same normalized
-name within 10 km is that fire. It is not emitted, and a standalone already
-stored for it is `Superseded` (positive evidence: the named incident). A failed
-lookup changes nothing.
+name within 10 km is that fire, provided the incident ended at least 90%
+contained (one CAL FIRE dropped while burning proves nothing). It is not
+emitted, and a standalone already stored for it is `Superseded` (positive
+evidence: the named incident). The match is per perimeter, never per name: a
+second same-named fire elsewhere stays a live standalone. A failed lookup
+changes nothing.
 
 The matching store-side rule (a fire attaching to an area/town place it is
 merely *near*) lives in `store.matchPlaces` — see `internal/store/AGENTS.md`.
