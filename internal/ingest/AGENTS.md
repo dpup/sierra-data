@@ -209,6 +209,8 @@ Two rules keep it honest, and both are load-bearing:
   **adopted** by a CAL FIRE incident (`calfire:<uuid>`). The perimeter is *still
   in the feed*; we know precisely which event absorbed it
   (`supersededStandalones`).
+  NWS alerts replaced by an Update or Cancel are the other producer (see
+  "Weather-alert replacement" below).
 - **Same guard as the sweep.** The scheduler only supersedes for sources whose
   fetch succeeded and wasn't suppressed, so a failed fetch still transitions
   nothing. And it is deliberately *narrow*: wildfire names only the id this exact
@@ -871,6 +873,32 @@ and cached per zone for a week. Three rules:
   smaller shape (`alertMinOverlap`; STO zones: real overlaps 11-71%, slivers
   into Amador and Mariposa at most 0.4%).
 
+## Weather-alert replacement: an Update or Cancel retires what it replaces (2026-11-11)
+
+NWS re-issues a product as a new alert (new id) with CAP `messageType`
+`Update` or `Cancel` and `references` naming the messages it replaces. Until
+2026-11-11 we read neither, so the replaced alert sat ACTIVE/SCHEDULED for the
+24h `expire` grace beside its replacement: the CAZ139 Winter Storm Watch showed
+twice on /live. `WeatherAlertNormalizer.replacedHeld` now puts a held
+ACTIVE/SCHEDULED `wx:` event in `Superseded` (RESOLVED this tick) when:
+
+- **an alert in the list references it.** Checked against the store on every
+  tick, so an Update stored before the rule existed still retires its
+  predecessor. A referenced alert still in the list is not emitted (it would
+  flip back to ACTIVE next tick), and a Cancel message is never emitted itself.
+- **it has dropped out of the list and api.weather.gov says `replacedBy`**
+  (`/alerts/{id}`). The only way to see a Cancel: `/alerts/active` never lists
+  Cancel messages. It also retires the middle of a chain whose Update named only
+  its immediate predecessor. One lookup per such alert, at most 8 a tick, a
+  "not replaced" answer trusted for an hour, none after the alert is retired.
+
+RESOLVED for both: the office said so (EXPIRED is for aging out unannounced). A
+Cancel ends the hazard; after an Update the hazard continues on the replacing
+alert's own event. Ids are unchanged, unheld references are ignored, and a
+stale-served list or failed lookup retires nothing. The retired event has no
+pointer to its replacement yet (no existing field; a follow-up for
+`ListRelatedEvents` or the detail).
+
 ## Enhancement budget + carry-forward
 
 Only the `WEATHER_ALERT` layer is enhanced here (CHP road incidents arrive already
@@ -1082,6 +1110,23 @@ emitted, and a standalone already stored for it is `Superseded` (positive
 evidence: the named incident). The match is per perimeter, never per name: a
 second same-named fire elsewhere stays a live standalone. A failed lookup
 changes nothing.
+
+**A standalone perimeter nobody is mapping ages out** (`ageOutStalePerimeters`,
+2026-11-11). FIRIS's `displayStatus='Active'` marks a fire's *current*
+perimeter, not a burning fire: a WFIGS "Final Fire Perimeter" carries it too, and
+rows stay listed for days. So a perimeter-only fire was hash-equal every tick,
+`last_seen_at` kept refreshing, and the expire grace never started:
+`firis:summit40y` (6 ac, last flight 11-09) and `firis:wallace3` (a 11-05 final
+perimeter) sat ACTIVE/SEVERE at revision 1. Now a standalone whose own
+`poly_DateCurrent` (carried as `observed_at`) is older than the `firis`
+`expireAfter` (24h) is emitted **EXPIRED** with `expires` = currency + grace when
+the store holds it ACTIVE, so the content-hash gate admits the transition on the
+first tick; one the store does not hold is never minted. EXPIRED, not RESOLVED:
+nobody has mapped it for a day, which is not "out", and a new flight brings it
+back ACTIVE. This is not the Cal OES orphan case above: no authority lists these
+fires (CAL FIRE does not, and the rule runs only when CAL FIRE answered), and
+`expire` is this source's own policy, now measured by the perimeter's timestamp
+instead of its listing. Adopted perimeters are untouched; CAL FIRE owns those.
 
 The matching store-side rule (a fire attaching to an area/town place it is
 merely *near*) lives in `store.matchPlaces` — see `internal/store/AGENTS.md`.

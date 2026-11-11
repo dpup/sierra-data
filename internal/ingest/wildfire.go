@@ -266,6 +266,8 @@ func (n *WildfireNormalizer) Poll(ctx context.Context, prior Prior) (*PollResult
 			}
 		}
 		standalone = kept
+	} else {
+		standalone = ageOutStalePerimeters(standalone, n.cfg.Grid.Sources["firis"].ExpireAfter, n.now(), prior)
 	}
 	events = append(events, standalone...)
 
@@ -779,12 +781,62 @@ func standalonePerimeterEvents(cands []perimCandidate, used map[string]bool, pri
 			fmt.Sprintf("%s — %.0f ac", c.name, p.Acres),
 		)
 		ev.Category = "wildfire"
+		ev.ObservedAt = tsProto(p.DateCurrent) // the perimeter's own currency (not hashed); ageOutStalePerimeters reads it
 		ev.Geometry = c.geom
 		ev.Provenance = NewProvenance("firis", "CAL FIRE / FIRIS", "CAL FIRE / FIRIS / NIFC", "")
 		ev.Detail = &gridv1.Event_Wildfire{Wildfire: &gridv1.WildfireDetail{
 			Acres:        p.Acres,
 			HasPerimeter: true,
 		}}
+		out = append(out, ev)
+	}
+	return out
+}
+
+// ageOutStalePerimeters expires standalone perimeters that are no longer being
+// observed: a perimeter whose own currency (poly_DateCurrent, carried as
+// ObservedAt) is older than grace — the firis source's expireAfter — is aged
+// out even though the feed still lists it.
+//
+// The feed's displayStatus='Active' marks a fire's CURRENT perimeter, not a
+// burning fire. FIRIS keeps listing a perimeter for days to weeks after the
+// last flight (a WFIGS "Final Fire Perimeter" carries Active too), so "still in
+// the feed" never ended a standalone: hash-equal every tick, last_seen_at
+// refreshed, the expire grace never started. firis:summit40y (6 ac, last
+// perimeter 2026-11-09T00:00Z) and firis:wallace3 (0.01 ac, a final perimeter
+// from 11-05) sat ACTIVE/SEVERE that way. The expire policy already says a
+// perimeter not re-observed within expireAfter ages out; this measures
+// "observed" by the perimeter's own timestamp instead of by its listing.
+//
+// EXPIRED, not RESOLVED: nothing says the fire is out, only that nobody has
+// mapped it for a day. A new flight (a fresher poly_DateCurrent) emits it
+// ACTIVE again — a recorded reappearance, as for any expire source.
+//
+// A stale perimeter the store does not hold as ACTIVE is dropped rather than
+// minted (as EXPIRED or otherwise): it is already aged out, or it was never a
+// live fire for us. One the store holds is emitted EXPIRED with expires set
+// to currency+grace, so the upsert writes the transition on the first tick —
+// the status change is hashed content, so the content-hash gate lets it
+// through. A zero currency is never judged, and grace <= 0 disables the rule.
+//
+// Only called when CAL FIRE answered: a standalone is by definition a fire no
+// CAL FIRE incident claims, which is uncomputable while CAL FIRE is down.
+func ageOutStalePerimeters(events []*gridv1.Event, grace time.Duration, now time.Time, prior Prior) []*gridv1.Event {
+	if grace <= 0 {
+		return events
+	}
+	out := events[:0]
+	for _, ev := range events {
+		obs := ev.GetObservedAt()
+		if obs == nil || now.Sub(obs.AsTime()) <= grace {
+			out = append(out, ev)
+			continue
+		}
+		if priorByID(prior, ev.GetId()) == nil {
+			continue
+		}
+		ev.Status = gridv1.EventStatus_EXPIRED
+		ev.Expires = tsProto(obs.AsTime().Add(grace))
 		out = append(out, ev)
 	}
 	return out
