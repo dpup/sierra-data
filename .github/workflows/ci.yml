@@ -12,8 +12,28 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # The Grid store's tests run against PostgreSQL (internal/storetest). The
+    # service matches docker-compose.test.yml; make test skips its own db-up
+    # (SKIP_DB_UP) and uses this server through TEST_DATABASE_URL.
+    services:
+      postgres:
+        image: postgres:18.6-alpine
+        env:
+          POSTGRES_USER: sierra
+          POSTGRES_PASSWORD: sierra
+          POSTGRES_DB: sierra
+          POSTGRES_INITDB_ARGS: --locale=C --encoding=UTF8
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U sierra -d sierra"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
     env:
       TZ: UTC
+      SKIP_DB_UP: "1"
+      TEST_DATABASE_URL: postgres://sierra:sierra@127.0.0.1:5432/postgres?sslmode=disable
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
