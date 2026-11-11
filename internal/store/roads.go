@@ -88,8 +88,13 @@ func (s *Store) RoadStatusSince(ctx context.Context, roadID string) (since time.
 	if err != nil {
 		return time.Time{}, 0, false, false, fmt.Errorf("store: road status %s: %w", roadID, err)
 	}
+	// Two ranges on idx_road_samples_status rather than "status != ?",
+	// which no index can serve: each reads only the other statuses' rows.
 	var lastOther sql.NullInt64
-	if err = s.db.QueryRowContext(ctx, `SELECT MAX(at) FROM road_samples WHERE road_id = ? AND status != ?`, roadID, status).Scan(&lastOther); err != nil {
+	if err = s.db.QueryRowContext(ctx, `SELECT MAX(m) FROM (
+		SELECT MAX(at) AS m FROM road_samples WHERE road_id = ?1 AND status < ?2
+		UNION ALL
+		SELECT MAX(at) FROM road_samples WHERE road_id = ?1 AND status > ?2)`, roadID, status).Scan(&lastOther); err != nil {
 		return time.Time{}, 0, false, false, fmt.Errorf("store: road status %s: %w", roadID, err)
 	}
 	var first int64
@@ -163,4 +168,3 @@ func median(v []int32) int32 {
 	}
 	return (c[n/2-1] + c[n/2] + 1) / 2
 }
-

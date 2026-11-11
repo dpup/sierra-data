@@ -277,11 +277,16 @@ CREATE TABLE road_samples (
   PRIMARY KEY (road_id, at)
 ) WITHOUT ROWID`
 
+// migrationV14 indexes road_samples by status, for RoadStatusSince's "last
+// sample in a different status": without it that read walked a road's whole
+// history (a year is ~35k rows) on every road_segment and summary request.
+const migrationV14 = `CREATE INDEX idx_road_samples_status ON road_samples (road_id, status, at)`
+
 // migrations[i] is the DDL for schema version i+1. Applied versions are
 // recorded in schema_migrations; already-applied versions are skipped, so
 // Open is idempotent across restarts and an existing dev DB at an older
 // version picks up only the missing migrations.
-var migrations = []string{schemaV1, migrationV2, migrationV3, migrationV4, migrationV5, migrationV6, migrationV7, migrationV8, migrationV9, migrationV10, migrationV11, migrationV12, migrationV13}
+var migrations = []string{schemaV1, migrationV2, migrationV3, migrationV4, migrationV5, migrationV6, migrationV7, migrationV8, migrationV9, migrationV10, migrationV11, migrationV12, migrationV13, migrationV14}
 
 // ErrNotFound is returned by point lookups (GetEvent, GetPlace) when no row
 // matches. Callers map it to a 404.

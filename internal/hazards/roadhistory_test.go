@@ -16,9 +16,11 @@ type fakeRoadHistory struct {
 	atStart, ok  bool
 	typical      int32
 	typicalCalls int
+	sinceCalls   int
 }
 
 func (f *fakeRoadHistory) RoadStatusSince(ctx context.Context, roadID string) (time.Time, int32, bool, bool, error) {
+	f.sinceCalls++
 	return f.since, f.status, f.atStart, f.ok, nil
 }
 
@@ -46,6 +48,8 @@ func TestAddRoadHistory(t *testing.T) {
 
 	s.addRoadHistory(context.Background(), &RoadProps{}, rd, now.Add(10*time.Minute))
 	assert.Equal(t, 1, f.typicalCalls, "typical is cached per road and hour of week")
+	s.addRoadHistory(context.Background(), &RoadProps{}, rd, now.Add(10*time.Minute+30*time.Second))
+	assert.Equal(t, 2, f.sinceCalls, "the status run is re-read after a minute, not per request")
 
 	// The archive's latest status disagrees with the live one (a refresh the
 	// sampler has not seen yet): no since is better than a wrong one.

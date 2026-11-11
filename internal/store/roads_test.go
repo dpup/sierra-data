@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -91,4 +92,26 @@ func TestFirstIngested(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 	assert.WithinDuration(t, time.Now(), got["usgs:1"], time.Minute)
+}
+
+// RoadStatusSince's "last other status" read must use the status index, not
+// walk the road's whole history.
+func TestRoadStatusSinceUsesStatusIndex(t *testing.T) {
+	s := newTestStore(t)
+	rows, err := s.db.Query(`EXPLAIN QUERY PLAN SELECT MAX(m) FROM (
+		SELECT MAX(at) AS m FROM road_samples WHERE road_id = ?1 AND status < ?2
+		UNION ALL
+		SELECT MAX(at) FROM road_samples WHERE road_id = ?1 AND status > ?2)`, "hwy4", 1)
+	require.NoError(t, err)
+	defer rows.Close()
+	var plan []string
+	for rows.Next() {
+		var id, parent, notused int
+		var detail string
+		require.NoError(t, rows.Scan(&id, &parent, &notused, &detail))
+		plan = append(plan, detail)
+	}
+	joined := strings.Join(plan, "\n")
+	assert.Contains(t, joined, "idx_road_samples_status")
+	assert.NotContains(t, joined, "SCAN road_samples")
 }

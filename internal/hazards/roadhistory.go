@@ -23,6 +23,10 @@ const (
 	typicalWindow     = 8 * 7 * 24 * time.Hour
 	typicalMinSamples = 8
 	typicalCacheTTL   = time.Hour
+	// sinceCacheTTL bounds how often a road's status run is re-read. Samples
+	// land every 15 minutes, so a minute old is current enough, and a closed
+	// road's run read (every open sample before it) is not paid per request.
+	sinceCacheTTL = time.Minute
 )
 
 type roadHistoryHolder struct {
@@ -30,6 +34,14 @@ type roadHistoryHolder struct {
 	mu sync.Mutex
 	// typical caches a road's typical minutes per hour of the week.
 	typical map[string]typicalEntry
+	since   map[string]sinceEntry
+}
+
+type sinceEntry struct {
+	since       time.Time
+	status      int32
+	atStart, ok bool
+	at          time.Time
 }
 
 type typicalEntry struct {
@@ -46,7 +58,7 @@ func (s *Service) UseRoadHistory(h RoadHistory) {
 		s.history.Store(nil)
 		return
 	}
-	s.history.Store(&roadHistoryHolder{h: h, typical: map[string]typicalEntry{}})
+	s.history.Store(&roadHistoryHolder{h: h, typical: map[string]typicalEntry{}, since: map[string]sinceEntry{}})
 }
 
 var pacific = func() *time.Location {
@@ -63,12 +75,24 @@ func (s *Service) addRoadHistory(ctx context.Context, p *RoadProps, rd *api.Road
 	if hh == nil || rd == nil {
 		return
 	}
-	since, status, atStart, ok, err := hh.h.RoadStatusSince(ctx, rd.GetId())
-	if err != nil {
-		logging.Warnw(ctx, "road history: status since", "road", rd.GetId(), "error", err)
-	} else if ok && status == int32(rd.GetStatus()) {
-		p.StatusSince = since.UTC().Format(time.RFC3339)
-		p.StatusSinceAtLeast = atStart
+	hh.mu.Lock()
+	se, hit := hh.since[rd.GetId()]
+	hh.mu.Unlock()
+	if !hit || now.Sub(se.at) > sinceCacheTTL || now.Before(se.at) {
+		since, status, atStart, ok, err := hh.h.RoadStatusSince(ctx, rd.GetId())
+		if err != nil {
+			logging.Warnw(ctx, "road history: status since", "road", rd.GetId(), "error", err)
+			se = sinceEntry{}
+		} else {
+			se = sinceEntry{since: since, status: status, atStart: atStart, ok: ok, at: now}
+			hh.mu.Lock()
+			hh.since[rd.GetId()] = se
+			hh.mu.Unlock()
+		}
+	}
+	if se.ok && se.status == int32(rd.GetStatus()) {
+		p.StatusSince = se.since.UTC().Format(time.RFC3339)
+		p.StatusSinceAtLeast = se.atStart
 	}
 	key := rd.GetId() + "|" + now.In(pacific).Format("Mon15")
 	hh.mu.Lock()
