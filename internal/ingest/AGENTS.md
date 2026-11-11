@@ -1083,6 +1083,23 @@ evidence: the named incident). The match is per perimeter, never per name: a
 second same-named fire elsewhere stays a live standalone. A failed lookup
 changes nothing.
 
+**A standalone perimeter nobody is mapping ages out** (`ageOutStalePerimeters`,
+2026-11-11). FIRIS's `displayStatus='Active'` marks a fire's *current*
+perimeter, not a burning fire: a WFIGS "Final Fire Perimeter" carries it too, and
+rows stay listed for days. So a perimeter-only fire was hash-equal every tick,
+`last_seen_at` kept refreshing, and the expire grace never started:
+`firis:summit40y` (6 ac, last flight 11-09) and `firis:wallace3` (a 11-05 final
+perimeter) sat ACTIVE/SEVERE at revision 1. Now a standalone whose own
+`poly_DateCurrent` (carried as `observed_at`) is older than the `firis`
+`expireAfter` (24h) is emitted **EXPIRED** with `expires` = currency + grace when
+the store holds it ACTIVE, so the content-hash gate admits the transition on the
+first tick; one the store does not hold is never minted. EXPIRED, not RESOLVED:
+nobody has mapped it for a day, which is not "out", and a new flight brings it
+back ACTIVE. This is not the Cal OES orphan case above: no authority lists these
+fires (CAL FIRE does not, and the rule runs only when CAL FIRE answered), and
+`expire` is this source's own policy, now measured by the perimeter's timestamp
+instead of its listing. Adopted perimeters are untouched; CAL FIRE owns those.
+
 The matching store-side rule (a fire attaching to an area/town place it is
 merely *near*) lives in `store.matchPlaces` — see `internal/store/AGENTS.md`.
 
