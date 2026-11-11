@@ -1115,3 +1115,168 @@ func TestWildfirePoll_UncontainedEndedIncidentClaimsNothing(t *testing.T) {
 	assert.Contains(t, eventIDs(res.Events), "firis:lonely")
 	assert.NotContains(t, res.Superseded, "firis:lonely")
 }
+
+// --- Stale standalone perimeters age out (ageOutStalePerimeters) ---
+//
+// Production, 2026-11-11: firis:summit40y (6 ac, last FIRIS perimeter
+// 2026-11-09T00:00Z) and firis:wallace3 (a WFIGS final perimeter from 11-05)
+// sat ACTIVE/SEVERE at revision 1 for days. The feed still listed both as
+// displayStatus=Active, unchanged, so every tick was hash-equal and the expire
+// grace (anchored to last_seen_at) never started.
+
+// summitPerimT is the reproduced fire's perimeter currency.
+var summitPerimT = time.Date(2026, 11, 9, 0, 0, 33, 0, time.UTC)
+
+// summitFeed is the FIRIS feed holding one mission-named standalone perimeter
+// (no incident_name, as in production) current at dateCurrent.
+func summitFeed(dateCurrent time.Time, box [4]float64) string {
+	return fmt.Sprintf(`{"features":[{
+	  "properties": {"incident_name": null, "mission": "CA-TCU-SUMMIT-40Y", "area_acres": 6.43, "poly_DateCurrent": %d, "source": "FIRIS", "displayStatus": "Active"},
+	  "geometry": {"type": "Polygon", "coordinates": [[[%[2]f,%[3]f],[%[4]f,%[3]f],[%[4]f,%[5]f],[%[2]f,%[5]f],[%[2]f,%[3]f]]]}
+	}]}`, dateCurrent.UnixMilli(), box[0], box[1], box[2], box[3])
+}
+
+var summitBox = [4]float64{-120.36, 38.24, -120.34, 38.26}
+
+// firisGraceConfig is testConfig with the production firis lifecycle tuning.
+func firisGraceConfig() *config.Config {
+	cfg := testConfig()
+	cfg.Grid.Sources = map[string]config.SourceTuning{
+		"calfire": {Disappearance: store.DisappearanceResolve},
+		"firis":   {Disappearance: store.DisappearanceExpire, ExpireAfter: 24 * time.Hour},
+	}
+	return cfg
+}
+
+func newSummitNormalizer(cfg *config.Config, calfireResp, feed string, now time.Time) *WildfireNormalizer {
+	n := NewWildfireNormalizer(cfg,
+		calfire.NewClientWithHTTPDoer("https://calfire.test", &fakeDoer{resp: calfireResp}),
+		firis.NewClientWithHTTPDoer("https://firis.test", &fakeDoer{resp: feed}))
+	n.now = func() time.Time { return now }
+	return n
+}
+
+func storedSummit() *scriptedPrior {
+	return &scriptedPrior{events: []*gridv1.Event{priorWildfireEvent("firis:summit40y", "firis", 38.25, -120.35, true)}}
+}
+
+func TestWildfirePoll_StaleStandalonePerimeterExpires(t *testing.T) {
+	feed := summitFeed(summitPerimT, summitBox)
+
+	// Seen fresh: ACTIVE, carrying the perimeter's own time.
+	n := newSummitNormalizer(firisGraceConfig(), `[]`, feed, summitPerimT.Add(time.Hour))
+	res, err := n.Poll(testCtx(), &scriptedPrior{})
+	require.NoError(t, err)
+	ev := eventByID(t, res.Events, "firis:summit40y")
+	assert.Equal(t, gridv1.EventStatus_ACTIVE, ev.GetStatus())
+	assert.Equal(t, summitPerimT.Truncate(time.Millisecond), ev.GetObservedAt().AsTime())
+	assert.Nil(t, ev.GetExpires())
+
+	// Three days on, the feed is unchanged and the store holds it ACTIVE: it
+	// is emitted EXPIRED, with expires at currency + the firis grace.
+	n = newSummitNormalizer(firisGraceConfig(), `[]`, feed, summitPerimT.Add(72*time.Hour))
+	res, err = n.Poll(testCtx(), storedSummit())
+	require.NoError(t, err)
+	ev = eventByID(t, res.Events, "firis:summit40y")
+	assert.Equal(t, gridv1.EventStatus_EXPIRED, ev.GetStatus())
+	assert.Equal(t, summitPerimT.Truncate(time.Millisecond).Add(24*time.Hour), ev.GetExpires().AsTime())
+	assert.Nil(t, res.PerSource)
+	assert.Empty(t, res.Superseded, "aging out is not supersession")
+
+	// Not held ACTIVE by the store (already expired, or never seen): a stale
+	// perimeter is never minted.
+	res, err = n.Poll(testCtx(), &scriptedPrior{})
+	require.NoError(t, err)
+	assert.Empty(t, res.Events)
+}
+
+// A fire that is still being mapped stays ACTIVE however long it has burned:
+// the clock is the perimeter's latest flight, not first sight.
+func TestWildfirePoll_FreshChangingPerimeterStaysActive(t *testing.T) {
+	cfg := firisGraceConfig()
+	for i, step := range []struct {
+		dateCurrent time.Time
+		box         [4]float64
+	}{
+		{summitPerimT, summitBox},
+		{summitPerimT.Add(20 * time.Hour), [4]float64{-120.37, 38.23, -120.33, 38.27}},
+		{summitPerimT.Add(44 * time.Hour), [4]float64{-120.38, 38.22, -120.32, 38.28}},
+		{summitPerimT.Add(70 * time.Hour), [4]float64{-120.39, 38.21, -120.31, 38.29}},
+	} {
+		n := newSummitNormalizer(cfg, `[]`, summitFeed(step.dateCurrent, step.box), step.dateCurrent.Add(6*time.Hour))
+		res, err := n.Poll(testCtx(), storedSummit())
+		require.NoError(t, err)
+		ev := eventByID(t, res.Events, "firis:summit40y")
+		assert.Equal(t, gridv1.EventStatus_ACTIVE, ev.GetStatus(), "step %d", i)
+		assert.Nil(t, ev.GetExpires(), "step %d", i)
+	}
+
+	// Right at the grace it is still live; one flight late is not an age-out.
+	n := newSummitNormalizer(cfg, `[]`, summitFeed(summitPerimT, summitBox), summitPerimT.Add(24*time.Hour))
+	res, err := n.Poll(testCtx(), storedSummit())
+	require.NoError(t, err)
+	assert.Equal(t, gridv1.EventStatus_ACTIVE, eventByID(t, res.Events, "firis:summit40y").GetStatus())
+}
+
+// Whether a perimeter is a standalone at all depends on CAL FIRE, so nothing
+// ages out while CAL FIRE is down; and an unset grace disables the rule.
+func TestWildfirePoll_StalePerimeterRuleNeedsCalfireAndGrace(t *testing.T) {
+	feed := summitFeed(summitPerimT, summitBox)
+	late := summitPerimT.Add(72 * time.Hour)
+
+	n := NewWildfireNormalizer(firisGraceConfig(),
+		calfire.NewClientWithHTTPDoer("https://calfire.test", &fakeDoer{err: assert.AnError}),
+		firis.NewClientWithHTTPDoer("https://firis.test", &fakeDoer{resp: feed}))
+	n.now = func() time.Time { return late }
+	res, err := n.Poll(testCtx(), storedSummit())
+	require.NoError(t, err)
+	require.Error(t, res.PerSource["calfire"])
+	assert.Equal(t, gridv1.EventStatus_ACTIVE, eventByID(t, res.Events, "firis:summit40y").GetStatus())
+
+	n = newSummitNormalizer(testConfig(), `[]`, feed, late) // no grid.sources tuning
+	res, err = n.Poll(testCtx(), storedSummit())
+	require.NoError(t, err)
+	assert.Equal(t, gridv1.EventStatus_ACTIVE, eventByID(t, res.Events, "firis:summit40y").GetStatus())
+}
+
+// End to end through the scheduler and a real store: the stuck production
+// state (stored ACTIVE at revision 1, feed unchanged) transitions on the
+// first tick that sees it stale, as revision 2, and later ticks write nothing.
+func TestTickAgesOutStoredStalePerimeter(t *testing.T) {
+	ctx := testCtx()
+	st := newSchedStore(t)
+	seedSchedSources(t, st, "calfire", "firis")
+	cfg := firisGraceConfig()
+
+	n := newSummitNormalizer(cfg, `[]`, summitFeed(summitPerimT, summitBox), summitPerimT.Add(time.Hour))
+	clock := summitPerimT.Add(time.Hour)
+	n.now = func() time.Time { return clock }
+	sched := NewScheduler(st, SchedulerConfig{Tuning: cfg.Grid.Sources})
+	ps := &pollerState{}
+	spec := PollerSpec{Normalizer: n, Interval: 5 * time.Minute}
+
+	sched.tick(ctx, spec, ps)
+	ev, err := st.GetEvent(ctx, "firis:summit40y")
+	require.NoError(t, err)
+	require.Equal(t, gridv1.EventStatus_ACTIVE, ev.GetStatus())
+	require.Equal(t, uint32(1), ev.GetRevision())
+
+	// The deploy: a new scheduler (first tick reconciles) three days later.
+	clock = summitPerimT.Add(72 * time.Hour)
+	sched = NewScheduler(st, SchedulerConfig{Tuning: cfg.Grid.Sources})
+	ps = &pollerState{}
+	sched.tick(ctx, spec, ps)
+	ev, err = st.GetEvent(ctx, "firis:summit40y")
+	require.NoError(t, err)
+	assert.Equal(t, gridv1.EventStatus_EXPIRED, ev.GetStatus())
+	assert.Equal(t, uint32(2), ev.GetRevision(), "the age-out is a recorded revision")
+
+	// Subsequent ticks: not re-minted, no new revision.
+	sched.tick(ctx, spec, ps)
+	clock = clock.Add(time.Hour)
+	sched.tick(ctx, spec, ps)
+	ev, err = st.GetEvent(ctx, "firis:summit40y")
+	require.NoError(t, err)
+	assert.Equal(t, gridv1.EventStatus_EXPIRED, ev.GetStatus())
+	assert.Equal(t, uint32(2), ev.GetRevision())
+}

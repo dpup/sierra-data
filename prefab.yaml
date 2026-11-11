@@ -514,7 +514,10 @@ grid:
     firis:
       pollInterval: "5m"
       # Perimeter uploads lag the fire; a perimeter missing from one poll is
-      # not containment. Expire only after a day without reappearing.
+      # not containment. Expire only after a day without reappearing. The same
+      # grace bounds a STANDALONE perimeter's own poly_DateCurrent: one nobody
+      # has re-mapped for a day expires even while the feed still lists it
+      # (internal/ingest/AGENTS.md, ageOutStalePerimeters).
       disappearance: "expire"
       expireAfter: "24h"
     caloes:
