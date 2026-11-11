@@ -1,0 +1,49 @@
+# Local PostgreSQL for the Grid store: `make test` (TEST_DATABASE_URL) and
+# `make run` / `node scripts/dev.mjs data` (PF__GRID__DATABASE__URL).
+#
+#   make db-up     start it (idempotent) and wait until it accepts connections
+#   make db-url    print the dev database URL
+#   make db-down   stop it (the named volume keeps the dev data)
+#
+# The Makefile falls back to an equivalent `docker run` where the compose
+# plugin is missing (the Moat sandbox); keep the two in step.
+#
+# Major version pinned to what production runs (RDS PostgreSQL 18). The
+# cluster is initialised with the C locale so every database compares text
+# bytewise (keyset cursors depend on it; see migrations/0001_baseline.sql).
+# The credentials are local-only throwaways, not a secret.
+#
+# fsync/full_page_writes/synchronous_commit are off: this server holds test
+# databases and a rebuildable dev store, and the test suite creates and drops
+# a database per test. Never copy these settings anywhere that matters.
+name: sierra-data
+services:
+  postgres:
+    image: postgres:18.6-alpine
+    container_name: sierra-data-pg
+    environment:
+      POSTGRES_USER: sierra
+      POSTGRES_PASSWORD: sierra
+      POSTGRES_DB: sierra
+      POSTGRES_INITDB_ARGS: --locale=C --encoding=UTF8
+    command:
+      - postgres
+      - -c
+      - fsync=off
+      - -c
+      - full_page_writes=off
+      - -c
+      - synchronous_commit=off
+      - -c
+      - max_connections=400
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - sierra-data-pg:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U sierra -d sierra"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+volumes:
+  sierra-data-pg:
