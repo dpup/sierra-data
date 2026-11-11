@@ -52,7 +52,9 @@ func (g *GridServer) GetEventTimeline(ctx context.Context, req *gridv1.GetEventT
 	var revs []*gridv1.EventRevision
 	token, truncated := "", false
 	for {
-		page, err := g.svc.Store.EventHistoryPage(ctx, req.GetId(), store.MaxPageSize, token)
+		// Never read past the cap: the last page is cut to fit it.
+		size := min(store.MaxPageSize, timelineRevisionCap-len(revs))
+		page, err := g.svc.Store.EventHistoryPage(ctx, req.GetId(), size, token)
 		if err != nil {
 			return nil, internalErr(ctx, err)
 		}
@@ -144,10 +146,13 @@ func buildTimeline(ev *gridv1.Event, revs []*gridv1.EventRevision, first *gridv1
 		first = ordered[0]
 	}
 	if first != nil {
+		detail := "No revisions since"
+		if n := int(ev.GetRevision()) - 1; n > 0 {
+			detail = plural(n, "revision") + " since"
+		}
 		t.Entries = append(t.Entries, &gridv1.TimelineEntry{
 			At: first.GetIngestedAt(), Kind: gridv1.TimelineKind_TIMELINE_FIRST_RECORDED, Clock: gridv1.TimelineClock_TIMELINE_CLOCK_GRID,
-			Label: "First recorded by the Grid", Revision: 1,
-			Detail: plural(int(ev.GetRevision()), "revision") + " since",
+			Label: "First recorded by the Grid", Revision: 1, Detail: detail,
 		})
 	}
 	for i := 1; i < len(ordered); i++ {

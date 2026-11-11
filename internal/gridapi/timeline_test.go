@@ -56,7 +56,7 @@ func TestTimelineCHPIncident(t *testing.T) {
 	assert.Equal(t, "Log line 2", e[2].GetDetail())
 	assert.Equal(t, gridv1.TimelineClock_TIMELINE_CLOCK_SOURCE, e[2].GetClock(), "at 19:28 the log line precedes the Grid's first record")
 	assert.Equal(t, gridv1.TimelineClock_TIMELINE_CLOCK_GRID, e[3].GetClock())
-	assert.Equal(t, "3 revisions since", e[3].GetDetail())
+	assert.Equal(t, "2 revisions since", e[3].GetDetail(), "revision 1 is the first record itself")
 	last := e[4]
 	assert.Equal(t, gridv1.TimelineKind_TIMELINE_STATUS, last.GetKind())
 	assert.Equal(t, uint32(3), last.GetRevision())

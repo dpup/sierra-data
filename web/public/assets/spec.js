@@ -217,7 +217,7 @@ export const ENDPOINTS = [
     path: '/api/v1/roads/{road}/history',
     blurb: "A monitored road segment's status and travel time over time.",
     detail:
-      'Returns RoadHistory: samples[] of {at, status, congestion, durationMinutes, delayMinutes}, oldest first, one per roads refresh (about 15 minutes). Kept since 2026-11-10. Default window 7 days before to; from/to are RFC 3339. The road_segment layer carries statusSince and typicalMinutes from the same samples.',
+      'Returns RoadHistory: samples[] of {at, status, congestion, durationMinutes, delayMinutes}, oldest first, one per roads refresh (about 15 minutes). Kept 400 days, starting when this endpoint was first deployed; an earlier window returns no samples. Default window 7 days before to; from/to are RFC 3339. The road_segment layer carries statusSince and typicalMinutes from the same samples.',
     params: [['from', 'RFC 3339', 'Window start (inclusive).', '7 days before to'], ['to', 'RFC 3339', 'Window end (exclusive).', 'now']],
     examples: ['/api/v1/roads/hwy4-arnold-bearvalley/history'],
   },

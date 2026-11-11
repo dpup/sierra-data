@@ -907,7 +907,7 @@
     "/api/v1/roads/{road}/history": {
       "get": {
         "summary": "Get one road segment's history.",
-        "description": "A monitored segment's status and travel time at each roads refresh\n(about every 15 minutes), oldest first, over a window: what a \"closed\nsince\" line or a travel-time chart needs. The Grid began keeping these\non 2026-11-10; `coverage` says what it holds. Default window: the 7 days\nbefore `to` (default now); windows over 400 days are clamped.",
+        "description": "A monitored segment's status and travel time at each roads refresh\n(about every 15 minutes), oldest first, over a window: what a \"closed\nsince\" line or a travel-time chart needs. Samples begin when this\nendpoint was first deployed and are kept 400 days, so an early window\nreturns fewer samples, or none, rather than an error. Default window: the\n7 days before `to` (default now); windows over 400 days are clamped.",
         "operationId": "GridService_GetRoadHistory",
         "responses": {
           "200": {
