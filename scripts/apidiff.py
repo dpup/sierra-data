@@ -83,6 +83,9 @@ VOLATILE_BY_PATH = {
     "/sources": {"lastAttemptAt", "lastSuccessAt", "lastError", "status"},
     "/conditions": {"observedAt", "updatedAt", "lastUpdated", "timestamp"},
     "/summary": {"lastAttemptAt", "lastSuccessAt", "lastError"},
+    # When this process computed (and cached) the totals: two processes
+    # compute them at different instants over the same data.
+    "/stats": {"computedAt"},
 }
 
 # Lists the API does not promise an order for, sorted before comparing:
