@@ -80,7 +80,6 @@ type Store struct {
 
 	maxConns, minConns int32
 	schemaVersion      atomic.Int64
-	schemaReady        atomic.Bool
 
 	closeOnce sync.Once
 	closeErr  error
@@ -237,12 +236,16 @@ func Open(url string, opts ...Option) (*Store, error) {
 }
 
 // OpenReader connects to the database at url (a PostgreSQL URL or DSN) as a
-// reader: the pool, the collation check, the schema version check, and the
-// validator watch. It takes no lock and never writes. A database whose schema
-// is older than this build (SchemaReady false) still opens: the writer
-// migrates it, and the watch notices; until then the caller should report
-// itself not ready. The database must use byte-order collation (see the
-// baseline migration); OpenReader refuses one that does not.
+// reader: the pool, the collation check, pending migrations, and the
+// validator watch. It takes no writer lease and writes no data.
+//
+// Every process migrates at boot (migrations package doc): OpenReader runs
+// migrations.Apply under the migration advisory lock before it returns, so a
+// store that opened is always at a schema this build reads. A database
+// already NEWER than this build is accepted as it is (additive-only policy).
+// A migration that fails fails the open. The database must use byte-order
+// collation (see the baseline migration); OpenReader refuses one that does
+// not.
 func OpenReader(url string, opts ...Option) (*Store, error) {
 	s, _, err := openReader(url, opts...)
 	return s, err
@@ -283,38 +286,15 @@ func openReader(url string, opts ...Option) (*Store, openConfig, error) {
 	db := stdlib.OpenDBFromPool(pool)
 	s := &Store{pool: pool, db: db, wildfireBuffer: cfg.wildfireBuffer,
 		townRadius: cfg.townRadius, maxConns: cfg.maxConns, minConns: cfg.minConns}
-	if _, err := s.RefreshSchema(ctx); err != nil && !errors.Is(err, errSchemaBehind) {
+	v, err := migrations.Apply(ctx, db)
+	if err != nil {
 		s.Close()
-		return nil, cfg, err
+		return nil, cfg, fmt.Errorf("store: %w", err)
 	}
+	s.schemaVersion.Store(int64(v))
 	s.startVersionWatch(cfg.versionPoll, cfg.versionListen)
 	return s, cfg, nil
 }
-
-// errSchemaBehind marks RefreshSchema's "older than this build" result.
-var errSchemaBehind = errors.New("store: database schema is older than this build")
-
-// RefreshSchema re-reads the database's schema version. Ready (SchemaReady)
-// once it is at least this build's; an error wrapping errSchemaBehind
-// otherwise.
-func (s *Store) RefreshSchema(ctx context.Context) (int, error) {
-	v, err := migrations.CheckVersion(ctx, s.db)
-	if err != nil {
-		cur, cerr := migrations.Current(ctx, s.db)
-		if cerr != nil || cur >= migrations.Latest() {
-			return 0, fmt.Errorf("store: %w", err)
-		}
-		s.schemaVersion.Store(int64(cur))
-		return cur, fmt.Errorf("%w: %w", errSchemaBehind, err)
-	}
-	s.schemaVersion.Store(int64(v))
-	s.schemaReady.Store(true)
-	return v, nil
-}
-
-// SchemaReady reports whether the database's schema is at least the version
-// this build reads. A reader is ready to serve only then.
-func (s *Store) SchemaReady() bool { return s.schemaReady.Load() }
 
 // checkCollation refuses a database that does not compare text bytewise.
 // Tested by behaviour rather than by name (C, POSIX, C.UTF-8 and the builtin

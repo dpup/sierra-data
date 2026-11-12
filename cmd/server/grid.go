@@ -43,7 +43,7 @@ import (
 // Exit closes the admission gate, drains and closes the store.
 //
 // Writer (at most one process per database, writer.go): Activate starts the
-// campaign for the writer lease; the holder seeds, migrates and runs the
+// campaign for the writer lease; the holder seeds and runs the
 // ingest scheduler, the MeshCore subscriber and push ingest; losing the
 // lease stops all of that and the process campaigns again. Quiesce stops
 // campaigning and releases the lease, and the process keeps serving reads.
@@ -171,9 +171,10 @@ func prepareGrid(ctx context.Context, appConfig *config.Config) (*gridApp, error
 
 // Serve opens the grid store as a reader and starts the production
 // listener: from here every GET route is served, whatever the writer role
-// does. It does not take the lease, write, seed or migrate. A database whose
-// schema is older than this build opens, but /readyz stays 503 until a
-// writer has migrated it. Idempotent.
+// does. It does not take the lease, write or seed. It does migrate: every
+// process applies pending migrations at boot under the migration advisory
+// lock (store.OpenReader; the policy is in internal/store/migrations), so
+// readiness never waits for a writer. Idempotent.
 func (a *gridApp) Serve(ctx context.Context) error {
 	a.mu.Lock()
 	if a.store != nil {
@@ -196,12 +197,8 @@ func (a *gridApp) Serve(ctx context.Context) error {
 	if st, err := gridStore.Settings(ctx); err == nil {
 		logging.Infow(a.ctx, "Grid store opened (reader)",
 			"database", st.Database, "serverVersion", st.ServerVersion,
-			"schemaVersion", st.SchemaVersion, "schemaReady", gridStore.SchemaReady(),
+			"schemaVersion", st.SchemaVersion,
 			"maxConns", st.MaxConns, "minConns", st.MinConns, "duration", time.Since(start))
-	}
-	if !gridStore.SchemaReady() {
-		logging.Warnw(a.ctx, "The database schema is older than this build: not ready until a writer migrates it",
-			"writerEnabled", appConfig.Grid.Writer.IsEnabled())
 	}
 	readCtx, readCancel := context.WithCancel(a.ctx)
 	gate := handoff.NewGate()
@@ -390,12 +387,13 @@ func (a *gridApp) Serve(ctx context.Context) error {
 }
 
 // Ready is the read path's readiness (/readyz, handoff /status.ready): the
-// store is open at a schema this build reads, and the process is not exiting.
+// store is open (which means migrated to at least this build's schema), and
+// the process is not exiting.
 // The writer role does not enter into it: a reader serves.
 func (a *gridApp) Ready() bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.store != nil && a.store.SchemaReady() && !a.exiting
+	return a.store != nil && !a.exiting
 }
 
 func (a *gridApp) serveLivez(w http.ResponseWriter, _ *http.Request) {

@@ -36,7 +36,6 @@ func TestReaderCannotWrite(t *testing.T) {
 	ctx := context.Background()
 	r := newReader(t, storetest.URL(t))
 	assert.False(t, r.HoldsLease())
-	assert.True(t, r.SchemaReady())
 	assert.ErrorIs(t, r.SeedSources(ctx, []SourceSeed{{ID: "usgs", Name: "u", PollInterval: time.Minute}}), ErrNotWriter)
 	assert.ErrorIs(t, r.UpsertPlace(ctx, testPlace("area:x", "x", "X", 1, nil)), ErrNotWriter)
 	_, err := r.UpsertEvent(ctx, testEvent("usgs:q1", 2, 1, "x"))
@@ -217,22 +216,38 @@ func TestLeaseLostWhenBackendTerminated(t *testing.T) {
 	seedSource(t, a, "usgs")
 }
 
-// A reader on a database older than its build opens, reports not ready, and
-// turns ready once a writer has migrated (the watch re-checks).
-func TestReaderTurnsReadyAfterWriterMigrates(t *testing.T) {
+// Every process migrates at boot, without the writer lease: a reader opened
+// on a database an older release left at the baseline (0001 only) brings it
+// to this build's schema, takes no lease and leaves writer_lease's epoch
+// alone; a second reader finds nothing to do.
+func TestReaderMigratesAnOlderSchema(t *testing.T) {
 	ctx := context.Background()
 	url := storetest.EmptyURL(t)
-	r := newReader(t, url, WithVersionPoll(100*time.Millisecond))
-	assert.False(t, r.SchemaReady())
-
-	w := newReader(t, url)
-	_, err := w.AcquireLease(ctx, LeaseOptions{Holder: "w"})
+	setup, err := sql.Open("pgx", url)
 	require.NoError(t, err)
-	assert.True(t, w.SchemaReady())
-	require.Eventually(t, r.SchemaReady, 3*time.Second, 20*time.Millisecond)
-	v, err := migrations.Current(ctx, r.db)
+	defer setup.Close()
+	v, err := migrations.ApplyThrough(ctx, setup, 1)
+	require.NoError(t, err)
+	require.Equal(t, 1, v, "the fixture is the baseline only")
+
+	r := newReader(t, url)
+	assert.False(t, r.HoldsLease())
+	v, err = migrations.Current(ctx, r.db)
 	require.NoError(t, err)
 	assert.Equal(t, migrations.Latest(), v)
+	st, err := r.Settings(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, migrations.Latest(), st.SchemaVersion)
+	w, err := r.WriterLease(ctx)
+	require.NoError(t, err)
+	assert.Zero(t, w.Epoch, "migrating is not taking the lease")
+	assert.Empty(t, w.Holder)
+
+	r2 := newReader(t, url)
+	var applied int
+	require.NoError(t, r2.db.QueryRowContext(ctx,
+		`SELECT count(*) FROM schema_migrations WHERE source = 'postgres'`).Scan(&applied))
+	assert.Equal(t, migrations.Latest(), applied, "each version applied once")
 }
 
 // Validators on a reader are cached and refreshed by NOTIFY (fast path) or

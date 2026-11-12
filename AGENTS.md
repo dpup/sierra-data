@@ -859,9 +859,12 @@ lease** (`internal/store/lease.go`: a session advisory lock plus a
 `writer_lease` epoch that every write transaction checks, so a writer that
 lost its session cannot land a write in its successor's term). Only the
 holder runs the ingest scheduler, the MeshCore subscriber, push-ingest
-buffers, seeding, migrations and cache warming (`cmd/server/writer.go`); it
+buffers, seeding and cache warming (`cmd/server/writer.go`); it
 heartbeats every 2 s, and on a lost lease drops to reader and campaigns
-again. A process started without `--standby` campaigns at boot in the
+again. Schema migrations are not the writer's: every process runs
+them at boot in `OpenReader` under the migration advisory lock, which is
+safe only because migrations stay backwards compatible for the previous
+release's readers and writer (rules in `internal/store/AGENTS.md`). A process started without `--standby` campaigns at boot in the
 background; `grid.writer.enabled: false` makes a reader-only task. Push
 ingest that lands on a reader is forwarded to `writer_lease.address`, or
 answered 503 + `Retry-After` with no live writer. SIGTERM releases the lease,

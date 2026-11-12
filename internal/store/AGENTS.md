@@ -217,14 +217,13 @@ write that bypasses `inTx`: the epoch fence lives there.
   lists bind one array: `= ANY($n)` with a Go slice. `TestNoQuestionMarkPlaceholders`
   fails on a SQLite `?` left in any SQL literal.
 - **Reader and writer (`lease.go`).** `OpenReader` opens the pool, checks
-  collation and the schema version, and takes no lock; a database older than
-  the build opens with `SchemaReady()` false and the version watch re-checks
-  it. `AcquireLease` makes the store the writer: a session
+  collation, applies pending migrations (every process migrates at boot; see
+  "Migration ladder") and takes no lease. `AcquireLease` makes the store the writer: a session
   `pg_try_advisory_lock` on a connection taken with `Acquire` and then
   `Hijack()`ed out of the pool (never a pooled connection, which would carry
   the session lock into unrelated queries), then an epoch bump in
   `writer_lease` (`SELECT ... FOR UPDATE`, then `UPDATE`, recording holder
-  and address), then migrations. A 2 s heartbeat updates `heartbeat_at WHERE
+  and address), then re-applies migrations (a no-op after the open). A 2 s heartbeat updates `heartbeat_at WHERE
   epoch = mine`; an error or zero rows means the lease is lost (`Lease.Lost`,
   `OnLost`). `ReleaseLease` waits for an in-flight write, clears holder and
   address, unlocks. `Open` is `OpenReader` plus `AcquireLease` (waiting
@@ -393,20 +392,33 @@ schema translated, with the changes listed in its header). The runner applies
 each pending version in its own transaction under `pg_advisory_xact_lock`, and
 records it in `schema_migrations (source, version, applied_at)`; `source` is
 `postgres` for these and `sqlite` for the legacy ladder the importer records.
-Only the writer migrates (`AcquireLease`, holding the advisory lock and
-after fencing the previous term). A reader on an older schema waits, not
-ready, until the writer has migrated; a release that adds a migration
-therefore needs the writer role to move to the new build (SIGTERM or `yield`
-the old writer, docs/deploy-handoff.md). Rules:
 
-- **Append-only.** Never edit a shipped file (a deployed database has recorded
-  it and will skip it) — add a new one.
-- **Additive only (expand/contract).** A process accepts a database at a
-  schema version `>=` its own (`migrations.CheckVersion`), so a reader one
-  release behind keeps working while a newer writer migrates. Never drop or
-  rename what the previous release still reads in the same release.
-- A migration that needs a data backfill runs its DML in the same file; DDL is
-  transactional, so a failed migration leaves nothing behind.
+**Every process migrates at boot**, reader or writer: `OpenReader` runs
+`migrations.Apply` before it returns, under the migration advisory lock, not
+the writer lease (the lease holder re-runs it on acquiring, a no-op). So a
+new release's tasks migrate as they start and turn ready without waiting for
+the writer role, while the previous release's readers **and its writer** are
+still running against the database. That is only safe because migrations are
+always backwards compatible. Rules, binding on every new file:
+
+- **Append-only.** Never edit, rename or delete a shipped file (a deployed
+  database has recorded it and will skip it) — add a new one.
+- **Additive only.** New tables, columns, indexes, keys. Never rename or drop
+  a table, column, index, constraint, trigger or function that a released
+  reader or writer uses, and never narrow a type or add a constraint an older
+  writer's rows could violate. Removal is a later release, once no running
+  build uses the thing (expand/contract).
+- **Every new column is nullable or has a DEFAULT.** The old writer does not
+  know the column and must still be able to INSERT rows into the new schema.
+- A backfill runs its DML in the same file; DDL is transactional, so a
+  failed migration leaves nothing behind (and fails that process's boot).
+  Keep it cheap: it runs at boot, under the lock, while the old release serves.
+- A process accepts a database at a version `>=` its own (`Apply` returns
+  the higher version; `migrations.CheckVersion` is the non-migrating check
+  for tools), so an older build keeps serving after a newer one migrated.
+  `TestReaderMigratesAnOlderSchema` (store) and
+  `TestReaderOnlyProcessMigratesAndIsReady` /
+  `TestOlderBuildServesANewerSchema` (cmd/server) pin both directions.
 
 ### The SQLite importer depends on this schema
 
