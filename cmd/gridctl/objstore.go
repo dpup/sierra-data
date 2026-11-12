@@ -69,9 +69,11 @@ func (l location) withSuffix(sfx string) location {
 type s3Store struct{ client *s3.Client }
 
 // Put uploads a file in one PutObject (the snapshot is ~150 MiB; the single
-// request limit is 5 GiB), with a SHA-256 checksum S3 verifies on receipt
-// and bucket-owner-full-control, because the bucket lives in the new
-// account while the snapshot task runs in the old one.
+// request limit is 5 GiB), with a SHA-256 checksum S3 verifies on receipt.
+// It also sends bucket-owner-full-control. The migration bucket now lives in
+// the old account, beside the snapshot task (the Grid organization refuses
+// writes from outside it), so the header is a no-op there; it is kept so an
+// upload into a bucket another account owns still hands that owner the object.
 func (s *s3Store) Put(ctx context.Context, bucket, key, path string) error {
 	fh, err := os.Open(path)
 	if err != nil {

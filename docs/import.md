@@ -121,18 +121,75 @@ Locally: `make gridctl` builds `bin/gridctl`; the image ships `/app/gridctl`.
 The Grid image's entry point is the server, and `run-task` overrides only the
 command, so the one-off tasks use a small task definition of their own:
 same image, `entryPoint: ["/app/gridctl"]`, the command as the arguments.
+ECS Exec is off in both accounts; nothing here needs it (the output is read
+from CloudWatch Logs).
+
+### The migration bucket (old account)
+
+The Grid organization's resource control policy refuses every principal
+outside the organization on Grid-account (083901560296) buckets and ECR, and
+the old project-hub account is outside it. So the bucket lives in the **old**
+account, created by hand in `us-west-2` (the organization's region policy
+treats `us-east-1` as global services only, so a Grid principal may not read
+a bucket there): private, SSE-S3, Object Ownership "bucket owner enforced",
+deleted after the migration is accepted. Its policy lets the Grid account's
+import task role read the snapshots and nothing else:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Sid": "GridImportReadsSnapshots",
+    "Effect": "Allow",
+    "Principal": {"AWS": "arn:aws:iam::083901560296:role/<gridctl task role>"},
+    "Action": "s3:GetObject",
+    "Resource": "arn:aws:s3:::<migration-bucket>/grid-*"
+  }]
+}
+```
+
+The snapshot task writes to its own account's bucket; the
+`bucket-owner-full-control` header gridctl sends is harmless there.
+
+**Fallback** if the Grid account cannot read outside the organization (its
+SCPs, or the S3 gateway endpoint policy, refuse a bucket in another
+account; the import then fails with `AccessDenied`): copy the snapshot and
+its manifest down with the operator's old-account credentials and up into a
+Grid-account bucket with Grid credentials (an in-organization principal),
+database first and manifest last, and import from there.
+`scripts/rehearse_import.py --new-bucket <grid bucket>` does exactly that
+(`transfer` step). The copy passes through the operator's disk: use native
+storage outside the workspace and bind mounts, and delete it after.
 
 ### Snapshot (old account)
 
 The legacy image does not contain `gridctl` (it is built from
-`legacy/efs-sqlite`). Register a one-off task definition in the old account
-that runs the new image (push it to the old account's ECR, or allow the old
-account to pull from the new ECR) with:
+`legacy/efs-sqlite`), and the RCP stops the old account pulling from Grid
+ECR, so push the new Grid image to an old-account ECR repository (a separate
+one, e.g. `sierra-gridctl`, so nothing touches the tags the coordinator
+deploys from `sierra-data`). Register a one-off task definition (family
+`sierra-gridctl-snapshot`) in the old account with:
 
-- the existing EFS volume and access point, mounted **read-only** at `/data`;
-- a task role with `s3:PutObject` (and `s3:PutObjectAcl` if the bucket keeps
-  ACLs enabled) on `arn:aws:s3:::<migration-bucket>/grid-*` only;
-- command `snapshot --db /data/grid.db --out s3://<bucket>/grid-<UTC ts>.db`.
+- that image, `entryPoint ["/app/gridctl"]`, 0.25 vCPU / 512 MiB, default
+  ephemeral storage;
+- the EFS file system **read-only**. For the cutover (the live file) the
+  existing access point (root `/info-ersn`) at `/data` is enough:
+  `--db /data/grid.db`. For a rehearsal from an AWS Backup restore the
+  restored copy lands outside that root (below), so mount the file system
+  root instead: `efsVolumeConfiguration` with `rootDirectory "/"`, no access
+  point, transit encryption on, at `/efs`, and `user "10001:10001"` on the
+  container (the access point normally supplies that identity; the files are
+  owned by 10001);
+- a task role with `s3:PutObject` on `arn:aws:s3:::<migration-bucket>/grid-*`
+  only;
+- awslogs to the existing `sierra-data` log group, stream prefix `gridctl`;
+- network: the `sierra-data` service's public subnets and its security
+  group `info-ersn` (the EFS mount targets admit NFS only from that group);
+  public IP on, as the service has;
+- command `snapshot --db <path> --out s3://<bucket>/grid-<UTC ts>.db`, with
+  `AWS_REGION=us-west-2` (the bucket's region) in the container overrides:
+  gridctl's S3 client takes the task's region and does not follow a
+  cross-region redirect.
 
 `VACUUM INTO` holds a shared lock for the length of the copy. On the
 rollback-journal legacy database the writer's commits wait for it (up to its
@@ -141,28 +198,148 @@ off-peak, or (the cutover) after the writer is stopped. Measured on a
 172 MiB fixture on local disk: 0.4-0.7 s; on EFS expect it to be bounded by
 EFS read throughput (bursting mode: about 100 MiB/s per client is a
 reasonable planning figure, so seconds, not minutes; measure it in the
-rehearsal).
+rehearsal). A snapshot of a restored copy takes no lock anyone waits on.
 
 ### Import (new account)
 
-A one-off task in the new account with:
+A one-off task in the Grid account (family `sierra-gridctl`) with:
 
 - `PF__GRID__DATABASE__URL` from the Grid's database secret (execution role:
   `secretsmanager:GetSecretValue` on it);
-- a task role with `s3:GetObject` on `arn:aws:s3:::<migration-bucket>/grid-*`
-  (and `kms:Decrypt` if the bucket uses a customer-managed key);
-- network: the private subnets and the task security group RDS admits, and
-  the S3 gateway endpoint;
+- a task role with `s3:GetObject` on
+  `arn:aws:s3:::<migration-bucket>/grid-*` (the old account's bucket, which
+  must also grant it, above; or the fallback bucket);
+- network: the private subnets and the gridctl security group RDS admits,
+  and the S3 gateway endpoint (its policy must allow the old account's
+  bucket, or use the fallback);
 - size: 0.5 vCPU / 1 GiB is plenty (the import streams; memory is bounded by
   one row);
 - command `import --from s3://<bucket>/grid-<ts>.db --report /tmp/report.json`.
 
-Run it while **no task holds the writer lease** (`grid.writer.enabled =
-false`, cutover step 1); the import refuses otherwise. Readers may serve during it and see the database
-empty until the commit. Then `verify` (same task definition, command
-`verify --from ...`) reads it back without writing, and must print
-`RESULT: OK` before the writer is enabled. `verify` after the writer has run
-reports differences by design (new revisions, swept events).
+**Order: the writer stays disabled until the import says `RESULT: OK`.**
+The import takes the writer lease and refuses while any server holds it, so:
+
+1. the Grid service runs with `PF__GRID__WRITER__ENABLED=false` (readers
+   only; pushes are answered 503) from its first deploy;
+2. `import` (readers may serve meanwhile and see an empty database until the
+   commit);
+3. `verify` (same task definition, command `verify --from ...`) reads it
+   back without writing and must print `RESULT: OK`;
+4. only then deploy the Grid with the writer enabled.
+
+`verify` after the writer has run reports differences by design (new
+revisions, swept events).
+
+## Rehearsal from an AWS Backup restore (gate 5)
+
+The migration plan (section 8, gate 5) wants two full rehearsals before the
+cutover, on an earlier copy of production: one from scratch, one proving the
+empty check refuses a re-run. Each is one command,
+`scripts/rehearse_import.py` (`make rehearse-import REHEARSE_ARGS=...`),
+which never touches the live `grid.db`: it restores a recovery point and
+snapshots the restored copy.
+
+| step | account | what it does |
+| --- | --- | --- |
+| `restore` | old | AWS Backup item-level restore of `/info-ersn/grid.db` (vault `info-ersn-backups`, latest completed recovery point or `--recovery-point-arn`) into the same EFS file system; waits; the `sierra-efs-admin` task lists `aws-backup-restore_*` and takes the newest |
+| `snapshot` | old | `sierra-gridctl-snapshot` with `snapshot --db /efs/aws-backup-restore_<ts>/info-ersn/grid.db --out s3://<bucket>/grid-rehearsal-<run>.db`; then reads the manifest back (size, SHA-256, quick_check, counts) |
+| `transfer` | both | only with `--new-bucket`: the fallback copy into a Grid-account bucket |
+| `import` | new | checks the Grid service's task definition says `PF__GRID__WRITER__ENABLED=false`, then `sierra-gridctl` with `import --from ... --report /tmp/report.json`; fails unless the task exits 0 and its log says `RESULT: OK` |
+| `verify` | new | the same task with `verify`; `RESULT: OK` required |
+| `refuse` | new | `import` again without `--allow-nonempty`; must fail with "the target database is not empty" |
+| `apidiff` | - | with `--new-base-url`: `scripts/apidiff.py` between `https://data.sierragridteam.org` and a new-stack server on the imported database. Production has moved on since the recovery point, so differences are expected and recorded, not fatal (`--apidiff-strict` makes them fatal); for the strict gate 2, run a legacy build on the same snapshot ("API diff gate" below) |
+| `cleanup` | both | removes the restore directory through `sierra-efs-admin` (or prints the command when `--efs-admin-family ''`) and deletes the snapshot objects; `--keep-restore`, `--keep-snapshot` |
+
+Each task's log is read from its awslogs stream (group and prefix from the
+task definition); the counts, timings and verify outcome go into a Markdown
+report, with a resumable state file beside it, in the workspace's
+`notes/local/` (ignored; the script refuses any other directory under
+`notes/` and the repository). A failure stops the run at that step and the
+report says where.
+
+```
+# look first: every AWS command, nothing run, nothing written
+python3 scripts/rehearse_import.py --dry-run --old-profile <old> --new-profile <grid>
+
+# rehearsal 1, on a freshly created empty database
+make rehearse-import REHEARSE_ARGS="--old-profile <old> --new-profile <grid> \
+  --new-subnets <private subnets> --new-security-groups <gridctl sg> --new-base-url <new-stack url>"
+
+# rehearsal 2, a later recovery point: recreate the database first, or replace in place
+make rehearse-import REHEARSE_ARGS="... --allow-nonempty"
+```
+
+Re-running with the same `--run-id` resumes: finished steps are skipped, the
+restore job is started with the run's idempotency token (and an existing job
+is waited on, not repeated), and an uploaded snapshot is not taken again.
+`--from-step <step>` and `--only a,b` run steps even if they are done; `--skip`
+leaves steps out. Every name is a flag with the defaults above (`--help`);
+the new account's identity is checked against 083901560296 before anything
+runs.
+
+### Before the first rehearsal (by hand)
+
+Old account (project-hub, `us-east-1`):
+
+1. The migration bucket in `us-west-2` and its policy (above).
+2. An ECR repository with the new Grid image (`make ecr-push-grid` with that
+   registry and repository).
+3. Task definition `sierra-gridctl-snapshot` (above), with the file system
+   root mounted read-only at `/efs` and `user "10001:10001"`.
+4. Task definition `sierra-efs-admin`: the same image, `entryPoint
+   ["/bin/sh", "-c"]`, `user "0"`, the file system root mounted
+   **read-write** at `/efs`, no task role, awslogs to `sierra-data` (prefix
+   `efs-admin`). It deletes restore directories, so deregister it after the
+   migration.
+5. The operator's role needs `backup:StartRestoreJob`, `iam:PassRole` on
+   `info-ersn-backup` (the backup role, which already has
+   `AWSBackupServiceRolePolicyForRestores`), `ecs:RunTask`/`DescribeTasks`,
+   `logs:GetLogEvents`, and S3 read and delete on the bucket.
+
+Grid account (`us-west-2`): the `sierra-gridctl` task definition and its
+security group (sierra-infra `grid/compute` and `grid/data`), an empty
+database created `TEMPLATE template0 LC_COLLATE 'C' LC_CTYPE 'C'` owned by
+`grid`, the Grid service (if it exists yet) deployed with the writer
+disabled, and the import task role named in the bucket policy.
+
+### Assumptions to verify on the first run
+
+- **Where the restore lands.** An item-level EFS restore to the same file
+  system is documented to create `aws-backup-restore_<timestamp>/` at the
+  file system root; the tooling assumes the item keeps its path below it
+  (`/aws-backup-restore_<ts>/info-ersn/grid.db`, with a fallback glob for
+  `/aws-backup-restore_<ts>/grid.db`) and that the names sort by time. If
+  the listing finds nothing, look on the file system and pass
+  `--restored-path`.
+- **The access point root.** The services' access point is rooted at
+  `/info-ersn` and cannot see `/aws-backup-restore_*`, hence the
+  file-system-root volume in the two old task definitions. That works only
+  if no file system policy requires an access point or IAM authorization
+  (project-hub sets none) and if root is not squashed for the admin task.
+- **Ownership.** Restored files are expected to keep uid 10001; the snapshot
+  task runs as 10001 to read them.
+- **Log groups.** Read from each task definition's awslogs options
+  (`--old-log-group`/`--new-log-group` override); the stream is
+  `<prefix>/<container>/<task id>`.
+- **Region override.** `AWS_REGION` in the container overrides is assumed to
+  win over the value ECS injects for Fargate tasks; if the upload fails with
+  a redirect (`PermanentRedirect`/301), gridctl needs an explicit S3 region.
+- **Torn copies.** AWS Backup copies a live file without SQLite's lock, and
+  only `grid.db` is restored (no journal). `quick_check` (in `snapshot`)
+  and the full import verification catch most damage; if either fails, use
+  the next recovery point.
+- **Names in the new account** (`sierra-grid` cluster and service,
+  `sierra-gridctl`) follow the sierra-infra plan and do not exist yet.
+
+### Decisions for review
+
+| decision | options | choice | why |
+| --- | --- | --- | --- |
+| How the script drives AWS | boto3; AWS CLI v2 through `subprocess` | AWS CLI, Python stdlib only | the precedent of `scripts/deploy.py` (and its stubbed-subprocess tests); no new dependency or virtualenv; `--dry-run` prints the exact commands an operator could run by hand |
+| Where the restore goes | the same EFS file system; a new file system per rehearsal | the same file system | cheapest and fastest: no new file system, mount targets or security group rules, and the restore directory is deleted at the end. The cost is a second copy of the system of record beside the live one for the length of the run and a root-mounted admin task; a fresh file system would isolate it (and could be deleted whole) but needs mount targets in the task subnets and its own access point |
+| Finding the restored path | guess from the restore job; list it from a task | list it from a one-off task (`sierra-efs-admin`) | the restore job reports only the file system, not the directory; the same task also deletes it afterwards. Without that task, `--restored-path` and printed cleanup instructions |
+| Where the report goes | notes/; notes/local/; the repository | the workspace's `notes/local/` (ignored) | the working agreement keeps rehearsal reports there: they carry the hashes and counts of the production store |
+| API diff target | production; a legacy build on the snapshot | production, informational | no extra legacy deployment for a rehearsal; the strict comparison stays the gate 2 run below |
 
 ## If it fails
 
