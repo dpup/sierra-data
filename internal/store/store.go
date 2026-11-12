@@ -21,6 +21,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -109,6 +110,7 @@ type openConfig struct {
 	onLockLost     func(error)
 	versionPoll    time.Duration
 	versionListen  bool
+	dialFunc       func(ctx context.Context, network, addr string) (net.Conn, error)
 }
 
 // Pool defaults. A low-traffic read-mostly API: a handful of connections
@@ -216,6 +218,13 @@ func WithoutVersionListen() Option {
 	return func(c *openConfig) { c.versionListen = false }
 }
 
+// WithDialFunc replaces how the pool dials PostgreSQL. Measurement only: the
+// scale tests wrap the connection to count round trips and to add a network
+// round-trip time (internal/store/scale_test.go). Production never sets it.
+func WithDialFunc(fn func(ctx context.Context, network, addr string) (net.Conn, error)) Option {
+	return func(c *openConfig) { c.dialFunc = fn }
+}
+
 // Open opens the store and takes the writer lease, waiting up to the lock
 // timeout: OpenReader plus AcquireLease. It is the one-process path (tools,
 // tests); the server opens a reader and campaigns separately (cmd/server).
@@ -273,6 +282,9 @@ func openReader(url string, opts ...Option) (*Store, openConfig, error) {
 	pcfg, err := pgxpool.ParseConfig(url)
 	if err != nil {
 		return nil, cfg, fmt.Errorf("store: parsing database URL: %w", err)
+	}
+	if cfg.dialFunc != nil {
+		pcfg.ConnConfig.DialFunc = cfg.dialFunc
 	}
 	pcfg.MaxConns = cfg.maxConns
 	pcfg.MinConns = cfg.minConns
