@@ -49,6 +49,10 @@ class NormalizeTests(unittest.TestCase):
         event = {"status": "ACTIVE"}
         self.assertEqual(apidiff.normalize(event, "/events/x"), event, "an event's status is data")
 
+    def test_stats_computation_time_is_ignored(self):
+        doc = {"events": 3, "computedAt": "2026-11-12T00:00:00Z"}
+        self.assertEqual(apidiff.normalize(doc, "/stats"), {"events": 3})
+
     def test_unordered_lists_are_sorted(self):
         a = {"sources": [{"id": "usgs"}, {"id": "chp"}]}
         b = {"sources": [{"id": "chp"}, {"id": "usgs"}]}
