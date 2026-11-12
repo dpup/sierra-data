@@ -111,6 +111,7 @@ type openConfig struct {
 	versionPoll    time.Duration
 	versionListen  bool
 	dialFunc       func(ctx context.Context, network, addr string) (net.Conn, error)
+	tracer         pgx.QueryTracer
 }
 
 // Pool defaults. A low-traffic read-mostly API: a handful of connections
@@ -225,6 +226,14 @@ func WithDialFunc(fn func(ctx context.Context, network, addr string) (net.Conn, 
 	return func(c *openConfig) { c.dialFunc = fn }
 }
 
+// WithQueryTracer observes every statement the pool runs. Measurement only:
+// the plan tests capture the SQL and arguments the hot store calls really
+// issue and EXPLAIN them (internal/store/plans_test.go), so they cannot drift
+// from the statements built here. Production never sets it.
+func WithQueryTracer(t pgx.QueryTracer) Option {
+	return func(c *openConfig) { c.tracer = t }
+}
+
 // Open opens the store and takes the writer lease, waiting up to the lock
 // timeout: OpenReader plus AcquireLease. It is the one-process path (tools,
 // tests); the server opens a reader and campaigns separately (cmd/server).
@@ -285,6 +294,9 @@ func openReader(url string, opts ...Option) (*Store, openConfig, error) {
 	}
 	if cfg.dialFunc != nil {
 		pcfg.ConnConfig.DialFunc = cfg.dialFunc
+	}
+	if cfg.tracer != nil {
+		pcfg.ConnConfig.Tracer = cfg.tracer
 	}
 	pcfg.MaxConns = cfg.maxConns
 	pcfg.MinConns = cfg.minConns
