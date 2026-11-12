@@ -285,8 +285,9 @@ write that bypasses `inTx`: the epoch fence lives there.
   per-row loop's later rows saw its earlier rows (telemetry's skip rules), the
   batch must reproduce that in Go, and `TestMeshTelemetryBatchMatchesSequentialReference`
   holds the old loop as a reference. `UpsertEvent` is still one transaction per
-  event (measured round trips: 6 when hash-equal and unchanged, 9 for a
-  telemetry refresh or a new revision); a
+  event (measured round trips: 4 when hash-equal and unchanged, 7 for a
+  telemetry refresh, 9 for a new revision; the hash-equal lookup carries the
+  stored blob and place set, `TestUpsertEventHashEqualStatementCount`); a
   set-based `UpsertEvents` was not built, see the P5 note.
 - **Connection budget.** A server process holds `maxConns` pooled connections
   (default 8; `grid.database.maxConns`, `PF__GRID__DATABASE__MAX_CONNS`), plus
