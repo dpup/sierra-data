@@ -1,9 +1,11 @@
--- import_log: one row per committed SQLite import (gridctl import).
+-- Grid store schema version 3: import_log, one row per committed SQLite
+-- import (gridctl import, internal/sqliteimport).
 --
--- Created by the importer inside its own transaction, so a failed import
--- leaves no trace. Written to become migration 0003_import_log.sql verbatim
--- once the writer lease's 0002 has landed; IF NOT EXISTS keeps a database
--- that an importer already created it in valid under the migration.
+-- The table is empty on every database that was not imported into; the
+-- importer writes its row in the same transaction as the data, so a failed
+-- import leaves no row. IF NOT EXISTS because rehearsal databases imported
+-- before this migration existed (the importer then created the table itself,
+-- with this exact definition) must still migrate.
 CREATE TABLE IF NOT EXISTS import_log (
   id                    bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   source                text NOT NULL,         -- path or s3:// URL as given
