@@ -1,4 +1,169 @@
-# Deploys: readers, the writer lease, and the control API
+# Deploys: the Grid account, readers, and the writer lease
+
+`main` (the PostgreSQL stack) deploys to the Grid account (sierra-infra
+`grid/*`, us-west-2) and nowhere else. The Grid and the mesh relay are two
+ECS Fargate services in one cluster, each with its own image, task
+definition and ECR repository. Terraform (sierra-infra `grid/compute`) owns
+the services, the task definitions' content and the deployment settings;
+this repository's deploy only swaps images. The first half of this page is
+how a deploy runs; the second half is what the Grid does during one
+(readers, the writer lease, migrations, health, SIGTERM).
+
+The legacy stack (SQLite on EFS, the coordinator, the old account) is
+frozen on `legacy/efs-sqlite` and deploys only from a checkout of that
+branch (last section).
+
+## How a deploy flows
+
+1. **CI on main.** A push to `main` runs `CI` (`.github/workflows/ci.yml`:
+   `make test` against PostgreSQL, `go vet`, the script tests).
+2. **The Deploy workflow** (`.github/workflows/deploy.yml`) starts when CI
+   succeeds on a push to this repository's `main` (`workflow_run`), or by
+   hand (`make deploy`, below). Its `preflight` job resolves the commit and
+   refuses anything not reachable from `origin/main`; a manual run also
+   needs a successful CI push run for that commit.
+3. **Approval.** The `deploy` job runs in the GitHub Environment
+   `production`, which has a required reviewer and allows only `main`. Once
+   approved it gets the deploy role through GitHub OIDC (no AWS keys) and
+   runs `scripts/deploy.py release`. Tooling comes from main's tip; the
+   images are built from a second checkout of the commit being deployed.
+4. **Images.** For each of `grid` and `relay` the workflow computes a
+   *content key*: its binaries built reproducibly (`-trimpath`, no VCS
+   stamp, no build id) for the task definition's architecture, plus the files
+   the Dockerfile copies in and the Dockerfile itself. When ECR already has
+   an image tagged `content-<key>` it is reused; otherwise the Dockerfile
+   target is built and pushed. Either way the image is tagged with the
+   **full commit SHA**, the **git tag** when the commit has one, and the
+   content key. ECR tags are immutable.
+5. **Revision.** It takes the family's latest ACTIVE task-definition
+   revision (so a revision Terraform registered is picked up), replaces only
+   the matching container's image with `<repository>@<digest>`, and
+   registers it. Environment, secrets, CPU, memory, roles and everything
+   else stay as Terraform wrote them.
+6. **UpdateService** with that revision, then it follows the ECS service
+   deployment (`describe-service-deployments`): blue/green lifecycle stages,
+   the bake time, and ECS's automatic rollback on failed health or alarms.
+   It prints the deployment ARN, the command that rolls the running
+   deployment back, and on success the command that restores the revision
+   that ran before. A rollback by ECS fails the run.
+
+A service whose image and revision are both unchanged is not redeployed, so
+a docs-only commit deploys nothing and a relay-only change leaves the Grid
+alone. The Grid deploys first; if it fails, the relay is not touched. One
+deploy runs at a time (`concurrency: deploy-production`), never cancelled
+half way.
+
+During the bake both task sets serve reads; the writer lease moves when the
+old set gets SIGTERM (about half a second, rehearsed), and the new tasks
+have already applied any migration at boot. No coordinator, no yield step.
+
+### Repository variables
+
+Repository variables (or variables on the `production` environment), all
+required; `scripts/deploy.py check-config` refuses to go on while one is
+unset or malformed. Automatic runs are skipped until `DEPLOY_ROLE_ARN` is
+set, so the workflow is inert before the infrastructure exists.
+
+| Variable | What |
+|---|---|
+| `DEPLOY_ROLE_ARN` | The sierra-data deploy role in the Grid account (sierra-infra `grid/deploy`) |
+| `DEPLOY_AWS_REGION` | `us-west-2` |
+| `DEPLOY_ECS_CLUSTER` | Cluster holding both services |
+| `DEPLOY_GRID_SERVICE` | The Grid ECS service |
+| `DEPLOY_GRID_TASK_FAMILY` | Its task-definition family (the service must run a revision of it) |
+| `DEPLOY_GRID_ECR_REPOSITORY` | ECR repository name for the `grid` image |
+| `DEPLOY_RELAY_SERVICE` | The relay ECS service |
+| `DEPLOY_RELAY_TASK_FAMILY` | Its task-definition family |
+| `DEPLOY_RELAY_ECR_REPOSITORY` | ECR repository name for the `relay` image |
+
+The container whose image is replaced is the one already using the
+service's repository, or else the one named `grid` / `relay`.
+
+The runner is `ubuntu-24.04` (x86_64) and the workflow refuses to build for
+another architecture: the Dockerfile cross-compiles Go but its runtime
+stages run `apk`, which would need emulation. An ARM64 task definition needs
+the runner changed to `ubuntu-24.04-arm` first.
+
+### What Terraform must set
+
+- On each `aws_ecs_service`: `lifecycle { ignore_changes = [task_definition] }`,
+  so an apply never reverts the image a deploy rolled out. Leave
+  `desired_count` managed (no autoscaling yet).
+- On each `aws_ecs_task_definition`: nothing ignored, and
+  `skip_destroy = true` so earlier revisions stay usable for a rollback. A
+  Terraform change (an env var, CPU, a secret) registers a new revision
+  that is *not* deployed until the next Deploy run, which builds on it.
+  To roll it out alone: `make deploy` (same image, new revision). The
+  image Terraform writes into the container definition is only a
+  placeholder for the first revision: every deploy replaces it.
+- The Grid service: deployment controller `ECS`, strategy `BLUE_GREEN`, a
+  bake time, the circuit breaker with rollback, and the ALB alternate
+  target group, production listener rule and infrastructure role that
+  blue/green needs; target group health check `/readyz`. The relay: rolling,
+  desired 1, minimum healthy 0 while it keeps a single SQLite file.
+
+### Deploying by hand
+
+```bash
+make deploy                 # HEAD: must be main, pushed, equal to origin/main, clean, CI green
+make deploy REF=v1.4.0      # an earlier tag (or commit) on main; the checkout does not matter
+make deploy-status          # recent Deploy runs
+```
+
+`make deploy` needs `gh` logged in, not AWS credentials. It runs the same
+guards as the legacy client (`branch_drift`: the right branch, not detached,
+HEAD fetched and equal to origin; `dirty_files`: no uncommitted tracked
+changes, `ALLOW_DIRTY=1` overrides) and checks that CI passed, then runs
+`gh workflow run deploy.yml --ref main` and follows the run with
+`gh run watch`; the exit code is the run's. Approve the `deploy` job in the
+`production` environment when asked.
+
+### Redeploying a previous release (rollback)
+
+- **While a deployment runs**, the workflow log has the command:
+  `aws ecs stop-service-deployment --service-deployment-arn <arn> --stop-type ROLLBACK`.
+  ECS also rolls back on its own when the new tasks fail health or the
+  configured alarms during the bake.
+- **After it finished**, either `make deploy REF=<previous tag or commit>`
+  (reuses the image already in ECR, registers a revision on today's
+  Terraform settings) or the printed
+  `aws ecs update-service --cluster <c> --service <s> --task-definition <previous revision>`
+  (restores the exact previous revision, settings included).
+
+Rolling the Grid back across a migration is safe: an older build accepts a
+newer schema (migrations are additive; see Migrations below).
+
+### First deploy (writer disabled)
+
+Per the cutover plan the Grid starts in the new account as readers only,
+before the SQLite import has run:
+
+1. Terraform creates the services with `PF__GRID__WRITER__ENABLED=false`
+   in the Grid task definition. A Grid image must already be in ECR: push
+   one with `make deploy PUSH_ONLY=1` (the workflow's `push_only` input:
+   build, push and tag, no ECS calls) once the deploy role exists, or by
+   hand with `make ecr-push-grid` / `ecr-push-relay` and the operator's
+   credentials. Point Terraform's first revision at that image.
+2. Set the repository variables; the next push to main (or `make deploy`)
+   deploys normally. With the writer disabled no task campaigns for the
+   lease: no ingest, no MQTT, no upstream spend, pushes answered 503.
+3. After `gridctl import` (docs/import.md), Terraform sets
+   `PF__GRID__WRITER__ENABLED=true`, which registers a new revision; run
+   `make deploy` to roll it out (same image, blue/green). One task takes the
+   lease and starts ingest.
+
+## The legacy stack
+
+The SQLite-on-EFS stack in the old account keeps its own deploy client,
+coordinator and `make ecs-deploy`, all on `legacy/efs-sqlite`. Deploy it
+from the canonical checkout of that branch (`repos/sierra-data` in the
+workspace) with `make ecs-deploy`; its guards refuse any other branch, a
+detached HEAD, a commit origin does not have and a dirty tree. On `main`,
+`make ecs-deploy`, `ecs-status` and `ecs-rollback` refuse and say where to
+go. A hotfix for the old stack goes to the legacy branch first and is
+forward-ported to main (`AGENTS.md`, "Branches and the legacy stack").
+
+# What the Grid does during a deploy
 
 The Grid (`sierra-server`) runs as one or more identical processes on one
 PostgreSQL database. **Every process serves every read from boot.** At most
@@ -13,14 +178,10 @@ yield.
 
 This replaces the standby/quiesce/activate handoff the legacy stack needed
 because only the database owner could serve. That handoff still exists (the
-Grid remaps it onto the roles, below) so a coordinator can drive the Grid if
-migration route B is taken; the native path needs none of it. The mesh relay
+Grid remaps it onto the roles, below) so a coordinator could drive the Grid;
+the native ECS path needs none of it. The mesh relay
 (`cmd/mesh-relay`) keeps the old handoff unchanged: it stays one process on
 its own SQLite file until it moves (migration plan R4).
-
-The legacy stack (SQLite on EFS, the coordinator) is frozen on
-`legacy/efs-sqlite`; deploy it only from a checkout of that branch with
-`make ecs-deploy` (see the top-level `AGENTS.md`).
 
 Code: `internal/store/lease.go` (the lease and fencing),
 `cmd/server/grid.go` (the reader: `Serve`, `Exit`), `cmd/server/writer.go`
