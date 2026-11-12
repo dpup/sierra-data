@@ -21,6 +21,19 @@ longer exist: `/api/v1` originally hosted a different hand-built REST surface,
 replaced by a snake_case `/v1` surface on 2026-07-05, which was folded back onto
 the proto-defined `/api/v1` gateway on 2026-07-09.
 
+## 2026-11-12 (later still)
+
+### A retired weather alert names the alert that replaced it
+
+`WeatherAlertDetail` has a new optional field, `replacedByEventId`: the event id
+of the alert that replaced this one (for example `wx:urn:oid:...`). It mirrors
+NWS's own `replacedBy` and the CAP `references` of the newer message. It is set
+only when the alert was retired (`status` `RESOLVED`) because a newer alert in
+the feed referenced it, and it appears on the revision that retires the alert and
+every later one. It is empty on every other alert, including one NWS cancelled
+or that simply lapsed. Additive; no client change needed. Clients that merge a
+superseded alert into its successor's card can follow the id.
+
 ## 2026-11-12 (later)
 
 ### The explorer pages leave data.sierragridteam.org; `/` is a page for API consumers

@@ -126,7 +126,7 @@ func (n *WeatherAlertNormalizer) Poll(ctx context.Context, prior Prior) (*PollRe
 		// an all-clear for the alerts it references, not a hazard of its own.
 		// (/alerts/active does not list Cancel messages today; this is a
 		// guard, not a path production exercises.)
-		if referenced[services.NWSAlertID(a)] || strings.EqualFold(a.MessageType, "Cancel") {
+		if len(referenced[services.NWSAlertID(a)]) > 0 || strings.EqualFold(a.MessageType, "Cancel") {
 			continue
 		}
 		// An NWS watch is SCHEDULED until it takes effect (decision 8). The
@@ -188,21 +188,22 @@ func (n *WeatherAlertNormalizer) Poll(ctx context.Context, prior Prior) (*PollRe
 	// Only from a clean fetch: a stale-served list proves nothing about
 	// what is still current, and the scheduler would not act on it anyway.
 	if perSource == nil {
-		res.Superseded = n.replacedHeld(ctx, prior, referenced, events, now)
+		res.Superseded, res.ReplacedBy = n.replacedHeld(ctx, prior, referenced, events, now)
 	}
 	return res, nil
 }
 
-// referencedAlerts is the set of alert ids that some alert in the list names
-// in its CAP references. Every listed message's references count, so a chain
-// whose links are all in the list is covered without walking it.
-func referencedAlerts(alerts []nws.Alert) map[string]bool {
-	out := make(map[string]bool)
+// referencedAlerts maps each alert id that some alert in the list names in its
+// CAP references to the ids of the listed alerts that name it, in list order.
+// Every listed message's references count, so a chain whose links are all in
+// the list is covered without walking it.
+func referencedAlerts(alerts []nws.Alert) map[string][]string {
+	out := make(map[string][]string)
 	for _, a := range alerts {
 		self := services.NWSAlertID(a)
 		for _, ref := range a.References {
 			if ref != self {
-				out[ref] = true
+				out[ref] = append(out[ref], self)
 			}
 		}
 	}
@@ -234,16 +235,18 @@ func referencedAlerts(alerts []nws.Alert) map[string]bool {
 // so, while here the issuing office has said it. A Cancel ends the hazard;
 // an Update ends THIS message, and the hazard continues on the replacing
 // alert, which is its own ACTIVE/SCHEDULED event. That is the Superseded
-// contract the wildfire adoption already uses. Event ids are unchanged; the
-// event carries no field that could point at its replacement, so the link
-// is left to a follow-up (ListRelatedEvents or a detail field).
+// contract the wildfire adoption already uses. Event ids are unchanged. The
+// second result maps a retired id to the Grid event id of the alert that
+// replaced it (WeatherAlertDetail.replaced_by_event_id), for the ids whose
+// replacement is itself an event in this poll: a Cancel is not emitted, so a
+// cancelled alert gets no pointer.
 //
 // Ids we do not hold are ignored, which also ignores alerts in zones we do
 // not track: we only ever hold alerts from our zones' feed.
-func (n *WeatherAlertNormalizer) replacedHeld(ctx context.Context, prior Prior, referenced map[string]bool, events []*gridv1.Event, now time.Time) []string {
+func (n *WeatherAlertNormalizer) replacedHeld(ctx context.Context, prior Prior, referenced map[string][]string, events []*gridv1.Event, now time.Time) ([]string, map[string]string) {
 	held := priorForSource(prior, "nws")
 	if len(held) == 0 {
-		return nil
+		return nil, nil
 	}
 	listed := make(map[string]bool, len(events))
 	for _, ev := range events {
@@ -257,12 +260,19 @@ func (n *WeatherAlertNormalizer) replacedHeld(ctx context.Context, prior Prior, 
 	}
 	stillHeld := make(map[string]bool, len(held))
 	var out []string
+	replacedBy := map[string]string{}
 	lookups := 0
 	for _, ev := range held {
 		id := strings.TrimPrefix(ev.GetId(), "wx:")
 		stillHeld[id] = true
-		if referenced[id] {
+		if refs := referenced[id]; len(refs) > 0 {
 			out = append(out, ev.GetId())
+			for _, r := range refs {
+				if listed["wx:"+r] {
+					replacedBy[ev.GetId()] = "wx:" + r
+					break
+				}
+			}
 			continue
 		}
 		// Still listed means still current; a synthesized id (no NWS id) has
@@ -289,13 +299,16 @@ func (n *WeatherAlertNormalizer) replacedHeld(ctx context.Context, prior Prior, 
 		}
 		logging.Infow(ctx, "Weather alert: NWS replaced a held alert", "id", ev.GetId(), "replacedBy", by)
 		out = append(out, ev.GetId())
+		if listed["wx:"+by] {
+			replacedBy[ev.GetId()] = "wx:" + by
+		}
 	}
 	for id := range n.notReplaced {
 		if !stillHeld[id] {
 			delete(n.notReplaced, id)
 		}
 	}
-	return out
+	return out, replacedBy
 }
 
 // attachArea sets the alert's geometry to its zones' area. Geometry is

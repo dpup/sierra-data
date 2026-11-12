@@ -771,6 +771,12 @@ message WeatherAlertDetail {
   string area_desc = 7;
   // NWS forecast zone codes the alert covers, e.g. "CAZ138".
   repeated string zones = 8 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "[\"CAZ137\", \"CAZ138\", \"CAZ139\"]"}];
+  // Grid event id of the alert that replaced this one, e.g. "wx:urn:oid:...".
+  // Mirrors NWS's own `replacedBy` / the CAP `references` of the newer message.
+  // Set only when this alert was retired (status RESOLVED) because a newer
+  // alert referenced it, and from that revision on; empty otherwise, including
+  // for an alert that was cancelled or simply lapsed.
+  string replaced_by_event_id = 9 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"wx:urn:oid:2.49.0.1.840.0.5d3f8b0a\""}];
 }
 
 // FireWeatherDetail is never populated on an event. Fire weather is a condition,

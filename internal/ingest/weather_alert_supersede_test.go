@@ -118,8 +118,10 @@ func TestWeatherAlertPoll_UpdateRetiresHeldPredecessor(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, []string{"wx:" + wswOldID}, res.Superseded)
+	assert.Equal(t, map[string]string{"wx:" + wswOldID: "wx:" + wswNewID}, res.ReplacedBy, "the retired alert points at its replacement")
 	require.Len(t, res.Events, 1)
 	assert.Equal(t, "wx:"+wswNewID, res.Events[0].Id, "the replacement keeps its own id and continues")
+	assert.Empty(t, res.Events[0].GetWeatherAlert().GetReplacedByEventId(), "the replacement itself points at nothing")
 	assert.Equal(t, gridv1.EventStatus_SCHEDULED, res.Events[0].Status)
 	assert.Empty(t, api.lookups, "a reference in the feed is evidence enough; no lookup")
 }
@@ -148,6 +150,7 @@ func TestWeatherAlertPoll_CancelRetiresHeldAlert(t *testing.T) {
 	res, err := newWSWNormalizer(api).Poll(testCtx(), &fakePrior{events: []*gridv1.Event{held, other}})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"wx:" + svrRefB}, res.Superseded, "only the held, referenced alert; svrRefA is not held")
+	assert.Empty(t, res.ReplacedBy, "a Cancel is not an event, so there is nothing to point at")
 	require.Len(t, res.Events, 1, "the Cancel message itself is not emitted")
 	assert.Equal(t, "wx:urn:oid:2.49.0.1.840.0.unrelated", res.Events[0].Id)
 }
@@ -166,6 +169,7 @@ func TestWeatherAlertPoll_AbsentHeldAlertReplacedByLookup(t *testing.T) {
 	res, err := n.Poll(testCtx(), prior)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"wx:" + wswOldID}, res.Superseded)
+	assert.Empty(t, res.ReplacedBy, "the replacement is not in this poll, so there is no event to name")
 	assert.ElementsMatch(t, []string{wswOldID, "urn:oid:2.49.0.1.840.0.lapsed"}, api.lookups)
 
 	// The lapsed alert NWS did not replace keeps its grace and is not asked
@@ -277,11 +281,17 @@ func TestTickRetiresNWSAlertReplacedByUpdate(t *testing.T) {
 	oldEv, err = st.GetEvent(ctx, "wx:"+wswOldID)
 	require.NoError(t, err)
 	assert.Equal(t, gridv1.EventStatus_RESOLVED, oldEv.GetStatus())
-	assert.Equal(t, oldRev+1, oldEv.GetRevision(), "the retirement is a recorded revision")
+	assert.Equal(t, oldRev+1, oldEv.GetRevision(), "the retirement, with its replacement pointer, is ONE recorded revision")
+	assert.Equal(t, "wx:"+wswNewID, oldEv.GetWeatherAlert().GetReplacedByEventId())
+	assert.Equal(t, "Winter Storm Watch", oldEv.GetCategory(), "the rest of the event is untouched")
+	rev, err := st.EventRevisionAt(ctx, "wx:"+wswOldID, oldEv.GetRevision())
+	require.NoError(t, err)
+	assert.Equal(t, "wx:"+wswNewID, rev.GetEvent().GetWeatherAlert().GetReplacedByEventId(), "the pointer is in the revision history too")
 	newEv, err := st.GetEvent(ctx, "wx:"+wswNewID)
 	require.NoError(t, err)
 	assert.Equal(t, gridv1.EventStatus_SCHEDULED, newEv.GetStatus())
 	assert.Equal(t, uint32(1), newEv.GetRevision())
+	assert.Empty(t, newEv.GetWeatherAlert().GetReplacedByEventId())
 	active, err := st.ActiveEventsBySource(ctx, "nws")
 	require.NoError(t, err)
 	require.Len(t, active, 1)

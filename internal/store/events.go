@@ -245,6 +245,16 @@ func (s *Store) UpsertEvent(ctx context.Context, ev *gridv1.Event) (UpsertResult
 // idempotent. observedAt is when the transition was observed (e.g. the poll
 // that noticed the disappearance).
 func (s *Store) TransitionEvents(ctx context.Context, ids []string, to gridv1.EventStatus, observedAt time.Time) error {
+	return s.TransitionEventsAmending(ctx, ids, to, observedAt, nil)
+}
+
+// TransitionEventsAmending is TransitionEvents that also lets the caller amend
+// each event it is about to transition, in the same revision: amend runs on the
+// decoded event before the status change is written, and only for events that
+// actually change status, so the amendment costs no extra revision. It must
+// only touch content the caller owns (the scheduler uses it to record which
+// alert replaced a retired one); amend may be nil.
+func (s *Store) TransitionEventsAmending(ctx context.Context, ids []string, to gridv1.EventStatus, observedAt time.Time, amend func(*gridv1.Event)) error {
 	if len(ids) == 0 {
 		return nil
 	}
@@ -259,7 +269,7 @@ func (s *Store) TransitionEvents(ctx context.Context, ids []string, to gridv1.Ev
 	}
 	return s.inTx(ctx, func(tx *sql.Tx) error {
 		for start := 0; start < len(uniq); start += transitionChunk {
-			if err := transitionChunkTx(ctx, tx, uniq[start:min(start+transitionChunk, len(uniq))], to, observedAt); err != nil {
+			if err := transitionChunkTx(ctx, tx, uniq[start:min(start+transitionChunk, len(uniq))], to, observedAt, amend); err != nil {
 				return err
 			}
 		}
@@ -278,7 +288,7 @@ const transitionChunk = 100
 // per event. Events already in the target status, and unknown ids, are left
 // out of every write. The rows written are what the per-event loop wrote,
 // with one ingested_at stamp for the chunk.
-func transitionChunkTx(ctx context.Context, tx *sql.Tx, ids []string, to gridv1.EventStatus, observedAt time.Time) error {
+func transitionChunkTx(ctx context.Context, tx *sql.Tx, ids []string, to gridv1.EventStatus, observedAt time.Time, amend func(*gridv1.Event)) error {
 	rows, err := tx.QueryContext(ctx, `SELECT id, proto FROM events WHERE id = ANY($1)`, ids)
 	if err != nil {
 		return fmt.Errorf("store: transition lookup: %w", err)
@@ -319,6 +329,9 @@ func transitionChunkTx(ctx context.Context, tx *sql.Tx, ids []string, to gridv1.
 			continue
 		}
 		ev.Status = to
+		if amend != nil {
+			amend(ev)
+		}
 		ev.ObservedAt = timestamppb.New(observedAt)
 		ev.IngestedAt = timestamppb.New(now)
 		ev.Revision++

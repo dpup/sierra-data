@@ -667,7 +667,7 @@ func (s *Scheduler) tick(ctx context.Context, spec PollerSpec, st *pollerState) 
 		// Supersession runs BEFORE the sweep so a named-successor event is
 		// resolved on its own terms rather than sitting out the expire grace;
 		// once resolved it is no longer active, so the sweep skips it.
-		s.supersede(ctx, src, superseded, now)
+		s.supersede(ctx, src, superseded, result.ReplacedBy, now)
 		s.sweepDisappeared(ctx, src, polled[src], now)
 	}
 	sweepDur := time.Since(sweepStart)
@@ -803,7 +803,7 @@ func (s *Scheduler) placeNames(ctx context.Context, ev *gridv1.Event) []string {
 // guard as the sweep), so the fail-loud invariant still holds: a failed fetch
 // transitions nothing. RESOLVED is a recorded revision — the supersession is
 // part of the event's history, not a delete.
-func (s *Scheduler) supersede(ctx context.Context, src string, ids map[string]bool, now time.Time) {
+func (s *Scheduler) supersede(ctx context.Context, src string, ids map[string]bool, replacedBy map[string]string, now time.Time) {
 	if len(ids) == 0 {
 		return
 	}
@@ -822,7 +822,15 @@ func (s *Scheduler) supersede(ctx context.Context, src string, ids map[string]bo
 	if len(match) == 0 {
 		return
 	}
-	if err := s.store.TransitionEvents(ctx, match, gridv1.EventStatus_RESOLVED, now); err != nil {
+	// The replacing id is recorded in the same revision as the transition.
+	amend := func(ev *gridv1.Event) {
+		if by := replacedBy[ev.GetId()]; by != "" {
+			if wa := ev.GetWeatherAlert(); wa != nil {
+				wa.ReplacedByEventId = by
+			}
+		}
+	}
+	if err := s.store.TransitionEventsAmending(ctx, match, gridv1.EventStatus_RESOLVED, now, amend); err != nil {
 		logging.Errorw(ctx, "Ingest tick: superseding transition failed",
 			"source", src, "error", err)
 		return

@@ -2183,9 +2183,15 @@ type WeatherAlertDetail struct {
 	// NWS free-text list of the affected zones.
 	AreaDesc string `protobuf:"bytes,7,opt,name=area_desc,json=areaDesc,proto3" json:"area_desc,omitempty"`
 	// NWS forecast zone codes the alert covers, e.g. "CAZ138".
-	Zones         []string `protobuf:"bytes,8,rep,name=zones,proto3" json:"zones,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Zones []string `protobuf:"bytes,8,rep,name=zones,proto3" json:"zones,omitempty"`
+	// Grid event id of the alert that replaced this one, e.g. "wx:urn:oid:...".
+	// Mirrors NWS's own `replacedBy` / the CAP `references` of the newer message.
+	// Set only when this alert was retired (status RESOLVED) because a newer
+	// alert referenced it, and from that revision on; empty otherwise, including
+	// for an alert that was cancelled or simply lapsed.
+	ReplacedByEventId string `protobuf:"bytes,9,opt,name=replaced_by_event_id,json=replacedByEventId,proto3" json:"replaced_by_event_id,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *WeatherAlertDetail) Reset() {
@@ -2258,6 +2264,13 @@ func (x *WeatherAlertDetail) GetZones() []string {
 		return x.Zones
 	}
 	return nil
+}
+
+func (x *WeatherAlertDetail) GetReplacedByEventId() string {
+	if x != nil {
+		return x.ReplacedByEventId
+	}
+	return ""
 }
 
 // FireWeatherDetail is never populated on an event. Fire weather is a condition,
@@ -8112,7 +8125,7 @@ const file_grid_proto_rawDesc = "" +
 	"\x05level\x18\x02 \x01(\tB<\x92A9J\a\"ORDER\"\xf2\x02\x05ORDER\xf2\x02\aWARNING\xf2\x02\bADVISORY\xf2\x02\x10SHELTER_IN_PLACER\x05level\x12\x1d\n" +
 	"\n" +
 	"event_type\x18\x03 \x01(\tR\teventType\x12(\n" +
-	"\x06county\x18\x04 \x01(\tB\x10\x92A\rJ\v\"CALAVERAS\"R\x06county\"\xb9\x03\n" +
+	"\x06county\x18\x04 \x01(\tB\x10\x92A\rJ\v\"CALAVERAS\"R\x06county\"\x95\x04\n" +
 	"\x12WeatherAlertDetail\x12`\n" +
 	"\fnws_severity\x18\x02 \x01(\tB=\x92A:J\b\"Severe\"\xf2\x02\aExtreme\xf2\x02\x06Severe\xf2\x02\bModerate\xf2\x02\x05Minor\xf2\x02\aUnknownR\vnwsSeverity\x12_\n" +
 	"\tcertainty\x18\x03 \x01(\tBA\x92A>J\b\"Likely\"\xf2\x02\bObserved\xf2\x02\x06Likely\xf2\x02\bPossible\xf2\x02\bUnlikely\xf2\x02\aUnknownR\tcertainty\x12Z\n" +
@@ -8120,7 +8133,8 @@ const file_grid_proto_rawDesc = "" +
 	"\"Expected\"\xf2\x02\tImmediate\xf2\x02\bExpected\xf2\x02\x06Future\xf2\x02\x04Past\xf2\x02\aUnknownR\aurgency\x12 \n" +
 	"\vinstruction\x18\x05 \x01(\tR\vinstruction\x12\x1b\n" +
 	"\tarea_desc\x18\a \x01(\tR\bareaDesc\x129\n" +
-	"\x05zones\x18\b \x03(\tB#\x92A J\x1e[\"CAZ137\", \"CAZ138\", \"CAZ139\"]R\x05zonesJ\x04\b\x01\x10\x02J\x04\b\x06\x10\a\"\x86\x01\n" +
+	"\x05zones\x18\b \x03(\tB#\x92A J\x1e[\"CAZ137\", \"CAZ138\", \"CAZ139\"]R\x05zones\x12Z\n" +
+	"\x14replaced_by_event_id\x18\t \x01(\tB)\x92A&J$\"wx:urn:oid:2.49.0.1.840.0.5d3f8b0a\"R\x11replacedByEventIdJ\x04\b\x01\x10\x02J\x04\b\x06\x10\a\"\x86\x01\n" +
 	"\x11FireWeatherDetail\x128\n" +
 	"\x05state\x18\x01 \x01(\tB\"\x92A\x1f\xf2\x02\x06normal\xf2\x02\belevated\xf2\x02\bred-flagR\x05state\x12!\n" +
 	"\fsource_event\x18\x02 \x01(\tR\vsourceEvent\x12\x14\n" +
