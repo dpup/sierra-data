@@ -106,6 +106,13 @@ COPY --from=go-builder /app/prefab.yaml /app/prefab.yaml
 # Copy the generated OpenAPI specifications
 COPY --from=go-builder /app/api/v1/*.swagger.json /app/api/v1/
 
+# Amazon's RDS root CAs (certs/README.md) join the system trust store, so the
+# server and gridctl verify the database's certificate with sslmode=verify-full
+# and no sslrootcert in the URL. update-ca-certificates comes with the
+# ca-certificates package above; it must run before the user switch.
+COPY --from=go-builder /app/certs/rds-global-bundle.pem /usr/local/share/ca-certificates/rds-global-bundle.crt
+RUN update-ca-certificates
+
 # The grid event store is PostgreSQL: the image holds no data and mounts no
 # volume. The connection comes from PF__GRID__DATABASE__URL (a secret injected
 # by the task definition); the server refuses to start without it.

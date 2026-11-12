@@ -77,7 +77,7 @@ SETTINGS = {
 # the Dockerfile's COPY lines.
 TARGETS = {
     "grid": {"stage": "grid", "binaries": [("./cmd/server", "sierra-server"), ("./cmd/gridctl", "gridctl")],
-             "files": ["Dockerfile", "prefab.yaml", "api/v1/*.swagger.json"]},
+             "files": ["Dockerfile", "prefab.yaml", "api/v1/*.swagger.json", "certs/rds-global-bundle.pem"]},
     "relay": {"stage": "relay", "binaries": [("./cmd/mesh-relay", "mesh-relay")],
               "files": ["Dockerfile", "prefab.yaml"]},
 }

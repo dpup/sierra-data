@@ -109,6 +109,8 @@ config.development.yaml
 
 # Local development certificates
 *.pem
+# Amazon RDS root CAs, public, baked into the Grid image (certs/README.md).
+!certs/rds-global-bundle.pem
 *.key
 *.crt
 *.p12
