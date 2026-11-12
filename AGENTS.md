@@ -579,7 +579,14 @@ everything from the grid event store. Field names are **camelCase** (protojson
 is on. Conditional GET (ETag/If-None-Match -> 304) is wired via prefab's `etag`
 plugin on most read RPCs — event detail, the event/history lists, places, and
 cameras (`GetPlaceSummary`/`GetConditions`/`ListSources`/`ResolvePlace`/
-`ListScanners` are not yet guarded); the `.geojson` and `/mesh/links` keep
+`ListScanners` are not yet guarded). Headers an RPC sets with prefab's
+`serverutil.SendHeader` (the `ETag`, and `Cache-Control: public, max-age=30`
+from `gridapi.CacheControlInterceptor`) reach HTTP clients only through
+`gridapi.OutgoingHeaderMatcher`, installed on the gateway mux in
+`cmd/server/grid.go`: prefab's own outgoing matcher drops them (grpc-gateway
+v2.33's `DefaultHeaderMatcher` has no `Grpc-Metadata-` branch), which is why
+no client saw either header until 2026-11-12. `TestConditionalGetThroughTheGateway`
+pins 200 + ETag, 304 and cross-process agreement over HTTP. The `.geojson` and `/mesh/links` keep
 their own weak ETag over the body's data (features + metadata, everything but
 `generatedAt`, which moves every second). Event validators fold in
 `EventStamp.Refreshes` / `RefreshVersion`, because the store rewrites some

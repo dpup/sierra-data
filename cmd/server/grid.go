@@ -295,6 +295,10 @@ func (a *gridApp) Serve(ctx context.Context) error {
 			// bigger than the list page budget is still served (alone on its
 			// page, or from GetEvent). See gridapi.PageByteBudget.
 			opts = append(append([]grpc.DialOption{}, opts...), gridapi.GatewayDialOptions()...)
+			// Forward the ETag and Cache-Control the RPCs set (as
+			// grpc-metadata-* keys) onto the HTTP response: prefab's outgoing
+			// matcher drops them. See gridapi.OutgoingHeaderMatcher.
+			gridapi.ConfigureGatewayMux(mux)
 			if err := gridv1.RegisterGridServiceHandlerFromEndpoint(ctx, mux, endpoint, opts); err != nil {
 				return err
 			}

@@ -15,8 +15,9 @@ import (
 // a cached copy before revalidating. On a 304 the etag interceptor returns a nil
 // error, so the header is set there too (correct — a 304 carries cache headers).
 //
-// serverutil.SendHeader only reaches the HTTP response on the gRPC-Gateway path;
-// it is a no-op we ignore for native gRPC callers. It is set after the handler
+// serverutil.SendHeader only reaches the HTTP response on the gRPC-Gateway path,
+// and there only through OutgoingHeaderMatcher (gatewayheaders.go); native
+// gRPC callers see it as response metadata. It is set after the handler
 // so a handler that sets its own Cache-Control (none today) would not be
 // overridden by an earlier metadata write.
 func CacheControlInterceptor(maxAge int) grpc.UnaryServerInterceptor {
