@@ -24,6 +24,30 @@ the proto-defined `/api/v1` gateway on 2026-07-09.
 
 ## 2026-11-12
 
+### Conditional GET and `Cache-Control: public, max-age=30` now reach clients
+
+The `/api/v1` RPCs have always computed an `ETag` and a `Cache-Control`
+header, but the gateway dropped both before the HTTP response, so no client
+ever received them. They are now sent:
+
+- Every GridService response (`/api/v1/events`, `/places`, `/sources`,
+  `/conditions`, ...) carries `Cache-Control: public, max-age=30`. A browser
+  or proxy may now reuse a response for up to 30 seconds without asking
+  again. If a page must show a change sooner, send `Cache-Control: no-cache`
+  on the request or revalidate (below).
+- The RPCs with a validator also carry a weak `ETag`: the event list, event
+  detail, an event's history, timeline and related events, `/history`,
+  `/places`, `/places/{place}` and `/cameras` (when the camera directory is
+  configured). Send it back as `If-None-Match` and an unchanged resource
+  answers `304 Not Modified` with no body (the same `ETag` and
+  `Cache-Control` headers). Every instance of the service returns the same
+  tag for the same data.
+- A stray `Grpcgateway-Content-Type: application/grpc` response header is
+  gone.
+
+No client change is needed; clients that ignore these headers behave as
+before, except for caching that honours `max-age`.
+
 ### Ingest: any instance accepts a report; 503 with Retry-After during a handover
 
 `POST /api/v1/ingest/{stream}` can now land on any instance of the service.
