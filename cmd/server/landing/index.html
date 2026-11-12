@@ -82,7 +82,11 @@ operator-run monitors and reporters.</li>
 <p>Paste this into an LLM agent's instructions before it writes a client.
 Agents that speak MCP can also connect to <code>/mcp</code>.</p>
 <div class="copy">
-<button type="button" id="copy-btn" hidden>copy</button>
+<button type="button" id="copy-btn" hidden aria-label="Copy the prompt" title="Copy">
+<svg class="icon-copy" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1"/><path d="M10.5 5.5V3.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2"/></svg>
+<svg class="icon-check" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 8.5l3 3 7-7"/></svg>
+<span class="sr-only" id="copy-status" aria-live="polite"></span>
+</button>
 <pre id="agent-prompt" class="term" tabindex="0">You are using The Grid, the public data service of S.I.E.R.R.A for the
 Ebbetts Pass / Highway 4 corridor of the central Sierra (California).
 
@@ -147,8 +151,14 @@ reference. Questions: <a href="https://sierragridteam.org">sierragridteam.org</a
   btn.hidden = false;
   btn.addEventListener('click', function () {
     navigator.clipboard.writeText(src.textContent).then(function () {
-      btn.textContent = 'copied';
-      setTimeout(function () { btn.textContent = 'copy'; }, 1500);
+      btn.classList.add('done');
+      btn.title = 'Copied';
+      document.getElementById('copy-status').textContent = 'Copied';
+      setTimeout(function () {
+        btn.classList.remove('done');
+        btn.title = 'Copy';
+        document.getElementById('copy-status').textContent = '';
+      }, 1500);
     });
   });
 })();
