@@ -1,8 +1,13 @@
-// Package handoff moves exclusive ownership of a SQLite database from one
-// process to another without the old process having to exit first.
+// Package handoff moves exclusive ownership of a database from one process
+// to another without the old process having to exit first.
 //
-// The Grid and the mesh relay each hold an exclusive lock on their own SQLite
-// file (grid.db, relay.db). A rolling deploy used to be stop-then-start: the
+// The mesh relay holds an exclusive lock on its SQLite file (relay.db); the
+// Grid's equivalent is its PostgreSQL writer lease, and the Grid maps these
+// states onto its reader/writer roles (cmd/server/writer.go: STANDBY is a
+// reader that does not campaign, ACTIVE campaigns or holds the lease,
+// QUIESCED has released it for good and still serves reads). Optional
+// interfaces (Readiness, HoldReporter) and Options.Commands let a service say
+// that without changing the protocol. A rolling deploy used to be stop-then-start: the
 // replacement could not open the database until the old task had been
 // drained, signalled, torn down and deprovisioned, and all of that was
 // downtime. With handoff, a deployment coordinator provisions the replacement
@@ -24,7 +29,8 @@
 //     happens at boot (no --standby: the legacy path) or on an explicit,
 //     authenticated POST /activate from the coordinator, which is responsible
 //     for having confirmed the previous owner's release or termination. The
-//     file lock the store takes is a secondary safeguard, not the protocol.
+//     relay's file lock is a secondary safeguard, not the protocol (the
+//     Grid's lease is: one holder, fenced by epoch).
 //   - QUIESCED is terminal. A released process never reopens the database;
 //     a rollback is another handoff, in the other direction, to a process that
 //     is in STANDBY.

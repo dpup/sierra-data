@@ -49,6 +49,32 @@ type Service interface {
 	Quiesce(ctx context.Context) error
 }
 
+// Readiness is optionally implemented by a Service whose readiness is not
+// "the controller is ACTIVE". The Grid serves reads from boot, in every
+// state, so its /readyz (and /status.ready) follow the read path instead.
+type Readiness interface {
+	Ready() bool
+}
+
+// HoldReporter is optionally implemented by a Service that knows whether it
+// holds its database right now. /status.databaseHeld is then the controller's
+// conservative flag AND this report, so a Grid that is ACTIVE but between
+// writer leases (yielded, or re-campaigning after a lost lease) says false.
+// The controller's flag still wins when it says false.
+type HoldReporter interface {
+	DatabaseHeld() bool
+}
+
+// Command is an extra authenticated control command (Options.Commands),
+// mounted as POST /<name> behind the same bearer and expectedInstanceId
+// checks as /activate. It gets the lifecycle state at the time of the call.
+// Returning an error wrapping ErrCommandRefused answers 409; any other error
+// 500; nil 200.
+type Command func(ctx context.Context, state State) error
+
+// ErrCommandRefused marks a Command error as a conflict (409), not a failure.
+var ErrCommandRefused = errors.New("refused in this state")
+
 // Exiter is optionally implemented by a Service with process-exit cleanup
 // that is not part of releasing the database (waiting for prefab's own
 // signal-driven shutdown, say). Called once, after the final quiescence.
@@ -72,6 +98,9 @@ type Options struct {
 	Standby bool
 	// ECSMetadataURI overrides ECS_CONTAINER_METADATA_URI_V4 (tests).
 	ECSMetadataURI string
+	// Commands are extra authenticated POST commands by name (the Grid's
+	// yield and campaign). Synchronous: the reply follows the command.
+	Commands map[string]Command
 }
 
 // Operation is one activation or quiescence.
@@ -170,6 +199,9 @@ func (c *Controller) Listen() error {
 	c.ln = ln
 	return nil
 }
+
+// InstanceID is this process incarnation's random id (as /status reports it).
+func (c *Controller) InstanceID() string { return c.instanceID }
 
 // ControlAddr is the bound control address ("" without a control plane).
 func (c *Controller) ControlAddr() string {
@@ -342,7 +374,24 @@ func (c *Controller) State() State {
 func (c *Controller) Held() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return c.heldLocked()
+}
+
+// heldLocked is the conservative flag, narrowed by the service's own report
+// when it has one. Caller holds mu.
+func (c *Controller) heldLocked() bool {
+	if hr, ok := c.svc.(HoldReporter); ok && c.held {
+		return hr.DatabaseHeld()
+	}
 	return c.held
+}
+
+// ready is the service's readiness when it reports one, else ACTIVE.
+func (c *Controller) ready(st State) bool {
+	if r, ok := c.svc.(Readiness); ok {
+		return r.Ready()
+	}
+	return st == StateActive
 }
 
 // beginLocked records a new operation and moves to its in-progress state.
@@ -524,7 +573,7 @@ func (c *Controller) Status() StatusDoc {
 	defer c.mu.Unlock()
 	d := StatusDoc{
 		Service: c.opts.Service, State: c.state, Prepared: true,
-		Ready: c.state == StateActive, DatabaseHeld: c.held, Standby: c.opts.Standby,
+		Ready: c.ready(c.state), DatabaseHeld: c.heldLocked(), Standby: c.opts.Standby,
 		InstanceID: c.instanceID, PID: os.Getpid(), Hostname: c.hostname, Revision: c.revision,
 		StartedAt: c.startedAt, ActivatedBy: c.activatedBy, QuiescedBy: c.quiescedBy,
 		ECS: c.ecs,
@@ -546,15 +595,41 @@ func (c *Controller) routes() http.Handler {
 	})
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
 		st := c.State()
+		ready := c.ready(st)
 		code := http.StatusServiceUnavailable
-		if st == StateActive {
+		if ready {
 			code = http.StatusOK
 		}
-		writeJSON(w, code, map[string]any{"ready": st == StateActive, "state": st})
+		writeJSON(w, code, map[string]any{"ready": ready, "state": st})
 	})
 	mux.HandleFunc("POST /activate", c.authed(c.handleActivate))
 	mux.HandleFunc("POST /quiesce", c.authed(c.handleQuiesce))
+	for name, cmd := range c.opts.Commands {
+		mux.HandleFunc("POST /"+name, c.authed(func(w http.ResponseWriter, _ string) {
+			c.runCommand(w, name, cmd)
+		}))
+	}
 	return mux
+}
+
+// runCommand runs an extra command synchronously and replies with the state
+// afterwards.
+func (c *Controller) runCommand(w http.ResponseWriter, name string, cmd Command) {
+	start := time.Now()
+	err := c.callService(name, func() error { return cmd(c.ctx, c.State()) })
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	switch {
+	case err == nil:
+		logging.Infow(c.ctx, "Control command complete", "command", name, "duration", time.Since(start))
+		c.replyLocked(w, http.StatusOK)
+	case errors.Is(err, ErrCommandRefused):
+		c.conflictLocked(w, "refused", err.Error())
+	default:
+		logging.Errorw(c.ctx, "Control command failed", "command", name, "error", err)
+		writeJSON(w, http.StatusInternalServerError, opResponse{State: c.state, InstanceID: c.instanceID,
+			Error: &apiError{Code: "failed", Message: err.Error()}})
+	}
 }
 
 func (c *Controller) authed(h func(http.ResponseWriter, string)) http.HandlerFunc {
