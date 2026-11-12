@@ -2,6 +2,8 @@ package gridapi
 
 import (
 	"context"
+	"fmt"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -65,7 +67,17 @@ func (g *GridServer) GetStats(ctx context.Context, req *gridv1.GetStatsRequest) 
 		return proto.Clone(hit).(*gridv1.Stats), nil
 	}
 
-	ch := g.stats.flight.DoChan(placeID, func() (any, error) {
+	ch := g.stats.flight.DoChan(placeID, func() (val any, err error) {
+		// The flight runs on its own goroutine, out of reach of the gRPC
+		// recovery interceptor, and singleflight re-panics a panic from the
+		// function on that goroutine, which would crash the process. Turn it
+		// into an error that every waiter on the flight receives.
+		defer func() {
+			if r := recover(); r != nil {
+				logError(ctx, "gridapi: stats computation panicked", fmt.Errorf("panic: %v\n%s", r, debug.Stack()))
+				val, err = nil, fmt.Errorf("stats computation panicked: %v", r)
+			}
+		}()
 		// A flight that started just after another finished must not
 		// recompute: the cache is checked again inside it.
 		if hit := g.stats.fresh(placeID, g.svc.Now()); hit != nil {
