@@ -4,8 +4,9 @@ The Grid (`sierra-server`) runs as one or more identical processes on one
 PostgreSQL database. **Every process serves every read from boot.** At most
 one process at a time is the **writer**: it holds the writer lease and runs
 everything that writes (the ingest scheduler and its pollers, the MeshCore
-subscriber, push-ingest buffers, source and place seeding, schema
-migrations, upstream cache warming). A deploy is therefore an ordinary
+subscriber, push-ingest buffers, source and place seeding, upstream cache
+warming). Schema migrations are not the writer's: every process applies
+them at boot (below). A deploy is therefore an ordinary
 blue/green deploy: the new processes start serving reads at once, and the
 writer role moves when the old writer goes away (SIGTERM) or is told to
 yield.
@@ -29,9 +30,8 @@ forwarding), `internal/handoff` (the lifecycle and control API).
 ## Roles
 
 **Reader (every process, from boot to exit).** `store.OpenReader` opens the
-pool, checks the collation and that the database schema is at least the
-version this build reads, and takes no lock. The production listener starts
-right after. A reader writes nothing; every write path in the store refuses
+pool, checks the collation, applies pending migrations (next section) and
+takes no writer lease. The production listener starts right after. A reader writes nothing; every write path in the store refuses
 with `ErrNotWriter`. ETag validators come from the `versions` table (below),
 so every process returns the same ETag for the same data.
 
@@ -41,12 +41,32 @@ so every process returns the same ETag for the same data.
    and hijacked out of it), polling every 250 ms;
 2. bumps `writer_lease.epoch` and records `holder` (`<instanceId>@<hostname>`)
    and `address` (where other processes reach this one);
-3. applies pending migrations (migrations run only here);
+3. re-applies migrations (normally a no-op: the process already migrated at
+   boot);
 4. then the process seeds sources and places and starts the scheduler, the
    MeshCore registry, push ingest and cache warming (a **term**).
 
 The holder refreshes `writer_lease.heartbeat_at` every 2 s on the lease
 connection.
+
+## Migrations: every process, at boot
+
+Every process, reader or writer, runs `migrations.Apply` when it opens the
+store, under the transaction-scoped migration advisory lock (one version per
+transaction; concurrent boots queue and the later ones find nothing to do).
+It does not need the writer lease. A database already newer than the build
+(a later release migrated it) is accepted as it is, so an older build keeps
+serving through a rollback. A migration that fails fails the boot.
+
+This is safe because migrations are always backwards compatible: while the
+new release migrates, the previous release's readers **and its writer** keep
+running against the newer schema. The rules (`internal/store/migrations`
+package doc, `internal/store/AGENTS.md`): append-only; additive only; every
+new column nullable or with a default, so the old writer can still insert
+rows; no rename or drop of anything a released reader or writer uses (that
+is a later release, once nothing running uses it). So a release with a
+migration deploys like any other: the new tasks migrate as they boot, turn
+ready, and the writer role moves when the old writer stops.
 
 ## Fencing
 
@@ -142,11 +162,11 @@ on the production port.
 On the production port (and the control port):
 
 - `GET /livez`: 200 while the process runs.
-- `GET /readyz`: 200 when the store is open at a schema this build reads and
-  the process is not exiting; the body says whether it is the writer
-  (`{"ready": true, "writer": false}`). The writer role never enters into
-  readiness: a reader is ready. 503 while the schema is older than the build
-  (until a writer migrates it) and once SIGTERM has started the exit.
+- `GET /readyz`: 200 when the store is open (and therefore migrated to at
+  least this build's schema) and the process is not exiting; the body says
+  whether it is the writer (`{"ready": true, "writer": false}`). The writer
+  role never enters into readiness: a reader is ready. 503 once SIGTERM has
+  started the exit.
 
 The Dockerfile `HEALTHCHECK` probes `/readyz` with a 15 s start period. The
 load balancer's target check should use `/readyz` too.
@@ -188,12 +208,11 @@ anything happens. Generate a token pair with
 `t=$(openssl rand -hex 32); printf %s "$t" | sha256sum`.
 
 **Yield** is how to move the writer before the old task set is stopped, for
-example for a release that adds a migration: the new build cannot be ready
-(its schema check fails) until a writer runs the migration, and only the
-writer migrates. Yield the old writer (and any other old process, or one of
-them may win the campaign instead); a new process takes the lease, migrates
-and becomes ready; the old processes keep serving reads (additive
-migrations only: they read the expanded schema fine).
+example to have the new build's ingest running before the old tasks drain.
+Yield the old writer (and any other old process, or one of them may win the
+campaign instead); a new process takes the lease; the old processes keep
+serving reads. A release with a migration does not need it: the new tasks
+migrate at boot and are ready without the writer role.
 
 ## The coordinator remap (route B)
 

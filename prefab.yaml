@@ -374,7 +374,8 @@ grid:
     lockTimeout: "90s"
 
   # Writer role (docs/deploy-handoff.md). Every task serves reads; one at a
-  # time holds the writer lease and runs ingest, seeding and migrations.
+  # time holds the writer lease and runs ingest and seeding. Every task
+  # applies schema migrations at boot, writer or not.
   writer:
     # false: a reader-only task that never campaigns (PF__GRID__WRITER__ENABLED).
     enabled: true

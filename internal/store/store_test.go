@@ -145,7 +145,8 @@ func TestOpenMigrateIdempotent(t *testing.T) {
 }
 
 // Additive-only schema policy: a build accepts a database a newer release
-// has migrated past it, and refuses one older than it needs.
+// has migrated past it; CheckVersion (for tools that do not migrate) refuses
+// one older than it needs.
 func TestSchemaVersionPolicy(t *testing.T) {
 	ctx := context.Background()
 	url := storetest.URL(t)
@@ -161,10 +162,10 @@ func TestSchemaVersionPolicy(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, migrations.Latest()+1, st.SchemaVersion)
 
-	_, err = s.db.ExecContext(ctx, `DELETE FROM schema_migrations`)
+	_, err = s.db.ExecContext(ctx, `DELETE FROM schema_migrations WHERE version > 1`)
 	require.NoError(t, err)
 	_, err = migrations.CheckVersion(ctx, s.db)
-	assert.Error(t, err, "an older schema is refused by a reader")
+	assert.Error(t, err, "a tool that must not migrate refuses an older schema")
 	require.NoError(t, s.Close())
 }
 

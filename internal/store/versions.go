@@ -128,9 +128,6 @@ func (s *Store) startVersionWatch(poll time.Duration, listen bool) {
 			case <-t.C:
 			}
 			s.versions.markDirty()
-			if !s.schemaReady.Load() {
-				_, _ = s.RefreshSchema(ctx)
-			}
 		}
 	}()
 	if listen {

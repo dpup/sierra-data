@@ -150,8 +150,7 @@ func (a *gridApp) Quiesce(_ context.Context) error {
 
 // yield is the control API's "yield" command: release the lease and stop
 // campaigning until "campaign" (or a restart). Reads continue. Useful to
-// hand the writer to another task set ahead of its predecessor's SIGTERM
-// (a release with a migration: the new code can only migrate as the writer).
+// hand the writer to another task set ahead of its predecessor's SIGTERM.
 func (a *gridApp) yield(_ context.Context, st handoff.State) error {
 	start := time.Now()
 	if err := a.stopWriter(); err != nil {

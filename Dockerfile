@@ -164,8 +164,8 @@ ENV PF__SERVER__PORT=8080
 # Health check: /readyz on the production port. Every task serves reads from
 # boot (the writer lease is campaigned for in the background and never gates
 # the listener), so readiness is the store open at a schema this build reads,
-# which takes seconds. It turns 503 while the process drains on SIGTERM, and
-# while the schema is older than this build (until a writer migrates it).
+# which takes seconds (every process applies pending migrations at boot,
+# before it listens). It turns 503 while the process drains on SIGTERM.
 HEALTHCHECK --interval=15s --timeout=3s --start-period=15s --retries=3 \
     CMD wget --no-verbose --tries=1 --spider http://localhost:8080/readyz || exit 1
 

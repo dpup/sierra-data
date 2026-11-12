@@ -7,11 +7,29 @@
 // both migrate, and records it in schema_migrations. DDL is transactional in
 // PostgreSQL, so a failed migration leaves nothing behind.
 //
-// Policy: append-only and additive (expand/contract). Never edit a shipped
-// file; add a new one. A process accepts a database at a version >= its own
-// (CheckVersion), so a reader one release behind keeps serving while a newer
-// writer migrates. That only holds if no migration removes or renames
-// something an older release still reads.
+// Who migrates: EVERY process, at boot (store.OpenReader runs Apply before the
+// open completes), reader or writer; the lease holder runs it again when it
+// takes the lease, which is a no-op. Migrating needs only the migration
+// advisory lock, not the writer lease. That is safe only because of the
+// policy below: while a new release migrates, the previous release's readers
+// AND its writer keep running against the newer schema.
+//
+// Policy (binding on every new file):
+//   - Append-only. Never edit, rename or delete a shipped file: a deployed
+//     database has recorded its version and will skip it. Add a new one.
+//   - Additive only. New tables, new columns, new indexes, new keys. Never
+//     rename or drop a table, column, index, constraint, trigger or function a
+//     released reader or writer uses; never narrow a type or add a constraint
+//     an older writer's rows could violate. Removing something is a later,
+//     separate release, once no running build uses it (expand/contract).
+//   - Every new column is nullable or has a DEFAULT, so the previous release's
+//     writer, which does not know the column, can still INSERT rows.
+//   - A backfill runs as DML in the same file; keep it cheap (it runs at a
+//     process's boot, under the lock, while the old release serves).
+//
+// A process accepts a database at a version >= its own (CheckVersion; Apply
+// returns the higher version), so an OLDER build keeps serving a database a
+// newer release has migrated.
 //
 // It is a leaf package (no dependency on internal/store) so the test
 // harness, internal/storetest, can build its template database with it.
@@ -99,15 +117,24 @@ const createTable = `CREATE TABLE IF NOT EXISTS schema_migrations (
 // database is at afterwards (which may exceed Latest: a newer release
 // migrated it, and that is accepted).
 func Apply(ctx context.Context, db *sql.DB) (int, error) {
+	return ApplyThrough(ctx, db, Latest())
+}
+
+// ApplyThrough is Apply stopping at version target (at most Latest): tests
+// use it to build a database as an older release left it.
+func ApplyThrough(ctx context.Context, db *sql.DB, target int) (int, error) {
+	if target > Latest() {
+		target = Latest()
+	}
 	for {
-		v, done, err := applyNext(ctx, db)
+		v, done, err := applyNext(ctx, db, target)
 		if err != nil || done {
 			return v, err
 		}
 	}
 }
 
-func applyNext(ctx context.Context, db *sql.DB) (version int, done bool, err error) {
+func applyNext(ctx context.Context, db *sql.DB, target int) (version int, done bool, err error) {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, false, fmt.Errorf("migrations: begin: %w", err)
@@ -127,7 +154,7 @@ func applyNext(ctx context.Context, db *sql.DB) (version int, done bool, err err
 	if err != nil {
 		return 0, false, err
 	}
-	if current >= Latest() {
+	if current >= target {
 		return current, true, nil
 	}
 	m := all[current] // version current+1
@@ -171,15 +198,15 @@ func Current(ctx context.Context, db *sql.DB) (int, error) {
 }
 
 // CheckVersion fails unless the database is at a schema version this build
-// can read: Latest or newer (additive-only policy). A reader that does not
-// migrate calls this instead of Apply.
+// can read: Latest or newer (additive-only policy). Tools that must not
+// migrate (gridctl verify) call this instead of Apply.
 func CheckVersion(ctx context.Context, db *sql.DB) (int, error) {
 	v, err := Current(ctx, db)
 	if err != nil {
 		return 0, err
 	}
 	if v < Latest() {
-		return v, fmt.Errorf("migrations: database schema is at version %d, this build needs %d (the writer migrates it)", v, Latest())
+		return v, fmt.Errorf("migrations: database schema is at version %d, this build needs %d (any process of this build migrates it at boot)", v, Latest())
 	}
 	return v, nil
 }

@@ -171,13 +171,15 @@ func (l *Lease) end(err error, lost bool) {
 
 // AcquireLease makes this store the writer: it waits for the advisory lock
 // (up to opts.Wait, or until ctx ends), fences the previous term out by
-// bumping writer_lease.epoch, applies pending migrations, and records the
-// holder and address. From then until the lease ends, inTx accepts writes.
+// bumping writer_lease.epoch, re-applies migrations, and records the holder
+// and address. From then until the lease ends, inTx accepts writes.
 //
-// The epoch is bumped BEFORE migrating when the table exists, so a previous
-// holder that has lost its session but not noticed is fenced out before any
-// DDL runs; on a database without writer_lease yet (empty, or schema 1) it is
-// bumped right after the migration that creates it.
+// OpenReader has already migrated (every process migrates at boot, without
+// the lease; the migrations package doc says why that is safe), so the Apply
+// here is an idempotent, cheap re-check: the writer never starts a term on a
+// schema it has not just confirmed. The bump-after-migrating path (no
+// writer_lease table yet) is then only reachable by a database that lost the
+// table, which the additive policy rules out; it is kept as a safety net.
 func (s *Store) AcquireLease(ctx context.Context, opts LeaseOptions) (*Lease, error) {
 	s.leaseMu.Lock()
 	defer s.leaseMu.Unlock()
@@ -209,7 +211,6 @@ func (s *Store) AcquireLease(ctx context.Context, opts LeaseOptions) (*Lease, er
 		return fail(fmt.Errorf("store: %w", err))
 	}
 	s.schemaVersion.Store(int64(v))
-	s.schemaReady.Store(true)
 	if !bumped {
 		if epoch, err = bumpEpoch(ctx, conn, opts.Holder, opts.Address); err != nil {
 			return fail(err)
