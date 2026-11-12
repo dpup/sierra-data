@@ -392,7 +392,8 @@ func TestImportFencesAStaleWriter(t *testing.T) {
 	// The old writer's session dies without it noticing yet: its lock is gone,
 	// its pool still works.
 	execPG(t, url, `SELECT pg_terminate_backend(pid) FROM pg_locks
-		WHERE locktype = 'advisory' AND pid <> pg_backend_pid()`)
+		WHERE locktype = 'advisory' AND pid <> pg_backend_pid()
+		  AND database = (SELECT oid FROM pg_database WHERE datname = current_database())`)
 
 	r, err := importInto(t, url, snap, m, false)
 	require.NoError(t, err)
