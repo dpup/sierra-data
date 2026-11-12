@@ -703,6 +703,17 @@ ecs-rollback:
 test-deploy-client:
 	python3 -m unittest discover -s scripts -p 'test_deploy.py' -v
 
+# API diff gate (migration plan section 8, gate 2): the legacy SQLite server
+# and the new PostgreSQL server on the same snapshot, every endpoint compared.
+# make apidiff LEGACY=http://localhost:8199 NEW=http://localhost:8200 [APIDIFF_ARGS="--events -1"]
+.PHONY: apidiff test-apidiff
+apidiff: test-apidiff
+	@test -n "$(LEGACY)" -a -n "$(NEW)" || { echo "usage: make apidiff LEGACY=<url> NEW=<url>"; exit 2; }
+	python3 scripts/apidiff.py --legacy "$(LEGACY)" --new "$(NEW)" $(APIDIFF_ARGS)
+
+test-apidiff:
+	python3 -m unittest discover -s scripts -p 'test_apidiff.py'
+
 # Clean up Docker artifacts
 docker-clean:
 	@echo "Cleaning up Docker artifacts..."
@@ -798,6 +809,7 @@ help:
 	@echo "  ecs-status  - Summarise coordinator ownership and deployment progress (JSON=1 for the raw document)"
 	@echo "  ecs-rollback - Deploy the previous image pair through the coordinator"
 	@echo "  test-deploy-client - Test the self-contained deployment client"
+	@echo "  apidiff LEGACY=url NEW=url - Diff the API of the legacy and new servers (migration gate 2)"
 	@echo "  docker      - Alias for docker-build"
 	@echo "  deploy      - Deploy to configured environment"
 	@echo "  install     - Install CLI tools to system PATH"
