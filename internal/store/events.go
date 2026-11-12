@@ -314,19 +314,20 @@ func (s *Store) TouchSeen(ctx context.Context, ids []string, t, staleBefore time
 	if len(ids) == 0 {
 		return 0, nil
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	res, err := s.db.ExecContext(ctx,
-		`UPDATE events SET last_seen_at = $1 WHERE id = ANY($2) AND last_seen_at < $3`,
-		t.Unix(), ids, staleBefore.Unix())
-	if err != nil {
-		return 0, fmt.Errorf("store: touch seen: %w", err)
-	}
-	touched, err := res.RowsAffected()
-	if err != nil {
-		return 0, fmt.Errorf("store: touch seen rows affected: %w", err)
-	}
-	return touched, nil
+	var touched int64
+	err := s.inTx(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx,
+			`UPDATE events SET last_seen_at = $1 WHERE id = ANY($2) AND last_seen_at < $3`,
+			t.Unix(), ids, staleBefore.Unix())
+		if err != nil {
+			return fmt.Errorf("store: touch seen: %w", err)
+		}
+		if touched, err = res.RowsAffected(); err != nil {
+			return fmt.Errorf("store: touch seen rows affected: %w", err)
+		}
+		return nil
+	})
+	return touched, err
 }
 
 // StoredEvent pairs an event with store-side liveness metadata that is not
@@ -857,8 +858,16 @@ func wildfireBufferedKind(k gridv1.PlaceKind) bool {
 // cache needs no separate lock. This avoids re-SELECTing and re-parsing every
 // place polygon on every per-event upsert — including hash-equal no-ops, which
 // dominate a steady-state tick.
+//
+// The cache is valid only for the lease term that built it, and only inside a
+// fenced write (txEpoch set by inTx): a reader has no business matching
+// places, and a process that was a reader for a while may have missed another
+// writer's place changes. That is a check, not a convention.
 func (s *Store) loadPlaceGeoms(tx *sql.Tx) ([]parsedPlace, error) {
-	if s.placesGeoValid {
+	if s.txEpoch == 0 {
+		return nil, fmt.Errorf("store: place matching outside a writer transaction: %w", ErrNotWriter)
+	}
+	if s.placesGeoValid && s.placesGeoEpoch == s.txEpoch {
 		return s.placesGeo, nil
 	}
 	rows, err := tx.Query(`SELECT id, proto FROM places`)
@@ -900,6 +909,7 @@ func (s *Store) loadPlaceGeoms(tx *sql.Tx) ([]parsedPlace, error) {
 	}
 	s.placesGeo = out
 	s.placesGeoValid = true
+	s.placesGeoEpoch = s.txEpoch
 	return out, nil
 }
 

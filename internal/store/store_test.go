@@ -90,7 +90,7 @@ func TestOpenRejectsConcurrentOpener(t *testing.T) {
 	assert.GreaterOrEqual(t, time.Since(start), 300*time.Millisecond, "it waited the lock timeout")
 	// The message must name the deploy-time cause: this error's most common
 	// context by far is a deploy whose previous writer has not released yet.
-	assert.Contains(t, err.Error(), "deregistration delay")
+	assert.Contains(t, err.Error(), "quiesced or yielded")
 
 	// Closing the first releases the lock, so a fresh open then succeeds.
 	require.NoError(t, s1.Close())
