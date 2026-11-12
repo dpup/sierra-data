@@ -256,11 +256,60 @@ write that bypasses `inTx`: the epoch fence lives there.
   `RoadStatusSince`, `Totals`) run in one REPEATABLE READ READ ONLY
   transaction (`readTx`), so a commit landing between them cannot produce an
   answer that never existed.
-- **Statistics.** PostgreSQL's autovacuum keeps planner statistics; there is
-  no `Analyze` any more. Plan assertions use `EXPLAIN (FORMAT JSON)` with
-  sequential scans, bitmap scans and sorts disabled (`plan_test.go`), which
-  pins that an index CAN serve a statement's filter and ORDER BY on test-sized
-  tables.
+- **Statistics and plans.** PostgreSQL's autovacuum keeps planner statistics;
+  there is no `Analyze` any more. `plans_test.go` records the SQL the hot store
+  calls really issue (a `WithQueryTracer` recorder) and EXPLAINs it:
+  `TestHotReadsUseTheirIndexes` (every run, sequential scans, bitmap scans and
+  sorts disabled, which pins that an index CAN serve each statement) and the
+  opt-in `TestHotQueryPlansAtScale` (`GRID_SCALE_DATABASE_URL`, a throwaway
+  clone of the imported fixture; planner's own choices; fails on a sequential
+  scan of a growing table). A new hot read goes in `hotCalls`. The helpers in
+  `plan_test.go` stay for one-off assertions. Recommend
+  `random_page_cost = 1.1` in the RDS parameter group (gp3 is not a spinning
+  disk): at the default 4 the planner hash-joins a sequential scan of
+  `event_lite` for a 201-row page (4.0 ms against 1.8 ms) and the plan tests
+  run under 1.1.
+- **Batched writes.** A write that loops over rows pays a network round trip
+  per statement, which is invisible against a local database and what a
+  Fargate-to-RDS position adds (measured: 0.13 ms per statement locally,
+  1.2 ms at a simulated 1 ms RTT). Write set-based: `INSERT ... SELECT FROM
+  unnest($1::t[], ...) WITH ORDINALITY ... ORDER BY ord` (input order matters
+  where identity ids are consumed in order, as the observation compaction
+  watermark does), `UPDATE ... FROM unnest`, multi-row `VALUES` for wide
+  nullable rows. Rules: one statement may not touch a row twice under `ON
+  CONFLICT DO UPDATE`, so fold repeated keys in Go first (mesh activity folds
+  to the per-clock MAX, which is what GREATEST row by row produced); chunk by
+  size (a perimeter blob is large: `transitionChunk` 100) or by parameter
+  count (65,535 per statement: telemetry 29 x 1,000); keep it inside the one
+  `inTx` (the epoch fence is the first statement and unchanged). Where the
+  per-row loop's later rows saw its earlier rows (telemetry's skip rules), the
+  batch must reproduce that in Go, and `TestMeshTelemetryBatchMatchesSequentialReference`
+  holds the old loop as a reference. `UpsertEvent` is still one transaction per
+  event (about 4 statements when hash-equal, 10 with a new revision); a
+  set-based `UpsertEvents` was not built, see the P5 note.
+- **Connection budget.** A server process holds `maxConns` pooled connections
+  (default 8; `grid.database.maxConns`, `PF__GRID__DATABASE__MAX_CONNS`), plus
+  the hijacked writer-lease connection, plus the `LISTEN` connection:
+  at most 10 backends, 3 idle (min 1 + 2); measured 10 under 64 concurrent map
+  requests. `gridctl` is one more process of the same shape (10). On
+  db.t4g.small (2 GiB; RDS default `max_connections` =
+  `LEAST(DBInstanceClassMemory/9531392, 5000)`, about 170-180 there, of which
+  3 are the superuser reserve and RDS's own agents and Database Insights take a
+  few): two task sets of 2 tasks during a blue/green is 4 x 10 = 40, `gridctl`
+  during an import 10, an operator's `psql` and migrations 2-3: about 55, a
+  third of the limit. Reads are milliseconds; 8 is far more than a 0.5 vCPU task
+  can keep busy, so the task's CPU, not the pool, is the limit. Do not raise it
+  without recomputing: tasks x (maxConns + 2) + headroom must stay under ~100
+  on this instance class. A larger fleet should put RDS Proxy in front rather
+  than grow the pool.
+- **Indexes nothing reads (contract candidates, not dropped: the schema is
+  additive-only while a release may still use them).** `events.min_lat`..
+  `max_lng` and no index (written on every event write, read by nothing);
+  `event_revisions_id_key` (the identity column's unique index, 672 kB: nothing
+  reads `event_revisions.id`); `idx_mesh_obs_pubkey` (34 MB of ~200, read only
+  by the boot-time `MeshNodeHeardTimes`, which scans all of Tier 0 anyway: 29 ms
+  warm, 282 ms cold on the fixture; it costs 2-3x on a bulk insert). All the
+  other indexes are used by a hot statement (`plans_test.go`).
 - **Timestamps** stay `bigint` unix seconds; never `timestamptz` for domain
   times (`schema_migrations.applied_at` is bookkeeping, not domain data).
 - **Tests.** `internal/storetest.URL(t)` gives each test its own database,
