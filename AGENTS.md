@@ -12,6 +12,10 @@ Edit the `AGENTS.md`; leave the `CLAUDE.md` stubs alone.
 
 Last updated: 2026-07-06
 
+## Commits
+
+- Don't add `Co-Authored-By:` trailers naming an agent or model, or any other AI attribution (such as a "Generated with" footer), to commit messages or pull request descriptions. `.claude/settings.json` turns off Claude Code's default commit trailer; follow the same rule with any other tool.
+
 ## Active Technologies
 
 **Language/Version**: Go 1.27.3 (`go.mod` and the Docker builder use Go 1.27.3)
