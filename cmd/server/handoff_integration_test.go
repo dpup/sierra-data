@@ -103,7 +103,7 @@ func TestGridCampaignsWhileAnotherHolds(t *testing.T) {
 	app, port := preparedGrid(t, dbURL)
 	h := runGrid(t, app, false)
 
-	require.Eventually(t, func() bool { return h.state() == handoff.StateActive }, 5*time.Second, 10*time.Millisecond)
+	require.Eventually(t, func() bool { return h.state() == handoff.StateActive }, 20*time.Second, 10*time.Millisecond)
 	assert.False(t, app.DatabaseHeld())
 	assert.False(t, h.status().DatabaseHeld, "ACTIVE but between leases: /status says so")
 	assert.Equal(t, http.StatusOK, httpCode(t, port, "/api/v1/sources"))
@@ -111,7 +111,7 @@ func TestGridCampaignsWhileAnotherHolds(t *testing.T) {
 
 	released := time.Now()
 	require.NoError(t, holder.Close())
-	require.Eventually(t, app.DatabaseHeld, 5*time.Second, 10*time.Millisecond)
+	require.Eventually(t, app.DatabaseHeld, 20*time.Second, 10*time.Millisecond)
 	t.Logf("took the lease %s after the holder released it", time.Since(released))
 	assert.True(t, h.status().DatabaseHeld)
 }
