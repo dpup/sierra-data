@@ -498,10 +498,8 @@ func customersPhrase(n int32) string {
 	case n == 1:
 		return "1 customer"
 	default:
-		// Separated: these render in the detail pane, whose screenshot contract
-		// (web/screenshots/events-contract.mjs check 9) rejects unseparated 4+
-		// digit numbers — and PSPS customer counts are the largest numbers this
-		// service emits. Same helper the wildfire acreage headline uses.
+		// Separated: headlines are read by people, and PSPS customer counts
+		// are the largest numbers this service emits. Same helper the wildfire acreage headline uses.
 		return fmt.Sprintf("%s customers", commaNum(float64(n)))
 	}
 }

@@ -196,7 +196,7 @@ func caltransAttribution(cfg *config.Config) string {
 }
 
 // Homepages used by more than one source row, or that have no constant of their
-// own in a client package. Human-facing pages — the site links the source name
+// own in a client package. Human-facing pages — a client links the source name
 // at them — not the machine endpoints the clients fetch.
 const (
 	quickMapURL = "https://quickmap.dot.ca.gov/"

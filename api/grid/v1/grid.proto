@@ -237,8 +237,8 @@ option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
     }
   ]
   external_docs: {
-    description: "The Grid site and human-readable docs"
-    url: "https://data.sierragridteam.org/docs"
+    description: "The Grid: overview, conventions and changelog"
+    url: "https://data.sierragridteam.org/"
   }
 };
 

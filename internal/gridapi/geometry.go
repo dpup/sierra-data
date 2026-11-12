@@ -17,7 +17,7 @@ import (
 //
 // The store holds GeoJSON as protobuf bytes, so the JSON mapping sends it as a
 // base64 string that every client must atob + JSON.parse. That stays the
-// default, byte for byte: the embedded site and ersn.net decode it. OBJECT is
+// default, byte for byte: existing clients such as ersn.net decode it. OBJECT is
 // the opt-in clean path: the same geometry as a google.protobuf.Struct in
 // Geometry.object, which protojson writes as a plain JSON object, and
 // geojson cleared, so a page never carries the geometry twice (it is the

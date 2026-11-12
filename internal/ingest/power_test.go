@@ -581,10 +581,9 @@ func TestPowerPoll_GeometryStableAcrossFeedOrder(t *testing.T) {
 		"upstream row order must not change the stored geometry bytes")
 }
 
-// TestPowerHeadlineSeparatesThousands: these headlines render in the events
-// detail pane, whose screenshot contract (web/screenshots/events-contract.mjs
-// check 9) fails the build on unseparated 4+ digit numbers — and PSPS customer
-// counts are the largest numbers this service emits.
+// TestPowerHeadlineSeparatesThousands: headlines are read by people, so 4+
+// digit numbers are separated — and PSPS customer counts are the largest
+// numbers this service emits.
 func TestPowerHeadlineSeparatesThousands(t *testing.T) {
 	bare := regexp.MustCompile(`(?:^|[^\d,])\d{4,}`)
 

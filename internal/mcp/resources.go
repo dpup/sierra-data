@@ -3,8 +3,8 @@ package mcp
 import "encoding/json"
 
 // A single MCP resource: a compact reference the agent can read to understand
-// the data model and — critically — the fail-loud honesty contract. Full docs
-// live at https://data.sierragridteam.org/docs.
+// the data model and — critically — the fail-loud honesty contract. The full
+// contract is https://data.sierragridteam.org/api/openapi.json.
 
 const docsResourceURI = "grid://reference"
 
