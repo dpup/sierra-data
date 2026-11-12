@@ -555,6 +555,14 @@ stop:
 		echo "No running server found"; \
 	fi
 
+# Gate 3 of the PostgreSQL migration: two servers on one throwaway database
+# (REHEARSE_DB, default sierra_rehearsal, dropped and recreated), a SIGTERM
+# and a SIGKILL handover under load; prints takeover times and failed
+# requests. Ports REHEARSE_PORT_A/B (8197/8198). docs/deploy-handoff.md.
+.PHONY: rehearse-bluegreen
+rehearse-bluegreen: server db-up
+	./scripts/rehearse-bluegreen.sh
+
 # Test server startup (quick test that exits after a few seconds)
 test-server: server
 	@echo "Testing server startup..."
