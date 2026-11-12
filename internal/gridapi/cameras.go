@@ -6,6 +6,7 @@ import (
 	"math"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -109,11 +110,19 @@ func (g *GridServer) ListCameras(ctx context.Context, req *gridv1.ListCamerasReq
 	}
 
 	cams, status, lastUpdate, version := g.svc.Cameras.Cameras()
-	// The list changes only on a refresh (version) and the geography only on a
-	// restart. placesVersion is a per-process random nonce, so it covers the
-	// seeded areas and the radius config only because both can change only on
-	// a restart, which mints a new nonce.
-	if err := etag.Guard(ctx, weakListTag(g.placesVersion+"."+version, req.GetPlace())); err != nil {
+	// The list changes only on a refresh (version, a hash of the list, so
+	// equal across processes); the geography with the places version (in the
+	// prefix) and the radius config, which is folded in explicitly because a
+	// new task definition can change it without a new binary or a reseed.
+	prefix, err := g.validatorPrefix(ctx)
+	if err != nil {
+		return nil, internalErr(ctx, err)
+	}
+	near := ""
+	if g.svc.Cfg != nil {
+		near = strconv.FormatFloat(g.svc.Cfg.Roads.CaltransFeeds.CWWP2.Cameras.Near(), 'f', -1, 64)
+	}
+	if err := etag.Guard(ctx, weakListTag(prefix+"."+version+".n"+near, req.GetPlace())); err != nil {
 		return nil, err // 304 — skip the distance pass
 	}
 	ranked, err := g.svc.camerasNear(ctx, cams, place)

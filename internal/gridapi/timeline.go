@@ -28,7 +28,11 @@ func (g *GridServer) GetEventTimeline(ctx context.Context, req *gridv1.GetEventT
 	if !ok {
 		return nil, notFoundErr("unknown event: %q", req.GetId())
 	}
-	tag := fmt.Sprintf("%s:timeline:%s:%d.%d", g.placesVersion, req.GetId(), stamp.Revision, stamp.Refreshes)
+	prefix, err := g.validatorPrefix(ctx)
+	if err != nil {
+		return nil, internalErr(ctx, err)
+	}
+	tag := fmt.Sprintf("%s:timeline:%s:%d.%d", prefix, req.GetId(), stamp.Revision, stamp.Refreshes)
 	var activity map[string]store.MeshActivity
 	if native, ok := strings.CutPrefix(req.GetId(), meshActivityPrefix); ok {
 		if activity, err = g.svc.Store.MeshActivityFor(ctx, []string{native}); err != nil {

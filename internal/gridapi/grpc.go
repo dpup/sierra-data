@@ -7,10 +7,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dpup/prefab/logging"
@@ -116,13 +119,12 @@ func (g *GridServer) resolvePlaceID(ctx context.Context, key string) (string, er
 type GridServer struct {
 	gridv1.UnimplementedGridServiceServer
 	svc *Service
-	// placesVersion is a per-process nonce mixed into the place and event-list
-	// ETag validators. The place directory is seeded once at boot and never
-	// mutates mid-process, so a fresh nonce per start IS its version. Folding it
-	// into the event-list validators too invalidates them on redeploy, covering
-	// the rare case where a changed place polygon reattaches events without a new
-	// revision (which DataVersion alone would miss).
-	placesVersion string
+	// build fingerprints the running binary (buildFingerprint). It leads every
+	// ETag, with the place-set version (validatorPrefix): a new release may
+	// render the same data differently, so its validators must differ. It
+	// replaced a random per-process nonce, which made two tasks serving the
+	// same data disagree on every validator.
+	build string
 	// pageBudget is the encoded-size cap on one list page (PageByteBudget;
 	// tests shrink it to keep fixtures small).
 	pageBudget int
@@ -132,18 +134,51 @@ type GridServer struct {
 
 // NewGridServer wires the gRPC service over the existing gridapi Service.
 func NewGridServer(svc *Service) *GridServer {
-	return &GridServer{svc: svc, placesVersion: randomNonce(), pageBudget: PageByteBudget}
+	return &GridServer{svc: svc, build: buildFingerprint(), pageBudget: PageByteBudget}
 }
 
-// randomNonce returns a short random hex string. On the (practically
-// impossible) crypto/rand failure it returns a fixed value — the validators
-// then stay stable-but-weak rather than panicking at startup.
-func randomNonce() string {
-	var b [8]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "boot"
+// validatorPrefix leads every ETag: the build fingerprint and the place-set
+// version from the versions table. Places are seeded by each new writer term
+// (and a changed polygon re-attaches events without a revision, which
+// DataVersion alone would miss), so the database's counter is the version;
+// it is the same in every process reading the database, unlike the
+// per-process nonce it replaced. A cached read (store.versionCache).
+func (g *GridServer) validatorPrefix(ctx context.Context) (string, error) {
+	pv, err := g.svc.Store.PlacesVersion(ctx)
+	if err != nil {
+		return "", err
 	}
-	return hex.EncodeToString(b[:])
+	return g.build + ".p" + strconv.FormatInt(pv, 10), nil
+}
+
+var (
+	buildOnce sync.Once
+	buildTag  string
+)
+
+// buildFingerprint is a short hash of the running executable, read once.
+// Two tasks running one image agree; any rebuilt binary differs. (The image
+// is built without .git, so there is no VCS revision to use.) On a read
+// failure it falls back to a random value: validators then differ per
+// process, which costs 200s, never a stale 304.
+func buildFingerprint() string {
+	buildOnce.Do(func() {
+		h := sha256.New()
+		if exe, err := os.Executable(); err == nil {
+			if f, err := os.Open(exe); err == nil {
+				_, err = io.Copy(h, f)
+				f.Close()
+				if err == nil {
+					buildTag = hex.EncodeToString(h.Sum(nil)[:6])
+					return
+				}
+			}
+		}
+		var b [6]byte
+		_, _ = rand.Read(b[:])
+		buildTag = "x" + hex.EncodeToString(b[:])
+	})
+	return buildTag
 }
 
 // weakListTag builds a weak ETag from a version prefix plus the request's filter
@@ -220,7 +255,11 @@ func (g *GridServer) ListEvents(ctx context.Context, req *gridv1.ListEventsReque
 	if err != nil {
 		return nil, internalErr(ctx, err)
 	}
-	version := g.placesVersion + "." + strconv.FormatInt(dv, 10) + ".r" + strconv.FormatInt(rv, 10)
+	prefix, err := g.validatorPrefix(ctx)
+	if err != nil {
+		return nil, internalErr(ctx, err)
+	}
+	version := prefix + "." + strconv.FormatInt(dv, 10) + ".r" + strconv.FormatInt(rv, 10)
 	if layersIncludeMesh(eq.Layers) {
 		// Mesh activity is overlaid at read time and moves without a revision.
 		mv, err := g.svc.Store.MeshActivityVersion(ctx)
@@ -270,9 +309,12 @@ func (g *GridServer) GetEvent(ctx context.Context, req *gridv1.GetEventRequest) 
 	// revision's blob (a fresh enhancement, mesh telemetry, a burn observation
 	// or re-attached place_ids land without a revision bump — see
 	// store.refreshEventPlaces), and whether the large enhancement I/O fields
-	// are included, and the geometry format. placesVersion is the per-boot
-	// nonce the in-process counters need.
-	tag := fmt.Sprintf("%s:%s:%d.%d:%t:%s", g.placesVersion, req.GetId(), stamp.Revision, stamp.Refreshes, req.GetEnhancementIo(), geomFmt)
+	// are included, and the geometry format; the prefix covers the build.
+	prefix, err := g.validatorPrefix(ctx)
+	if err != nil {
+		return nil, internalErr(ctx, err)
+	}
+	tag := fmt.Sprintf("%s:%s:%d.%d:%t:%s", prefix, req.GetId(), stamp.Revision, stamp.Refreshes, req.GetEnhancementIo(), geomFmt)
 	// A mesh node's activity clocks are overlaid from outside the blob and move
 	// without a revision, so they are part of the validator. One primary-key
 	// read, reused for the overlay below.
@@ -324,7 +366,11 @@ func (g *GridServer) GetEventHistory(ctx context.Context, req *gridv1.GetEventHi
 	}
 	// Revision snapshots are immutable, so in-place rewrites of the current
 	// blob (stamp.Refreshes) never change this body: the revision alone keys it.
-	tag := etag.Weak(fmt.Sprintf("%s:%s:%d:%d:%s:%t:%s", g.placesVersion, req.GetId(), stamp.Revision, req.GetPageSize(), req.GetPageToken(), req.GetEnhancementIo(), geomFmt))
+	prefix, err := g.validatorPrefix(ctx)
+	if err != nil {
+		return nil, internalErr(ctx, err)
+	}
+	tag := etag.Weak(fmt.Sprintf("%s:%s:%d:%d:%s:%t:%s", prefix, req.GetId(), stamp.Revision, req.GetPageSize(), req.GetPageToken(), req.GetEnhancementIo(), geomFmt))
 	if err := etag.Guard(ctx, tag); err != nil {
 		return nil, err // 304 — skip the history query + blob rehydrate
 	}
@@ -380,7 +426,11 @@ func (g *GridServer) ListHistory(ctx context.Context, req *gridv1.ListHistoryReq
 	if err != nil {
 		return nil, internalErr(ctx, err)
 	}
-	version := g.placesVersion + "." + strconv.FormatInt(dv, 10)
+	prefix, err := g.validatorPrefix(ctx)
+	if err != nil {
+		return nil, internalErr(ctx, err)
+	}
+	version := prefix + "." + strconv.FormatInt(dv, 10)
 	if hq.PlaceID != "" {
 		// Snapshots never change, but which events a place matches can: a
 		// place re-attachment rewrites event_places without a revision.
@@ -420,9 +470,13 @@ func (g *GridServer) ListPlaces(ctx context.Context, req *gridv1.ListPlacesReque
 	if err != nil {
 		return nil, invalidErr(err)
 	}
-	// The directory is static within a process; a match skips building the
-	// (geometry-heavy) list.
-	if err := etag.Guard(ctx, weakListTag(g.placesVersion, "kind="+req.GetKind(), "q="+req.GetQ(), "geometry="+geomFmt.String())); err != nil {
+	// The directory changes only when places are (re)seeded, which bumps the
+	// places version; a match skips building the (geometry-heavy) list.
+	prefix, err := g.validatorPrefix(ctx)
+	if err != nil {
+		return nil, internalErr(ctx, err)
+	}
+	if err := etag.Guard(ctx, weakListTag(prefix, "kind="+req.GetKind(), "q="+req.GetQ(), "geometry="+geomFmt.String())); err != nil {
 		return nil, err
 	}
 	places, err := g.svc.Store.ListPlaces(ctx, kind, req.GetQ())
@@ -446,9 +500,14 @@ func (g *GridServer) GetPlace(ctx context.Context, req *gridv1.GetPlaceRequest) 
 	if err != nil {
 		return nil, internalErr(ctx, err)
 	}
-	// Places are static within a process; the load above is a single indexed row,
-	// so guard after it — a match still saves re-sending the geometry blob.
-	if err := etag.Guard(ctx, etag.Weak(g.placesVersion+":"+place.GetId()+":"+geomFmt.String())); err != nil {
+	// Places change only with the places version; the load above is a single
+	// indexed row, so guard after it — a match still saves re-sending the
+	// geometry blob.
+	prefix, err := g.validatorPrefix(ctx)
+	if err != nil {
+		return nil, internalErr(ctx, err)
+	}
+	if err := etag.Guard(ctx, etag.Weak(prefix+":"+place.GetId()+":"+geomFmt.String())); err != nil {
 		return nil, err
 	}
 	applyGeometryFormat(ctx, geomFmt, place.GetGeometry())
