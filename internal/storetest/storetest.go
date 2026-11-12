@@ -5,15 +5,18 @@
 // docker-compose.test.yml). When it is unset, every caller is skipped with a
 // loud message, so plain `go test ./...` stays Docker-free.
 //
-// The schema is migrated ONCE into a template database (sierra_template); a
-// test then gets `CREATE DATABASE t_<random> TEMPLATE sierra_template`, which
+// The schema is migrated ONCE into a template database (sierra_template_<hash>);
+// a test then gets `CREATE DATABASE t_<random> TEMPLATE sierra_template_<hash>`, which
 // is a file copy, far cheaper than migrating, and the database is dropped
 // WITH (FORCE) when the test ends. Databases are created with C collation,
 // like production must be. Advisory locks are per database, so writer-lock
 // tests in different databases never contend and t.Parallel() stays safe.
 //
-// The template is keyed on a hash of the migration files (stored as the
-// database comment), so editing a migration rebuilds it on the next run.
+// The template is keyed on a hash of the migration files: its NAME carries a
+// prefix of the hash (sierra_template_<hash>), and the full hash is kept as the
+// database comment. Editing a migration therefore builds a new template on the
+// next run, and two checkouts with different migration sets (worktrees on one
+// Docker server) each get their own instead of dropping each other's mid-run.
 package storetest
 
 import (
@@ -39,8 +42,12 @@ import (
 // EnvVar names the admin connection URL.
 const EnvVar = "TEST_DATABASE_URL"
 
-// TemplateName is the migrated template every test database is copied from.
-const TemplateName = "sierra_template"
+// TemplatePrefix names the migrated templates every test database is copied
+// from: TemplatePrefix + the first 12 hex digits of the migrations' hash.
+const TemplatePrefix = "sierra_template_"
+
+// TemplateName is this build's template database.
+var TemplateName = TemplatePrefix + migrationsHash()[:12]
 
 // templateLockKey serializes template (re)builds across test binaries: go
 // test runs packages in parallel, and each would otherwise race to build it.
@@ -138,7 +145,7 @@ func createFromTemplate(ctx context.Context, c *pgx.Conn, name string) error {
 	return err
 }
 
-// ensureTemplate builds sierra_template if it is missing or was built from
+// ensureTemplate builds this build's template if it is missing or was built from
 // different migration files. Runs under a session advisory lock on the admin
 // database, so concurrent test binaries build it once.
 func ensureTemplate(admin string) error {
