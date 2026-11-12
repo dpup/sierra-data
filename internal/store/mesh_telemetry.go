@@ -99,51 +99,145 @@ func (s *Store) InsertMeshTelemetry(ctx context.Context, samples []MeshTelemetry
 		return nil
 	}
 	return s.inTx(ctx, func(tx *sql.Tx) error {
-		stmt, err := tx.PrepareContext(ctx, `
-			INSERT INTO mesh_telemetry (`+telemetryColumns+`)
-			VALUES (`+params(1, 29)+`)
-			ON CONFLICT (pubkey, reported_at) DO NOTHING`)
-		if err != nil {
-			return fmt.Errorf("store: prepare mesh telemetry insert: %w", err)
-		}
-		defer stmt.Close()
-		prev, err := tx.PrepareContext(ctx, `
-			SELECT last_success_at, uptime_s, packets_sent, packets_recv FROM mesh_telemetry
-			WHERE pubkey = $1 AND reporter = $2 AND reported_at < $3
-			ORDER BY reported_at DESC LIMIT 1`)
-		if err != nil {
-			return fmt.Errorf("store: prepare mesh telemetry lookup: %w", err)
-		}
-		defer prev.Close()
+		// Drop what a series cannot use before anything is looked up.
+		valid := make([]MeshTelemetrySample, 0, len(samples))
 		for _, t := range samples {
-			if t.PubKey == "" || t.ReportedAt.IsZero() {
-				continue // no identity or no time: nothing a series could use
+			if t.PubKey != "" && !t.ReportedAt.IsZero() {
+				valid = append(valid, t)
 			}
-			var last sql.NullInt64
-			var uptime, sent, recv int64
-			err := prev.QueryRowContext(ctx, t.PubKey, t.Reporter, t.ReportedAt.Unix()).Scan(&last, &uptime, &sent, &recv)
-			switch {
-			case err == nil && !t.LastSuccessAt.IsZero() && last.Valid && last.Int64 == t.LastSuccessAt.Unix():
-				continue // the same read, reported again
-			case err == nil && t.UptimeS > 0 && t.UptimeS == uptime && t.PacketsSent == sent && t.PacketsRecv == recv:
-				continue // a cached reading re-sent as new: the node's clock did not move
-			case err != nil && err != sql.ErrNoRows:
-				return fmt.Errorf("store: looking up mesh telemetry for %s: %w", t.PubKey, err)
-			}
-			if _, err := stmt.ExecContext(ctx,
-				t.PubKey, t.ReportedAt.Unix(), t.ReceivedAt.Unix(), t.Reporter,
-				unixTimeOrNil(t.LastSuccessAt), unixTimeOrNil(t.LastAttemptAt),
-				t.BatteryVolts, t.BatteryPct, t.BatteryPctSource, t.TemperatureC, t.Humidity, t.Pressure,
-				t.NoiseFloorDBm, t.LastSNRdB, t.LastRSSIdBm, t.TxQueueLen,
-				t.UptimeS, t.AirtimeMs, t.RxAirtimeMs, t.PacketsSent, t.PacketsRecv,
-				t.SentFlood, t.SentDirect, t.RecvFlood, t.RecvDirect,
-				t.DirectDups, t.FloodDups, t.FullEvts, t.RecvErrors,
-			); err != nil {
-				return fmt.Errorf("store: inserting mesh telemetry for %s: %w", t.PubKey, err)
+		}
+		for start := 0; start < len(valid); start += telemetryChunk {
+			if err := insertTelemetryChunk(ctx, tx, valid[start:min(start+telemetryChunk, len(valid))]); err != nil {
+				return err
 			}
 		}
 		return nil
 	})
+}
+
+// telemetryChunk bounds one INSERT: 29 parameters a row against PostgreSQL's
+// 65,535, with headroom.
+const telemetryChunk = 1000
+
+// telemetryPrev is the row a sample is compared with: the node's previous
+// sample from the same reporter.
+type telemetryPrev struct {
+	reportedAt  int64
+	lastSuccess sql.NullInt64
+	uptime      int64
+	sent, recv  int64
+}
+
+// insertTelemetryChunk applies the skip rules (see InsertMeshTelemetry) to
+// every sample against what precedes it, then inserts the survivors, in two
+// round trips for the chunk instead of two per sample: one LATERAL lookup of
+// every sample's previous stored row, one multi-row INSERT.
+//
+// "What precedes it" is the stored row with the greatest reported_at below the
+// sample's, or an earlier sample of this same chunk that was inserted and is
+// newer than that row: exactly what the per-sample loop saw, where each insert
+// was visible to the next lookup. A tie goes to the stored row. A sample only
+// counts as inserted if it can be: the primary key is (pubkey, reported_at)
+// whatever the reporter, so a sample colliding with a stored row, or with an
+// earlier one in the chunk, is dropped by ON CONFLICT and precedes nothing.
+func insertTelemetryChunk(ctx context.Context, tx *sql.Tx, chunk []MeshTelemetrySample) error {
+	n := len(chunk)
+	pubkey, reporter, reported := make([]string, n), make([]string, n), make([]int64, n)
+	for i, t := range chunk {
+		pubkey[i], reporter[i], reported[i] = t.PubKey, t.Reporter, t.ReportedAt.Unix()
+	}
+	rows, err := tx.QueryContext(ctx, `
+		SELECT t.ord,
+		       EXISTS (SELECT 1 FROM mesh_telemetry c WHERE c.pubkey = t.pubkey AND c.reported_at = t.reported_at),
+		       p.reported_at, p.last_success_at, p.uptime_s, p.packets_sent, p.packets_recv
+		FROM unnest($1::text[], $2::text[], $3::bigint[]) WITH ORDINALITY AS t(pubkey, reporter, reported_at, ord)
+		LEFT JOIN LATERAL (
+		  SELECT m.reported_at, m.last_success_at, m.uptime_s, m.packets_sent, m.packets_recv
+		  FROM mesh_telemetry m
+		  WHERE m.pubkey = t.pubkey AND m.reporter = t.reporter AND m.reported_at < t.reported_at
+		  ORDER BY m.reported_at DESC LIMIT 1) p ON true`, pubkey, reporter, reported)
+	if err != nil {
+		return fmt.Errorf("store: looking up mesh telemetry predecessors: %w", err)
+	}
+	stored := make(map[int]telemetryPrev, n)
+	collides := make(map[int]bool)
+	for rows.Next() {
+		var ord int
+		var exists bool
+		var at, up, sent, recv, last sql.NullInt64
+		if err := rows.Scan(&ord, &exists, &at, &last, &up, &sent, &recv); err != nil {
+			rows.Close()
+			return fmt.Errorf("store: scanning mesh telemetry predecessor: %w", err)
+		}
+		collides[ord-1] = exists
+		if at.Valid {
+			stored[ord-1] = telemetryPrev{reportedAt: at.Int64, lastSuccess: last, uptime: up.Int64, sent: sent.Int64, recv: recv.Int64}
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("store: looking up mesh telemetry predecessors: %w", err)
+	}
+
+	type seriesKey struct{ pubkey, reporter string }
+	type pointKey struct {
+		pubkey string
+		at     int64
+	}
+	kept := map[seriesKey][]int{} // indexes into chunk of the samples inserted so far
+	taken := map[pointKey]bool{}  // (pubkey, reported_at) inserted so far, any reporter
+	var keep []MeshTelemetrySample
+	for i, t := range chunk {
+		prev, have := stored[i]
+		for _, j := range kept[seriesKey{t.PubKey, t.Reporter}] {
+			if r := chunk[j].ReportedAt.Unix(); r < reported[i] && (!have || r > prev.reportedAt) {
+				prev, have = telemetryPrev{reportedAt: r, uptime: chunk[j].UptimeS,
+					sent: chunk[j].PacketsSent, recv: chunk[j].PacketsRecv}, true
+				if !chunk[j].LastSuccessAt.IsZero() {
+					prev.lastSuccess = sql.NullInt64{Int64: chunk[j].LastSuccessAt.Unix(), Valid: true}
+				}
+			}
+		}
+		switch {
+		case have && !t.LastSuccessAt.IsZero() && prev.lastSuccess.Valid && prev.lastSuccess.Int64 == t.LastSuccessAt.Unix():
+			continue // the same read, reported again
+		case have && t.UptimeS > 0 && t.UptimeS == prev.uptime && t.PacketsSent == prev.sent && t.PacketsRecv == prev.recv:
+			continue // a cached reading re-sent as new: the node's clock did not move
+		}
+		pk := pointKey{t.PubKey, reported[i]}
+		if collides[i] || taken[pk] {
+			continue // ON CONFLICT DO NOTHING would drop it: it precedes nothing
+		}
+		taken[pk] = true
+		keep = append(keep, t)
+		k := seriesKey{t.PubKey, t.Reporter}
+		kept[k] = append(kept[k], i)
+	}
+	if len(keep) == 0 {
+		return nil
+	}
+
+	args := make([]any, 0, len(keep)*29)
+	var values strings.Builder
+	for i, t := range keep {
+		if i > 0 {
+			values.WriteString(", ")
+		}
+		values.WriteString("(" + params(i*29+1, 29) + ")")
+		args = append(args,
+			t.PubKey, t.ReportedAt.Unix(), t.ReceivedAt.Unix(), t.Reporter,
+			unixTimeOrNil(t.LastSuccessAt), unixTimeOrNil(t.LastAttemptAt),
+			t.BatteryVolts, t.BatteryPct, t.BatteryPctSource, t.TemperatureC, t.Humidity, t.Pressure,
+			t.NoiseFloorDBm, t.LastSNRdB, t.LastRSSIdBm, t.TxQueueLen,
+			t.UptimeS, t.AirtimeMs, t.RxAirtimeMs, t.PacketsSent, t.PacketsRecv,
+			t.SentFlood, t.SentDirect, t.RecvFlood, t.RecvDirect,
+			t.DirectDups, t.FloodDups, t.FullEvts, t.RecvErrors)
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO mesh_telemetry (`+telemetryColumns+`) VALUES `+
+		values.String()+` ON CONFLICT (pubkey, reported_at) DO NOTHING`, args...); err != nil {
+		return fmt.Errorf("store: inserting %d mesh telemetry samples: %w", len(keep), err)
+	}
+	return nil
 }
 
 // MeshTelemetry returns one node's samples in [from, to), oldest first, plus

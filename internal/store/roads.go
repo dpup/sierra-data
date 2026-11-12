@@ -26,21 +26,33 @@ func (s *Store) InsertRoadSamples(ctx context.Context, samples []RoadSample) err
 	if len(samples) == 0 {
 		return nil
 	}
-	return s.inTx(ctx, func(tx *sql.Tx) error {
-		stmt, err := tx.PrepareContext(ctx, `INSERT INTO road_samples
-			(road_id, at, status, congestion, duration_m, delay_m) VALUES ($1, $2, $3, $4, $5, $6)
-			ON CONFLICT (road_id, at) DO NOTHING`)
-		if err != nil {
-			return fmt.Errorf("store: prepare road sample insert: %w", err)
+	roadID := make([]string, 0, len(samples))
+	at, status, congestion := make([]int64, 0, len(samples)), make([]int32, 0, len(samples)), make([]int32, 0, len(samples))
+	duration, delay := make([]*int32, 0, len(samples)), make([]*int32, 0, len(samples))
+	for _, r := range samples {
+		if r.RoadID == "" || r.At.IsZero() {
+			continue
 		}
-		defer stmt.Close()
-		for _, r := range samples {
-			if r.RoadID == "" || r.At.IsZero() {
-				continue
-			}
-			if _, err := stmt.ExecContext(ctx, r.RoadID, r.At.Unix(), r.Status, r.Congestion, r.DurationMinutes, r.DelayMinutes); err != nil {
-				return fmt.Errorf("store: insert road sample %s: %w", r.RoadID, err)
-			}
+		roadID = append(roadID, r.RoadID)
+		at = append(at, r.At.Unix())
+		status, congestion = append(status, r.Status), append(congestion, r.Congestion)
+		duration, delay = append(duration, r.DurationMinutes), append(delay, r.DelayMinutes)
+	}
+	if len(roadID) == 0 {
+		return nil
+	}
+	return s.inTx(ctx, func(tx *sql.Tx) error {
+		// One multi-row INSERT (unnest). A repeated (road, at) inside the
+		// batch is ignored like one already stored: the first wins.
+		if _, err := tx.ExecContext(ctx, `INSERT INTO road_samples
+			(road_id, at, status, congestion, duration_m, delay_m)
+			SELECT road_id, at, status, congestion, duration_m, delay_m
+			FROM unnest($1::text[], $2::bigint[], $3::int[], $4::int[], $5::int[], $6::int[])
+			     WITH ORDINALITY AS t(road_id, at, status, congestion, duration_m, delay_m, ord)
+			ORDER BY ord
+			ON CONFLICT (road_id, at) DO NOTHING`,
+			roadID, at, status, congestion, duration, delay); err != nil {
+			return fmt.Errorf("store: insert %d road samples: %w", len(roadID), err)
 		}
 		return nil
 	})

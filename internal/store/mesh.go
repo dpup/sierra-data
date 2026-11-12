@@ -49,25 +49,38 @@ func (s *Store) InsertMeshObservations(ctx context.Context, obs []MeshObservatio
 	return s.RecordMeshTick(ctx, obs, nil)
 }
 
+// obsChunk bounds one observation INSERT: nine arrays of this many elements.
+const obsChunk = 5000
+
+// insertMeshObservations writes the batch with one multi-row INSERT per
+// obsChunk rows (unnest of parallel arrays), in input order: the identity ids
+// the rows receive ascend with the slice, which the compaction watermark
+// relies on. It was a prepared statement executed once per row, a network
+// round trip each; a tick's few hundred receptions are now two round trips.
 func insertMeshObservations(ctx context.Context, tx *sql.Tx, obs []MeshObservation) error {
-	if len(obs) == 0 {
-		return nil
-	}
-	stmt, err := tx.PrepareContext(ctx, `
-		INSERT INTO mesh_observations
-		  (pubkey, heard_at, broker, gateway, snr, rssi, hop_count, path, path_nodes)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`)
-	if err != nil {
-		return fmt.Errorf("store: prepare mesh observation insert: %w", err)
-	}
-	defer stmt.Close()
-	for _, o := range obs {
-		if _, err := stmt.ExecContext(ctx,
-			o.PubKey, o.HeardAt.Unix(), o.Broker, o.Gateway,
-			o.SNR, o.RSSI, o.HopCount,
-			strings.Join(o.Path, ","), strings.Join(o.PathNodes, ","),
-		); err != nil {
-			return fmt.Errorf("store: insert mesh observation %s: %w", o.PubKey, err)
+	for start := 0; start < len(obs); start += obsChunk {
+		chunk := obs[start:min(start+obsChunk, len(obs))]
+		n := len(chunk)
+		pubkey, broker, gateway := make([]string, n), make([]string, n), make([]string, n)
+		path, pathNodes := make([]string, n), make([]string, n)
+		heard, hops := make([]int64, n), make([]int64, n)
+		snr, rssi := make([]float64, n), make([]int32, n)
+		for i, o := range chunk {
+			pubkey[i], broker[i], gateway[i] = o.PubKey, o.Broker, o.Gateway
+			heard[i], hops[i] = o.HeardAt.Unix(), int64(o.HopCount)
+			snr[i], rssi[i] = o.SNR, o.RSSI
+			path[i], pathNodes[i] = strings.Join(o.Path, ","), strings.Join(o.PathNodes, ",")
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO mesh_observations
+			  (pubkey, heard_at, broker, gateway, snr, rssi, hop_count, path, path_nodes)
+			SELECT pubkey, heard_at, broker, gateway, snr, rssi, hop_count, path, path_nodes
+			FROM unnest($1::text[], $2::bigint[], $3::text[], $4::text[], $5::float8[],
+			            $6::int[], $7::bigint[], $8::text[], $9::text[])
+			     WITH ORDINALITY AS t(pubkey, heard_at, broker, gateway, snr, rssi, hop_count, path, path_nodes, ord)
+			ORDER BY ord`,
+			pubkey, heard, broker, gateway, snr, rssi, hops, path, pathNodes); err != nil {
+			return fmt.Errorf("store: insert %d mesh observations: %w", n, err)
 		}
 	}
 	return nil
