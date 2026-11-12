@@ -62,13 +62,15 @@ pre, .term {
   border-left: 2px solid var(--brass);
   padding: 12px 14px;
   overflow-x: auto;
-  white-space: pre;
+  white-space: pre-wrap;    /* wrap at phone width; copying keeps the real newlines */
+  overflow-wrap: anywhere;
   line-height: 1.5;
   font-size: 0.93em;
 }
-.copy { position: relative; }
+.copy { display: flex; flex-direction: column; }
+.copy pre { margin-top: 0; }
 .copy button {
-  position: absolute; top: 8px; right: 8px;
+  align-self: flex-end;
   font: inherit; font-size: 0.85em;
   background: var(--bg); color: var(--green);
   border: 1px solid var(--brass); border-radius: 0;
