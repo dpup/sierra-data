@@ -16,6 +16,7 @@ require (
 	github.com/sierragridteam/sierra-meshrelay v0.10.0
 	github.com/stretchr/testify v1.12.1
 	github.com/twpayne/go-polyline v1.1.2
+	github.com/yuin/goldmark v1.8.7
 	golang.org/x/net v0.62.0
 	golang.org/x/sync v0.24.0
 	google.golang.org/genproto/googleapis/api v0.0.0-20261104224025-d1e00e9f33ab

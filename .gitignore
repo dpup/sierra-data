@@ -64,35 +64,8 @@ coverage/
 bower_components
 
 # node_modules (if any JS tools are used).
-# Both forms on purpose: `node_modules/` matches a real directory, but the site
-# build makes web/node_modules a SYMLINK to an off-mount store (see the
-# SITE_DEPS note in the Makefile), and a trailing-slash pattern does not match a
-# symlink — so without the second line git would happily commit a link to an
-# absolute path that exists on exactly one machine.
 node_modules/
-node_modules
 
-# Astro build cache (web/).
-web/.astro/
-
-# The Astro build OUTPUT. Not committed: the Docker image builds it itself (the
-# Dockerfile's site-builder stage), so there is no stale-artifact class of bug
-# and no generated JS in review diffs. Locally, `make site` (or any target that
-# embeds it — `make server`, `make run`, `make test`) rebuilds it on demand.
-#
-# .gitkeep is the exception and must stay committed: site/embed.go does
-# `//go:embed all:dist`, which is a COMPILE ERROR if the directory doesn't
-# exist — so a fresh clone with no Node still has to `go build ./...`.
-# `astro build` EMPTIES outDir, which would delete it — hence the twin file
-# web/public/.gitkeep, which Astro copies back into dist on every build.
-site/dist/*
-!site/dist/.gitkeep
-
-# Screenshot/layout-diagnosis artifacts (tools/screenshots) — regenerated.
-tools/screenshots/out/
-
-# Mocked-data screenshot review artifacts (web/screenshots) — regenerated.
-web/screenshots/out/
 
 # Optional npm cache directory
 .npm
@@ -183,10 +156,6 @@ server.pid
 __pycache__/
 *.pyc
 
-# Generated from the locked npm dependency during site builds.
-web/public/lib/maplibre-gl.mjs
-web/public/lib/maplibre-gl.css
-web/public/lib/maplibre-gl-worker.mjs
 
 # Locally compiled corridor generator (source is under cmd/).
 /gen-corridors

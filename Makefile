@@ -1,5 +1,5 @@
 # Live Data API Server - Build, Test, and Deployment Tasks
-.PHONY: openapi test-mesh-relay mesh-relay run-relay relay-token docker-build-relay ecr-push ecr-push-grid ecr-push-relay ingest-token test-pge test-llm burn-line-dry-run build test proto proto-tools clean server tools site site-modules site-ensure site-install site-dev site-shots site-shots-mock check-wiring run dev lint fmt docker docker-build docker-run docker-run-dev docker-push docker-clean deploy install help test-meshcore
+.PHONY: openapi test-mesh-relay mesh-relay run-relay relay-token docker-build-relay ecr-push ecr-push-grid ecr-push-relay ingest-token test-pge test-llm burn-line-dry-run build test proto proto-tools clean server tools run dev lint fmt docker docker-build docker-run docker-run-dev docker-push docker-clean deploy install help test-meshcore
 
 # Go parameters
 GOCMD=go
@@ -58,13 +58,10 @@ build: proto server tools mesh-relay
 # Build main server only
 server: $(SERVER_BINARY)
 
-# site-ensure: the server embeds site/dist, which is no longer committed — build
-# it (if stale/missing) before compiling, or the binary serves an empty site.
-$(SERVER_BINARY): proto site-ensure
+$(SERVER_BINARY): proto
 	$(GOBUILD) -o $(SERVER_BINARY) ./$(CMD_DIR)/server
 
-# Mesh relay: a SEPARATE service (own process, own SQLite file). It does not
-# embed the site, so it needs neither Node nor site-ensure.
+# Mesh relay: a SEPARATE service (own process, own SQLite file).
 mesh-relay:
 	$(GOBUILD) -o $(MESH_RELAY_BINARY) ./$(CMD_DIR)/mesh-relay
 
@@ -123,114 +120,6 @@ $(TEST_LLM_BINARY): proto
 $(TEST_PGE_BINARY): proto
 	$(GOBUILD) -o $(TEST_PGE_BINARY) ./$(CMD_DIR)/test-pge
 
-# Build the static site with Astro (source in web/) into site/dist. The output
-# is NOT committed — it's git-ignored and rebuilt on demand: locally by the
-# site-ensure rule below (a prerequisite of every target that embeds it), and
-# for a deploy by the Dockerfile's site-builder stage. So there is nothing to
-# keep in sync and no way to ship a stale site.
-# Uses pnpm install --frozen-lockfile into an off-mount dependency store; see SITE_DEPS below.
-# Where the site's npm dependencies actually live.
-#
-# Files written into /workspace — a virtiofs bind mount — bit-corrupt in place
-# (the same fault class as the SQLite corruption in internal/store/AGENTS.md).
-# The package manager writes ~188MB of them, and one flipped byte in @astrojs/compiler's
-# astro.wasm or in any dist/*.js kills the build with an error naming an
-# innocent .astro file. So node_modules lives OFF the mount and web/node_modules
-# is a symlink to it.
-#
-# Crucially the INSTALL also has to happen off the mount: `pnpm install` deletes and
-# recreates node_modules, which replaces the symlink with a real directory back
-# on the corrupting filesystem. So we keep a copy of package.json +
-# pnpm-lock.yaml and pnpm-workspace.yaml in $(SITE_DEPS) and run pnpm there, then link. Override
-# SITE_DEPS for a different host.
-SITE_DEPS ?= $(HOME)/.cache/grid-web-deps
-
-site-modules:
-	@command -v pnpm >/dev/null 2>&1 || { echo "pnpm 12.18.0 and Node 26.13.0+ are required"; exit 1; }
-	@mkdir -p "$(SITE_DEPS)"
-	@if [ ! -f "$(SITE_DEPS)/.installed" ] || [ ! -d "$(SITE_DEPS)/node_modules" ] || \
-		! cmp -s web/package.json "$(SITE_DEPS)/package.json" || \
-		! cmp -s web/pnpm-lock.yaml "$(SITE_DEPS)/pnpm-lock.yaml" || \
-		! cmp -s web/pnpm-workspace.yaml "$(SITE_DEPS)/pnpm-workspace.yaml"; then \
-		rm -f "$(SITE_DEPS)/.installed"; \
-		cp web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml "$(SITE_DEPS)/"; \
-		(cd "$(SITE_DEPS)" && pnpm install --frozen-lockfile) || exit 1; \
-		touch "$(SITE_DEPS)/.installed"; \
-	fi
-	@# Removing the symlink does not remove its off-mount target.
-	@rm -rf web/node_modules
-	@ln -sfn "$(SITE_DEPS)/node_modules" web/node_modules
-
-site: site-modules
-	@echo "Building site (Astro → site/dist)..."
-	cd web && pnpm run build
-	@# Astro emits build-internal *.mjs at the dist root (content-*.mjs stubs, a
-	@# hash-named manifest_*.mjs) that are never served. Prune all root-level
-	@# *.mjs; real page JS lives in assets/.
-	rm -f site/dist/*.mjs
-	@# AFTER the build, not before: half of this check reads the built HTML, so a
-	@# pre-build run examined the previous build (and crashed outright on a fresh
-	@# clone, where site/dist holds only .gitkeep). A failure here still fails the
-	@# target, so nothing downstream — server, test, image — proceeds on drift.
-	@$(MAKE) --no-print-directory check-wiring
-	@echo "✅ Site built: site/dist"
-
-# Rebuild the site only when it's missing or older than its source. This is what
-# every target that embeds site/dist depends on, so `make server|run|test` always
-# compiles against a site matching web/ — no "did I remember to rebuild?" step.
-# A no-op costs nothing; a real rebuild is ~1.5s.
-#
-# The source list is enumerated explicitly rather than `find web/` so the walk
-# never descends into web/node_modules (a symlink to an off-mount store).
-# Directories are listed alongside files because a DELETED page changes no
-# surviving file's mtime — only its parent directory's — and a deleted page that
-# lingers in site/dist is exactly the kind of staleness this rule exists to stop.
-# CHANGELOG.md is rendered into the site's /changelog page (web/src/pages/changelog.astro).
-SITE_SRC := $(shell find web/src web/public web/scripts web/astro.config.mjs web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml CHANGELOG.md \( -type f -o -type d \) 2>/dev/null)
-
-site/dist/index.html: $(SITE_SRC)
-	@$(MAKE) --no-print-directory site
-
-site-ensure: site/dist/index.html
-
-# Install site build dependencies only (no build).
-site-install: site-modules
-	@echo "✅ Site deps installed at $(SITE_DEPS) (web/node_modules → symlink)"
-
-# Run the Astro dev server (hot reload) for local site development. Note: /v1 and
-# /api calls still need the Go server running — point the dev site at it or proxy.
-site-dev: site-modules
-	cd web && pnpm run dev
-
-# Screenshot + layout-metrics of the running site for spacing/layout diagnosis.
-# Uses the web project's locked Playwright dependency and Chromium with
-# a server already running — point BASE_URL at it (default :8190). Set LABEL to
-# tag a run (e.g. before/after) for numeric diffs. Output lands under
-# tools/screenshots/out/<LABEL>/ (git-ignored).
-site-shots: site-modules
-	cd tools/screenshots && \
-		BASE_URL=$(or $(BASE_URL),http://localhost:8190) LABEL=$(or $(LABEL),current) node shots.mjs
-
-# Self-contained screenshots with MOCKED /api/v1 data — no server, no API keys,
-# deterministic. Builds the site, serves site/dist, intercepts every /api/v1
-# fetch from web/screenshots/fixtures.mjs so pages render populated state, and
-# captures each page at phone/tablet/desktop into web/screenshots/out/
-# (git-ignored). This is the one to reach for when reviewing the rendered UI —
-# especially mobile — without standing up the Go server + live upstreams.
-# Pass PAGES=events,map or ONLY=mobile to narrow a run. Uses web/'s own
-# Playwright devDependency, also used by site-shots.
-site-shots-mock: site-modules
-	cd web && pnpm run build
-	cd web && node screenshots/capture.mjs $(if $(PAGES),--pages $(PAGES),) $(if $(ONLY),--only $(ONLY),)
-
-# Islands bind to markup by id string, so a rename on one side only surfaces in
-# a browser as a null-deref halfway through init. This is that check, statically:
-# every getElementById/requireEls id in an island must exist in its page. It runs
-# at the end of `site`, so the mismatch cannot reach a build. Standalone against
-# an unbuilt tree it checks source only.
-check-wiring:
-	@cd web && node screenshots/wiring-check.mjs
-
 # Generate protobuf code
 # Note: googleapis is a proto-only module (no Go code), so we download it explicitly with @latest.
 # Both googleapis and grpc-gateway are resolved via `go mod download -json` (not `go list -m`)
@@ -288,10 +177,6 @@ clean:
 	rm -f $(PROTO_DIR)/*_grpc.pb.go
 	rm -f $(PROTO_DIR)/*.swagger.json
 	rm -f $(GRID_PROTO_DIR)/*.pb.go
-	rm -rf site/dist web/node_modules web/.astro
-	@# Put the .gitkeep placeholder back: without it site/dist doesn't exist and
-	@# site/embed.go's //go:embed all:dist stops compiling.
-	@mkdir -p site/dist && touch site/dist/.gitkeep
 
 ## Database (local PostgreSQL in Docker)
 
@@ -341,13 +226,10 @@ db-url:
 
 ## Testing Targets
 
-# Run full test suite against the Docker PostgreSQL (db-up). site-ensure so
-# the embed-manifest tests in cmd/server/site_test.go run against a real
-# build — with an unbuilt site/dist they skip (plain `go test ./...` stays
-# Node-free), and a skip proves nothing. Plain `go test ./...` without
+# Run full test suite against the Docker PostgreSQL (db-up). Plain `go test ./...` without
 # TEST_DATABASE_URL skips every store-backed test with a loud SKIP line.
 # CI provides its own PostgreSQL service and sets SKIP_DB_UP=1.
-test: site-ensure $(if $(SKIP_DB_UP),,db-up)
+test: $(if $(SKIP_DB_UP),,db-up)
 	TZ=UTC TEST_DATABASE_URL="$(TEST_DATABASE_URL)" $(GOTEST) -v ./...
 
 # Test incident content processing functionality
@@ -607,9 +489,7 @@ docker: docker-build
 # Build Docker container image.
 # Depends on `proto` (regenerate the committed *.pb.go so the image is built
 # from code matching the current .proto) and `test` (never build/deploy a red
-# tree). The image itself only compiles — it does not regenerate or test. It
-# DOES build the site (the Dockerfile's site-builder stage) from web/ source, so
-# there's no stale-site guard here: the image can only contain a fresh build.
+# tree). The image itself only compiles — it does not regenerate or test.
 docker-build: proto test
 	@echo "Building Docker image: $(DOCKER_IMAGE_NAME):$(DOCKER_TAG)"
 	docker build \
@@ -620,7 +500,7 @@ docker-build: proto test
 		-t $(DOCKER_IMAGE_NAME):$(DOCKER_TAG) .
 	@echo "✅ Docker image built: $(DOCKER_IMAGE_NAME):$(DOCKER_TAG)"
 
-# The relay image: same Dockerfile, its own target (no site, no API keys).
+# The relay image: same Dockerfile, its own target (no API keys).
 docker-build-relay:
 	docker build --platform linux/amd64 --target relay -t $(RELAY_IMAGE_NAME):$(DOCKER_TAG) .
 	@echo "✅ Docker image built: $(RELAY_IMAGE_NAME):$(DOCKER_TAG)"
@@ -757,10 +637,6 @@ help:
 	@echo "  tools       - Build CLI testing tools only"
 	@echo "  proto       - Generate protobuf code (and the OpenAPI spec)"
 	@echo "  openapi     - Rebuild api/grid/v1/openapi.json from the swagger + overlay"
-	@echo "  site        - Build the static site (Astro, web/ → site/dist; not committed)"
-	@echo "  site-ensure - Build the site only if missing/stale (implied by server, run, test)"
-	@echo "  site-dev    - Run the Astro dev server (hot reload)"
-	@echo "  site-shots [BASE_URL=url] [LABEL=tag] - Screenshot + layout metrics of a running site (Playwright)"
 	@echo "  gridctl     - Build the SQLite -> PostgreSQL importer (bin/gridctl; docs/import.md)"
 	@echo "  clean       - Clean build artifacts"
 	@echo ""
@@ -821,9 +697,3 @@ help:
 # Forces a file target to rebuild every time.
 FORCE:
 
-# Browser contracts use synthetic fixtures and never contact production services.
-.PHONY: site-test
-site-test: site
-	cd web && node screenshots/map-contract.mjs
-	cd web && node screenshots/events-contract.mjs
-	cd web && node screenshots/relay-contract.mjs
