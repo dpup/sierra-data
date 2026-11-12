@@ -220,3 +220,47 @@ func TestMeshTelemetryBatchMatchesSequentialReference(t *testing.T) {
 		})
 	}
 }
+
+func TestReplaceEventPlacesTouchesOnlyWhatChanged(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	set := func(id string, places []string) {
+		t.Helper()
+		require.NoError(t, s.inTx(ctx, func(tx *sql.Tx) error { return replaceEventPlaces(tx, id, places) }))
+	}
+	rowsOf := func(id string) map[string]string { // place -> xmin of its row
+		t.Helper()
+		rows, err := s.db.Query(`SELECT place_id, xmin::text FROM event_places WHERE event_id = $1`, id)
+		require.NoError(t, err)
+		defer rows.Close()
+		out := map[string]string{}
+		for rows.Next() {
+			var p, x string
+			require.NoError(t, rows.Scan(&p, &x))
+			out[p] = x
+		}
+		require.NoError(t, rows.Err())
+		return out
+	}
+
+	set("e1", []string{"a", "b", "c"})
+	set("e2", []string{"a"}) // another event is never touched
+	first := rowsOf("e1")
+	require.Len(t, first, 3)
+
+	set("e1", []string{"a", "b", "c"})
+	assert.Equal(t, first, rowsOf("e1"), "an unchanged set rewrites no row")
+
+	set("e1", []string{"b", "d"})
+	got := rowsOf("e1")
+	assert.Len(t, got, 2)
+	assert.Equal(t, first["b"], got["b"], "a kept row is the same row")
+	assert.Contains(t, got, "d")
+	assert.NotContains(t, got, "a")
+
+	set("e1", []string{"d", "d"}) // a repeated id is one row
+	assert.Len(t, rowsOf("e1"), 1)
+	set("e1", nil)
+	assert.Empty(t, rowsOf("e1"))
+	assert.Len(t, rowsOf("e2"), 1)
+}
