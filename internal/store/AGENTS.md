@@ -473,7 +473,7 @@ always backwards compatible. Rules, binding on every new file:
 
 ### The SQLite importer depends on this schema
 
-`internal/sqliteimport` (`gridctl import`, `docs/import.md`) loads the legacy
+`internal/sqliteimport` (`gridctl import`; usage in the `cmd/gridctl` package doc) loads the legacy
 SQLite store into these tables and verifies them column by column. Its table
 list (`tables.go`) names the columns it copies and compares, and it derives
 the columns SQLite never had (`first_ingested_at`, the bbox, `versions`, the

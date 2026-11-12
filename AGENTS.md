@@ -36,7 +36,7 @@ Last updated: 2026-07-06
 ├── cmd/                       # CLI applications
 │   ├── server/                # Main API server (main.go, site.go, gridadapter.go; landing/ = the / page)
 │   ├── mesh-relay/            # SIERRA Mesh Relay — a SEPARATE service (see below)
-│   ├── gridctl/               # SQLite -> PostgreSQL importer: snapshot, import, verify (docs/import.md)
+│   ├── gridctl/               # SQLite -> PostgreSQL importer: snapshot, import, verify (gridctl --help)
 │   ├── test-google/           # Google Routes API testing tool
 │   ├── test-caltrans/         # Caltrans data testing tool
 │   ├── test-weather/          # Weather API testing tool
@@ -225,16 +225,18 @@ infrastructure. The tag `legacy-efs-final` marks where they parted.
 **main deploys through GitHub Actions**, never from a laptop's AWS
 credentials: CI passing on a push to `main` starts the Deploy workflow
 (`.github/workflows/deploy.yml`), which waits for approval in the
-`production` environment, pushes the images to the Grid account's ECR
-through OIDC, registers task-definition revisions with only the image
-changed (Terraform in sierra-infra owns the rest) and updates the ECS
+`production` environment, pushes the images to ECR through OIDC,
+registers task-definition revisions with only the image changed (the
+infrastructure code owns the rest) and updates the ECS
 services (native blue/green, bake, automatic rollback). `make deploy` runs
 it by hand for HEAD (the guards in `scripts/deploy.py`, `branch_drift`:
 on `main`, pushed and equal to origin, clean tree, CI green) or
 `REF=<tag or commit on main>` to redeploy an earlier release. Images are
 tagged with the full commit and the git tag, so what runs is always a
-commit anyone can find. Flow, variables, first deploy and rollback:
-`docs/deploy-handoff.md`.
+commit anyone can find. Flow, variables and rollback:
+`docs/deploy-handoff.md`. Runbooks for Sierra's own hosting (the first deploy,
+what the infrastructure must set, the migration) live in the private
+workspace, not in this repository.
 
 A production fix for the old stack is a **hotfix on the legacy branch**:
 branch from `legacy/efs-sqlite`, open the PR against `legacy/efs-sqlite`
@@ -248,7 +250,9 @@ lost at cutover. Nothing targets `release/*` branches any more.
 image): `snapshot` takes a consistent read-only copy of the legacy `grid.db`
 (to a path or `s3://`), `import` loads it into an empty PostgreSQL database
 in one verified transaction, `verify` re-checks an imported database
-read-only. Runbook, guarantees and timings: `docs/import.md`. The importer
+read-only. Usage and guarantees: `gridctl --help` and the `cmd/gridctl`
+package doc; Sierra's own migration runbook and its import rehearsal live in
+the private workspace. The importer
 (`internal/sqliteimport`) is the only Grid code that links SQLite, and
 `cmd/server` must never import it (`TestServerDoesNotLinkTheImporter`). The
 API diff gate between the two stacks is `make apidiff LEGACY=<url> NEW=<url>`
