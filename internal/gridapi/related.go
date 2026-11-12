@@ -30,7 +30,11 @@ func (g *GridServer) ListRelatedEvents(ctx context.Context, req *gridv1.ListRela
 	if err != nil {
 		return nil, internalErr(ctx, err)
 	}
-	tag := fmt.Sprintf("%s:related:%s:%d.%s", g.placesVersion, req.GetId(), dv, strconv.FormatInt(rv, 10))
+	prefix, err := g.validatorPrefix(ctx)
+	if err != nil {
+		return nil, internalErr(ctx, err)
+	}
+	tag := fmt.Sprintf("%s:related:%s:%d.%s", prefix, req.GetId(), dv, strconv.FormatInt(rv, 10))
 	if err := etag.Guard(ctx, etag.Weak(tag)); err != nil {
 		return nil, err
 	}
