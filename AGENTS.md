@@ -219,21 +219,30 @@ curl -s http://localhost:8181/api/v1/events?layer=road_incident | jq .
 
 Since 2026-11-11 the repository has two lines. `legacy/efs-sqlite` is the
 frozen SQLite-on-EFS stack that runs in the old AWS account; `main` is the
-PostgreSQL stack for the new account and cannot run on the legacy
+PostgreSQL stack for the new Grid account and cannot run on the legacy
 infrastructure. The tag `legacy-efs-final` marks where they parted.
+
+**main deploys through GitHub Actions**, never from a laptop's AWS
+credentials: CI passing on a push to `main` starts the Deploy workflow
+(`.github/workflows/deploy.yml`), which waits for approval in the
+`production` environment, pushes the images to the Grid account's ECR
+through OIDC, registers task-definition revisions with only the image
+changed (Terraform in sierra-infra owns the rest) and updates the ECS
+services (native blue/green, bake, automatic rollback). `make deploy` runs
+it by hand for HEAD (the guards in `scripts/deploy.py`, `branch_drift`:
+on `main`, pushed and equal to origin, clean tree, CI green) or
+`REF=<tag or commit on main>` to redeploy an earlier release. Images are
+tagged with the full commit and the git tag, so what runs is always a
+commit anyone can find. Flow, variables, first deploy and rollback:
+`docs/deploy-handoff.md`.
 
 A production fix for the old stack is a **hotfix on the legacy branch**:
 branch from `legacy/efs-sqlite`, open the PR against `legacy/efs-sqlite`
 (CI runs on it), merge, then deploy from a checkout of that branch with
-`make ecs-deploy`. The deploy client refuses to build from any other branch
-or from a commit origin does not have (`scripts/deploy.py`, `branch_drift`):
-the images are tagged with the commit, so what runs must be a commit anyone
-can find for a rollback or a forward-port. `--branch` names a different
-branch only for a deliberate exception.
-
-Afterwards, forward-port the fix to `main` (cherry-pick, or a fresh change
-where the store code differs) so it is not lost at cutover. Nothing targets
-`release/*` branches any more.
+`make ecs-deploy` (its own deploy client and the coordinator; on `main`
+that target refuses). Afterwards, forward-port the fix to `main`
+(cherry-pick, or a fresh change where the store code differs) so it is not
+lost at cutover. Nothing targets `release/*` branches any more.
 
 **The data crosses with `gridctl`** (`make gridctl`; `/app/gridctl` in the
 image): `snapshot` takes a consistent read-only copy of the legacy `grid.db`
@@ -887,12 +896,13 @@ answered 503 + `Retry-After` with no live writer. SIGTERM releases the lease,
 then drains and exits; `/livez` and `/readyz` (read-path readiness, never the
 writer role) are on the production port. A blue/green deploy is just two task
 sets: the writer moves when the old one stops, or on the control API's
-authenticated `yield`. Rules: a new background goroutine that writes belongs
+authenticated `yield`. In the Grid account that is ECS's native blue/green
+(`make deploy`, the Deploy workflow). Rules: a new background goroutine that writes belongs
 in the writer term (`startTerm`) and must be stopped and waited for in
 `stopTerm`; a new production route must go through the admission gate; a
 cache that is only valid while writing must be keyed to the lease term (the
 store's place-geometry cache is). `--standby` / `POST /activate` /
-`POST /quiesce` still work for a coordinator, remapped onto the roles. Guide,
+`POST /quiesce` still work for a coordinator, remapped onto the roles. Deploy flow,
 control API, the remap and the rehearsal (`make rehearse-bluegreen`):
 `docs/deploy-handoff.md`. The mesh relay keeps the original
 `internal/handoff` standby/quiesce lifecycle on its SQLite file.

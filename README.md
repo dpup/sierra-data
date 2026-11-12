@@ -104,77 +104,28 @@ environment variables, never in `prefab.yaml`.
 
 ## Deployment
 
-The repository includes a self-contained client for the Sierra deployment
-coordinator in AWS. Deployers need this checkout and AWS credentials; no
-infrastructure-repository checkout, deployment token or bastion connection is
-required. The AWS endpoint manages task definitions, standby slots, database
-ownership, load-balancer registration and cleanup.
-
-### Deploy
-
-With the existing build toolchain installed and AWS credentials configured:
-
-```bash
-# Uses the normal AWS credential chain: environment credentials, SSO/profile, etc.
-make ecs-deploy
-
-# Or choose a named profile and an explicit image tag.
-AWS_PROFILE=my-profile make ecs-deploy DOCKER_TAG=release-abc123
-```
-
-This checks the deployment client, discovers both ECR repositories from
-`sierra-data-coordinator`, builds and pushes Grid and relay with the same tag,
-then waits for the coordinated handoff. The default deployment tag is the
-current commit's 12-character SHA. Both images are built even when only one
-binary changed. Tags are resolved to immutable digests after the pushes.
-
-It refuses to build from a working tree with uncommitted changes to tracked
-files, which would ship under the commit's tag and come back on a rollback to
-it. Commit or discard them, or override with `make ecs-deploy ALLOW_DIRTY=1`.
-
-For images already pushed under the same tag in both repositories:
+`main` deploys to the Grid account's ECS services through GitHub Actions:
+CI passing on a push to `main` starts the Deploy workflow
+(`.github/workflows/deploy.yml`), which waits for a reviewer in the
+`production` environment, then builds and pushes the `grid` and `relay`
+images (tagged with the commit and the git tag), registers task-definition
+revisions with only the image changed, and follows each ECS blue/green
+deployment to its end. A service whose image did not change is not
+redeployed.
 
 ```bash
-python3 scripts/deploy.py deploy --tag release-abc123 --wait
+make deploy               # HEAD: on main, pushed, clean, CI green; dispatches and watches the run
+make deploy REF=v1.4.0    # redeploy an earlier tag or commit on main
+make deploy-status        # recent Deploy runs
 ```
 
-The region defaults to `AWS_REGION`, then `AWS_DEFAULT_REGION`, then
-`us-east-1`. Set `SIERRA_DEPLOY_FUNCTION` (or `--function` on the script) to use
-another configured coordinator. `--profile` overrides the normal AWS profile.
-No `ECS_CLUSTER`, `ECS_SERVICE`, `ECS_TASK_DEFINITION` or `DOCKER_REGISTRY`
-settings are needed by `make ecs-deploy`.
+`make deploy` needs `gh`, not AWS credentials. Repository variables, the
+first deploy with the writer disabled, rollback and what Terraform must
+set: [docs/deploy-handoff.md](docs/deploy-handoff.md).
 
-### Status and rollback
-
-```bash
-make ecs-status          # owner, any operation in progress, the last operation's phase timeline
-make ecs-status JSON=1   # the coordinator's raw status document
-make ecs-rollback
-```
-
-Rollback starts a fresh standby on the previous image pair and uses the same
-ownership handoff. Successful deployment exits zero. A failed deployment that
-was automatically rolled back exits nonzero; inspect status before retrying.
-A CLI timeout leaves the server-side workflow running. `scripts/deploy.py
-resume --wait` resumes a terminated workflow after the underlying issue is
-resolved. Reuse `--operation-id` only when retrying the same start request.
-
-The coordinator owns service counts, task-definition registration and target
-membership. Application deployments go through this client; runtime settings
-such as environment variables, resource limits and volumes are managed by the
-infrastructure configuration.
-
-### Prerequisites and permissions
-
-- Python 3.9+ and AWS CLI v2 for the deployment client; it has no pip dependencies.
-- Make, Docker and the repository's Go/site build toolchain for `--build`.
-- Credentials with ECR push access to the configured repositories,
-  `ecr:DescribeImages`, and `lambda:GetFunctionConfiguration` /
-  `lambda:InvokeFunction` on the coordinator. The client needs no direct ECS
-  mutation or Secrets Manager access.
-
-Client tests run with `make test-deploy-client` and use mocked AWS/build calls.
-They do not build images or deploy anything.
+The legacy SQLite-on-EFS stack in the old account deploys only from a
+checkout of `legacy/efs-sqlite` with its own `make ecs-deploy`; on `main`
+that target refuses.
 
 ## Development
 
