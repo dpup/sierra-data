@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"sort"
@@ -154,8 +155,18 @@ func (s *Store) UpsertEvent(ctx context.Context, ev *gridv1.Event) (UpsertResult
 	err := s.inTx(ctx, func(tx *sql.Tx) error {
 		var oldRev uint32
 		var oldHash string
-		err := tx.QueryRow(`SELECT revision, content_hash FROM events WHERE id = $1`, ev.GetId()).
-			Scan(&oldRev, &oldHash)
+		var pre storedForRefresh
+		// One round trip for the lookup and, when the hash matches, everything
+		// the hash-equal path compares against (the stored blob and place
+		// set), which were two more statements. The blob and places are only
+		// fetched on a match: a content change does not need them.
+		err := tx.QueryRow(`
+			SELECT revision, content_hash,
+			       CASE WHEN content_hash = $2 THEN proto END,
+			       CASE WHEN content_hash = $2 THEN
+			         (SELECT json_agg(place_id ORDER BY place_id) FROM event_places WHERE event_id = $1) END
+			FROM events WHERE id = $1`, ev.GetId(), hash).
+			Scan(&oldRev, &oldHash, &pre.blob, &pre.placesJSON)
 		switch {
 		case err == sql.ErrNoRows:
 			res = UpsertResult{Changed: true, Revision: 1}
@@ -165,7 +176,7 @@ func (s *Store) UpsertEvent(ctx context.Context, ev *gridv1.Event) (UpsertResult
 			res = UpsertResult{Changed: false, Revision: oldRev}
 			// Content unchanged, but the place set may not be: recompute and
 			// sync attachments without touching revision/hash/history.
-			_, err := s.refreshEventPlaces(tx, ev)
+			_, err := s.refreshEventPlaces(tx, ev, &pre)
 			return err
 		default:
 			res = UpsertResult{Changed: true, Revision: oldRev + 1}
@@ -540,7 +551,7 @@ func insertRevision(tx *sql.Tx, id string, rev uint32, observedAt, ingestedAt in
 // revision untouched. It reports whether it rewrote the row; a rewrite bumps
 // the row's refreshes counter and the layer's refresh version (in this
 // transaction), the validators' view of the change.
-func (s *Store) refreshEventPlaces(tx *sql.Tx, ev *gridv1.Event) (bool, error) {
+func (s *Store) refreshEventPlaces(tx *sql.Tx, ev *gridv1.Event, pre *storedForRefresh) (bool, error) {
 	c := proto.Clone(ev).(*gridv1.Event)
 	ensureGeometryIndex(c)
 	matched, err := s.matchPlaces(tx, c)
@@ -549,31 +560,26 @@ func (s *Store) refreshEventPlaces(tx *sql.Tx, ev *gridv1.Event) (bool, error) {
 	}
 	want := unionSorted(ev.GetPlaceIds(), matched)
 
-	rows, err := tx.Query(`SELECT place_id FROM event_places WHERE event_id = $1 ORDER BY place_id`, ev.GetId())
-	if err != nil {
-		return false, fmt.Errorf("store: load event_places %s: %w", ev.GetId(), err)
+	// The stored place set and blob, as UpsertEvent's lookup read them (same
+	// transaction, and the single writer holds mu, so nothing has changed
+	// them since); read here only if the lookup did not carry them.
+	if pre == nil || pre.blob == nil {
+		pre, err = loadForRefresh(tx, ev.GetId())
+		if err != nil {
+			return false, err
+		}
 	}
 	var have []string
-	for rows.Next() {
-		var pid string
-		if err := rows.Scan(&pid); err != nil {
-			rows.Close()
-			return false, fmt.Errorf("store: scan event_places %s: %w", ev.GetId(), err)
+	if len(pre.placesJSON) > 0 {
+		if err := json.Unmarshal(pre.placesJSON, &have); err != nil {
+			return false, fmt.Errorf("store: decode event_places %s: %w", ev.GetId(), err)
 		}
-		have = append(have, pid)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return false, fmt.Errorf("store: iterate event_places %s: %w", ev.GetId(), err)
 	}
 	placesChanged := !slices.Equal(want, have)
 
-	// Load the stored blob to compare the hash-excluded fields (place_ids and the
+	// The stored blob, to compare the hash-excluded fields (place_ids and the
 	// AI enhancement/summary) against the incoming event.
-	var blob []byte
-	if err := tx.QueryRow(`SELECT proto FROM events WHERE id = $1`, ev.GetId()).Scan(&blob); err != nil {
-		return false, fmt.Errorf("store: load event %s for refresh: %w", ev.GetId(), err)
-	}
+	blob := pre.blob
 	stored := &gridv1.Event{}
 	if err := proto.Unmarshal(blob, stored); err != nil {
 		return false, fmt.Errorf("store: unmarshal event %s for refresh: %w", ev.GetId(), err)
@@ -673,6 +679,25 @@ func (s *Store) refreshEventPlaces(tx *sql.Tx, ev *gridv1.Event) (bool, error) {
 	// Same transaction as the rewrite: a reader can never pair the new
 	// version with the old blob.
 	return true, bumpVersion(tx, refreshKey(ev.GetLayer()), 1)
+}
+
+// storedForRefresh is what the hash-equal path compares an incoming event
+// with: the stored blob and the event's place ids (a JSON array in place_id
+// order, NULL for none).
+type storedForRefresh struct {
+	blob       []byte
+	placesJSON []byte
+}
+
+// loadForRefresh reads storedForRefresh in one statement.
+func loadForRefresh(tx *sql.Tx, id string) (*storedForRefresh, error) {
+	var pre storedForRefresh
+	if err := tx.QueryRow(`
+		SELECT proto, (SELECT json_agg(place_id ORDER BY place_id) FROM event_places WHERE event_id = $1)
+		FROM events WHERE id = $1`, id).Scan(&pre.blob, &pre.placesJSON); err != nil {
+		return nil, fmt.Errorf("store: load event %s for refresh: %w", id, err)
+	}
+	return &pre, nil
 }
 
 // replaceEventPlaces sets an event's attachments in ONE statement: it deletes
