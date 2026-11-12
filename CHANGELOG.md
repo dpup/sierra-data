@@ -3,9 +3,8 @@
 All notable **API-facing** changes to The Grid, the S.I.E.R.R.A data service at
 `https://data.sierragridteam.org`. Read it before updating a consuming site (for
 example ersn.net or sierragridteam.org). It is published at
-<https://data.sierragridteam.org/changelog>; the API reference is at
-<https://data.sierragridteam.org/docs> and the OpenAPI spec at
-<https://data.sierragridteam.org/api/openapi.json>.
+<https://data.sierragridteam.org/changelog>; the API reference is the OpenAPI
+spec at <https://data.sierragridteam.org/api/openapi.json>.
 
 **Format.** There are no versioned releases: the service deploys from `main`, so
 each entry is a dated `##` section, newest first (several on one day are marked
@@ -21,6 +20,30 @@ hand-built handler and are camelCase too. Older entries describe surfaces that n
 longer exist: `/api/v1` originally hosted a different hand-built REST surface,
 replaced by a snake_case `/v1` surface on 2026-07-05, which was folded back onto
 the proto-defined `/api/v1` gateway on 2026-07-09.
+
+## 2026-11-12 (later)
+
+### The explorer pages leave data.sierragridteam.org; `/` is a page for API consumers
+
+The embedded explorer site is removed from this service. Browsing the data
+(events, map, places, sources, history, mesh) moves to the separate explorer
+at <https://grid.sierragridteam.org>. What remains on this host besides the API:
+
+- `/` is a short overview for people and agents building on the API: what the
+  service is, its conventions, three `curl` examples, and a prompt to hand an
+  LLM agent. Plain HTML, no build step; the copy button is the only script.
+- `/llms.txt` (new) is the same overview in the
+  [llms.txt](https://llmstxt.org/) format, as `text/plain`.
+- `/changelog` still publishes this file, now rendered by the server.
+- `/docs`, `/mcp-guide`, `/events`, `/event`, `/map`, `/places`, `/sources`,
+  `/history`, `/roads`, `/mesh` and `/relay` now answer `404`, and the 404 page
+  links the explorer and the OpenAPI spec. The OpenAPI spec is the reference
+  until a fuller documentation site exists; its `externalDocs` now points at
+  `/`. The `/relay` page is gone, but the relay's public status API
+  (`GET /mesh/relay/api/status`) is unchanged.
+
+**No API change.** `/api/v1/*`, `/api/openapi.json`, `/mcp`, `/livez` and
+`/readyz` behave exactly as before.
 
 ## 2026-11-12
 

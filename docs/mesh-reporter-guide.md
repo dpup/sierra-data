@@ -584,8 +584,9 @@ Run it from cron or a systemd timer:
 
 ## Questions
 
-The public API reference is at <https://data.sierragridteam.org/docs>, and the
-endpoint is documented there under **Push ingest**. For anything about your
+The API contract is the OpenAPI spec at
+<https://data.sierragridteam.org/api/openapi.json>; the endpoint is
+`POST /api/v1/ingest/{stream}` there. For anything about your
 token, your reporting cadence, or reporting something other than MeshCore
 repeaters and packets, ask the service maintainer — new kinds of report are a
 small configuration change on our side.

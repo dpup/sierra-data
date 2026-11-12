@@ -6,7 +6,7 @@ path and GitHub repo are `github.com/sierragridteam/sierra-data` (renamed 2026-0
 `github.com/dpup/info.ersn.net/server`).
 
 These notes live in `AGENTS.md` files (this one and one per subsystem:
-`internal/{clients,hazards,ingest,services,store}/`, `web/`). Each sits beside a
+`internal/{clients,hazards,ingest,services,store}/`). Each sits beside a
 one-line `CLAUDE.md` containing `@AGENTS.md`, so Claude Code loads the same text.
 Edit the `AGENTS.md`; leave the `CLAUDE.md` stubs alone.
 
@@ -30,7 +30,7 @@ Last updated: 2026-07-06
 ├── api/grid/v1/                # grid.v1 messages (Event/Place/...) + the GridService /api/v1 surface
 ├── bin/                        # Compiled binaries
 ├── cmd/                       # CLI applications
-│   ├── server/                # Main API server (main.go, site.go, gridadapter.go)
+│   ├── server/                # Main API server (main.go, site.go, gridadapter.go; landing/ = the / page)
 │   ├── mesh-relay/            # SIERRA Mesh Relay — a SEPARATE service (see below)
 │   ├── gridctl/               # SQLite -> PostgreSQL importer: snapshot, import, verify (docs/import.md)
 │   ├── test-google/           # Google Routes API testing tool
@@ -53,11 +53,11 @@ Last updated: 2026-07-06
 │   ├── places/                # Grid place directory seeder (areas/counties/towns/corridors)
 │   └── lib/                   # Shared libraries (incl. lib/geojson: geometry + PIP)
 ├── data/places/               # Checked-in Census county polygons (counties.geojson)
-├── site/                      # Embedded data.sierragridteam.org static site (served at /)
 ├── tests/                     # Test files and test data
 ├── docs/design/               # design docs & specs for work that has shipped (historical record)
 ├── docs/solutions/            # documented solutions to past problems (bugs, best practices, patterns), by category with YAML frontmatter (module, tags, problem_type)
 ├── CONCEPTS.md                # shared domain vocabulary (entities, named processes, status concepts)
+├── changelog.go               # embeds CHANGELOG.md (package sierradata) for /changelog
 └── Makefile                   # Build automation
 ```
 
@@ -65,13 +65,19 @@ The Grid's database is PostgreSQL (locally the Docker container from
 `docker-compose.test.yml`); `data/` is git-ignored except `data/places/`, and
 holds the relay's local `relay.db`.
 
-The embedded site's build output (`site/dist`) is git-ignored too — unlike the
-generated `*.pb.go`, it is **not** committed. `make server`/`run`/`test` rebuild
-it from `web/` when it is stale (via `site-ensure`, ~1.5s), and the Docker image
-builds it in its own `site-builder` stage, so a stale site cannot ship. Only
-`site/dist/.gitkeep` is committed — `//go:embed all:dist` needs the directory to
-exist — and `web/public/.gitkeep` restores it after `astro build` empties the
-output directory. See `web/AGENTS.md`.
+**Landing page.** `data.sierragridteam.org/` is one hand-written page for API
+consumers, not an app: `cmd/server/landing/index.html`, `style.css` and
+`llms.txt`, embedded by `cmd/server/site.go` (`siteHandler`, mounted at `/`),
+which also renders `CHANGELOG.md` at `/changelog` with goldmark (GFM; raw HTML
+is dropped). There is no build step and no Node: edit the file, `go build`,
+reload. Keep it small and honest — monospace, the brand's ink-strong, cream,
+green and brass, no external requests, no JavaScript beyond the optional copy
+button — and keep `index.html`, `llms.txt` and the OpenAPI description saying
+the same things. `cmd/server/site_test.go` pins the routes. The data explorer
+that used to live here (an Astro site under `web/`) was removed on 2026-11-12;
+browsing the data is the separate sierra-grid project at
+grid.sierragridteam.org. A fuller docs site is planned; until then the OpenAPI
+spec is the reference.
 
 ## Commands
 
@@ -79,10 +85,8 @@ Whenever possible you MUST use a command provided by the makefile. If you need a
 discuss with the operator improvements to the makefile commands.
 
 **Toolchain note**: The sandbox does not ship Go or protoc preinstalled. To build
-or run tests you need Go 1.27.3+ on `PATH`. `make build`/`server`/`run`/`test` also
-need **Node 26.13.0+**, because they build the embedded site; plain `go build ./...`
-and `go test ./...` stay Node-free (the site tests skip when `site/dist` holds
-only its placeholder). `make proto` additionally requires
+or run tests you need Go 1.27.3+ on `PATH`; nothing here needs Node.
+`make proto` additionally requires
 `protoc` plus the plugins `protoc-gen-go`, `protoc-gen-go-grpc`,
 `protoc-gen-grpc-gateway`, and `protoc-gen-openapiv2` — installed at pinned
 versions by `make proto-tools` (a prerequisite of `make proto`; versions are
@@ -543,7 +547,8 @@ section at the top (no formal releases — we deploy from `main`, so entries are
 timestamped). That's how consuming sites (ersn.net, sierragridteam.org) learn
 what to update. Flag anything that changes an existing response shape as a
 breaking change: start its `###` heading with `BREAKING:` and include a
-migration note. The file is also published at `/changelog`.
+migration note. The file is also published at `/changelog` (rendered by
+`cmd/server/site.go`; there is nothing to rebuild).
 
 **`/api/openapi.json` must stay a complete, accurate description** — it is what
 a consumer (or an agent) builds a client or UI from. It is OpenAPI 3.0.3,
@@ -778,7 +783,7 @@ the same scenario in-process, so tool and relay can't drift).
 
 Invariants: no unauthenticated route reaches a node (only `/healthz` and
 `GET /mesh/relay/api/status` are public — the
-last feeds the site's `/relay` page and withholds pubkeys, node names, notes and
+last is the public gateway summary and withholds pubkeys, node names, notes and
 lease holders, because a gateway sits at a volunteer's house); **never log frame payloads** (they carry
 private messages and channel keys — `CHANNEL_INFO` returns the secret); tokens
 are stored as SHA-256 only and shown once; one exclusive lease per gateway, and

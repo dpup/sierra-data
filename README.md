@@ -13,15 +13,18 @@ alias, and ersn.net is a consuming site.
 Pollers read each upstream source (CAL FIRE and FIRIS, Cal OES evacuation zones,
 the National Weather Service, USGS, CHP, Caltrans, PG&E, county burn lines, and
 MeshCore community MQTT bridges), normalise every occurrence into one `Event`
-model, and store it in SQLite with its full revision history. Road travel times
+model, and store it in PostgreSQL with its full revision history. Road travel times
 come from the Google Routes API and current weather from OpenWeatherMap. CHP
 incidents are rewritten into plain language by OpenAI, with the original text
 kept verbatim.
 
 The store is served as one API, `/api/v1`: gRPC with a gRPC-Gateway JSON
 mapping (camelCase fields, RFC 3339 timestamps), plus RFC 7946 GeoJSON map
-layers. The same binary serves an embedded site at `/` that is itself a client
-of that API, and an MCP endpoint at `/mcp` for LLM agents.
+layers. The same binary serves a one-page overview for API consumers at `/`
+(with `/llms.txt` and `/changelog`) and an MCP endpoint at `/mcp` for LLM
+agents. The data explorer is a separate project,
+[sierra-grid](https://github.com/sierragridteam/sierra-grid), at
+grid.sierragridteam.org.
 
 Every source reports its health (`OK | STALE | UNAVAILABLE`). A failed source
 is reported as unknown, never as an all-clear: in particular, an evacuation
@@ -45,17 +48,17 @@ curl 'https://data.sierragridteam.org/api/v1/events?place=calaveras-county&statu
 curl https://data.sierragridteam.org/api/v1/places/calaveras-county/map/wildfire.geojson
 ```
 
-- **Reference and rendering rules:** https://data.sierragridteam.org/docs
-- **OpenAPI spec** (for code generation and agents): https://data.sierragridteam.org/api/openapi.json
+- **Overview, conventions and a prompt for agents:** https://data.sierragridteam.org/ (and `/llms.txt`)
+- **OpenAPI spec** (the reference; for code generation and agents): https://data.sierragridteam.org/api/openapi.json
 - **Changelog** of API changes, with migration notes: https://data.sierragridteam.org/changelog ([`CHANGELOG.md`](CHANGELOG.md))
-- **MCP** for LLM agents: https://data.sierragridteam.org/mcp-guide
+- **MCP** for LLM agents: `https://data.sierragridteam.org/mcp` (Streamable HTTP, keyless)
 
 ## Quick Start
 
 ### Prerequisites
 
 - Go 1.25+
-- Node 26.13.0+ (`make build`, `make run` and `make test` build the embedded site)
+- Docker, for the local PostgreSQL that `make run` and `make test` use
 - API keys for Google Routes, OpenWeatherMap and OpenAI. The server refuses to
   start without an OpenAI key (it enhances CHP road incidents); for a local run
   without enhancement, any non-empty placeholder lets it start.
@@ -208,10 +211,10 @@ make stop
 ### Testing
 
 ```bash
-# Run all tests (builds the embedded site first; needs Node 26.13.0+)
+# Run all tests against the Docker PostgreSQL
 make test
 
-# Go tests only, without Node (site tests skip when the site is not built)
+# Go tests only, without a database (store-backed tests skip)
 go test ./...
 
 # Probe individual upstream sources
@@ -236,12 +239,12 @@ make fmt    # go fmt
 ├── api/grid/v1/          # grid.v1 protos: Event, Place, … and the GridService (/api/v1)
 ├── api/v1/               # older road/weather protos used internally
 ├── cmd/
-│   ├── server/           # the Grid server (API, MCP, embedded site)
+│   ├── server/           # the Grid server (API, MCP, landing page in server/landing)
 │   ├── mesh-relay/       # SIERRA Mesh Relay, a separate service
 │   ├── burn-line/        # county burn-line reader (runs from CI)
 │   └── test-*/           # per-source diagnostic CLIs
 ├── internal/
-│   ├── store/            # SQLite event store (events, revisions, places, sources)
+│   ├── store/            # PostgreSQL event store (events, revisions, places, sources)
 │   ├── ingest/           # poller scheduler and per-source normalizers
 │   ├── gridapi/          # GridService implementation and GeoJSON layers
 │   ├── hazards/          # GeoJSON layer projection
@@ -249,7 +252,6 @@ make fmt    # go fmt
 │   ├── pushingest/       # authenticated push ingest
 │   ├── clients/          # upstream API clients
 │   └── services/         # road and weather services
-├── web/                  # Astro source for the embedded site (built into site/dist)
 ├── docs/                 # design records and operator guides
 ├── prefab.yaml           # configuration
 ├── CHANGELOG.md          # API changes, published at /changelog
