@@ -44,6 +44,10 @@ REPO = Path(__file__).resolve().parents[1]
 MAIN = "main"
 WORKFLOW = "deploy.yml"
 CI_WORKFLOW = "ci.yml"
+# Where main and legacy/efs-sqlite parted: this commit and everything before
+# it are the SQLite stack, which cannot run in the Grid account although it
+# is reachable from main.
+FLOOR_TAG = "legacy-efs-final"
 
 # Repository (or `production` environment) variables. The workflow passes
 # them as environment variables of the same name; check-config refuses to
@@ -173,6 +177,15 @@ def resolve(ref=None, fetch=True, cwd=REPO):
                              capture_output=True, text=True)
     if on_main.returncode:
         raise Refused("%s is not on origin/%s; only main deploys to the Grid account" % (ref or sha, MAIN))
+    floor = commit("refs/tags/" + FLOOR_TAG)
+    if not floor:
+        raise Refused("tag %s is missing from this checkout (git fetch --tags origin); it marks the oldest"
+                      " commit main may not deploy" % FLOOR_TAG)
+    pre_split = subprocess.run(["git", "merge-base", "--is-ancestor", sha, floor], cwd=cwd,
+                               capture_output=True, text=True)
+    if pre_split.returncode == 0:
+        raise Refused("%s is at or before %s: the SQLite stack, deployed only from legacy/efs-sqlite"
+                      % (ref or sha, FLOOR_TAG))
     if not tag:
         tags = git("tag", "--points-at", sha, "--sort=-v:refname", cwd=cwd).split()
         tag = next((t for t in tags if TAG_RE.fullmatch(t) and not t.startswith(CONTENT_PREFIX)), "")

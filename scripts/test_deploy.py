@@ -14,6 +14,7 @@ import deploy
 REPO = deploy.REPO
 SHA = "0123456789abcdef0123456789abcdef01234567"
 OLD_SHA = "fedcba9876543210fedcba9876543210fedcba98"
+FLOOR = "3b084b21650d23ec6895623609d35d21bb8acb2c"
 REGISTRY = "123456789012.dkr.ecr.us-west-2.amazonaws.com"
 URI = REGISTRY + "/grid"
 DIGEST = "sha256:" + "a" * 64
@@ -128,6 +129,8 @@ class ResolveTests(unittest.TestCase):
     def answers(self, **extra):
         base = {"rev-parse --verify --quiet origin/main^{commit}": SHA,
                 "merge-base --is-ancestor %s origin/main" % SHA: "",
+                "rev-parse --verify --quiet refs/tags/legacy-efs-final^{commit}": FLOOR,
+                "merge-base --is-ancestor %s %s" % (SHA, FLOOR): None,
                 "tag --points-at %s --sort=-v:refname" % SHA: ""}
         base.update(extra)
         return base
@@ -150,6 +153,22 @@ class ResolveTests(unittest.TestCase):
         with patch("deploy.subprocess.run", side_effect=git_responses(**answers)), \
                 self.assertRaisesRegex(deploy.Refused, "not on origin/main"):
             deploy.resolve(OLD_SHA, fetch=False)
+
+    def test_the_sqlite_stack_is_refused_although_main_reaches_it(self):
+        for target in [FLOOR, OLD_SHA]:
+            answers = self.answers(**{"rev-parse --verify --quiet refs/tags/%s^{commit}" % target: None,
+                                      "rev-parse --verify --quiet %s^{commit}" % target: target,
+                                      "merge-base --is-ancestor %s origin/main" % target: "",
+                                      "merge-base --is-ancestor %s %s" % (target, FLOOR): ""})
+            with self.subTest(target=target), patch("deploy.subprocess.run", side_effect=git_responses(**answers)), \
+                    self.assertRaisesRegex(deploy.Refused, "legacy-efs-final"):
+                deploy.resolve(target, fetch=False)
+
+    def test_a_missing_floor_tag_is_refused(self):
+        answers = self.answers(**{"rev-parse --verify --quiet refs/tags/legacy-efs-final^{commit}": None})
+        with patch("deploy.subprocess.run", side_effect=git_responses(**answers)), \
+                self.assertRaisesRegex(deploy.Refused, "missing"):
+            deploy.resolve(fetch=False)
 
     def test_unknown_or_unsafe_refs_are_refused(self):
         for ref in ["$(shell bad)", "feature/x", "legacy/efs-sqlite"]:
