@@ -105,9 +105,9 @@ func hotCalls(ids hotIDs) []planTarget {
 		{"events layer (map layer)", ev(EventQuery{Layers: []gridv1.Layer{gridv1.Layer_WILDFIRE}}),
 			[]string{"idx_events_layer|idx_events_active", "events_pkey"}},
 		{"events place+layer", ev(EventQuery{PlaceID: ids.corridor, Layers: []gridv1.Layer{gridv1.Layer_ROAD_INCIDENT}}),
-			[]string{"idx_event_places_place|event_places_pkey"}},
+			[]string{"idx_event_places_place"}},
 		{"events place all statuses (lite)", ev(EventQuery{PlaceID: ids.place, Statuses: all, Lite: true}),
-			[]string{"idx_event_places_place|event_places_pkey", "event_lite_pkey"}},
+			[]string{"idx_event_places_place", "event_lite_pkey"}},
 		{"events single status (list index)", ev(EventQuery{Statuses: []gridv1.EventStatus{gridv1.EventStatus_ACTIVE}}),
 			[]string{"idx_events_active"}},
 		{"events since", ev(EventQuery{Since: since}), []string{"events_pkey"}},
@@ -306,25 +306,47 @@ func TestHotReadsUseTheirIndexes(t *testing.T) {
 	}
 }
 
-// The check is not vacuous: without the index a statement's plan no longer
-// shows it.
+// The check is not vacuous: with an index dropped, every hot call that
+// names it fails its want list (an alternative listed with "|" must not be
+// one the planner can always fall back to, like a primary key whose leading
+// column the statement does not filter on).
 func TestHotReadsPlanCheckSeesAMissingIndex(t *testing.T) {
-	rec := &statementRecorder{}
-	s := newTestStore(t, WithQueryTracer(rec))
-	var h planTarget
-	for _, c := range hotCalls(testIDs) {
-		if c.name == "tick: prior active by source" {
-			h = c
-		}
+	for _, c := range []struct{ index, call string }{
+		{"idx_events_source_status", "tick: prior active by source"},
+		{"idx_event_places_place", "events place+layer"},
+		{"idx_event_places_place", "events place all statuses (lite)"},
+		{"idx_revisions_observed", "history place"},
+		{"idx_mesh_link_bucket", "mesh links"},
+	} {
+		t.Run(c.index+"/"+c.call, func(t *testing.T) {
+			rec := &statementRecorder{}
+			s := newTestStore(t, WithQueryTracer(rec))
+			var h planTarget
+			for _, x := range hotCalls(testIDs) {
+				if x.name == c.call {
+					h = x
+				}
+			}
+			require.NotNil(t, h.call)
+			satisfied := func() bool {
+				used, _ := indexesUsed(t, s, rec, h)
+				for _, w := range h.want {
+					ok := false
+					for _, alt := range strings.Split(w, "|") {
+						ok = ok || used[alt]
+					}
+					if !ok {
+						return false
+					}
+				}
+				return true
+			}
+			require.True(t, satisfied(), "with every index present")
+			_, err := s.db.Exec(`DROP INDEX ` + c.index)
+			require.NoError(t, err)
+			assert.False(t, satisfied(), "%s still passes without %s", c.call, c.index)
+		})
 	}
-	require.NotNil(t, h.call)
-	used, _ := indexesUsed(t, s, rec, h)
-	require.True(t, used["idx_events_source_status"])
-
-	_, err := s.db.Exec(`DROP INDEX idx_events_source_status`)
-	require.NoError(t, err)
-	used, _ = indexesUsed(t, s, rec, h)
-	assert.False(t, used["idx_events_source_status"])
 }
 
 func keys(m map[string]bool) []string {
