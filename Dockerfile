@@ -82,9 +82,10 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=120s --retries=3 \
 ENTRYPOINT ["/app/mesh-relay"]
 
 ###############################################################################
-# Stage 2: Final lightweight runtime image
+# Stage 2: Final lightweight runtime image (docker build --target grid; also
+# the default target, being the last stage)
 ###############################################################################
-FROM alpine:3.24.4
+FROM alpine:3.24.4 AS grid
 
 WORKDIR /app
 

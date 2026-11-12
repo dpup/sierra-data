@@ -8,6 +8,8 @@ on:
       - 'scripts/rehearse_import.py'
       - 'scripts/test_rehearse_import.py'
       - 'Makefile'
+      - 'Dockerfile'
+      - '.github/workflows/deploy.yml'
       - '.github/workflows/deploy-client.yml'
   push:
     branches: [main]
@@ -17,6 +19,8 @@ on:
       - 'scripts/rehearse_import.py'
       - 'scripts/test_rehearse_import.py'
       - 'Makefile'
+      - 'Dockerfile'
+      - '.github/workflows/deploy.yml'
       - '.github/workflows/deploy-client.yml'
 
 permissions:

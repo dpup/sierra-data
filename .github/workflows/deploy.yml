@@ -1,0 +1,161 @@
+# Deploys main to the Grid account: ECS Fargate services with native
+# blue/green deployments, owned by Terraform in sierra-infra (grid/compute).
+#
+#   push to main -> CI (verify) succeeds -> this workflow (workflow_run)
+#   make deploy [REF=<tag or commit>]     -> this workflow (workflow_dispatch)
+#
+# preflight resolves what to deploy and refuses anything not on main (and, for
+# a dispatch, anything CI has not passed). deploy waits for a reviewer in the
+# `production` environment, then assumes the deploy role through GitHub OIDC
+# and runs `scripts/deploy.py release`, which for each image (grid, relay):
+#
+#   1. reuses the image already in ECR when its content key (the binaries,
+#      built reproducibly, plus the files the Dockerfile copies) is there, or
+#      builds and pushes it, tagged with the commit, the git tag when there is
+#      one, and the content key;
+#   2. registers a task-definition revision from the family's latest with
+#      only that container's image changed (Terraform owns everything else);
+#   3. calls UpdateService and follows the ECS service deployment (bake,
+#      automatic rollback) to SUCCESSFUL, printing the deployment ARN and the
+#      rollback commands.
+#
+# A service whose image and revision did not change is not redeployed. The
+# tooling (this file, scripts/deploy.py) comes from main's tip; the images
+# are built from a second checkout of the commit being deployed, so an older
+# tag redeploys with today's tooling.
+#
+# Configuration: repository (or `production` environment) variables, listed
+# in scripts/deploy.py SETTINGS and docs/deploy-handoff.md. Automatic runs
+# stay off until DEPLOY_ROLE_ARN is set (so merging this before the infra
+# exists sends no failure mail); once it is, any other unset variable fails
+# the run before anything is built.
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Tag or commit on main to deploy (empty: the tip of main)"
+        type: string
+        required: false
+      push_only:
+        description: "Build and push the images only; leave ECS alone (first deploy)"
+        type: boolean
+        default: false
+      request_id:
+        description: "Set by make deploy to find this run; leave empty"
+        type: string
+        required: false
+
+run-name: >-
+  ${{ github.event_name == 'workflow_dispatch'
+  && format('Deploy {0} [{1}]', inputs.ref || 'main', inputs.request_id)
+  || format('Deploy {0}', github.event.workflow_run.head_sha) }}
+
+permissions:
+  contents: read
+
+# One deploy at a time, never cancelled half way: ECS would carry on, but the
+# workflow would stop reporting it. A newer pending run replaces an older
+# pending one, so a burst of merges deploys the latest.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  DEPLOY_ROLE_ARN: ${{ vars.DEPLOY_ROLE_ARN }}
+  DEPLOY_AWS_REGION: ${{ vars.DEPLOY_AWS_REGION }}
+  DEPLOY_ECS_CLUSTER: ${{ vars.DEPLOY_ECS_CLUSTER }}
+  DEPLOY_GRID_SERVICE: ${{ vars.DEPLOY_GRID_SERVICE }}
+  DEPLOY_GRID_TASK_FAMILY: ${{ vars.DEPLOY_GRID_TASK_FAMILY }}
+  DEPLOY_GRID_ECR_REPOSITORY: ${{ vars.DEPLOY_GRID_ECR_REPOSITORY }}
+  DEPLOY_RELAY_SERVICE: ${{ vars.DEPLOY_RELAY_SERVICE }}
+  DEPLOY_RELAY_TASK_FAMILY: ${{ vars.DEPLOY_RELAY_TASK_FAMILY }}
+  DEPLOY_RELAY_ECR_REPOSITORY: ${{ vars.DEPLOY_RELAY_ECR_REPOSITORY }}
+
+jobs:
+  preflight:
+    # workflow_run fires for every CI run on a branch named main, including a
+    # fork's; only a successful push to this repository's main deploys.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository &&
+       vars.DEPLOY_ROLE_ARN != '')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read # gh run list: has CI passed for a dispatched commit
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+      git_tag: ${{ steps.resolve.outputs.git_tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0 # history and tags: is the commit on main, which tag names it
+          persist-credentials: false
+      - name: Refuse unless every deploy variable is set
+        run: python3 scripts/deploy.py check-config
+      - name: Resolve what to deploy
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          INPUT_REF: ${{ inputs.ref }}
+        run: |
+          if [ "$EVENT" = workflow_run ]; then
+            python3 scripts/deploy.py resolve --no-fetch --ref "$RUN_SHA" | tee -a "$GITHUB_OUTPUT"
+          else
+            python3 scripts/deploy.py resolve --no-fetch --require-ci ${INPUT_REF:+--ref "$INPUT_REF"} | tee -a "$GITHUB_OUTPUT"
+          fi
+
+  deploy:
+    needs: preflight
+    runs-on: ubuntu-24.04 # x86_64: builds natively for X86_64 task definitions
+    timeout-minutes: 120
+    environment: production
+    permissions:
+      contents: read
+      id-token: write # GitHub OIDC -> the deploy role
+    env:
+      SHA: ${{ needs.preflight.outputs.sha }}
+      GIT_TAG: ${{ needs.preflight.outputs.git_tag }}
+      PUSH_ONLY: ${{ inputs.push_only }}
+    steps:
+      - name: Tooling from main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Source of the commit being deployed
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.preflight.outputs.sha }}
+          path: src
+          persist-credentials: false
+      - run: python3 scripts/deploy.py check-config
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: src/go.mod
+          cache-dependency-path: src/go.sum
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.DEPLOY_AWS_REGION }}
+          role-session-name: sierra-data-deploy-${{ github.run_id }}
+      - name: Release
+        run: |
+          args=(--source src --sha "$SHA")
+          if [ -n "$GIT_TAG" ]; then args+=(--git-tag "$GIT_TAG"); fi
+          if [ "$PUSH_ONLY" = true ]; then args+=(--push-only); fi
+          python3 scripts/deploy.py release "${args[@]}"
