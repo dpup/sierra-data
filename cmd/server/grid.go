@@ -2,11 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
-	"runtime/debug"
-	"strings"
 	"sync"
 	"time"
 
@@ -18,18 +17,11 @@ import (
 
 	gridv1 "github.com/sierragridteam/sierra-data/api/grid/v1"
 	"github.com/sierragridteam/sierra-data/internal/cache"
-	"github.com/sierragridteam/sierra-data/internal/clients/calfire"
-	"github.com/sierragridteam/sierra-data/internal/clients/calfireburn"
-	"github.com/sierragridteam/sierra-data/internal/clients/caloes"
 	"github.com/sierragridteam/sierra-data/internal/clients/caltrans"
 	"github.com/sierragridteam/sierra-data/internal/clients/census"
 	"github.com/sierragridteam/sierra-data/internal/clients/cwwp2"
-	"github.com/sierragridteam/sierra-data/internal/clients/firis"
 	"github.com/sierragridteam/sierra-data/internal/clients/google"
-	"github.com/sierragridteam/sierra-data/internal/clients/meshcore"
 	"github.com/sierragridteam/sierra-data/internal/clients/nws"
-	"github.com/sierragridteam/sierra-data/internal/clients/pge"
-	"github.com/sierragridteam/sierra-data/internal/clients/usgs"
 	"github.com/sierragridteam/sierra-data/internal/clients/weather"
 	"github.com/sierragridteam/sierra-data/internal/config"
 	"github.com/sierragridteam/sierra-data/internal/gridapi"
@@ -38,16 +30,23 @@ import (
 	"github.com/sierragridteam/sierra-data/internal/ingest"
 	"github.com/sierragridteam/sierra-data/internal/lib/alerts"
 	"github.com/sierragridteam/sierra-data/internal/mcp"
-	"github.com/sierragridteam/sierra-data/internal/places"
 	"github.com/sierragridteam/sierra-data/internal/pushingest"
 	"github.com/sierragridteam/sierra-data/internal/services"
 	"github.com/sierragridteam/sierra-data/internal/store"
 )
 
-// gridApp is the Grid as internal/handoff drives it. prepareGrid builds
-// everything that does not touch the database, which is all a STANDBY process has;
-// Activate opens the store and starts production service; Quiesce undoes
-// that, in an order that ends with the store closed and its lock released.
+// gridApp is the Grid as internal/handoff drives it, in two roles.
+//
+// Reader (every process, from boot to exit): prepareGrid builds everything
+// that does not touch the database; Serve opens the store as a reader and
+// starts the production listener, which serves every GET from then on;
+// Exit closes the admission gate, drains and closes the store.
+//
+// Writer (at most one process per database, writer.go): Activate starts the
+// campaign for the writer lease; the holder seeds, migrates and runs the
+// ingest scheduler, the MeshCore subscriber and push ingest; losing the
+// lease stops all of that and the process campaigns again. Quiesce stops
+// campaigning and releases the lease, and the process keeps serving reads.
 type gridApp struct {
 	ctx context.Context // carries the logger; never cancelled
 	cfg *config.Config
@@ -62,26 +61,39 @@ type gridApp struct {
 	nwsEnhancer    ingest.NWSEnhancer
 	model          string
 
-	// onFatal is the controller's Fail: the production server stopping after
-	// activation is fatal, as it was before handoff (main sets it).
+	// onFatal is the controller's Fail: the production server stopping is
+	// fatal (main sets it).
 	onFatal func(error)
-	// activateHook, when set, runs at named points in Activate (tests inject
-	// failures and panics there).
+	// activateHook, when set, runs at named points of a writer term's start
+	// (tests inject failures and panics there).
 	activateHook func(stage string)
+	// instanceID names this process in writer_lease.holder (the handoff
+	// controller's id; main sets it).
+	instanceID string
+	// strictActivate is the coordinator mode (--standby): Activate waits for
+	// the lease up to grid.database.lockTimeout and fails back to STANDBY
+	// without it, as a coordinator expects. Otherwise Activate starts a
+	// background campaign and returns at once.
+	strictActivate bool
 
-	// Active: set by Activate, torn down by Quiesce.
+	// Reader: set by Serve, torn down by Exit.
 	mu         sync.Mutex
-	gate       *handoff.Gate
-	runCancel  context.CancelFunc // ends the scheduler, periodic refresh, cameras, MQTT, the neighbour rebuild
 	store      *store.Store
-	scheduler  *ingest.Scheduler
-	meshReg    *meshcore.Registry
-	bg         sync.WaitGroup // background goroutines that read the store
+	gate       *handoff.Gate
+	readCancel context.CancelFunc // ends the camera directory refresh
 	server     *prefab.Server
 	serverDone chan struct{} // closed when prefab's Start returns
 	serverErr  error         // its result, valid once serverDone is closed
+	ingest     *ingestRouter // nil when push ingest is not configured
+	advertise  string        // host:port recorded in writer_lease.address
+	exiting    bool
+	// serverStopWait, when positive, caps how long Exit waits for prefab's
+	// signal-driven shutdown (tests stop the controller without a signal, so
+	// prefab never stops on its own there).
+	serverStopWait time.Duration
 
-	quiesced struct{ drained, workers, mesh, bg, store bool }
+	// Writer role (writer.go).
+	w writerRole
 }
 
 // prepareGrid builds the database-free half of the Grid: config-derived
@@ -157,250 +169,64 @@ func prepareGrid(ctx context.Context, appConfig *config.Config) (*gridApp, error
 	return a, nil
 }
 
-// Activate opens the grid store (and its writer lock) and starts production service. On any error it tears
-// down what it started; if that teardown cannot release the database it says
-// so (handoff.ErrStillHeld), and the controller keeps the database counted as
-// held.
-func (a *gridApp) Activate(actx context.Context) (err error) {
-	ctx := a.ctx
-	// Everything below logs through actx too; carry the process logger on it
-	// whatever the caller passed (a logger-less context panics in prefab's
-	// logging, which once crash-looped production at the first mesh log line).
-	actx = handoff.WithLoggerOf(actx, ctx)
-	appConfig := a.cfg
-	activateStart := time.Now()
-
+// Serve opens the grid store as a reader and starts the production
+// listener: from here every GET route is served, whatever the writer role
+// does. It does not take the lease, write, seed or migrate. A database whose
+// schema is older than this build opens, but /readyz stays 503 until a
+// writer has migrated it. Idempotent.
+func (a *gridApp) Serve(ctx context.Context) error {
 	a.mu.Lock()
-	// Fresh per attempt: a gate never reopens, and a retry after a failed
-	// activation must not see the previous attempt's (released) resources.
-	a.gate = handoff.NewGate()
-	a.store, a.scheduler, a.meshReg = nil, nil, nil
-	a.quiesced = struct{ drained, workers, mesh, bg, store bool }{}
-	runCtx, runCancel := context.WithCancel(ctx)
-	a.runCancel = runCancel
+	if a.store != nil {
+		a.mu.Unlock()
+		return nil
+	}
 	a.mu.Unlock()
-	defer func() {
-		// A panic is a failed activation like any other: release what was
-		// opened rather than leave it running behind a "held" status.
-		if r := recover(); r != nil {
-			err = fmt.Errorf("panic during activation: %v\n%s", r, debug.Stack())
-		}
-		if err == nil {
-			return
-		}
-		logging.Warnw(ctx, "Activation failed; releasing what it opened", "error", err)
-		if qerr := a.Quiesce(ctx); qerr != nil {
-			err = fmt.Errorf("%w (and releasing it failed: %w: %w)", err, handoff.ErrStillHeld, qerr)
-		}
-	}()
-
-	// Grid event store + ingest scheduler (docs/design/v2-implementation-plan.md):
-	// normalized hazard events persisted with revision history, per-source
-	// health, and the place directory — the /api/v1 foundation.
-	openStart := time.Now()
+	start := time.Now()
+	appConfig := a.cfg
 	dbCfg := appConfig.Grid.Database
-	gridStore, err := store.Open(dbCfg.URL,
+	gridStore, err := store.OpenReader(dbCfg.URL,
 		store.WithMaxConns(dbCfg.MaxConns),
 		store.WithMinConns(dbCfg.MinConns),
-		store.WithLockTimeout(dbCfg.LockTimeout),
-		// A SIGTERM during the lock wait ends it at once.
-		store.WithLockContext(actx),
-		// Detection only until the P3 lease: losing the lock connection means
-		// another process may write, which an operator must hear about.
-		store.WithLockLost(func(err error) {
-			logging.Errorw(ctx, "Grid store LOST its writer lock; another process may now write", "error", err)
-		}),
+		store.WithLockContext(ctx),
 		store.WithWildfireProximity(appConfig.Grid.Wildfire.PlaceBuffer()),
 		store.WithTownRadius(appConfig.Grid.Places.TownRadiusMeters))
 	if err != nil {
 		return fmt.Errorf("open grid store: %w", err)
 	}
-	a.mu.Lock()
-	a.store = gridStore
-	a.mu.Unlock()
-	a.hazards.UseRoadHistory(gridStore)
-	a.hook("store-opened")
-
-	if st, err := gridStore.Settings(actx); err == nil {
-		logging.Infow(ctx, "Grid store opened",
+	if st, err := gridStore.Settings(ctx); err == nil {
+		logging.Infow(a.ctx, "Grid store opened (reader)",
 			"database", st.Database, "serverVersion", st.ServerVersion,
-			"schemaVersion", st.SchemaVersion, "maxConns", st.MaxConns, "minConns", st.MinConns,
-			"duration", time.Since(openStart))
+			"schemaVersion", st.SchemaVersion, "schemaReady", gridStore.SchemaReady(),
+			"maxConns", st.MaxConns, "minConns", st.MinConns, "duration", time.Since(start))
 	}
-	if err := actx.Err(); err != nil {
-		return err
+	if !gridStore.SchemaReady() {
+		logging.Warnw(a.ctx, "The database schema is older than this build: not ready until a writer migrates it",
+			"writerEnabled", appConfig.Grid.Writer.IsEnabled())
 	}
-
-	seedStart := time.Now()
-	if err := gridStore.SeedSources(actx, gridSourceSeeds(appConfig)); err != nil {
-		return fmt.Errorf("seed grid sources: %w", err)
-	}
-	retireOrphanedSources(actx, gridStore)
-	if err := places.Seed(actx, gridStore, appConfig); err != nil {
-		return fmt.Errorf("seed grid places: %w", err)
-	}
-	logging.Infow(ctx, "Seeded grid sources and places", "duration", time.Since(seedStart))
-
-	// One poller per upstream scope; weather_alert and road_incident reuse the
-	// services' cached, budgeted pipelines (plan decision 6).
-	roadIncidents := ingest.NewRoadIncidentNormalizer(appConfig, a.roadsService)
-	wildfire := ingest.NewWildfireNormalizer(appConfig, calfire.NewClient(), firis.NewClient())
-	wildfire.UseEndedFires(endedFires(gridStore))
-	pollers := []ingest.PollerSpec{
-		{Normalizer: ingest.NewEarthquakeNormalizer(appConfig, usgs.NewClient()), Interval: gridPollInterval(appConfig, "usgs")},
-		{Normalizer: wildfire, Interval: gridPollInterval(appConfig, "calfire", "firis")},
-		{Normalizer: ingest.NewEvacuationNormalizer(appConfig, caloes.NewClient()), Interval: gridPollInterval(appConfig, "caloes")},
-		{Normalizer: ingest.NewWeatherAlertNormalizer(appConfig, a.weatherService), Interval: gridPollInterval(appConfig, "nws")},
-		// chp alone, or chp + caltrans when lane closures still come from
-		// lcs2way.kml (see RoadIncidentNormalizer.SourceIDs).
-		{Normalizer: roadIncidents, Interval: gridPollInterval(appConfig, roadIncidents.SourceIDs()...)},
-		{Normalizer: ingest.NewPowerNormalizer(appConfig, pge.NewClient()), Interval: gridPollInterval(appConfig, "pge", "psps")},
-	}
-	// Caltrans lane closures from CWWP2, scheduled windows included. Its own
-	// poller on the caltrans interval rather than the CHP one: the two district
-	// files are ~5 MB together, uncompressed, and the portal does not gzip.
-	if len(appConfig.Roads.CaltransFeeds.CWWP2.LaneClosureDistricts) > 0 {
-		pollers = append(pollers, ingest.PollerSpec{
-			Normalizer: ingest.NewLaneClosureNormalizer(appConfig, a.cwClient),
-			Interval:   gridPollInterval(appConfig, "caltrans"),
-		})
-	}
-
-	// Authenticated push ingest (optional): operator-run monitors POST to
-	// /api/v1/ingest/{stream}. The block was validated in prepareGrid, so an
-	// error here is unexpected rather than a config typo.
-	burnLineIDs := make([]string, 0, len(appConfig.Grid.Burn.Lines))
-	for _, l := range appConfig.Grid.Burn.Lines {
-		burnLineIDs = append(burnLineIDs, l.ID)
-	}
-	// An accepted burn reading wakes the burn poller, so the event shows it
-	// right away instead of on the next hourly tick.
-	burnWake, wakeBurn := ingest.NewWake()
-	pushRegistry, err := pushingest.NewRegistry(appConfig.Grid.Ingest,
-		pushingest.WithBurnLines(gridStore, burnLineIDs),
-		pushingest.WithBurnAccepted(wakeBurn))
-	if err != nil {
-		return fmt.Errorf("invalid grid.ingest configuration: %w", err)
-	}
-	for _, id := range pushRegistry.MissingTokens() {
-		logging.Warnw(ctx, "Push reporter has no token hash; nothing can authenticate as it",
-			"reporter", id, "env", "PF__GRID__INGEST__REPORTER_TOKEN_SHA256__"+strings.ToUpper(id))
-	}
-	// Reporter health is in-memory; without this every deploy reports the
-	// once-a-day burn-line reporter as never having reported until its next run.
-	if err := pushRegistry.RestoreBurnHealth(actx); err != nil {
-		logging.Warnw(ctx, "Could not restore burn reporter health", "error", err)
-	}
-
-	// Burn status (optional): per-county residential burning status from two
-	// independent authorities — the county air district's burn line and CAL
-	// FIRE's seasonal suspension. Ambient state, polled a couple of times a day.
-	if len(appConfig.Grid.Burn.Counties) > 0 {
-		// The burn-day facet is PUSHED (the `burn.line` stream on
-		// /api/v1/ingest): the normalizer reads the staging table the push
-		// handler writes, rather than fetching an upstream. CAL FIRE is still a
-		// real fetch.
-		pollers = append(pollers, ingest.PollerSpec{
-			Normalizer: ingest.NewBurnStatusNormalizer(appConfig, calfireburn.NewClient(), gridStore,
-				storePlaceIndex{gridStore}, burnReporters(pushRegistry)),
-			Interval: gridPollInterval(appConfig, "burnline", "calfire-burn"),
-			Wake:     burnWake,
-		})
-	}
-
-	// Mesh-node presence (optional). TWO possible inputs, and the poller runs if
-	// EITHER is configured: the MeshCore MQTT subscriber (community bridges,
-	// broadcast adverts) and the push-ingest buffer (operator monitors reading
-	// repeater admin interfaces). The NetworkNormalizer merges them into one event
-	// per node on the scheduler's tick.
-	//
-	// The MeshCore registry itself has two doors: the MQTT brokers, and the
-	// mesh.packet push stream, through which an operator's companion radio
-	// forwards the raw adverts it hears (a companion in Arnold hears SIERRA
-	// nodes no MQTT observer does). Either door justifies the registry; only
-	// the brokers need a connection.
-	var meshcoreReg ingest.MeshRegistry
-	mqttEnabled := appConfig.Grid.Meshcore.Enabled && len(appConfig.Grid.Meshcore.Brokers) > 0
-	packetReporters := pushRegistry.ReporterIDs(pushingest.MeshPacketStream)
-	if mqttEnabled || len(packetReporters) > 0 {
-		reg := meshcore.NewRegistry(meshcoreClientConfig(appConfig))
-		// Rehydrate presence from the persisted store BEFORE connecting, so a
-		// deploy doesn't drop the whole mesh to "unknown" (and let the sweep expire
-		// the slow SIERRA repeaters) until every node re-adverts.
-		if seedMeshRegistry(actx, reg, gridStore) {
-			// The neighbour graph is rebuilt in the background: replaying 48h
-			// of receptions measured 14.4s over EFS, and nothing needs it
-			// before the listener opens. It reads the store, so it is a
-			// background database user: Quiesce cancels it and waits.
-			a.bg.Add(1)
-			go func() {
-				defer a.bg.Done()
-				seedMeshNeighbours(runCtx, reg, gridStore)
-			}()
-		}
-		if mqttEnabled {
-			if err := reg.Connect(runCtx); err != nil {
-				logging.Errorw(ctx, "Failed to start MeshCore subscriber", "error", err)
-			} else {
-				logging.Infow(ctx, "MeshCore subscriber started", "brokers", len(appConfig.Grid.Meshcore.Brokers))
-			}
-		}
-		a.mu.Lock()
-		a.meshReg = reg
-		a.mu.Unlock()
-		if len(packetReporters) > 0 {
-			pushRegistry.SetPacketSink(reg)
-			logging.Infow(ctx, "MeshCore packet forwarding enabled", "reporters", packetReporters)
-		}
-		meshcoreReg = reg
-	}
-	var meshPush ingest.MeshPushSource
-	if pushRegistry.Enabled() {
-		meshPush = pushRegistry
-		logging.Infow(ctx, "Push ingest enabled",
-			"reporters", pushRegistry.ReporterIDs(pushingest.MeshStream),
-			"packetReporters", packetReporters)
-	}
-	if meshcoreReg != nil || meshPush != nil {
-		meshSources := []string{"meshcore"}
-		seen := map[string]bool{"meshcore": true}
-		for _, id := range append(pushRegistry.ReporterIDs(pushingest.MeshStream), packetReporters...) {
-			if !seen[id] {
-				seen[id] = true
-				meshSources = append(meshSources, id)
-			}
-		}
-		pollers = append(pollers, ingest.PollerSpec{
-			Normalizer: ingest.NewNetworkNormalizer(appConfig, meshcoreReg, meshPush).
-				WithCatalog(func(ctx context.Context) ([]*gridv1.Event, error) {
-					return gridStore.EventsBySourceAndStatus(ctx, "meshcore", gridv1.EventStatus_EXPIRED)
-				}),
-			Interval: gridPollInterval(appConfig, meshSources...),
-		})
-	}
-	if err := actx.Err(); err != nil {
-		return err
-	}
-
-	scheduler := ingest.NewScheduler(gridStore, ingest.SchedulerConfig{
-		Pollers:         pollers,
-		Tuning:          appConfig.Grid.Sources,
-		Enhancer:        a.nwsEnhancer,
-		EnhancerModel:   a.model,
-		BudgetPerTick:   appConfig.Grid.Enhancement.BudgetPerTick,
-		MeshMaintenance: meshMaintenanceConfig(appConfig),
-		RoadSampling:    roadSamplingConfig(a.roadsService),
-	})
-	scheduler.Start(runCtx)
+	readCtx, readCancel := context.WithCancel(a.ctx)
+	gate := handoff.NewGate()
 	a.mu.Lock()
-	a.scheduler = scheduler
+	a.store, a.gate, a.readCancel = gridStore, gate, readCancel
 	a.mu.Unlock()
+	fail := func(err error) error {
+		readCancel()
+		a.mu.Lock()
+		a.store, a.gate = nil, nil
+		a.mu.Unlock()
+		gridStore.Close()
+		return err
+	}
+	a.hazards.UseRoadHistory(gridStore)
 
-	// Upstream cache warming starts with production service, not in standby:
-	// a standby must not double the Google Routes / OpenWeather spend.
-	periodicRefresh := services.NewPeriodicRefreshService(a.roadsService, a.weatherService, appConfig)
-	if err := periodicRefresh.StartPeriodicRefresh(runCtx); err != nil {
-		logging.Errorw(ctx, "Failed to start periodic refresh", "error", err)
+	// The push-ingest route exists on every process; the writer serves it,
+	// any other process forwards it there (ingestroute.go). Validated in
+	// prepareGrid, so an error here is unexpected.
+	pushCfg, err := pushingest.NewRegistry(appConfig.Grid.Ingest)
+	if err != nil {
+		return fail(fmt.Errorf("invalid grid.ingest configuration: %w", err))
+	}
+	if pushCfg.Enabled() {
+		a.ingest = newIngestRouter(gridStore, a.instanceID, a.holder(), appConfig)
 	}
 
 	// Grid API service: backs the /api/v1 GridService RPCs and the hand-built
@@ -410,16 +236,17 @@ func (a *gridApp) Activate(actx context.Context) (err error) {
 
 	// Caltrans CCTV camera directory (GET /api/v1/cameras). The lists are
 	// near-static, so they refresh in the background and a request never waits
-	// on Caltrans. Without districts the RPC answers UNAVAILABLE.
+	// on Caltrans. Without districts the RPC answers UNAVAILABLE. A read-path
+	// cache: every process keeps its own.
 	if cams := appConfig.Roads.CaltransFeeds.CWWP2.Cameras; len(cams.Districts) > 0 {
 		camClient := cwwp2.NewClient()
 		if base := appConfig.Roads.CaltransFeeds.CWWP2.BaseURL; base != "" {
 			camClient.BaseURL = base
 		}
 		cameraService := services.NewCameraService(camClient, cams.Districts, cams.RefreshInterval)
-		go cameraService.Run(runCtx)
+		go cameraService.Run(readCtx)
 		gridapiService.Cameras = cameraService
-		logging.Infow(ctx, "Camera directory enabled",
+		logging.Infow(a.ctx, "Camera directory enabled",
 			"districts", cams.Districts, "nearMeters", cams.Near())
 	}
 
@@ -436,20 +263,20 @@ func (a *gridApp) Activate(actx context.Context) (err error) {
 	gridServer := gridapi.NewGridServer(gridapiService)
 
 	// Every route that can reach the store goes through the admission gate,
-	// which is how Quiesce stops admitting (prefab's listener cannot be
-	// stopped short of a signal). gRPC covers every gateway-routed RPC, since
-	// the gateway reaches the service over a loopback gRPC connection; the
-	// hand-mounted routes are wrapped one by one.
-	gate := a.gate
+	// which closes only at exit (prefab's listener cannot be stopped short of
+	// a signal). gRPC covers every gateway-routed RPC, since the gateway
+	// reaches the service over a loopback gRPC connection; the hand-mounted
+	// routes are wrapped one by one.
 	gated := gateRuntime(gate)
+	ingest := a.ingest
 
 	// Prefab server. gRPC + gateway serve the /api/v1 GridService; MCP and the
 	// static site are plain HTTP handlers. Its base context is the process
-	// context, NOT runCtx: cancelling it closes the gateway's loopback gRPC
-	// connection, and a released Grid then answers 499 (cancelled) where it
-	// should answer the gate's 503. In-flight cancellation is the gate's job.
+	// context: cancelling it closes the gateway's loopback gRPC connection,
+	// and a closing Grid then answers 499 (cancelled) where it should answer
+	// the gate's 503. In-flight cancellation is the gate's job.
 	server := prefab.New(
-		prefab.WithContext(ctx),
+		prefab.WithContext(a.ctx),
 		prefab.WithGRPCReflection(),
 		prefab.WithGRPCInterceptor(gate.UnaryInterceptor()),
 		// Cache-Control: public, max-age=30 on every (read-only) GridService
@@ -459,10 +286,11 @@ func (a *gridApp) Activate(actx context.Context) (err error) {
 		// Conditional GET (ETag/If-None-Match -> 304) for RPCs that call
 		// etag.Guard — event detail (revision + in-place refreshes), the
 		// event/history lists (DataVersion + per-layer RefreshVersion +
-		// filters), and places (per-process nonce) — so a match skips the
-		// expensive load. The hand-built .geojson route bypasses the gRPC
-		// interceptor and keeps its own data-hash ETag. (GetPlaceSummary is
-		// not yet guarded.)
+		// filters), and places — so a match skips the expensive load. Every
+		// validator starts with the build and the database's places version,
+		// so every process serving one database agrees. The hand-built
+		// .geojson route bypasses the gRPC interceptor and keeps its own
+		// data-hash ETag. (GetPlaceSummary is not yet guarded.)
 		prefab.WithPlugin(etag.Plugin()),
 		prefab.WithGRPCService(&gridv1.GridService_ServiceDesc, gridServer),
 		prefab.WithGRPCGateway(func(ctx context.Context, mux *runtime.ServeMux, endpoint string, opts []grpc.DialOption) error {
@@ -483,13 +311,13 @@ func (a *gridApp) Activate(actx context.Context) (err error) {
 			// hand-mounted rather than proto-defined because it takes a foreign
 			// document verbatim (whatever shape a monitor already produces), and
 			// deliberately bypasses the ETag/Cache-Control interceptors, which
-			// exist for GETs.
+			// exist for GETs. The writer serves it; any other process forwards.
 			//
 			// CORS keeps this browser-unreachable cross-origin: corsAllowMethods is
 			// [GET], so the POST preflight is denied — the same property that
 			// protects /mcp. Do not add POST to that list.
-			if pushRegistry.Enabled() {
-				if err := pushRegistry.Mount(mux, gated); err != nil {
+			if ingest != nil {
+				if err := ingest.Mount(mux, gated); err != nil {
 					return err
 				}
 			}
@@ -509,24 +337,23 @@ func (a *gridApp) Activate(actx context.Context) (err error) {
 			w.Header().Set("Cache-Control", "public, max-age=300")
 			_, _ = w.Write(gridv1.OpenAPISpec)
 		})),
+		// Health on the production port, for the container and load-balancer
+		// checks. Not gated: they answer from the process state itself.
+		prefab.WithHTTPHandlerFunc("/livez", a.serveLivez),
+		prefab.WithHTTPHandlerFunc("/readyz", a.serveReadyz),
 		prefab.WithHTTPHandlerFunc("/", gate.HandlerFunc(siteHandler)),
 	)
-
-	// Everything above runs before the listener opens, so during a deploy it
-	// is time the load balancer has no healthy target. Keep it short, and keep
-	// it measured.
-	logging.Infow(ctx, "Server initialization complete, starting HTTP services",
-		"activation", time.Since(activateStart), "sinceProcessStart", time.Since(processStart))
 
 	// Our listener must be the one WaitListening finds: refuse to start on a
 	// port something else already holds.
 	port := prefab.ConfigInt("server.port")
 	if err := handoff.PortFree(port); err != nil {
-		return err
+		return fail(err)
 	}
 	done := make(chan struct{})
 	a.mu.Lock()
 	a.server, a.serverDone = server, done
+	a.advertise = advertiseAddrFor(appConfig, port)
 	a.mu.Unlock()
 	// prefab's Start blocks until its own SIGTERM handler has shut it down,
 	// which is also the only way to stop its listener.
@@ -537,7 +364,7 @@ func (a *gridApp) Activate(actx context.Context) (err error) {
 		a.mu.Unlock()
 		close(done)
 	}()
-	if err := handoff.WaitListening(actx, port, done, 15*time.Second); err != nil {
+	if err := handoff.WaitListening(ctx, port, done, 15*time.Second); err != nil {
 		a.mu.Lock()
 		serr := a.serverErr
 		a.mu.Unlock()
@@ -547,8 +374,7 @@ func (a *gridApp) Activate(actx context.Context) (err error) {
 		return fmt.Errorf("production listener: %w", err)
 	}
 	// prefab's Start returns nil only after its own SIGTERM shutdown. An error
-	// after this point means production stopped serving while we still hold
-	// the database, which the pre-handoff main treated as fatal.
+	// means production stopped serving, which is fatal.
 	go func() {
 		<-done
 		a.mu.Lock()
@@ -558,98 +384,64 @@ func (a *gridApp) Activate(actx context.Context) (err error) {
 			a.onFatal(fmt.Errorf("production server stopped: %w", serr))
 		}
 	}()
+	logging.Infow(a.ctx, "Serving reads", "port", port, "duration", time.Since(start),
+		"sinceProcessStart", time.Since(processStart))
 	return nil
 }
 
-func (a *gridApp) hook(stage string) {
-	if a.activateHook != nil {
-		a.activateHook(stage)
-	}
-}
-
-// Quiesce releases the grid store. In order: stop admitting and drain requests, stop
-// the ingest scheduler, disconnect MQTT, cancel and wait for the remaining
-// background work, close the store (which releases its lock). Each step runs
-// once; a retry after a failure resumes at the step that failed.
-func (a *gridApp) Quiesce(_ context.Context) error {
-	ctx := a.ctx
-	ctl := a.cfg.Grid.Control
-	start := time.Now()
+// Ready is the read path's readiness (/readyz, handoff /status.ready): the
+// store is open at a schema this build reads, and the process is not exiting.
+// The writer role does not enter into it: a reader serves.
+func (a *gridApp) Ready() bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-
-	if !a.quiesced.drained && a.gate != nil {
-		res := a.gate.Drain(ctl.Drain(), 2*time.Second)
-		logging.Infow(ctx, "Quiesce: request drain complete",
-			"inFlight", res.InFlight, "cancelled", res.Cancelled, "remaining", res.Remaining,
-			"duration", res.Duration)
-		if res.Remaining > 0 {
-			// Not fatal: closing the store below is the barrier. A handler
-			// that outlives it gets "database is closed", never a query.
-			logging.Warnw(ctx, "Quiesce: requests ignored cancellation; the store close will cut them off",
-				"remaining", res.Remaining)
-		}
-	}
-	a.quiesced.drained = true
-
-	// One budget for every background worker, so the worst case (drain +
-	// this) stays inside ECS's default 30s stop timeout.
-	workersDeadline := time.Now().Add(ctl.WorkerStop())
-
-	if !a.quiesced.workers && a.scheduler != nil {
-		t := time.Now()
-		if err := a.scheduler.Stop(2*time.Second, max(time.Until(workersDeadline)-2*time.Second, 0)); err != nil {
-			logging.Errorw(ctx, "Quiesce: ingest scheduler did not stop", "error", err, "duration", time.Since(t))
-			return err
-		}
-		logging.Infow(ctx, "Quiesce: ingest scheduler stopped", "duration", time.Since(t))
-	}
-	a.quiesced.workers = true
-
-	if !a.quiesced.mesh && a.meshReg != nil {
-		t := time.Now()
-		a.meshReg.Close()
-		logging.Infow(ctx, "Quiesce: MeshCore subscriber closed", "duration", time.Since(t))
-	}
-	a.quiesced.mesh = true
-
-	if !a.quiesced.bg {
-		t := time.Now()
-		if a.runCancel != nil {
-			a.runCancel()
-		}
-		bgDone := make(chan struct{})
-		go func() { a.bg.Wait(); close(bgDone) }()
-		if !handoff.WaitClosed(bgDone, max(time.Until(workersDeadline), 100*time.Millisecond)) {
-			err := fmt.Errorf("background store readers still running %s after cancellation", ctl.WorkerStop())
-			logging.Errorw(ctx, "Quiesce: background work did not stop", "error", err)
-			return err
-		}
-		logging.Infow(ctx, "Quiesce: background work stopped", "duration", time.Since(t))
-	}
-	a.quiesced.bg = true
-
-	if !a.quiesced.store && a.store != nil {
-		t := time.Now()
-		a.hazards.UseRoadHistory(nil)
-		if err := a.store.Close(); err != nil {
-			logging.Errorw(ctx, "Quiesce: grid store close failed", "error", err, "duration", time.Since(t))
-			return fmt.Errorf("close grid store: %w", err)
-		}
-		logging.Infow(ctx, "Quiesce: grid store closed and lock released", "duration", time.Since(t))
-	}
-	a.quiesced.store = true
-
-	logging.Infow(ctx, "Quiesce: database ownership released", "duration", time.Since(start))
-	return nil
+	return a.store != nil && a.store.SchemaReady() && !a.exiting
 }
 
-// Exit waits for prefab's own signal-driven shutdown (it received the same
-// SIGTERM) so its final log lines land before the process ends.
+func (a *gridApp) serveLivez(w http.ResponseWriter, _ *http.Request) {
+	writeHealth(w, http.StatusOK, map[string]any{"live": true})
+}
+
+func (a *gridApp) serveReadyz(w http.ResponseWriter, _ *http.Request) {
+	ready := a.Ready()
+	code := http.StatusServiceUnavailable
+	if ready {
+		code = http.StatusOK
+	}
+	writeHealth(w, code, map[string]any{"ready": ready, "writer": a.DatabaseHeld()})
+}
+
+func writeHealth(w http.ResponseWriter, code int, body map[string]any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(code)
+	_ = json.NewEncoder(w).Encode(body)
+}
+
+// Exit is the reader's end, after the controller has released the writer
+// role (SIGTERM quiesces first): /readyz turns 503, the admission gate closes
+// and drains in-flight requests, prefab's own signal-driven shutdown is
+// awaited, and the store is closed (releasing the lease too, if a failed
+// quiescence left it held).
 func (a *gridApp) Exit(ctx context.Context) {
 	a.mu.Lock()
-	done := a.serverDone
+	a.exiting = true
+	gate, done, st, readCancel := a.gate, a.serverDone, a.store, a.readCancel
 	a.mu.Unlock()
+	if gate != nil {
+		res := gate.Drain(a.cfg.Grid.Control.Drain(), 2*time.Second)
+		logging.Infow(a.ctx, "Exit: request drain complete",
+			"inFlight", res.InFlight, "cancelled", res.Cancelled, "remaining", res.Remaining,
+			"duration", res.Duration)
+	}
+	if readCancel != nil {
+		readCancel()
+	}
+	if a.serverStopWait > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, a.serverStopWait)
+		defer cancel()
+	}
 	if done != nil {
 		select {
 		case <-done:
@@ -661,6 +453,12 @@ func (a *gridApp) Exit(ctx context.Context) {
 			}
 		case <-ctx.Done():
 			logging.Warnw(a.ctx, "HTTP server did not stop before exit")
+		}
+	}
+	if st != nil {
+		a.hazards.UseRoadHistory(nil)
+		if err := st.Close(); err != nil {
+			logging.Warnw(a.ctx, "Exit: closing the grid store", "error", err)
 		}
 	}
 	logging.Infow(a.ctx, "Shutdown complete", "sinceProcessStart", time.Since(processStart))

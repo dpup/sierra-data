@@ -27,15 +27,18 @@ import (
 	"github.com/sierragridteam/sierra-data/internal/store"
 )
 
-// The Grid's lifecycle is internal/handoff's: prepare (no database), then
-// ACTIVE either at boot or, with --standby, when a deployment coordinator
-// says so; SIGTERM in any state quiesces before exit.
+// The Grid's lifecycle (docs/deploy-handoff.md): prepare (no database), open
+// the store as a reader and serve every GET, then, through internal/handoff,
+// activate the writer role: at boot by default (a background campaign for
+// the writer lease), or under a deployment coordinator with --standby (a
+// reader that campaigns only on POST /activate). SIGTERM in any state
+// releases the lease, then drains and exits.
 //
-//	sierra-server             # activate at boot (the default, as always)
-//	sierra-server --standby   # prepare, then wait on the control port for POST /activate
+//	sierra-server             # serve reads; campaign for the writer lease at boot
+//	sierra-server --standby   # serve reads; campaign only on POST /activate
 func main() {
 	standby := flag.Bool("standby", false,
-		"start in STANDBY: prepare without opening the database and wait for POST /activate on the control port")
+		"serve reads but do not campaign for the writer lease until POST /activate on the control port")
 	flag.Parse()
 
 	// Initialize structured logging
@@ -58,19 +61,35 @@ func main() {
 		logging.Errorw(ctx, "Grid preparation failed", "error", err)
 		log.Fatalf("Grid preparation failed: %v", err)
 	}
+	app.strictActivate = *standby
 
-	opts := handoff.Options{Service: "grid", Standby: *standby}
-	if ctl := appConfig.Grid.Control; ctl.Enabled() {
-		opts.Addr = fmt.Sprintf(":%d", ctl.Port)
-		opts.TokenSha256 = ctl.TokenSha256
-	}
-	ctrl, err := handoff.New(ctx, app, opts)
+	ctrl, err := handoff.New(ctx, app, gridControlOptions(app, appConfig, *standby))
 	if err != nil {
 		logging.Errorw(ctx, "Invalid deployment control configuration", "error", err)
 		log.Fatalf("Invalid deployment control configuration: %v", err)
 	}
 	app.onFatal = ctrl.Fail
+	app.instanceID = ctrl.InstanceID()
+	if err := app.Serve(ctx); err != nil {
+		logging.Errorw(ctx, "Could not start serving reads", "error", err)
+		log.Fatalf("Could not start serving reads: %v", err)
+	}
 	os.Exit(ctrl.Run(ctx))
+}
+
+// gridControlOptions configures the Grid's handoff controller: the control
+// listener when a token hash is set, and the writer commands it adds to
+// /activate and /quiesce.
+func gridControlOptions(app *gridApp, cfg *config.Config, standby bool) handoff.Options {
+	opts := handoff.Options{Service: "grid", Standby: standby, Commands: map[string]handoff.Command{
+		"yield":    app.yield,
+		"campaign": app.campaign,
+	}}
+	if ctl := cfg.Grid.Control; ctl.Enabled() {
+		opts.Addr = fmt.Sprintf(":%d", ctl.Port)
+		opts.TokenSha256 = ctl.TokenSha256
+	}
+	return opts
 }
 
 // deferredHandler is an http.Handler whose delegate is set after construction.

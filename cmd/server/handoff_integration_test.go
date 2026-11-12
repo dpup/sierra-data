@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -34,19 +35,29 @@ import (
 
 const integrationToken = "integration-deploy-token"
 
+// The coordinator remap (route B): STANDBY is a reader that does not
+// campaign, /activate takes the lease, /quiesce releases it while reads
+// continue, SIGTERM exits.
 func TestGridHandoffLifecycleWithMeshEnabled(t *testing.T) {
 	blockOutbound(t)
 	dbURL := seededGridDB(t)
 	app, port := preparedGrid(t, dbURL)
-	h := runController(t, app, true)
+	h := runGrid(t, app, true)
 
-	// STANDBY: nothing open, the next owner could take the lock right now.
+	// STANDBY: serving reads, holding nothing; the next owner could take the
+	// lease right now.
 	assert.Equal(t, handoff.StateStandby, h.state())
+	assert.Equal(t, http.StatusOK, httpCode(t, port, "/api/v1/sources"), "a standby serves reads")
+	assert.Equal(t, http.StatusOK, httpCode(t, port, "/readyz"))
+	st := h.status()
+	assert.True(t, st.Ready)
+	assert.False(t, st.DatabaseHeld)
 	assertLockFree(t, dbURL)
 
 	h.command("/activate", "it-activate")
-	st := h.waitSettled()
+	st = h.waitSettled()
 	require.Equal(t, handoff.StateActive, st.State, "activation failed: %+v", st.Operation)
+	assert.True(t, st.DatabaseHeld, "ACTIVE under a coordinator means the lease is held")
 	assert.Equal(t, http.StatusOK, httpCode(t, port, "/api/v1/sources"))
 	assert.Equal(t, http.StatusOK, httpCode(t, port, "/api/v1/mesh/links"),
 		"a gated hand-mounted route")
@@ -56,25 +67,111 @@ func TestGridHandoffLifecycleWithMeshEnabled(t *testing.T) {
 	st = h.waitSettled()
 	require.Equal(t, handoff.StateQuiesced, st.State, "quiescence failed: %+v", st.Operation)
 	assert.False(t, st.DatabaseHeld)
-	assert.Equal(t, http.StatusServiceUnavailable, httpCode(t, port, "/api/v1/sources"),
-		"released: the gRPC-routed surface refuses (503, not the 499 a cancelled gateway gives)")
-	assert.Equal(t, http.StatusServiceUnavailable, httpCode(t, port, "/api/v1/mesh/links"))
+	assert.Equal(t, http.StatusOK, httpCode(t, port, "/api/v1/sources"),
+		"released: the lease is gone but reads continue until SIGTERM")
+	assert.Equal(t, http.StatusOK, httpCode(t, port, "/api/v1/mesh/links"))
 	assertLockFree(t, dbURL)
 
 	assert.Equal(t, 0, h.terminate(), "SIGTERM after release exits cleanly")
+	assert.Equal(t, http.StatusServiceUnavailable, httpCode(t, port, "/api/v1/sources"),
+		"after exit the admission gate refuses (503, not the 499 a cancelled gateway gives)")
 }
 
+// The native path: no --standby, so the process campaigns at boot and holds
+// the lease once it is free; SIGTERM releases it.
 func TestGridBootActivationWithMeshEnabled(t *testing.T) {
 	blockOutbound(t)
 	dbURL := seededGridDB(t)
 	app, port := preparedGrid(t, dbURL)
-	h := runController(t, app, false)
+	h := runGrid(t, app, false)
 
-	require.Eventually(t, func() bool { return h.state() == handoff.StateActive }, 20*time.Second, 20*time.Millisecond,
-		"boot activation never reached ACTIVE (state %s)", h.state())
+	require.Eventually(t, func() bool { return h.state() == handoff.StateActive && app.DatabaseHeld() },
+		20*time.Second, 20*time.Millisecond, "boot activation never took the lease (state %s)", h.state())
 	assert.Equal(t, http.StatusOK, httpCode(t, port, "/api/v1/sources"))
 	assert.Equal(t, 0, h.terminate(), "SIGTERM while ACTIVE quiesces and exits 0")
 	assertLockFree(t, dbURL)
+}
+
+// Boot activation while another process holds the lease: ACTIVE at once
+// (campaigning, not holding), serving reads; it takes over as soon as the
+// holder lets go.
+func TestGridCampaignsWhileAnotherHolds(t *testing.T) {
+	blockOutbound(t)
+	dbURL := seededGridDB(t)
+	holder, err := store.Open(dbURL)
+	require.NoError(t, err)
+	app, port := preparedGrid(t, dbURL)
+	h := runGrid(t, app, false)
+
+	require.Eventually(t, func() bool { return h.state() == handoff.StateActive }, 5*time.Second, 10*time.Millisecond)
+	assert.False(t, app.DatabaseHeld())
+	assert.False(t, h.status().DatabaseHeld, "ACTIVE but between leases: /status says so")
+	assert.Equal(t, http.StatusOK, httpCode(t, port, "/api/v1/sources"))
+	assert.Equal(t, http.StatusOK, httpCode(t, port, "/readyz"), "a reader is ready")
+
+	released := time.Now()
+	require.NoError(t, holder.Close())
+	require.Eventually(t, app.DatabaseHeld, 5*time.Second, 10*time.Millisecond)
+	t.Logf("took the lease %s after the holder released it", time.Since(released))
+	assert.True(t, h.status().DatabaseHeld)
+}
+
+// yield releases the lease and stops campaigning; campaign resumes it.
+func TestGridYieldAndCampaign(t *testing.T) {
+	blockOutbound(t)
+	dbURL := seededGridDB(t)
+	app, port := preparedGrid(t, dbURL)
+	h := runGrid(t, app, false)
+	require.Eventually(t, app.DatabaseHeld, 20*time.Second, 20*time.Millisecond)
+
+	assert.Equal(t, http.StatusOK, h.post("/yield"))
+	assert.False(t, app.DatabaseHeld())
+	assertLockFree(t, dbURL)
+	time.Sleep(1500 * time.Millisecond)
+	assert.False(t, app.DatabaseHeld(), "a yielded process does not campaign")
+	assertLockFree(t, dbURL)
+	assert.Equal(t, http.StatusOK, httpCode(t, port, "/api/v1/sources"), "and keeps serving reads")
+	assert.Equal(t, handoff.StateActive, h.state())
+
+	assert.Equal(t, http.StatusOK, h.post("/campaign"))
+	require.Eventually(t, app.DatabaseHeld, 5*time.Second, 10*time.Millisecond)
+
+	h.command("/quiesce", "it-release")
+	require.Equal(t, handoff.StateQuiesced, h.waitSettled().State)
+	assert.Equal(t, http.StatusConflict, h.post("/campaign"), "a quiesced process never campaigns again")
+}
+
+// Losing the lease's session (an RDS failover looks like this) stops the
+// writers; the process keeps serving reads and campaigns again, coming back
+// with a newer epoch.
+func TestGridLeaseLossDropsToReaderAndRecampaigns(t *testing.T) {
+	blockOutbound(t)
+	dbURL := seededGridDB(t)
+	app, port := preparedGrid(t, dbURL)
+	h := runGrid(t, app, false)
+	require.Eventually(t, app.DatabaseHeld, 20*time.Second, 20*time.Millisecond)
+	_ = h
+
+	admin, err := store.OpenReader(dbURL)
+	require.NoError(t, err)
+	defer admin.Close()
+	before, err := admin.WriterLease(context.Background())
+	require.NoError(t, err)
+
+	db, err := sql.Open("pgx", dbURL)
+	require.NoError(t, err)
+	defer db.Close()
+	var killed int
+	require.NoError(t, db.QueryRow(`SELECT COUNT(pg_terminate_backend(pid)) FROM pg_locks
+		WHERE locktype = 'advisory' AND granted
+		  AND database = (SELECT oid FROM pg_database WHERE datname = current_database())`).Scan(&killed))
+	require.Equal(t, 1, killed, "the lease connection")
+
+	require.Eventually(t, func() bool {
+		w, err := admin.WriterLease(context.Background())
+		return err == nil && w.Epoch > before.Epoch && w.Live && app.DatabaseHeld()
+	}, 15*time.Second, 50*time.Millisecond, "the process came back as the writer with a newer epoch")
+	assert.Equal(t, http.StatusOK, httpCode(t, port, "/api/v1/sources"))
 }
 
 // --- harness ----------------------------------------------------------------
@@ -121,7 +218,8 @@ func seededGridDB(t *testing.T) string {
 }
 
 // preparedGrid is prepareGrid on a minimal config: mesh enabled against a
-// dead broker, a free production port, a short lock wait.
+// dead broker, a free production port, a short lock wait. Serve is the
+// caller's (runGrid), as main does.
 func preparedGrid(t *testing.T, dbURL string) (*gridApp, int) {
 	t.Helper()
 	port := freePort(t)
@@ -136,7 +234,21 @@ func preparedGrid(t *testing.T, dbURL string) (*gridApp, int) {
 	cfg.Grid.Control.WorkerStopTimeout = 5 * time.Second
 	app, err := prepareGrid(testCtx(), cfg)
 	require.NoError(t, err)
+	app.serverStopWait = 10 * time.Millisecond
 	return app, port
+}
+
+// runGrid starts app the way main does: the controller with the Grid's
+// options, then Serve (reads), then Run.
+func runGrid(t *testing.T, app *gridApp, standby bool) *ctrlHarness {
+	t.Helper()
+	app.strictActivate = standby
+	h := runControllerWith(t, app, gridControlOptions(app, app.cfg, standby), func(c *handoff.Controller) {
+		app.onFatal = c.Fail
+		app.instanceID = c.InstanceID()
+		require.NoError(t, app.Serve(testCtx()))
+	})
+	return h
 }
 
 type ctrlHarness struct {
@@ -148,16 +260,20 @@ type ctrlHarness struct {
 	code   int
 }
 
-// runController runs svc under a controller exactly as main does: a logger on
-// the process context, nothing else. The service must get everything else it
-// needs from the controller.
-func runController(t *testing.T, svc handoff.Service, standby bool) *ctrlHarness {
+// runControllerWith runs svc under a controller exactly as main does: a
+// logger on the process context, nothing else. The service must get
+// everything else it needs from the controller. before runs between New and
+// Run (main's Serve).
+func runControllerWith(t *testing.T, svc handoff.Service, opts handoff.Options, before func(*handoff.Controller)) *ctrlHarness {
 	t.Helper()
 	sum := sha256.Sum256([]byte(integrationToken))
-	c, err := handoff.New(testCtx(), svc, handoff.Options{Service: "test", Addr: "127.0.0.1:0",
-		TokenSha256: hex.EncodeToString(sum[:]), Standby: standby})
+	opts.Service, opts.Addr, opts.TokenSha256 = "test", "127.0.0.1:0", hex.EncodeToString(sum[:])
+	c, err := handoff.New(testCtx(), svc, opts)
 	require.NoError(t, err)
 	require.NoError(t, c.Listen())
+	if before != nil {
+		before(c)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	h := &ctrlHarness{t: t, c: c, base: "http://" + c.ControlAddr(), cancel: cancel, done: make(chan struct{})}
 	go func() { h.code = c.Run(ctx); close(h.done) }()
@@ -181,6 +297,28 @@ func (h *ctrlHarness) command(path, op string) {
 	require.NoError(h.t, err)
 	resp.Body.Close()
 	require.Contains(h.t, []int{http.StatusOK, http.StatusAccepted}, resp.StatusCode, "%s %s", path, op)
+}
+
+// post sends an authenticated control command with no body and returns the
+// HTTP status.
+func (h *ctrlHarness) post(path string) int {
+	h.t.Helper()
+	req, _ := http.NewRequest(http.MethodPost, h.base+path, nil)
+	req.Header.Set("Authorization", "Bearer "+integrationToken)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(h.t, err)
+	resp.Body.Close()
+	return resp.StatusCode
+}
+
+func (h *ctrlHarness) status() handoff.StatusDoc {
+	h.t.Helper()
+	resp, err := http.Get(h.base + "/status")
+	require.NoError(h.t, err)
+	defer resp.Body.Close()
+	var d handoff.StatusDoc
+	require.NoError(h.t, json.NewDecoder(resp.Body).Decode(&d))
+	return d
 }
 
 // waitSettled waits for the current operation to finish and returns /status.
@@ -223,7 +361,7 @@ func httpCode(t *testing.T, port int, path string) int {
 	return resp.StatusCode
 }
 
-// The writer lock is a PostgreSQL advisory lock per database: a second
+// The writer lease is a PostgreSQL advisory lock per database: a second
 // store on the same database is the contender the next deploy would be.
 func assertLockFree(t *testing.T, url string) {
 	t.Helper()
@@ -252,9 +390,9 @@ func freePort(t *testing.T) int {
 // Fixes from the post-incident review, each against the real Grid.
 
 // The production port already bound (in a shared network namespace a
-// released predecessor keeps it): activation must fail, not report ACTIVE on
-// the strength of someone else's listener.
-func TestGridActivationRefusesABoundPort(t *testing.T) {
+// predecessor keeps it): Serve must fail, not report serving on the strength
+// of someone else's listener.
+func TestGridServeRefusesABoundPort(t *testing.T) {
 	blockOutbound(t)
 	dbURL := seededGridDB(t)
 	app, port := preparedGrid(t, dbURL)
@@ -262,12 +400,9 @@ func TestGridActivationRefusesABoundPort(t *testing.T) {
 	require.NoError(t, err)
 	defer squatter.Close()
 
-	h := runController(t, app, true)
-	h.command("/activate", "it-activate")
-	st := h.waitSettled()
-	assert.Equal(t, handoff.StateStandby, st.State)
-	assert.False(t, st.DatabaseHeld)
-	assert.Contains(t, st.Operation.Error, "already in use")
+	err = app.Serve(testCtx())
+	assert.ErrorContains(t, err, "already in use")
+	assert.Nil(t, app.store, "a failed Serve closes what it opened")
 	assertLockFree(t, dbURL)
 }
 
@@ -282,7 +417,7 @@ func TestGridTerminateDuringLockWaitIsPrompt(t *testing.T) {
 	require.NoError(t, err)
 	defer holder.Close()
 
-	h := runController(t, app, true)
+	h := runGrid(t, app, true)
 	h.command("/activate", "it-activate")
 	require.Eventually(t, func() bool { return h.state() == handoff.StateActivating }, 5*time.Second, 5*time.Millisecond)
 	time.Sleep(300 * time.Millisecond) // inside the lock wait
@@ -291,20 +426,20 @@ func TestGridTerminateDuringLockWaitIsPrompt(t *testing.T) {
 	assert.Less(t, time.Since(start), 5*time.Second, "shutdown must not wait out the minute-long lock timeout")
 }
 
-// A panic mid-activation releases what was opened (the deferred cleanup runs)
-// and returns to STANDBY; a retry then succeeds.
+// A panic mid-activation (coordinator mode) releases what was opened (the
+// deferred cleanup runs) and returns to STANDBY; a retry then succeeds.
 func TestGridPanicDuringActivationReleasesAndRetries(t *testing.T) {
 	blockOutbound(t)
 	dbURL := seededGridDB(t)
 	app, port := preparedGrid(t, dbURL)
 	panicked := false
 	app.activateHook = func(stage string) {
-		if stage == "store-opened" && !panicked {
+		if stage == "lease-acquired" && !panicked {
 			panicked = true
 			panic("injected")
 		}
 	}
-	h := runController(t, app, true)
+	h := runGrid(t, app, true)
 	h.command("/activate", "it-activate-1")
 	st := h.waitSettled()
 	assert.Equal(t, handoff.StateStandby, st.State, "cleanup ran, so the database is free: %+v", st.Operation)
