@@ -675,18 +675,25 @@ func (s *Store) refreshEventPlaces(tx *sql.Tx, ev *gridv1.Event) (bool, error) {
 	return true, bumpVersion(tx, refreshKey(ev.GetLayer()), 1)
 }
 
-// replaceEventPlaces sets an event's attachments: one DELETE and one
-// multi-row INSERT (unnest), two round trips whatever the place count.
+// replaceEventPlaces sets an event's attachments in ONE statement: it deletes
+// the rows no longer wanted (a data-modifying CTE) and inserts the missing
+// ones. Rows that stay are not touched, so a revision with an unchanged place
+// set writes nothing here (the old DELETE-everything-then-INSERT rewrote every
+// row on every revision), and the two statements' round trips are one. The
+// delete and the insert cannot meet: one removes rows outside the wanted set,
+// the other adds rows inside it.
 func replaceEventPlaces(tx *sql.Tx, id string, placeIDs []string) error {
-	if _, err := tx.Exec(`DELETE FROM event_places WHERE event_id = $1`, id); err != nil {
-		return fmt.Errorf("store: clear event_places %s: %w", id, err)
+	if placeIDs == nil {
+		placeIDs = []string{}
 	}
-	if len(placeIDs) == 0 {
-		return nil
-	}
-	if _, err := tx.Exec(`INSERT INTO event_places (event_id, place_id)
-		SELECT $1, p FROM unnest($2::text[]) AS p`, id, placeIDs); err != nil {
-		return fmt.Errorf("store: insert event_places %s: %w", id, err)
+	if _, err := tx.Exec(`
+		WITH gone AS (
+		  DELETE FROM event_places WHERE event_id = $1 AND place_id <> ALL($2::text[])
+		)
+		INSERT INTO event_places (event_id, place_id)
+		SELECT $1, p FROM unnest($2::text[]) AS p
+		ON CONFLICT (event_id, place_id) DO NOTHING`, id, placeIDs); err != nil {
+		return fmt.Errorf("store: set event_places %s: %w", id, err)
 	}
 	return nil
 }
