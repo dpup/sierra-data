@@ -8812,7 +8812,7 @@ const file_grid_proto_rawDesc = "" +
 	"\x10GetMeshTelemetry\x12 .grid.v1.GetMeshTelemetryRequest\x1a\x1d.grid.v1.MeshTelemetryArchive\"\xae\x01\x92A\x8c\x01\n" +
 	"\x04MeshJ\x83\x01\n" +
 	"\x03400\x12|\n" +
-	"zINVALID_ARGUMENT: `node` missing or not 8-64 even-length hex (optionally prefixed `meshcore:`), or `from` not before `to`.\x82\xd3\xe4\x93\x02\x18\x12\x16/api/v1/mesh/telemetry\x1ap\x92Am\x12kEvery /api/v1 RPC. The resource tags (Places, Events, Conditions, Sources, Mesh) group the same operations.B\x91c\x92A\xd3b\x12\xae[\n" +
+	"zINVALID_ARGUMENT: `node` missing or not 8-64 even-length hex (optionally prefixed `meshcore:`), or `from` not before `to`.\x82\xd3\xe4\x93\x02\x18\x12\x16/api/v1/mesh/telemetry\x1ap\x92Am\x12kEvery /api/v1 RPC. The resource tags (Places, Events, Conditions, Sources, Mesh) group the same operations.B\x95c\x92A\xd7b\x12\xae[\n" +
 	"\fThe Grid API\x12\xfaYPublic, read-only JSON API of **The Grid**, the S.I.E.R.R.A. data service. It gathers hazard and situational-awareness feeds for California's central Sierra Nevada, centred on Calaveras and Tuolumne counties: the Highway 4 / Ebbetts Pass corridor (Angels Camp, Murphys, Arnold, Dorrington, Bear Valley) and the Highway 49/108 towns (Sonora, Columbia, Twain Harte). Neighbouring counties (Alpine, Amador, El Dorado, Mariposa, San Joaquin, Stanislaus) are in the place directory because hazards cross county lines.\n" +
 	"\n" +
 	"Upstream sources: CAL FIRE and FIRIS (wildfires and perimeters), Cal OES / Genasys (evacuation zones), the National Weather Service (alerts, fire weather, forecasts), USGS (earthquakes), CHP and Caltrans (incidents, lane closures, chain control, cameras, message signs), PG&E (outages and Public Safety Power Shutoffs), county burn lines and CAL FIRE burn permits, the MeshCore community radio mesh, Google Routes and OpenWeatherMap.\n" +
@@ -8884,8 +8884,8 @@ const file_grid_proto_rawDesc = "" +
 	"\n" +
 	"Conditions\x12\x8f\x01Current, non-event state: weather, forecasts and fire weather, plus reference data (traffic cameras and scanner feeds). None of it is an event.jp\n" +
 	"\aSources\x12eThe upstream source registry and per-source health, which tells a client how far to trust each layer.j\xd6\x01\n" +
-	"\x04Mesh\x12\xcd\x01The MeshCore community radio mesh: node presence is the MESH event layer and the mesh_node map layer; relay topology is /api/v1/mesh/links and the mesh_link map layer; per-node history is GetMeshTelemetry.rM\n" +
-	"%The Grid site and human-readable docs\x12$https://data.sierragridteam.org/docsZ8github.com/sierragridteam/sierra-data/api/grid/v1;gridv1b\x06proto3"
+	"\x04Mesh\x12\xcd\x01The MeshCore community radio mesh: node presence is the MESH event layer and the mesh_node map layer; relay topology is /api/v1/mesh/links and the mesh_link map layer; per-node history is GetMeshTelemetry.rQ\n" +
+	"-The Grid: overview, conventions and changelog\x12 https://data.sierragridteam.org/Z8github.com/sierragridteam/sierra-data/api/grid/v1;gridv1b\x06proto3"
 
 var (
 	file_grid_proto_rawDescOnce sync.Once

@@ -3778,7 +3778,7 @@
     }
   },
   "externalDocs": {
-    "description": "The Grid site and human-readable docs",
-    "url": "https://data.sierragridteam.org/docs"
+    "description": "The Grid: overview, conventions and changelog",
+    "url": "https://data.sierragridteam.org/"
   }
 }

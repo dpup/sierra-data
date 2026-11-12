@@ -268,7 +268,7 @@ func (a *gridApp) Serve(ctx context.Context) error {
 	ingest := a.ingest
 
 	// Prefab server. gRPC + gateway serve the /api/v1 GridService; MCP and the
-	// static site are plain HTTP handlers. Its base context is the process
+	// landing page are plain HTTP handlers. Its base context is the process
 	// context: cancelling it closes the gateway's loopback gRPC connection,
 	// and a closing Grid then answers 499 (cancelled) where it should answer
 	// the gate's 503. In-flight cancellation is the gate's job.

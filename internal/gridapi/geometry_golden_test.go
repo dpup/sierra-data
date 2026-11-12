@@ -19,8 +19,8 @@ import (
 )
 
 // The default (no geometryFormat) JSON of every Geometry-carrying RPC must stay
-// byte-for-byte what it was before the OBJECT form existed: the embedded site
-// and external consumers (ersn.net) decode the base64 `geojson` string and
+// byte-for-byte what it was before the OBJECT form existed: external
+// consumers (ersn.net and others) decode the base64 `geojson` string and
 // nothing else. testdata/geometry_default.golden.json was captured from the
 // code BEFORE the change; regenerate it only for a deliberate, changelogged
 // response change (UPDATE_GOLDEN=1 go test ./internal/gridapi -run TestDefaultGeometryJSONIsUnchanged).
