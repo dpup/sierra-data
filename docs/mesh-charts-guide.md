@@ -189,9 +189,9 @@ windowed), if the page wants a map beside the charts.
 
 ## Left undone
 
-- **The Grid's own site has no chart.** The endpoint has no consumer yet;
-  `web/` renders the mesh roster and map but nothing plots. Whichever site gets
-  there first sets the pattern.
+- **No chart consumer yet.** The endpoint has no consumer yet; the data
+  explorer moved to sierra-grid (grid.sierragridteam.org), and nothing plots
+  it. Whichever site gets there first sets the pattern.
 - **Road-incident headlines churn.** Unrelated to charts, live now: one closure
   has produced 18 different public headlines from a single unchanged upstream
   description, because AI-written fields sit inside the content hash. Worth

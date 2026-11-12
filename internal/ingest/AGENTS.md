@@ -1159,7 +1159,7 @@ the bare `unionBounds`. Don't generalize the wildfire margin to new layers.
 5. **Projection** (`internal/gridapi/project.go`): add a `case` to `ProjectEvents`
    producing the exact shipped envelope; if it's a map layer, add it to
    `eventLayers` and `layerSourceIDs` in `internal/gridapi/maplayers.go`.
-6. **Docs**: `site/docs.html` (public `/api/v1` reference) and a `CHANGELOG.md` entry.
+6. **Docs**: the OpenAPI description (`grid.proto` comments and annotations, or `api/grid/v1/openapi.overlay.yaml`, then `make proto`) and a `CHANGELOG.md` entry.
 
 Per the spec, that's the whole surface — a new poller shows up in summary domains,
 `/api/v1/events`, and the map namespace automatically; no new endpoints.
