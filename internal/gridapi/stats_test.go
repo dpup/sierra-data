@@ -184,3 +184,54 @@ func TestGetStatsCancelAndError(t *testing.T) {
 	assert.Positive(t, ok.GetEvents())
 	assert.EqualValues(t, 3, calls.Load())
 }
+
+// A panic inside the computation, which runs on the flight's leader goroutine
+// where the gRPC recovery interceptor cannot see it, is returned to every
+// waiter as an internal error instead of crashing the process, and is not
+// cached.
+func TestGetStatsPanicReachesEveryWaiter(t *testing.T) {
+	s := newTestService(t)
+	seedPresenceFixtures(t, s)
+	g := NewGridServer(s)
+
+	var calls atomic.Int32
+	entered := make(chan struct{}, 8)
+	release := make(chan struct{})
+	var boom atomic.Bool
+	boom.Store(true)
+	g.stats.totals = func(ctx context.Context, placeID string) (store.Totals, error) {
+		calls.Add(1)
+		if boom.Load() {
+			entered <- struct{}{}
+			<-release
+			panic("totals blew up")
+		}
+		return s.Store.Totals(ctx, placeID)
+	}
+
+	const n = 8
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, errs[i] = g.GetStats(rpcBG(), &gridv1.GetStatsRequest{})
+		}()
+	}
+	<-entered
+	time.Sleep(50 * time.Millisecond) // the others queue behind the leader
+	close(release)
+	wg.Wait()
+
+	assert.EqualValues(t, 1, calls.Load(), "one flight")
+	for i := range n {
+		assert.Equal(t, codes.Internal, status.Code(errs[i]), "waiter %d", i)
+	}
+
+	// Nothing was cached and the flight is clear: the next request recomputes.
+	boom.Store(false)
+	ok, err := g.GetStats(rpcBG(), &gridv1.GetStatsRequest{})
+	require.NoError(t, err)
+	assert.Positive(t, ok.GetEvents())
+}
