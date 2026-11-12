@@ -24,16 +24,24 @@ every step below as handling the only copy.
   only if verification passed. A failure (verification, a crash, a killed
   task, a dropped connection) leaves no data. The schema itself (the
   PostgreSQL migrations) is applied first and committed on its own, exactly as
-  the writer would apply it; an empty schema is not data.
+  every Grid process applies it at boot; an empty schema is not data.
 - **An import refuses a database that holds Grid data** (any imported table,
   `versions`, or `import_log`), unless `--allow-nonempty` (rehearsals only:
   it truncates inside the same transaction, so a failed re-import keeps the
   previous data). It also refuses a database that does not compare text
   bytewise (create it `TEMPLATE template0 LC_COLLATE 'C' LC_CTYPE 'C'`), and a
   source that is not a complete v14 ladder.
-- **A running writer cannot interleave.** The import takes `EXCLUSIVE` locks
-  on every target table (readers continue; writes wait) with a 10 s lock
-  timeout, so it fails rather than queueing behind a live writer.
+- **The import is the writer while it runs.** It takes the Grid writer lease
+  through the same `store.AcquireLease` a server's campaign uses (holder
+  `gridctl-import@<host>/<pid>`, no address, so readers answer pushes with
+  503 meanwhile), and its transaction carries the lease's epoch fence like
+  every write. If a server holds the lease for `--lock-timeout` (default
+  10 s), the import is **refused**, naming the holder; `--allow-nonempty`
+  does not override that. Taking the lease bumps the epoch, so a writer that
+  lost its session without noticing is fenced out too. The import releases
+  the lease when it ends; a server's campaign then takes it in a newer term.
+  Inside the transaction it also takes `EXCLUSIVE` locks on every target
+  table (readers continue). `verify` takes no lease and no lock.
 - **Verification** (inside the import, and on demand with `verify`):
   - row counts per table equal the snapshot manifest and the source;
   - a SHA-256 over each table's rows in primary-key order, computed in Go on
@@ -84,7 +92,7 @@ transaction, so a failed import leaves none.
 
 ```
 gridctl snapshot --db /data/grid.db --out s3://<bucket>/grid-<ts>.db   # or a local path
-gridctl import   --from s3://<bucket>/grid-<ts>.db [--to <url>] [--report r.json] [--allow-nonempty]
+gridctl import   --from s3://<bucket>/grid-<ts>.db [--to <url>] [--report r.json] [--allow-nonempty] [--lock-timeout 10s]
 gridctl verify   --from s3://<bucket>/grid-<ts>.db [--to <url>] [--report r.json]
 gridctl version
 ```
@@ -150,7 +158,7 @@ A one-off task in the new account with:
 - command `import --from s3://<bucket>/grid-<ts>.db --report /tmp/report.json`.
 
 Run it while **no task holds the writer lease** (`grid.writer.enabled =
-false`, cutover step 1); readers may serve during it and see the database
+false`, cutover step 1); the import refuses otherwise. Readers may serve during it and see the database
 empty until the commit. Then `verify` (same task definition, command
 `verify --from ...`) reads it back without writing, and must print
 `RESULT: OK` before the writer is enabled. `verify` after the writer has run
@@ -167,7 +175,8 @@ and `check:` lines, fix the cause, run again.
 | `source schema is version N` | not a v14 store | the importer reads only `legacy-efs-final`'s schema |
 | `quick_check` not ok, or SQLite says the database is read-only / malformed when opening | the file (often an EFS backup taken mid-commit, carrying a hot journal) is inconsistent; a `mode=ro` open reports it instead of repairing it | use the next recovery point, or snapshot the live file |
 | `the target database is not empty` | a previous import (or a writer) left data | production: drop and recreate the database, then import; rehearsal: `--allow-nonempty` |
-| `locking the target tables` | something holds a lock: a writer is running | stop the writer (lease holder), retry |
+| `another process holds the Grid writer lease` | a server (named in the message) is the writer | stop it, `yield` it, or run it with `PF__GRID__WRITER__ENABLED=false`; retry |
+| `locking the target tables` | something else holds a table lock (a long query, a manual session) | find it in `pg_locks`, end it, retry |
 | `does not use byte-order collation` | the database was created with a glibc/ICU locale | recreate it with `TEMPLATE template0 LC_COLLATE 'C' LC_CTYPE 'C'` |
 | `rows fail the blob check` | an index column disagrees with its blob in the source (historical drift) or a blob does not unmarshal | stop and investigate the named rows on the source; do not patch around it |
 | `row stream SHA-256 differs` | the data changed in transit; the first differing rows and column are listed | a bug in the importer: keep the report, do not proceed |

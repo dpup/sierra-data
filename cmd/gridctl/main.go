@@ -12,6 +12,12 @@
 // secret injects, so the URL never has to appear on a command line. It is
 // never printed.
 //
+// import is a writer: it takes the Grid writer lease (store.AcquireLease, the
+// path a server's campaign uses) and runs its transaction under the lease's
+// epoch fence. If a server holds the lease for --lock-timeout (default 10s)
+// it refuses, --allow-nonempty or not; stop, yield or disable that writer
+// first. verify takes no lock (read-only).
+//
 // Exit status: 0 success, 1 failure (for import and verify: any difference;
 // the import is rolled back), 2 usage.
 package main
@@ -275,6 +281,8 @@ func cmdImport(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	allow := fs.Bool("allow-nonempty", false, "replace existing Grid data (rehearsal re-runs only); the replacement is part of the one transaction")
 	report := fs.String("report", "", "also write the JSON report to this file")
 	tmp := fs.String("tmp", "", "scratch directory for an s3:// source (default $TMPDIR)")
+	lockTimeout := fs.Duration("lock-timeout", 10*time.Second,
+		"how long to wait for the Grid writer lease (refused if a server still holds it) and the table locks")
 	if err := parse(fs, args); err != nil {
 		return err
 	}
@@ -295,7 +303,7 @@ func cmdImport(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	}
 	r, ierr := sqliteimport.Import(ctx, sqliteimport.ImportOptions{
 		SourcePath: src.path, SourceLabel: *from, Manifest: src.manifest, TargetURL: url,
-		AllowNonEmpty: *allow, Version: gridctlVersion(), Log: stderr})
+		AllowNonEmpty: *allow, Version: gridctlVersion(), Log: stderr, LockTimeout: *lockTimeout})
 	if r != nil {
 		printReport(stdout, r, ierr == nil)
 		if err := writeReport(*report, r); err != nil {

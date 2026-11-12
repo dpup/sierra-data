@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/sierragridteam/sierra-data/internal/sqliteimport/legacyfixture"
+	"github.com/sierragridteam/sierra-data/internal/store"
 	"github.com/sierragridteam/sierra-data/internal/storetest"
 )
 
@@ -172,4 +173,38 @@ func execSQL(t *testing.T, url, q string) {
 	defer c.Close(context.Background())
 	_, err = c.Exec(context.Background(), q)
 	require.NoError(t, err)
+}
+
+// import refuses while a server holds the writer lease (exit 1, the holder
+// named); verify is read-only and runs regardless; after the holder lets go
+// the import proceeds.
+func TestImportRefusedWhileAWriterHoldsTheLease(t *testing.T) {
+	live := liveFixture(t)
+	snap := filepath.Join(t.TempDir(), "snap.db")
+	code, _, stderr := gridctl(t, "snapshot", "--db", live, "--out", snap)
+	require.Equal(t, 0, code, stderr)
+	url := storetest.URL(t)
+	code, _, stderr = gridctl(t, "import", "--from", snap, "--to", url)
+	require.Equal(t, 0, code, stderr)
+
+	holder, err := store.OpenReader(url)
+	require.NoError(t, err)
+	defer holder.Close()
+	_, err = holder.AcquireLease(context.Background(), store.LeaseOptions{Holder: "grid-task-1", Address: "10.0.0.9:8080"})
+	require.NoError(t, err)
+
+	code, _, stderr = gridctl(t, "import", "--from", snap, "--to", url, "--allow-nonempty", "--lock-timeout", "300ms")
+	assert.Equal(t, 1, code)
+	assert.Contains(t, stderr, "writer lease")
+	assert.Contains(t, stderr, "grid-task-1")
+	assert.NotContains(t, stderr, url)
+
+	code, out, _ := gridctl(t, "verify", "--from", snap, "--to", url)
+	assert.Equal(t, 0, code, out)
+	assert.Contains(t, out, "RESULT: OK", "verify needs no lease")
+
+	require.NoError(t, holder.ReleaseLease())
+	code, out, stderr = gridctl(t, "import", "--from", snap, "--to", url, "--allow-nonempty")
+	require.Equal(t, 0, code, out+stderr)
+	assert.Contains(t, out, "RESULT: OK")
 }

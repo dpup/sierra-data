@@ -332,3 +332,71 @@ func TestServerDoesNotLinkTheImporter(t *testing.T) {
 		}
 	}
 }
+
+// The import is a writer like any other (decision 3, 2026-11-12): it takes
+// the writer lease through store.AcquireLease and fences its transaction with
+// the epoch. While a server holds the lease the import is refused, whether or
+// not --allow-nonempty is set, and nothing is written; once the holder
+// releases it, the import proceeds, bumps the epoch and leaves the lease free.
+func TestImportRefusesWhileAWriterHoldsTheLease(t *testing.T) {
+	snap, m, sum := fixture(t)
+	url := storetest.URL(t)
+	holder, err := store.OpenReader(url)
+	require.NoError(t, err)
+	defer holder.Close()
+	lease, err := holder.AcquireLease(context.Background(), store.LeaseOptions{Holder: "server-a", Address: "10.0.0.1:8080"})
+	require.NoError(t, err)
+
+	for _, allow := range []bool{false, true} {
+		start := time.Now()
+		r, err := sqliteimport.Import(context.Background(), sqliteimport.ImportOptions{
+			SourcePath: snap, Manifest: m, TargetURL: url, AllowNonEmpty: allow, Version: "test",
+			LockTimeout: 300 * time.Millisecond})
+		require.ErrorIs(t, err, sqliteimport.ErrWriterLive, "allow-nonempty=%v", allow)
+		assert.Nil(t, r)
+		assert.ErrorContains(t, err, `"server-a"`, "the message names the holder")
+		assert.ErrorContains(t, err, "--allow-nonempty does not override")
+		assert.Less(t, time.Since(start), 5*time.Second)
+	}
+	assert.Zero(t, scalar(t, url, `SELECT count(*) FROM events`))
+	assert.Zero(t, scalar(t, url, `SELECT count(*) FROM import_log`))
+	assert.True(t, holder.HoldsLease(), "the holder kept its lease")
+
+	require.NoError(t, holder.ReleaseLease())
+	r, err := importInto(t, url, snap, m, false)
+	require.NoError(t, err)
+	require.True(t, r.OK())
+	assert.Equal(t, sum.Rows["events"], scalar(t, url, `SELECT count(*) FROM events`))
+	assert.Equal(t, lease.Epoch()+1, scalar(t, url, `SELECT epoch FROM writer_lease WHERE id = 1`),
+		"the import held its own term")
+	assert.Zero(t, scalar(t, url, `SELECT count(*) FROM writer_lease WHERE holder <> '' OR address <> ''`),
+		"the import released the lease")
+
+	// And a server takes over after it, in a newer term.
+	l2, err := holder.AcquireLease(context.Background(), store.LeaseOptions{Holder: "server-a", Wait: 2 * time.Second})
+	require.NoError(t, err)
+	assert.Equal(t, lease.Epoch()+2, l2.Epoch())
+}
+
+// A write that a stale term started cannot land after the import took the
+// lease: the importer's epoch bump fences it (the server's own store fence,
+// exercised here through the importer as the next term).
+func TestImportFencesAStaleWriter(t *testing.T) {
+	snap, m, _ := fixture(t)
+	url := storetest.URL(t)
+	old, err := store.OpenReader(url)
+	require.NoError(t, err)
+	defer old.Close()
+	_, err = old.AcquireLease(context.Background(), store.LeaseOptions{Holder: "old"})
+	require.NoError(t, err)
+	// The old writer's session dies without it noticing yet: its lock is gone,
+	// its pool still works.
+	execPG(t, url, `SELECT pg_terminate_backend(pid) FROM pg_locks
+		WHERE locktype = 'advisory' AND pid <> pg_backend_pid()`)
+
+	r, err := importInto(t, url, snap, m, false)
+	require.NoError(t, err)
+	require.True(t, r.OK())
+	err = old.SeedSources(context.Background(), []store.SourceSeed{{ID: "usgs", Name: "u", PollInterval: time.Minute}})
+	assert.ErrorIs(t, err, store.ErrNotWriter, "the stale writer is fenced out")
+}

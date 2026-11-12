@@ -6,13 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/stdlib"
 
-	"github.com/sierragridteam/sierra-data/internal/store/migrations"
+	"github.com/sierragridteam/sierra-data/internal/store"
 )
 
 // ErrNotEmpty is returned when the target already holds Grid data and the
@@ -31,7 +31,8 @@ type ImportOptions struct {
 	AllowNonEmpty bool
 	Version       string    // gridctl version, for import_log
 	Log           io.Writer // progress lines; nil = silent
-	// LockTimeout bounds the wait for table locks (a live writer); 0 = 10s.
+	// LockTimeout bounds the wait for the writer lease (a live server holds
+	// it: the import is refused) and then for the table locks; 0 = 10s.
 	LockTimeout time.Duration
 }
 
@@ -46,9 +47,12 @@ func (o ImportOptions) logf(format string, args ...any) {
 //
 //  1. Check the file against its manifest (SHA-256, size), open it mode=ro in
 //     one read transaction, and refuse anything but a v14 store.
-//  2. Refuse a target that does not compare bytewise, apply the PostgreSQL
-//     migrations (the schema; committed on their own, like any writer's
-//     migration), then in one transaction: lock the tables, refuse existing
+//  2. Open the target as a server does (store.OpenReader: refuse a target
+//     that does not compare bytewise, apply the PostgreSQL migrations, each
+//     committed on its own as every process does at boot) and take the
+//     writer lease with store.AcquireLease, refusing with ErrWriterLive if a
+//     server holds it for LockTimeout. Then in ONE transaction, fenced by the
+//     lease's epoch like any write (store.WritePgxTx): lock the tables, refuse existing
 //     data unless AllowNonEmpty, COPY every table in dependency order,
 //     derive events.first_ingested_at and the bbox columns, reset the
 //     mesh_observations identity past MAX(id) and the compaction watermark,
@@ -59,7 +63,7 @@ func (o ImportOptions) logf(format string, args ...any) {
 //     rehydrated with its index columns agreeing, and the database-level
 //     invariants. Any problem rolls everything back and returns
 //     ErrVerification with the report.
-//  4. Write an import_log row and commit.
+//  4. Write an import_log row and commit; release the lease.
 func Import(ctx context.Context, opts ImportOptions) (*Report, error) {
 	r := &Report{Source: opts.SourceLabel, StartedAt: time.Now().UTC()}
 	if r.Source == "" {
@@ -87,37 +91,82 @@ func Import(ctx context.Context, opts ImportOptions) (*Report, error) {
 	}
 	defer src.close()
 
-	conn, err := connectTarget(ctx, opts.TargetURL)
+	st, err := openWriter(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
-	defer conn.Close(context.Background())
-	if err := applyMigrations(ctx, conn); err != nil {
+	defer st.Close()
+	defer st.ReleaseLease()
+
+	err = st.WritePgxTx(ctx, func(tx pgx.Tx) error { return importInTx(ctx, opts, src, tx, r) })
+	if err != nil {
+		if errors.Is(err, ErrVerification) {
+			return r, err
+		}
 		return nil, err
 	}
+	return r, nil
+}
 
-	tx, err := conn.Begin(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("sqliteimport: begin: %w", err)
+// ErrWriterLive is returned when another process holds the writer lease for
+// the whole wait: a server is (or may be) writing this database. An import
+// never runs beside a writer, --allow-nonempty or not.
+var ErrWriterLive = errors.New("sqliteimport: another process holds the Grid writer lease")
+
+// openWriter opens the target the way a server does (store.OpenReader: the
+// collation check and the migrations every process applies at boot) and
+// takes the writer lease through the same AcquireLease a server's campaign
+// uses, so the import's transaction carries the epoch fence like any other
+// write and no server can write until the importer releases the lease.
+func openWriter(ctx context.Context, opts ImportOptions) (*store.Store, error) {
+	if opts.TargetURL == "" {
+		return nil, errors.New("sqliteimport: no target database URL")
 	}
-	defer tx.Rollback(context.Background()) // no-op after Commit
+	st, err := store.OpenReader(opts.TargetURL, store.WithMaxConns(2), store.WithMinConns(1),
+		store.WithLockContext(ctx), store.WithoutVersionListen())
+	if err != nil {
+		return nil, fmt.Errorf("sqliteimport: opening the target: %w", err)
+	}
+	host, _ := os.Hostname()
+	_, err = st.AcquireLease(ctx, store.LeaseOptions{
+		Holder: fmt.Sprintf("gridctl-import@%s/%d", host, os.Getpid()),
+		Wait:   opts.LockTimeout,
+	})
+	if err == nil {
+		return st, nil
+	}
+	defer st.Close()
+	if !errors.Is(err, store.ErrLockHeld) {
+		return nil, fmt.Errorf("sqliteimport: taking the writer lease: %w", err)
+	}
+	who := "unknown holder"
+	if w, werr := st.WriterLease(ctx); werr == nil && w.Holder != "" {
+		who = fmt.Sprintf("holder %q, epoch %d, last heartbeat %s ago", w.Holder, w.Epoch,
+			w.HeartbeatAge.Round(100*time.Millisecond))
+	}
+	return nil, fmt.Errorf("%w (%s, still held after %s). Stop that server, yield it, or run it with "+
+		"PF__GRID__WRITER__ENABLED=false, then import again; --allow-nonempty does not override this",
+		ErrWriterLive, who, opts.LockTimeout)
+}
 
+// importInTx is the import proper, inside the fenced write transaction.
+func importInTx(ctx context.Context, opts ImportOptions, src *source, tx pgx.Tx, r *Report) error {
 	if err := lockTargets(ctx, tx, opts.LockTimeout); err != nil {
-		return nil, err
+		return err
 	}
 	occupied, err := occupiedTables(ctx, tx)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if len(occupied) > 0 {
 		if !opts.AllowNonEmpty {
-			return nil, fmt.Errorf("%w: %s hold data (a previous import or a running writer); "+
+			return fmt.Errorf("%w: %s hold data (a previous import or a running writer); "+
 				"import only into an empty database, or pass --allow-nonempty to replace it (rehearsals only)",
 				ErrNotEmpty, strings.Join(occupied, ", "))
 		}
 		opts.logf("replacing existing data in %s", strings.Join(occupied, ", "))
 		if err := clearTargets(ctx, tx); err != nil {
-			return nil, err
+			return err
 		}
 		r.Replaced = true
 	}
@@ -126,31 +175,25 @@ func Import(ctx context.Context, opts ImportOptions) (*Report, error) {
 	for _, t := range importTables {
 		n, secs, err := copyTable(ctx, src, tx, t)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		r.Tables = append(r.Tables, TableReport{Table: t.name, CopySeconds: secs})
 		opts.logf("copied %-18s %9d rows in %6.2fs", t.name, n, secs)
 	}
 	if err := finishTargets(ctx, tx); err != nil {
-		return nil, err
+		return err
 	}
 	r.CopySeconds = time.Since(copyStart).Seconds()
 
 	opts.logf("verifying")
 	if err := runVerify(ctx, src, tx, opts.Manifest, r); err != nil {
-		return nil, err
+		return err
 	}
 	r.FinishedAt = time.Now().UTC()
 	if !r.OK() {
-		return r, fmt.Errorf("%w: %d problems, rolled back (first: %s)", ErrVerification, len(r.Problems), r.Problems[0])
+		return fmt.Errorf("%w: %d problems, rolled back (first: %s)", ErrVerification, len(r.Problems), r.Problems[0])
 	}
-	if err := writeImportLog(ctx, tx, opts, r); err != nil {
-		return nil, err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("sqliteimport: commit: %w", err)
-	}
-	return r, nil
+	return writeImportLog(ctx, tx, opts, r)
 }
 
 // Verify compares an already-imported database with a SQLite source,
@@ -213,16 +256,6 @@ func connectTarget(ctx context.Context, url string) (*pgx.Conn, error) {
 			"create it with TEMPLATE template0 LC_COLLATE 'C' LC_CTYPE 'C'")
 	}
 	return conn, nil
-}
-
-func applyMigrations(ctx context.Context, conn *pgx.Conn) error {
-	db := stdlib.OpenDB(*conn.Config())
-	defer db.Close()
-	if _, err := migrations.Apply(ctx, db); err != nil {
-		return fmt.Errorf("sqliteimport: %w", err)
-	}
-	_, err := migrations.CheckVersion(ctx, db)
-	return err
 }
 
 // targetTables are every table the import writes: the imported ones plus

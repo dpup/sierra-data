@@ -437,6 +437,11 @@ the columns SQLite never had (`first_ingested_at`, the bbox, `versions`, the
   and asserted by its database checks.
 - `import_log` is migration `0003_import_log.sql`; the importer only writes
   its row, inside the import transaction.
+- The importer is a writer: it opens with `OpenReader`, takes the lease with
+  `AcquireLease` (refusing while a server holds it) and writes through
+  `WritePgxTx`, the native-pgx sibling of `inTx` for `CopyFrom`, with the
+  same epoch fence. Anything else that must write outside the scheduler
+  goes the same way; never write around the fence.
 
 `ErrNotFound` from point lookups (`GetEvent`, `GetPlace`) maps to HTTP 404 at the
 API layer — return it, don't invent a sentinel.

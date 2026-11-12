@@ -25,6 +25,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -399,6 +400,46 @@ func (s *Store) inTx(ctx context.Context, fn func(tx *sql.Tx) error) error {
 		return err
 	}
 	s.versions.markDirty() // this process reads its own writes' validators at once
+	return nil
+}
+
+// WritePgxTx runs fn in a fenced write transaction on a native pgx
+// connection, for writes database/sql cannot express (COPY: the SQLite
+// importer). The guarantees are inTx's: refused with ErrNotWriter without a
+// live writer lease, the epoch fence (FOR KEY SHARE) runs first and holds for
+// the whole transaction, and it runs under the write mutex. fn's error rolls
+// back; nil commits.
+func (s *Store) WritePgxTx(ctx context.Context, fn func(tx pgx.Tx) error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	l := s.lease.Load()
+	if !l.live() {
+		return ErrNotWriter
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("store: begin: %w", err)
+	}
+	defer tx.Rollback(context.Background()) // no-op after Commit
+	var one int
+	err = tx.QueryRow(ctx,
+		`SELECT 1 FROM writer_lease WHERE id = 1 AND epoch = $1 FOR KEY SHARE`, l.epoch).Scan(&one)
+	if errors.Is(err, pgx.ErrNoRows) {
+		l.end(ErrFenced, true)
+		return ErrFenced
+	}
+	if err != nil {
+		return fmt.Errorf("store: checking the writer lease: %w", err)
+	}
+	s.txEpoch = l.epoch
+	defer func() { s.txEpoch = 0 }()
+	if err := fn(tx); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	s.versions.markDirty()
 	return nil
 }
 
