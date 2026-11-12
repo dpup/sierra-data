@@ -34,7 +34,10 @@ body {
   font: 15px/1.6 ui-monospace, "IBM Plex Mono", "SF Mono", Menlo, Consolas, monospace;
 }
 main { max-width: 84ch; margin: 0 auto; padding: 32px 16px 48px; }
-h1, h2, h3, h4 { font-size: 1em; line-height: 1.4; margin: 2em 0 0.6em; }
+/* Terminal weight: headings and emphasis lean on colour and the prompt
+   markers, not on bold. Monospace faces only carry regular and bold, so
+   anything heavier than 400 renders as full bold. */
+h1, h2, h3, h4 { font-size: 1em; font-weight: 400; line-height: 1.4; margin: 2em 0 0.6em; }
 h1 { font-size: 1.6em; margin-top: 0.3em; color: var(--green); }
 h2 { color: var(--green); }
 h2 .mark, .prompt, .p { color: var(--brass); }
@@ -45,7 +48,7 @@ p, ul, ol, pre, table { margin: 0 0 1em; }
 a { color: var(--green); text-underline-offset: 2px; }
 a:hover { text-decoration-thickness: 2px; }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-b, strong { font-weight: 700; }
+b, strong { font-weight: 400; color: var(--green); }
 code { font-family: inherit; color: var(--brass); overflow-wrap: anywhere; }
 pre code { color: inherit; }
 .lede { font-size: 1.05em; }
