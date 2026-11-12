@@ -2046,8 +2046,8 @@ geojson layer, and the `fire` summary domain):
 place. It counts toward `summary.totalActive` and `severityCounts`, is eligible
 for `topEvents`, and can lift `summary.mode` to WATCH/ACTIVE. A place can
 therefore report an active fire whose perimeter is not inside its boundary —
-that is intended, but if you render "fires in <place>" you may want to say
-"fires in or near <place>".
+that is intended, but if you render "fires in `<place>`" you may want to say
+"fires in or near `<place>`".
 
 **Event ids can change for fires that were previously perimeter-only.** A fire
 whose CAL FIRE origin point sat outside the old box surfaced as a bare

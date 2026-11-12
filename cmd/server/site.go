@@ -1,65 +1,109 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
+	"embed"
 	"encoding/hex"
-	"io/fs"
-	"mime"
 	"net/http"
 	"path"
 	"strings"
 	"sync"
 
-	"github.com/sierragridteam/sierra-data/site"
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/extension"
+	"github.com/yuin/goldmark/parser"
+
+	sierradata "github.com/sierragridteam/sierra-data"
 )
 
-// siteETags memoizes each embedded file's content hash. The embedded FS is
-// immutable at runtime, so a file's ETag is computed once and reused.
-var (
-	siteETagMu sync.RWMutex
-	siteETags  = map[string]string{}
-)
-
-// siteETag returns a strong ETag for an embedded file's bytes.
-func siteETag(name string, body []byte) string {
-	siteETagMu.RLock()
-	tag, ok := siteETags[name]
-	siteETagMu.RUnlock()
-	if ok {
-		return tag
-	}
-	sum := sha256.Sum256(body)
-	tag = `"` + hex.EncodeToString(sum[:16]) + `"`
-	siteETagMu.Lock()
-	siteETags[name] = tag
-	siteETagMu.Unlock()
-	return tag
-}
-
-// siteContentTypes pins Content-Type for every extension the site ships.
-// Checked BEFORE mime.TypeByExtension: the OS mime database
-// (/etc/mime.types) varies by host — minimal containers lack it entirely and
-// desktop distros remap .js — and the types the site depends on must not.
-var siteContentTypes = map[string]string{
-	".html":    "text/html; charset=utf-8",
-	".js":      "text/javascript; charset=utf-8",
-	".css":     "text/css; charset=utf-8",
-	".geojson": "application/geo+json",
-	".json":    "application/json",
-	".md":      "text/markdown; charset=utf-8",
-	".svg":     "image/svg+xml",
-	".png":     "image/png",
-	".ico":     "image/x-icon",
-}
-
-// siteHandler serves the embedded site at "/". It only ever sees paths that no
-// more-specific prefab mount claimed (/api/ gateway, /mcp, /api/openapi.json),
-// so it doesn't need to route around them.
+// The landing page is plain files in cmd/server/landing, embedded as-is: no
+// build step and no JavaScript beyond the optional copy button. The data
+// explorer lives in the separate sierra-grid project at grid.sierragridteam.org.
 //
-// Caching: HTML is no-cache (pages are the deploy unit — a new deploy must
-// show up on reload); /assets/* revalidates every 5 minutes (app code
-// iterates); /lib/* is vendored third-party code that only changes with a
-// deliberate upgrade, so it caches for a day.
+//go:embed landing/index.html landing/style.css landing/llms.txt
+var landingFS embed.FS
+
+// sitePage is one response the "/" handler can serve, with its ETag computed
+// once: every body is immutable for the life of the process.
+type sitePage struct {
+	ctype string
+	body  []byte
+	etag  string
+}
+
+func newSitePage(ctype string, body []byte) *sitePage {
+	sum := sha256.Sum256(body)
+	return &sitePage{ctype: ctype, body: body, etag: `"` + hex.EncodeToString(sum[:16]) + `"`}
+}
+
+var (
+	sitePagesOnce sync.Once
+	sitePages     map[string]*sitePage
+)
+
+// loadSitePages builds the route table on first use. The changelog is
+// rendered from the embedded CHANGELOG.md once per process.
+func loadSitePages() map[string]*sitePage {
+	sitePagesOnce.Do(func() {
+		read := func(name string) []byte {
+			b, err := landingFS.ReadFile("landing/" + name)
+			if err != nil {
+				panic(err) // embedded at compile time; cannot fail
+			}
+			return b
+		}
+		index := newSitePage("text/html; charset=utf-8", read("index.html"))
+		sitePages = map[string]*sitePage{
+			"":          index,
+			"index":     index,
+			"style.css": newSitePage("text/css; charset=utf-8", read("style.css")),
+			"llms.txt":  newSitePage("text/plain; charset=utf-8", read("llms.txt")),
+			"changelog": newSitePage("text/html; charset=utf-8", renderChangelog(sierradata.Changelog)),
+		}
+	})
+	return sitePages
+}
+
+// renderChangelog turns CHANGELOG.md into a page using the landing stylesheet.
+// goldmark's default renderer drops raw HTML, so the Markdown cannot inject
+// markup; GFM adds the tables and autolinks the file uses.
+func renderChangelog(src []byte) []byte {
+	md := goldmark.New(
+		goldmark.WithExtensions(extension.GFM),
+		goldmark.WithParserOptions(parser.WithAutoHeadingID()),
+	)
+	var buf bytes.Buffer
+	buf.WriteString(`<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Changelog · The Grid</title>
+<meta name="color-scheme" content="dark light">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<main class="md">
+<p class="prompt">sierra@grid:~$ <span class="cmd">cat CHANGELOG.md</span> · <a href="/">data.sierragridteam.org</a></p>
+`)
+	if err := md.Convert(src, &buf); err != nil {
+		// Unreachable for an in-memory source; fall back to the raw text.
+		buf.Reset()
+		buf.WriteString("<!doctype html><title>Changelog</title><pre>")
+		buf.WriteString(strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace(string(src)))
+		buf.WriteString("</pre>")
+		return buf.Bytes()
+	}
+	buf.WriteString("</main>\n</body>\n</html>\n")
+	return buf.Bytes()
+}
+
+// siteHandler serves the landing page at "/", plus /style.css, /llms.txt and
+// /changelog. It only sees paths no more specific mount claimed (the /api/
+// gateway, /api/openapi.json, /mcp, health), so it does not route around them.
+// Everything is no-cache with a strong ETag, so a deploy shows on reload and a
+// revalidation costs a bodiless 304.
 func siteHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.Header().Set("Allow", "GET, HEAD")
@@ -67,10 +111,9 @@ func siteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Clean URLs: pages are addressed without the .html suffix. Any explicit
-	// ".html" request 301s to the extensionless form (/events.html -> /events,
-	// /index.html -> /) so there is one canonical URL, and old bookmarks and
-	// any stray links still resolve. Query strings are preserved.
+	// Clean URLs: an explicit ".html" 301s to the extensionless form
+	// (/changelog.html -> /changelog, /index.html -> /), preserving the query,
+	// so old links into the former site still land somewhere canonical.
 	if p := r.URL.Path; strings.HasSuffix(p, ".html") {
 		clean := strings.TrimSuffix(p, ".html")
 		if clean == "/index" {
@@ -83,58 +126,31 @@ func siteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Map the URL path to an embedded file. path.Clean collapses any ".."
-	// segments so traversal can't escape the embed root (embed.FS would
-	// reject such paths anyway; this keeps the 404 path tidy).
-	name := path.Clean(strings.TrimPrefix(r.URL.Path, "/"))
-	if name == "." || name == "" {
-		name = "index.html"
-	}
-
-	body, err := fs.ReadFile(site.FS, name)
-	if err != nil && path.Ext(name) == "" {
-		// Extensionless page URL: /events -> events.html. Only files (not the
-		// asset/lib paths, which carry their own extensions) hit this fallback.
-		if b, e := fs.ReadFile(site.FS, name+".html"); e == nil {
-			name, body, err = name+".html", b, nil
-		}
-	}
-	if err != nil {
-		// Includes directory paths (ReadFile on a dir errors) — the site has
-		// no directory listings.
+	// path.Clean collapses ".." and a trailing slash, so /changelog/ is
+	// /changelog and traversal has nowhere to go.
+	name := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
+	page, ok := loadSitePages()[name]
+	if !ok {
 		siteNotFound(w)
 		return
 	}
 
-	ext := path.Ext(name)
-	ctype := siteContentTypes[ext]
-	if ctype == "" {
-		ctype = mime.TypeByExtension(ext)
-	}
-	if ctype == "" {
-		ctype = "application/octet-stream"
-	}
-	w.Header().Set("Content-Type", ctype)
-	w.Header().Set("Cache-Control", siteCacheControl(name, ext))
-
-	// Every file is ETagged, which is what makes `no-cache` cheap: the browser
-	// revalidates and gets a bodiless 304 rather than the file again.
-	tag := siteETag(name, body)
-	w.Header().Set("ETag", tag)
-	if match := r.Header.Get("If-None-Match"); match != "" && etagMatches(match, tag) {
+	w.Header().Set("Content-Type", page.ctype)
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("ETag", page.etag)
+	if match := r.Header.Get("If-None-Match"); match != "" && etagMatches(match, page.etag) {
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
-
 	if r.Method == http.MethodHead {
 		return
 	}
-	_, _ = w.Write(body)
+	_, _ = w.Write(page.body)
 }
 
 // etagMatches reports whether an If-None-Match header selects `tag`.
 // Handles the comma-separated list form and the "*" wildcard; weak comparison
-// is fine here because the site never serves a semantically-equal variant.
+// is fine here because no page has a semantically-equal variant.
 func etagMatches(header, tag string) bool {
 	for _, candidate := range strings.Split(header, ",") {
 		candidate = strings.TrimSpace(candidate)
@@ -146,51 +162,25 @@ func etagMatches(header, tag string) bool {
 	return false
 }
 
-// siteCacheControl picks the Cache-Control policy for an embedded file by
-// location.
-//
-// `assets/` MUST REVALIDATE, and this is not a tuning choice. The page HTML and
-// the island JavaScript it loads are one unit: the island binds to the markup by
-// element id. Serving HTML `no-cache` while `assets/*` sat on `max-age=300`
-// meant that for five minutes after a deploy a browser could hold NEW markup and
-// OLD script — which threw
-//
-//	events.js: markup is missing #ev-scope-place, #ev-sort
-//
-// against a correctly-built, self-consistent deploy. The two files are
-// versioned together or not at all. Unlike `_astro/*` these names carry no
-// content hash (they are copied verbatim from `web/public/`), so the URL cannot
-// distinguish versions and revalidation is the only thing that can.
-//
-// Revalidation is cheap because every response is ETagged: an unchanged file
-// costs one conditional request and a bodiless 304.
-func siteCacheControl(name, ext string) string {
-	switch {
-	case ext == ".html":
-		return "no-cache"
-	case strings.HasPrefix(name, "_astro/"):
-		// Astro's own bundled output, named by CONTENT HASH
-		// (_astro/docs.oe4bHGyF.css). The filename changes whenever the bytes
-		// do, so the file at a given URL can never change — the one case where
-		// immutable is exactly right rather than merely convenient.
-		return "public, max-age=31536000, immutable"
-	case strings.HasPrefix(name, "assets/"):
-		return "no-cache"
-	case strings.HasPrefix(name, "lib/"):
-		// Vendored third-party libraries. Not coupled to our markup — MapLibre
-		// does not know our element ids — so a stale copy is merely old, not
-		// broken, and these are the biggest files on the site.
-		return "public, max-age=86400"
-	default:
-		return "no-cache"
-	}
-}
-
-// siteNotFound writes a minimal HTML 404 consistent with the site's plain
-// aesthetic (the JSON-error convention belongs to /v1, not the site).
+// siteNotFound writes a minimal HTML 404 (the JSON error envelope belongs to
+// /api). The former explorer pages (/events, /map, /relay, ...) land here, so
+// it says where they went.
 func siteNotFound(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.WriteHeader(http.StatusNotFound)
-	_, _ = w.Write([]byte("<!doctype html><title>404</title><h1>404 Not Found</h1><p><a href=\"/\">data.sierragridteam.org</a></p>\n"))
+	_, _ = w.Write([]byte(`<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>404 · The Grid</title><link rel="stylesheet" href="/style.css"></head>
+<body><main>
+<p class="prompt">sierra@grid:~$ <span class="cmd">cat this-page</span></p>
+<h1>404 Not Found</h1>
+<p>Nothing is served at this path. The data explorer is at
+<a href="https://grid.sierragridteam.org">grid.sierragridteam.org</a>; the API is described at
+<a href="/api/openapi.json">/api/openapi.json</a>.</p>
+<p><a href="/">data.sierragridteam.org</a></p>
+</main></body>
+</html>
+`))
 }

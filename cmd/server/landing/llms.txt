@@ -1,0 +1,26 @@
+# The Grid
+
+> The S.I.E.R.R.A data service at https://data.sierragridteam.org: a public, read-only, keyless API of wildfire, evacuation, weather, earthquake, road, power and mesh-network data for the Ebbetts Pass / Highway 4 corridor of the central Sierra (California).
+
+Pollers read the upstream sources (CAL FIRE and FIRIS, Cal OES evacuation zones, the National Weather Service, USGS, CHP, Caltrans, PG&E, county burn lines and MeshCore community bridges) and normalize every occurrence into one event model with full revision history. Everything is under `/api/v1`, defined in protobuf and served as JSON: camelCase fields, query parameters in camelCase or snake_case, RFC 3339 UTC timestamps. Places are addressed by slug (`ebbetts-pass`, `calaveras-county`). `/api/v1/events` defaults to `status=ACTIVE,SCHEDULED`; severity runs `INFO`, `MINOR`, `MODERATE`, `SEVERE`, `EXTREME`. Lists page with a keyset cursor (`nextPageToken` back as `pageToken` until empty). `geometryFormat=OBJECT` returns geometry as a GeoJSON object instead of base64. Reads carry `Cache-Control: public, max-age=30` and most carry an `ETag` for `If-None-Match`; poll every 30 to 60 seconds at most, and on `503` honor `Retry-After`. Every source reports `sourceStatus` (`OK`, `STALE`, `UNAVAILABLE`): a failure is never returned as an all-clear, and `null` means unknown, not zero. CORS is open for GET. The only write endpoint (`POST /api/v1/ingest/{stream}`) is authenticated and exists for operator-run reporters; do not call it. Show each record's `attribution`, cache responses, and name your app in `User-Agent`.
+
+## Docs
+
+- [OpenAPI spec](https://data.sierragridteam.org/api/openapi.json): the complete contract, OpenAPI 3.0, every endpoint and field
+- [Changelog](https://data.sierragridteam.org/changelog): every API change, newest first; `BREAKING:` entries include a migration note
+- [Landing page](https://data.sierragridteam.org/): overview, principles and a prompt to hand an agent
+
+## API
+
+- [Sources](https://data.sierragridteam.org/api/v1/sources): every upstream feed and its health
+- [Places](https://data.sierragridteam.org/api/v1/places): the place directory (areas, counties, towns, corridors) and their slugs
+- [Place summary](https://data.sierragridteam.org/api/v1/places/ebbetts-pass/summary): one place right now: mode, severity rollup, evacuations, top events, source health
+- [Events](https://data.sierragridteam.org/api/v1/events?place=ebbetts-pass&layer=road_incident): cross-layer event query, filtered by place, layer, status and severity_min
+- [Map layers](https://data.sierragridteam.org/api/v1/places/ebbetts-pass/map/wildfire.geojson): one RFC 7946 FeatureCollection per layer and place
+- [MCP](https://data.sierragridteam.org/mcp): the same read-only data as Model Context Protocol tools (Streamable HTTP, POST)
+
+## Optional
+
+- [Data explorer](https://grid.sierragridteam.org): browse the data in a web UI
+- [sierra-sdk](https://github.com/sierragridteam/sierra-sdk): the TypeScript client and shared API schema
+- [S.I.E.R.R.A](https://sierragridteam.org): the volunteer alliance that runs the service

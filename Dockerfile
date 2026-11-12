@@ -1,36 +1,7 @@
 # Multi-stage build for The Grid (S.I.E.R.R.A data service)
 
 ###############################################################################
-# Stage 1: Build the static site (Astro: web/ -> site/dist)
-###############################################################################
-# This stage is why site/dist is NOT committed: the image builds the site from
-# source, so a checkout can never ship a stale one and no `check-site` guard is
-# needed. Runs on the NATIVE build platform - the output is static HTML/CSS/JS,
-# byte-identical for every target arch, so there is nothing to cross-compile and
-# no toolchain to emulate.
-FROM --platform=$BUILDPLATFORM node:26.13.0-slim AS site-builder
-
-WORKDIR /web
-
-# Dependencies first, from the lockfile, so this layer (the slow one) stays
-# cached until web/pnpm-lock.yaml actually changes. Astro is a
-# devDependency, so this must NOT be --omit=dev.
-COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
-RUN npm install --global pnpm@12.18.0 && pnpm install --frozen-lockfile
-
-COPY web/ ./
-# /changelog renders the repo-root CHANGELOG.md at build time; the page imports
-# it as ../../../CHANGELOG.md from /web/src/pages, which resolves to /CHANGELOG.md.
-COPY CHANGELOG.md /CHANGELOG.md
-
-# astro.config.mjs sets outDir '../site/dist', so WORKDIR /web puts the build at
-# /site/dist. The pruned root-level *.mjs are Astro build-internal stubs
-# (content-*.mjs, a hash-named manifest) that the served site never references;
-# `make site` prunes them the same way.
-RUN pnpm run build && rm -f /site/dist/*.mjs && node screenshots/wiring-check.mjs
-
-###############################################################################
-# Stage 2: Build the Go application
+# Stage 1: Build the Go application
 ###############################################################################
 # Run the builder on the NATIVE build platform and cross-compile to the target
 # arch. Running an amd64 Go toolchain under QEMU emulation (e.g. building
@@ -59,12 +30,6 @@ RUN go mod download
 # it just compiles. Regenerate locally with `make proto` after .proto changes.
 COPY . .
 
-# The built site comes from the site-builder stage, never from the build context
-# (site/dist is git-ignored AND .dockerignore'd, so whatever a developer happens
-# to have built locally cannot leak into the image). This is the tree that
-# site/embed.go's `//go:embed all:dist` reads, so it must land before `go build`.
-COPY --from=site-builder /site/dist ./site/dist
-
 # Cross-compile a static binary for the target platform.
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -ldflags="-s -w" -o /sierra-server ./cmd/server
@@ -81,8 +46,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
 # Mesh relay image (docker build --target relay) — a SEPARATE service
 ###############################################################################
 # The relay is its own process with its own database so a relay crash or deploy
-# never touches the hazard feeds (the relay is github.com/sierragridteam/sierra-meshrelay/relay). It does not embed the
-# site, so this build skips the Node stage entirely. These stages sit BEFORE the
+# never touches the hazard feeds (the relay is github.com/sierragridteam/sierra-meshrelay/relay). These stages sit BEFORE the
 # server's final stage so a plain `docker build` still produces the server.
 FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine AS relay-builder
 WORKDIR /app
@@ -118,7 +82,7 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=120s --retries=3 \
 ENTRYPOINT ["/app/mesh-relay"]
 
 ###############################################################################
-# Stage 3: Final lightweight runtime image
+# Stage 2: Final lightweight runtime image
 ###############################################################################
 FROM alpine:3.24.4
 

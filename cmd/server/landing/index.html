@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Grid · data.sierragridteam.org</title>
+<meta name="description" content="The Grid: the S.I.E.R.R.A data service. A public, read-only, keyless API of hazard, road, weather, power and mesh-network data for the Ebbetts Pass / Highway 4 corridor of the central Sierra.">
+<meta name="color-scheme" content="dark light">
+<link rel="stylesheet" href="/style.css">
+<link rel="alternate" type="text/plain" href="/llms.txt" title="llms.txt">
+</head>
+<body>
+<main>
+<header>
+<p class="prompt">sierra@grid:~$ <span class="cmd">cat README</span></p>
+<h1>The Grid</h1>
+<p class="lede">The S.I.E.R.R.A data service: wildfire, evacuation, weather,
+earthquake, road, power and mesh-network data for the Ebbetts Pass /
+Highway 4 corridor of the central Sierra, in one public API.</p>
+<p class="meta">public · read-only · keyless · <a href="/api/openapi.json">/api/openapi.json</a></p>
+</header>
+
+<section aria-labelledby="what">
+<h2 id="what"><span class="mark" aria-hidden="true">#</span> What this is</h2>
+<p>Pollers read the upstream sources (CAL FIRE and FIRIS, Cal OES evacuation
+zones, the National Weather Service, USGS, CHP, Caltrans, PG&amp;E, county burn
+lines and MeshCore community bridges), normalize every occurrence into one
+event model, and keep its full revision history. You read the result here.
+It is run by <a href="https://sierragridteam.org">S.I.E.R.R.A</a>, the Signal
+Integrity &amp; Emergency Radio Response Alliance, a volunteer group.</p>
+<p>This page is for people and agents building on the API. To browse the data,
+use the explorer at <a href="https://grid.sierragridteam.org">grid.sierragridteam.org</a>.</p>
+</section>
+
+<section aria-labelledby="principles">
+<h2 id="principles"><span class="mark" aria-hidden="true">#</span> Principles</h2>
+<ul class="list">
+<li><b>One surface.</b> Everything is under <code>/api/v1</code>, defined in
+protobuf and served as JSON. Field names are camelCase; query parameters
+take camelCase (as the spec names them) or snake_case.</li>
+<li><b>Events are the unit.</b> Every wildfire, closure, alert or outage is an
+event with an id, a severity (<code>INFO</code> to <code>EXTREME</code>), a
+status and a revision number. Each content change writes a new revision, and
+the history stays queryable.</li>
+<li><b>Places by slug.</b> Areas, counties, towns and corridors are addressed
+by slug, such as <code>ebbetts-pass</code> or <code>calaveras-county</code>.</li>
+<li><b>Fail loud.</b> Every source reports <code>sourceStatus</code>:
+<code>OK</code>, <code>STALE</code> or <code>UNAVAILABLE</code>. A failed
+feed is returned as a failure, never as a fabricated all-clear, and
+<code>null</code> means unknown, not zero.</li>
+<li><b>Cache-friendly.</b> Reads carry <code>Cache-Control: public,
+max-age=30</code> (map layers 60); most also carry an <code>ETag</code>, so a conditional GET
+with <code>If-None-Match</code> returns <code>304</code>.</li>
+<li><b>Open to browsers.</b> CORS is open for <code>GET</code>, and no key or
+signup is needed. The one authenticated write endpoint exists only for
+operator-run monitors and reporters.</li>
+</ul>
+</section>
+
+<section aria-labelledby="start">
+<h2 id="start"><span class="mark" aria-hidden="true">#</span> Start here</h2>
+<pre class="term"><span class="p">$</span> curl https://data.sierragridteam.org/api/v1/sources
+<span class="c"># every upstream feed and its health</span>
+
+<span class="p">$</span> curl https://data.sierragridteam.org/api/v1/places/ebbetts-pass/summary
+<span class="c"># the corridor right now: severity rollup, evacuations, top events</span>
+
+<span class="p">$</span> curl 'https://data.sierragridteam.org/api/v1/events?place=ebbetts-pass&amp;layer=road_incident'
+<span class="c"># active and scheduled road incidents and closures</span></pre>
+<ul class="links">
+<li><a href="/api/openapi.json">/api/openapi.json</a> <span>the complete contract (OpenAPI 3.0)</span></li>
+<li><a href="/changelog">/changelog</a> <span>every API change, newest first</span></li>
+<li><a href="/llms.txt">/llms.txt</a> <span>this page, for language models</span></li>
+<li><a href="https://grid.sierragridteam.org">grid.sierragridteam.org</a> <span>the data explorer</span></li>
+<li><a href="https://github.com/sierragridteam/sierra-sdk">sierra-sdk</a> <span>the TypeScript client and shared API schema</span></li>
+<li><a href="https://sierragridteam.org">sierragridteam.org</a> <span>S.I.E.R.R.A</span></li>
+</ul>
+</section>
+
+<section aria-labelledby="agent">
+<h2 id="agent"><span class="mark" aria-hidden="true">&gt;</span> Give your agent this</h2>
+<p>Paste this into an LLM agent's instructions before it writes a client.
+Agents that speak MCP can also connect to <code>/mcp</code>.</p>
+<div class="copy">
+<button type="button" id="copy-btn" hidden>copy</button>
+<pre id="agent-prompt" class="term" tabindex="0">You are using The Grid, the public data service of S.I.E.R.R.A for the
+Ebbetts Pass / Highway 4 corridor of the central Sierra (California).
+
+Base URL:  https://data.sierragridteam.org
+Contract:  https://data.sierragridteam.org/api/openapi.json (read it first)
+Overview:  https://data.sierragridteam.org/llms.txt
+Changes:   https://data.sierragridteam.org/changelog
+
+Conventions:
+- All data is read-only GET under /api/v1. No key. JSON is camelCase;
+  query parameters take camelCase or snake_case (pageToken, page_token).
+- Places are addressed by slug (ebbetts-pass, calaveras-county). List them
+  with GET /api/v1/places; resolve a point with /api/v1/places:resolve.
+- /api/v1/events defaults to status=ACTIVE,SCHEDULED. Pass status
+  explicitly for other states, and always pass place: unscoped, the
+  feed is mostly INFO mesh-radio nodes.
+- Severity runs INFO, MINOR, MODERATE, SEVERE, EXTREME.
+- Timestamps are RFC 3339 in UTC.
+- Pass geometryFormat=OBJECT to get geometry as a GeoJSON object instead
+  of base64 bytes. Coordinates are [lng, lat].
+- Lists page with a keyset cursor: send nextPageToken back as pageToken
+  until it comes back empty. A short page is not the end.
+- Send If-None-Match with a stored ETag; a 304 means nothing changed.
+  Responses are cacheable for 30 seconds; poll every 30-60 s at most.
+- On 503 with Retry-After (a deploy handover), wait and retry.
+- Check sourceStatus. UNAVAILABLE or null means unknown: never present it
+  as zero or as an all-clear. Show each record's attribution.
+
+Do not:
+- call the write endpoint (POST /api/v1/ingest/*); it is for operators.
+- scrape or proxy the upstream feeds through this service.
+- send a generic User-Agent; name your app and a contact.</pre>
+</div>
+</section>
+
+<section aria-labelledby="etiquette">
+<h2 id="etiquette"><span class="mark" aria-hidden="true">#</span> Etiquette</h2>
+<ul class="list">
+<li>Cache responses and revalidate with <code>If-None-Match</code>. Most
+sources update every one to ten minutes.</li>
+<li>Poll every 30 to 60 seconds at most. If you get a <code>503</code>
+with <code>Retry-After</code> (a deploy handover), wait that long and retry.</li>
+<li>Say who you are in <code>User-Agent</code>, with a URL or email.</li>
+<li>Show the <code>attribution</code> string and link the upstream source
+wherever you display the data. Evacuation data is reference only; point
+people to official sources.</li>
+</ul>
+</section>
+
+<footer>
+<hr>
+<p>A fuller documentation site is planned. Until then, the OpenAPI spec is the
+reference. Questions: <a href="https://sierragridteam.org">sierragridteam.org</a>.</p>
+<p class="prompt">sierra@grid:~$ <span class="cursor" aria-hidden="true">_</span></p>
+</footer>
+</main>
+<script>
+(function () {
+  var btn = document.getElementById('copy-btn');
+  var src = document.getElementById('agent-prompt');
+  if (!btn || !src || !navigator.clipboard) return;
+  btn.hidden = false;
+  btn.addEventListener('click', function () {
+    navigator.clipboard.writeText(src.textContent).then(function () {
+      btn.textContent = 'copied';
+      setTimeout(function () { btn.textContent = 'copy'; }, 1500);
+    });
+  });
+})();
+</script>
+</body>
+</html>
