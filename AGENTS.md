@@ -32,6 +32,7 @@ Last updated: 2026-07-06
 ├── cmd/                       # CLI applications
 │   ├── server/                # Main API server (main.go, site.go, gridadapter.go)
 │   ├── mesh-relay/            # SIERRA Mesh Relay — a SEPARATE service (see below)
+│   ├── gridctl/               # SQLite -> PostgreSQL importer: snapshot, import, verify (docs/import.md)
 │   ├── test-google/           # Google Routes API testing tool
 │   ├── test-caltrans/         # Caltrans data testing tool
 │   ├── test-weather/          # Weather API testing tool
@@ -45,6 +46,7 @@ Last updated: 2026-07-06
 │   ├── hazards/               # /api/v1 unified GeoJSON hazard layers
 │   ├── store/                 # PostgreSQL grid event store (events, revisions, places, sources)
 │   ├── storetest/             # Per-test PostgreSQL databases (TEST_DATABASE_URL)
+│   ├── sqliteimport/          # The legacy SQLite store -> PostgreSQL (gridctl's library; the only SQLite in the Grid)
 │   ├── ingest/                # Poller scheduler + per-source normalizers → the store
 │   ├── pushingest/            # Authenticated push ingest (POST /api/v1/ingest/{stream})
 │   ├── gridapi/               # /api/v1 GridService impl (gRPC) + hand-built GeoJSON
@@ -224,6 +226,16 @@ branch only for a deliberate exception.
 Afterwards, forward-port the fix to `main` (cherry-pick, or a fresh change
 where the store code differs) so it is not lost at cutover. Nothing targets
 `release/*` branches any more.
+
+**The data crosses with `gridctl`** (`make gridctl`; `/app/gridctl` in the
+image): `snapshot` takes a consistent read-only copy of the legacy `grid.db`
+(to a path or `s3://`), `import` loads it into an empty PostgreSQL database
+in one verified transaction, `verify` re-checks an imported database
+read-only. Runbook, guarantees and timings: `docs/import.md`. The importer
+(`internal/sqliteimport`) is the only Grid code that links SQLite, and
+`cmd/server` must never import it (`TestServerDoesNotLinkTheImporter`). The
+API diff gate between the two stacks is `make apidiff LEGACY=<url> NEW=<url>`
+(`scripts/apidiff.py`, stdlib Python).
 
 ## Development Workflow
 
