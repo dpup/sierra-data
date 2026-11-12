@@ -2,7 +2,6 @@ package sqliteimport
 
 import (
 	"context"
-	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,16 +14,6 @@ import (
 
 	"github.com/sierragridteam/sierra-data/internal/store/migrations"
 )
-
-// importLogSQL creates the import_log table. The importer runs it inside its
-// own transaction, so a failed import leaves no table behind either. It is
-// written to become migration 0003_import_log.sql verbatim once the writer
-// lease's 0002 has landed (the runner refuses gaps in the ladder, so it cannot
-// be a migration on a branch without 0002); IF NOT EXISTS keeps both paths
-// valid.
-//
-//go:embed import_log.sql
-var importLogSQL string
 
 // ErrNotEmpty is returned when the target already holds Grid data and the
 // caller did not allow replacing it.
@@ -113,9 +102,6 @@ func Import(ctx context.Context, opts ImportOptions) (*Report, error) {
 	}
 	defer tx.Rollback(context.Background()) // no-op after Commit
 
-	if _, err := tx.Exec(ctx, importLogSQL); err != nil {
-		return nil, fmt.Errorf("sqliteimport: creating import_log: %w", err)
-	}
 	if err := lockTargets(ctx, tx, opts.LockTimeout); err != nil {
 		return nil, err
 	}

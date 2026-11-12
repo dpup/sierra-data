@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	neturl "net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -215,7 +216,7 @@ func TestSecondImportRefusesWithoutAllowNonEmpty(t *testing.T) {
 }
 
 // Any mismatch rolls the whole import back: nothing is left behind, not even
-// the import_log table.
+// an import_log row (the table itself is migration 0003).
 func TestFailedVerificationLeavesNothingBehind(t *testing.T) {
 	snap, m, _ := fixture(t)
 	url := storetest.URL(t)
@@ -233,7 +234,7 @@ func TestFailedVerificationLeavesNothingBehind(t *testing.T) {
 	for _, table := range []string{"events", "event_revisions", "places", "sources", "mesh_observations", "versions"} {
 		assert.Zero(t, scalar(t, url, `SELECT count(*) FROM `+table), table)
 	}
-	assert.Zero(t, scalar(t, url, `SELECT count(*) FROM pg_tables WHERE tablename = 'import_log'`))
+	assert.Zero(t, scalar(t, url, `SELECT count(*) FROM import_log`))
 }
 
 func TestImportRefusesAFileThatIsNotItsManifest(t *testing.T) {
@@ -304,8 +305,10 @@ func TestImportRefusesANonCCollatedTarget(t *testing.T) {
 		t.Skipf("SKIP: this server cannot create an ICU database: %v", err)
 	}
 	t.Cleanup(func() { execPG(t, admin, `DROP DATABASE IF EXISTS `+name+` WITH (FORCE)`) })
-	u := strings.Replace(admin, "/postgres?", "/"+name+"?", 1)
-	_, err = importInto(t, u, snap, m, false)
+	pu, err := neturl.Parse(admin)
+	require.NoError(t, err)
+	pu.Path = "/" + name
+	_, err = importInto(t, pu.String(), snap, m, false)
 	assert.ErrorContains(t, err, "byte-order collation")
 }
 

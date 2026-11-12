@@ -423,10 +423,8 @@ the columns SQLite never had (`first_ingested_at`, the bbox, `versions`, the
 - A new `versions` key, identity column or derived index column needs the
   same treatment as `revisions` and `first_ingested_at`: seeded by the import
   and asserted by its database checks.
-- `import_log` is created by the importer itself until it becomes migration
-  `0003_import_log.sql` (after the writer lease's `0002`; the runner refuses
-  a gap). The DDL is `internal/sqliteimport/import_log.sql`, written to be
-  moved verbatim.
+- `import_log` is migration `0003_import_log.sql`; the importer only writes
+  its row, inside the import transaction.
 
 `ErrNotFound` from point lookups (`GetEvent`, `GetPlace`) maps to HTTP 404 at the
 API layer — return it, don't invent a sentinel.

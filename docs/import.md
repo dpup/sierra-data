@@ -76,9 +76,9 @@ is replaced by the bbox columns) and `subscriptions` (never used; a
 non-empty one fails the import so it is noticed). A table the importer does
 not know fails the import too.
 
-`import_log` is created by the importer inside its transaction. It becomes
-migration `0003_import_log.sql` (the same `CREATE TABLE IF NOT EXISTS`) once
-the writer lease's `0002` has landed on main.
+`import_log` is schema migration `0003_import_log.sql` (empty on a database
+that was never imported into); the importer writes its row in the import
+transaction, so a failed import leaves none.
 
 ## Commands
 
