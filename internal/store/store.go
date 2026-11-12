@@ -5,8 +5,10 @@
 // The proto blob is canonical — scalar columns exist only as query indexes and
 // every read path rehydrates from the blob. Writes are serialized through an
 // internal mutex (single-writer discipline: the ingest scheduler) and, across
-// processes, by the writer advisory lock Open takes (lease.go). Reads go
-// straight to the connection pool under PostgreSQL's MVCC.
+// processes, by the writer lease (lease.go): every process opens a reader
+// (OpenReader), one at a time holds the lease (AcquireLease), and every write
+// transaction is fenced by its epoch. Reads go straight to the connection pool
+// under PostgreSQL's MVCC.
 //
 // The driver is pgx v5: a pgxpool.Pool, exposed to the existing
 // database/sql code as *sql.DB through stdlib.OpenDBFromPool. The native pool
@@ -20,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -36,20 +39,36 @@ import (
 var ErrNotFound = errors.New("store: not found")
 
 // Store wraps the database. Safe for concurrent use: writes take mu and run
-// one at a time; reads go straight to the pool.
+// one at a time, and only while this process holds the writer lease
+// (lease.go); reads go straight to the pool.
 type Store struct {
 	pool *pgxpool.Pool
 	db   *sql.DB
-	lock *writerLock
 	mu   sync.Mutex // single-writer discipline within the process
+
+	// The writer lease, nil for a reader. Swapped under leaseMu (acquire,
+	// release) and mu (so an in-flight write finishes before a release).
+	leaseMu sync.Mutex
+	lease   atomic.Pointer[Lease]
+	// txEpoch is the epoch of the write transaction in progress (0 outside
+	// one). Guarded by mu. loadPlaceGeoms checks it, so the place cache can
+	// only be built or used inside a fenced write.
+	txEpoch int64
 
 	// placesGeo caches parsed place geometries so matchPlaces (called per event
 	// on every ingest tick, including hash-equal no-ops) does not re-SELECT and
 	// re-parse every place polygon under the write mutex. Guarded by mu — both
 	// matchPlaces (inside inTx) and UpsertPlace (the only invalidator) hold it.
-	// Safe as a process cache only because this process is the single writer.
+	// Valid only for the lease term that built it (placesGeoEpoch): another
+	// writer may change places while this process is a reader.
 	placesGeo      []parsedPlace
 	placesGeoValid bool
+	placesGeoEpoch int64
+
+	// versions caches the validator counters for readers (versions.go).
+	versions  versionCache
+	watchStop context.CancelFunc
+	watchDone chan struct{}
 
 	// wildfireBuffer is how close (metres) a WILDFIRE event may come to an AREA
 	// or TOWN place and still attach to it. See WithWildfireProximity.
@@ -60,7 +79,8 @@ type Store struct {
 	townRadius float64
 
 	maxConns, minConns int32
-	schemaVersion      int
+	schemaVersion      atomic.Int64
+	schemaReady        atomic.Bool
 
 	closeOnce sync.Once
 	closeErr  error
@@ -87,6 +107,8 @@ type openConfig struct {
 	lockTimeout    time.Duration
 	lockCtx        context.Context // ends a lock wait early; nil = wait the full timeout
 	onLockLost     func(error)
+	versionPoll    time.Duration
+	versionListen  bool
 }
 
 // Pool defaults. A low-traffic read-mostly API: a handful of connections
@@ -151,9 +173,9 @@ func WithMinConns(n int) Option {
 	}
 }
 
-// WithLockTimeout bounds how long Open waits for the writer lock before
-// failing (grid.database.lockTimeout). See DefaultLockTimeout for why waiting
-// beats dying. Zero or negative keeps the default.
+// WithLockTimeout bounds how long Open waits for the writer lease before
+// failing (grid.database.lockTimeout). Zero or negative keeps the default.
+// OpenReader ignores it; AcquireLease takes its own wait.
 func WithLockTimeout(d time.Duration) Option {
 	return func(c *openConfig) {
 		if d > 0 {
@@ -162,29 +184,74 @@ func WithLockTimeout(d time.Duration) Option {
 	}
 }
 
-// WithLockContext makes Open's lock wait end as soon as ctx does. A handoff
-// activation (internal/handoff) passes its context so a SIGTERM during the
-// wait aborts it at once, instead of holding shutdown for up to lockTimeout
-// (90s, longer than ECS's 30s stop timeout).
+// WithLockContext makes Open's lease wait end as soon as ctx does.
 func WithLockContext(ctx context.Context) Option {
 	return func(c *openConfig) { c.lockCtx = ctx }
 }
 
-// WithLockLost registers a hook called (once, from a background goroutine)
-// if the writer lock's connection fails its heartbeat after Open: the lock is
-// gone and another process may now be writing. Today cmd/server only logs it;
-// P3's lease turns it into "stop writing, drop to reader".
+// WithLockLost registers the OnLost hook for the lease Open takes: called
+// once, from a background goroutine, if the lease is lost (its session died
+// or another process bumped the epoch).
 func WithLockLost(fn func(error)) Option {
 	return func(c *openConfig) { c.onLockLost = fn }
 }
 
-// Open connects to the database at url (a PostgreSQL URL or DSN), takes the
-// writer lock (waiting up to the lock timeout), applies pending migrations and
-// returns the store. The database must use byte-order collation (see the
-// baseline migration); Open refuses one that does not.
+// DefaultVersionPoll is how often a store re-reads the validator counters
+// even without a notification: the bound on how long a reader can answer a
+// stale 304 when its LISTEN connection is down.
+const DefaultVersionPoll = 10 * time.Second
+
+// WithVersionPoll sets the validator backstop poll (DefaultVersionPoll).
+func WithVersionPoll(d time.Duration) Option {
+	return func(c *openConfig) {
+		if d > 0 {
+			c.versionPoll = d
+		}
+	}
+}
+
+// WithoutVersionListen turns off the LISTEN fast path, leaving the poll
+// (tests of the backstop).
+func WithoutVersionListen() Option {
+	return func(c *openConfig) { c.versionListen = false }
+}
+
+// Open opens the store and takes the writer lease, waiting up to the lock
+// timeout: OpenReader plus AcquireLease. It is the one-process path (tools,
+// tests); the server opens a reader and campaigns separately (cmd/server).
 func Open(url string, opts ...Option) (*Store, error) {
+	s, cfg, err := openReader(url, opts...)
+	if err != nil {
+		return nil, err
+	}
+	ctx := cfg.lockCtx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if _, err := s.AcquireLease(ctx, LeaseOptions{Holder: defaultHolder(),
+		Wait: cfg.lockTimeout, OnLost: cfg.onLockLost}); err != nil {
+		s.Close()
+		return nil, err
+	}
+	return s, nil
+}
+
+// OpenReader connects to the database at url (a PostgreSQL URL or DSN) as a
+// reader: the pool, the collation check, the schema version check, and the
+// validator watch. It takes no lock and never writes. A database whose schema
+// is older than this build (SchemaReady false) still opens: the writer
+// migrates it, and the watch notices; until then the caller should report
+// itself not ready. The database must use byte-order collation (see the
+// baseline migration); OpenReader refuses one that does not.
+func OpenReader(url string, opts ...Option) (*Store, error) {
+	s, _, err := openReader(url, opts...)
+	return s, err
+}
+
+func openReader(url string, opts ...Option) (*Store, openConfig, error) {
 	cfg := openConfig{maxConns: DefaultMaxConns, minConns: DefaultMinConns,
-		lockTimeout: lockAcquireTimeout, townRadius: DefaultTownRadiusMeters}
+		lockTimeout: lockAcquireTimeout, townRadius: DefaultTownRadiusMeters,
+		versionPoll: DefaultVersionPoll, versionListen: true}
 	for _, o := range opts {
 		o(&cfg)
 	}
@@ -192,7 +259,7 @@ func Open(url string, opts ...Option) (*Store, error) {
 		cfg.minConns = cfg.maxConns
 	}
 	if url == "" {
-		return nil, errors.New("store: no database URL (grid.database.url / PF__GRID__DATABASE__URL)")
+		return nil, cfg, errors.New("store: no database URL (grid.database.url / PF__GRID__DATABASE__URL)")
 	}
 	ctx := cfg.lockCtx
 	if ctx == nil {
@@ -201,43 +268,53 @@ func Open(url string, opts ...Option) (*Store, error) {
 
 	pcfg, err := pgxpool.ParseConfig(url)
 	if err != nil {
-		return nil, fmt.Errorf("store: parsing database URL: %w", err)
+		return nil, cfg, fmt.Errorf("store: parsing database URL: %w", err)
 	}
 	pcfg.MaxConns = cfg.maxConns
 	pcfg.MinConns = cfg.minConns
 	pool, err := pgxpool.NewWithConfig(ctx, pcfg)
 	if err != nil {
-		return nil, fmt.Errorf("store: creating pool: %w", err)
-	}
-	fail := func(err error) (*Store, error) {
-		pool.Close()
-		return nil, err
+		return nil, cfg, fmt.Errorf("store: creating pool: %w", err)
 	}
 	if err := checkCollation(ctx, pool); err != nil {
-		return fail(err)
-	}
-
-	lock, err := acquireWriterLock(ctx, pool, cfg.lockTimeout, cfg.onLockLost)
-	if err != nil {
-		return fail(err)
+		pool.Close()
+		return nil, cfg, err
 	}
 	db := stdlib.OpenDBFromPool(pool)
-	s := &Store{pool: pool, db: db, lock: lock, wildfireBuffer: cfg.wildfireBuffer,
+	s := &Store{pool: pool, db: db, wildfireBuffer: cfg.wildfireBuffer,
 		townRadius: cfg.townRadius, maxConns: cfg.maxConns, minConns: cfg.minConns}
-	// Migrations run only while holding the writer lock: the lock holder is
-	// the one process allowed to change the database. They also take their
-	// own transaction-scoped lock, so the runner is safe on its own.
-	v, err := migrations.Apply(ctx, db)
-	if err == nil {
-		v, err = migrations.CheckVersion(ctx, db)
-	}
-	if err != nil {
+	if _, err := s.RefreshSchema(ctx); err != nil && !errors.Is(err, errSchemaBehind) {
 		s.Close()
-		return nil, fmt.Errorf("store: %w", err)
+		return nil, cfg, err
 	}
-	s.schemaVersion = v
-	return s, nil
+	s.startVersionWatch(cfg.versionPoll, cfg.versionListen)
+	return s, cfg, nil
 }
+
+// errSchemaBehind marks RefreshSchema's "older than this build" result.
+var errSchemaBehind = errors.New("store: database schema is older than this build")
+
+// RefreshSchema re-reads the database's schema version. Ready (SchemaReady)
+// once it is at least this build's; an error wrapping errSchemaBehind
+// otherwise.
+func (s *Store) RefreshSchema(ctx context.Context) (int, error) {
+	v, err := migrations.CheckVersion(ctx, s.db)
+	if err != nil {
+		cur, cerr := migrations.Current(ctx, s.db)
+		if cerr != nil || cur >= migrations.Latest() {
+			return 0, fmt.Errorf("store: %w", err)
+		}
+		s.schemaVersion.Store(int64(cur))
+		return cur, fmt.Errorf("%w: %w", errSchemaBehind, err)
+	}
+	s.schemaVersion.Store(int64(v))
+	s.schemaReady.Store(true)
+	return v, nil
+}
+
+// SchemaReady reports whether the database's schema is at least the version
+// this build reads. A reader is ready to serve only then.
+func (s *Store) SchemaReady() bool { return s.schemaReady.Load() }
 
 // checkCollation refuses a database that does not compare text bytewise.
 // Tested by behaviour rather than by name (C, POSIX, C.UTF-8 and the builtin
@@ -257,14 +334,19 @@ func checkCollation(ctx context.Context, pool *pgxpool.Pool) error {
 	return nil
 }
 
-// Close closes the pool and releases the writer lock. Once it returns, every
-// query on the store fails and the next owner can take the lock at once.
-// Idempotent: later calls return the first call's result.
+// Close releases the writer lease (if held), stops the validator watch and
+// closes the pool. Once it returns, every query on the store fails and the
+// next writer can take the lease at once. Idempotent: later calls return the
+// first call's result.
 func (s *Store) Close() error {
 	s.closeOnce.Do(func() {
-		err := s.db.Close()
-		if lerr := s.lock.release(); err == nil {
-			err = lerr
+		err := s.ReleaseLease()
+		if s.watchStop != nil {
+			s.watchStop()
+			<-s.watchDone
+		}
+		if derr := s.db.Close(); err == nil {
+			err = derr
 		}
 		s.pool.Close()
 		s.closeErr = err
@@ -288,7 +370,7 @@ type Settings struct {
 
 // Settings reports the connection's effective configuration.
 func (s *Store) Settings(ctx context.Context) (Settings, error) {
-	st := Settings{SchemaVersion: s.schemaVersion, MaxConns: s.maxConns, MinConns: s.minConns}
+	st := Settings{SchemaVersion: int(s.schemaVersion.Load()), MaxConns: s.maxConns, MinConns: s.minConns}
 	if err := s.db.QueryRowContext(ctx, `SELECT current_database(), current_setting('server_version')`).
 		Scan(&st.Database, &st.ServerVersion); err != nil {
 		return st, fmt.Errorf("store: reading settings: %w", err)
@@ -296,22 +378,48 @@ func (s *Store) Settings(ctx context.Context) (Settings, error) {
 	return st, nil
 }
 
-// inTx runs fn inside a write transaction under the store mutex. Read
-// committed: the read-modify-write sequences inside (UpsertEvent's lookup,
-// TransitionEvents, RecordAttempt, compaction) are safe because this process
-// is the only writer (mu here, the writer lock across processes).
+// inTx runs fn inside a write transaction under the store mutex, fenced by
+// the writer lease: it refuses without a live lease (ErrNotWriter), and its
+// first statement checks writer_lease.epoch with a key-share lock held to
+// commit (ErrFenced when another process has bumped it; see lease.go for why
+// that ordering is airtight). Read committed: the read-modify-write sequences
+// inside (UpsertEvent's lookup, TransitionEvents, RecordAttempt, compaction)
+// are safe because this process is the only writer (mu here, the lease
+// across processes).
 func (s *Store) inTx(ctx context.Context, fn func(tx *sql.Tx) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	l := s.lease.Load()
+	if !l.live() {
+		return ErrNotWriter
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("store: begin: %w", err)
 	}
+	var one int
+	err = tx.QueryRowContext(ctx,
+		`SELECT 1 FROM writer_lease WHERE id = 1 AND epoch = $1 FOR KEY SHARE`, l.epoch).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		tx.Rollback()
+		l.end(ErrFenced, true)
+		return ErrFenced
+	}
+	if err != nil {
+		tx.Rollback()
+		return fmt.Errorf("store: checking the writer lease: %w", err)
+	}
+	s.txEpoch = l.epoch
+	defer func() { s.txEpoch = 0 }()
 	if err := fn(tx); err != nil {
 		tx.Rollback()
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.versions.markDirty() // this process reads its own writes' validators at once
+	return nil
 }
 
 // readTx runs fn in a REPEATABLE READ READ ONLY transaction: one snapshot for
