@@ -22,6 +22,19 @@ longer exist: `/api/v1` originally hosted a different hand-built REST surface,
 replaced by a snake_case `/v1` surface on 2026-07-05, which was folded back onto
 the proto-defined `/api/v1` gateway on 2026-07-09.
 
+## 2026-11-12
+
+### Ingest: any instance accepts a report; 503 with Retry-After during a handover
+
+`POST /api/v1/ingest/{stream}` can now land on any instance of the service.
+The instance that holds the writer role keeps the report; any other forwards
+it unchanged (same token, same body) and returns that instance's answer, so a
+reporter sees the same `202`/`204`/`4xx` as before. While no instance holds
+the writer role, which happens for well under a few seconds during a deploy,
+the answer is `503` with `Retry-After: 2` and the usual JSON error envelope
+(`code` 14, `UNAVAILABLE`). Retry after that many seconds; reporters that
+already retry on `503` need no change.
+
 ## 2026-11-11
 
 ### Mesh: SIERRA gateway nodes appear on the Grid

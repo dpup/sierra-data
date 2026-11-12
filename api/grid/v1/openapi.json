@@ -950,7 +950,7 @@
     },
     "/api/v1/ingest/{stream}": {
       "post": {
-        "description": "The only write endpoint, for operator-run monitors (see\ndocs/mesh-reporter-guide.md). Each reporter is granted specific streams.\nA report is validated and queued (202), not stored synchronously: the\ningest scheduler merges it on its next tick, and no request writes an\nevent directly.\n\nChecks run in this order and nothing in the body is read before the\ncaller is known: bearer token (401) -> stream exists (404) -> reporter\ngranted the stream (403) -> rate limit (429) -> body size (413) ->\npayload (400). A malformed envelope rejects the whole report; a bad\nentry is skipped and named in `warnings`.\n\n**Limits.** One accepted report per reporter per stream every 15\nseconds by default (measured from the last ACCEPTED report, so rejected\nretries never lock you out); 1 MiB body; 1000 entries. Retries are\nsafe: entries are keyed by node or line.\n\n**Preflight.** `?preflight=true` checks the token and grant only and\nanswers 204, recording nothing (no rate-limit or health effect). Use it\nbefore expensive work such as placing a phone call.\n\nErrors use the same `rpcStatus` envelope as every other route. Any\nmethod other than POST answers `405` with `Allow: POST` (body code 12,\n`UNIMPLEMENTED`).\n\nNot callable from a browser cross-origin (CORS allows GET only). The\nroute is mounted only when the deployment configures reporters.\n",
+        "description": "The only write endpoint, for operator-run monitors (see\ndocs/mesh-reporter-guide.md). Each reporter is granted specific streams.\nA report is validated and queued (202), not stored synchronously: the\ningest scheduler merges it on its next tick, and no request writes an\nevent directly.\n\nChecks run in this order and nothing in the body is read before the\ncaller is known: bearer token (401) -> stream exists (404) -> reporter\ngranted the stream (403) -> rate limit (429) -> body size (413) ->\npayload (400). A malformed envelope rejects the whole report; a bad\nentry is skipped and named in `warnings`.\n\n**Limits.** One accepted report per reporter per stream every 15\nseconds by default (measured from the last ACCEPTED report, so rejected\nretries never lock you out); 1 MiB body; 1000 entries. Retries are\nsafe: entries are keyed by node or line.\n\n**Preflight.** `?preflight=true` checks the token and grant only and\nanswers 204, recording nothing (no rate-limit or health effect). Use it\nbefore expensive work such as placing a phone call.\n\nErrors use the same `rpcStatus` envelope as every other route. Any\nmethod other than POST answers `405` with `Allow: POST` (body code 12,\n`UNIMPLEMENTED`).\n\n**Any instance.** Every instance accepts the request. Reports are\nheld by the one instance that currently holds the writer role; any\nother instance forwards the request to it unchanged and relays its\nanswer. While no instance holds that role (a handover, normally well\nunder a few seconds) the answer is `503` with `Retry-After`: retry.\n\nNot callable from a browser cross-origin (CORS allows GET only). The\nroute is mounted only when the deployment configures reporters.\n",
         "operationId": "IngestReport",
         "parameters": [
           {
@@ -1235,7 +1235,31 @@
             }
           },
           "503": {
-            "$ref": "#/components/responses/HandoffUnavailable"
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 14,
+                  "codeName": "UNAVAILABLE",
+                  "details": [],
+                  "message": "no writer is running (a takeover is in progress); retry"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/rpcStatus"
+                }
+              },
+              "text/plain": {
+                "example": "service is handing over to a new instance; retry\n",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Retry after `Retry-After` seconds. Either no instance holds the\nwriter role right now, or it did not answer the forwarded\nreport (`rpcStatus` JSON, code 14 `UNAVAILABLE`,\n`Retry-After: 2`), or this instance is shutting down (plain\ntext, as on every route).\n",
+            "headers": {
+              "Retry-After": {
+                "$ref": "#/components/headers/RetryAfter"
+              }
+            }
           }
         },
         "security": [
@@ -3231,7 +3255,7 @@
             }
           }
         },
-        "description": "The server is handing over to a new instance during a deploy. Retry after\n`Retry-After` seconds. Plain text, not JSON.\n",
+        "description": "This instance is shutting down (a deploy is replacing it) and no longer\nadmits requests. Retry after `Retry-After` seconds; the next attempt\nreaches another instance. Plain text, not JSON.\n",
         "headers": {
           "Retry-After": {
             "$ref": "#/components/headers/RetryAfter"

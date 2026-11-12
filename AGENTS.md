@@ -144,10 +144,12 @@ path — prefer it over ad-hoc kills. When you must kill a server by hand:
   in) that this container cannot see or kill. To verify a local build, run it on
   a different port (`PF__SERVER__PORT=<port> make run-bg`) rather than fighting
   8181, and confirm you bound it by checking the "Listening for traffic" log
-  line. Only one process at a time can write a database (the writer lock): a
-  second server against the same `PF__GRID__DATABASE__URL` waits
-  `grid.database.lockTimeout` and fails, so give a parallel instance its own
-  database (`createdb` in the container, or a different URL).
+  line. Only one process at a time writes a database (the writer lease): a
+  second server against the same `PF__GRID__DATABASE__URL` starts as a
+  reader and takes over writing when the first stops, so two servers on one
+  database are a blue/green pair, not two independent dev servers. Give an
+  independent instance its own database (`CREATE DATABASE ... TEMPLATE
+  template0 LC_COLLATE 'C' LC_CTYPE 'C'` in the container, and its URL).
 
 ### Testing
 ```bash
@@ -253,7 +255,8 @@ export PORT=8181
 # Grid event store: a PostgreSQL URL (required; prefab.yaml leaves it empty).
 # Production injects it from a secret; make run / run-bg default it to the
 # Docker database (make db-url). Pool and lock: PF__GRID__DATABASE__MAX_CONNS,
-# __MIN_CONNS, __LOCK_TIMEOUT. The database must use C collation (see
+# __MIN_CONNS, __LOCK_TIMEOUT. Writer role: PF__GRID__WRITER__ENABLED (false =
+# reader only), __ADVERTISE_ADDR (docs/deploy-handoff.md). The database must use C collation (see
 # internal/store/migrations/0001_baseline.sql). The SQLite-era
 # PF__GRID__DB_PATH / JOURNAL_MODE / CACHE_SIZE_MB / LOCK_TIMEOUT are gone and
 # now stop the server (ValidateEnvOverrides).
@@ -719,8 +722,9 @@ cached last-good fetch), never a fabricated clear state.
 store is the system of record** for grid events. The canonical value is the proto
 blob (`grid.v1.Event`) — scalar columns exist only as query indexes and every
 read rehydrates from the blob. Writes are single-writer (the ingest scheduler,
-serialized through a mutex, and one writer process per database via an
-advisory lock); reads run concurrently under MVCC. Every content
+serialized through a mutex, and one writer process per database via the
+writer lease, an advisory lock plus an epoch every write transaction checks);
+every process serves reads, concurrently under MVCC. Every content
 change or lifecycle transition is a revision snapshot in `event_revisions`, so a
 restart rehydrates events + history with no re-fetch. The in-memory TTL caches
 (`internal/cache`) remain on the read path for the roads/weather/hazards services
@@ -835,23 +839,32 @@ whose adverts never reach a broker. The `relay` reporter has `enumerates:
 true`, so the repeaters it lists are admitted without a location (shadow
 repeaters, no geometry) or outside the geofence; see internal/ingest/AGENTS.md.
 
-## Deploy handoff (standby startup)
+## Deploys: readers and the writer lease
 
-Both binaries share one lifecycle, `internal/handoff`:
-`STANDBY → ACTIVATING → ACTIVE → QUIESCING → QUIESCED`. Default (no flag)
-activates at boot as always; `--standby` prepares without opening the
-database and waits for an authenticated `POST /activate` on a private control
-port (Grid `grid.control.port` 8081, relay `meshRelay.control.port` 8091; off
-unless `control.tokenSha256` is set). `POST /quiesce` (and SIGTERM, in every
-state) stops admitting, drains, stops every background database user, closes
-the store and releases its lock. Rules that keep it to one writer: ownership
-is never inferred from a timeout or an unhealthy predecessor; QUIESCED never
-reactivates; a release that cannot complete stays QUIESCING with
-`databaseHeld: true`. A new background goroutine that touches the store must
-be stopped and waited for in `gridApp.Quiesce` (or the scheduler's `Stop`),
-and a new production route must go through the admission gate. Coordinator
-guide, API table, first-migration and rollback notes:
-`docs/deploy-handoff.md`.
+Every Grid process serves every read from boot (`gridApp.Serve`:
+`store.OpenReader`, then the listener). At most one holds the **writer
+lease** (`internal/store/lease.go`: a session advisory lock plus a
+`writer_lease` epoch that every write transaction checks, so a writer that
+lost its session cannot land a write in its successor's term). Only the
+holder runs the ingest scheduler, the MeshCore subscriber, push-ingest
+buffers, seeding, migrations and cache warming (`cmd/server/writer.go`); it
+heartbeats every 2 s, and on a lost lease drops to reader and campaigns
+again. A process started without `--standby` campaigns at boot in the
+background; `grid.writer.enabled: false` makes a reader-only task. Push
+ingest that lands on a reader is forwarded to `writer_lease.address`, or
+answered 503 + `Retry-After` with no live writer. SIGTERM releases the lease,
+then drains and exits; `/livez` and `/readyz` (read-path readiness, never the
+writer role) are on the production port. A blue/green deploy is just two task
+sets: the writer moves when the old one stops, or on the control API's
+authenticated `yield`. Rules: a new background goroutine that writes belongs
+in the writer term (`startTerm`) and must be stopped and waited for in
+`stopTerm`; a new production route must go through the admission gate; a
+cache that is only valid while writing must be keyed to the lease term (the
+store's place-geometry cache is). `--standby` / `POST /activate` /
+`POST /quiesce` still work for a coordinator, remapped onto the roles. Guide,
+control API, the remap and the rehearsal (`make rehearse-bluegreen`):
+`docs/deploy-handoff.md`. The mesh relay keeps the original
+`internal/handoff` standby/quiesce lifecycle on its SQLite file.
 
 ## Performance & Monitoring
 

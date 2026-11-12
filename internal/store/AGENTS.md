@@ -192,17 +192,20 @@ its boundary.
 
 ## Single-writer discipline
 
-Writes go through `inTx` (or `TouchSeen`), which take the store mutex — the ingest
-scheduler is the **only** writer, serialized. Across processes, `Open` holds the
-writer lock (below), so exactly one process writes a database. Reads go
-straight to the pool under PostgreSQL MVCC and never wait on the writer. Write
+Every write goes through `inTx`, which takes the store mutex — the ingest
+scheduler is the **only** writer, serialized — and refuses unless this
+process holds a live writer lease (below), so exactly one process writes a
+database. A reader store (`OpenReader`) answers every write with
+`ErrNotWriter`. Reads go straight to the pool under PostgreSQL MVCC and never
+wait on the writer. Write
 transactions run at READ COMMITTED; their read-modify-write steps (the upsert's
 revision lookup, `TransitionEvents`, `RecordAttempt`, compaction's watermark)
 are safe only because of the single writer — say so in a comment if you add
 one. Keep write transactions small (one `UpsertEvent` per tx); `matchPlaces`
 is cache-backed for the same reason, and that cache (`placesGeo`) is valid only
-in the writing process. Do not add a second writer; if you need one, it must
-also hold `mu`.
+inside a fenced write of the lease term that built it (`loadPlaceGeoms`
+checks `txEpoch`; a reader cannot reach it). Do not add a second writer or a
+write that bypasses `inTx`: the epoch fence lives there.
 
 ## PostgreSQL
 
@@ -213,18 +216,28 @@ also hold `mu`.
   `database/sql` cannot do (COPY, LISTEN, a dedicated connection). Dynamic
   lists bind one array: `= ANY($n)` with a Go slice. `TestNoQuestionMarkPlaceholders`
   fails on a SQLite `?` left in any SQL literal.
-- **Writer lock (`lease.go`).** A session `pg_try_advisory_lock` on a
-  connection taken with `Acquire` and then `Hijack()`ed out of the pool — never
-  a pooled connection, which would carry the session lock into unrelated
-  queries. `Open` waits up to `grid.database.lockTimeout` (90 s; the common
-  contention is a deploy whose previous writer has not released yet, and
-  waiting beats a crash loop), announces the wait once and the acquisition
-  with its duration, and ends early when `WithLockContext`'s context does
-  (SIGTERM during a handoff activation). A heartbeat pings the connection and
-  calls the `WithLockLost` hook if it dies. `Close` unlocks; process or
-  connection death releases it server-side. Migration plan P3 turns this into
-  a lease with epoch fencing and reader/writer roles; until then an advisory
-  lock alone cannot stop a writer that lost its session mid-transaction.
+- **Reader and writer (`lease.go`).** `OpenReader` opens the pool, checks
+  collation and the schema version, and takes no lock; a database older than
+  the build opens with `SchemaReady()` false and the version watch re-checks
+  it. `AcquireLease` makes the store the writer: a session
+  `pg_try_advisory_lock` on a connection taken with `Acquire` and then
+  `Hijack()`ed out of the pool (never a pooled connection, which would carry
+  the session lock into unrelated queries), then an epoch bump in
+  `writer_lease` (`SELECT ... FOR UPDATE`, then `UPDATE`, recording holder
+  and address), then migrations. A 2 s heartbeat updates `heartbeat_at WHERE
+  epoch = mine`; an error or zero rows means the lease is lost (`Lease.Lost`,
+  `OnLost`). `ReleaseLease` waits for an in-flight write, clears holder and
+  address, unlocks. `Open` is `OpenReader` plus `AcquireLease` (waiting
+  `lockTimeout`): the one-process path for tools and tests.
+- **Fencing.** `inTx` first runs `SELECT 1 FROM writer_lease WHERE id = 1 AND
+  epoch = $mine FOR KEY SHARE` and fails with `ErrFenced` (wrapping
+  `ErrNotWriter`) on zero rows, marking the lease lost. The bump's `FOR
+  UPDATE` waits for a write already past the check (it commits as the old
+  term's last write) and fails every later one; key-share does not block the
+  heartbeat's no-key update, so a long write never stalls it. This is what
+  an advisory lock alone could not do: stop a writer whose session died while
+  its pooled connections still work. `lease_test.go` pins the stale epoch,
+  the wait, the terminated backend and the release.
 - **Collation.** Keyset cursors (`id > $1`), golden orderings and Go-side
   sorting assume byte order. The database must be created
   `TEMPLATE template0 LC_COLLATE 'C' LC_CTYPE 'C'`; `Open` refuses one that
@@ -234,7 +247,12 @@ also hold `mu`.
   `MeshActivityVersion` and `PlacesVersion` read rows of the `versions` table,
   bumped in the same transaction as the write. They used to be process memory
   (and a `COUNT(*)`), which gives wrong 304s as soon as two processes serve
-  reads.
+  reads. Each store caches the table (`versionCache`) and re-reads it after
+  its own commits, on `NOTIFY grid_versions` (a statement trigger on
+  `versions`, migration 0002; a dedicated `LISTEN` connection) and on a 10 s
+  poll (`WithVersionPoll`), so a reader's stale 304 is bounded by the poll
+  even with the listener down. A test that writes `versions` with raw SQL
+  must account for the cache.
 - **Read snapshots.** Reads that span statements (`MeshLinks`,
   `RoadStatusSince`, `Totals`) run in one REPEATABLE READ READ ONLY
   transaction (`readTx`), so a commit landing between them cannot produce an
@@ -247,7 +265,9 @@ also hold `mu`.
 - **Timestamps** stay `bigint` unix seconds; never `timestamptz` for domain
   times (`schema_migrations.applied_at` is bookkeeping, not domain data).
 - **Tests.** `internal/storetest.URL(t)` gives each test its own database,
-  copied from a migrated `sierra_template` and dropped afterwards;
+  copied from a migrated `sierra_template_<hash of the migrations>` (so
+  worktrees with different migration sets on one Docker server do not drop
+  each other's template) and dropped afterwards;
   without `TEST_DATABASE_URL` the test is skipped with a `SKIP:` line.
   `make test` starts the Docker database (`make db-up`) and sets it.
 
@@ -373,7 +393,11 @@ schema translated, with the changes listed in its header). The runner applies
 each pending version in its own transaction under `pg_advisory_xact_lock`, and
 records it in `schema_migrations (source, version, applied_at)`; `source` is
 `postgres` for these and `sqlite` for the legacy ladder the importer records.
-Only the writer migrates (`Open`, while holding the writer lock). Rules:
+Only the writer migrates (`AcquireLease`, holding the advisory lock and
+after fencing the previous term). A reader on an older schema waits, not
+ready, until the writer has migrated; a release that adds a migration
+therefore needs the writer role to move to the new build (SIGTERM or `yield`
+the old writer, docs/deploy-handoff.md). Rules:
 
 - **Append-only.** Never edit a shipped file (a deployed database has recorded
   it and will skip it) — add a new one.

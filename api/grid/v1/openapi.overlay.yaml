@@ -271,8 +271,9 @@ spec:
           Cache-Control: {$ref: "#/components/headers/CacheControl"}
       HandoffUnavailable:
         description: |
-          The server is handing over to a new instance during a deploy. Retry after
-          `Retry-After` seconds. Plain text, not JSON.
+          This instance is shutting down (a deploy is replacing it) and no longer
+          admits requests. Retry after `Retry-After` seconds; the next attempt
+          reaches another instance. Plain text, not JSON.
         headers:
           Retry-After: {$ref: "#/components/headers/RetryAfter"}
         content:
@@ -1176,6 +1177,12 @@ spec:
           method other than POST answers `405` with `Allow: POST` (body code 12,
           `UNIMPLEMENTED`).
 
+          **Any instance.** Every instance accepts the request. Reports are
+          held by the one instance that currently holds the writer role; any
+          other instance forwards the request to it unchanged and relays its
+          answer. While no instance holds that role (a handover, normally well
+          under a few seconds) the answer is `503` with `Retry-After`: retry.
+
           Not callable from a browser cross-origin (CORS allows GET only). The
           route is mounted only when the deployment configures reporters.
         security:
@@ -1271,7 +1278,22 @@ spec:
               application/json:
                 schema: {$ref: "#/components/schemas/rpcStatus"}
                 example: {"code": 8, "codeName": "RESOURCE_EXHAUSTED", "message": "reporting faster than the configured minimum interval of 15s", "details": []}
-          "503": {$ref: "#/components/responses/HandoffUnavailable"}
+          "503":
+            description: |
+              Retry after `Retry-After` seconds. Either no instance holds the
+              writer role right now, or it did not answer the forwarded
+              report (`rpcStatus` JSON, code 14 `UNAVAILABLE`,
+              `Retry-After: 2`), or this instance is shutting down (plain
+              text, as on every route).
+            headers:
+              Retry-After: {$ref: "#/components/headers/RetryAfter"}
+            content:
+              application/json:
+                schema: {$ref: "#/components/schemas/rpcStatus"}
+                example: {"code": 14, "codeName": "UNAVAILABLE", "message": "no writer is running (a takeover is in progress); retry", "details": []}
+              text/plain:
+                schema: {type: string}
+                example: "service is handing over to a new instance; retry\n"
 
     /mcp:
       post:

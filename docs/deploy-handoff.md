@@ -1,319 +1,247 @@
-# Deploy handoff: standby startup and explicit database ownership
+# Deploys: readers, the writer lease, and the control API
 
-> **Grid store on PostgreSQL (feat/postgres-store, 2026-11-11).** The Grid's
-> lock is now a PostgreSQL session advisory lock held on a dedicated
-> connection (`internal/store/lease.go`), waited for up to
-> `grid.database.lockTimeout`; "database held" and the state machine below are
-> unchanged. Where this guide says `grid.db`, flock or EFS for the Grid, read
-> "the Grid database" and "the writer lock". The relay keeps its SQLite file.
-> The coordinator flow itself is replaced by the writer lease and native
-> blue/green in the migration plan (P3, P6); this guide is rewritten then.
+The Grid (`sierra-server`) runs as one or more identical processes on one
+PostgreSQL database. **Every process serves every read from boot.** At most
+one process at a time is the **writer**: it holds the writer lease and runs
+everything that writes (the ingest scheduler and its pollers, the MeshCore
+subscriber, push-ingest buffers, source and place seeding, schema
+migrations, upstream cache warming). A deploy is therefore an ordinary
+blue/green deploy: the new processes start serving reads at once, and the
+writer role moves when the old writer goes away (SIGTERM) or is told to
+yield.
 
-The Grid (`sierra-server`) and the mesh relay (`mesh-relay`) each hold an
-exclusive lock on their own database (the Grid's PostgreSQL writer lock,
-the relay's SQLite `relay.db`). Without
-handoff, a rolling deploy is stop-then-start: the replacement cannot open the
-database until the old task has drained, been signalled, exited and been
-deprovisioned, and all of that is downtime (measured ~1m35s, most of it
-platform orchestration rather than our code).
+This replaces the standby/quiesce/activate handoff the legacy stack needed
+because only the database owner could serve. That handoff still exists (the
+Grid remaps it onto the roles, below) so a coordinator can drive the Grid if
+migration route B is taken; the native path needs none of it. The mesh relay
+(`cmd/mesh-relay`) keeps the old handoff unchanged: it stays one process on
+its own SQLite file until it moves (migration plan R4).
 
-With handoff, a deployment coordinator:
+The legacy stack (SQLite on EFS, the coordinator) is frozen on
+`legacy/efs-sqlite`; deploy it only from a checkout of that branch with
+`make ecs-deploy` (see the top-level `AGENTS.md`).
 
-1. starts the replacement with `--standby` (config loaded and validated,
-   nothing opened),
-2. tells the old process to **quiesce** (stop admitting, stop every database
-   user, close the database, release the lock) and confirms the release,
-3. tells the replacement to **activate**,
-4. confirms readiness and switches load-balancer traffic,
-5. terminates the old task afterwards, at leisure.
+Code: `internal/store/lease.go` (the lease and fencing),
+`cmd/server/grid.go` (the reader: `Serve`, `Exit`), `cmd/server/writer.go`
+(the writer role and the remap), `cmd/server/ingestroute.go` (push
+forwarding), `internal/handoff` (the lifecycle and control API).
 
-Provisioning and deprovisioning both move outside the downtime window. What
-remains is quiescence plus activation (milliseconds to a few seconds locally;
-dominated in production by the in-flight drain and the store open over the
-network filesystem).
+## Roles
 
-The code is `internal/handoff` (state machine, control API, admission gate),
-`cmd/server/grid.go` and `cmd/mesh-relay/main.go`.
+**Reader (every process, from boot to exit).** `store.OpenReader` opens the
+pool, checks the collation and that the database schema is at least the
+version this build reads, and takes no lock. The production listener starts
+right after. A reader writes nothing; every write path in the store refuses
+with `ErrNotWriter`. ETag validators come from the `versions` table (below),
+so every process returns the same ETag for the same data.
 
-**Which branch deploys.** This stack is frozen on `legacy/efs-sqlite`
-(`main` is the PostgreSQL stack and cannot run here). `make ecs-deploy`
-builds only from a checkout of that branch whose HEAD matches
-`origin/legacy/efs-sqlite`; it refuses `main`, a detached HEAD, unpushed
-commits and a stale checkout, before any image is built. Hotfix on the
-legacy branch, merge, pull, deploy, then forward-port to `main`.
+**Writer (the lease holder).** `store.AcquireLease`:
 
-## Flags and configuration
+1. takes `pg_try_advisory_lock` on a dedicated connection (taken from the pool
+   and hijacked out of it), polling every 250 ms;
+2. bumps `writer_lease.epoch` and records `holder` (`<instanceId>@<hostname>`)
+   and `address` (where other processes reach this one);
+3. applies pending migrations (migrations run only here);
+4. then the process seeds sources and places and starts the scheduler, the
+   MeshCore registry, push ingest and cache warming (a **term**).
 
+The holder refreshes `writer_lease.heartbeat_at` every 2 s on the lease
+connection.
+
+## Fencing
+
+The advisory lock alone does not stop a writer whose session has died (an RDS
+failover, a network cut) but who has not noticed yet: its pooled connections
+would keep writing after another process took the lock. So every write
+transaction (`inTx`) starts with
+
+```sql
+SELECT 1 FROM writer_lease WHERE id = 1 AND epoch = $mine FOR KEY SHARE
 ```
-sierra-server [--standby]
-mesh-relay [--standby]
-mesh-relay token -name <admin>     # unchanged
-```
 
-`--standby` defaults to false: without it a process activates at boot exactly
-as before, and SIGTERM runs the same quiescence described below before exit.
+and aborts with `ErrFenced` on zero rows. A new holder bumps the epoch with
+`SELECT ... FOR UPDATE`, which waits for any write transaction of the old
+term that has already passed the check; that transaction commits as the old
+term's last write, and every later one fails. Key-share does not conflict
+with the holder's own heartbeat (a no-key `UPDATE`), so a long write never
+stalls the heartbeat. Tested in `internal/store/lease_test.go`
+(`TestStaleEpochIsFenced`, `TestEpochBumpWaitsForInFlightWrite`).
+
+## Losing the lease
+
+The heartbeat fails when the lease connection's session is gone (error) or
+the epoch has moved (zero rows). Either marks the lease lost: `inTx` refuses
+from that moment, the connection is closed (which releases the lock
+server-side if it was not already gone), and the writer role stops the term
+(scheduler, MQTT, background work), keeps serving reads, and campaigns again
+after a backoff (1 s, doubling to 15 s; reset after a term that lasted a
+minute). RDS failover or maintenance drops every session: every process's
+reads reconnect through the pool, the writer loses its lease within about 2 s,
+and whichever process wins the next campaign writes. Pollers lose nothing
+(they re-fetch); pushes get 503 and retry.
+
+## Push ingest on a reader
+
+`POST /api/v1/ingest/{stream}` is mounted on every process (when reporters
+are configured). The writer serves it from its term's registry. Any other
+process reads `writer_lease` and, when a holder is recorded with a heartbeat
+younger than 10 s, forwards the request (method, URI, `Authorization`,
+`Content-Type`, body) to `http://<address>` within
+`grid.writer.forwardTimeout` and relays the status, body and the
+`Content-Type`, `Retry-After`, `WWW-Authenticate` and `Allow` headers. It
+answers `503` with `Retry-After: 2` when there is no live writer, when the
+forward fails, when the writer is its own process still starting its term,
+and when the request already carries `X-Grid-Forwarded-By` (a forwarded
+request is never forwarded again). Reporters retry 5xx already.
+
+The reader does not authenticate the request itself: the writer does, once.
+
+## Validators (ETags)
+
+The validators are the `versions` counters (bumped in the writing
+transaction), a short hash of the running executable (a new build may render
+the same data differently; the image has no `.git`), and the place-set
+version (bumped when a writer term reseeds). Each process caches the counters
+and refreshes them
+
+- after each of its own commits (the writer is exact),
+- on `NOTIFY grid_versions` (a statement trigger on `versions`; delivered at
+  commit) on a dedicated `LISTEN` connection, and
+- on a 10 s poll, so a reader with a broken listener answers a stale `304`
+  for at most 10 s after a write.
+
+Note: the gRPC handlers set `ETag` and `Cache-Control`, but the gateway does
+not copy them to the HTTP response today (pre-existing, also on the legacy
+build; prefab's outgoing header matcher). Comparing validators across
+processes therefore needs a gRPC client for now.
+
+## Configuration
 
 | key | env | default | |
 |---|---|---|---|
-| `grid.control.port` | `PF__GRID__CONTROL__PORT` | 8081 | Grid control listener |
-| `grid.control.tokenSha256` | `PF__GRID__CONTROL__TOKEN_SHA256` | empty (off) | hex SHA-256 of the deployment token |
-| `meshRelay.control.port` | `PF__MESH_RELAY__CONTROL__PORT` | 8091 | relay control listener (must differ from the Grid's whenever the two processes share a network namespace) |
-| `meshRelay.control.tokenSha256` | `PF__MESH_RELAY__CONTROL__TOKEN_SHA256` | empty (off) | |
-| `*.control.drainTimeout` | | 10s | in-flight request grace before cancellation; this is downtime |
-| `*.control.workerStopTimeout` | | 10s | one budget for every background database user to stop (a running ingest tick gets 2s, then is cancelled); past it the release FAILS. With `drainTimeout`, a quiesce takes at most ~20s, inside ECS's default 30s stop timeout |
+| `grid.writer.enabled` | `PF__GRID__WRITER__ENABLED` | `true` | `false`: a reader-only process that never campaigns (a bake against a database another stack writes; extra read capacity) |
+| `grid.writer.advertiseAddr` | `PF__GRID__WRITER__ADVERTISE_ADDR` | `server.host` (the hostname when it is `0.0.0.0`) + the bound port | where other processes reach this one for forwarded pushes |
+| `grid.writer.forwardTimeout` | `PF__GRID__WRITER__FORWARD_TIMEOUT` | 10s | bound on one forwarded push |
+| `grid.database.lockTimeout` | `PF__GRID__DATABASE__LOCK_TIMEOUT` | 90s | how long `POST /activate` (coordinator mode) waits for the lease; a boot campaign has no deadline |
+| `grid.control.port` | `PF__GRID__CONTROL__PORT` | 8081 | control listener |
+| `grid.control.tokenSha256` | `PF__GRID__CONTROL__TOKEN_SHA256` | empty (off) | hex SHA-256 of the control token |
+| `grid.control.drainTimeout` | | 10s | in-flight request grace at exit |
+| `grid.control.workerStopTimeout` | | 10s | one budget for the term's workers to stop (a running tick gets 2s); past it the release fails and `databaseHeld` stays true |
 
-The control listener runs only when `tokenSha256` is set, with or without
-`--standby`. `--standby` without it refuses to start (a standby nobody can
-activate). Only the hash is configured; the token stays with the coordinator.
-Generate a pair with `t=$(openssl rand -hex 32); printf %s "$t" | sha256sum`.
+**On ECS** the address must be the task's private IP. With `awsvpc`
+networking the hostname is the task's private DNS name, which the default
+already uses. To be explicit, the entrypoint (or a future change) can read
+the task metadata endpoint (`$ECS_CONTAINER_METADATA_URI_V4/task`,
+`Containers[].Networks[0].IPv4Addresses[0]`) and set
+`PF__GRID__WRITER__ADVERTISE_ADDR=<ip>:8080`. The server does not do this AWS
+lookup itself. The security group must allow the tasks to reach each other
+on the production port.
 
-**The control ports must never be reachable from the public load balancer.**
+## Health
 
-## Lifecycle
+On the production port (and the control port):
 
-```
-STANDBY ──activate──▶ ACTIVATING ──ok──▶ ACTIVE ──quiesce──▶ QUIESCING ──ok──▶ QUIESCED
-   │                      │ failed                              │ failed
-   │                      ▼                                     ▼
-   │                   STANDBY                      QUIESCING (database counted as HELD)
-   └────────────quiesce (fence: never opened anything)────────────────────────▶ QUIESCED
-```
+- `GET /livez`: 200 while the process runs.
+- `GET /readyz`: 200 when the store is open at a schema this build reads and
+  the process is not exiting; the body says whether it is the writer
+  (`{"ready": true, "writer": false}`). The writer role never enters into
+  readiness: a reader is ready. 503 while the schema is older than the build
+  (until a writer migrates it) and once SIGTERM has started the exit.
 
-- **STANDBY**: configuration loaded and validated (including the push-ingest
-  reporter hashes and relay admin hashes), read-path services constructed. No
-  database file is opened, created, migrated, seeded or analyzed; no ingest
-  scheduler, MQTT subscriber, upstream cache warming or relay session runs;
-  the production port is not bound.
-- **ACTIVATING**: opening the database (the file lock is taken here, and waits
-  up to `lockTimeout` for a holder to let go), seeding, starting background
-  work, binding the production listener. ACTIVE is reported only once the
-  production port accepts connections.
-- **ACTIVE**: serving production. The faster-boot behaviour applies here:
-  persisted index statistics are reused (the refresh runs 10 minutes later),
-  and the MeshCore neighbour graph is rebuilt in the background.
-- **QUIESCING / QUIESCED**: see the contract below. QUIESCED is terminal: the
-  process stays alive (so the platform can clean it up whenever) and never
-  reopens its database.
-
-A failed activation (including a panic during it) releases what it opened
-and returns to STANDBY. If it cannot release, it goes to QUIESCING with a
-failed operation and `databaseHeld: true` instead. Activation also refuses to
-start when its production port is already bound, so it can never report
-ACTIVE on the strength of another process's listener; and the lock wait ends
-as soon as the activation is cancelled (SIGTERM), rather than after
-`lockTimeout`.
-
-## Quiescence contract
-
-A successful quiescence (state QUIESCED, `databaseHeld: false`) means, in
-order:
-
-1. **New work is not admitted.** Every production route is behind an
-   admission gate that now answers `503` with `Retry-After: 1` (gRPC
-   `UNAVAILABLE`). prefab owns the production listener and cannot stop it
-   short of a signal, so the port stays bound in QUIESCED; it just refuses.
-   Load balancer health checks against it fail, which is what you want.
-2. **In-flight requests drained or were cancelled.** They get `drainTimeout`
-   to finish, then their contexts are cancelled. A handler that ignores
-   cancellation is logged; step 5 still cuts it off from the database.
-3. **Background database users have stopped and their goroutines have
-   returned**: the ingest scheduler's pollers, mesh maintenance and the
-   statistics refresh (a running tick gets 2s, then is cancelled; a cancelled
-   fetch is a failed poll, which writes nothing), the MeshCore subscriber, and
-   the neighbour-graph rebuild.
-4. **(Relay) every session is closed and the audit queue is flushed.** Leases
-   end with `relay_shutdown`, bridges get close code 1001, every websocket
-   handler has returned, and no lease or bridge can attach behind the sweep.
-5. **The SQLite connections are closed and the file lock released.** Any
-   straggler gets `sql: database is closed`, never a query.
-
-If any step cannot complete, the operation fails, the state stays QUIESCING,
-and `databaseHeld` stays true. **That is an ambiguous handoff**: do not
-activate the replacement. Either retry the quiesce with a new operation id or
-terminate the old task and confirm it is gone.
-
-## Control API
-
-| Endpoint | Auth | |
-|---|---|---|
-| `GET /status` | none | state, `prepared`, `ready`, `databaseHeld`, `standby`, identity (`instanceId`, `pid`, `hostname`, `revision`, `startedAt`), the current/last `operation`, `activatedBy`, `quiescedBy`, and `ecs` (below) |
-| `GET /livez` | none | 200 whenever the process and its control plane are up, standby included |
-| `GET /readyz` | none | 200 only when ACTIVE; 503 otherwise |
-| `POST /activate` | bearer | body `{"operationId": "...", "expectedInstanceId": "..."}` |
-| `POST /quiesce` | bearer | body `{"operationId": "...", "expectedInstanceId": "..."}` |
-
-Mutating calls take `Authorization: Bearer <token>` (401 without it). Both run
-asynchronously: `202 Accepted` with the operation, then poll `/status` until
-the operation's `status` is `succeeded` or `failed` (`error` says why). Every
-response carries `state`, `instanceId` and `operation`; conflicts carry
-`error: {code, message}` with HTTP 409.
-
-**`expectedInstanceId` addresses one process incarnation.** Every process
-gets a random `instanceId` at start; a container restart comes back at the
-same IP and port with a new one. When the field is set and does not match,
-the command is refused with 409 `instance_mismatch` **before** anything else
-is considered, in every state, idempotent replays included, so a delayed
-command meant for a previous incarnation can never activate or quiesce its
-successor. Read `instanceId` from `/status` and send it on every command; it
-is optional only so a hand-run command still works.
-
-| state | `POST /activate` | `POST /quiesce` |
-|---|---|---|
-| STANDBY | 202, starts | 200, **fences**: QUIESCED without ever opening anything |
-| STANDBY after a failed activation | same id: 409 `operation_failed`; new id: 202, retries | 200, fences |
-| ACTIVATING | same id or none: 202; other id: 409 `activation_in_progress` | 409 `activation_in_progress` |
-| ACTIVE | same id or none: 200; other id: 409 `already_active` | 202, starts |
-| QUIESCING (running) | 409 `released` | same id or none: 202; other id: 409 `quiescence_in_progress` |
-| QUIESCING (failed) | 409 `released` | same id: 409 `operation_failed`; new id: 202, retries |
-| QUIESCED | 409 `released` | 200 (release is a terminal fact) |
-
-Use one operation id per deployment step (`<deploy>-release`,
-`<deploy>-activate`), and reuse it on retries of the same request.
-
-### ECS identity (`/status.ecs`)
-
-On ECS the process reads the task metadata endpoint (v4,
-`ECS_CONTAINER_METADATA_URI_V4`) every 10 seconds for its whole life and
-reports the raw values: `taskArn`, `cluster`, `family`, `revision`,
-`availabilityZone`, `containerName`, `containerArn`, `dockerId`,
-`containerStartedAt`, `restartCount`, with `fetchedAt` (when those values
-were read), `lastAttemptAt` and `lastError`. Nothing is inferred from them.
-
-**The metadata does not identify the process; `instanceId` does.** On a
-Fargate in-place container restart (restart policy), ECS kept
-`containerStartedAt`, `dockerId` and `containerArn` unchanged, and only
-`restartCount` advanced (0 → 1; observed in a Fargate restart test on
-2026-11-04). An earlier version derived a
-`boundToProcess` flag from start-time proximity; that accepted a
-predecessor's metadata and has been removed. So the binding contract is the
-coordinator's, using three pieces of evidence together:
-
-1. **Which task and container answered:** `taskArn` + `containerName` match
-   the target the coordinator addressed.
-2. **Whether ECS restarted it:** `restartCount` compared with the value the
-   coordinator recorded for the previous owner. A larger count means an
-   in-place restart since. It is only as fresh as `fetchedAt`, and ECS may lag
-   a restart, so read it again rather than trusting one sample.
-3. **Which process it is:** `instanceId`, pinned on every command with
-   `expectedInstanceId`. This is the only process-generation proof.
-
-None of these authorizes activation on its own, and none replaces a confirmed
-release (or confirmed termination) of the previous owner.
-
-- `restartCount` is `null` when ECS does not report it (no restart policy):
-  unknown, never 0.
-- A failed refresh keeps the last good values with `lastError` set and an
-  `lastAttemptAt` later than `fetchedAt`; treat them as that old.
-- Off ECS (local runs) or before any successful read: `available: false` with
-  a `reason`. Nothing else depends on it.
+The Dockerfile `HEALTHCHECK` probes `/readyz` with a 15 s start period. The
+load balancer's target check should use `/readyz` too.
 
 ## SIGTERM
 
-The same quiescence runs on SIGTERM in every state, then the process exits:
+1. The writer role stops: campaigning ends, the term's workers stop (within
+   `workerStopTimeout`), and the lease is released, clearing `holder` and
+   `address` so readers answer `503` at once rather than forward to a
+   stopping process. Measured locally: about 250 ms, almost all of it closing
+   the MeshCore subscriber.
+2. `/readyz` turns 503, the admission gate closes (`503`, `Retry-After: 1`) and
+   in-flight requests drain (`drainTimeout`).
+3. The store is closed and the process exits 0 (1 if the release failed;
+   process exit releases the lock regardless).
 
-| state | on SIGTERM |
+prefab stops its HTTP listener on SIGTERM itself, in parallel with step 1, so
+a push forwarded to a stopping writer fails and is answered `503` by the
+forwarding reader. A second signal exits at once with 1.
+
+## Control API (optional)
+
+Runs on `grid.control.port` only when `grid.control.tokenSha256` is set.
+Never route it from the public load balancer.
+
+| Endpoint | Auth | |
+|---|---|---|
+| `GET /status` | none | `state`, `ready` (the read path), `databaseHeld` (holds the writer lease, or is still stopping a term), identity (`instanceId`, `pid`, `hostname`, `revision`, `startedAt`), the current/last `operation`, `ecs` (task metadata, reported raw) |
+| `GET /livez`, `GET /readyz` | none | as above |
+| `POST /yield` | bearer | release the lease and stop campaigning until `/campaign`; keep serving reads. 200 when done |
+| `POST /campaign` | bearer | resume campaigning after a yield; only in `ACTIVE` (409 otherwise) |
+| `POST /activate` | bearer | coordinator mode, below |
+| `POST /quiesce` | bearer | release the lease for good (`QUIESCED`); keep serving reads until SIGTERM |
+
+Commands take `Authorization: Bearer <token>` and an optional body
+`{"operationId": "...", "expectedInstanceId": "..."}`; a set
+`expectedInstanceId` that is not this process is refused with 409 before
+anything happens. Generate a token pair with
+`t=$(openssl rand -hex 32); printf %s "$t" | sha256sum`.
+
+**Yield** is how to move the writer before the old task set is stopped, for
+example for a release that adds a migration: the new build cannot be ready
+(its schema check fails) until a writer runs the migration, and only the
+writer migrates. Yield the old writer (and any other old process, or one of
+them may win the campaign instead); a new process takes the lease, migrates
+and becomes ready; the old processes keep serving reads (additive
+migrations only: they read the expanded schema fine).
+
+## The coordinator remap (route B)
+
+`internal/handoff`'s states are unchanged; the Grid maps them onto the roles:
+
+| state | meaning for the Grid |
 |---|---|
-| STANDBY | exit 0; nothing was opened |
-| ACTIVATING | the activation is cancelled and releases what it opened; exit 0 |
-| ACTIVE | quiesce, then exit 0 (or 1 if the release failed) |
-| QUIESCING | wait for it; retry once if it failed; exit 0/1 |
-| QUIESCED | exit 0 |
+| `STANDBY` (`--standby`) | a reader that does not campaign; serves reads |
+| `ACTIVATING` | `POST /activate`: waiting up to `lockTimeout` for the lease, then starting the term; on failure it releases and returns to `STANDBY` |
+| `ACTIVE` | holds the lease, or (after a lost lease or a yield) campaigns for it; `databaseHeld` says which |
+| `QUIESCING` / `QUIESCED` | `POST /quiesce` or SIGTERM: the lease released for good; still serving reads until exit |
 
-If the production server stops on its own after activation (prefab's
-`Start` returns an error), the process quiesces and exits 1, the same as a
-fatal server error before handoff, but with the database released first.
+Without `--standby` the process activates at boot, which for the Grid means
+"campaign in the background": `ACTIVE` at once, holding the lease as soon as
+it is free. The coordinator's sequence (standby the new task, quiesce the old,
+activate the new, switch traffic, terminate the old) and its
+`expectedInstanceId` contract still work. What changed for it: a standby
+already serves reads (it can take traffic before activation), and quiesce no
+longer stops reads (the admission gate closes only at exit). The writer lock
+is the PostgreSQL lease, never a file lock.
 
-A second signal exits immediately with 1. The exit code is 0 only when the
-database ended released (process exit releases the lock regardless).
+## Rehearsal (migration gate 3)
 
-## Coordinator sequence
+`make rehearse-bluegreen` builds the server, starts the Docker database and
+runs `scripts/rehearse-bluegreen.sh` on a throwaway database
+(`REHEARSE_DB`, default `sierra_rehearsal`, dropped and recreated) with two
+servers on ports `REHEARSE_PORT_A/B` (8197/8198):
 
-```
-start replacement task with --standby
-  wait: GET new:/livez == 200 and /status.state == STANDBY
-  record each process's /status.instanceId (old and new, Grid and relay)
-POST old:/quiesce  {"operationId": "D-release", "expectedInstanceId": OLD}   (Grid AND relay)
-  wait: old /status.state == QUIESCED and databaseHeld == false   (both)
-  on failure or timeout: do NOT activate; terminate the old task and confirm
-  it has stopped, then continue
-POST new:/activate {"operationId": "D-activate", "expectedInstanceId": NEW}  (both)
-  409 instance_mismatch: the process restarted since it was recorded; re-read
-  /status and decide again (never retry blindly with the new id)
-  wait: new /status.state == ACTIVE (operation succeeded), /readyz == 200
-  on failure: the new task is back in STANDBY, released; see rollback
-switch load-balancer traffic to the new task; verify production health
-terminate the old task
-```
+1. A starts and takes the lease; B starts as a ready reader, serves reads and
+   forwards a push to A.
+2. Under steady load on B (reads, and preflight pushes that retry on 503 like a
+   reporter), A gets SIGTERM; B must take the lease.
+3. A returns as a reader; under load on A, B gets SIGKILL; A must take over.
+4. The epochs must be 1, 2, 3 with one lock holder; no read may fail and no
+   push may fail after its retries; each takeover must be under
+   `REHEARSE_TAKEOVER_MAX_MS` (5 s).
 
-The server never infers ownership. Nothing activates because a predecessor
-timed out, went unhealthy or stopped answering; activation is the
-coordinator's explicit decision, made only after a confirmed release or a
-confirmed termination of the previous owner. On an ambiguous handoff
-everything stays inactive.
-
-**Rollback is another handoff.** A released (QUIESCED) task never
-reactivates, so rolling back means starting the previous version in standby,
-quiescing the current owner, and activating the previous one. A version that
-predates this feature has no control plane and cannot do that; rolling back
-to it is a classic stop-then-start.
-
-## Health checks
-
-Liveness and readiness are deliberately separate, and a standby fails the
-existing production-port check by design (nothing listens there yet):
-
-- **Container health** during the whole task life: `GET :8081/livez` (Grid)
-  and `GET :8091/livez` (relay). The Dockerfile `HEALTHCHECK`s still probe the
-  production ports, which is correct for a normal deployment and wrong for a
-  standby; the task definition's checks must use `/livez` once `--standby` is
-  in use.
-- **Production readiness**: `GET /readyz` on the control port, or the
-  existing load-balancer target check on the production port (which also goes
-  503 once quiesced).
-
-## First migration
-
-Binaries before this change have no control plane, so the first rollout
-cannot be a handoff:
-
-1. Deploy this version the classic way (no `--standby`), with
-   `control.tokenSha256` configured so the running task has a control plane.
-   It activates at boot, exactly as before.
-2. Every deploy after that can be a handoff, because the old task now
-   answers `POST /quiesce`.
-
-Until the coordinated infrastructure is in place, leave `--standby` off: the
-default path is unchanged.
-
-## The file lock is a safeguard, not the protocol
-
-`store.Open` and the relay's `OpenStore` (sierra-meshrelay) still take an exclusive `flock` on a
-sibling `.lock` file and wait up to `lockTimeout` for it. Locally that makes a
-premature activation fail (verified: activating a standby while the old
-process held the database failed with the lock error after the timeout, and
-the standby returned to STANDBY, released). **Whether `flock` is enforced
-between two separate Fargate tasks on the shared filesystem has not been
-verified.** Before relying on it, run the same check there: with the old task
-ACTIVE, activate a standby replacement and confirm the activation fails on the
-lock and the replacement reports STANDBY, `databaseHeld: false`. Either way,
-the coordinator's confirmed release is what prevents two writers.
+Local results (2026-11-12, three runs): SIGTERM takeover 506-513 ms, SIGKILL
+takeover 62-289 ms, no failed reads or pushes, one push retried once per
+switch.
 
 ## Timing logs
 
-Each step logs a duration (`duration` field):
-
-- preparation: `Grid prepared (no database opened)` / `Relay prepared`,
-  `Standby preparation complete; waiting for activation` (`sinceProcessStart`)
-- activation: `Activation started`, `Grid store opened`, `Seeded grid sources
-  and places`, `Using persisted grid store statistics`, `MeshCore: rehydrated
-  node presence`, `Server initialization complete`, `Activation complete;
-  serving production` (with `sinceProcessStart`); relay: `Relay store opened`,
-  `Relay serving`
-- quiescence: `Quiesce: request drain complete` (`inFlight`, `cancelled`,
-  `remaining`), `Quiesce: ingest scheduler stopped`, `Quiesce: MeshCore
-  subscriber closed`, `Quiesce: background work stopped`, relay `Relay
-  sessions closed and audit queue flushed` (`sessionDrain`, `auditFlush`),
-  `Quiesce: grid store closed and lock released`, `Quiesce: grid.db ownership
-  released`, `Quiescence complete; database ownership released`
-- exit: `Shutdown requested`, `Shutdown complete`, `Process exiting`
-  (`state`, `databaseHeld`, `exitCode`)
+Each step logs a duration: `Grid store opened (reader)`, `Serving reads`,
+`Campaigning for the writer lease`, `Writer lease acquired` (`waited`),
+`Seeded grid sources and places`, `Writer term started`, `Writer lease LOST`,
+`Writer stop: ...` (scheduler, MeshCore, background work, lease released),
+`Quiesce: writer lease released; still serving reads`, `Exit: request drain
+complete`, `Shutdown complete`, `Process exiting` (`state`, `databaseHeld`,
+`exitCode`). Forwarded pushes log `Push ingest: forwarded to the writer`
+(`writer`, `epoch`, `status`, `duration`).
