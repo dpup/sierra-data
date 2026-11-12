@@ -19,7 +19,9 @@ const modulePath = "github.com/sierragridteam/sierra-data"
 
 // undocumentedRoutes are hand-mounted paths deliberately absent from the spec.
 var undocumentedRoutes = map[string]string{
-	"/": "the embedded static site, not an API",
+	"/":       "the embedded static site, not an API",
+	"/livez":  "process health for the container check, not part of the data API",
+	"/readyz": "read-path readiness for the container and load-balancer checks, not part of the data API",
 }
 
 // handRoute is one route mounted by hand rather than generated from grid.proto.

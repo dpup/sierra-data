@@ -367,18 +367,30 @@ grid:
     # writer lock holds one more, dedicated connection.
     maxConns: 8
     minConns: 1
-    # How long activation waits for the writer lock (an advisory lock held by
-    # whichever process is writing) before giving up. The common contention
-    # case is a deploy whose previous writer has not released yet, and WAITING
-    # beats dying: a task that gives up is simply restarted to wait again. A
-    # SIGTERM ends the wait at once.
+    # How long a coordinator-driven activation (--standby, POST /activate)
+    # waits for the writer lease before failing back to STANDBY. A process
+    # that activates at boot campaigns in the background without a deadline,
+    # serving reads meanwhile. A SIGTERM ends either wait at once.
     lockTimeout: "90s"
 
+  # Writer role (docs/deploy-handoff.md). Every task serves reads; one at a
+  # time holds the writer lease and runs ingest, seeding and migrations.
+  writer:
+    # false: a reader-only task that never campaigns (PF__GRID__WRITER__ENABLED).
+    enabled: true
+    # host:port other tasks dial to reach this one (push ingest on a reader is
+    # forwarded to the writer's). Empty: server.host (or the hostname when it
+    # is 0.0.0.0) and server.port. PF__GRID__WRITER__ADVERTISE_ADDR.
+    advertiseAddr: ""
+    # Bound on one forwarded push.
+    forwardTimeout: "10s"
+
   # Deployment control (internal/handoff, docs/deploy-handoff.md): a private
-  # listener a deploy coordinator uses to hand the database from the old task to a
-  # replacement started with --standby. OFF until tokenSha256 is set (the hash
-  # only; the token stays with the coordinator), and --standby refuses to start
-  # without it. Never route this port from the public load balancer.
+  # listener for the authenticated yield/campaign commands and, under a deploy
+  # coordinator, --standby / POST /activate / POST /quiesce. OFF until
+  # tokenSha256 is set (the hash only; the token stays with the operator), and
+  # --standby refuses to start without it. Never route this port from the
+  # public load balancer.
   control:
     port: 8081
     tokenSha256: ""

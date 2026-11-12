@@ -152,13 +152,13 @@ ENV PORT=8080
 ENV PF__SERVER__HOST=0.0.0.0
 ENV PF__SERVER__PORT=8080
 
-# Health check. Not tied to grid.database.lockTimeout any more: the target
-# deployment (migration plan P3, before this image is deployed anywhere)
-# serves reads before it holds the writer lease. Until P3 lands, the
-# listener still opens only after the writer lock, so a deploy that waits
-# out a previous writer longer than this grace is restarted.
-HEALTHCHECK --interval=30s --timeout=3s --start-period=30s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:8080/ || exit 1
+# Health check: /readyz on the production port. Every task serves reads from
+# boot (the writer lease is campaigned for in the background and never gates
+# the listener), so readiness is the store open at a schema this build reads,
+# which takes seconds. It turns 503 while the process drains on SIGTERM, and
+# while the schema is older than this build (until a writer migrates it).
+HEALTHCHECK --interval=15s --timeout=3s --start-period=15s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:8080/readyz || exit 1
 
 # Run the application
 ENTRYPOINT ["/app/sierra-server"]

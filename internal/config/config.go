@@ -162,6 +162,9 @@ type MeshRelayAdmin struct {
 // span several.
 type GridConfig struct {
 	Database GridDatabaseConfig `koanf:"database"`
+	// Writer is the process's writer role (the lease campaign, push-ingest
+	// forwarding). docs/deploy-handoff.md.
+	Writer GridWriterConfig `koanf:"writer"`
 	// Control is the Grid's deployment-control plane (internal/handoff).
 	Control     ControlConfig           `koanf:"control"`
 	Enhancement GridEnhancement         `koanf:"enhancement"`
@@ -187,12 +190,41 @@ type GridDatabaseConfig struct {
 	// MinConns keeps this many connections open while idle (0 =>
 	// store.DefaultMinConns).
 	MinConns int `koanf:"minConns"`
-	// LockTimeout is how long activation waits for the writer lock (another
-	// process holding it: normally the previous deploy draining) before
-	// failing. Waiting beats dying: a task that gives up is restarted to wait
-	// again. 0 => store.DefaultLockTimeout. Keep the Dockerfile HEALTHCHECK
-	// start-period above it while the listener opens only after the lock.
+	// LockTimeout is how long a coordinator-driven activation (--standby, then
+	// POST /activate) waits for the writer lease before failing and going
+	// back to STANDBY. 0 => store.DefaultLockTimeout. A process activated at
+	// boot campaigns in the background instead and never gives up; it serves
+	// reads meanwhile, so no health check depends on this.
 	LockTimeout time.Duration `koanf:"lockTimeout"`
+}
+
+// GridWriterConfig is the Grid's writer role.
+type GridWriterConfig struct {
+	// Enabled lets this process campaign for the writer lease (default true).
+	// false makes a reader-only task: it serves every GET and forwards push
+	// ingest, and never writes (the bake of a new environment against a
+	// database another stack still writes, or extra read capacity).
+	// PF__GRID__WRITER__ENABLED.
+	Enabled *bool `koanf:"enabled"`
+	// AdvertiseAddr is host:port where other tasks reach this one's
+	// production listener (recorded in writer_lease.address; a reader forwards
+	// push ingest there). Default: server.host, or the hostname when the host
+	// is a wildcard (on Fargate awsvpc the hostname resolves to the task's
+	// private IP), plus server.port. PF__GRID__WRITER__ADVERTISE_ADDR.
+	AdvertiseAddr string `koanf:"advertiseAddr"`
+	// ForwardTimeout bounds one forwarded push (default 10s).
+	ForwardTimeout time.Duration `koanf:"forwardTimeout"`
+}
+
+// IsEnabled is Enabled with its default (true).
+func (c GridWriterConfig) IsEnabled() bool { return c.Enabled == nil || *c.Enabled }
+
+// Forward is ForwardTimeout with its default.
+func (c GridWriterConfig) Forward() time.Duration {
+	if c.ForwardTimeout > 0 {
+		return c.ForwardTimeout
+	}
+	return 10 * time.Second
 }
 
 // Ingest defaults. Each is applied when the corresponding grid.ingest key is
