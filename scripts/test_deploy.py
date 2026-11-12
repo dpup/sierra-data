@@ -3,6 +3,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 from types import SimpleNamespace
 import unittest
@@ -10,374 +11,562 @@ from unittest.mock import patch
 
 import deploy
 
+REPO = deploy.REPO
+SHA = "0123456789abcdef0123456789abcdef01234567"
+OLD_SHA = "fedcba9876543210fedcba9876543210fedcba98"
+REGISTRY = "123456789012.dkr.ecr.us-west-2.amazonaws.com"
+URI = REGISTRY + "/grid"
+DIGEST = "sha256:" + "a" * 64
+OLD_DIGEST = "sha256:" + "b" * 64
+ENV = {"DEPLOY_ROLE_ARN": "arn:aws:iam::123456789012:role/sierra-data-deploy",
+       "DEPLOY_AWS_REGION": "us-west-2", "DEPLOY_ECS_CLUSTER": "sierra",
+       "DEPLOY_GRID_SERVICE": "grid", "DEPLOY_GRID_TASK_FAMILY": "sierra-grid",
+       "DEPLOY_GRID_ECR_REPOSITORY": "grid", "DEPLOY_RELAY_SERVICE": "relay",
+       "DEPLOY_RELAY_TASK_FAMILY": "sierra-relay", "DEPLOY_RELAY_ECR_REPOSITORY": "relay"}
 
-REGISTRY = "123456789012.dkr.ecr.us-east-1.amazonaws.com"
-CONFIG = {"repositories": {"grid": REGISTRY + "/grid", "relay": REGISTRY + "/relay"}}
+
+def cfg():
+    return deploy.Config(ENV)
 
 
-def arguments(**values):
-    return SimpleNamespace(**{"profile": None, "region": "us-east-1", "function": "coordinator",
-                              "tag": "abc123", **values})
+def git_responses(**answers):
+    def run(command, **_):
+        key = " ".join(command[1:])
+        if command[0] == "git" and command[1] == "fetch":
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if key in answers:
+            value = answers[key]
+            if value is None:
+                return SimpleNamespace(returncode=1, stdout="", stderr="")
+            return SimpleNamespace(returncode=0, stdout=value + "\n", stderr="")
+        raise AssertionError("unexpected command: " + key)
+    return run
 
 
-class DeployTests(unittest.TestCase):
-    def test_ambient_credentials_use_the_normal_aws_chain(self):
-        with patch.dict(os.environ, {"AWS_PROFILE": "ambient", "AWS_SESSION_TOKEN": "temporary"}), \
-                patch("deploy.subprocess.run", return_value=SimpleNamespace(returncode=0, stdout="{}")) as run:
-            deploy.aws(arguments(), "sts", "get-caller-identity")
-        command = run.call_args.args[0]
-        self.assertNotIn("--profile", command)
-        self.assertEqual(run.call_args.kwargs["env"]["AWS_SESSION_TOKEN"], "temporary")
+class ConfigTests(unittest.TestCase):
+    def test_every_unset_variable_is_named(self):
+        problems = deploy.config_problems({})
+        self.assertEqual(len(problems), len(deploy.SETTINGS))
+        for name in deploy.SETTINGS:
+            self.assertTrue(any(p.startswith(name + " is unset") for p in problems), name)
 
-    def test_build_discovers_both_destinations_and_keeps_credentials(self):
-        with patch.dict(os.environ, {"AWS_SESSION_TOKEN": "temporary"}), \
-                patch("deploy.subprocess.run") as run:
-            deploy.build_images(arguments(), CONFIG)
-        self.assertEqual([c.args[0] for c in run.call_args_list], [
-            ["make", "ecr-push-grid", "DOCKER_REGISTRY=" + REGISTRY, "DOCKER_IMAGE_NAME=grid", "DOCKER_TAG=abc123"],
-            ["make", "ecr-push-relay", "DOCKER_REGISTRY=" + REGISTRY, "RELAY_IMAGE_NAME=relay", "DOCKER_TAG=abc123"],
-        ])
-        self.assertTrue(all(c.kwargs["cwd"] == deploy.REPO for c in run.call_args_list))
-        self.assertEqual(run.call_args.kwargs["env"]["AWS_SESSION_TOKEN"], "temporary")
+    def test_complete_configuration_passes(self):
+        self.assertEqual(deploy.config_problems(ENV), [])
+        self.assertEqual(cfg().targets["relay"], {"service": "relay", "family": "sierra-relay", "repository": "relay"})
 
-    def test_explicit_profile_applies_to_build_helpers_too(self):
-        with patch.dict(os.environ, {"AWS_ACCESS_KEY_ID": "temporary", "AWS_SESSION_TOKEN": "temporary",
-                                     "AWS_DEFAULT_PROFILE": "other"}), patch("deploy.subprocess.run") as run:
-            deploy.build_images(arguments(profile="chosen"), CONFIG)
-        env = run.call_args.kwargs["env"]
-        self.assertEqual(env["AWS_PROFILE"], "chosen")
-        self.assertEqual(env["AWS_DEFAULT_PROFILE"], "chosen")
-        self.assertNotIn("AWS_ACCESS_KEY_ID", env)
-        self.assertNotIn("AWS_SESSION_TOKEN", env)
-        self.assertEqual(env["AWS_DEFAULT_REGION"], "us-east-1")
+    def test_malformed_values_are_refused(self):
+        bad = {**ENV, "DEPLOY_ROLE_ARN": "sierra-data-deploy", "DEPLOY_GRID_ECR_REPOSITORY": "Grid;rm"}
+        problems = deploy.config_problems(bad)
+        self.assertEqual(len(problems), 2)
+        with self.assertRaises(deploy.Refused):
+            deploy.Config(bad)
 
-    def test_invalid_repository_is_refused_before_any_build(self):
-        config = {"repositories": {"grid": CONFIG["repositories"]["grid"],
-                                   "relay": REGISTRY + "/$(shell echo bad)"}}
-        with patch("deploy.subprocess.run") as run, self.assertRaises(RuntimeError):
-            deploy.build_images(arguments(), config)
-        run.assert_not_called()
+    def test_check_config_command_exits_2_when_incomplete(self):
+        with patch.dict(os.environ, {k: "" for k in ENV}), contextlib.redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(deploy.main(["check-config"]), 2)
+        self.assertIn("DEPLOY_ECS_CLUSTER is unset", err.getvalue())
 
-    def test_images_resolve_separate_immutable_digests(self):
-        def aws(args, *command):
-            repository = command[command.index("--repository-name") + 1]
-            return {"imageDetails": [{"imageDigest": "sha256:" + ("a" if repository == "grid" else "b") * 64}]}
+    def test_release_refuses_before_any_aws_call_when_incomplete(self):
+        with patch("deploy.aws") as aws:
+            args = SimpleNamespace(sha=SHA, git_tag="", source=str(REPO), only=None, push_only=False,
+                                   platform="linux/amd64", timeout=1)
+            with self.assertRaises(deploy.Refused):
+                deploy.release(args, environ={})
+        aws.assert_not_called()
 
-        with patch("deploy.aws", side_effect=aws):
-            result = deploy.images(arguments(), CONFIG)
-        self.assertEqual(result, {"grid": REGISTRY + "/grid@sha256:" + "a" * 64,
-                                  "relay": REGISTRY + "/relay@sha256:" + "b" * 64})
+    def test_workflow_passes_exactly_the_settings(self):
+        workflow = (REPO / ".github" / "workflows" / "deploy.yml").read_text()
+        used = set(re.findall(r"vars\.(DEPLOY_[A-Z_]+)", workflow))
+        self.assertEqual(used, set(deploy.SETTINGS))
+        for name in deploy.SETTINGS:
+            self.assertIn("%s: ${{ vars.%s }}" % (name, name), workflow, "passed through under its own name")
 
-    def test_deploy_builds_before_resolving_and_waits_for_coordinator(self):
-        events = []
-        images = {"grid": "grid@sha256:a", "relay": "relay@sha256:b"}
-        with patch("sys.argv", ["deploy.py", "deploy", "--build", "--tag", "abc123", "--operation-id", "request", "--wait"]), \
-                patch("deploy.branch_drift", return_value=None), patch("deploy.dirty_files", return_value=[]), \
-                patch("deploy.configuration", return_value=CONFIG), \
-                patch("deploy.build_images", side_effect=lambda *_: events.append("build")), \
-                patch("deploy.images", side_effect=lambda *_: events.append("resolve") or images), \
-                patch("deploy.invoke", return_value={"operationId": "request"}) as invoke, \
-                patch("deploy.wait", return_value=0) as wait, contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(deploy.main(), 0)
-        self.assertEqual(events, ["build", "resolve"])
-        self.assertEqual(invoke.call_args.args[1], {"command": "start", "action": "deploy",
-                                                  "operationId": "request", "images": images})
-        wait.assert_called_once()
 
-    def test_failed_push_never_requests_a_deployment(self):
-        with patch("sys.argv", ["deploy.py", "deploy", "--build", "--tag", "abc123"]), \
-                patch("deploy.branch_drift", return_value=None), patch("deploy.dirty_files", return_value=[]), \
-                patch("deploy.configuration", return_value=CONFIG), \
-                patch("deploy.build_images", side_effect=subprocess.CalledProcessError(1, ["make"])), \
-                patch("deploy.invoke") as invoke, patch("deploy.images") as resolve:
-            with self.assertRaises(subprocess.CalledProcessError):
-                deploy.main()
-        invoke.assert_not_called()
-        resolve.assert_not_called()
+class BranchGuardTests(unittest.TestCase):
+    def test_refuses_another_branch_before_touching_origin(self):
+        with patch("deploy.subprocess.run", side_effect=git_responses(**{"rev-parse --abbrev-ref HEAD": "legacy/efs-sqlite"})) as git:
+            drift = deploy.branch_drift()
+        self.assertIn("on legacy/efs-sqlite", drift)
+        self.assertIn("deploys only from main", drift)
+        self.assertIn("make ecs-deploy", drift, "points the legacy operator at the legacy path")
+        self.assertEqual(len(git.call_args_list), 1)
 
-    def test_build_without_tag_uses_repository_commit(self):
-        with patch("sys.argv", ["deploy.py", "deploy", "--build"]), patch("deploy.branch_drift", return_value=None), patch("deploy.dirty_files", return_value=[]), \
-                patch("deploy.subprocess.run", return_value=SimpleNamespace(stdout="0123456789ab\n")) as git, \
-                patch("deploy.configuration", return_value=CONFIG), patch("deploy.build_images") as build, \
-                patch("deploy.images", return_value={}), patch("deploy.invoke", return_value={}), \
-                contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(deploy.main(), 0)
-        self.assertEqual(build.call_args.args[0].tag, "0123456789ab")
-        self.assertEqual(git.call_args.kwargs["cwd"], deploy.REPO)
+    def test_names_a_detached_head(self):
+        with patch("deploy.subprocess.run", side_effect=git_responses(**{"rev-parse --abbrev-ref HEAD": "HEAD"})):
+            self.assertIn("detached", deploy.branch_drift())
 
-    def test_dirty_tree_never_builds_or_deploys(self):
-        # Images are tagged with the commit; uncommitted changes would ship under it.
-        with patch("sys.argv", ["deploy.py", "deploy", "--build", "--tag", "abc123"]), \
-                patch("deploy.branch_drift", return_value=None), patch("deploy.dirty_files", return_value=["api/v1/common.pb.go"]), \
-                patch("deploy.configuration") as config, patch("deploy.build_images") as build, \
-                patch("deploy.invoke") as invoke, contextlib.redirect_stderr(io.StringIO()) as err:
-            with self.assertRaises(SystemExit) as exit:
-                deploy.main()
-        self.assertEqual(exit.exception.code, 2)
-        self.assertIn("api/v1/common.pb.go", err.getvalue())
-        self.assertIn("--allow-dirty", err.getvalue())
-        config.assert_not_called()
-        build.assert_not_called()
-        invoke.assert_not_called()
+    def test_fetches_and_compares_with_origin(self):
+        answers = {"rev-parse --abbrev-ref HEAD": "main", "rev-parse HEAD": "aaa", "rev-parse origin/main": "bbb",
+                   "rev-list --count origin/main..HEAD": "2", "rev-list --count HEAD..origin/main": "0"}
+        with patch("deploy.subprocess.run", side_effect=git_responses(**answers)) as git:
+            drift = deploy.branch_drift()
+        self.assertIn("2 commit(s) ahead of and 0 behind origin/main", drift)
+        self.assertIn(["git", "fetch", "--quiet", "origin", "main"], [c.args[0] for c in git.call_args_list])
+        self.assertTrue(all(c.kwargs["cwd"] == REPO for c in git.call_args_list))
 
-    def test_allow_dirty_is_an_explicit_override(self):
-        with patch("sys.argv", ["deploy.py", "deploy", "--build", "--tag", "abc123", "--allow-dirty"]), \
-                patch("deploy.branch_drift", return_value=None), patch("deploy.dirty_files", return_value=["Makefile"]) as dirty, \
-                patch("deploy.configuration", return_value=CONFIG), patch("deploy.build_images") as build, \
-                patch("deploy.images", return_value={}), patch("deploy.invoke", return_value={}), \
-                contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(deploy.main(), 0)
-        dirty.assert_not_called()
-        build.assert_called_once()
+    def test_reports_an_unreachable_origin(self):
+        def run(command, **_):
+            if command[1] == "fetch":
+                return SimpleNamespace(returncode=128, stderr="fatal: couldn't find remote ref main")
+            return SimpleNamespace(stdout="main\n")
+        with patch("deploy.subprocess.run", side_effect=run):
+            self.assertIn("cannot compare main with origin", deploy.branch_drift())
+
+    def test_none_when_head_matches_origin(self):
+        answers = {"rev-parse --abbrev-ref HEAD": "main", "rev-parse HEAD": "aaa", "rev-parse origin/main": "aaa"}
+        with patch("deploy.subprocess.run", side_effect=git_responses(**answers)):
+            self.assertIsNone(deploy.branch_drift())
 
     def test_dirty_files_lists_tracked_changes_only(self):
         porcelain = " M api/v1/common.pb.go\nM  Makefile\n"
         with patch("deploy.subprocess.run", return_value=SimpleNamespace(stdout=porcelain)) as git:
             self.assertEqual(deploy.dirty_files(), ["api/v1/common.pb.go", "Makefile"])
         self.assertIn("--untracked-files=no", git.call_args.args[0])
-        self.assertEqual(git.call_args.kwargs["cwd"], deploy.REPO)
 
-    def test_wrong_branch_never_builds_or_deploys(self):
-        # main is the Postgres stack; only the frozen legacy branch runs on this infrastructure.
-        with patch("sys.argv", ["deploy.py", "deploy", "--build"]), \
-                patch("deploy.branch_drift", return_value="HEAD is on main, but the legacy stack deploys only from legacy/efs-sqlite"), \
-                patch("deploy.dirty_files") as dirty, patch("deploy.configuration") as config, \
-                patch("deploy.build_images") as build, patch("deploy.invoke") as invoke, \
+
+class ResolveTests(unittest.TestCase):
+    def answers(self, **extra):
+        base = {"rev-parse --verify --quiet origin/main^{commit}": SHA,
+                "merge-base --is-ancestor %s origin/main" % SHA: "",
+                "tag --points-at %s --sort=-v:refname" % SHA: ""}
+        base.update(extra)
+        return base
+
+    def test_tip_of_main_with_its_tag(self):
+        answers = self.answers(**{"tag --points-at %s --sort=-v:refname" % SHA: "v1.3.0\nv1.2.9"})
+        with patch("deploy.subprocess.run", side_effect=git_responses(**answers)) as git:
+            self.assertEqual(deploy.resolve(), (SHA, "v1.3.0"))
+        self.assertIn(["git", "fetch", "--quiet", "--tags", "origin", "main"], [c.args[0] for c in git.call_args_list])
+
+    def test_a_tag_resolves_to_its_commit(self):
+        answers = self.answers(**{"rev-parse --verify --quiet refs/tags/v1.2.0^{commit}": SHA})
+        with patch("deploy.subprocess.run", side_effect=git_responses(**answers)):
+            self.assertEqual(deploy.resolve("v1.2.0", fetch=False), (SHA, "v1.2.0"))
+
+    def test_a_commit_not_on_main_is_refused(self):
+        answers = self.answers(**{"rev-parse --verify --quiet refs/tags/%s^{commit}" % OLD_SHA: None,
+                                  "rev-parse --verify --quiet %s^{commit}" % OLD_SHA: OLD_SHA,
+                                  "merge-base --is-ancestor %s origin/main" % OLD_SHA: None})
+        with patch("deploy.subprocess.run", side_effect=git_responses(**answers)), \
+                self.assertRaisesRegex(deploy.Refused, "not on origin/main"):
+            deploy.resolve(OLD_SHA, fetch=False)
+
+    def test_unknown_or_unsafe_refs_are_refused(self):
+        for ref in ["$(shell bad)", "feature/x", "legacy/efs-sqlite"]:
+            with self.subTest(ref=ref), patch("deploy.subprocess.run", side_effect=git_responses(**self.answers())), \
+                    self.assertRaises(deploy.Refused):
+                deploy.resolve(ref, fetch=False)
+
+    def test_a_tag_shaped_like_an_image_key_is_refused(self):
+        answers = self.answers(**{"rev-parse --verify --quiet refs/tags/content-abc^{commit}": SHA})
+        with patch("deploy.subprocess.run", side_effect=git_responses(**answers)), \
+                self.assertRaisesRegex(deploy.Refused, "collide"):
+            deploy.resolve("content-abc", fetch=False)
+
+    def test_resolve_command_prints_workflow_outputs(self):
+        with patch("deploy.resolve", return_value=(SHA, "v1")), patch("deploy.ci_passed", return_value=True), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(deploy.main(["resolve", "--ref", "v1", "--no-fetch", "--require-ci"]), 0)
+        self.assertEqual(out.getvalue(), "sha=%s\ngit_tag=v1\n" % SHA)
+
+    def test_resolve_command_refuses_without_ci(self):
+        with patch("deploy.resolve", return_value=(SHA, "")), patch("deploy.ci_passed", return_value=False), \
+                contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(deploy.main(["resolve", "--require-ci"]), 2)
+        self.assertEqual(out.getvalue(), "")
+
+
+class DispatchTests(unittest.TestCase):
+    def gh(self, url="https://github.com/sierragridteam/sierra-data/actions/runs/42\n"):
+        calls = []
+
+        def fake(*command, capture=True):
+            calls.append(list(command))
+            return SimpleNamespace(stdout=url if command[:2] == ("workflow", "run") else "[]")
+        return calls, fake
+
+    def test_head_dispatches_main_and_watches_the_run(self):
+        calls, fake = self.gh()
+        with patch("deploy.branch_drift", return_value=None), patch("deploy.dirty_files", return_value=[]), \
+                patch("deploy.git", return_value=SHA), patch("deploy.ci_passed", return_value=True) as ci, \
+                patch("deploy.gh", side_effect=fake), \
+                patch("deploy.subprocess.run", return_value=SimpleNamespace(returncode=0)) as watch, \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(deploy.main(["dispatch"]), 0)
+        ci.assert_called_once_with(SHA)
+        run = calls[0]
+        self.assertEqual(run[:5], ["workflow", "run", "deploy.yml", "--ref", "main"])
+        self.assertIn("ref=" + SHA, run)
+        self.assertTrue(any(f.startswith("request_id=") for f in run))
+        self.assertEqual(watch.call_args.args[0], ["gh", "run", "watch", "42", "--exit-status", "--interval", "10"])
+
+    def test_watch_failure_is_the_exit_code(self):
+        calls, fake = self.gh()
+        with patch("deploy.branch_drift", return_value=None), patch("deploy.dirty_files", return_value=[]), \
+                patch("deploy.git", return_value=SHA), patch("deploy.ci_passed", return_value=True), \
+                patch("deploy.gh", side_effect=fake), \
+                patch("deploy.subprocess.run", return_value=SimpleNamespace(returncode=1)), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(deploy.main(["dispatch"]), 1)
+
+    def test_wrong_branch_never_dispatches(self):
+        with patch("deploy.branch_drift", return_value="HEAD is on legacy/efs-sqlite, but this deploys only from main"), \
+                patch("deploy.dirty_files") as dirty, patch("deploy.gh") as gh, \
                 contextlib.redirect_stderr(io.StringIO()) as err:
-            with self.assertRaises(SystemExit) as exit:
-                deploy.main()
-        self.assertEqual(exit.exception.code, 2)
-        self.assertIn("legacy/efs-sqlite", err.getvalue())
+            self.assertEqual(deploy.main(["dispatch"]), 2)
+        self.assertIn("deploys only from main", err.getvalue())
         dirty.assert_not_called()
-        config.assert_not_called()
-        build.assert_not_called()
-        invoke.assert_not_called()
+        gh.assert_not_called()
 
-    def test_branch_check_is_only_for_builds(self):
-        # A --tag deploy names images that already exist; the checkout is irrelevant.
-        with patch("sys.argv", ["deploy.py", "deploy", "--tag", "abc123"]), patch("deploy.branch_drift") as drift, \
-                patch("deploy.configuration", return_value=CONFIG), patch("deploy.images", return_value={}), \
-                patch("deploy.invoke", return_value={}), contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(deploy.main(), 0)
+    def test_dirty_tree_never_dispatches(self):
+        with patch("deploy.branch_drift", return_value=None), patch("deploy.dirty_files", return_value=["Makefile"]), \
+                patch("deploy.gh") as gh, contextlib.redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(deploy.main(["dispatch"]), 2)
+        self.assertIn("Makefile", err.getvalue())
+        self.assertIn("ALLOW_DIRTY", err.getvalue())
+        gh.assert_not_called()
+
+    def test_allow_dirty_is_an_explicit_override(self):
+        calls, fake = self.gh()
+        with patch("deploy.branch_drift", return_value=None), patch("deploy.dirty_files") as dirty, \
+                patch("deploy.git", return_value=SHA), patch("deploy.ci_passed", return_value=True), \
+                patch("deploy.gh", side_effect=fake), \
+                patch("deploy.subprocess.run", return_value=SimpleNamespace(returncode=0)), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(deploy.main(["dispatch", "--allow-dirty"]), 0)
+        dirty.assert_not_called()
+
+    def test_red_ci_never_dispatches(self):
+        with patch("deploy.branch_drift", return_value=None), patch("deploy.dirty_files", return_value=[]), \
+                patch("deploy.git", return_value=SHA), patch("deploy.ci_passed", return_value=False), \
+                patch("deploy.gh") as gh, contextlib.redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(deploy.main(["dispatch"]), 2)
+        self.assertIn("CI has not passed", err.getvalue())
+        gh.assert_not_called()
+
+    def test_a_tag_skips_the_checkout_guards_but_not_resolution(self):
+        calls, fake = self.gh()
+        with patch("deploy.branch_drift") as drift, patch("deploy.dirty_files") as dirty, \
+                patch("deploy.resolve", return_value=(OLD_SHA, "v1.2.0")) as resolve, \
+                patch("deploy.ci_passed", return_value=True) as ci, patch("deploy.gh", side_effect=fake), \
+                patch("deploy.subprocess.run", return_value=SimpleNamespace(returncode=0)), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(deploy.main(["dispatch", "--ref", "v1.2.0"]), 0)
         drift.assert_not_called()
+        dirty.assert_not_called()
+        resolve.assert_called_once_with("v1.2.0")
+        ci.assert_called_once_with(OLD_SHA)
+        self.assertIn("ref=v1.2.0", calls[0])
 
-    def git_responses(self, **answers):
-        def run(command, **_):
-            key = " ".join(command[1:])
-            if key.startswith("fetch"):
-                return SimpleNamespace(returncode=0, stdout="")
-            return SimpleNamespace(stdout=answers[key] + "\n")
+    def test_run_is_found_by_request_id_when_gh_prints_no_url(self):
+        listing = json.dumps([{"databaseId": 7, "displayTitle": "Deploy main [other]"},
+                              {"databaseId": 9, "displayTitle": "Deploy main [abc123]"}])
+        with patch("deploy.gh", return_value=SimpleNamespace(stdout=listing)):
+            self.assertEqual(deploy.find_run("abc123", timeout=5), "9")
+
+    def test_ci_check_asks_for_a_successful_push_run_on_main(self):
+        with patch("deploy.gh", return_value=SimpleNamespace(stdout='[{"databaseId": 1}]')) as gh:
+            self.assertTrue(deploy.ci_passed(SHA))
+        command = gh.call_args.args
+        for flag, value in [("--workflow", "ci.yml"), ("--commit", SHA), ("--branch", "main"),
+                            ("--event", "push"), ("--status", "success")]:
+            self.assertEqual(command[command.index(flag) + 1], value)
+
+
+class LegacyTargetTests(unittest.TestCase):
+    def test_ecs_deploy_cannot_run_from_main(self):
+        for target in ["ecs-deploy", "ecs-status", "ecs-rollback"]:
+            with self.subTest(target=target):
+                result = subprocess.run(["make", "-s", target], cwd=REPO, capture_output=True, text=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("legacy/efs-sqlite", result.stderr)
+
+    def test_no_coordinator_client_remains(self):
+        source = Path(deploy.__file__).read_text()
+        for legacy in ["lambda", "coordinator\"", "SIERRA_DEPLOY_FUNCTION", "sierra-data-coordinator"]:
+            self.assertNotIn(legacy, source)
+
+
+class ContentKeyTests(unittest.TestCase):
+    def fake_go(self, payloads):
+        def run(command, cwd, env, check):
+            out = Path(command[command.index("-o") + 1])
+            out.write_bytes(payloads.get((command[-1], env["GOARCH"]), b"binary " + command[-1].encode()))
+            self.assertEqual(env["CGO_ENABLED"], "0")
+            self.assertEqual(env["GOFLAGS"], "-buildvcs=false", "a VCS stamp would change the key every commit")
+            self.assertIn("-trimpath", command)
+            return SimpleNamespace(returncode=0)
         return run
 
-    def test_branch_drift_refuses_another_branch_before_touching_origin(self):
-        with patch("deploy.subprocess.run", side_effect=self.git_responses(**{"rev-parse --abbrev-ref HEAD": "main"})) as git:
-            drift = deploy.branch_drift("legacy/efs-sqlite")
-        self.assertIn("on main", drift)
-        self.assertIn("legacy/efs-sqlite", drift)
-        self.assertEqual(len(git.call_args_list), 1)
+    def test_key_is_stable_and_follows_binaries_and_architecture(self):
+        same = deploy.content_key("relay", "amd64", REPO, run=self.fake_go({}))
+        self.assertEqual(same, deploy.content_key("relay", "amd64", REPO, run=self.fake_go({})))
+        self.assertNotEqual(same, deploy.content_key("relay", "arm64", REPO, run=self.fake_go({})))
+        changed = deploy.content_key("relay", "amd64", REPO, run=self.fake_go({("./cmd/mesh-relay", "amd64"): b"new"}))
+        self.assertNotEqual(same, changed)
+        self.assertRegex(same, r"^[0-9a-f]{32}$")
 
-    def test_branch_drift_names_a_detached_head(self):
-        with patch("deploy.subprocess.run", side_effect=self.git_responses(**{"rev-parse --abbrev-ref HEAD": "HEAD"})):
-            self.assertIn("detached", deploy.branch_drift("legacy/efs-sqlite"))
+    def test_grid_and_relay_keys_differ(self):
+        self.assertNotEqual(deploy.content_key("grid", "amd64", REPO, run=self.fake_go({})),
+                            deploy.content_key("relay", "amd64", REPO, run=self.fake_go({})))
 
-    def test_branch_drift_fetches_and_compares_with_origin(self):
-        answers = {"rev-parse --abbrev-ref HEAD": "legacy/efs-sqlite", "rev-parse HEAD": "aaa",
-                   "rev-parse origin/legacy/efs-sqlite": "bbb",
-                   "rev-list --count origin/legacy/efs-sqlite..HEAD": "2", "rev-list --count HEAD..origin/legacy/efs-sqlite": "0"}
-        with patch("deploy.subprocess.run", side_effect=self.git_responses(**answers)) as git:
-            drift = deploy.branch_drift("legacy/efs-sqlite")
-        self.assertIn("2 commit(s) ahead of and 0 behind origin/legacy/efs-sqlite", drift)
-        self.assertIn(["git", "fetch", "--quiet", "origin", "legacy/efs-sqlite"], [c.args[0] for c in git.call_args_list])
-        self.assertTrue(all(c.kwargs["cwd"] == deploy.REPO for c in git.call_args_list))
-
-    def test_branch_drift_reports_a_missing_or_unreachable_origin(self):
-        def run(command, **_):
-            if command[1] == "fetch":
-                return SimpleNamespace(returncode=128, stderr="fatal: couldn't find remote ref legacy/efs-sqlite")
-            return SimpleNamespace(stdout="legacy/efs-sqlite\n")
-        with patch("deploy.subprocess.run", side_effect=run):
-            drift = deploy.branch_drift("legacy/efs-sqlite")
-        self.assertIn("cannot compare legacy/efs-sqlite with origin", drift)
-        self.assertIn("couldn't find remote ref", drift)
-
-    def test_branch_drift_is_none_when_head_matches_origin(self):
-        answers = {"rev-parse --abbrev-ref HEAD": "legacy/efs-sqlite", "rev-parse HEAD": "aaa",
-                   "rev-parse origin/legacy/efs-sqlite": "aaa"}
-        with patch("deploy.subprocess.run", side_effect=self.git_responses(**answers)):
-            self.assertIsNone(deploy.branch_drift("legacy/efs-sqlite"))
-
-    def test_completed_rollback_returns_nonzero_instead_of_ecs_stable(self):
-        state = {"operation": None, "last": {"id": "request", "result": "ROLLED_BACK"}, "owner": {"arn": "owner"}}
-        with patch("deploy.invoke", return_value=state), contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(deploy.wait(arguments(timeout=1), "request"), 2)
-
-    def test_blocked_or_superseded_workflow_is_refused(self):
-        cases = [{"operation": {"id": "request", "phase": "BLOCKED", "execution": "flow", "error": "unknown owner"}},
-                 {"operation": {"id": "different"}}]
-        for state in cases:
-            with self.subTest(state=state), patch("deploy.invoke", return_value=state), \
-                    contextlib.redirect_stdout(io.StringIO()), self.assertRaises(RuntimeError):
-                deploy.wait(arguments(timeout=1), "request")
-
-    def test_unsafe_tag_cannot_reach_make(self):
-        with patch("sys.argv", ["deploy.py", "deploy", "--build", "--tag", "$(shell bad)"]), \
-                patch("deploy.branch_drift", return_value=None), patch("deploy.dirty_files", return_value=[]), \
-                patch("deploy.configuration") as config, contextlib.redirect_stderr(io.StringIO()), \
-                self.assertRaises(SystemExit):
-            deploy.main()
-        config.assert_not_called()
-
-    def test_lambda_invoke_uses_temp_files_and_propagates_server_failure(self):
-        def aws(args, *command):
-            payload = json.loads(Path(command[command.index("--payload") + 1].removeprefix("fileb://")).read_text())
-            self.assertEqual(payload, {"command": "status"})
-            Path(command[-1]).write_text(json.dumps({"errorMessage": "lock retained"}))
-            return {"FunctionError": "Unhandled"}
-
-        with patch("deploy.aws", side_effect=aws), self.assertRaisesRegex(RuntimeError, "lock retained"):
-            deploy.invoke(arguments(), {"command": "status"})
-
-
-class FakeClock:
-    """time.monotonic/time.sleep stand-ins: each sleep advances the clock."""
-
-    def __init__(self, step=20):
-        self.now, self.step = 0.0, step
-
-    def monotonic(self):
-        return self.now
-
-    def sleep(self, _):
-        self.now += self.step
-
-
-OWNER = {"arn": "arn:aws:ecs:us-east-1:123456789012:task/example-cluster/0f1e2d3c4b5a69788796a5b4c3d2e1f0",
-         "definition": "arn:aws:ecs:us-east-1:123456789012:task-definition/example-coordinated:3",
-         "ip": "10.0.0.30", "slot": "example-b", "state": "RUNNING",
-         "processes": {"grid": {"instanceId": "aaaa1111bbbb2222", "restartCount": None},
-                       "relay": {"instanceId": "cccc3333dddd4444", "restartCount": 0}}}
-
-
-def statuses(*phases, result="SUCCEEDED", op="op-1"):
-    """Coordinator status responses: one per phase poll, then the finished state."""
-    out = [{"operation": {"id": op, "phase": p, "execution": "arn:aws:states:x:execution:handoff:" + op}}
-           for p in phases]
-    out.append({"operation": None, "last": {"id": op, "result": result}, "owner": OWNER})
-    return out
-
-
-class ProgressOutputTests(unittest.TestCase):
-    def run_deploy(self, responses, extra=()):
-        clock = FakeClock()
-        replies = iter([{"operationId": "op-1", "phase": "PUBLISH",
-                         "execution": "arn:aws:states:x:execution:handoff:op-1"}] + responses)
-        with patch("sys.argv", ["deploy.py", "deploy", "--tag", "abc123", "--wait", *extra]), \
-                patch("deploy.configuration", return_value=CONFIG), patch("deploy.images", return_value={}), \
-                patch("deploy.invoke", side_effect=lambda *_: next(replies)), \
-                patch("deploy.time.monotonic", clock.monotonic), patch("deploy.time.sleep", clock.sleep), \
-                contextlib.redirect_stdout(io.StringIO()) as out:
-            code = deploy.main()
-        return code, out.getvalue()
-
-    def test_successful_deploy_prints_one_line_per_phase_and_a_summary(self):
-        code, out = self.run_deploy(statuses("PUBLISH", "PREPARE", "WAIT_STANDBY", "WAIT_STANDBY",
-                                             "WAIT_STANDBY", "WAIT_STANDBY", "ROUTING"))
-        self.assertEqual(code, 0)
-        lines = out.splitlines()
-        self.assertEqual(lines[0], "deploy op-1 started  (retry this same request with --operation-id op-1)")
-        rows = [l for l in lines if __import__("re").match(r"  \d\d:\d\d:\d\d  \+", l)]
-        phases = [l.split()[-1] for l in rows if "still" not in l]
-        self.assertEqual(phases, ["PUBLISH", "PREPARE", "WAIT_STANDBY", "ROUTING"], "each phase once")
-        self.assertEqual(sum("WAIT_STANDBY (still waiting, 1m00s)" in l for l in lines), 1,
-                         "a phase that drags gets a note a minute in")
-        self.assertIn("✅ SUCCEEDED in 2m20s", lines)
-        self.assertIn("Owner     example-b  task 0f1e2d3c4b5a69788796a5b4c3d2e1f0  RUNNING  10.0.0.30  "
-                      "example-coordinated:3", lines)
-        self.assertIn("          relay  instance cccc3333dddd4444  restarts 0", lines)
-        self.assertNotIn("{", out, "no JSON in the default output")
-        self.assertNotIn("arn:aws", out)
-
-    def test_rolled_back_deploy_is_marked_and_exits_nonzero(self):
-        code, out = self.run_deploy(statuses("PREPARE", result="ROLLED_BACK"))
-        self.assertEqual(code, 2)
-        self.assertIn("❌ ROLLED_BACK in", out)
-        self.assertIn("Inspect with `make ecs-status` before retrying.", out)
-
-    def test_json_flag_keeps_the_raw_output(self):
-        code, out = self.run_deploy(statuses("PREPARE"), extra=["--json"])
-        self.assertEqual(code, 0)
-        self.assertIn('"operationId": "op-1"', out)
-        self.assertIn('{"operationId": "op-1", "phase": "PREPARE"', out)
-        self.assertIn('"result": "SUCCEEDED"', out)
-        self.assertNotIn("✅", out)
-
-    def test_waiting_needs_an_operation_id(self):
-        with patch("sys.argv", ["deploy.py", "deploy", "--tag", "abc123", "--wait"]), \
-                patch("deploy.configuration", return_value=CONFIG), patch("deploy.images", return_value={}), \
-                patch("deploy.invoke", return_value={}), self.assertRaises(RuntimeError):
-            deploy.main()
-
-
-TESTDATA = Path(__file__).resolve().parent / "testdata"
-PST = __import__("datetime").timezone(__import__("datetime").timedelta(hours=-8), "PST")
-
-
-class StatusFormatTests(unittest.TestCase):
-    def test_completed_bootstrap_reads_as_a_summary(self):
-        state = json.loads((TESTDATA / "status-bootstrap.json").read_text())
-        out = deploy.format_status(state, now=1793853300, tz=PST)
-        lines = out.splitlines()
-        self.assertEqual(lines[0], "Owner     example-a  task 0f1e2d3c4b5a69788796a5b4c3d2e1f0  RUNNING  "
-                                   "10.0.0.20  example-coordinated:2")
-        self.assertIn("          grid   instance aaaa1111bbbb2222  restarts -", lines)
-        self.assertIn("          relay  instance cccc3333dddd4444  restarts 0", lines)
-        self.assertIn("Operation none in progress", lines)
-        self.assertIn("Last      bootstrap  sierra-bootstrap-20261105T042314Z  SUCCEEDED", lines)
-        self.assertIn("  finished  2026-11-04 20:29:35 PST (5m25s ago)  took 3m40s", lines)
-        self.assertIn("  replaced  example:57 (legacy), 1 task(s)", lines)
-        self.assertIn("            task 1a2b3c4d5e6f708192a3b4c5d6e7f809  stopped", lines)
-        self.assertIn("    WAIT_OLD_STOPPED   +1m21s   1m53s", lines)
-        self.assertIn("    WAIT_CLEANED       +3m38s   2s", lines, "the last phase runs to finishedAt")
-        self.assertIn("Previous  none (nothing to roll back to)", lines)
-        self.assertNotIn("execution", out, "an execution named like the operation is not repeated")
-        self.assertNotIn("arn:aws", out, "ARNs are shortened")
-
-    def test_operation_in_progress_shows_its_phase_and_images(self):
-        state = {"owner": None, "last": None, "previous": {
-                     "definition": "arn:aws:ecs:us-east-1:123456789012:task-definition/example-coordinated:3",
-                     "images": {"grid": REGISTRY + "/grid@sha256:" + "a" * 64}},
-                 "operation": {"id": "deploy-1", "kind": "deploy", "phase": "WAIT_STANDBY", "phaseAt": 1000,
-                               "startedAt": 990, "rollback": True, "error": "standby not live yet",
-                               "execution": "arn:aws:states:us-east-1:123456789012:execution:handoff:exec-9",
-                               "images": {"grid": REGISTRY + "/grid@sha256:" + "b" * 64,
-                                          "relay": REGISTRY + "/relay@sha256:" + "c" * 64},
-                               "timeline": [{"at": 990, "phase": "PREPARE"}, {"at": 1000, "phase": "WAIT_STANDBY"}]}}
-        out = deploy.format_status(state, now=1045, tz=PST).splitlines()
-        self.assertEqual(out[0], "Owner     none")
-        self.assertIn("Operation deploy  deploy-1  phase WAIT_STANDBY  (rollback)", out)
-        self.assertIn("  in phase  45s", out)
-        self.assertIn("  execution exec-9", out)
-        self.assertIn("  image     grid   grid@sha256:" + "b" * 12, out)
-        self.assertIn("  image     relay  relay@sha256:" + "c" * 12, out)
-        self.assertIn("  error     standby not live yet", out)
-        self.assertIn("    WAIT_STANDBY       +10s     45s", out, "the current phase runs to now")
-        self.assertIn("Previous  example-coordinated:3", out)
-
-    def test_empty_document_does_not_crash(self):
-        out = deploy.format_status({}, now=0, tz=PST)
-        self.assertIn("Owner     none", out)
-        self.assertIn("Operation none in progress", out)
-
-    def test_status_json_flag_prints_the_raw_document(self):
-        state = json.loads((TESTDATA / "status-bootstrap.json").read_text())
-        for argv, raw in ((["deploy.py", "status", "--json"], True), (["deploy.py", "status"], False)):
-            with patch("sys.argv", argv), patch("deploy.invoke", return_value=state), \
-                    contextlib.redirect_stdout(io.StringIO()) as out:
-                self.assertEqual(deploy.main(), 0)
-            if raw:
-                self.assertEqual(json.loads(out.getvalue()), state)
+    def test_targets_cover_what_the_dockerfile_copies(self):
+        # Each final stage copies binaries from its builder and files from the
+        # build context (/app/...). The key must hash all of them, or a change
+        # to one would ship nothing.
+        dockerfile = (REPO / "Dockerfile").read_text()
+        stages = re.findall(r"^FROM \S+ AS (\S+)", dockerfile, re.M)
+        self.assertIn("grid", stages)
+        self.assertIn("relay", stages)
+        builders = {"go-builder": "grid", "relay-builder": "relay"}
+        for builder, source in re.findall(r"^COPY --from=(\S+) (\S+) ", dockerfile, re.M):
+            target = deploy.TARGETS[builders[builder]]
+            if source.startswith("/app/"):
+                path = source[len("/app/"):]
+                self.assertIn(path, target["files"], "%s copies %s" % (builders[builder], path))
             else:
-                self.assertTrue(out.getvalue().startswith("Owner     example-a"))
+                self.assertIn(source.lstrip("/"), [b for _, b in target["binaries"]])
+        for target in deploy.TARGETS.values():
+            self.assertIn("Dockerfile", target["files"])
+
+
+class TaskDefinitionTests(unittest.TestCase):
+    DEFINITION = {
+        "taskDefinitionArn": "arn:aws:ecs:us-west-2:123456789012:task-definition/sierra-grid:7",
+        "family": "sierra-grid", "revision": 7, "status": "ACTIVE", "registeredAt": 1, "registeredBy": "x",
+        "compatibilities": ["EC2", "FARGATE"], "requiresAttributes": [{"name": "x"}],
+        "requiresCompatibilities": ["FARGATE"], "cpu": "512", "memory": "1024", "networkMode": "awsvpc",
+        "taskRoleArn": "arn:aws:iam::123456789012:role/grid-task", "executionRoleArn": "arn:aws:iam::123456789012:role/grid-exec",
+        "runtimePlatform": {"cpuArchitecture": "X86_64", "operatingSystemFamily": "LINUX"},
+        "containerDefinitions": [
+            {"name": "grid", "image": URI + "@" + OLD_DIGEST,
+             "environment": [{"name": "PF__GRID__WRITER__ENABLED", "value": "false"}],
+             "secrets": [{"name": "PF__GRID__DATABASE__URL", "valueFrom": "arn:aws:secretsmanager:..."}]},
+            {"name": "log-router", "image": "public.ecr.aws/aws-observability/aws-for-fluent-bit:3"}]}
+
+    def test_only_the_image_changes(self):
+        request = deploy.with_image(self.DEFINITION, [{"key": "app", "value": "grid"}], 0, URI + "@" + DIGEST)
+        for field in deploy.READ_ONLY:
+            self.assertNotIn(field, request)
+        self.assertEqual(request["containerDefinitions"][0]["image"], URI + "@" + DIGEST)
+        self.assertEqual(self.DEFINITION["containerDefinitions"][0]["image"], URI + "@" + OLD_DIGEST, "input untouched")
+        expected = {k: v for k, v in self.DEFINITION.items() if k not in deploy.READ_ONLY}
+        expected["containerDefinitions"] = [dict(self.DEFINITION["containerDefinitions"][0], image=URI + "@" + DIGEST),
+                                            self.DEFINITION["containerDefinitions"][1]]
+        expected["tags"] = [{"key": "app", "value": "grid"}]
+        self.assertEqual(request, expected)
+
+    def test_untagged_definition_sends_no_tags(self):
+        self.assertNotIn("tags", deploy.with_image(self.DEFINITION, [], 0, "x"))
+
+    def test_container_is_found_by_repository_then_by_name(self):
+        self.assertEqual(deploy.container_index(self.DEFINITION, URI, "grid"), 0)
+        placeholder = dict(self.DEFINITION, containerDefinitions=[
+            {"name": "sidecar", "image": "busybox"}, {"name": "grid", "image": "public.ecr.aws/nginx/nginx:bootstrap"}])
+        self.assertEqual(deploy.container_index(placeholder, URI, "grid"), 1)
+        ambiguous = dict(self.DEFINITION, containerDefinitions=[{"name": "a", "image": URI + ":x"},
+                                                                {"name": "b", "image": URI + ":y"}])
+        with self.assertRaises(RuntimeError):
+            deploy.container_index(ambiguous, URI, "grid")
+        with self.assertRaises(RuntimeError):
+            deploy.container_index(dict(self.DEFINITION, containerDefinitions=[{"name": "x", "image": "y"}]), URI, "grid")
+
+    def test_family_of_an_arn(self):
+        self.assertEqual(deploy.family_of(self.DEFINITION["taskDefinitionArn"]), "sierra-grid")
+
+
+class FakeAws:
+    """A scripted AWS: ECR images by tag, ECS service and task definitions,
+    and a service deployment that walks through the given statuses."""
+
+    def __init__(self, test, images=None, service_td=7, latest_td=7, running_image=None, statuses=("SUCCESSFUL",),
+                 busy=False):
+        self.test, self.calls = test, []
+        self.images = dict(images or {})  # tag -> digest
+        self.service_td, self.latest_td, self.busy = service_td, latest_td, busy
+        self.running_image = running_image or URI + "@" + OLD_DIGEST
+        self.statuses = list(statuses)
+        self.registered = None
+
+    def td(self, revision, image):
+        d = json.loads(json.dumps(TaskDefinitionTests.DEFINITION))
+        d["taskDefinitionArn"] = d["taskDefinitionArn"].rsplit(":", 1)[0] + ":%d" % revision
+        d["revision"] = revision
+        d["containerDefinitions"][0]["image"] = image
+        return d
+
+    def __call__(self, region, *command):
+        self.test.assertEqual(region, "us-west-2")
+        self.calls.append(command[:2])
+        op = command[:2]
+        arg = lambda flag: command[command.index(flag) + 1]
+        if op == ("ecr", "describe-repositories"):
+            return {"repositories": [{"repositoryUri": REGISTRY + "/" + arg("--repository-names")}]}
+        if op == ("ecr", "describe-images"):
+            kind, value = arg("--image-ids").split("=", 1)
+            if kind == "imageTag":
+                if value not in self.images:
+                    raise RuntimeError("An error occurred (ImageNotFoundException)")
+                return {"imageDetails": [{"imageDigest": self.images[value]}]}
+            tags = [t for t, d in self.images.items() if d == value]
+            return {"imageDetails": [{"imageDigest": value, "imageTags": tags}]}
+        if op == ("ecr", "batch-get-image"):
+            return {"images": [{"imageManifest": "{}", "imageManifestMediaType": "application/vnd.oci.image.manifest.v1+json"}]}
+        if op == ("ecr", "put-image"):
+            self.images[arg("--image-tag")] = arg("--image-digest")
+            return {}
+        if op == ("ecs", "describe-services"):
+            return {"services": [{"status": "ACTIVE", "taskDefinition": self.td(self.service_td, "")["taskDefinitionArn"]}]}
+        if op == ("ecs", "list-service-deployments"):
+            if "--status" in command:
+                return {"serviceDeployments": [{"status": "IN_PROGRESS", "serviceDeploymentArn": "busy"}] if self.busy else []}
+            return {"serviceDeployments": [{"serviceDeploymentArn": "arn:sd/1", "targetServiceRevisionArn": "arn:rev/1"}]}
+        if op == ("ecs", "describe-task-definition"):
+            ref = arg("--task-definition")
+            revision = self.latest_td if ref == "sierra-grid" else int(ref.rsplit(":", 1)[1])
+            image = self.running_image if revision == self.service_td else URI + ":placeholder"
+            return {"taskDefinition": self.td(revision, image), "tags": []}
+        if op == ("ecs", "register-task-definition"):
+            self.registered = json.loads(Path(arg("--cli-input-json")[len("file://"):]).read_text())
+            return {"taskDefinition": {"taskDefinitionArn": self.td(self.latest_td + 1, "")["taskDefinitionArn"]}}
+        if op == ("ecs", "update-service"):
+            self.updated_to = arg("--task-definition")
+            return {"service": {"deployments": [{"id": "ecs-svc/123", "status": "PRIMARY"}]}}
+        if op == ("ecs", "describe-service-revisions"):
+            return {"serviceRevisions": [{"taskDefinition": self.updated_to}]}
+        if op == ("ecs", "describe-service-deployments"):
+            status = self.statuses.pop(0) if len(self.statuses) > 1 else self.statuses[0]
+            return {"serviceDeployments": [{"status": status, "lifecycleStage": "BAKE_TIME"}]}
+        raise AssertionError("unexpected aws call %s" % (command,))
+
+
+class ReleaseTests(unittest.TestCase):
+    def run_release(self, fake, key="k" * 32, build=None):
+        log = []
+        with patch("deploy.aws", side_effect=fake), patch("deploy.content_key", return_value=key), \
+                patch("deploy.docker_login"), patch("deploy.time.sleep"), \
+                patch("deploy.host.machine", return_value="x86_64"), \
+                patch("deploy.subprocess.run", side_effect=build or self.fail_build):
+            ok, lines = deploy.release_one(cfg(), "grid", SHA, "v1.4.0", REPO, timeout=600, log=log.append)
+        return ok, lines, log
+
+    def fail_build(self, *a, **k):
+        raise AssertionError("must not build: %s" % (a,))
+
+    def test_unchanged_image_and_revision_is_not_redeployed(self):
+        fake = FakeAws(self, images={"content-" + "k" * 32: OLD_DIGEST, OLD_SHA: OLD_DIGEST})
+        ok, lines, _ = self.run_release(fake)
+        self.assertTrue(ok)
+        self.assertIn("unchanged", lines[0])
+        self.assertNotIn(("ecs", "register-task-definition"), fake.calls)
+        self.assertNotIn(("ecs", "update-service"), fake.calls)
+        self.assertEqual(fake.images[SHA], OLD_DIGEST, "the commit still gets its tag on the reused image")
+        self.assertEqual(fake.images["v1.4.0"], OLD_DIGEST)
+
+    def test_new_image_registers_from_latest_and_follows_to_success(self):
+        built = []
+
+        def build(command, **kwargs):
+            built.append(command)
+            return SimpleNamespace(returncode=0)
+
+        fake = FakeAws(self, images={}, statuses=("IN_PROGRESS", "SUCCESSFUL"))
+        original_put = fake.__call__
+
+        # docker push is simulated by the first describe of the content tag after the pushes.
+        def aws(region, *command):
+            if command[:2] == ("ecr", "describe-images") and any(c[1] == "push" for c in built) \
+                    and "imageTag=content-" + "k" * 32 in command:
+                fake.images.setdefault("content-" + "k" * 32, DIGEST)
+            return original_put(region, *command)
+
+        ok, lines, log = self.run_release(aws, build=build)
+        self.assertTrue(ok, lines)
+        docker_build = built[0]
+        self.assertEqual(docker_build[:6], ["docker", "build", "--platform", "linux/amd64", "--target", "grid"])
+        pushes = [c[2] for c in built if c[1] == "push"]
+        self.assertEqual(pushes, [URI + ":" + SHA, URI + ":v1.4.0", URI + ":content-" + "k" * 32],
+                         "content tag last: it marks a complete push")
+        registered = fake.registered
+        self.assertEqual(registered["containerDefinitions"][0]["image"], URI + "@" + DIGEST)
+        self.assertEqual(registered["containerDefinitions"][0]["environment"],
+                         TaskDefinitionTests.DEFINITION["containerDefinitions"][0]["environment"])
+        self.assertEqual(fake.updated_to.rsplit(":", 1)[1], "8")
+        self.assertTrue(any("stop-service-deployment" in l and "arn:sd/1" in l for l in log))
+        self.assertTrue(any("update-service" in l and "sierra-grid:7" in l for l in lines),
+                        "the rollback names the revision that ran before")
+
+    def test_terraform_revision_is_deployed_even_when_the_image_is_the_same(self):
+        # Terraform registered :8 (say the writer was enabled); the service still runs :7.
+        fake = FakeAws(self, images={"content-" + "k" * 32: OLD_DIGEST}, service_td=7, latest_td=8)
+        ok, lines, _ = self.run_release(fake)
+        self.assertTrue(ok)
+        self.assertIn(("ecs", "register-task-definition"), fake.calls)
+        self.assertEqual(fake.registered["containerDefinitions"][0]["image"], URI + "@" + OLD_DIGEST)
+        self.assertEqual(fake.updated_to.rsplit(":", 1)[1], "9")
+
+    def test_rolled_back_deployment_fails(self):
+        fake = FakeAws(self, images={"content-" + "k" * 32: DIGEST}, statuses=("IN_PROGRESS", "ROLLBACK_SUCCESSFUL"))
+        ok, lines, _ = self.run_release(fake)
+        self.assertFalse(ok)
+        self.assertIn("NOT deployed", lines[0])
+        self.assertIn("describe-service-deployments", lines[1])
+
+    def test_timeout_fails_but_names_the_running_deployment(self):
+        fake = FakeAws(self, images={"content-" + "k" * 32: DIGEST}, statuses=("IN_PROGRESS",))
+        clock = iter(range(0, 100000, 10))
+        with patch("deploy.time.monotonic", side_effect=lambda: next(clock)):
+            ok, lines, log = self.run_release(fake)
+        self.assertFalse(ok)
+        self.assertTrue(any("still running" in l for l in log))
+
+    def test_deployment_in_progress_is_refused_before_building(self):
+        fake = FakeAws(self, images={}, busy=True)
+        with self.assertRaisesRegex(RuntimeError, "already has a deployment"):
+            self.run_release(fake)
+        self.assertNotIn(("ecs", "update-service"), fake.calls)
+
+    def test_service_on_another_family_is_refused(self):
+        fake = FakeAws(self)
+        with patch("deploy.aws", side_effect=fake), patch.dict(ENV, {"DEPLOY_GRID_TASK_FAMILY": "other"}), \
+                self.assertRaisesRegex(RuntimeError, "not a revision of other"):
+            deploy.release_one(cfg(), "grid", SHA, "", REPO, timeout=1, log=lambda *_: None)
+
+    def test_tag_conflict_is_an_error(self):
+        fake = FakeAws(self, images={"v1.4.0": OLD_DIGEST})
+        with patch("deploy.aws", side_effect=fake), self.assertRaisesRegex(RuntimeError, "already names another image"):
+            deploy.add_tag(cfg(), "grid", DIGEST, "v1.4.0")
+
+    def test_failed_service_stops_the_release(self):
+        args = SimpleNamespace(sha=SHA, git_tag="", source=str(REPO), only=None, push_only=False,
+                               platform="linux/amd64", timeout=1)
+        with patch("deploy.release_one", return_value=(False, ["grid: NOT deployed"])) as one, \
+                patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": ""}), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(deploy.release(args, environ=ENV), 1)
+        self.assertEqual([c.args[1] for c in one.call_args_list], ["grid"], "relay is not touched after grid failed")
+
+    def test_release_refuses_a_short_sha_or_unusable_tag(self):
+        for sha, tag in [("abc123", ""), (SHA, "content-x"), (SHA, "a/b")]:
+            args = SimpleNamespace(sha=sha, git_tag=tag, source=str(REPO), only=None, push_only=False,
+                                   platform="linux/amd64", timeout=1)
+            with self.subTest(sha=sha, tag=tag), patch("deploy.release_one") as one, self.assertRaises(deploy.Refused):
+                deploy.release(args, environ=ENV)
+            one.assert_not_called()
+
+    def test_push_only_never_touches_ecs(self):
+        fake = FakeAws(self, images={"content-" + "k" * 32: DIGEST})
+        with patch("deploy.aws", side_effect=fake), patch("deploy.content_key", return_value="k" * 32), \
+                patch("deploy.docker_login"):
+            ok, lines = deploy.release_one(cfg(), "grid", SHA, "", REPO, timeout=1, log=lambda *_: None,
+                                           push_only_arch="amd64")
+        self.assertTrue(ok)
+        self.assertFalse([c for c in fake.calls if c[0] == "ecs"])
+
+    def test_native_runner_is_required_to_build(self):
+        fake = FakeAws(self, images={})
+        with patch("deploy.aws", side_effect=fake), patch("deploy.host.machine", return_value="x86_64"), \
+                self.assertRaisesRegex(RuntimeError, "native runner"):
+            deploy.ensure_image(cfg(), "grid", URI, "k" * 32, SHA, "", "arm64", REPO, log=lambda *_: None)
 
 
 if __name__ == "__main__":

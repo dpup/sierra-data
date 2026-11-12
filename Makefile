@@ -492,12 +492,7 @@ docker: docker-build
 # tree). The image itself only compiles — it does not regenerate or test.
 docker-build: proto test
 	@echo "Building Docker image: $(DOCKER_IMAGE_NAME):$(DOCKER_TAG)"
-	docker build \
-		--platform linux/amd64 \
-		--build-arg GOOGLE_API_KEY=$(PF__GOOGLE_ROUTES__API_KEY) \
-		--build-arg OPENWEATHER_API_KEY=$(PF__OPENWEATHER__API_KEY) \
-		--build-arg OPENAI_API_KEY=$(PF__OPENAI__API_KEY) \
-		-t $(DOCKER_IMAGE_NAME):$(DOCKER_TAG) .
+	docker build --platform linux/amd64 --target grid -t $(DOCKER_IMAGE_NAME):$(DOCKER_TAG) .
 	@echo "✅ Docker image built: $(DOCKER_IMAGE_NAME):$(DOCKER_TAG)"
 
 # The relay image: same Dockerfile, its own target (no API keys).
@@ -537,7 +532,9 @@ docker-run-dev: docker-build
 		--name sierra-server-dev \
 		$(DOCKER_IMAGE_NAME):$(DOCKER_TAG)
 
-# Build and push both images without starting a deployment.
+# Build and push both images without starting a deployment: a manual first
+# push (the Grid account's ECR before the deploy role exists) or a local
+# check. Production deploys go through `make deploy` and the Deploy workflow.
 ecr-push: ecr-push-grid ecr-push-relay
 	@echo "✅ Both images pushed to $(DOCKER_REGISTRY) as :$(DOCKER_TAG)"
 
@@ -565,20 +562,20 @@ docker-push: docker-build
 	docker push $(DOCKER_REGISTRY)/$(DOCKER_IMAGE_NAME):$(DOCKER_TAG)
 	@echo "✅ Docker image pushed: $(DOCKER_REGISTRY)/$(DOCKER_IMAGE_NAME):$(DOCKER_TAG)"
 
-# Deployment is coordinated by the AWS endpoint. The repository client discovers
-# both ECR repositories there; AWS credentials are the only deployment config.
-# Use the commit tag by default, keeping explicit non-latest DOCKER_TAG values.
-.PHONY: ecs-deploy ecs-status ecs-rollback test-deploy-client
-# Refuses a working tree with uncommitted tracked changes (they would ship under
-# the commit's tag); ALLOW_DIRTY=1 overrides.
-ecs-deploy: test-deploy-client
-	python3 scripts/deploy.py deploy --build --wait --tag "$(if $(filter latest,$(DOCKER_TAG)),$(shell git rev-parse --short=12 HEAD),$(DOCKER_TAG))"$(if $(ALLOW_DIRTY), --allow-dirty)
+## Deployment (main -> the Grid account; docs/deploy-handoff.md)
+#
+# CI on main passes -> the Deploy workflow (.github/workflows/deploy.yml)
+# builds and pushes the images, registers task-definition revisions and
+# updates the ECS services (native blue/green, bake, automatic rollback).
+# `make deploy` runs that workflow by hand: for HEAD (on main, pushed, clean,
+# CI green) or REF=<tag or commit on main> to redeploy an earlier release.
+# It needs gh, not AWS credentials.
+.PHONY: deploy deploy-status test-deploy-client ecs-deploy ecs-status ecs-rollback
+deploy: test-deploy-client
+	python3 scripts/deploy.py dispatch$(if $(REF), --ref "$(REF)")$(if $(ALLOW_DIRTY), --allow-dirty)$(if $(PUSH_ONLY), --push-only)
 
-ecs-status:
-	python3 scripts/deploy.py status$(if $(JSON), --json)
-
-ecs-rollback:
-	python3 scripts/deploy.py rollback --wait
+deploy-status:
+	gh run list --workflow deploy.yml --limit 10
 
 test-deploy-client:
 	python3 -m unittest discover -s scripts -p 'test_deploy.py' -v
@@ -591,6 +588,14 @@ test-deploy-client:
 .PHONY: rehearse-import
 rehearse-import: test-deploy-client
 	python3 scripts/rehearse_import.py $(REHEARSE_ARGS)
+
+# The legacy stack's commands (the coordinator in the old account). They exist
+# only on legacy/efs-sqlite; here they refuse, so muscle memory cannot ship the
+# PostgreSQL build to the SQLite stack.
+ecs-deploy ecs-status ecs-rollback:
+	@echo "make $@ is the legacy stack's (SQLite on EFS, old account) and runs only from a checkout of" >&2
+	@echo "legacy/efs-sqlite (repos/sierra-data). main deploys to the Grid account with make deploy." >&2
+	@exit 2
 
 # API diff gate (migration plan section 8, gate 2): the legacy SQLite server
 # and the new PostgreSQL server on the same snapshot, every endpoint compared.
@@ -611,12 +616,6 @@ docker-clean:
 	-docker rmi $(DOCKER_IMAGE_NAME):$(DOCKER_TAG) 2>/dev/null || true
 	-docker system prune -f
 	@echo "✅ Docker artifacts cleaned"
-
-## Deployment Targets
-
-# Deploy to configured environment
-deploy:
-	@echo "Deployment not yet implemented"
 
 # Install CLI tools to system PATH
 install: tools
@@ -689,15 +688,14 @@ help:
 	@echo "  docker-push      - Push Docker image to registry (set DOCKER_REGISTRY)"
 	@echo "  docker-clean     - Clean up Docker artifacts and containers"
 	@echo ""
-	@echo "Deployment targets:"
-	@echo "  ecs-deploy  - Build/push both images and wait for coordinated deployment (AWS credentials required)"
-	@echo "  ecs-status  - Summarise coordinator ownership and deployment progress (JSON=1 for the raw document)"
-	@echo "  ecs-rollback - Deploy the previous image pair through the coordinator"
-	@echo "  test-deploy-client - Test the self-contained deployment client and the rehearsal script"
+	@echo "Deployment targets (docs/deploy-handoff.md):"
+	@echo "  deploy [REF=tag|commit] - Run the Deploy workflow for HEAD (main, pushed, clean, CI green) or REF, and watch it"
+	@echo "  deploy-status - Recent Deploy workflow runs"
+	@echo "  test-deploy-client - Test scripts/deploy.py and the rehearsal script"
 	@echo "  rehearse-import REHEARSE_ARGS=... - Import rehearsal from an AWS Backup restore (migration gate 5; docs/import.md)"
+	@echo "  (ecs-deploy/ecs-status/ecs-rollback are the legacy stack's; they run only on legacy/efs-sqlite)"
 	@echo "  apidiff LEGACY=url NEW=url - Diff the API of the legacy and new servers (migration gate 2)"
 	@echo "  docker      - Alias for docker-build"
-	@echo "  deploy      - Deploy to configured environment"
 	@echo "  install     - Install CLI tools to system PATH"
 	@echo ""
 	@echo "Utility targets:"
