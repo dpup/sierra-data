@@ -61,22 +61,28 @@ have already applied any migration at boot. No coordinator, no yield step.
 
 ### Repository variables
 
-Repository variables (or variables on the `production` environment), all
-required; `scripts/deploy.py check-config` refuses to go on while one is
-unset or malformed. Automatic runs are skipped until `DEPLOY_ROLE_ARN` is
-set, so the workflow is inert before the infrastructure exists.
+Repository variables (or variables on the `production` environment).
+`scripts/deploy.py check-config` refuses to go on while a required one is
+unset or any is malformed. Automatic runs are skipped until `DEPLOY_ROLE_ARN`
+is set, so the workflow is inert before the infrastructure exists.
 
-| Variable | What |
-|---|---|
-| `DEPLOY_ROLE_ARN` | The sierra-data deploy role in the Grid account (sierra-infra `grid/deploy`) |
-| `DEPLOY_AWS_REGION` | `us-west-2` |
-| `DEPLOY_ECS_CLUSTER` | Cluster holding both services |
-| `DEPLOY_GRID_SERVICE` | The Grid ECS service |
-| `DEPLOY_GRID_TASK_FAMILY` | Its task-definition family (the service must run a revision of it) |
-| `DEPLOY_GRID_ECR_REPOSITORY` | ECR repository name for the `grid` image |
-| `DEPLOY_RELAY_SERVICE` | The relay ECS service |
-| `DEPLOY_RELAY_TASK_FAMILY` | Its task-definition family |
-| `DEPLOY_RELAY_ECR_REPOSITORY` | ECR repository name for the `relay` image |
+The three relay variables are **optional as a group**, because the Grid
+service exists in the new account before the relay does. All three unset:
+the relay is skipped and the run (and `make deploy`) says so in a notice
+line, `relay: skipped, ... are all unset; deploying the Grid only`. Some
+set: refused, naming the missing ones. All set: both are deployed.
+
+| Variable | Required | What |
+|---|---|---|
+| `DEPLOY_ROLE_ARN` | yes | The sierra-data deploy role in the Grid account (sierra-infra `grid/deploy`) |
+| `DEPLOY_AWS_REGION` | yes | `us-west-2` |
+| `DEPLOY_ECS_CLUSTER` | yes | Cluster holding the services |
+| `DEPLOY_GRID_SERVICE` | yes | The Grid ECS service |
+| `DEPLOY_GRID_TASK_FAMILY` | yes | Its task-definition family (the service must run a revision of it) |
+| `DEPLOY_GRID_ECR_REPOSITORY` | yes | ECR repository name for the `grid` image |
+| `DEPLOY_RELAY_SERVICE` | all three or none | The relay ECS service |
+| `DEPLOY_RELAY_TASK_FAMILY` | all three or none | Its task-definition family |
+| `DEPLOY_RELAY_ECR_REPOSITORY` | all three or none | ECR repository name for the `relay` image |
 
 The container whose image is replaced is the one already using the
 service's repository, or else the one named `grid` / `relay`.
@@ -115,7 +121,10 @@ make deploy-status          # recent Deploy runs
 `make deploy` needs `gh` logged in, not AWS credentials. It runs the same
 guards as the legacy client (`branch_drift`: the right branch, not detached,
 HEAD fetched and equal to origin; `dirty_files`: no uncommitted tracked
-changes, `ALLOW_DIRTY=1` overrides) and checks that CI passed, then runs
+changes, `ALLOW_DIRTY=1` overrides) and checks that CI passed. When `gh` can
+read the variables (repository and `production` environment) it applies the
+configuration check by name, refusing missing ones and noting a skipped
+relay; when it cannot, it says so and leaves the check to the workflow. Then it runs
 `gh workflow run deploy.yml --ref main` and follows the run with
 `gh run watch`; the exit code is the run's. Approve the `deploy` job in the
 `production` environment when asked.
@@ -147,7 +156,8 @@ before the SQLite import has run:
    hand with `make ecr-push-grid` / `ecr-push-relay` and the operator's
    credentials. Point Terraform's first revision at that image.
 2. Set the repository variables; the next push to main (or `make deploy`)
-   deploys normally. With the writer disabled no task campaigns for the
+   deploys normally. Leave the three `DEPLOY_RELAY_*` unset until the relay
+   service exists: the Grid deploys alone, with a notice. With the writer disabled no task campaigns for the
    lease: no ingest, no MQTT, no upstream spend, pushes answered 503.
 3. After `gridctl import` (docs/import.md), Terraform sets
    `PF__GRID__WRITER__ENABLED=true`, which registers a new revision; run
