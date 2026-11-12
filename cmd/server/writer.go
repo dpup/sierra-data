@@ -350,6 +350,7 @@ func (a *gridApp) startTerm(actx context.Context, lease *store.Lease) (*writerTe
 		return nil, fmt.Errorf("seed grid places: %w", err)
 	}
 	logging.Infow(ctx, "Seeded grid sources and places", "duration", time.Since(seedStart))
+	a.hook("seeded")
 
 	// One poller per upstream scope; weather_alert and road_incident reuse the
 	// services' cached, budgeted pipelines (plan decision 6).

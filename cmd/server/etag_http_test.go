@@ -28,8 +28,21 @@ func TestConditionalGetThroughTheGateway(t *testing.T) {
 	eventID := seedPlaceAndEvent(t, dbURL)
 
 	a, portA := preparedGrid(t, dbURL)
+	// The writer's boot seed (sources, places) bumps the places version that
+	// leads every ETag; wait for it, or a read on each side can straddle it.
+	seeded := make(chan struct{})
+	a.activateHook = func(stage string) {
+		if stage == "seeded" {
+			close(seeded)
+		}
+	}
 	ha := runGrid(t, a, false)
-	require.Eventually(t, a.DatabaseHeld, 20*time.Second, 20*time.Millisecond)
+	select {
+	case <-seeded:
+	case <-time.After(20 * time.Second):
+		t.Fatal("the writer never finished seeding")
+	}
+	require.True(t, a.DatabaseHeld())
 	b, portB := preparedGrid(t, dbURL)
 	off := false
 	b.cfg.Grid.Writer.Enabled = &off

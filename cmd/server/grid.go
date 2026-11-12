@@ -64,8 +64,9 @@ type gridApp struct {
 	// onFatal is the controller's Fail: the production server stopping is
 	// fatal (main sets it).
 	onFatal func(error)
-	// activateHook, when set, runs at named points of a writer term's start
-	// (tests inject failures and panics there).
+	// activateHook, when set, runs at named points of a writer term's start:
+	// "lease-acquired", then "seeded" once the boot writes (sources, places)
+	// are in. Tests inject failures and panics there, and wait on it.
 	activateHook func(stage string)
 	// instanceID names this process in writer_lease.holder (the handoff
 	// controller's id; main sets it).
