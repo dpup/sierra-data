@@ -34,7 +34,7 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -ldflags="-s -w" -o /sierra-server ./cmd/server
 
-# gridctl, the one-off SQLite -> PostgreSQL importer (docs/import.md). Shipped
+# gridctl, the one-off SQLite -> PostgreSQL importer (usage: gridctl --help). Shipped
 # in the Grid image so a one-off ECS task can run it (entryPoint
 # /app/gridctl); its own binary, so the server links neither SQLite nor the
 # AWS SDK. GRIDCTL_VERSION is recorded in snapshot manifests and import_log.

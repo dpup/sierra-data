@@ -5,8 +5,6 @@ on:
     paths:
       - 'scripts/deploy.py'
       - 'scripts/test_deploy.py'
-      - 'scripts/rehearse_import.py'
-      - 'scripts/test_rehearse_import.py'
       - 'Makefile'
       - 'Dockerfile'
       - '.github/workflows/deploy.yml'
@@ -16,8 +14,6 @@ on:
     paths:
       - 'scripts/deploy.py'
       - 'scripts/test_deploy.py'
-      - 'scripts/rehearse_import.py'
-      - 'scripts/test_rehearse_import.py'
       - 'Makefile'
       - 'Dockerfile'
       - '.github/workflows/deploy.yml'

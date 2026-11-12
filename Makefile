@@ -65,8 +65,8 @@ $(SERVER_BINARY): proto
 mesh-relay:
 	$(GOBUILD) -o $(MESH_RELAY_BINARY) ./$(CMD_DIR)/mesh-relay
 
-# gridctl: the SQLite -> PostgreSQL importer (snapshot, import, verify; see
-# docs/import.md). Its own binary so the server never links SQLite or the AWS
+# gridctl: the SQLite -> PostgreSQL importer (snapshot, import, verify; usage in
+# `bin/gridctl --help` and the cmd/gridctl package doc). Its own binary so the server never links SQLite or the AWS
 # SDK. The version (git describe) lands in the snapshot manifest and import_log.
 GRIDCTL_BINARY=$(BUILD_DIR)/gridctl
 GRIDCTL_VERSION?=$(shell git describe --always --dirty 2>/dev/null || echo dev)
@@ -579,15 +579,6 @@ deploy-status:
 
 test-deploy-client:
 	python3 -m unittest discover -s scripts -p 'test_deploy.py' -v
-	python3 -m unittest discover -s scripts -p 'test_rehearse_import.py' -v
-
-# Import rehearsal (migration gate 5): AWS Backup restore of grid.db, snapshot
-# in the old account, import + verify in the Grid account, report in the
-# workspace's notes/local/. Runbook: docs/import.md. Try REHEARSE_ARGS=--dry-run first.
-# make rehearse-import REHEARSE_ARGS="--old-profile <old> --new-profile <new> [--new-base-url <url>]"
-.PHONY: rehearse-import
-rehearse-import: test-deploy-client
-	python3 scripts/rehearse_import.py $(REHEARSE_ARGS)
 
 # The legacy stack's commands (the coordinator in the old account). They exist
 # only on legacy/efs-sqlite; here they refuse, so muscle memory cannot ship the
@@ -645,7 +636,7 @@ help:
 	@echo "  tools       - Build CLI testing tools only"
 	@echo "  proto       - Generate protobuf code (and the OpenAPI spec)"
 	@echo "  openapi     - Rebuild api/grid/v1/openapi.json from the swagger + overlay"
-	@echo "  gridctl     - Build the SQLite -> PostgreSQL importer (bin/gridctl; docs/import.md)"
+	@echo "  gridctl     - Build the SQLite -> PostgreSQL importer (bin/gridctl; bin/gridctl --help)"
 	@echo "  clean       - Clean build artifacts"
 	@echo ""
 	@echo "Operations targets:"
@@ -691,8 +682,7 @@ help:
 	@echo "Deployment targets (docs/deploy-handoff.md):"
 	@echo "  deploy [REF=tag|commit] - Run the Deploy workflow for HEAD (main, pushed, clean, CI green) or REF, and watch it"
 	@echo "  deploy-status - Recent Deploy workflow runs"
-	@echo "  test-deploy-client - Test scripts/deploy.py and the rehearsal script"
-	@echo "  rehearse-import REHEARSE_ARGS=... - Import rehearsal from an AWS Backup restore (migration gate 5; docs/import.md)"
+	@echo "  test-deploy-client - Test scripts/deploy.py"
 	@echo "  (ecs-deploy/ecs-status/ecs-rollback are the legacy stack's; they run only on legacy/efs-sqlite)"
 	@echo "  apidiff LEGACY=url NEW=url - Diff the API of the legacy and new servers (migration gate 2)"
 	@echo "  docker      - Alias for docker-build"

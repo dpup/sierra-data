@@ -119,9 +119,9 @@ make deploy REF=v1.4.0    # redeploy an earlier tag or commit on main
 make deploy-status        # recent Deploy runs
 ```
 
-`make deploy` needs `gh`, not AWS credentials. Repository variables, the
-first deploy with the writer disabled, rollback and what Terraform must
-set: [docs/deploy-handoff.md](docs/deploy-handoff.md).
+`make deploy` needs `gh`, not AWS credentials. Repository variables,
+rollback and what the Grid does during a deploy:
+[docs/deploy-handoff.md](docs/deploy-handoff.md).
 
 The legacy SQLite-on-EFS stack in the old account deploys only from a
 checkout of `legacy/efs-sqlite` with its own `make ecs-deploy`; on `main`
