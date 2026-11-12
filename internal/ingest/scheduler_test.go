@@ -797,7 +797,7 @@ func TestTickCoalescesTouchSeen(t *testing.T) {
 	ps := &pollerState{}
 	spec := PollerSpec{Normalizer: fn, Interval: time.Minute}
 
-	sched.tick(ctx, spec, ps) // upsert stamps last_seen_at = t0
+	sched.tick(ctx, spec, ps) // upsert stamps last_seen_at with the store's wall clock
 	lastSeen := func() int64 {
 		t.Helper()
 		active, err := st.ActiveEventsBySource(context.Background(), "s1")
@@ -805,13 +805,16 @@ func TestTickCoalescesTouchSeen(t *testing.T) {
 		require.Len(t, active, 1)
 		return active[0].LastSeenAt.Unix()
 	}
-	require.Equal(t, t0.Unix(), lastSeen())
+	// The upsert runs a little after t0 and may cross a second boundary, so
+	// the stamp is t0 or just after it; the stamp itself is the anchor below.
+	stamp := lastSeen()
+	require.InDelta(t, t0.Unix(), stamp, 2, "the first tick stamps last_seen_at")
 
 	// Ticks inside the coalescing window: the stamp must NOT move — that is the
 	// whole point (no dirty pages, no cache invalidation on quiet ticks).
 	now = t0.Add(time.Minute)
 	sched.tick(ctx, spec, ps)
-	assert.Equal(t, t0.Unix(), lastSeen(), "a tick inside the window must not rewrite the stamp")
+	assert.Equal(t, stamp, lastSeen(), "a tick inside the window must not rewrite the stamp")
 
 	// A tick past the window rewrites it, so the stamp lags truth by at most
 	// touchSeenCoalesce — which is why the window must stay far below every
