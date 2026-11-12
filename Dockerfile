@@ -69,6 +69,14 @@ COPY --from=site-builder /site/dist ./site/dist
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -ldflags="-s -w" -o /sierra-server ./cmd/server
 
+# gridctl, the one-off SQLite -> PostgreSQL importer (docs/import.md). Shipped
+# in the Grid image so a one-off ECS task can run it (entryPoint
+# /app/gridctl); its own binary, so the server links neither SQLite nor the
+# AWS SDK. GRIDCTL_VERSION is recorded in snapshot manifests and import_log.
+ARG GRIDCTL_VERSION=image
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -ldflags="-s -w -X main.version=${GRIDCTL_VERSION}" -o /gridctl ./cmd/gridctl
+
 ###############################################################################
 # Mesh relay image (docker build --target relay) — a SEPARATE service
 ###############################################################################
@@ -125,6 +133,7 @@ RUN addgroup -S sierra && adduser -S sierra -G sierra
 
 # Copy the binary from the build stage
 COPY --from=go-builder /sierra-server /app/sierra-server
+COPY --from=go-builder /gridctl /app/gridctl
 
 # Copy the configuration file
 COPY --from=go-builder /app/prefab.yaml /app/prefab.yaml

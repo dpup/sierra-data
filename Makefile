@@ -68,6 +68,15 @@ $(SERVER_BINARY): proto site-ensure
 mesh-relay:
 	$(GOBUILD) -o $(MESH_RELAY_BINARY) ./$(CMD_DIR)/mesh-relay
 
+# gridctl: the SQLite -> PostgreSQL importer (snapshot, import, verify; see
+# docs/import.md). Its own binary so the server never links SQLite or the AWS
+# SDK. The version (git describe) lands in the snapshot manifest and import_log.
+GRIDCTL_BINARY=$(BUILD_DIR)/gridctl
+GRIDCTL_VERSION?=$(shell git describe --always --dirty 2>/dev/null || echo dev)
+.PHONY: gridctl
+gridctl:
+	$(GOBUILD) -ldflags "-X main.version=$(GRIDCTL_VERSION)" -o $(GRIDCTL_BINARY) ./$(CMD_DIR)/gridctl
+
 # Run the relay in the foreground (prefab.yaml meshRelay: port 8090, db
 # ./data/relay.db). Add yourself to meshRelay.admins (see relay-token) to use
 # the admin API.
@@ -741,6 +750,7 @@ help:
 	@echo "  site-ensure - Build the site only if missing/stale (implied by server, run, test)"
 	@echo "  site-dev    - Run the Astro dev server (hot reload)"
 	@echo "  site-shots [BASE_URL=url] [LABEL=tag] - Screenshot + layout metrics of a running site (Playwright)"
+	@echo "  gridctl     - Build the SQLite -> PostgreSQL importer (bin/gridctl; docs/import.md)"
 	@echo "  clean       - Clean build artifacts"
 	@echo ""
 	@echo "Operations targets:"
