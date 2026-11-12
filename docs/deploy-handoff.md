@@ -121,7 +121,8 @@ The reader does not authenticate the request itself: the writer does, once.
 The validators are the `versions` counters (bumped in the writing
 transaction), a short hash of the running executable (a new build may render
 the same data differently; the image has no `.git`), and the place-set
-version (bumped when a writer term reseeds). Each process caches the counters
+version (bumped only when a place actually changes: a writer term's reseed
+of an unchanged directory bumps nothing, so a handover alone moves no tag). Each process caches the counters
 and refreshes them
 
 - after each of its own commits (the writer is exact),
@@ -130,10 +131,11 @@ and refreshes them
 - on a 10 s poll, so a reader with a broken listener answers a stale `304`
   for at most 10 s after a write.
 
-Note: the gRPC handlers set `ETag` and `Cache-Control`, but the gateway does
-not copy them to the HTTP response today (pre-existing, also on the legacy
-build; prefab's outgoing header matcher). Comparing validators across
-processes therefore needs a gRPC client for now.
+HTTP clients get the `ETag` and `Cache-Control: public, max-age=30`, and a
+`304` with no body on a matching `If-None-Match`, through
+`gridapi.OutgoingHeaderMatcher` on the gateway mux (prefab's own outgoing
+matcher dropped both headers until 2026-11-12). Two processes on one
+database return the same tag, and either honours the other's.
 
 ## Configuration
 
@@ -249,10 +251,15 @@ servers on ports `REHEARSE_PORT_A/B` (8197/8198):
 4. The epochs must be 1, 2, 3 with one lock holder; no read may fail and no
    push may fail after its retries; each takeover must be under
    `REHEARSE_TAKEOVER_MAX_MS` (5 s).
+5. Conditional GET: A and B return the same `ETag` for `/api/v1/places` and
+   `/api/v1/events`, B answers A's tag with `304`, and the `/api/v1/places`
+   tag taken before each switch still answers `304` (no body) from the
+   survivor after the SIGTERM and the SIGKILL handover.
 
-Local results (2026-11-12, three runs): SIGTERM takeover 506-513 ms, SIGKILL
-takeover 62-289 ms, no failed reads or pushes, one push retried once per
-switch.
+Local results (2026-11-12, three runs after the integration of the importer
+and the header fix): SIGTERM takeover 455-481 ms, SIGKILL takeover 284-289 ms,
+no failed reads or pushes, one push retried once per switch, ETags equal on
+both processes and the pre-switch tag answered `304` after every handover.
 
 ## Timing logs
 
