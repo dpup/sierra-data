@@ -9,7 +9,7 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.33.0
 	github.com/sashabaranov/go-openai v1.43.0
-	github.com/sierragridteam/sierra-meshrelay v0.10.0
+	github.com/sierragridteam/sierra-meshrelay v0.14.0
 	github.com/stretchr/testify v1.12.1
 	github.com/twpayne/go-polyline v1.1.2
 	golang.org/x/net v0.62.0
