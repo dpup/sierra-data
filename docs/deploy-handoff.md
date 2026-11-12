@@ -20,8 +20,10 @@ branch (last section).
 2. **The Deploy workflow** (`.github/workflows/deploy.yml`) starts when CI
    succeeds on a push to this repository's `main` (`workflow_run`), or by
    hand (`make deploy`, below). Its `preflight` job resolves the commit and
-   refuses anything not reachable from `origin/main`; a manual run also
-   needs a successful CI push run for that commit.
+   refuses anything not reachable from `origin/main`, and anything at or
+   before the tag `legacy-efs-final` (the SQLite stack, which main's history
+   still reaches); a manual run also needs a successful CI push run for
+   that commit.
 3. **Approval.** The `deploy` job runs in the GitHub Environment
    `production`, which has a required reviewer and allows only `main`. Once
    approved it gets the deploy role through GitHub OIDC (no AWS keys) and
