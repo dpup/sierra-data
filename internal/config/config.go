@@ -185,7 +185,9 @@ type GridDatabaseConfig struct {
 	// internal/store/migrations/0001_baseline.sql).
 	URL string `koanf:"url"`
 	// MaxConns bounds the connection pool (0 => store.DefaultMaxConns). The
-	// writer lock holds one more, dedicated connection.
+	// writer lease holds one more, dedicated connection and the validator
+	// LISTEN another: a process uses at most MaxConns + 2 backends (the
+	// arithmetic for db.t4g.small is in internal/store/AGENTS.md).
 	MaxConns int `koanf:"maxConns"`
 	// MinConns keeps this many connections open while idle (0 =>
 	// store.DefaultMinConns).
