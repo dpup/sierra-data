@@ -408,6 +408,26 @@ the old writer, docs/deploy-handoff.md). Rules:
 - A migration that needs a data backfill runs its DML in the same file; DDL is
   transactional, so a failed migration leaves nothing behind.
 
+### The SQLite importer depends on this schema
+
+`internal/sqliteimport` (`gridctl import`, `docs/import.md`) loads the legacy
+SQLite store into these tables and verifies them column by column. Its table
+list (`tables.go`) names the columns it copies and compares, and it derives
+the columns SQLite never had (`first_ingested_at`, the bbox, `versions`, the
+`mesh_observations` identity). So:
+
+- A new column on an imported table must either have a default that is right
+  for every legacy row, or be derived in the importer (and checked there).
+- A new table that holds data carried from SQLite goes into the importer's
+  list; one that does not is simply empty after an import.
+- A new `versions` key, identity column or derived index column needs the
+  same treatment as `revisions` and `first_ingested_at`: seeded by the import
+  and asserted by its database checks.
+- `import_log` is created by the importer itself until it becomes migration
+  `0003_import_log.sql` (after the writer lease's `0002`; the runner refuses
+  a gap). The DDL is `internal/sqliteimport/import_log.sql`, written to be
+  moved verbatim.
+
 `ErrNotFound` from point lookups (`GetEvent`, `GetPlace`) maps to HTTP 404 at the
 API layer — return it, don't invent a sentinel.
 
