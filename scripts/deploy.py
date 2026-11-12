@@ -16,7 +16,7 @@ Python 3 standard library only, in two halves:
                 deployment (blue/green bake, automatic rollback) to its end.
 
 Also `resolve` (the workflow's check of what it is asked to deploy) and
-`check-config` (refuses when a repository variable is unset).
+`check-config` (refuses when a required repository variable is unset).
 
 Terraform (sierra-infra, grid/compute) owns the services, the task
 definitions' content and the deployment configuration; this only swaps
@@ -51,7 +51,10 @@ FLOOR_TAG = "legacy-efs-final"
 
 # Repository (or `production` environment) variables. The workflow passes
 # them as environment variables of the same name; check-config refuses to
-# go on while any is unset or malformed.
+# go on while any is unset or malformed. The relay's three are OPTIONAL as a
+# group (the Grid service exists in the new account before the relay does):
+# all unset skips the relay with a notice, some set is refused, all set
+# deploys it.
 SETTINGS = {
     "DEPLOY_ROLE_ARN": (r"arn:aws:iam::[0-9]{12}:role/[\w+=,.@/-]+",
                         "role the workflow assumes through GitHub OIDC (sierra-infra grid/deploy)"),
@@ -78,6 +81,8 @@ TARGETS = {
     "relay": {"stage": "relay", "binaries": [("./cmd/mesh-relay", "mesh-relay")],
               "files": ["Dockerfile", "prefab.yaml"]},
 }
+
+OPTIONAL_GROUPS = {"relay": ["DEPLOY_RELAY_SERVICE", "DEPLOY_RELAY_TASK_FAMILY", "DEPLOY_RELAY_ECR_REPOSITORY"]}
 
 SHA_RE = re.compile(r"[0-9a-f]{7,40}")
 FULL_SHA_RE = re.compile(r"[0-9a-f]{40}")
@@ -219,6 +224,34 @@ def find_run(request_id, timeout=60):
                        % (request_id, WORKFLOW))
 
 
+def variable_names():
+    """Names of the repository and `production` environment variables, or
+    None when gh cannot read them (that needs more than read access; the
+    workflow checks them regardless)."""
+    names = set()
+    for scope in ([], ["--env", "production"]):
+        try:
+            out = gh("variable", "list", *scope, "--json", "name").stdout
+        except (subprocess.CalledProcessError, OSError):
+            return None
+        names |= {v["name"] for v in json.loads(out or "[]")}
+    return names
+
+
+def check_variables():
+    """The workflow's configuration check, by name only, before dispatching."""
+    names = variable_names()
+    if names is None:
+        print("notice: cannot read the repository variables with gh; the workflow checks them", flush=True)
+        return
+    present = {n: "set" for n in names}
+    problems = config_problems(present, check_format=False)
+    if problems:
+        raise Refused("deploy configuration incomplete; set these repository variables:\n  " + "\n  ".join(problems))
+    for target in skipped_targets(present):
+        notice(skip_notice(target), {})
+
+
 def dispatch(args):
     if args.ref:
         # An existing release: the checkout's branch and tree do not matter,
@@ -239,6 +272,7 @@ def dispatch(args):
         what = sha
     if not ci_passed(sha):
         raise Refused("CI has not passed for %s on a push to %s; deploy only what verify passed" % (sha[:12], MAIN))
+    check_variables()
     request_id = uuid.uuid4().hex[:12]
     fields = ["-f", "ref=" + what, "-f", "request_id=" + request_id]
     if args.push_only:
@@ -255,15 +289,42 @@ def dispatch(args):
 # --- configuration -------------------------------------------------------------
 
 
-def config_problems(environ):
+def skipped_targets(environ):
+    """The optional images whose variables are all unset."""
+    return [target for target, names in OPTIONAL_GROUPS.items() if not any(environ.get(n) for n in names)]
+
+
+def skip_notice(target):
+    return ("%s: skipped, %s are all unset; deploying the Grid only"
+            % (target, ", ".join(OPTIONAL_GROUPS[target])))
+
+
+def config_problems(environ, check_format=True):
+    """Every unset or malformed variable. An optional group that is entirely
+    unset is no problem (it is skipped); a partly set one names what is
+    missing."""
+    skipped = {n for target in skipped_targets(environ) for n in OPTIONAL_GROUPS[target]}
     problems = []
     for name, (pattern, meaning) in SETTINGS.items():
+        if name in skipped:
+            continue
         value = environ.get(name, "")
+        group = next((t for t, names in OPTIONAL_GROUPS.items() if name in names), None)
         if not value:
-            problems.append("%s is unset (%s)" % (name, meaning))
-        elif not re.fullmatch(pattern, value):
+            if group:
+                problems.append("%s is unset (%s); the %s variables are all or nothing: set it, or unset %s"
+                                % (name, meaning, group,
+                                   " and ".join(n for n in OPTIONAL_GROUPS[group] if environ.get(n))))
+            else:
+                problems.append("%s is unset (%s)" % (name, meaning))
+        elif check_format and not re.fullmatch(pattern, value):
             problems.append("%s=%r is malformed (%s)" % (name, value, meaning))
     return problems
+
+
+def notice(text, environ=os.environ):
+    """A line in the log, and an annotation on the run when in Actions."""
+    print(("::notice::" if environ.get("GITHUB_ACTIONS") == "true" else "notice: ") + text, flush=True)
 
 
 class Config:
@@ -274,10 +335,11 @@ class Config:
                           + "\n  ".join(problems))
         self.region = environ["DEPLOY_AWS_REGION"]
         self.cluster = environ["DEPLOY_ECS_CLUSTER"]
+        self.skipped = skipped_targets(environ)
         self.targets = {name: {"service": environ["DEPLOY_%s_SERVICE" % name.upper()],
                                "family": environ["DEPLOY_%s_TASK_FAMILY" % name.upper()],
                                "repository": environ["DEPLOY_%s_ECR_REPOSITORY" % name.upper()]}
-                        for name in TARGETS}
+                        for name in TARGETS if name not in self.skipped}
 
 
 # --- AWS -----------------------------------------------------------------------
@@ -602,8 +664,14 @@ def release(args, environ=os.environ):
     if args.git_tag and (not TAG_RE.fullmatch(args.git_tag) or args.git_tag.startswith(CONTENT_PREFIX)):
         raise Refused("--git-tag %r is not usable as an image tag" % args.git_tag)
     source = Path(args.source).resolve()
-    names = [args.only] if args.only else list(TARGETS)
+    if args.only and args.only not in cfg.targets:
+        raise Refused("--only %s, but the %s variables are unset" % (args.only, args.only))
+    names = [args.only] if args.only else list(cfg.targets)
     summary, failed = [], False
+    for name in cfg.skipped:
+        if not args.only:
+            notice(skip_notice(name), environ)
+            summary.append(skip_notice(name))
     for name in names:
         ok, lines = release_one(cfg, name, args.sha, args.git_tag, source, args.timeout,
                                 push_only_arch=args.platform.split("/")[-1] if args.push_only else None)
@@ -657,6 +725,8 @@ def main(argv=None):
             if problems:
                 raise Refused("deploy configuration incomplete; set these repository variables:\n  "
                               + "\n  ".join(problems))
+            for target in skipped_targets(os.environ):
+                notice(skip_notice(target))
             print("deploy configuration complete")
             return 0
         return release(args)

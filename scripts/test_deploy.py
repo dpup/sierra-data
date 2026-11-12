@@ -45,11 +45,49 @@ def git_responses(**answers):
 
 
 class ConfigTests(unittest.TestCase):
-    def test_every_unset_variable_is_named(self):
+    RELAY = ["DEPLOY_RELAY_SERVICE", "DEPLOY_RELAY_TASK_FAMILY", "DEPLOY_RELAY_ECR_REPOSITORY"]
+
+    def test_every_unset_required_variable_is_named(self):
         problems = deploy.config_problems({})
-        self.assertEqual(len(problems), len(deploy.SETTINGS))
-        for name in deploy.SETTINGS:
+        required = [n for n in deploy.SETTINGS if n not in self.RELAY]
+        self.assertEqual(len(problems), len(required))
+        for name in required:
             self.assertTrue(any(p.startswith(name + " is unset") for p in problems), name)
+
+    def test_grid_variables_stay_required_without_the_relay(self):
+        for name in ["DEPLOY_GRID_SERVICE", "DEPLOY_GRID_TASK_FAMILY", "DEPLOY_GRID_ECR_REPOSITORY"]:
+            env = {k: v for k, v in ENV.items() if k != name and k not in self.RELAY}
+            with self.subTest(name=name):
+                self.assertEqual([p.split()[0] for p in deploy.config_problems(env)], [name])
+
+    def test_relay_all_unset_is_skipped(self):
+        env = {k: v for k, v in ENV.items() if k not in self.RELAY}
+        self.assertEqual(deploy.config_problems(env), [])
+        config = deploy.Config(env)
+        self.assertEqual(list(config.targets), ["grid"])
+        self.assertEqual(config.skipped, ["relay"])
+
+    def test_relay_partly_set_names_the_missing_ones(self):
+        env = {k: v for k, v in ENV.items() if k not in ("DEPLOY_RELAY_TASK_FAMILY", "DEPLOY_RELAY_ECR_REPOSITORY")}
+        problems = deploy.config_problems(env)
+        self.assertEqual([p.split()[0] for p in problems], ["DEPLOY_RELAY_TASK_FAMILY", "DEPLOY_RELAY_ECR_REPOSITORY"])
+        self.assertIn("all or nothing", problems[0])
+        self.assertIn("unset DEPLOY_RELAY_SERVICE", problems[0])
+        with self.assertRaises(deploy.Refused):
+            deploy.Config(env)
+
+    def test_relay_all_set_deploys_both(self):
+        config = deploy.Config(ENV)
+        self.assertEqual(list(config.targets), ["grid", "relay"])
+        self.assertEqual(config.skipped, [])
+
+    def test_check_config_notices_a_skipped_relay(self):
+        env = {**{k: v for k, v in ENV.items() if k not in self.RELAY}, **{k: "" for k in self.RELAY},
+               "GITHUB_ACTIONS": "true"}
+        with patch.dict(os.environ, env), contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(deploy.main(["check-config"]), 0)
+        self.assertIn("::notice::relay: skipped, DEPLOY_RELAY_SERVICE, DEPLOY_RELAY_TASK_FAMILY, "
+                      "DEPLOY_RELAY_ECR_REPOSITORY are all unset; deploying the Grid only", out.getvalue())
 
     def test_complete_configuration_passes(self):
         self.assertEqual(deploy.config_problems(ENV), [])
@@ -196,13 +234,64 @@ class ResolveTests(unittest.TestCase):
 
 
 class DispatchTests(unittest.TestCase):
-    def gh(self, url="https://github.com/sierragridteam/sierra-data/actions/runs/42\n"):
+    def gh(self, url="https://github.com/sierragridteam/sierra-data/actions/runs/42\n", variables=tuple(ENV)):
         calls = []
 
         def fake(*command, capture=True):
             calls.append(list(command))
-            return SimpleNamespace(stdout=url if command[:2] == ("workflow", "run") else "[]")
+            if command[:2] == ("workflow", "run"):
+                return SimpleNamespace(stdout=url)
+            if command[:2] == ("variable", "list"):
+                # Repository scope holds them all; the environment scope none.
+                names = [] if "--env" in command else list(variables)
+                return SimpleNamespace(stdout=json.dumps([{"name": n} for n in names]))
+            return SimpleNamespace(stdout="[]")
         return calls, fake
+
+    @staticmethod
+    def workflow_run(calls):
+        return next(c for c in calls if c[:2] == ["workflow", "run"])
+
+    def dispatch_with_variables(self, variables):
+        calls, fake = self.gh(variables=variables)
+        with patch("deploy.branch_drift", return_value=None), patch("deploy.dirty_files", return_value=[]), \
+                patch("deploy.git", return_value=SHA), patch("deploy.ci_passed", return_value=True), \
+                patch("deploy.gh", side_effect=fake), \
+                patch("deploy.subprocess.run", return_value=SimpleNamespace(returncode=0)), \
+                contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()) as err:
+            code = deploy.main(["dispatch"])
+        return code, out.getvalue(), err.getvalue(), calls
+
+    def test_dispatch_with_every_variable_deploys_both_silently(self):
+        code, out, _, calls = self.dispatch_with_variables(ENV)
+        self.assertEqual(code, 0)
+        self.assertNotIn("skipped", out)
+        self.workflow_run(calls)
+
+    def test_dispatch_without_relay_variables_says_the_relay_is_skipped(self):
+        code, out, _, calls = self.dispatch_with_variables([n for n in ENV if not n.startswith("DEPLOY_RELAY_")])
+        self.assertEqual(code, 0)
+        self.assertIn("notice: relay: skipped", out)
+        self.workflow_run(calls)
+
+    def test_dispatch_with_some_relay_variables_is_refused(self):
+        code, _, err, calls = self.dispatch_with_variables([n for n in ENV if n != "DEPLOY_RELAY_TASK_FAMILY"])
+        self.assertEqual(code, 2)
+        self.assertIn("DEPLOY_RELAY_TASK_FAMILY is unset", err)
+        self.assertFalse([c for c in calls if c[:2] == ["workflow", "run"]], "nothing dispatched")
+
+    def test_dispatch_goes_on_when_gh_cannot_read_variables(self):
+        def fake(*command, capture=True):
+            if command[:2] == ("variable", "list"):
+                raise subprocess.CalledProcessError(1, ["gh"])
+            return SimpleNamespace(stdout="https://github.com/x/y/actions/runs/7\n")
+        with patch("deploy.branch_drift", return_value=None), patch("deploy.dirty_files", return_value=[]), \
+                patch("deploy.git", return_value=SHA), patch("deploy.ci_passed", return_value=True), \
+                patch("deploy.gh", side_effect=fake), \
+                patch("deploy.subprocess.run", return_value=SimpleNamespace(returncode=0)), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(deploy.main(["dispatch"]), 0)
+        self.assertIn("the workflow checks them", out.getvalue())
 
     def test_head_dispatches_main_and_watches_the_run(self):
         calls, fake = self.gh()
@@ -213,7 +302,7 @@ class DispatchTests(unittest.TestCase):
                 contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(deploy.main(["dispatch"]), 0)
         ci.assert_called_once_with(SHA)
-        run = calls[0]
+        run = self.workflow_run(calls)
         self.assertEqual(run[:5], ["workflow", "run", "deploy.yml", "--ref", "main"])
         self.assertIn("ref=" + SHA, run)
         self.assertTrue(any(f.startswith("request_id=") for f in run))
@@ -275,7 +364,7 @@ class DispatchTests(unittest.TestCase):
         dirty.assert_not_called()
         resolve.assert_called_once_with("v1.2.0")
         ci.assert_called_once_with(OLD_SHA)
-        self.assertIn("ref=v1.2.0", calls[0])
+        self.assertIn("ref=v1.2.0", self.workflow_run(calls))
 
     def test_run_is_found_by_request_id_when_gh_prints_no_url(self):
         listing = json.dumps([{"databaseId": 7, "displayTitle": "Deploy main [other]"},
@@ -555,6 +644,27 @@ class ReleaseTests(unittest.TestCase):
         fake = FakeAws(self, images={"v1.4.0": OLD_DIGEST})
         with patch("deploy.aws", side_effect=fake), self.assertRaisesRegex(RuntimeError, "already names another image"):
             deploy.add_tag(cfg(), "grid", DIGEST, "v1.4.0")
+
+    def test_release_without_relay_deploys_the_grid_only(self):
+        args = SimpleNamespace(sha=SHA, git_tag="", source=str(REPO), only=None, push_only=False,
+                               platform="linux/amd64", timeout=1)
+        env = {k: v for k, v in ENV.items() if not k.startswith("DEPLOY_RELAY_")}
+        with patch("deploy.release_one", return_value=(True, ["grid: deployed"])) as one, \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(deploy.release(args, environ=env), 0)
+        self.assertEqual([c.args[1] for c in one.call_args_list], ["grid"])
+        self.assertIn("notice: relay: skipped", out.getvalue())
+        with patch("deploy.release_one") as one, self.assertRaisesRegex(deploy.Refused, "relay variables are unset"):
+            deploy.release(SimpleNamespace(**{**vars(args), "only": "relay"}), environ=env)
+        one.assert_not_called()
+
+    def test_release_with_some_relay_variables_is_refused(self):
+        args = SimpleNamespace(sha=SHA, git_tag="", source=str(REPO), only=None, push_only=False,
+                               platform="linux/amd64", timeout=1)
+        env = {k: v for k, v in ENV.items() if k != "DEPLOY_RELAY_SERVICE"}
+        with patch("deploy.release_one") as one, self.assertRaisesRegex(deploy.Refused, "DEPLOY_RELAY_SERVICE"):
+            deploy.release(args, environ=env)
+        one.assert_not_called()
 
     def test_failed_service_stops_the_release(self):
         args = SimpleNamespace(sha=SHA, git_tag="", source=str(REPO), only=None, push_only=False,

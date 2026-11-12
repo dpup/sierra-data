@@ -27,8 +27,10 @@
 # Configuration: repository (or `production` environment) variables, listed
 # in scripts/deploy.py SETTINGS and docs/deploy-handoff.md. Automatic runs
 # stay off until DEPLOY_ROLE_ARN is set (so merging this before the infra
-# exists sends no failure mail); once it is, any other unset variable fails
-# the run before anything is built.
+# exists sends no failure mail); once it is, any other unset required
+# variable fails the run before anything is built. The three DEPLOY_RELAY_*
+# variables are optional as a group: all unset deploys the Grid only, with a
+# notice; some set fails the run naming the missing ones.
 name: Deploy
 
 on:
