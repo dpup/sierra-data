@@ -262,6 +262,12 @@ place set changes (same mutex, same place as the `placesGeoValid` invalidation),
 and a tick that sees a new version upserts **every** event once. A poller's first
 tick also reconciles, so a restart re-derives attachments.
 
+The scheduler (and every `pollerState`) is built per **writer term**
+(`cmd/server/writer.go`): what it remembers is only valid while this process
+holds the writer lease, and a new term (after a takeover, or this process
+winning the lease back) starts from a full reconcile. A reader never runs a
+scheduler; its store refuses every write.
+
 Cross-tick state lives in `pollerState`, created in `run` and never shared, so it
 is goroutine-local by construction — **do not hoist it onto `Scheduler`**, which
 every poller shares. `TestTickReconcilesWhenPlacesChange` pins this and fails if
