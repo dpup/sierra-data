@@ -14,6 +14,11 @@
 #   4. A again (now the reader), steady load on A, then SIGKILL to B (a crash:
 #      no release); A must take over once the dead session's lock is gone;
 #   5. the lease epochs must have moved 1 -> 2 -> 3, one holder at a time.
+# Throughout, conditional GET: both processes must return the same ETag for
+# /api/v1/places (and /api/v1/events), and the tag taken before each switch
+# must still answer 304 (no body) from the survivor after it: a handover
+# alone changes no validator. /api/v1/places is the probe because its tag
+# moves only when places change; the event list moves as the pollers ingest.
 # It prints the takeover times and request counts and exits non-zero on any
 # failed read, any push that failed after its retries, or a slow takeover.
 #
@@ -77,6 +82,37 @@ wait_for() { # description timeout-seconds command...
 is_ready() { [[ $(readyz "$1") == *'"ready":true'* ]]; }
 is_writer() { [[ $(readyz "$1") == *'"writer":true'* ]]; }
 is_reader() { [[ $(readyz "$1") == *'"ready":true,"writer":false'* ]]; }
+
+ETAG_PATH=/api/v1/places
+etag_of() { # port path -> the ETag header (empty if none)
+	curl -s -m 5 -D - -o /dev/null "http://127.0.0.1:$1$2" |
+		awk 'tolower($1) == "etag:" { sub(/\r$/, ""); sub(/^[^:]*: */, ""); print }'
+}
+cond_get() { # port path tag -> "<status> <body bytes>"
+	curl -s -m 5 -o /dev/null -w '%{http_code} %{size_download}' -H "If-None-Match: $3" "http://127.0.0.1:$1$2" || echo "000 0"
+}
+same_etag() { # path -> 0 when A and B return the same non-empty tag (retried: pollers commit)
+	local i ta tb
+	for i in 1 2 3 4 5; do
+		ta=$(etag_of "$PORT_A" "$1")
+		tb=$(etag_of "$PORT_B" "$1")
+		[[ -n $ta && $ta == "$tb" ]] && return 0
+		sleep 0.2
+	done
+	log "ETag for $1 differs: A '$ta' B '$tb'"
+	return 1
+}
+ETAG_FAIL=0
+etag_check() { # what port tag -> asserts a 304 with no body
+	local got
+	got=$(cond_get "$2" "$ETAG_PATH" "$3")
+	if [[ $got == "304 0" ]]; then
+		log "  304 across the $1: $ETAG_PATH with the pre-switch tag answered 304, no body"
+	else
+		log "FAIL: 304 across the $1: $ETAG_PATH with $3 answered '$got' (now $(etag_of "$2" "$ETAG_PATH"))"
+		ETAG_FAIL=1
+	fi
+}
 
 push_once() { # port -> HTTP status
 	curl -s -m 15 -o /dev/null -w '%{http_code}' -X POST \
@@ -152,6 +188,11 @@ grep -q 'Push ingest: forwarded to the writer' "$OUT/b.log" || die "B did not lo
 body_a=$(curl -s "http://127.0.0.1:$PORT_A/api/v1/sources" | sha256sum)
 body_b=$(curl -s "http://127.0.0.1:$PORT_B/api/v1/sources" | sha256sum)
 log "B ($PORT_B) is a ready reader, serves reads, forwarded a push to A (204); /sources bodies equal: $([[ $body_a == "$body_b" ]] && echo yes || echo NO)"
+same_etag "$ETAG_PATH" || ETAG_FAIL=1
+same_etag "/api/v1/events" || ETAG_FAIL=1
+TAG_PRE_TERM=$(etag_of "$PORT_A" "$ETAG_PATH")
+[[ $(cond_get "$PORT_B" "$ETAG_PATH" "$TAG_PRE_TERM") == "304 0" ]] || { log "FAIL: B did not answer 304 to A's tag"; ETAG_FAIL=1; }
+log "ETags agree on A and B ($ETAG_PATH: $TAG_PRE_TERM); B answers A's tag with 304"
 
 # --- 3. SIGTERM to A under load on B ------------------------------------------
 start_load "$PORT_B" "$OUT/load-sigterm.txt"
@@ -167,12 +208,15 @@ stop_load
 wait "$PID_A" 2>/dev/null && exit_a=0 || exit_a=$?
 SUMMARY_TERM=$(tally "$OUT/load-sigterm.txt") && ok_term=1 || ok_term=0
 log "  load on B across the switch: $SUMMARY_TERM; A exited $exit_a"
+etag_check "SIGTERM handover" "$PORT_B" "$TAG_PRE_TERM"
 
 # --- 4. A back as a reader; SIGKILL to B under load on A ----------------------
 start_server a2 "$PORT_A"
 PID_A=$LAST_PID
 wait_for "A ready again" 30 is_ready "$PORT_A"
 is_reader "$PORT_A" || die "A should come back as a reader: $(readyz "$PORT_A")"
+same_etag "$ETAG_PATH" || ETAG_FAIL=1
+TAG_PRE_KILL=$(etag_of "$PORT_B" "$ETAG_PATH")
 wait_for "B's push ingest" 30 bash -c "[[ \$(curl -s -m 5 -o /dev/null -w '%{http_code}' -X POST -H 'Authorization: Bearer $TOKEN' 'http://127.0.0.1:$PORT_B/api/v1/ingest/$STREAM?preflight=true') == 204 ]]"
 start_load "$PORT_A" "$OUT/load-sigkill.txt"
 sleep 2
@@ -186,6 +230,7 @@ sleep "$LOAD_SECONDS"
 stop_load
 SUMMARY_KILL=$(tally "$OUT/load-sigkill.txt") && ok_kill=1 || ok_kill=0
 log "  load on A across the crash: $SUMMARY_KILL"
+etag_check "SIGKILL handover" "$PORT_A" "$TAG_PRE_KILL"
 
 # --- 5. the lease record -------------------------------------------------------
 lease=$(psql_db 'SELECT epoch, holder <> $$$$, address FROM writer_lease')
@@ -204,10 +249,12 @@ fail=0
 ((TAKEOVER_TERM <= TAKEOVER_MAX_MS)) || { log "FAIL: SIGTERM takeover ${TAKEOVER_TERM} ms > ${TAKEOVER_MAX_MS} ms"; fail=1; }
 ((TAKEOVER_KILL <= TAKEOVER_MAX_MS)) || { log "FAIL: SIGKILL takeover ${TAKEOVER_KILL} ms > ${TAKEOVER_MAX_MS} ms"; fail=1; }
 ((ok_term && ok_kill)) || { log "FAIL: requests failed (beyond the push retry) during a switch"; fail=1; }
+((ETAG_FAIL == 0)) || { log "FAIL: conditional GET across the processes or a switch (above)"; fail=1; }
 
 echo
 echo "rehearse-bluegreen: SIGTERM takeover ${TAKEOVER_TERM} ms; SIGKILL takeover ${TAKEOVER_KILL} ms"
 echo "  SIGTERM: $SUMMARY_TERM"
 echo "  SIGKILL: $SUMMARY_KILL"
+echo "  ETags: equal on both processes; pre-switch $ETAG_PATH tag 304 after SIGTERM and SIGKILL: $([[ $ETAG_FAIL == 0 ]] && echo yes || echo NO)"
 echo "  logs: $OUT"
 ((fail == 0)) && echo "PASS" || { echo "FAIL"; exit 1; }

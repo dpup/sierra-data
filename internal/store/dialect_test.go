@@ -15,6 +15,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	gridv1 "github.com/sierragridteam/sierra-data/api/grid/v1"
 )
 
 // Tests for the SQLite -> PostgreSQL dialect traps: each exercises the
@@ -160,6 +162,33 @@ func TestVersionsAreSharedThroughTheDatabase(t *testing.T) {
 	pv, err := s.PlacesVersion(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), pv)
+}
+
+// Re-seeding an unchanged place directory (every writer term does) bumps
+// nothing, so validators, which all start with the places version, survive
+// a handover; a real change still bumps.
+func TestUnchangedPlaceUpsertKeepsTheVersion(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	geom := &gridv1.Geometry{Centroid: &gridv1.LatLng{Lat: 38.2, Lng: -120.4}}
+	require.NoError(t, s.UpsertPlace(ctx, testPlace("area:x", "x", "X", gridv1.PlaceKind_AREA, geom)))
+	pv, err := s.PlacesVersion(ctx)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), pv)
+
+	require.NoError(t, s.UpsertPlace(ctx, testPlace("area:x", "x", "X", gridv1.PlaceKind_AREA,
+		&gridv1.Geometry{Centroid: &gridv1.LatLng{Lat: 38.2, Lng: -120.4}})))
+	pv, err = s.PlacesVersion(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), pv, "an equal place is a no-op")
+
+	require.NoError(t, s.UpsertPlace(ctx, testPlace("area:x", "x", "X renamed", gridv1.PlaceKind_AREA, geom)))
+	pv, err = s.PlacesVersion(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), pv, "a change bumps")
+	got, err := s.GetPlace(ctx, "area:x")
+	require.NoError(t, err)
+	assert.Equal(t, "X renamed", got.GetName())
 }
 
 // first_ingested_at is written once, on insert: a revision or a transition

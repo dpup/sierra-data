@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -26,6 +27,12 @@ var placeSpecificity = map[gridv1.PlaceKind]int{
 // UpsertPlace inserts or replaces a place. The blob is canonical; columns
 // mirror it for filtering. A slug collision across different ids is a
 // seeding bug and surfaces as a UNIQUE constraint error.
+//
+// A place equal to the stored one (proto.Equal) is a no-op: no write, no
+// `places` version bump, no cache invalidation. Every writer term re-seeds
+// the whole directory (places.Seed), and every ETag validator starts with the
+// places version, so an unconditional bump made every handover change every
+// tag on every process: no 304 could survive a deploy.
 func (s *Store) UpsertPlace(ctx context.Context, p *gridv1.Place) error {
 	if p.GetId() == "" || p.GetSlug() == "" {
 		return fmt.Errorf("store: place requires id and slug")
@@ -35,6 +42,18 @@ func (s *Store) UpsertPlace(ctx context.Context, p *gridv1.Place) error {
 		return fmt.Errorf("store: marshal place %s: %w", p.GetId(), err)
 	}
 	return s.inTx(ctx, func(tx *sql.Tx) error {
+		var stored []byte
+		err := tx.QueryRowContext(ctx, `SELECT proto FROM places WHERE id = $1 FOR UPDATE`, p.GetId()).Scan(&stored)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+		case err != nil:
+			return fmt.Errorf("store: read place %s: %w", p.GetId(), err)
+		default:
+			var cur gridv1.Place
+			if proto.Unmarshal(stored, &cur) == nil && proto.Equal(&cur, p) {
+				return nil
+			}
+		}
 		var parent any
 		if p.GetParentId() != "" {
 			parent = p.GetParentId()
