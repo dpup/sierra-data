@@ -237,52 +237,120 @@ func (s *Store) TransitionEvents(ctx context.Context, ids []string, to gridv1.Ev
 	if len(ids) == 0 {
 		return nil
 	}
+	// A repeated id is already in the target status the second time round.
+	seen := make(map[string]bool, len(ids))
+	uniq := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if !seen[id] {
+			seen[id] = true
+			uniq = append(uniq, id)
+		}
+	}
 	return s.inTx(ctx, func(tx *sql.Tx) error {
-		for _, id := range ids {
-			var blob []byte
-			err := tx.QueryRow(`SELECT proto FROM events WHERE id = $1`, id).Scan(&blob)
-			if err == sql.ErrNoRows {
-				continue
-			}
-			if err != nil {
-				return fmt.Errorf("store: transition lookup %s: %w", id, err)
-			}
-			ev := &gridv1.Event{}
-			if err := proto.Unmarshal(blob, ev); err != nil {
-				return fmt.Errorf("store: transition unmarshal %s: %w", id, err)
-			}
-			if ev.GetStatus() == to {
-				continue
-			}
-			now := time.Now()
-			ev.Status = to
-			ev.ObservedAt = timestamppb.New(observedAt)
-			ev.IngestedAt = timestamppb.New(now)
-			ev.Revision++
-			newBlob, err := proto.Marshal(ev)
-			if err != nil {
-				return fmt.Errorf("store: transition marshal %s: %w", id, err)
-			}
-			// Status is hashed content: recompute so a later reappearance in
-			// the feed (status differs) correctly writes a revision.
-			if _, err := tx.Exec(`
-				UPDATE events SET status = $1, observed_at = $2, ingested_at = $3,
-				                  revision = $4, content_hash = $5, proto = $6
-				WHERE id = $7`,
-				int32(to), observedAt.Unix(), now.Unix(),
-				ev.GetRevision(), ContentHash(ev), newBlob, id,
-			); err != nil {
-				return fmt.Errorf("store: transition update %s: %w", id, err)
-			}
-			if err := insertRevision(tx, id, ev.GetRevision(), observedAt.Unix(), now.Unix(), newBlob); err != nil {
-				return err
-			}
-			if err := putLite(tx, ev); err != nil {
+		for start := 0; start < len(uniq); start += transitionChunk {
+			if err := transitionChunkTx(ctx, tx, uniq[start:min(start+transitionChunk, len(uniq))], to, observedAt); err != nil {
 				return err
 			}
 		}
 		return nil
 	})
+}
+
+// transitionChunk bounds one batch: a perimeter blob can be large, and the
+// batch holds the events, their revision snapshots and their lite copies at
+// once.
+const transitionChunk = 100
+
+// transitionChunkTx transitions one chunk in a fixed number of round trips (one
+// read, then one set-based write each for the events, their revision
+// snapshots, their lite copies and the 'revisions' counter) instead of five
+// per event. Events already in the target status, and unknown ids, are left
+// out of every write. The rows written are what the per-event loop wrote,
+// with one ingested_at stamp for the chunk.
+func transitionChunkTx(ctx context.Context, tx *sql.Tx, ids []string, to gridv1.EventStatus, observedAt time.Time) error {
+	rows, err := tx.QueryContext(ctx, `SELECT id, proto FROM events WHERE id = ANY($1)`, ids)
+	if err != nil {
+		return fmt.Errorf("store: transition lookup: %w", err)
+	}
+	stored := make(map[string][]byte, len(ids))
+	for rows.Next() {
+		var id string
+		var blob []byte
+		if err := rows.Scan(&id, &blob); err != nil {
+			rows.Close()
+			return fmt.Errorf("store: transition scan: %w", err)
+		}
+		stored[id] = blob
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("store: transition lookup: %w", err)
+	}
+
+	now := time.Now()
+	var (
+		mid              []string
+		rev              []int64
+		hashes           []string
+		blobs, liteBlobs [][]byte
+		liteIDs          []string
+	)
+	for _, id := range ids { // the caller's order, not the map's
+		blob, ok := stored[id]
+		if !ok {
+			continue
+		}
+		ev := &gridv1.Event{}
+		if err := proto.Unmarshal(blob, ev); err != nil {
+			return fmt.Errorf("store: transition unmarshal %s: %w", id, err)
+		}
+		if ev.GetStatus() == to {
+			continue
+		}
+		ev.Status = to
+		ev.ObservedAt = timestamppb.New(observedAt)
+		ev.IngestedAt = timestamppb.New(now)
+		ev.Revision++
+		newBlob, err := proto.Marshal(ev)
+		if err != nil {
+			return fmt.Errorf("store: transition marshal %s: %w", id, err)
+		}
+		lb, err := liteBlob(ev)
+		if err != nil {
+			return fmt.Errorf("store: marshal lite event %s: %w", id, err)
+		}
+		mid, rev = append(mid, id), append(rev, int64(ev.GetRevision()))
+		// Status is hashed content: recompute so a later reappearance in
+		// the feed (status differs) correctly writes a revision.
+		hashes = append(hashes, ContentHash(ev))
+		blobs, liteBlobs, liteIDs = append(blobs, newBlob), append(liteBlobs, lb), append(liteIDs, id)
+	}
+	if len(mid) == 0 {
+		return nil
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE events e SET status = $1, observed_at = $2, ingested_at = $3,
+		                    revision = v.revision, content_hash = v.content_hash, proto = v.proto
+		FROM unnest($4::text[], $5::bigint[], $6::text[], $7::bytea[]) AS v(id, revision, content_hash, proto)
+		WHERE e.id = v.id`,
+		int32(to), observedAt.Unix(), now.Unix(), mid, rev, hashes, blobs); err != nil {
+		return fmt.Errorf("store: transition update of %d events: %w", len(mid), err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO event_revisions (event_id, revision, observed_at, ingested_at, proto)
+		SELECT id, revision, $1, $2, proto
+		FROM unnest($3::text[], $4::bigint[], $5::bytea[]) AS v(id, revision, proto)`,
+		observedAt.Unix(), now.Unix(), mid, rev, blobs); err != nil {
+		return fmt.Errorf("store: transition revisions of %d events: %w", len(mid), err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO event_lite (event_id, proto)
+		SELECT id, proto FROM unnest($1::text[], $2::bytea[]) AS v(id, proto)
+		ON CONFLICT (event_id) DO UPDATE SET proto = excluded.proto`, liteIDs, liteBlobs); err != nil {
+		return fmt.Errorf("store: transition lite copies of %d events: %w", len(mid), err)
+	}
+	return bumpVersion(tx, versionRevisions, int64(len(mid)))
 }
 
 // TouchSeen stamps last_seen_at = t for every id whose current stamp is older
