@@ -48,28 +48,44 @@ func (s *Store) RecordMeshTick(ctx context.Context, obs []MeshObservation, act [
 	})
 }
 
+// upsertMeshActivity merges the batch in one INSERT ... ON CONFLICT over
+// unnest. A statement may not touch a row twice, so repeated keys are folded
+// first: the per-clock MAX of the batch, which is what applying the rows one
+// by one through GREATEST produced.
 func upsertMeshActivity(ctx context.Context, tx *sql.Tx, act []MeshActivity) error {
-	if len(act) == 0 {
-		return nil
-	}
-	stmt, err := tx.PrepareContext(ctx, `
-		INSERT INTO mesh_activity (pubkey, last_heard_at, last_relayed_at)
-		VALUES ($1, $2, $3)
-		ON CONFLICT (pubkey) DO UPDATE SET
-		  last_heard_at   = GREATEST(mesh_activity.last_heard_at, excluded.last_heard_at),
-		  last_relayed_at = GREATEST(mesh_activity.last_relayed_at, excluded.last_relayed_at)`)
-	if err != nil {
-		return fmt.Errorf("store: prepare mesh activity upsert: %w", err)
-	}
-	defer stmt.Close()
+	type clocks struct{ heard, relayed int64 }
+	folded := make(map[string]*clocks, len(act))
+	order := make([]string, 0, len(act))
 	for _, a := range act {
 		pk := strings.ToLower(a.PubKey)
 		if pk == "" {
 			continue
 		}
-		if _, err := stmt.ExecContext(ctx, pk, unixOrZero(a.LastHeardAt), unixOrZero(a.LastRelayedAt)); err != nil {
-			return fmt.Errorf("store: upsert mesh activity %s: %w", pk, err)
+		c := folded[pk]
+		if c == nil {
+			c = &clocks{}
+			folded[pk] = c
+			order = append(order, pk)
 		}
+		c.heard = max(c.heard, unixOrZero(a.LastHeardAt))
+		c.relayed = max(c.relayed, unixOrZero(a.LastRelayedAt))
+	}
+	if len(order) == 0 {
+		return nil
+	}
+	heard, relayed := make([]int64, len(order)), make([]int64, len(order))
+	for i, pk := range order {
+		heard[i], relayed[i] = folded[pk].heard, folded[pk].relayed
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO mesh_activity (pubkey, last_heard_at, last_relayed_at)
+		SELECT pubkey, last_heard_at, last_relayed_at
+		FROM unnest($1::text[], $2::bigint[], $3::bigint[]) AS t(pubkey, last_heard_at, last_relayed_at)
+		ON CONFLICT (pubkey) DO UPDATE SET
+		  last_heard_at   = GREATEST(mesh_activity.last_heard_at, excluded.last_heard_at),
+		  last_relayed_at = GREATEST(mesh_activity.last_relayed_at, excluded.last_relayed_at)`,
+		order, heard, relayed); err != nil {
+		return fmt.Errorf("store: upsert %d mesh activity rows: %w", len(order), err)
 	}
 	return nil
 }
