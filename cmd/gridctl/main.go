@@ -1,23 +1,48 @@
-// Command gridctl carries the legacy SQLite Grid store into PostgreSQL
-// (migration plan D11): snapshot a live SQLite file, import a snapshot in one
-// verified transaction, and verify an imported database. It runs locally or
-// as a one-off ECS task (the image ships it as /app/gridctl).
+// Command gridctl carries the legacy SQLite Grid store (schema v14, the
+// legacy-efs-final tag) into PostgreSQL (migration plan D11): snapshot a live
+// SQLite file, import a snapshot in one verified transaction, and verify an
+// imported database. It is the CLI over internal/sqliteimport, which documents
+// what moves and what the verification checks. It runs locally (make gridctl
+// builds bin/gridctl) or as a one-off container (the image ships /app/gridctl).
 //
-//	gridctl snapshot --db /data/grid.db --out s3://bucket/grid-<ts>.db
-//	gridctl import   --from s3://bucket/grid-<ts>.db [--to <postgres url>] [--allow-nonempty]
-//	gridctl verify   --from <snapshot path or s3://> [--to <postgres url>]
+//	gridctl snapshot --db <grid.db> --out <path or s3://bucket/key> [--busy-timeout 30s] [--tmp <dir>]
+//	gridctl import   --from <path or s3://> [--to <postgres url>] [--manifest <path>|none]
+//	                 [--report <file>] [--allow-nonempty] [--lock-timeout 10s] [--tmp <dir>]
+//	gridctl verify   --from <path or s3://> [--to <postgres url>] [--manifest <path>|none]
+//	                 [--report <file>] [--tmp <dir>]
 //	gridctl version
 //
-// --to defaults to $PF__GRID__DATABASE__URL, the variable the Grid task's
-// secret injects, so the URL never has to appear on a command line. It is
-// never printed.
+// snapshot opens the source read-only (mode=ro; it never creates a journal
+// or the file), copies it with VACUUM INTO (one read transaction, so one
+// consistent state of a live file; it waits up to --busy-timeout for the
+// live writer's lock, and the writer's commits wait for the copy), runs quick_check and writes a manifest (size, SHA-256,
+// schema version, row counts) beside the copy as <out>.manifest.json. For an
+// s3:// destination the database is uploaded first and the manifest last, so
+// a manifest means a complete upload; uploads carry bucket-owner-full-control
+// and a SHA-256 checksum, and downloads validate it. S3 credentials come from
+// the default AWS chain. Scratch space for s3:// (--tmp, default $TMPDIR) is
+// about the snapshot's size.
 //
-// import is a writer: it takes the Grid writer lease (store.AcquireLease, the
-// path a server's campaign uses) and runs its transaction under the lease's
-// epoch fence. If a server holds the lease for --lock-timeout (default 10s)
-// it refuses, --allow-nonempty or not; stop, yield or disable that writer
-// first. verify takes no lock (read-only).
+// import and verify require the manifest unless --manifest none. --to
+// defaults to $PF__GRID__DATABASE__URL, the variable the Grid's own secret
+// injects, so the URL never has to appear on a command line. It is never
+// printed. The target database must compare text bytewise (create it
+// TEMPLATE template0 LC_COLLATE 'C' LC_CTYPE 'C').
 //
+// import applies the PostgreSQL migrations, then writes the data, the derived
+// columns, versions, the SQLite ladder in schema_migrations and the import_log
+// row in one transaction, verifies inside it and commits only if verification
+// passed: a failure leaves no data. It refuses a database that already holds
+// Grid data unless --allow-nonempty (rehearsal re-runs only: it truncates in
+// the same transaction). import is a writer: it takes the Grid writer lease
+// (store.AcquireLease, the path a server's campaign uses) and runs its
+// transaction under the lease's epoch fence. If a server holds the lease for
+// --lock-timeout (default 10s) it refuses, --allow-nonempty or not; stop,
+// yield or disable that writer (PF__GRID__WRITER__ENABLED=false) first.
+// verify takes no lock (read-only); after a writer has run it reports
+// differences by design.
+//
+// Every command prints its report to stdout; --report also writes the JSON.
 // Exit status: 0 success, 1 failure (for import and verify: any difference;
 // the import is rolled back), 2 usage.
 package main
