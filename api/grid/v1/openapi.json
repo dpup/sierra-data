@@ -7944,6 +7944,11 @@
             "example": "Severe",
             "type": "string"
           },
+          "replacedByEventId": {
+            "description": "Grid event id of the alert that replaced this one, e.g. \"wx:urn:oid:...\".\nMirrors NWS's own `replacedBy` / the CAP `references` of the newer message.\nSet only when this alert was retired (status RESOLVED) because a newer\nalert referenced it, and from that revision on; empty otherwise, including\nfor an alert that was cancelled or simply lapsed.",
+            "example": "wx:urn:oid:2.49.0.1.840.0.5d3f8b0a",
+            "type": "string"
+          },
           "urgency": {
             "description": "NWS urgency.",
             "enum": [
@@ -7974,6 +7979,7 @@
           "certainty",
           "instruction",
           "nwsSeverity",
+          "replacedByEventId",
           "urgency",
           "zones"
         ],

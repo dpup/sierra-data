@@ -77,6 +77,12 @@ type PollResult struct {
 	// (`firis:<name>`) and is now ADOPTED by a CAL FIRE incident (`calfire:<uuid>`),
 	// where the perimeter is still in the feed and we know precisely where it went.
 	Superseded []string
+	// ReplacedBy optionally names, for ids in Superseded, the event id that
+	// replaced each (retired id -> replacing id). The scheduler records it on
+	// the retired event, in the same revision as the RESOLVED transition, where
+	// the event's detail has a field for it (today WeatherAlertDetail's
+	// replaced_by_event_id). Ids without an entry are retired without a pointer.
+	ReplacedBy map[string]string
 	// MeshObservations is the mesh-node reception firehose drained from the push
 	// source's buffer this tick (nil for every other poller). Receptions are
 	// measurements, not events — the scheduler batch-inserts them into the
