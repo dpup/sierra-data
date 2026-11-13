@@ -20,7 +20,7 @@ Last updated: 2026-07-06
 
 **Language/Version**: Go 1.27.3 (`go.mod` and the Docker builder use Go 1.27.3)
 **Primary Dependencies**: gRPC, gRPC Gateway, Prefab framework (github.com/dpup/prefab), Protocol Buffers  
-**Storage**: PostgreSQL 18 (pgx v5, pure Go) is the grid event store's system of record — events, revision history, the place directory, and source health — at `grid.database.url` (`PF__GRID__DATABASE__URL`). Locally it runs in Docker (`make db-up`; `make test`/`make run` use it). The mesh relay keeps its own store: a SQLite file (`meshRelay.dbPath`, the default) or a DynamoDB table (`meshRelay.store: dynamodb`, the hosted relay). The SQLite-on-EFS Grid store is frozen on the `legacy/efs-sqlite` branch. In-memory TTL caches remain on the read path for the roads/weather/hazards services.  
+**Storage**: PostgreSQL 18 (pgx v5, pure Go) is the grid event store's system of record — events, revision history, the place directory, and source health — at `grid.database.url` (`PF__GRID__DATABASE__URL`). Locally it runs in Docker (`make db-up`; `make test`/`make run` use it). The mesh relay keeps its own store: a SQLite file (`meshRelay.dbPath`, the default) or a DynamoDB table (`meshRelay.store: dynamodb`, the hosted relay). The SQLite-on-EFS Grid store that ran until 2026-11-13 is archived at the git tag `legacy-efs-archived`. In-memory TTL caches remain on the read path for the roads/weather/hazards services.  
 **Testing**: Go testing framework with testify, contract tests for gRPC services  
 **Target Platform**: Linux/macOS server, containerizable
 
@@ -236,11 +236,11 @@ what runs is always a commit anyone can find. Flow, variables and rollback:
 `docs/deploy-handoff.md`. Runbooks for Sierra's own hosting live in the
 private workspace, not in this repository.
 
-`legacy/efs-sqlite` is the **archived** SQLite-on-EFS stack that ran in the
-old AWS account until the cutover; the tag `legacy-efs-final` marks where
-the lines parted. Nothing deploys from it: `make ecs-deploy` and its
-coordinator belong to that branch and refuse on `main`. Do not hotfix it or
-forward-port from it; a change belongs on `main`.
+The SQLite-on-EFS stack that ran in the old AWS account until the cutover
+is **archived** in git history: the tag `legacy-efs-final` marks where the
+lines parted, `legacy-efs-archived` its last commit (its coordinator deploy
+client, `make ecs-deploy`, lived only there). The branch is gone; nothing
+deploys from the tags, and a change belongs on `main`.
 
 **`gridctl`** (`make gridctl`; `/app/gridctl` in the image) is the tool that
 moved the data: `snapshot` takes a consistent read-only copy of a legacy
@@ -914,7 +914,7 @@ store's place-geometry cache is). `--standby` / `POST /activate` /
 `POST /quiesce` still work for a coordinator, remapped onto the roles. Deploy flow,
 control API, the remap and the rehearsal (`make rehearse-bluegreen`):
 `docs/deploy-handoff.md`. The mesh relay keeps the original
-`internal/handoff` standby/quiesce lifecycle on its SQLite file.
+`internal/handoff` standby/quiesce lifecycle on its own store.
 
 ## Performance & Monitoring
 

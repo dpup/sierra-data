@@ -20,9 +20,9 @@ Also `resolve` (the workflow's check of what it is asked to deploy) and
 
 Terraform (sierra-infra, grid/compute) owns the services, the task
 definitions' content and the deployment configuration; this only swaps
-images. The legacy stack (SQLite on EFS, the coordinator Lambda,
-`make ecs-deploy`) deploys only from a checkout of legacy/efs-sqlite: nothing
-here can reach the old account. docs/deploy-handoff.md has the whole flow.
+images. The old account's stack (SQLite on EFS, the coordinator Lambda,
+`make ecs-deploy`) is archived at the tag legacy-efs-archived and retired:
+nothing here can reach the old account. docs/deploy-handoff.md has the flow.
 """
 
 import argparse
@@ -127,16 +127,14 @@ def dirty_files():
 def branch_drift(branch=MAIN):
     """Why HEAD must not be deployed, or None.
 
-    main deploys to the Grid account; the frozen SQLite stack deploys only
-    from legacy/efs-sqlite with its own `make ecs-deploy`. HEAD must also be
+    Only main deploys, and only to the Grid account. HEAD must also be
     exactly origin's branch: images are tagged with the commit, and a
-    rollback or a forward-port must be able to find what is running."""
+    rollback must be able to find what is running."""
     current = git("rev-parse", "--abbrev-ref", "HEAD")
     if current != branch:
         where = "detached" if current == "HEAD" else "on " + current
         return ("HEAD is %s, but this deploys only from %s\n"
-                "(the legacy stack deploys from a legacy/efs-sqlite checkout with make ecs-deploy;"
-                " to redeploy an older release use make deploy REF=<tag>)" % (where, branch))
+                "(to redeploy an older release use make deploy REF=<tag>)" % (where, branch))
     fetched = subprocess.run(["git", "fetch", "--quiet", "origin", branch], cwd=REPO,
                              capture_output=True, text=True)
     if fetched.returncode:
@@ -189,7 +187,7 @@ def resolve(ref=None, fetch=True, cwd=REPO):
     pre_split = subprocess.run(["git", "merge-base", "--is-ancestor", sha, floor], cwd=cwd,
                                capture_output=True, text=True)
     if pre_split.returncode == 0:
-        raise Refused("%s is at or before %s: the SQLite stack, deployed only from legacy/efs-sqlite"
+        raise Refused("%s is at or before %s: the retired SQLite stack, which nothing deploys"
                       % (ref or sha, FLOOR_TAG))
     if not tag:
         tags = git("tag", "--points-at", sha, "--sort=-v:refname", cwd=cwd).split()
