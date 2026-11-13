@@ -42,6 +42,12 @@ func TestGetRoadHistory(t *testing.T) {
 
 	_, err = g.GetRoadHistory(rpcBG(), &gridv1.GetRoadHistoryRequest{Road: "nowhere"})
 	assert.Equal(t, codes.NotFound, status.Code(err))
+	// A summary headline id for a closure past the segment is not a road:
+	// it is refused, not read as the segment.
+	for _, id := range []string{road + ":beyond-0", "road:" + road + ":beyond-0"} {
+		_, err = g.GetRoadHistory(rpcBG(), &gridv1.GetRoadHistoryRequest{Road: id})
+		assert.Equal(t, codes.NotFound, status.Code(err), id)
+	}
 	_, err = g.GetRoadHistory(rpcBG(), &gridv1.GetRoadHistoryRequest{Road: road, From: timestamppb.New(base), To: timestamppb.New(base)})
 	assert.Equal(t, codes.InvalidArgument, status.Code(err))
 }

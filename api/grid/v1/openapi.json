@@ -4358,7 +4358,7 @@
         "description": "road_segment block (Google Routes travel time over a configured route). The numbers are absent, not 0, until the route has been measured.",
         "properties": {
           "beyond": {
-            "description": "Named seasonal closures past one of the segment's ends that are in effect now, such as the Ebbetts Pass winter closure past Bear Valley. They do not change the segment's `status` or `severity`: the segment is as open as `status` says. An entry appears only when Caltrans words the closure as the configured span; any other closure naming those places closes the segment. Absent when there are none. Each entry is also a roads headline in the place summary, with the id `road:{segment}#beyond-{index}`.",
+            "description": "Named seasonal closures past one of the segment's ends that are in effect now, such as the Ebbetts Pass winter closure past Bear Valley. They do not change the segment's `status` or `severity`: the segment is as open as `status` says. An entry appears only when Caltrans words the closure as the configured span; any other closure naming those places closes the segment. Absent when there are none. Each entry is also a roads headline in the place summary, with the id `road:{segment}:beyond-{index}`.",
             "items": {
               "properties": {
                 "description": {
@@ -7679,7 +7679,7 @@
             "type": "string"
           },
           "id": {
-            "description": "The item's id. For `kind: EVENT` an event id, fetchable at\n`GET /api/v1/events/{id}`. For `kind: CONDITION` a map-feature id\n(`road:{segment}`, `cc:{checkpoint}`, `fw:region`): it is NOT an event and\n`GET /api/v1/events/{id}` returns 404. Find it as `properties.id` in the\nplace's `{layer}.geojson` map layer (the layer slug is `layer` lowercased).\nA seasonal closure past a road segment's end has the id\n`road:{segment}#beyond-{n}`: the part before `#` is the segment feature's\nid and `n` is the index into its `road.beyond`.",
+            "description": "The item's id. For `kind: EVENT` an event id, fetchable at\n`GET /api/v1/events/{id}`. For `kind: CONDITION` a map-feature id\n(`road:{segment}`, `cc:{checkpoint}`, `fw:region`): it is NOT an event and\n`GET /api/v1/events/{id}` returns 404. Find it as `properties.id` in the\nplace's `{layer}.geojson` map layer (the layer slug is `layer` lowercased).\nA seasonal closure past a road segment's end has the id\n`road:{segment}:beyond-{n}`: the part before `:beyond-` is the segment\nfeature's id and `n` is the index into its `road.beyond`. It is not a\nroad id: `GET /api/v1/roads/{road}/history` returns 404 for it.",
             "example": "road:hwy4-arnold-bearvalley",
             "type": "string"
           },

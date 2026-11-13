@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -1010,6 +1011,11 @@ func (s *RoadsService) applyRoadConditions(ctx context.Context, monitoredRoad co
 		}
 
 		if b := seasonalClosureBeyond(condition, monitoredRoad); b != nil {
+			// Caltrans can publish the same closure twice (two paragraphs,
+			// or one per district): one entry and one alert per name.
+			if slices.ContainsFunc(beyond, func(have *api.RoadBeyond) bool { return have.GetName() == b.GetName() }) {
+				continue
+			}
 			beyond = append(beyond, b)
 			*alerts = append(*alerts, s.buildRoadConditionAlert(condition, api.AlertClassification_NEARBY))
 			logging.Infow(ctx, "Road condition is a seasonal closure past the road's end",
@@ -1076,13 +1082,6 @@ func seasonalClosureBeyond(c caltrans.RoadCondition, road config.MonitoredRoad) 
 			b.Side = "START"
 		}
 		b.From, b.To = caltrans.ConditionSpan(c)
-		// The span is the closure. If the rest of the text names a place of
-		// this road as well, it says more than the closure: on the road.
-		rest := c
-		rest.Description = strings.Replace(strings.Replace(c.Description, b.From, " ", 1), b.To, " ", 1)
-		if caltrans.MatchConditionToSegment(rest, road.Section, road.LocationKeywords) {
-			return nil
-		}
 		return b
 	}
 	return nil

@@ -897,7 +897,7 @@ func TestSummary_SeasonalClosurePastASegmentIsARoadsHeadline(t *testing.T) {
 		assert.Equal(t, 2, d.ActiveCount, "the closure and the gate; the open segments are baseline")
 		require.Len(t, d.Headlines, 2)
 		top := d.Headlines[0]
-		assert.Equal(t, "road:hwy4-arnold-bearvalley#beyond-0", top.ID)
+		assert.Equal(t, "road:hwy4-arnold-bearvalley:beyond-0", top.ID)
 		assert.Equal(t, "CONDITION", top.Kind)
 		assert.Equal(t, "ROAD_SEGMENT", top.Layer)
 		assert.Equal(t, "SEVERE", top.Severity)

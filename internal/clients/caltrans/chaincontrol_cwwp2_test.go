@@ -465,3 +465,42 @@ func TestChainControlDetails_ClosureWithoutTheClosureStyle(t *testing.T) {
 		assert.False(t, c.Closed)
 	}
 }
+
+// A chain control whose text begins "Closed to traffic without chains." is a
+// control, not a closure; and the supplement rule uses the parser's closure
+// test, so a gate that lost its closure style is still kept beside CWWP2.
+func TestIsClosurePlacemark(t *testing.T) {
+	body := func(header, text string) string {
+		return `<div class="infowindow-content"><div class="iw-header"><div class="iw-header-left">
+            <img class="iw-icon" src="https://quickmap.dot.ca.gov/img/cc32x32.png" />
+            ` + header + `
+        </div></div><div class="iw-body"><h2 class="iw-title">Eastbound Highway 4</h2>
+        <p class="iw-text"><strong>Location: </strong>LAKE ALPINE</p>
+        <p class="iw-text">` + text + `</p></div></div>`
+	}
+	for _, tt := range []struct {
+		name string
+		in   CaltransIncident
+		want bool
+	}{
+		{"style", CaltransIncident{StyleUrl: "#full-closure", DescriptionHtml: body("Chain Control", "Chains are required.")}, true},
+		{"old title", CaltransIncident{Name: "Eastbound Highway 4 Road Closed"}, true},
+		{"header", CaltransIncident{StyleUrl: "#notclosed", DescriptionHtml: body("Road Closed", "No traffic.")}, true},
+		{"body", CaltransIncident{StyleUrl: "#notclosed", DescriptionHtml: body("Chain Control", "Closed to traffic.")}, true},
+		{"body, no full stop", CaltransIncident{StyleUrl: "#notclosed", DescriptionHtml: body("Chain Control", " closed to traffic ")}, true},
+		{"closed without chains", CaltransIncident{StyleUrl: "#notclosed", DescriptionHtml: body("Chain Control", "Closed to traffic without chains.")}, false},
+		{"closed to some", CaltransIncident{StyleUrl: "#notclosed", DescriptionHtml: body("Chain Control", "Closed to traffic for vehicles without chains or snow tires.")}, false},
+		{"a control", CaltransIncident{StyleUrl: "#notclosed", DescriptionHtml: body("Chain Control", "Chains are required on all vehicles.")}, false},
+	} {
+		assert.Equal(t, tt.want, isClosurePlacemark(tt.in), tt.name)
+		if tt.want {
+			assert.True(t, isKMLSupplement(tt.in), "%s: a closure is kept beside CWWP2", tt.name)
+		}
+	}
+	p := &FeedParser{}
+	controls := p.parseChainControlDetails([]CaltransIncident{{StyleUrl: "#notclosed",
+		DescriptionHtml: body("Chain Control", "Closed to traffic without chains.") + `<p class="iw-text"><strong>Chain Control level R-2</strong></p>`}})
+	require.Len(t, controls, 1)
+	assert.False(t, controls[0].Closed)
+	assert.Equal(t, "R2", controls[0].Level)
+}

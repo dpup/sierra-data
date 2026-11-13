@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/dpup/prefab/logging"
@@ -162,16 +163,21 @@ func TestApplyRoadConditions_EbbettsPassWinterClosure(t *testing.T) {
 }
 
 type want struct {
-	status api.RoadStatus
-	chain  api.ChainControlStatus
+	status  api.RoadStatus
+	chain   api.ChainControlStatus
+	onRoute bool // the text matched the section: one ON_ROUTE alert
 }
 
 var (
-	clear    = want{api.RoadStatus_OPEN, api.ChainControlStatus_NONE}
-	closed   = want{api.RoadStatus_CLOSED, api.ChainControlStatus_NONE}
-	chained  = want{api.RoadStatus_OPEN, api.ChainControlStatus_REQUIRED}
-	restrict = want{api.RoadStatus_RESTRICTED, api.ChainControlStatus_NONE}
+	clear    = want{api.RoadStatus_OPEN, api.ChainControlStatus_NONE, false}
+	closed   = want{api.RoadStatus_CLOSED, api.ChainControlStatus_NONE, true}
+	chained  = want{api.RoadStatus_OPEN, api.ChainControlStatus_REQUIRED, true}
+	restrict = want{api.RoadStatus_RESTRICTED, api.ChainControlStatus_NONE, true}
+	// info: an on-route notice that changes neither status nor chain control.
+	info = want{api.RoadStatus_OPEN, api.ChainControlStatus_NONE, true}
 )
+
+const ebbettsSpan = "Is closed from 0.5 mi east of the Jct of SR 207 /Mt Reba Turnoff/ to the Jct of SR 89 /Ebbetts Pass/"
 
 // Everything that is not the named closure is matched the way it always was:
 // a text naming a place of a section is ON that section. No row here may
@@ -207,6 +213,27 @@ func TestApplyRoadConditions_EverythingElseStaysOnTheSection(t *testing.T) {
 		{"1-way controlled traffic from the Jct of SR 207 /Mt Reba Turnoff/ to the Jct of SR 89 /Ebbetts Pass/ - Due to construction", clear, clear, restrict},
 		// The named span, with more on the section said after it.
 		{"Is closed from the Jct of SR 207 /Mt Reba Turnoff/ to the Jct of SR 89 /Ebbetts Pass/ - Due to snow - Also closed at Dorrington", clear, clear, closed},
+		// The named span, with anything else said after it: places nobody
+		// configured, another requirement, another sentence. On the section.
+		{ebbettsSpan + " (Alpine Co) - Due to snow - Chains are required from Cottage Springs to Cabbage Patch", clear, clear, closed},
+		{ebbettsSpan + " (Alpine Co) - Due to snow - Also closed at Black Springs", clear, clear, closed},
+		{ebbettsSpan + " (Alpine Co) - Due to snow - Also closed at Cottage Springs", clear, clear, closed},
+		{ebbettsSpan + " (Alpine Co) - Due to snow - Also closed at Spicer Reservoir Rd", clear, clear, closed},
+		{ebbettsSpan + " (Alpine Co) - Due to snow - Also closed at the Calaveras/Alpine Co Line", clear, clear, closed},
+		{ebbettsSpan + " (Alpine Co) - Due to snow - Also closed at Hells Kitchen", clear, clear, closed},
+		{ebbettsSpan + " (Alpine Co) - Due to snow - Also closed at Bear Vly", clear, clear, closed},
+		{ebbettsSpan + " (Alpine Co) - Due to snow - Also closed at Mt. Reba", clear, clear, closed},
+		{ebbettsSpan + " (Alpine Co) - Due to snow - Also closed at Mount Reba", clear, clear, closed},
+		{ebbettsSpan + " (Alpine Co) - Due to snow - Chains or snow tires are required 5 mi west of the closure", clear, clear, closed},
+		{ebbettsSpan + " (Alpine Co) - Due to snow - The road is closed west of the turnoff as well", clear, clear, closed},
+		{ebbettsSpan + " (Alpine Co) 24 hrs a day and at Cottage Springs - Due to snow", clear, clear, closed},
+		// One paragraph holding the closure, a line break and a chain
+		// requirement is parsed as one closure: on the section, not lost.
+		{ebbettsSpan + " (Alpine Co) - Due to snow- Motorists are advised to use an alternate route<br />Chains are required from Cottage Springs to Cabbage Patch", clear, clear, closed},
+		// Not requirements, and a restriction that mentions one.
+		{"Chains are no longer required from Arnold to Dorrington", clear, info, info},
+		{"Is open from Arnold to Dorrington - no chains or traction devices required", clear, info, info},
+		{"1-way controlled traffic from Arnold to Dorrington - chains or snow tires are required", clear, restrict, restrict},
 		// The early-season gate at Lake Alpine is not the configured closure.
 		{"Is closed from 0.6 mi east of Lake Alpine to 7.2 mi west of the Jct of SR 89 /Ebbetts Pass/ (Alpine Co) - For the winter - Motorists are advised to use an alternate route", clear, clear, closed},
 		{"Is closed from Bear Valley to the Jct of SR 89 /Ebbetts Pass/ (Alpine Co) - Due to snow", clear, clear, closed},
@@ -230,7 +257,7 @@ func TestApplyRoadConditions_EverythingElseStaysOnTheSection(t *testing.T) {
 				assert.Equal(t, w.status, a.status, id)
 				assert.Equal(t, w.chain, a.chain, id)
 				assert.Empty(t, a.beyond, id)
-				if w == clear {
+				if !w.onRoute {
 					assert.Empty(t, a.alerts, id)
 				} else if assert.Len(t, a.alerts, 1, id) {
 					assert.Equal(t, api.AlertClassification_ON_ROUTE, a.alerts[0].GetClassification(), id)
@@ -277,4 +304,48 @@ func TestApplyRoadConditions_SeasonalClosureBeforeTheStart(t *testing.T) {
 	roads[0].SeasonalClosures[0].Name = " "
 	a = applyTo(t, roads, "hwy108-strawberry-sonora", closure("Is closed from Kennedy Meadows to the Jct of US 395 /Sonora Pass/"))
 	assert.Equal(t, api.RoadStatus_CLOSED, a.status)
+}
+
+// The wording around the named span may vary in case, spacing and its
+// closing clauses and is still the seasonal closure; the same closure
+// published twice is one entry and one alert.
+func TestApplyRoadConditions_SeasonalClosureWordingAndDuplicates(t *testing.T) {
+	roads := shippedRoads(t)
+	for _, text := range []string{
+		ebbettsClosureText,
+		ebbettsSpan + " (Alpine Co)- Due to snow",
+		ebbettsSpan + " (Alpine Co) - DUE TO SNOW",
+		ebbettsSpan + " (Alpine Co) - Due to snow - Motorists are advised to use an alternate route.",
+		ebbettsSpan + " (Alpine Co) - For the winter",
+		ebbettsSpan + " (Alpine Co) 24 hrs a day - Due to snow",
+		strings.ToUpper(ebbettsClosureText),
+	} {
+		parsed, err := caltrans.ParseRoadConditionsHTML("<h3>SR 4</h3><p>"+text+"</p><hr>", "4")
+		require.NoError(t, err)
+		require.Len(t, parsed, 1)
+		a := applyTo(t, roads, hwy4Upper, parsed)
+		assert.Equal(t, api.RoadStatus_OPEN, a.status, text)
+		if assert.Len(t, a.beyond, 1, text) {
+			assert.Equal(t, "Ebbetts Pass winter closure", a.beyond[0].GetName())
+			assert.Equal(t, "the jct of sr 89 /ebbetts pass/", strings.ToLower(a.beyond[0].GetTo()), text)
+		}
+	}
+
+	twice, err := caltrans.ParseRoadConditionsHTML("<h3>SR 4</h3><p>"+ebbettsClosureText+"</p><p>"+ebbettsSpan+" (Alpine Co) - For the winter</p><hr>", "4")
+	require.NoError(t, err)
+	require.Len(t, twice, 2)
+	a := applyTo(t, roads, hwy4Upper, twice)
+	assert.Equal(t, api.RoadStatus_OPEN, a.status)
+	require.Len(t, a.beyond, 1)
+	assert.Equal(t, "snow", a.beyond[0].GetReason(), "the first one published")
+	assert.Len(t, a.alerts, 1)
+
+	// The closure and, in its own paragraph, a requirement on the section.
+	both, err := caltrans.ParseRoadConditionsHTML("<h3>SR 4</h3><p>"+ebbettsClosureText+"</p><p>Chains or snow tires are required from Dorrington to the Jct of SR 207 /Mt Reba Turnoff/</p><hr>", "4")
+	require.NoError(t, err)
+	a = applyTo(t, roads, hwy4Upper, both)
+	assert.Equal(t, api.RoadStatus_OPEN, a.status)
+	assert.Equal(t, api.ChainControlStatus_REQUIRED, a.chain)
+	assert.Len(t, a.beyond, 1)
+	assert.Len(t, a.alerts, 2)
 }

@@ -205,18 +205,27 @@ The one exception is a **named seasonal closure** (`seasonalClosures` on the
 monitored road in prefab.yaml; a list). The Ebbetts Pass winter closure is at
 the same place every year and starts where Arnold to Bear Valley ends, so it
 is named rather than inferred. `caltrans.MatchSeasonalClosure` accepts a
-condition only when all of this holds:
+condition only when the WHOLE text, case and spacing aside, reads
+
+    [Is] closed from [N mi <dir> of] <start> to <end> [(... Co)] [24 hrs a day]
+    [- Due to snow|ice|weather...] [- For the winter|season]
+    [- Motorists are advised to use an alternate route][.]
 
 - it is a closure (not a chain requirement, restriction or notice);
-- its span (`caltrans.ConditionSpan`) has two ends;
 - the start is made of the configured `start` names and nothing else, bare or
   offset by at most `maxStartOffsetMiles` in `startOffsetDirection` (the
   direction away from the road: "0.5 mi east of ...");
 - the end is made of the configured `end` names and nothing else, no offset;
-- the rest of the text names no place of the road (`seasonalClosureBeyond`).
+- what follows the end is only the tail above (`seasonalClosureTail`, a
+  whitelist with a fixed list of reasons). It is a whitelist because the
+  places a trailing sentence might name are not all known: "Also closed at
+  Black Springs", a chain requirement merged into the same paragraph after a
+  `<br />`, "24 hrs a day and at Cottage Springs". Do not turn it into a
+  blacklist of known places, and do not match on `ConditionSpan`, which drops
+  the tail (it is for display: `beyond.from` / `beyond.to`).
 
 Then the road keeps its own status, and the closure is reported as
-`Road.beyond` (with the configured name) and as a NEARBY alert. Anything else,
+`Road.beyond` (with the configured name, once per name) and as a NEARBY alert. Anything else,
 including every near miss, is an ordinary condition on the road. Do not loosen
 this into a general "past the end" rule: one was built and reviewed on
 2026-11-13 and produced false all-clears (an unknown place, or an offset
@@ -229,4 +238,10 @@ one outcome this code must not produce; a false closure is the fallback.
 the place summary, since the segment itself stays INFO.
 
 "Chains or snow tires are required" (R1) is a chain requirement like the R2
-and R3 wordings (`classifyCondition`); all three set `ChainControlStatus_REQUIRED`.
+and R3 wordings (`classifyCondition`, `requiresChains`); all three set
+`ChainControlStatus_REQUIRED`. The verb must follow directly and "no" must not
+precede: "not required", "no longer required", "may be required" and "no
+chains ... required" are notices. Order matters: closure, then the wordings
+main always read ("chains are required", "chains required", "chain control"),
+then restriction, then the R1 wordings, so a restriction mentioning R1 stays a
+restriction.

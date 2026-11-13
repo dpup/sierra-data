@@ -68,33 +68,55 @@ or end, one starting west of the turnoff or more than 2 mi east of it, a
 closure "at" the turnoff, and a chain requirement over the same span. That
 includes the early-season wording "Is closed from 0.6 mi east of Lake Alpine
 to 7.2 mi west of the Jct of SR 89 /Ebbetts Pass/", which closes the segment
-as it always has. When the text is not exactly the named closure, the segment
-reads closed.
+as it always has.
+
+The whole text has to be the closure and nothing more. After the end, only
+this may follow, in any letter case and spacing: a county in parentheses, "24
+hrs a day", "- Due to" snow, ice or weather, "- For the winter" or "- For the
+season", "- Motorists are advised to use an alternate route", and a full stop.
+Anything else after it (another place, a chain requirement, a second sentence,
+other hours, another reason) and the segment reads closed, as before. The same
+closure published twice is one `beyond` entry.
 
 **The place summary keeps the pass closure.** `GET
 /api/v1/places/{place}/summary` for a place whose map shows the segment
 (one whose bounds contain either end of it, such as `ebbetts-pass`, and the
 segment's own corridor) lists the closure in
 the `roads` domain at its own severity: `highestSeverity: SEVERE`, and a
-headline `{"id": "road:hwy4-arnold-bearvalley#beyond-0", "kind": "CONDITION",
+headline `{"id": "road:hwy4-arnold-bearvalley:beyond-0", "kind": "CONDITION",
 "layer": "ROAD_SEGMENT", "severity": "SEVERE", "headline": "Hwy 4: Ebbetts
 Pass winter closure (past Bear Valley) — snow"}`. The id is the segment
-feature's id, `#beyond-`, and the index into its `road.beyond`. The headline
+feature's id, `:beyond-`, and the index into its `road.beyond`. It is not a
+road id: `GET /api/v1/roads/{road}/history` answers 404 for it. The headline
 names the closure and not the segment, which stays `OPEN` and `INFO`.
 
 **Migrate:** a client that read "the pass is closed" from the last segment's
 `status` should read `road.beyond`, or the summary's roads headline. A segment
 that is `OPEN` with a `beyond` entry is open to its end and closed past it. A
 client that looks a `CONDITION` headline up by `properties.id` should cut the
-id at `#`. `GET /api/v1/roads/{road}/history` records the segment as OPEN from
+id at `:beyond-`. `GET /api/v1/roads/{road}/history` records the segment as OPEN from
 the deploy on; samples from 2026-11-12 to then say CLOSED.
 
 ### "Chains or snow tires are required" (R1) marks the segment
 
 Caltrans words R1 chain control in highway-conditions text as "Chains or snow
 tires are required ...". That wording was read as a notice, so a segment under
-R1 by text alone kept `chainControl: NONE`. It is now `REQUIRED`, like the R2
-and R3 wordings. (`chain_control` checkpoints were not affected.)
+R1 by text alone kept `chainControl: NONE`. It is now `REQUIRED`.
+(`chain_control` checkpoints were not affected.)
+
+Exactly this wording sets `REQUIRED`: "chains", optionally "or snow tires" or
+"or traction devices", optionally "are", then "required" ("Chains are
+required", "Chains required", "Chains or snow tires are required", "Chains or
+traction devices are required"), and any text containing "chain control".
+These do not: "Chains are not required", "Chains are no longer required",
+"chains may be required", and the same wording after "no" ("No chains or snow
+tires are required"). A closure stays a closure whatever it says about chains.
+A restriction ("1-way controlled traffic ...") that also says "chains or snow
+tires are required" stays `RESTRICTED`; one that says "chains are required" is
+read as a chain requirement, as it always was.
+
+**Changed value:** "No chains required" and "No chains are required" used to
+set `REQUIRED`; they are notices now.
 
 ### `chain_control` closure points name their highway and place again
 
@@ -105,9 +127,9 @@ road closed", `areaLabel` "EAST END OF LAKE ALPINE - EBBETTS PASS",
 `description`, `effective`, and `chainControl.highway`. Chain controls that
 come from the same file (outside Caltrans District 10) get their level,
 highway and place back the same way. A closure is recognised by its marker
-style, its "Road Closed" header or its "Closed to traffic." text, any one of
-them, so a change to one does not turn a gate into a chain control with no
-level.
+style, its "Road Closed" header or a text that is exactly "Closed to
+traffic.", any one of them, so a change to one does not turn a gate into a
+chain control with no level.
 
 **Changed value:** the `id` of features that come from this file is now
 `cc:<district>-<message id>` (`cc:10-2515`), because Caltrans numbers its

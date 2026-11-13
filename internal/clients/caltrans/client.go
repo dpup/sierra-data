@@ -203,14 +203,7 @@ func (p *FeedParser) parseChainControlDetails(incidents []CaltransIncident) []Ch
 
 		// Parse name: "Eastbound US 50 Chain Control level R-2"
 		control.Direction, control.Highway, control.Level = parseChainControlName(incident.Name)
-		// A closure is marked three ways in the 2026 layout (style, "Road
-		// Closed" header, "Closed to traffic." body) and by its title in the
-		// old one. Any one of them is enough: a closure read as a chain
-		// control would reach the map as a control with no level.
-		control.Closed = strings.EqualFold(strings.TrimSpace(incident.StyleUrl), "#full-closure") ||
-			roadClosedPattern.MatchString(incident.Name) ||
-			iwClosedHeaderPattern.MatchString(incident.DescriptionHtml) ||
-			iwClosedBodyPattern.MatchString(incident.DescriptionHtml)
+		control.Closed = isClosurePlacemark(incident)
 
 		// Parse description HTML for location, effective time, and requirements
 		control.LocationName, control.EffectiveTime, control.Description, control.LastUpdated, control.District, control.MessageID = parseChainControlDescription(incident.DescriptionHtml)
@@ -227,6 +220,20 @@ func (p *FeedParser) parseChainControlDetails(incidents []CaltransIncident) []Ch
 	}
 
 	return controls
+}
+
+// isClosurePlacemark reports whether a cc.kml placemark is a road closure
+// and not a chain control. A closure is marked three ways in the 2026 layout
+// (style, "Road Closed" header, a body that is exactly "Closed to traffic.")
+// and by its title in the old one. Any one of them is enough: a closure read
+// as a chain control would reach the map as a control with no level. A
+// control whose body goes on ("Closed to traffic without chains.") is not a
+// closure by its body.
+func isClosurePlacemark(in CaltransIncident) bool {
+	return strings.EqualFold(strings.TrimSpace(in.StyleUrl), "#full-closure") ||
+		roadClosedPattern.MatchString(in.Name) ||
+		iwClosedHeaderPattern.MatchString(in.DescriptionHtml) ||
+		iwClosedBodyPattern.MatchString(in.DescriptionHtml)
 }
 
 var roadClosedPattern = regexp.MustCompile(`(?i)\bRoad\s+Closed\b`)
@@ -278,7 +285,7 @@ var (
 	iwLocationPattern  = regexp.MustCompile(`(?is)<strong>\s*Location:\s*</strong>(.*?)</p>`)
 	// The header div holds an icon and the kind: "Road Closed" or "Chain Control".
 	iwClosedHeaderPattern = regexp.MustCompile(`(?is)class="iw-header-left"[^>]*>(?:\s|<img[^>]*>)*Road\s+Closed\b`)
-	iwClosedBodyPattern   = regexp.MustCompile(`(?is)<p[^>]*class="iw-text"[^>]*>\s*Closed\s+to\s+traffic\b`)
+	iwClosedBodyPattern   = regexp.MustCompile(`(?is)<p[^>]*class="iw-text"[^>]*>\s*Closed\s+to\s+traffic\s*\.?\s*</p>`)
 	iwTextPattern         = regexp.MustCompile(`(?is)<p[^>]*class="iw-text"[^>]*>(.*?)</p>`)
 )
 

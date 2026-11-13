@@ -5173,8 +5173,9 @@ type SummaryDomainHeadline struct {
 	// `GET /api/v1/events/{id}` returns 404. Find it as `properties.id` in the
 	// place's `{layer}.geojson` map layer (the layer slug is `layer` lowercased).
 	// A seasonal closure past a road segment's end has the id
-	// `road:{segment}#beyond-{n}`: the part before `#` is the segment feature's
-	// id and `n` is the index into its `road.beyond`.
+	// `road:{segment}:beyond-{n}`: the part before `:beyond-` is the segment
+	// feature's id and `n` is the index into its `road.beyond`. It is not a
+	// road id: `GET /api/v1/roads/{road}/history` returns 404 for it.
 	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	// The item's severity.
 	Severity string `protobuf:"bytes,2,opt,name=severity,proto3" json:"severity,omitempty"`

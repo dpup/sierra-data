@@ -470,7 +470,8 @@ func featureItems(features []hazards.Feature) []mergedItem {
 // these "Ebbetts Pass is closed" would be missing from the roads domain. Each
 // counts at the closure's own severity, under its own headline, which names
 // the closure and not the segment. The id is the segment feature's id plus
-// "#beyond-<index into road.beyond>".
+// ":beyond-<index into road.beyond>" (URL-safe, like every other id here; it
+// is not a road id, and /roads/{road}/history answers 404 for it).
 func beyondItems(features []hazards.Feature) []mergedItem {
 	var out []mergedItem
 	for _, f := range features {
@@ -479,7 +480,7 @@ func beyondItems(features []hazards.Feature) []mergedItem {
 		}
 		for i, b := range f.Properties.Road.Beyond {
 			out = append(out, mergedItem{
-				id:          fmt.Sprintf("%s#beyond-%d", f.Properties.ID, i),
+				id:          fmt.Sprintf("%s:beyond-%d", f.Properties.ID, i),
 				severity:    b.Severity,
 				rank:        b.SeverityRank,
 				headline:    b.Headline,

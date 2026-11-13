@@ -301,6 +301,29 @@ func TestMatchSeasonalClosure_Rule(t *testing.T) {
 		{"Is closed from 2 miles east of the Mt Reba Turnoff to Ebbetts Pass", CONDITION_CLOSURE, true},
 		{"IS CLOSED FROM 0.5 MI EAST OF THE JCT OF SR 207 /MT REBA TURNOFF/ TO THE JCT OF SR 89 /EBBETTS PASS/", CONDITION_CLOSURE, true},
 
+		// The tail Caltrans closes it with, in any case and spacing.
+		{"Is closed from 0.5 mi east of the Jct of SR 207 /Mt Reba Turnoff/ to the Jct of SR 89 /Ebbetts Pass/ (Alpine Co)- Due to snow", CONDITION_CLOSURE, true},
+		{"Is closed from 0.5 mi east of the Jct of SR 207 /Mt Reba Turnoff/ to the Jct of SR 89 /Ebbetts Pass/ (Alpine Co) - DUE TO SNOW", CONDITION_CLOSURE, true},
+		{"Is closed from 0.5 mi east of the Jct of SR 207 /Mt Reba Turnoff/ to the Jct of SR 89 /Ebbetts Pass/ (Alpine Co) -due to snow -Motorists are advised to use an alternate route.", CONDITION_CLOSURE, true},
+		{"Is closed from 0.5 mi east of the Jct of SR 207 /Mt Reba Turnoff/ to the Jct of SR 89 /Ebbetts Pass/ (Alpine Co) - For the winter.", CONDITION_CLOSURE, true},
+		{"Is closed from 0.5 mi east of the Jct of SR 207 /Mt Reba Turnoff/ to the Jct of SR 89 /Ebbetts Pass/ (Alpine Co) 24 hrs a day - Due to snow and ice - For the season - Motorists are advised to use an alternate route", CONDITION_CLOSURE, true},
+		{"Is  closed from 0.5 mi east of the Jct of SR 207  /Mt Reba Turnoff/ to the Jct of SR 89 /Ebbetts Pass/.", CONDITION_CLOSURE, true},
+
+		// Anything else after the end: it says more than the closure.
+		{"Is closed from 0.5 mi east of the Jct of SR 207 /Mt Reba Turnoff/ to the Jct of SR 89 /Ebbetts Pass/ (Alpine Co) - Due to snow - Chains are required from Cottage Springs to Cabbage Patch", CONDITION_CLOSURE, false},
+		{"Is closed from 0.5 mi east of the Jct of SR 207 /Mt Reba Turnoff/ to the Jct of SR 89 /Ebbetts Pass/ (Alpine Co) - Due to snow - Also closed at Black Springs", CONDITION_CLOSURE, false},
+		{"Is closed from 0.5 mi east of the Jct of SR 207 /Mt Reba Turnoff/ to the Jct of SR 89 /Ebbetts Pass/ (Alpine Co) - Due to snow - Chains or snow tires are required 5 mi west of the closure", CONDITION_CLOSURE, false},
+		{"Is closed from 0.5 mi east of the Jct of SR 207 /Mt Reba Turnoff/ to the Jct of SR 89 /Ebbetts Pass/ (Alpine Co) - Due to snow - The road is closed west of the turnoff as well", CONDITION_CLOSURE, false},
+		{"Is closed from 0.5 mi east of the Jct of SR 207 /Mt Reba Turnoff/ to the Jct of SR 89 /Ebbetts Pass/ (Alpine Co) 24 hrs a day and at Cottage Springs - Due to snow", CONDITION_CLOSURE, false},
+		{"Is closed from 0.5 mi east of the Jct of SR 207 /Mt Reba Turnoff/ to the Jct of SR 89 /Ebbetts Pass/ (Alpine Co) from 0600 hrs to 1800 hrs - Due to snow", CONDITION_CLOSURE, false},
+		{"Is closed from 0.5 mi east of the Jct of SR 207 /Mt Reba Turnoff/ to the Jct of SR 89 /Ebbetts Pass/ (Alpine Co) - Due to snow at Dorrington", CONDITION_CLOSURE, false},
+		{"Is closed from 0.5 mi east of the Jct of SR 207 /Mt Reba Turnoff/ to the Jct of SR 89 /Ebbetts Pass/ (Alpine Co) - Due to a rock slide", CONDITION_CLOSURE, false},
+		{"Is closed from 0.5 mi east of the Jct of SR 207 /Mt Reba Turnoff/ to the Jct of SR 89 /Ebbetts Pass/ and Hells Kitchen (Alpine Co)", CONDITION_CLOSURE, false},
+		{"Is closed from 0.5 mi east of the Jct of SR 207 /Mt Reba Turnoff/ to the Jct of SR 89 /Ebbetts Pass/ (Alpine Co) (Cottage Springs Co) - Due to snow", CONDITION_CLOSURE, false},
+		{"Is closed from 0.5 mi east of the Jct of SR 207 /Mt Reba Turnoff/ to the Jct of SR 89 /Ebbetts Pass/ Rd", CONDITION_CLOSURE, false},
+		{"Is closed from 0.5 mi east of the Jct of SR 207 /Mt Reba Turnoff/ to the Jct of SR 89 /Ebbetts Pass/ (Alpine Co) - Due to snow- Motorists are advised to use an alternate route Chains are required from Cottage Springs to Cabbage Patch", CONDITION_CLOSURE, false},
+		{"Chains are required - Is closed from 0.5 mi east of the Jct of SR 207 /Mt Reba Turnoff/ to the Jct of SR 89 /Ebbetts Pass/", CONDITION_CLOSURE, false},
+
 		// A different end.
 		{"Is closed from 0.5 mi east of the Jct of SR 207 /Mt Reba Turnoff/ to Lake Alpine (Alpine Co) - Due to snow", CONDITION_CLOSURE, false},
 		{"Is closed from 0.5 mi east of the Jct of SR 207 /Mt Reba Turnoff/ to 7.2 mi west of the Jct of SR 89 /Ebbetts Pass/", CONDITION_CLOSURE, false},
@@ -343,11 +366,25 @@ func TestClassifyCondition_ChainLevels(t *testing.T) {
 		"Chains are required on all vehicles except 4-wheel-drive vehicles with snow tires on all 4 wheels from Dorrington to the Jct of SR 207 /Mt Reba Turnoff/": CONDITION_CHAIN,
 		"Chains are required on all vehicles from Dorrington to Bear Valley":                                                                                       CONDITION_CHAIN,
 		"Chains or traction devices are required on all vehicles except four wheel/ all wheel drive vehicles with snow-tread tires on all four wheels.":            CONDITION_CHAIN,
-		"Snow tires are required from Arnold to Dorrington":                                                                                                        CONDITION_CHAIN,
-		"Chains required from Arnold to Dorrington":                                                                                                                CONDITION_CHAIN,
-		"Is closed from Arnold to Dorrington - Chains or snow tires are required west of the closure":                                                              CONDITION_CLOSURE,
-		"1-way controlled traffic at various locations - Due to construction":                                                                                      CONDITION_RESTRICTION,
-		"For Yosemite Nat'l Park road information call 209-372-0200":                                                                                               CONDITION_INFO,
+		"Chains required from Arnold to Dorrington":                                                   CONDITION_CHAIN,
+		"Is closed from Arnold to Dorrington - Chains or snow tires are required west of the closure": CONDITION_CLOSURE,
+		"1-way controlled traffic at various locations - Due to construction":                         CONDITION_RESTRICTION,
+		"For Yosemite Nat'l Park road information call 209-372-0200":                                  CONDITION_INFO,
+		// Not requirements.
+		"Chains are not required":                                                        CONDITION_INFO,
+		"Chains are no longer required from Arnold to Dorrington":                        CONDITION_INFO,
+		"No chains or snow tires are required at this time":                              CONDITION_INFO,
+		"No chains required":                                                             CONDITION_INFO,
+		"Motorists should carry chains - chains may be required at any time":             CONDITION_INFO,
+		"Is open from Arnold to Dorrington - no chains or traction devices required":     CONDITION_INFO,
+		"Is open from Arnold to Dorrington - No chains or traction devices are required": CONDITION_INFO,
+		// A restriction that mentions the R1 wording stays a restriction; with
+		// "chains are required" or "chain control" it always was a chain condition.
+		"1-way controlled traffic from Arnold to Dorrington - chains or snow tires are required":     CONDITION_RESTRICTION,
+		"1-way controlled traffic from Arnold to Dorrington - chains or traction devices required":   CONDITION_RESTRICTION,
+		"1-way controlled traffic from Arnold to Dorrington - chains are required":                   CONDITION_CHAIN,
+		"1-way controlled traffic at the chain control checkpoint":                                   CONDITION_CHAIN,
+		"No chains are required east of Arnold - Chains are required from Dorrington to Bear Valley": CONDITION_CHAIN,
 	} {
 		assert.Equal(t, want, classifyCondition(text), text)
 	}

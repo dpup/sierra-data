@@ -191,12 +191,13 @@ var truckLevelRe = regexp.MustCompile(`(?i)\blevel\s+(MAX|MIN|TS)\b|truck chain 
 // POSITIVE match only — the 2026 iw-* layout (blank <name>s) defeats any rule
 // keyed on parsing a level out of the text:
 //
-//   - road closures: styleUrl "#full-closure" (the style id is the same in
-//     the 2025 legacy capture and the 2026 file).
+//   - road closures: isClosurePlacemark, the test the parser uses (styleUrl
+//     "#full-closure", the same in the 2025 legacy capture and the 2026
+//     file, or the "Road Closed" header, or the "Closed to traffic." body).
 //   - truck-only levels: "level MAX/MIN/TS" in the name, or the truck
 //     requirement / chain-screening text in the description.
 func isKMLSupplement(in CaltransIncident) bool {
-	if strings.EqualFold(strings.TrimSpace(in.StyleUrl), "#full-closure") {
+	if isClosurePlacemark(in) {
 		return true
 	}
 	return truckLevelRe.MatchString(in.Name) || truckLevelRe.MatchString(in.DescriptionText)

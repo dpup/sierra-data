@@ -611,7 +611,7 @@ spec:
                 toKm: {type: number}
           beyond:
             type: array
-            description: "Named seasonal closures past one of the segment's ends that are in effect now, such as the Ebbetts Pass winter closure past Bear Valley. They do not change the segment's `status` or `severity`: the segment is as open as `status` says. An entry appears only when Caltrans words the closure as the configured span; any other closure naming those places closes the segment. Absent when there are none. Each entry is also a roads headline in the place summary, with the id `road:{segment}#beyond-{index}`."
+            description: "Named seasonal closures past one of the segment's ends that are in effect now, such as the Ebbetts Pass winter closure past Bear Valley. They do not change the segment's `status` or `severity`: the segment is as open as `status` says. An entry appears only when Caltrans words the closure as the configured span; any other closure naming those places closes the segment. Absent when there are none. Each entry is also a roads headline in the place summary, with the id `road:{segment}:beyond-{index}`."
             items:
               type: object
               required: [name, status, side, severity, severityRank, headline, source]
