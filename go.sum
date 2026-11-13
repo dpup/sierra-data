@@ -110,10 +110,8 @@ github.com/santhosh-tekuri/jsonschema/v6 v6.0.3 h1:1EYB5IzjZawrrnELUi78f9fPu57Hu
 github.com/santhosh-tekuri/jsonschema/v6 v6.0.3/go.mod h1:JXeL+ps8p7/KNMjDQk3TCwPpBy0wYklyWTfbkIzdIFU=
 github.com/sashabaranov/go-openai v1.43.0 h1:HNRpO8TAQ01ssO7aPXO/68QRlcCCYQQ5GfHbFceRZcY=
 github.com/sashabaranov/go-openai v1.43.0/go.mod h1:lj5b/K+zjTSFxVLijLSTDZuP7adOgerWeFyZLUhAKRg=
-github.com/sierragridteam/sierra-meshrelay v0.9.0 h1:33/9jur5a/zblsPyzLbDMVUUKAjPuShvF73+aCy1c7I=
-github.com/sierragridteam/sierra-meshrelay v0.9.0/go.mod h1:HIr0aeykDa7qRECDHWfP21ct9uOzYm58tn6Pt19LoMg=
-github.com/sierragridteam/sierra-meshrelay v0.10.0 h1:2FR4h2bSpCYmZwvOZRQkqZkWfgjApsQ2Q6EI5XTazKU=
-github.com/sierragridteam/sierra-meshrelay v0.10.0/go.mod h1:p429/OXPgZdOG0HeCy1fpiqzsiEGj5NZlNFFag/RDY4=
+github.com/sierragridteam/sierra-meshrelay v0.14.0 h1:ts1rjmFY3OXCP7JLkx+RJgohBNQljZLR9z9a6UW/8Wc=
+github.com/sierragridteam/sierra-meshrelay v0.14.0/go.mod h1:1ZcMEb0GS3TluINK33xAU2AccRYwFG7pFFntqIXXcLU=
 github.com/sirupsen/logrus v1.4.2/go.mod h1:tLMulIdttU9McNUspp0xgXVQah82FyeX6MwdIuYE2rE=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
 github.com/stretchr/objx v0.1.1/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
