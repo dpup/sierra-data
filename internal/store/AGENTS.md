@@ -293,12 +293,12 @@ write that bypasses `inTx`: the epoch fence lives there.
   (default 8; `grid.database.maxConns`, `PF__GRID__DATABASE__MAX_CONNS`), plus
   the hijacked writer-lease connection, plus the `LISTEN` connection:
   at most 10 backends, 3 idle (min 1 + 2); measured 10 under 64 concurrent map
-  requests. `gridctl` is one more process of the same shape (10). On
+  requests. On
   db.t4g.small (2 GiB; RDS default `max_connections` =
   `LEAST(DBInstanceClassMemory/9531392, 5000)`, about 170-180 there, of which
   3 are the superuser reserve and RDS's own agents and Database Insights take a
-  few): two task sets of 2 tasks during a blue/green is 4 x 10 = 40, `gridctl`
-  during an import 10, an operator's `psql` and migrations 2-3: about 55, a
+  few): two task sets of 2 tasks during a blue/green is 4 x 10 = 40, an
+  operator's `psql` and migrations 2-3: about 45, a
   third of the limit. Reads are milliseconds; 8 is far more than a 0.5 vCPU task
   can keep busy, so the task's CPU, not the pool, is the limit. Do not raise it
   without recomputing: tasks x (maxConns + 2) + headroom must stay under ~100
@@ -471,28 +471,14 @@ always backwards compatible. Rules, binding on every new file:
   `TestReaderOnlyProcessMigratesAndIsReady` /
   `TestOlderBuildServesANewerSchema` (cmd/server) pin both directions.
 
-### The SQLite importer depends on this schema
+### The SQLite import, for the record
 
-`internal/sqliteimport` (`gridctl import`; usage in the `cmd/gridctl` package doc) loads the legacy
-SQLite store into these tables and verifies them column by column. Its table
-list (`tables.go`) names the columns it copies and compares, and it derives
-the columns SQLite never had (`first_ingested_at`, the bbox, `versions`, the
-`mesh_observations` identity). So:
-
-- A new column on an imported table must either have a default that is right
-  for every legacy row, or be derived in the importer (and checked there).
-- A new table that holds data carried from SQLite goes into the importer's
-  list; one that does not is simply empty after an import.
-- A new `versions` key, identity column or derived index column needs the
-  same treatment as `revisions` and `first_ingested_at`: seeded by the import
-  and asserted by its database checks.
-- `import_log` is migration `0003_import_log.sql`; the importer only writes
-  its row, inside the import transaction.
-- The importer is a writer: it opens with `OpenReader`, takes the lease with
-  `AcquireLease` (refusing while a server holds it) and writes through
-  `WritePgxTx`, the native-pgx sibling of `inTx` for `CopyFrom`, with the
-  same epoch fence. Anything else that must write outside the scheduler
-  goes the same way; never write around the fence.
+The legacy store was loaded into these tables once, on 2026-11-13, by
+`gridctl import` (`internal/sqliteimport`, removed afterwards). It left two
+traces that stay: `schema_migrations` rows with `source = 'sqlite'` (the
+legacy ladder it recorded) beside the `postgres` ones, and the `import_log`
+table (migration `0003_import_log.sql`) with its one row. Nothing writes
+either again; do not drop them (additive-only schema).
 
 `ErrNotFound` from point lookups (`GetEvent`, `GetPlace`) maps to HTTP 404 at the
 API layer — return it, don't invent a sentinel.

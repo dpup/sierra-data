@@ -199,7 +199,7 @@ func Current(ctx context.Context, db *sql.DB) (int, error) {
 
 // CheckVersion fails unless the database is at a schema version this build
 // can read: Latest or newer (additive-only policy). Tools that must not
-// migrate (gridctl verify) call this instead of Apply.
+// migrate call this instead of Apply.
 func CheckVersion(ctx context.Context, db *sql.DB) (int, error) {
 	v, err := Current(ctx, db)
 	if err != nil {

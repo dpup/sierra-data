@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Diff the Grid API of two servers (migration plan section 8, gate 2).
 
-Run the legacy SQLite-backed server and the new PostgreSQL-backed server on
-the same snapshot (the new one loaded through `gridctl import`), then:
+Run two servers on the same data (the migration's gate compared the legacy
+SQLite server with the PostgreSQL one on one snapshot), then:
 
     python3 scripts/apidiff.py --legacy http://localhost:8199 --new http://localhost:8200
     make apidiff LEGACY=http://localhost:8199 NEW=http://localhost:8200

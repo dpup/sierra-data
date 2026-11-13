@@ -76,7 +76,7 @@ SETTINGS = {
 # whose image did not change is not redeployed. test_deploy.py holds this to
 # the Dockerfile's COPY lines.
 TARGETS = {
-    "grid": {"stage": "grid", "binaries": [("./cmd/server", "sierra-server"), ("./cmd/gridctl", "gridctl")],
+    "grid": {"stage": "grid", "binaries": [("./cmd/server", "sierra-server")],
              "files": ["Dockerfile", "prefab.yaml", "api/v1/*.swagger.json", "certs/rds-global-bundle.pem"]},
     "relay": {"stage": "relay", "binaries": [("./cmd/mesh-relay", "mesh-relay")],
               "files": ["Dockerfile", "prefab.yaml"]},
