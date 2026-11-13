@@ -1,0 +1,1050 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xsi:schemaLocation="http://www.opengis.net/kml/2.2 http://schemas.opengis.net/kml/2.2.0/ogckml22.xsd" xmlns="http://www.opengis.net/kml/2.2" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+    <Document>
+        <name>Caltrans Chain Controls</name>
+        <Style id="notclosed">
+            <IconStyle>
+                <colorMode>normal</colorMode>
+                <Icon>
+                    <href>https://quickmap.dot.ca.gov/img/cc32x32.png</href>
+                </Icon>
+                <hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/>
+            </IconStyle>
+            <LabelStyle>
+                <scale>0</scale>
+            </LabelStyle>
+        </Style>
+        <Style id="full-closure">
+            <IconStyle>
+                <colorMode>normal</colorMode>
+                <Icon>
+                    <href>https://quickmap.dot.ca.gov/img/full-closure-32x32.png</href>
+                </Icon>
+                <hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/>
+            </IconStyle>
+            <LabelStyle>
+                <scale>0</scale>
+            </LabelStyle>
+        </Style>
+        <Placemark>
+            <name></name>
+            <description><![CDATA[<link rel="stylesheet" type="text/css" href="https://quickmap.dot.ca.gov/css/gm-infowindow.css?v=9" />
+<div class="infowindow-content">
+    <div class="iw-header">
+        <div class="iw-header-left">
+            <img class="iw-icon" src="https://quickmap.dot.ca.gov/img/cc32x32.png" />
+            Chain Control
+        </div>
+    </div>
+
+    <div class="iw-body">
+        <h2 class="iw-title">Eastbound Highway 20</h2>
+        
+        <p class="iw-text"><strong>Chain Control level TS</strong></p>
+        <p class="iw-text"><strong>Location: </strong>Nevada St. - Nevada City</p>
+        <p class="iw-text">All trucks must stop at the chain check point, Caltrans is currently screening for chains. Drivers must have maximum chains in their possession in order to proceed. Trucks without chains will be turned around. Permit loads are prohibited over the summit.</p>
+        <p class="iw-text"><strong>Effective from: </strong>11/13/2026 12:43</p>
+        <div font-size:xx-small;'>District: 3 Message ID: 8949</div>
+        
+        <p class="iw-attribution">
+            Information courtesy of <strong>Caltrans</strong>
+        </p>
+    </div>
+
+    <div class="iw-footer">
+        <span class="iw-timestamp">Last updated: <strong>11/13/2026</strong> 1:37pm</span>
+    </div>
+</div>]]></description>
+            <styleUrl>#notclosed</styleUrl>
+            <Point>
+                <coordinates>-121.010858,39.273057</coordinates>
+            </Point>
+        </Placemark>
+        <Placemark>
+            <name></name>
+            <description><![CDATA[<link rel="stylesheet" type="text/css" href="https://quickmap.dot.ca.gov/css/gm-infowindow.css?v=9" />
+<div class="infowindow-content">
+    <div class="iw-header">
+        <div class="iw-header-left">
+            <img class="iw-icon" src="https://quickmap.dot.ca.gov/img/cc32x32.png" />
+            Chain Control
+        </div>
+    </div>
+
+    <div class="iw-body">
+        <h2 class="iw-title">Westbound Interstate 80</h2>
+        
+        <p class="iw-text"><strong>Chain Control level TS</strong></p>
+        <p class="iw-text"><strong>Location: </strong>Mogul</p>
+        <p class="iw-text">All trucks must stop at the chain check point, Caltrans is currently screening for chains. Drivers must have maximum chains in their possession in order to proceed. Trucks without chains will be turned around. Permit loads are prohibited over the summit.</p>
+        <p class="iw-text"><strong>Effective from: </strong>11/13/2026 09:16</p>
+        <div font-size:xx-small;'>District: 3 Message ID: 9139</div>
+        
+        <p class="iw-attribution">
+            Information courtesy of <strong>Caltrans</strong>
+        </p>
+    </div>
+
+    <div class="iw-footer">
+        <span class="iw-timestamp">Last updated: <strong>11/13/2026</strong> 1:37pm</span>
+    </div>
+</div>]]></description>
+            <styleUrl>#notclosed</styleUrl>
+            <Point>
+                <coordinates>-119.926323,39.513921</coordinates>
+            </Point>
+        </Placemark>
+        <Placemark>
+            <name></name>
+            <description><![CDATA[<link rel="stylesheet" type="text/css" href="https://quickmap.dot.ca.gov/css/gm-infowindow.css?v=9" />
+<div class="infowindow-content">
+    <div class="iw-header">
+        <div class="iw-header-left">
+            <img class="iw-icon" src="https://quickmap.dot.ca.gov/img/cc32x32.png" />
+            Chain Control
+        </div>
+    </div>
+
+    <div class="iw-body">
+        <h2 class="iw-title">Westbound Interstate 80</h2>
+        
+        <p class="iw-text"><strong>Chain Control level MIN</strong></p>
+        <p class="iw-text"><strong>Location: </strong>Rainbow</p>
+        <p class="iw-text">Truck chain requirements are minimum for all trucks.</p>
+        <p class="iw-text"><strong>Effective from: </strong>11/13/2026 13:23</p>
+        <div font-size:xx-small;'>District: 3 Message ID: 9069</div>
+        
+        <p class="iw-attribution">
+            Information courtesy of <strong>Caltrans</strong>
+        </p>
+    </div>
+
+    <div class="iw-footer">
+        <span class="iw-timestamp">Last updated: <strong>11/13/2026</strong> 1:37pm</span>
+    </div>
+</div>]]></description>
+            <styleUrl>#notclosed</styleUrl>
+            <Point>
+                <coordinates>-120.49317,39.31176</coordinates>
+            </Point>
+        </Placemark>
+        <Placemark>
+            <name></name>
+            <description><![CDATA[<link rel="stylesheet" type="text/css" href="https://quickmap.dot.ca.gov/css/gm-infowindow.css?v=9" />
+<div class="infowindow-content">
+    <div class="iw-header">
+        <div class="iw-header-left">
+            <img class="iw-icon" src="https://quickmap.dot.ca.gov/img/cc32x32.png" />
+            Chain Control
+        </div>
+    </div>
+
+    <div class="iw-body">
+        <h2 class="iw-title">Westbound Interstate 80</h2>
+        
+        <p class="iw-text"><strong>Chain Control level R-2</strong></p>
+        <p class="iw-text"><strong>Location: </strong>Rainbow</p>
+        <p class="iw-text">Chains or traction devices are required on all vehicles except four wheel/ all wheel drive vehicles with snow-tread tires on all four wheels. (Four wheel/all wheel drive vehicles must carry traction devices in chain control areas).</p>
+        <p class="iw-text"><strong>Effective from: </strong>11/13/2026 13:23</p>
+        <div font-size:xx-small;'>District: 3 Message ID: 9068</div>
+        
+        <p class="iw-attribution">
+            Information courtesy of <strong>Caltrans</strong>
+        </p>
+    </div>
+
+    <div class="iw-footer">
+        <span class="iw-timestamp">Last updated: <strong>11/13/2026</strong> 1:37pm</span>
+    </div>
+</div>]]></description>
+            <styleUrl>#notclosed</styleUrl>
+            <Point>
+                <coordinates>-120.49317,39.31176</coordinates>
+            </Point>
+        </Placemark>
+        <Placemark>
+            <name></name>
+            <description><![CDATA[<link rel="stylesheet" type="text/css" href="https://quickmap.dot.ca.gov/css/gm-infowindow.css?v=9" />
+<div class="infowindow-content">
+    <div class="iw-header">
+        <div class="iw-header-left">
+            <img class="iw-icon" src="https://quickmap.dot.ca.gov/img/cc32x32.png" />
+            Chain Control
+        </div>
+    </div>
+
+    <div class="iw-body">
+        <h2 class="iw-title">Westbound Interstate 80</h2>
+        
+        <p class="iw-text"><strong>Chain Control level MIN</strong></p>
+        <p class="iw-text"><strong>Location: </strong>Kingvale</p>
+        <p class="iw-text">Truck chain requirements are minimum for all trucks.</p>
+        <p class="iw-text"><strong>Effective from: </strong>11/13/2026 13:23</p>
+        <div font-size:xx-small;'>District: 3 Message ID: 9067</div>
+        
+        <p class="iw-attribution">
+            Information courtesy of <strong>Caltrans</strong>
+        </p>
+    </div>
+
+    <div class="iw-footer">
+        <span class="iw-timestamp">Last updated: <strong>11/13/2026</strong> 1:37pm</span>
+    </div>
+</div>]]></description>
+            <styleUrl>#notclosed</styleUrl>
+            <Point>
+                <coordinates>-120.44992,39.31392</coordinates>
+            </Point>
+        </Placemark>
+        <Placemark>
+            <name></name>
+            <description><![CDATA[<link rel="stylesheet" type="text/css" href="https://quickmap.dot.ca.gov/css/gm-infowindow.css?v=9" />
+<div class="infowindow-content">
+    <div class="iw-header">
+        <div class="iw-header-left">
+            <img class="iw-icon" src="https://quickmap.dot.ca.gov/img/cc32x32.png" />
+            Chain Control
+        </div>
+    </div>
+
+    <div class="iw-body">
+        <h2 class="iw-title">Westbound Interstate 80</h2>
+        
+        <p class="iw-text"><strong>Chain Control level R-2</strong></p>
+        <p class="iw-text"><strong>Location: </strong>Kingvale</p>
+        <p class="iw-text">Chains or traction devices are required on all vehicles except four wheel/ all wheel drive vehicles with snow-tread tires on all four wheels. (Four wheel/all wheel drive vehicles must carry traction devices in chain control areas).</p>
+        <p class="iw-text"><strong>Effective from: </strong>11/13/2026 13:23</p>
+        <div font-size:xx-small;'>District: 3 Message ID: 9066</div>
+        
+        <p class="iw-attribution">
+            Information courtesy of <strong>Caltrans</strong>
+        </p>
+    </div>
+
+    <div class="iw-footer">
+        <span class="iw-timestamp">Last updated: <strong>11/13/2026</strong> 1:37pm</span>
+    </div>
+</div>]]></description>
+            <styleUrl>#notclosed</styleUrl>
+            <Point>
+                <coordinates>-120.44992,39.31392</coordinates>
+            </Point>
+        </Placemark>
+        <Placemark>
+            <name></name>
+            <description><![CDATA[<link rel="stylesheet" type="text/css" href="https://quickmap.dot.ca.gov/css/gm-infowindow.css?v=9" />
+<div class="infowindow-content">
+    <div class="iw-header">
+        <div class="iw-header-left">
+            <img class="iw-icon" src="https://quickmap.dot.ca.gov/img/cc32x32.png" />
+            Chain Control
+        </div>
+    </div>
+
+    <div class="iw-body">
+        <h2 class="iw-title">Westbound Interstate 80</h2>
+        
+        <p class="iw-text"><strong>Chain Control level MIN</strong></p>
+        <p class="iw-text"><strong>Location: </strong>DLI (Donner Lake Interchange)</p>
+        <p class="iw-text">Truck chain requirements are minimum for all trucks.</p>
+        <p class="iw-text"><strong>Effective from: </strong>11/13/2026 13:23</p>
+        <div font-size:xx-small;'>District: 3 Message ID: 9065</div>
+        
+        <p class="iw-attribution">
+            Information courtesy of <strong>Caltrans</strong>
+        </p>
+    </div>
+
+    <div class="iw-footer">
+        <span class="iw-timestamp">Last updated: <strong>11/13/2026</strong> 1:37pm</span>
+    </div>
+</div>]]></description>
+            <styleUrl>#notclosed</styleUrl>
+            <Point>
+                <coordinates>-120.27931,39.32886</coordinates>
+            </Point>
+        </Placemark>
+        <Placemark>
+            <name></name>
+            <description><![CDATA[<link rel="stylesheet" type="text/css" href="https://quickmap.dot.ca.gov/css/gm-infowindow.css?v=9" />
+<div class="infowindow-content">
+    <div class="iw-header">
+        <div class="iw-header-left">
+            <img class="iw-icon" src="https://quickmap.dot.ca.gov/img/cc32x32.png" />
+            Chain Control
+        </div>
+    </div>
+
+    <div class="iw-body">
+        <h2 class="iw-title">Westbound Interstate 80</h2>
+        
+        <p class="iw-text"><strong>Chain Control level R-2</strong></p>
+        <p class="iw-text"><strong>Location: </strong>DLI (Donner Lake Interchange)</p>
+        <p class="iw-text">Chains or traction devices are required on all vehicles except four wheel/ all wheel drive vehicles with snow-tread tires on all four wheels. (Four wheel/all wheel drive vehicles must carry traction devices in chain control areas).</p>
+        <p class="iw-text"><strong>Effective from: </strong>11/13/2026 13:23</p>
+        <div font-size:xx-small;'>District: 3 Message ID: 9064</div>
+        
+        <p class="iw-attribution">
+            Information courtesy of <strong>Caltrans</strong>
+        </p>
+    </div>
+
+    <div class="iw-footer">
+        <span class="iw-timestamp">Last updated: <strong>11/13/2026</strong> 1:37pm</span>
+    </div>
+</div>]]></description>
+            <styleUrl>#notclosed</styleUrl>
+            <Point>
+                <coordinates>-120.27931,39.32886</coordinates>
+            </Point>
+        </Placemark>
+        <Placemark>
+            <name></name>
+            <description><![CDATA[<link rel="stylesheet" type="text/css" href="https://quickmap.dot.ca.gov/css/gm-infowindow.css?v=9" />
+<div class="infowindow-content">
+    <div class="iw-header">
+        <div class="iw-header-left">
+            <img class="iw-icon" src="https://quickmap.dot.ca.gov/img/cc32x32.png" />
+            Chain Control
+        </div>
+    </div>
+
+    <div class="iw-body">
+        <h2 class="iw-title">Eastbound Interstate 80</h2>
+        
+        <p class="iw-text"><strong>Chain Control level HT</strong></p>
+        <p class="iw-text"><strong>Location: </strong>Castle Peak, (@ DRA Holding only)</p>
+        <p class="iw-text">All traffic is being held at the chain control check point due to incidents or weather related conditions.</p>
+        <p class="iw-text"><strong>Effective from: </strong>11/13/2026 13:34</p>
+        <div font-size:xx-small;'>District: 3 Message ID: 9122</div>
+        
+        <p class="iw-attribution">
+            Information courtesy of <strong>Caltrans</strong>
+        </p>
+    </div>
+
+    <div class="iw-footer">
+        <span class="iw-timestamp">Last updated: <strong>11/13/2026</strong> 1:37pm</span>
+    </div>
+</div>]]></description>
+            <styleUrl>#notclosed</styleUrl>
+            <Point>
+                <coordinates>-120.33873,39.34256</coordinates>
+            </Point>
+        </Placemark>
+        <Placemark>
+            <name></name>
+            <description><![CDATA[<link rel="stylesheet" type="text/css" href="https://quickmap.dot.ca.gov/css/gm-infowindow.css?v=9" />
+<div class="infowindow-content">
+    <div class="iw-header">
+        <div class="iw-header-left">
+            <img class="iw-icon" src="https://quickmap.dot.ca.gov/img/cc32x32.png" />
+            Chain Control
+        </div>
+    </div>
+
+    <div class="iw-body">
+        <h2 class="iw-title">Eastbound Interstate 80</h2>
+        
+        <p class="iw-text"><strong>Chain Control level R-2</strong></p>
+        <p class="iw-text"><strong>Location: </strong>DLI (Donner Lake Interchange)</p>
+        <p class="iw-text">Chains or traction devices are required on all vehicles except four wheel/ all wheel drive vehicles with snow-tread tires on all four wheels. (Four wheel/all wheel drive vehicles must carry traction devices in chain control areas).</p>
+        <p class="iw-text"><strong>Effective from: </strong>11/13/2026 13:21</p>
+        <div font-size:xx-small;'>District: 3 Message ID: 9041</div>
+        
+        <p class="iw-attribution">
+            Information courtesy of <strong>Caltrans</strong>
+        </p>
+    </div>
+
+    <div class="iw-footer">
+        <span class="iw-timestamp">Last updated: <strong>11/13/2026</strong> 1:37pm</span>
+    </div>
+</div>]]></description>
+            <styleUrl>#notclosed</styleUrl>
+            <Point>
+                <coordinates>-120.28941,39.331</coordinates>
+            </Point>
+        </Placemark>
+        <Placemark>
+            <name></name>
+            <description><![CDATA[<link rel="stylesheet" type="text/css" href="https://quickmap.dot.ca.gov/css/gm-infowindow.css?v=9" />
+<div class="infowindow-content">
+    <div class="iw-header">
+        <div class="iw-header-left">
+            <img class="iw-icon" src="https://quickmap.dot.ca.gov/img/cc32x32.png" />
+            Chain Control
+        </div>
+    </div>
+
+    <div class="iw-body">
+        <h2 class="iw-title">Eastbound Interstate 80</h2>
+        
+        <p class="iw-text"><strong>Chain Control level MIN</strong></p>
+        <p class="iw-text"><strong>Location: </strong>DLI (Donner Lake Interchange)</p>
+        <p class="iw-text">Truck chain requirements are minimum for all trucks.</p>
+        <p class="iw-text"><strong>Effective from: </strong>11/13/2026 13:21</p>
+        <div font-size:xx-small;'>District: 3 Message ID: 9042</div>
+        
+        <p class="iw-attribution">
+            Information courtesy of <strong>Caltrans</strong>
+        </p>
+    </div>
+
+    <div class="iw-footer">
+        <span class="iw-timestamp">Last updated: <strong>11/13/2026</strong> 1:37pm</span>
+    </div>
+</div>]]></description>
+            <styleUrl>#notclosed</styleUrl>
+            <Point>
+                <coordinates>-120.28941,39.331</coordinates>
+            </Point>
+        </Placemark>
+        <Placemark>
+            <name></name>
+            <description><![CDATA[<link rel="stylesheet" type="text/css" href="https://quickmap.dot.ca.gov/css/gm-infowindow.css?v=9" />
+<div class="infowindow-content">
+    <div class="iw-header">
+        <div class="iw-header-left">
+            <img class="iw-icon" src="https://quickmap.dot.ca.gov/img/cc32x32.png" />
+            Chain Control
+        </div>
+    </div>
+
+    <div class="iw-body">
+        <h2 class="iw-title">Eastbound Interstate 80</h2>
+        
+        <p class="iw-text"><strong>Chain Control level R-2</strong></p>
+        <p class="iw-text"><strong>Location: </strong>Truckee</p>
+        <p class="iw-text">Chains or traction devices are required on all vehicles except four wheel/ all wheel drive vehicles with snow-tread tires on all four wheels. (Four wheel/all wheel drive vehicles must carry traction devices in chain control areas).</p>
+        <p class="iw-text"><strong>Effective from: </strong>11/13/2026 13:21</p>
+        <div font-size:xx-small;'>District: 3 Message ID: 9043</div>
+        
+        <p class="iw-attribution">
+            Information courtesy of <strong>Caltrans</strong>
+        </p>
+    </div>
+
+    <div class="iw-footer">
+        <span class="iw-timestamp">Last updated: <strong>11/13/2026</strong> 1:37pm</span>
+    </div>
+</div>]]></description>
+            <styleUrl>#notclosed</styleUrl>
+            <Point>
+                <coordinates>-120.22045,39.32371</coordinates>
+            </Point>
+        </Placemark>
+        <Placemark>
+            <name></name>
+            <description><![CDATA[<link rel="stylesheet" type="text/css" href="https://quickmap.dot.ca.gov/css/gm-infowindow.css?v=9" />
+<div class="infowindow-content">
+    <div class="iw-header">
+        <div class="iw-header-left">
+            <img class="iw-icon" src="https://quickmap.dot.ca.gov/img/cc32x32.png" />
+            Chain Control
+        </div>
+    </div>
+
+    <div class="iw-body">
+        <h2 class="iw-title">Eastbound Interstate 80</h2>
+        
+        <p class="iw-text"><strong>Chain Control level MIN</strong></p>
+        <p class="iw-text"><strong>Location: </strong>Truckee</p>
+        <p class="iw-text">Truck chain requirements are minimum for all trucks.</p>
+        <p class="iw-text"><strong>Effective from: </strong>11/13/2026 13:21</p>
+        <div font-size:xx-small;'>District: 3 Message ID: 9044</div>
+        
+        <p class="iw-attribution">
+            Information courtesy of <strong>Caltrans</strong>
+        </p>
+    </div>
+
+    <div class="iw-footer">
+        <span class="iw-timestamp">Last updated: <strong>11/13/2026</strong> 1:37pm</span>
+    </div>
+</div>]]></description>
+            <styleUrl>#notclosed</styleUrl>
+            <Point>
+                <coordinates>-120.22045,39.32371</coordinates>
+            </Point>
+        </Placemark>
+        <Placemark>
+            <name></name>
+            <description><![CDATA[<link rel="stylesheet" type="text/css" href="https://quickmap.dot.ca.gov/css/gm-infowindow.css?v=9" />
+<div class="infowindow-content">
+    <div class="iw-header">
+        <div class="iw-header-left">
+            <img class="iw-icon" src="https://quickmap.dot.ca.gov/img/cc32x32.png" />
+            Chain Control
+        </div>
+    </div>
+
+    <div class="iw-body">
+        <h2 class="iw-title">Eastbound Interstate 80</h2>
+        
+        <p class="iw-text"><strong>Chain Control level MIN</strong></p>
+        <p class="iw-text"><strong>Location: </strong>Kingvale</p>
+        <p class="iw-text">Truck chain requirements are minimum for all trucks.</p>
+        <p class="iw-text"><strong>Effective from: </strong>11/13/2026 13:21</p>
+        <div font-size:xx-small;'>District: 3 Message ID: 9040</div>
+        
+        <p class="iw-attribution">
+            Information courtesy of <strong>Caltrans</strong>
+        </p>
+    </div>
+
+    <div class="iw-footer">
+        <span class="iw-timestamp">Last updated: <strong>11/13/2026</strong> 1:37pm</span>
+    </div>
+</div>]]></description>
+            <styleUrl>#notclosed</styleUrl>
+            <Point>
+                <coordinates>-120.44614,39.31421</coordinates>
+            </Point>
+        </Placemark>
+        <Placemark>
+            <name></name>
+            <description><![CDATA[<link rel="stylesheet" type="text/css" href="https://quickmap.dot.ca.gov/css/gm-infowindow.css?v=9" />
+<div class="infowindow-content">
+    <div class="iw-header">
+        <div class="iw-header-left">
+            <img class="iw-icon" src="https://quickmap.dot.ca.gov/img/cc32x32.png" />
+            Chain Control
+        </div>
+    </div>
+
+    <div class="iw-body">
+        <h2 class="iw-title">Eastbound Interstate 80</h2>
+        
+        <p class="iw-text"><strong>Chain Control level R-2</strong></p>
+        <p class="iw-text"><strong>Location: </strong>Kingvale</p>
+        <p class="iw-text">Chains or traction devices are required on all vehicles except four wheel/ all wheel drive vehicles with snow-tread tires on all four wheels. (Four wheel/all wheel drive vehicles must carry traction devices in chain control areas).</p>
+        <p class="iw-text"><strong>Effective from: </strong>11/13/2026 13:21</p>
+        <div font-size:xx-small;'>District: 3 Message ID: 9039</div>
+        
+        <p class="iw-attribution">
+            Information courtesy of <strong>Caltrans</strong>
+        </p>
+    </div>
+
+    <div class="iw-footer">
+        <span class="iw-timestamp">Last updated: <strong>11/13/2026</strong> 1:37pm</span>
+    </div>
+</div>]]></description>
+            <styleUrl>#notclosed</styleUrl>
+            <Point>
+                <coordinates>-120.44614,39.31421</coordinates>
+            </Point>
+        </Placemark>
+        <Placemark>
+            <name></name>
+            <description><![CDATA[<link rel="stylesheet" type="text/css" href="https://quickmap.dot.ca.gov/css/gm-infowindow.css?v=9" />
+<div class="infowindow-content">
+    <div class="iw-header">
+        <div class="iw-header-left">
+            <img class="iw-icon" src="https://quickmap.dot.ca.gov/img/cc32x32.png" />
+            Chain Control
+        </div>
+    </div>
+
+    <div class="iw-body">
+        <h2 class="iw-title">Eastbound Interstate 80</h2>
+        
+        <p class="iw-text"><strong>Chain Control level TS</strong></p>
+        <p class="iw-text"><strong>Location: </strong>Applegate</p>
+        <p class="iw-text">All trucks must stop at the chain check point, Caltrans is currently screening for chains. Drivers must have maximum chains in their possession in order to proceed. Trucks without chains will be turned around. Permit loads are prohibited over the summit.</p>
+        <p class="iw-text"><strong>Effective from: </strong>11/13/2026 11:32</p>
+        <div font-size:xx-small;'>District: 3 Message ID: 9017</div>
+        
+        <p class="iw-attribution">
+            Information courtesy of <strong>Caltrans</strong>
+        </p>
+    </div>
+
+    <div class="iw-footer">
+        <span class="iw-timestamp">Last updated: <strong>11/13/2026</strong> 1:37pm</span>
+    </div>
+</div>]]></description>
+            <styleUrl>#notclosed</styleUrl>
+            <Point>
+                <coordinates>-120.994743,39.002148</coordinates>
+            </Point>
+        </Placemark>
+        <Placemark>
+            <name></name>
+            <description><![CDATA[<link rel="stylesheet" type="text/css" href="https://quickmap.dot.ca.gov/css/gm-infowindow.css?v=9" />
+<div class="infowindow-content">
+    <div class="iw-header">
+        <div class="iw-header-left">
+            <img class="iw-icon" src="https://quickmap.dot.ca.gov/img/full-closure-32x32.png" />
+            Road Closed
+        </div>
+    </div>
+
+    <div class="iw-body">
+        <h2 class="iw-title">Eastbound Highway 120</h2>
+        
+        
+        <p class="iw-text"><strong>Location: </strong>CRANE FLAT RD (closure gate in park, not chain sign)</p>
+        <p class="iw-text">Closed to traffic.</p>
+        <p class="iw-text"><strong>Effective from: </strong>11/12/2026 18:10</p>
+        <div font-size:xx-small;'>District: 10 Message ID: 2650</div>
+        
+        <p class="iw-attribution">
+            Information courtesy of <strong>Caltrans</strong>
+        </p>
+    </div>
+
+    <div class="iw-footer">
+        <span class="iw-timestamp">Last updated: <strong>11/13/2026</strong> 1:37pm</span>
+    </div>
+</div>]]></description>
+            <styleUrl>#full-closure</styleUrl>
+            <Point>
+                <coordinates>-119.803511,37.747246</coordinates>
+            </Point>
+        </Placemark>
+        <Placemark>
+            <name></name>
+            <description><![CDATA[<link rel="stylesheet" type="text/css" href="https://quickmap.dot.ca.gov/css/gm-infowindow.css?v=9" />
+<div class="infowindow-content">
+    <div class="iw-header">
+        <div class="iw-header-left">
+            <img class="iw-icon" src="https://quickmap.dot.ca.gov/img/full-closure-32x32.png" />
+            Road Closed
+        </div>
+    </div>
+
+    <div class="iw-body">
+        <h2 class="iw-title">Eastbound Highway 108</h2>
+        
+        
+        <p class="iw-text"><strong>Location: </strong>KENNEDY MEADOWS - SONORA PASS</p>
+        <p class="iw-text">Closed to traffic.</p>
+        <p class="iw-text"><strong>Effective from: </strong>11/12/2026 11:58</p>
+        <div font-size:xx-small;'>District: 10 Message ID: 2638</div>
+        
+        <p class="iw-attribution">
+            Information courtesy of <strong>Caltrans</strong>
+        </p>
+    </div>
+
+    <div class="iw-footer">
+        <span class="iw-timestamp">Last updated: <strong>11/13/2026</strong> 1:37pm</span>
+    </div>
+</div>]]></description>
+            <styleUrl>#full-closure</styleUrl>
+            <Point>
+                <coordinates>-119.75371,38.32572</coordinates>
+            </Point>
+        </Placemark>
+        <Placemark>
+            <name></name>
+            <description><![CDATA[<link rel="stylesheet" type="text/css" href="https://quickmap.dot.ca.gov/css/gm-infowindow.css?v=9" />
+<div class="infowindow-content">
+    <div class="iw-header">
+        <div class="iw-header-left">
+            <img class="iw-icon" src="https://quickmap.dot.ca.gov/img/cc32x32.png" />
+            Chain Control
+        </div>
+    </div>
+
+    <div class="iw-body">
+        <h2 class="iw-title">Eastbound Highway 88</h2>
+        
+        <p class="iw-text"><strong>Chain Control level R-2</strong></p>
+        <p class="iw-text"><strong>Location: </strong>KIRKWOOD</p>
+        <p class="iw-text">Chains or traction devices are required on all vehicles except four wheel/ all wheel drive vehicles with snow-tread tires on all four wheels. (Four wheel/all wheel drive vehicles must carry traction devices in chain control areas).</p>
+        <p class="iw-text"><strong>Effective from: </strong>11/13/2026 13:33</p>
+        <div font-size:xx-small;'>District: 10 Message ID: 2596</div>
+        
+        <p class="iw-attribution">
+            Information courtesy of <strong>Caltrans</strong>
+        </p>
+    </div>
+
+    <div class="iw-footer">
+        <span class="iw-timestamp">Last updated: <strong>11/13/2026</strong> 1:37pm</span>
+    </div>
+</div>]]></description>
+            <styleUrl>#notclosed</styleUrl>
+            <Point>
+                <coordinates>-120.0782,38.7004</coordinates>
+            </Point>
+        </Placemark>
+        <Placemark>
+            <name></name>
+            <description><![CDATA[<link rel="stylesheet" type="text/css" href="https://quickmap.dot.ca.gov/css/gm-infowindow.css?v=9" />
+<div class="infowindow-content">
+    <div class="iw-header">
+        <div class="iw-header-left">
+            <img class="iw-icon" src="https://quickmap.dot.ca.gov/img/cc32x32.png" />
+            Chain Control
+        </div>
+    </div>
+
+    <div class="iw-body">
+        <h2 class="iw-title">Westbound Highway 88</h2>
+        
+        <p class="iw-text"><strong>Chain Control level R-2</strong></p>
+        <p class="iw-text"><strong>Location: </strong>KIRKWOOD</p>
+        <p class="iw-text">Chains or traction devices are required on all vehicles except four wheel/ all wheel drive vehicles with snow-tread tires on all four wheels. (Four wheel/all wheel drive vehicles must carry traction devices in chain control areas).</p>
+        <p class="iw-text"><strong>Effective from: </strong>11/13/2026 13:33</p>
+        <div font-size:xx-small;'>District: 10 Message ID: 2595</div>
+        
+        <p class="iw-attribution">
+            Information courtesy of <strong>Caltrans</strong>
+        </p>
+    </div>
+
+    <div class="iw-footer">
+        <span class="iw-timestamp">Last updated: <strong>11/13/2026</strong> 1:37pm</span>
+    </div>
+</div>]]></description>
+            <styleUrl>#notclosed</styleUrl>
+            <Point>
+                <coordinates>-120.08017,38.69997</coordinates>
+            </Point>
+        </Placemark>
+        <Placemark>
+            <name></name>
+            <description><![CDATA[<link rel="stylesheet" type="text/css" href="https://quickmap.dot.ca.gov/css/gm-infowindow.css?v=9" />
+<div class="infowindow-content">
+    <div class="iw-header">
+        <div class="iw-header-left">
+            <img class="iw-icon" src="https://quickmap.dot.ca.gov/img/cc32x32.png" />
+            Chain Control
+        </div>
+    </div>
+
+    <div class="iw-body">
+        <h2 class="iw-title">Eastbound Highway 88</h2>
+        
+        <p class="iw-text"><strong>Chain Control level R-2</strong></p>
+        <p class="iw-text"><strong>Location: </strong>MARTIN MEADOW</p>
+        <p class="iw-text">Chains or traction devices are required on all vehicles except four wheel/ all wheel drive vehicles with snow-tread tires on all four wheels. (Four wheel/all wheel drive vehicles must carry traction devices in chain control areas).</p>
+        <p class="iw-text"><strong>Effective from: </strong>11/13/2026 13:33</p>
+        <div font-size:xx-small;'>District: 10 Message ID: 2593</div>
+        
+        <p class="iw-attribution">
+            Information courtesy of <strong>Caltrans</strong>
+        </p>
+    </div>
+
+    <div class="iw-footer">
+        <span class="iw-timestamp">Last updated: <strong>11/13/2026</strong> 1:37pm</span>
+    </div>
+</div>]]></description>
+            <styleUrl>#notclosed</styleUrl>
+            <Point>
+                <coordinates>-120.1201,38.6969</coordinates>
+            </Point>
+        </Placemark>
+        <Placemark>
+            <name></name>
+            <description><![CDATA[<link rel="stylesheet" type="text/css" href="https://quickmap.dot.ca.gov/css/gm-infowindow.css?v=9" />
+<div class="infowindow-content">
+    <div class="iw-header">
+        <div class="iw-header-left">
+            <img class="iw-icon" src="https://quickmap.dot.ca.gov/img/cc32x32.png" />
+            Chain Control
+        </div>
+    </div>
+
+    <div class="iw-body">
+        <h2 class="iw-title">Westbound Highway 88</h2>
+        
+        <p class="iw-text"><strong>Chain Control level R-2</strong></p>
+        <p class="iw-text"><strong>Location: </strong>SILVER LAKE</p>
+        <p class="iw-text">Chains or traction devices are required on all vehicles except four wheel/ all wheel drive vehicles with snow-tread tires on all four wheels. (Four wheel/all wheel drive vehicles must carry traction devices in chain control areas).</p>
+        <p class="iw-text"><strong>Effective from: </strong>11/13/2026 13:06</p>
+        <div font-size:xx-small;'>District: 10 Message ID: 2591</div>
+        
+        <p class="iw-attribution">
+            Information courtesy of <strong>Caltrans</strong>
+        </p>
+    </div>
+
+    <div class="iw-footer">
+        <span class="iw-timestamp">Last updated: <strong>11/13/2026</strong> 1:37pm</span>
+    </div>
+</div>]]></description>
+            <styleUrl>#notclosed</styleUrl>
+            <Point>
+                <coordinates>-120.12223,38.66761</coordinates>
+            </Point>
+        </Placemark>
+        <Placemark>
+            <name></name>
+            <description><![CDATA[<link rel="stylesheet" type="text/css" href="https://quickmap.dot.ca.gov/css/gm-infowindow.css?v=9" />
+<div class="infowindow-content">
+    <div class="iw-header">
+        <div class="iw-header-left">
+            <img class="iw-icon" src="https://quickmap.dot.ca.gov/img/cc32x32.png" />
+            Chain Control
+        </div>
+    </div>
+
+    <div class="iw-body">
+        <h2 class="iw-title">Eastbound Highway 88</h2>
+        
+        <p class="iw-text"><strong>Chain Control level R-2</strong></p>
+        <p class="iw-text"><strong>Location: </strong>IRON MT RD</p>
+        <p class="iw-text">Chains or traction devices are required on all vehicles except four wheel/ all wheel drive vehicles with snow-tread tires on all four wheels. (Four wheel/all wheel drive vehicles must carry traction devices in chain control areas).</p>
+        <p class="iw-text"><strong>Effective from: </strong>11/13/2026 13:06</p>
+        <div font-size:xx-small;'>District: 10 Message ID: 2590</div>
+        
+        <p class="iw-attribution">
+            Information courtesy of <strong>Caltrans</strong>
+        </p>
+    </div>
+
+    <div class="iw-footer">
+        <span class="iw-timestamp">Last updated: <strong>11/13/2026</strong> 1:37pm</span>
+    </div>
+</div>]]></description>
+            <styleUrl>#notclosed</styleUrl>
+            <Point>
+                <coordinates>-120.1982,38.62515</coordinates>
+            </Point>
+        </Placemark>
+        <Placemark>
+            <name></name>
+            <description><![CDATA[<link rel="stylesheet" type="text/css" href="https://quickmap.dot.ca.gov/css/gm-infowindow.css?v=9" />
+<div class="infowindow-content">
+    <div class="iw-header">
+        <div class="iw-header-left">
+            <img class="iw-icon" src="https://quickmap.dot.ca.gov/img/cc32x32.png" />
+            Chain Control
+        </div>
+    </div>
+
+    <div class="iw-body">
+        <h2 class="iw-title">Westbound Highway 88</h2>
+        
+        <p class="iw-text"><strong>Chain Control level R-2</strong></p>
+        <p class="iw-text"><strong>Location: </strong>IRON MT RD</p>
+        <p class="iw-text">Chains or traction devices are required on all vehicles except four wheel/ all wheel drive vehicles with snow-tread tires on all four wheels. (Four wheel/all wheel drive vehicles must carry traction devices in chain control areas).</p>
+        <p class="iw-text"><strong>Effective from: </strong>11/13/2026 13:05</p>
+        <div font-size:xx-small;'>District: 10 Message ID: 2589</div>
+        
+        <p class="iw-attribution">
+            Information courtesy of <strong>Caltrans</strong>
+        </p>
+    </div>
+
+    <div class="iw-footer">
+        <span class="iw-timestamp">Last updated: <strong>11/13/2026</strong> 1:37pm</span>
+    </div>
+</div>]]></description>
+            <styleUrl>#notclosed</styleUrl>
+            <Point>
+                <coordinates>-120.20005,38.62498</coordinates>
+            </Point>
+        </Placemark>
+        <Placemark>
+            <name></name>
+            <description><![CDATA[<link rel="stylesheet" type="text/css" href="https://quickmap.dot.ca.gov/css/gm-infowindow.css?v=9" />
+<div class="infowindow-content">
+    <div class="iw-header">
+        <div class="iw-header-left">
+            <img class="iw-icon" src="https://quickmap.dot.ca.gov/img/cc32x32.png" />
+            Chain Control
+        </div>
+    </div>
+
+    <div class="iw-body">
+        <h2 class="iw-title">Eastbound Highway 88</h2>
+        
+        <p class="iw-text"><strong>Chain Control level R-2</strong></p>
+        <p class="iw-text"><strong>Location: </strong>PEDDLER VISTA</p>
+        <p class="iw-text">Chains or traction devices are required on all vehicles except four wheel/ all wheel drive vehicles with snow-tread tires on all four wheels. (Four wheel/all wheel drive vehicles must carry traction devices in chain control areas).</p>
+        <p class="iw-text"><strong>Effective from: </strong>11/13/2026 13:05</p>
+        <div font-size:xx-small;'>District: 10 Message ID: 2588</div>
+        
+        <p class="iw-attribution">
+            Information courtesy of <strong>Caltrans</strong>
+        </p>
+    </div>
+
+    <div class="iw-footer">
+        <span class="iw-timestamp">Last updated: <strong>11/13/2026</strong> 1:37pm</span>
+    </div>
+</div>]]></description>
+            <styleUrl>#notclosed</styleUrl>
+            <Point>
+                <coordinates>-120.2693,38.5634</coordinates>
+            </Point>
+        </Placemark>
+        <Placemark>
+            <name></name>
+            <description><![CDATA[<link rel="stylesheet" type="text/css" href="https://quickmap.dot.ca.gov/css/gm-infowindow.css?v=9" />
+<div class="infowindow-content">
+    <div class="iw-header">
+        <div class="iw-header-left">
+            <img class="iw-icon" src="https://quickmap.dot.ca.gov/img/full-closure-32x32.png" />
+            Road Closed
+        </div>
+    </div>
+
+    <div class="iw-body">
+        <h2 class="iw-title">Eastbound Highway 89</h2>
+        
+        
+        <p class="iw-text"><strong>Location: </strong>MONITOR PASS</p>
+        <p class="iw-text">Closed to traffic.</p>
+        <p class="iw-text"><strong>Effective from: </strong>11/13/2026 08:01</p>
+        <div font-size:xx-small;'>District: 10 Message ID: 2598</div>
+        
+        <p class="iw-attribution">
+            Information courtesy of <strong>Caltrans</strong>
+        </p>
+    </div>
+
+    <div class="iw-footer">
+        <span class="iw-timestamp">Last updated: <strong>11/13/2026</strong> 1:37pm</span>
+    </div>
+</div>]]></description>
+            <styleUrl>#full-closure</styleUrl>
+            <Point>
+                <coordinates>-119.72635,38.66055</coordinates>
+            </Point>
+        </Placemark>
+        <Placemark>
+            <name></name>
+            <description><![CDATA[<link rel="stylesheet" type="text/css" href="https://quickmap.dot.ca.gov/css/gm-infowindow.css?v=9" />
+<div class="infowindow-content">
+    <div class="iw-header">
+        <div class="iw-header-left">
+            <img class="iw-icon" src="https://quickmap.dot.ca.gov/img/cc32x32.png" />
+            Chain Control
+        </div>
+    </div>
+
+    <div class="iw-body">
+        <h2 class="iw-title">Westbound Highway 88</h2>
+        
+        <p class="iw-text"><strong>Chain Control level R-2</strong></p>
+        <p class="iw-text"><strong>Location: </strong>RED LAKE CREEK</p>
+        <p class="iw-text">Chains or traction devices are required on all vehicles except four wheel/ all wheel drive vehicles with snow-tread tires on all four wheels. (Four wheel/all wheel drive vehicles must carry traction devices in chain control areas).</p>
+        <p class="iw-text"><strong>Effective from: </strong>11/13/2026 13:16</p>
+        <div font-size:xx-small;'>District: 10 Message ID: 2567</div>
+        
+        <p class="iw-attribution">
+            Information courtesy of <strong>Caltrans</strong>
+        </p>
+    </div>
+
+    <div class="iw-footer">
+        <span class="iw-timestamp">Last updated: <strong>11/13/2026</strong> 1:37pm</span>
+    </div>
+</div>]]></description>
+            <styleUrl>#notclosed</styleUrl>
+            <Point>
+                <coordinates>-119.95523,38.71362</coordinates>
+            </Point>
+        </Placemark>
+        <Placemark>
+            <name></name>
+            <description><![CDATA[<link rel="stylesheet" type="text/css" href="https://quickmap.dot.ca.gov/css/gm-infowindow.css?v=9" />
+<div class="infowindow-content">
+    <div class="iw-header">
+        <div class="iw-header-left">
+            <img class="iw-icon" src="https://quickmap.dot.ca.gov/img/cc32x32.png" />
+            Chain Control
+        </div>
+    </div>
+
+    <div class="iw-body">
+        <h2 class="iw-title">Eastbound Highway 88</h2>
+        
+        <p class="iw-text"><strong>Chain Control level R-2</strong></p>
+        <p class="iw-text"><strong>Location: </strong>KIRKWOOD (ALP)</p>
+        <p class="iw-text">Chains or traction devices are required on all vehicles except four wheel/ all wheel drive vehicles with snow-tread tires on all four wheels. (Four wheel/all wheel drive vehicles must carry traction devices in chain control areas).</p>
+        <p class="iw-text"><strong>Effective from: </strong>11/13/2026 13:16</p>
+        <div font-size:xx-small;'>District: 10 Message ID: 2565</div>
+        
+        <p class="iw-attribution">
+            Information courtesy of <strong>Caltrans</strong>
+        </p>
+    </div>
+
+    <div class="iw-footer">
+        <span class="iw-timestamp">Last updated: <strong>11/13/2026</strong> 1:37pm</span>
+    </div>
+</div>]]></description>
+            <styleUrl>#notclosed</styleUrl>
+            <Point>
+                <coordinates>-120.0715,38.7027</coordinates>
+            </Point>
+        </Placemark>
+        <Placemark>
+            <name></name>
+            <description><![CDATA[<link rel="stylesheet" type="text/css" href="https://quickmap.dot.ca.gov/css/gm-infowindow.css?v=9" />
+<div class="infowindow-content">
+    <div class="iw-header">
+        <div class="iw-header-left">
+            <img class="iw-icon" src="https://quickmap.dot.ca.gov/img/full-closure-32x32.png" />
+            Road Closed
+        </div>
+    </div>
+
+    <div class="iw-body">
+        <h2 class="iw-title">Eastbound Highway 4</h2>
+        
+        
+        <p class="iw-text"><strong>Location: </strong>EAST END OF LAKE ALPINE - EBBETTS PASS</p>
+        <p class="iw-text">Closed to traffic.</p>
+        <p class="iw-text"><strong>Effective from: </strong>11/12/2026 12:08</p>
+        <div font-size:xx-small;'>District: 10 Message ID: 2515</div>
+        
+        <p class="iw-attribution">
+            Information courtesy of <strong>Caltrans</strong>
+        </p>
+    </div>
+
+    <div class="iw-footer">
+        <span class="iw-timestamp">Last updated: <strong>11/13/2026</strong> 1:37pm</span>
+    </div>
+</div>]]></description>
+            <styleUrl>#full-closure</styleUrl>
+            <Point>
+                <coordinates>-119.99421,38.48135</coordinates>
+            </Point>
+        </Placemark>
+        <Placemark>
+            <name></name>
+            <description><![CDATA[<link rel="stylesheet" type="text/css" href="https://quickmap.dot.ca.gov/css/gm-infowindow.css?v=9" />
+<div class="infowindow-content">
+    <div class="iw-header">
+        <div class="iw-header-left">
+            <img class="iw-icon" src="https://quickmap.dot.ca.gov/img/full-closure-32x32.png" />
+            Road Closed
+        </div>
+    </div>
+
+    <div class="iw-body">
+        <h2 class="iw-title">Westbound Highway 4</h2>
+        
+        
+        <p class="iw-text"><strong>Location: </strong>RAYMOND MEADOWS - EBBETTS PASS</p>
+        <p class="iw-text">Closed to traffic.</p>
+        <p class="iw-text"><strong>Effective from: </strong>11/12/2026 12:08</p>
+        <div font-size:xx-small;'>District: 10 Message ID: 2516</div>
+        
+        <p class="iw-attribution">
+            Information courtesy of <strong>Caltrans</strong>
+        </p>
+    </div>
+
+    <div class="iw-footer">
+        <span class="iw-timestamp">Last updated: <strong>11/13/2026</strong> 1:37pm</span>
+    </div>
+</div>]]></description>
+            <styleUrl>#full-closure</styleUrl>
+            <Point>
+                <coordinates>-119.78531,38.58947</coordinates>
+            </Point>
+        </Placemark>
+    </Document>
+</kml>

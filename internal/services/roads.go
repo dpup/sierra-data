@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -477,7 +478,7 @@ func (s *RoadsService) buildRoadFromRouteAndAlerts(ctx context.Context, monitore
 	}
 
 	// Apply road conditions from roads.dot.ca.gov (closures, chain controls)
-	s.applyRoadConditions(ctx, monitoredRoad, roadConditions, &roadStatus, &chainControl, &statusExplanation, &enhancedAlerts, &causes)
+	beyond := s.applyRoadConditions(ctx, monitoredRoad, roadConditions, &roadStatus, &chainControl, &statusExplanation, &enhancedAlerts, &causes)
 	if roadStatus == api.RoadStatus_OPEN {
 		causes = nil
 	}
@@ -518,6 +519,7 @@ func (s *RoadsService) buildRoadFromRouteAndAlerts(ctx context.Context, monitore
 		ChainControlInfo:  chainControlInfo,
 		Polyline:          geometry,
 		StatusCauses:      causes,
+		Beyond:            beyond,
 	}, nil
 }
 
@@ -990,12 +992,13 @@ func (s *RoadsService) fetchRoadConditions(ctx context.Context) map[string][]cal
 	return result
 }
 
-// applyRoadConditions processes road conditions from roads.dot.ca.gov and updates road status
-func (s *RoadsService) applyRoadConditions(ctx context.Context, monitoredRoad config.MonitoredRoad, conditions []caltrans.RoadCondition, roadStatus *api.RoadStatus, chainControl *api.ChainControlStatus, statusExplanation *string, alerts *[]*api.RoadAlert, causes *[]*api.RoadStatusCause) {
-	if len(conditions) == 0 {
-		return
-	}
-
+// applyRoadConditions processes road conditions from roads.dot.ca.gov and
+// updates road status. It returns the conditions that are one of the road's
+// named seasonal closures (config seasonalClosures): those lie past the
+// road's end and leave its status alone. Every other condition naming a
+// place of this road sets its status, as it always has.
+func (s *RoadsService) applyRoadConditions(ctx context.Context, monitoredRoad config.MonitoredRoad, conditions []caltrans.RoadCondition, roadStatus *api.RoadStatus, chainControl *api.ChainControlStatus, statusExplanation *string, alerts *[]*api.RoadAlert, causes *[]*api.RoadStatusCause) []*api.RoadBeyond {
+	var beyond []*api.RoadBeyond
 	for _, condition := range conditions {
 		// Road conditions from roads.dot.ca.gov are route-wide text advisories with
 		// no geometry — the feed returns every condition on the highway statewide.
@@ -1004,6 +1007,21 @@ func (s *RoadsService) applyRoadConditions(ctx context.Context, monitoredRoad co
 		// Delta) is duplicated onto every monitored segment of that highway. The
 		// geolocated KML incident feed still provides spatially-accurate alerts.
 		if !caltrans.MatchConditionToSegment(condition, monitoredRoad.Section, monitoredRoad.LocationKeywords) {
+			continue
+		}
+
+		if b := seasonalClosureBeyond(condition, monitoredRoad); b != nil {
+			// Caltrans can publish the same closure twice (two paragraphs,
+			// or one per district): one entry and one alert per name.
+			if slices.ContainsFunc(beyond, func(have *api.RoadBeyond) bool { return have.GetName() == b.GetName() }) {
+				continue
+			}
+			beyond = append(beyond, b)
+			*alerts = append(*alerts, s.buildRoadConditionAlert(condition, api.AlertClassification_NEARBY))
+			logging.Infow(ctx, "Road condition is a seasonal closure past the road's end",
+				"road_id", monitoredRoad.ID,
+				"closure", b.GetName(),
+				"description", condition.Description)
 			continue
 		}
 
@@ -1043,6 +1061,30 @@ func (s *RoadsService) applyRoadConditions(ctx context.Context, monitoredRoad co
 			}
 		}
 	}
+	return beyond
+}
+
+// seasonalClosureBeyond returns the Road.beyond entry for a condition that is
+// one of the road's named seasonal closures, nil for any other condition.
+func seasonalClosureBeyond(c caltrans.RoadCondition, road config.MonitoredRoad) *api.RoadBeyond {
+	for _, sc := range road.SeasonalClosures {
+		if strings.TrimSpace(sc.Name) == "" || !caltrans.MatchSeasonalClosure(c, caltrans.SeasonalClosure{
+			Name: sc.Name, Start: sc.Start, End: sc.End,
+			StartOffsetDirection: sc.StartOffsetDirection, MaxStartOffsetMiles: sc.MaxStartOffsetMiles,
+		}) {
+			continue
+		}
+		b := &api.RoadBeyond{
+			Name: sc.Name, Status: api.RoadStatus_CLOSED, Side: "END",
+			Source: "road_condition", Description: c.Description, Reason: c.Reason,
+		}
+		if strings.EqualFold(strings.TrimSpace(sc.Side), "start") {
+			b.Side = "START"
+		}
+		b.From, b.To = caltrans.ConditionSpan(c)
+		return b
+	}
+	return nil
 }
 
 // buildRoadConditionAlert creates a RoadAlert from a road condition

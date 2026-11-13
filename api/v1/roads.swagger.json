@@ -584,6 +584,14 @@
             "$ref": "#/definitions/v1RoadStatusCause"
           },
           "description": "What set `status` when it is not OPEN: each on-route item, in the order\napplied. Empty when OPEN."
+        },
+        "beyond": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1RoadBeyond"
+          },
+          "description": "Named seasonal closures past one of this road's ends that are in effect\n(the Ebbetts Pass winter closure past Bear Valley). They never change\n`status`: this road is as open as `status` says."
         }
       },
       "title": "Data models"
@@ -663,6 +671,44 @@
           "title": "Stable CHP log / closure id; matches Incident.id for the same event (empty if none)"
         }
       }
+    },
+    "v1RoadBeyond": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "$ref": "#/definitions/v1RoadStatus",
+          "title": "what the highway is there: CLOSED"
+        },
+        "side": {
+          "type": "string",
+          "title": "\"END\" - past the road's destination | \"START\" - before its origin"
+        },
+        "source": {
+          "type": "string",
+          "title": "\"road_condition\""
+        },
+        "description": {
+          "type": "string",
+          "title": "the condition text, as published"
+        },
+        "reason": {
+          "type": "string",
+          "title": "snow, winter_closure ...; empty when the text gives none"
+        },
+        "from": {
+          "type": "string",
+          "title": "where it starts, in the source's words"
+        },
+        "to": {
+          "type": "string",
+          "title": "where it ends, in the source's words"
+        },
+        "name": {
+          "type": "string",
+          "title": "the closure's configured name (\"Ebbetts Pass winter closure\")"
+        }
+      },
+      "description": "RoadBeyond is a named seasonal closure past one of a road's ends, in\neffect now, so it does not affect the road itself."
     },
     "v1RoadStatus": {
       "type": "string",

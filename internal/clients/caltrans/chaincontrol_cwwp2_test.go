@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -358,4 +359,148 @@ func TestChainControlDetails_RoadClosed(t *testing.T) {
 	r2 := findKML(t, legacyKML(t), "Highway 4", "Eastbound", "TAMARACK")
 	require.NotNil(t, r2)
 	assert.False(t, r2.Closed)
+}
+
+// The real 2026 cc.kml (captured 2026-11-13, the first storm of the season):
+// blank <name>s, the highway in the info-window title, and the location,
+// time and message id behind <strong> labels. Until this layout was parsed,
+// the Ebbetts Pass gate reached the map as a bare "road closed" with no
+// highway, place or time.
+func TestChainControlDetails_InfoWindowLayout2026(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("..", "..", "..", "tests", "testdata", "caltrans", "chain_controls_20261113_133700.kml"))
+	require.NoError(t, err)
+	p := &FeedParser{HTTPClient: fixedDoer{200, b}}
+	controls, err := p.ParseChainControlsDetailed(context.Background())
+	require.NoError(t, err)
+	require.Len(t, controls, 30)
+
+	gate := findKML(t, controls, "Highway 4", "Eastbound", "EAST END OF LAKE ALPINE - EBBETTS PASS")
+	require.NotNil(t, gate, "the eastbound Ebbetts Pass gate")
+	assert.True(t, gate.Closed)
+	assert.Empty(t, gate.Level)
+	assert.Equal(t, "Closed to traffic.", gate.Description)
+	assert.Equal(t, "2026-11-12T12:08:00-08:00", gate.EffectiveTime)
+	assert.Equal(t, "2026-11-13T13:37:00-08:00", gate.LastUpdated)
+	assert.Equal(t, "10", gate.District)
+	assert.Equal(t, "2515", gate.MessageID)
+	assert.InDelta(t, 38.48135, gate.Coordinates.Latitude, 1e-6)
+
+	// The other passes, closed the same day.
+	for _, want := range []struct{ highway, direction, location string }{
+		{"Highway 4", "Westbound", "RAYMOND MEADOWS - EBBETTS PASS"},
+		{"Highway 108", "Eastbound", "KENNEDY MEADOWS - SONORA PASS"},
+		{"Highway 89", "Eastbound", "MONITOR PASS"},
+		{"Highway 120", "Eastbound", "CRANE FLAT RD"},
+	} {
+		c := findKML(t, controls, want.highway, want.direction, want.location)
+		if assert.NotNil(t, c, "%s %s", want.highway, want.location) {
+			assert.True(t, c.Closed)
+		}
+	}
+
+	// A chain control keeps its level, read from the body.
+	var r2 *ChainControlData
+	for i := range controls {
+		if c := &controls[i]; c.Highway == "Highway 88" && c.Level == "R2" {
+			r2 = c
+			break
+		}
+	}
+	require.NotNil(t, r2, "an R-2 control on Highway 88")
+	assert.False(t, r2.Closed)
+	assert.NotEmpty(t, r2.LocationName)
+	assert.Contains(t, r2.Description, "Chains")
+	assert.NotEmpty(t, r2.MessageID)
+}
+
+// A closure in the 2026 layout is marked by its style, its "Road Closed"
+// header and its "Closed to traffic." body. Any one of them is enough: read
+// as a chain control, the gate would reach the map as a control with no level.
+func TestChainControlDetails_ClosureWithoutTheClosureStyle(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("..", "..", "..", "tests", "testdata", "caltrans", "chain_controls_20261113_133700.kml"))
+	require.NoError(t, err)
+	real := string(b)
+	require.Equal(t, 5, strings.Count(real, "<styleUrl>#full-closure</styleUrl>"))
+	restyled := strings.ReplaceAll(real, "<styleUrl>#full-closure</styleUrl>", "<styleUrl>#notclosed</styleUrl>")
+	chainHeader := regexp.MustCompile(`full-closure-32x32\.png" />\s*Road Closed`)
+	require.Len(t, chainHeader.FindAllString(restyled, -1), 5)
+
+	for name, kml := range map[string]string{
+		"header and body": restyled,
+		"body only": chainHeader.ReplaceAllString(restyled, `cc32x32.png" />
+            Chain Control`),
+		"header only": strings.ReplaceAll(restyled, "Closed to traffic.", "No traffic."),
+		"style only": chainHeader.ReplaceAllString(strings.ReplaceAll(real, "Closed to traffic.", "No traffic."), `cc32x32.png" />
+            Chain Control`),
+		"header, no icon": regexp.MustCompile(`<img class="iw-icon" src="[^"]*full-closure[^"]*" />`).ReplaceAllString(strings.ReplaceAll(restyled, "Closed to traffic.", "No traffic."), ""),
+		"body, other case": chainHeader.ReplaceAllString(strings.ReplaceAll(restyled, "Closed to traffic.", "CLOSED TO TRAFFIC"), `cc32x32.png" />
+            Chain Control`),
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := &FeedParser{HTTPClient: fixedDoer{200, []byte(kml)}}
+			controls, err := p.ParseChainControlsDetailed(context.Background())
+			require.NoError(t, err)
+			require.Len(t, controls, 30)
+			closed := 0
+			for _, c := range controls {
+				if c.Closed {
+					closed++
+					assert.Empty(t, c.Level, c.LocationName)
+				}
+			}
+			assert.Equal(t, 5, closed)
+			gate := findKML(t, controls, "Highway 4", "Eastbound", "EAST END OF LAKE ALPINE - EBBETTS PASS")
+			require.NotNil(t, gate)
+			assert.True(t, gate.Closed)
+			assert.Equal(t, "Highway 4", gate.Highway)
+		})
+	}
+
+	// With none of the three it is not a closure.
+	none := chainHeader.ReplaceAllString(strings.ReplaceAll(restyled, "Closed to traffic.", "No traffic."), `cc32x32.png" />
+            Chain Control`)
+	controls, err := (&FeedParser{HTTPClient: fixedDoer{200, []byte(none)}}).ParseChainControlsDetailed(context.Background())
+	require.NoError(t, err)
+	for _, c := range controls {
+		assert.False(t, c.Closed)
+	}
+}
+
+// A chain control whose text begins "Closed to traffic without chains." is a
+// control, not a closure; and the supplement rule uses the parser's closure
+// test, so a gate that lost its closure style is still kept beside CWWP2.
+func TestIsClosurePlacemark(t *testing.T) {
+	body := func(header, text string) string {
+		return `<div class="infowindow-content"><div class="iw-header"><div class="iw-header-left">
+            <img class="iw-icon" src="https://quickmap.dot.ca.gov/img/cc32x32.png" />
+            ` + header + `
+        </div></div><div class="iw-body"><h2 class="iw-title">Eastbound Highway 4</h2>
+        <p class="iw-text"><strong>Location: </strong>LAKE ALPINE</p>
+        <p class="iw-text">` + text + `</p></div></div>`
+	}
+	for _, tt := range []struct {
+		name string
+		in   CaltransIncident
+		want bool
+	}{
+		{"style", CaltransIncident{StyleUrl: "#full-closure", DescriptionHtml: body("Chain Control", "Chains are required.")}, true},
+		{"old title", CaltransIncident{Name: "Eastbound Highway 4 Road Closed"}, true},
+		{"header", CaltransIncident{StyleUrl: "#notclosed", DescriptionHtml: body("Road Closed", "No traffic.")}, true},
+		{"body", CaltransIncident{StyleUrl: "#notclosed", DescriptionHtml: body("Chain Control", "Closed to traffic.")}, true},
+		{"body, no full stop", CaltransIncident{StyleUrl: "#notclosed", DescriptionHtml: body("Chain Control", " closed to traffic ")}, true},
+		{"closed without chains", CaltransIncident{StyleUrl: "#notclosed", DescriptionHtml: body("Chain Control", "Closed to traffic without chains.")}, false},
+		{"closed to some", CaltransIncident{StyleUrl: "#notclosed", DescriptionHtml: body("Chain Control", "Closed to traffic for vehicles without chains or snow tires.")}, false},
+		{"a control", CaltransIncident{StyleUrl: "#notclosed", DescriptionHtml: body("Chain Control", "Chains are required on all vehicles.")}, false},
+	} {
+		assert.Equal(t, tt.want, isClosurePlacemark(tt.in), tt.name)
+		if tt.want {
+			assert.True(t, isKMLSupplement(tt.in), "%s: a closure is kept beside CWWP2", tt.name)
+		}
+	}
+	p := &FeedParser{}
+	controls := p.parseChainControlDetails([]CaltransIncident{{StyleUrl: "#notclosed",
+		DescriptionHtml: body("Chain Control", "Closed to traffic without chains.") + `<p class="iw-text"><strong>Chain Control level R-2</strong></p>`}})
+	require.Len(t, controls, 1)
+	assert.False(t, controls[0].Closed)
+	assert.Equal(t, "R2", controls[0].Level)
 }

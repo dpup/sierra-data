@@ -609,6 +609,24 @@ spec:
                 extent: {type: string, enum: [SPAN, POINT, UNKNOWN], description: "SPAN - fromKm..toKm along the segment (a closure running past the segment is cut at its end); POINT - one place (fromKm = toKm); UNKNOWN - no position on the segment (text-only condition, or too far off the line)."}
                 fromKm: {type: number, description: km along the segment from its configured origin.}
                 toKm: {type: number}
+          beyond:
+            type: array
+            description: "Named seasonal closures past one of the segment's ends that are in effect now, such as the Ebbetts Pass winter closure past Bear Valley. They do not change the segment's `status` or `severity`: the segment is as open as `status` says. An entry appears only when Caltrans words the closure as the configured span; any other closure naming those places closes the segment. Absent when there are none. Each entry is also a roads headline in the place summary, with the id `road:{segment}:beyond-{index}`."
+            items:
+              type: object
+              required: [name, status, side, severity, severityRank, headline, source]
+              properties:
+                name: {type: string, example: "Ebbetts Pass winter closure", description: "The closure's name."}
+                status: {type: string, enum: [CLOSED], description: "What the highway is past that end."}
+                side: {type: string, enum: [END, START], description: "END - past the segment's destination (the last coordinate of its line); START - before its origin."}
+                severity: {type: string, enum: [SEVERE], description: "The closure's own severity. The segment's `severity` does not include it."}
+                severityRank: {type: integer, example: 3}
+                headline: {type: string, example: "Hwy 4: Ebbetts Pass winter closure (past Bear Valley) — snow", description: "One line that names the closure without calling the segment closed."}
+                source: {type: string, enum: [road_condition], description: "road_condition is Caltrans highway-conditions text."}
+                description: {type: string, description: "The source text, as published."}
+                reason: {type: string, example: snow, description: "snow, ice, winter_closure, seasonal_closure, construction, rockslide, mudslide, fire, flooding, accident. Absent when the text gives none."}
+                from: {type: string, example: "0.5 mi east of the Jct of SR 207 /Mt Reba Turnoff/", description: "Where it starts, in the source's words."}
+                to: {type: string, example: "the Jct of SR 89 /Ebbetts Pass/", description: "Where it ends, in the source's words."}
       MapChainControlProps:
         type: object
         description: chain_control block. Severity follows the level (R1 MINOR, R2 MODERATE, R3 SEVERE); a seasonal pass closure (`category` closed) is MINOR.

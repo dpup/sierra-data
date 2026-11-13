@@ -362,7 +362,7 @@ func (s *Service) chainControls(ctx context.Context, area config.HazardArea) ([]
 			category, headline = "closed", strings.TrimSpace(c.Highway+" road closed")
 		}
 		p := Properties{
-			ID:           "cc:" + nonEmpty(c.MessageID, c.LocationName, fmt.Sprintf("%.5f,%.5f", c.Coordinates.Latitude, c.Coordinates.Longitude)),
+			ID:           chainControlID(c),
 			Layer:        strings.ToUpper(LayerChainControl),
 			Kind:         "Chain control",
 			Category:     category,
@@ -401,6 +401,21 @@ func (s *Service) chainControls(ctx context.Context, area config.HazardArea) ([]
 		return out, partialData(errors.Join(degraded...))
 	}
 	return out, nil
+}
+
+// chainControlID is "cc:<district>-<message id>": Caltrans numbers cc.kml
+// messages per district, so the id alone repeats across districts. A CWWP2
+// checkpoint index already starts with its district ("10-17") and is kept as
+// it is. A row missing either part is identified by its position.
+func chainControlID(c caltrans.ChainControlData) string {
+	district, id := strings.TrimSpace(c.District), strings.TrimSpace(c.MessageID)
+	switch {
+	case district == "" || id == "":
+		return fmt.Sprintf("cc:%.5f,%.5f", c.Coordinates.Latitude, c.Coordinates.Longitude)
+	case c.Source == caltrans.SourceCWWP2 && strings.HasPrefix(id, district+"-"):
+		return "cc:" + id
+	}
+	return "cc:" + district + "-" + id
 }
 
 func (s *Service) roadSegments(ctx context.Context, area config.HazardArea) ([]Feature, error) {
@@ -467,6 +482,7 @@ func (s *Service) roadSegments(ctx context.Context, area config.HazardArea) ([]F
 			}
 			s.addRoadHistory(ctx, p.Road, rd, time.Now())
 			p.Road.StatusCauses = roadStatusCauses(rd, pathOf(rd, mr))
+			p.Road.Beyond = roadBeyond(rd, mr)
 		}
 		p.setSeverity(sev)
 		out = append(out, Feature{Type: "Feature", Geometry: geom, Properties: p})

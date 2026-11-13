@@ -2,9 +2,11 @@ package hazards
 
 import (
 	"math"
+	"regexp"
 	"strings"
 
 	api "github.com/sierragridteam/sierra-data/api/v1"
+	"github.com/sierragridteam/sierra-data/internal/config"
 )
 
 // causeMaxOffsetMeters is how far from the segment line a cause may sit and
@@ -64,6 +66,54 @@ func roadStatusCauses(rd *api.Road, path []LatLng) []RoadStatusCauseProps {
 		out = append(out, p)
 	}
 	return out
+}
+
+// roadBeyond projects the seasonal closures past the segment's ends.
+func roadBeyond(rd *api.Road, mr config.MonitoredRoad) []RoadBeyondProps {
+	var out []RoadBeyondProps
+	for _, b := range rd.GetBeyond() {
+		status := api.RoadStatus_CLOSED // the only thing a seasonal closure is
+		if b.GetStatus() == api.RoadStatus_RESTRICTED {
+			status = api.RoadStatus_RESTRICTED
+		}
+		sev := roadSeverity(&api.Road{Status: status})
+		out = append(out, RoadBeyondProps{
+			Name:     b.GetName(),
+			Status:   strings.TrimPrefix(status.String(), "ROAD_STATUS_"),
+			Side:     b.GetSide(),
+			Severity: sev, SeverityRank: severityRank(sev),
+			Headline:    beyondHeadline(b, mr),
+			Source:      b.GetSource(),
+			Description: b.GetDescription(),
+			Reason:      b.GetReason(),
+			From:        b.GetFrom(),
+			To:          b.GetTo(),
+		})
+	}
+	return out
+}
+
+// beyondHeadline words a closure past a segment's end so that it does not
+// read as the segment being closed: "Hwy 4: Ebbetts Pass winter closure (past
+// Bear Valley) — snow".
+func beyondHeadline(b *api.RoadBeyond, mr config.MonitoredRoad) string {
+	ends := regexp.MustCompile(`(?i)\s+to\s+`).Split(mr.Section, 2)
+	where := ""
+	switch {
+	case b.GetSide() == "START" && strings.TrimSpace(ends[0]) != "":
+		where = " (before " + strings.TrimSpace(ends[0]) + ")"
+	case b.GetSide() != "START" && len(ends) == 2 && strings.TrimSpace(ends[1]) != "":
+		where = " (past " + strings.TrimSpace(ends[1]) + ")"
+	}
+	h := nonEmpty(b.GetName(), "Closure") + where
+	if name := strings.TrimSpace(mr.Name); name != "" {
+		h = name + ": " + h
+	}
+	// "winter closure — winter closure" says nothing twice.
+	if r := b.GetReason(); r != "" && r != "winter_closure" && r != "seasonal_closure" {
+		h += " — " + strings.ReplaceAll(r, "_", " ")
+	}
+	return h
 }
 
 // nearerEndKm is the km position (0 or the path's length) of whichever end

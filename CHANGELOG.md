@@ -21,6 +21,123 @@ longer exist: `/api/v1` originally hosted a different hand-built REST surface,
 replaced by a snake_case `/v1` surface on 2026-07-05, which was folded back onto
 the proto-defined `/api/v1` gateway on 2026-07-09.
 
+## 2026-11-13 (later)
+
+### BREAKING: the Ebbetts Pass winter closure no longer closes "Arnold to Bear Valley" (`road.beyond`)
+
+Since 2026-11-12 the `road_segment` "Hwy 4 — Arnold to Bear Valley" read
+`status: CLOSED`, although the road to Bear Valley was open. The closure was
+the Ebbetts Pass winter closure, which Caltrans words as "Is closed from 0.5
+mi east of the Jct of SR 207 /Mt Reba Turnoff/ to the Jct of SR 89 /Ebbetts
+Pass/": it starts where that segment ends. Caltrans highway-conditions text
+has no position; the Grid matches it to a segment by the places it names, and
+the Mt Reba turnoff and Ebbetts Pass are places it knows that segment by.
+
+That closure is at the same place every winter, so it is now named. A closure
+whose text runs from the Mt Reba turnoff (as written, or up to 2 mi east of
+it) to the SR 89 junction at Ebbetts Pass leaves the segment's `status`,
+`severity`, `description` and `road.statusCauses` alone, and is reported on
+the segment as `road.beyond[]`:
+
+```json
+"status": "OPEN",
+"severity": "INFO",
+"road": {
+  "roadId": "hwy4-arnold-bearvalley",
+  "beyond": [{
+    "name": "Ebbetts Pass winter closure",
+    "status": "CLOSED", "side": "END",
+    "severity": "SEVERE", "severityRank": 3,
+    "headline": "Hwy 4: Ebbetts Pass winter closure (past Bear Valley) — snow",
+    "source": "road_condition", "reason": "snow",
+    "from": "0.5 mi east of the Jct of SR 207 /Mt Reba Turnoff/",
+    "to": "the Jct of SR 89 /Ebbetts Pass/",
+    "description": "Is closed from 0.5 mi east of ... - Due to snow- Motorists are advised to use an alternate route"
+  }]
+}
+```
+
+`side` is `END` (past the segment's destination) or `START` (before its
+origin); `from`, `to` and `description` are Caltrans's own words. Ebbetts Pass
+is the only named closure today.
+
+**Nothing else changed in how conditions are matched.** Every other text that
+names Lake Alpine, the Mt Reba turnoff or Ebbetts Pass still closes the
+segment or marks it chains-required, as before: a closure with another start
+or end, one starting west of the turnoff or more than 2 mi east of it, a
+closure "at" the turnoff, and a chain requirement over the same span. That
+includes the early-season wording "Is closed from 0.6 mi east of Lake Alpine
+to 7.2 mi west of the Jct of SR 89 /Ebbetts Pass/", which closes the segment
+as it always has.
+
+The whole text has to be the closure and nothing more. After the end, only
+this may follow, in any letter case and spacing: a county in parentheses, "24
+hrs a day", "- Due to" snow, ice or weather, "- For the winter" or "- For the
+season", "- Motorists are advised to use an alternate route", and a full stop.
+Anything else after it (another place, a chain requirement, a second sentence,
+other hours, another reason) and the segment reads closed, as before. The same
+closure published twice is one `beyond` entry.
+
+**The place summary keeps the pass closure.** `GET
+/api/v1/places/{place}/summary` for a place whose map shows the segment
+(one whose bounds contain either end of it, such as `ebbetts-pass`, and the
+segment's own corridor) lists the closure in
+the `roads` domain at its own severity: `highestSeverity: SEVERE`, and a
+headline `{"id": "road:hwy4-arnold-bearvalley:beyond-0", "kind": "CONDITION",
+"layer": "ROAD_SEGMENT", "severity": "SEVERE", "headline": "Hwy 4: Ebbetts
+Pass winter closure (past Bear Valley) — snow"}`. The id is the segment
+feature's id, `:beyond-`, and the index into its `road.beyond`. It is not a
+road id: `GET /api/v1/roads/{road}/history` answers 404 for it. The headline
+names the closure and not the segment, which stays `OPEN` and `INFO`.
+
+**Migrate:** a client that read "the pass is closed" from the last segment's
+`status` should read `road.beyond`, or the summary's roads headline. A segment
+that is `OPEN` with a `beyond` entry is open to its end and closed past it. A
+client that looks a `CONDITION` headline up by `properties.id` should cut the
+id at `:beyond-`. `GET /api/v1/roads/{road}/history` records the segment as OPEN from
+the deploy on; samples from 2026-11-12 to then say CLOSED.
+
+### "Chains or snow tires are required" (R1) marks the segment
+
+Caltrans words R1 chain control in highway-conditions text as "Chains or snow
+tires are required ...". That wording was read as a notice, so a segment under
+R1 by text alone kept `chainControl: NONE`. It is now `REQUIRED`.
+(`chain_control` checkpoints were not affected.)
+
+Exactly this wording sets `REQUIRED`: "chains", optionally "or snow tires" or
+"or traction devices", optionally "are", then "required" ("Chains are
+required", "Chains required", "Chains or snow tires are required", "Chains or
+traction devices are required"), and any text containing "chain control".
+These do not: "Chains are not required", "Chains are no longer required",
+"chains may be required", and the same wording after "no" ("No chains or snow
+tires are required"). A closure stays a closure whatever it says about chains.
+A restriction ("1-way controlled traffic ...") that also says "chains or snow
+tires are required" stays `RESTRICTED`; one that says "chains are required" is
+read as a chain requirement, as it always was.
+
+**Changed value:** "No chains required" and "No chains are required" used to
+set `REQUIRED`; they are notices now.
+
+### `chain_control` closure points name their highway and place again
+
+Caltrans changed the markup of its chain-control file, and the seasonal pass
+gates reached the `chain_control` layer as a bare `headline: "road closed"`
+with no highway, place or time. They are read again: `headline` "Highway 4
+road closed", `areaLabel` "EAST END OF LAKE ALPINE - EBBETTS PASS",
+`description`, `effective`, and `chainControl.highway`. Chain controls that
+come from the same file (outside Caltrans District 10) get their level,
+highway and place back the same way. A closure is recognised by its marker
+style, its "Road Closed" header or a text that is exactly "Closed to
+traffic.", any one of them, so a change to one does not turn a gate into a
+chain control with no level.
+
+**Changed value:** the `id` of features that come from this file is now
+`cc:<district>-<message id>` (`cc:10-2515`), because Caltrans numbers its
+messages per district and two districts could share `cc:<message id>`. It was
+`cc:<message id>` under the old markup and `cc:<lat>,<lng>` since the markup
+changed; `cc:<lat>,<lng>` remains the id of an entry with no district or no
+message id. Checkpoint ids (`cc:10-ALP-4-0.65-W-14W`) are unchanged.
+
 ## 2026-11-13
 
 ### The Grid moved to a new AWS account (no API change)

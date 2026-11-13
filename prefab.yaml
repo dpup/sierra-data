@@ -191,6 +191,21 @@ roads:
         latitude: 38.461045
         longitude: -120.042368
       locationKeywords: ["Camp Connell", "Dorrington", "White Pines", "Big Trees", "Ganns", "Tamarack", "Lake Alpine", "Mt Reba", "Ebbetts"]
+      # Named closures past this segment's end that recur at the same place
+      # every year. A Caltrans closure is one of these only when its span runs
+      # from `start` (bare, or offset up to maxStartOffsetMiles in
+      # startOffsetDirection, the direction away from the segment) to `end`:
+      # "Is closed from 0.5 mi east of the Jct of SR 207 /Mt Reba Turnoff/ to
+      # the Jct of SR 89 /Ebbetts Pass/". The segment then keeps its own
+      # status and the closure is reported as road.beyond. Any other text
+      # naming these places closes or chain-marks the segment as usual.
+      seasonalClosures:
+        - name: "Ebbetts Pass winter closure"
+          side: end
+          start: ["Jct of SR 207", "Mt Reba Turnoff"]
+          end: ["Jct of SR 89", "Ebbetts Pass"]
+          startOffsetDirection: east
+          maxStartOffsetMiles: 2
     # Hwy 49 / Tuolumne corridor (issue #6). Angels Camp <-> Sonora links the
     # Calaveras and Tuolumne service areas. Note: the upper Hwy 4 segment past
     # Arnold (Dorrington) is already covered by "Arnold to Bear Valley" above,

@@ -182,6 +182,10 @@ message Road {
   // What set `status` when it is not OPEN: each on-route item, in the order
   // applied. Empty when OPEN.
   repeated RoadStatusCause status_causes = 14;
+  // Named seasonal closures past one of this road's ends that are in effect
+  // (the Ebbetts Pass winter closure past Bear Valley). They never change
+  // `status`: this road is as open as `status` says.
+  repeated RoadBeyond beyond = 15;
 }
 
 // ChainControlInfo provides detailed chain control status for a road
@@ -205,6 +209,19 @@ message RoadStatusCause {
   string description = 5;           // restriction details, or the condition text
   Coordinates begin = 6;            // where it starts; unset for road conditions (text only)
   Coordinates end = 7;              // where it ends, when the source gives an extent
+}
+
+// RoadBeyond is a named seasonal closure past one of a road's ends, in
+// effect now, so it does not affect the road itself.
+message RoadBeyond {
+  RoadStatus status = 1;            // what the highway is there: CLOSED
+  string side = 2;                  // "END" - past the road's destination | "START" - before its origin
+  string source = 3;                // "road_condition"
+  string description = 4;           // the condition text, as published
+  string reason = 5;                // snow, winter_closure ...; empty when the text gives none
+  string from = 6;                  // where it starts, in the source's words
+  string to = 7;                    // where it ends, in the source's words
+  string name = 8;                  // the closure's configured name ("Ebbetts Pass winter closure")
 }
 
 // TrafficCondition merged into Road for simplicity

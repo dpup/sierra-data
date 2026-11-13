@@ -2,6 +2,7 @@ package gridapi
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -281,7 +282,7 @@ func (s *Service) buildPlaceSummary(ctx context.Context, hb hazardsBuilder, plac
 		buildDomain("roads",
 			[]string{eventLayerStatus(hazards.LayerRoadIncident), condChain.status, condSegment.status},
 			append(eventItems(withoutPlannedRoadwork(byLayer[gridv1.Layer_ROAD_INCIDENT])),
-				featureItems(append(condChain.features, condSegment.features...))...)),
+				append(featureItems(append(condChain.features, condSegment.features...)), beyondItems(condSegment.features)...)...)),
 		buildDomain("seismic",
 			[]string{eventLayerStatus(hazards.LayerEarthquake)},
 			eventItems(byLayer[gridv1.Layer_EARTHQUAKE])),
@@ -460,6 +461,33 @@ func featureItems(features []hazards.Feature) []mergedItem {
 			isCondition: true,
 			layer:       strings.ToUpper(f.Properties.Layer),
 		})
+	}
+	return out
+}
+
+// beyondItems are the seasonal closures past the end of the place's road
+// segments (road.beyond). The segment itself is open and INFO, so without
+// these "Ebbetts Pass is closed" would be missing from the roads domain. Each
+// counts at the closure's own severity, under its own headline, which names
+// the closure and not the segment. The id is the segment feature's id plus
+// ":beyond-<index into road.beyond>" (URL-safe, like every other id here; it
+// is not a road id, and /roads/{road}/history answers 404 for it).
+func beyondItems(features []hazards.Feature) []mergedItem {
+	var out []mergedItem
+	for _, f := range features {
+		if f.Properties.Road == nil {
+			continue
+		}
+		for i, b := range f.Properties.Road.Beyond {
+			out = append(out, mergedItem{
+				id:          fmt.Sprintf("%s:beyond-%d", f.Properties.ID, i),
+				severity:    b.Severity,
+				rank:        b.SeverityRank,
+				headline:    b.Headline,
+				isCondition: true,
+				layer:       strings.ToUpper(f.Properties.Layer),
+			})
+		}
 	}
 	return out
 }

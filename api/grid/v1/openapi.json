@@ -4357,6 +4357,86 @@
       "MapRoadProps": {
         "description": "road_segment block (Google Routes travel time over a configured route). The numbers are absent, not 0, until the route has been measured.",
         "properties": {
+          "beyond": {
+            "description": "Named seasonal closures past one of the segment's ends that are in effect now, such as the Ebbetts Pass winter closure past Bear Valley. They do not change the segment's `status` or `severity`: the segment is as open as `status` says. An entry appears only when Caltrans words the closure as the configured span; any other closure naming those places closes the segment. Absent when there are none. Each entry is also a roads headline in the place summary, with the id `road:{segment}:beyond-{index}`.",
+            "items": {
+              "properties": {
+                "description": {
+                  "description": "The source text, as published.",
+                  "type": "string"
+                },
+                "from": {
+                  "description": "Where it starts, in the source's words.",
+                  "example": "0.5 mi east of the Jct of SR 207 /Mt Reba Turnoff/",
+                  "type": "string"
+                },
+                "headline": {
+                  "description": "One line that names the closure without calling the segment closed.",
+                  "example": "Hwy 4: Ebbetts Pass winter closure (past Bear Valley) — snow",
+                  "type": "string"
+                },
+                "name": {
+                  "description": "The closure's name.",
+                  "example": "Ebbetts Pass winter closure",
+                  "type": "string"
+                },
+                "reason": {
+                  "description": "snow, ice, winter_closure, seasonal_closure, construction, rockslide, mudslide, fire, flooding, accident. Absent when the text gives none.",
+                  "example": "snow",
+                  "type": "string"
+                },
+                "severity": {
+                  "description": "The closure's own severity. The segment's `severity` does not include it.",
+                  "enum": [
+                    "SEVERE"
+                  ],
+                  "type": "string"
+                },
+                "severityRank": {
+                  "example": 3,
+                  "type": "integer"
+                },
+                "side": {
+                  "description": "END - past the segment's destination (the last coordinate of its line); START - before its origin.",
+                  "enum": [
+                    "END",
+                    "START"
+                  ],
+                  "type": "string"
+                },
+                "source": {
+                  "description": "road_condition is Caltrans highway-conditions text.",
+                  "enum": [
+                    "road_condition"
+                  ],
+                  "type": "string"
+                },
+                "status": {
+                  "description": "What the highway is past that end.",
+                  "enum": [
+                    "CLOSED"
+                  ],
+                  "type": "string"
+                },
+                "to": {
+                  "description": "Where it ends, in the source's words.",
+                  "example": "the Jct of SR 89 /Ebbetts Pass/",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "status",
+                "side",
+                "severity",
+                "severityRank",
+                "headline",
+                "source"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
           "congestion": {
             "enum": [
               "CLEAR",
@@ -7599,7 +7679,7 @@
             "type": "string"
           },
           "id": {
-            "description": "The item's id. For `kind: EVENT` an event id, fetchable at\n`GET /api/v1/events/{id}`. For `kind: CONDITION` a map-feature id\n(`road:{segment}`, `cc:{checkpoint}`, `fw:region`): it is NOT an event and\n`GET /api/v1/events/{id}` returns 404. Find it as `properties.id` in the\nplace's `{layer}.geojson` map layer (the layer slug is `layer` lowercased).",
+            "description": "The item's id. For `kind: EVENT` an event id, fetchable at\n`GET /api/v1/events/{id}`. For `kind: CONDITION` a map-feature id\n(`road:{segment}`, `cc:{checkpoint}`, `fw:region`): it is NOT an event and\n`GET /api/v1/events/{id}` returns 404. Find it as `properties.id` in the\nplace's `{layer}.geojson` map layer (the layer slug is `layer` lowercased).\nA seasonal closure past a road segment's end has the id\n`road:{segment}:beyond-{n}`: the part before `:beyond-` is the segment\nfeature's id and `n` is the index into its `road.beyond`. It is not a\nroad id: `GET /api/v1/roads/{road}/history` returns 404 for it.",
             "example": "road:hwy4-arnold-bearvalley",
             "type": "string"
           },
