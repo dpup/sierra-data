@@ -256,7 +256,14 @@ func TestTickRetiresNWSAlertReplacedByUpdate(t *testing.T) {
 	sched.tick(ctx, spec, &pollerState{})
 
 	// 11-11 22:38Z: the old code stored the Update beside it and retired nothing.
-	pre, err := NewWeatherAlertNormalizer(cfg, &fakeWeatherAPI{alerts: feed}).Poll(ctx, nil)
+	// The clock is fixed here too: on the wall clock the fixture's warning
+	// takes effect on 11-13 18:00Z, after which a real-time poll stores it
+	// ACTIVE and the deploy tick below (SCHEDULED at its fixed time) would
+	// mint a second revision.
+	clock = time.Date(2026, 11, 11, 22, 38, 0, 0, time.UTC)
+	old := NewWeatherAlertNormalizer(cfg, &fakeWeatherAPI{alerts: feed})
+	old.now = func() time.Time { return clock }
+	pre, err := old.Poll(ctx, nil)
 	require.NoError(t, err)
 	for _, ev := range pre.Events {
 		_, err := st.UpsertEvent(ctx, ev)
