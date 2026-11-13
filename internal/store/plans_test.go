@@ -30,7 +30,7 @@ import (
 //     one leaves the disabled node in the plan, which fails the test).
 //   - TestHotQueryPlansAtScale is opt-in (GRID_SCALE_DATABASE_URL, like
 //     TestWritePhaseAtScale) and EXPLAIN (ANALYZE, BUFFERS)es the same calls on
-//     the imported production-sized database with the planner's own choices
+//     a production-sized database with the planner's own choices
 //     and fails if a hot statement scans a growing table sequentially.
 
 // statementRecorder is a pgx.QueryTracer keeping what ran.

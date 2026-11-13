@@ -20,9 +20,9 @@ import (
 //
 //	GRID_SCALE_DATABASE_URL=postgres://...  go test ./internal/store -run 'AtScale' -v
 //
-// The database is WRITTEN TO: point it at a throwaway clone of an imported
-// fixture (gridctl import of legacyfixture.ProductionScale; see the
-// cmd/gridctl package doc), never at anything real. GRID_SCALE_RTT adds
+// The database is WRITTEN TO: point it at a throwaway clone (a restore of a
+// production RDS snapshot into a scratch instance, or a copy of the local
+// database after a long run), never at anything real. GRID_SCALE_RTT adds
 // a simulated network round-trip time to every client write (for example 1ms,
 // roughly a Fargate task and an RDS instance in one availability zone).
 const scaleEnv = "GRID_SCALE_DATABASE_URL"
