@@ -123,9 +123,10 @@ make deploy-status        # recent Deploy runs
 rollback and what the Grid does during a deploy:
 [docs/deploy-handoff.md](docs/deploy-handoff.md).
 
-`legacy/efs-sqlite` is the archived SQLite-on-EFS stack that ran in the old
-AWS account until 2026-11-13; nothing deploys from it, and its
-`make ecs-deploy` refuses on `main`.
+The SQLite-on-EFS stack that ran in the old AWS account until 2026-11-13 is
+archived in git history at the tags `legacy-efs-final` (where the lines
+parted) and `legacy-efs-archived` (its last commit); the branch is gone and
+nothing deploys from it.
 
 ## Development
 

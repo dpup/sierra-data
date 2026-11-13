@@ -570,7 +570,7 @@ docker-push: docker-build
 # `make deploy` runs that workflow by hand: for HEAD (on main, pushed, clean,
 # CI green) or REF=<tag or commit on main> to redeploy an earlier release.
 # It needs gh, not AWS credentials.
-.PHONY: deploy deploy-status test-deploy-client ecs-deploy ecs-status ecs-rollback
+.PHONY: deploy deploy-status test-deploy-client
 deploy: test-deploy-client
 	python3 scripts/deploy.py dispatch$(if $(REF), --ref "$(REF)")$(if $(ALLOW_DIRTY), --allow-dirty)$(if $(PUSH_ONLY), --push-only)
 
@@ -579,14 +579,6 @@ deploy-status:
 
 test-deploy-client:
 	python3 -m unittest discover -s scripts -p 'test_deploy.py' -v
-
-# The archived legacy stack's commands (the coordinator in the old account,
-# retired 2026-11-13). They exist only on legacy/efs-sqlite; here they refuse,
-# so muscle memory cannot ship the PostgreSQL build to the old stack.
-ecs-deploy ecs-status ecs-rollback:
-	@echo "make $@ belonged to the legacy stack (SQLite on EFS, old account, retired 2026-11-13) and exists" >&2
-	@echo "only on the archived legacy/efs-sqlite branch. main deploys to the Grid account with make deploy." >&2
-	@exit 2
 
 # API diff gate (migration plan section 8, gate 2): the legacy SQLite server
 # and the new PostgreSQL server on the same snapshot, every endpoint compared.
@@ -683,7 +675,6 @@ help:
 	@echo "  deploy [REF=tag|commit] - Run the Deploy workflow for HEAD (main, pushed, clean, CI green) or REF, and watch it"
 	@echo "  deploy-status - Recent Deploy workflow runs"
 	@echo "  test-deploy-client - Test scripts/deploy.py"
-	@echo "  (ecs-deploy/ecs-status/ecs-rollback belonged to the archived legacy stack and refuse here)"
 	@echo "  apidiff LEGACY=url NEW=url - Diff the API of the legacy and new servers (migration gate 2)"
 	@echo "  docker      - Alias for docker-build"
 	@echo "  install     - Install CLI tools to system PATH"

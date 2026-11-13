@@ -127,7 +127,7 @@ class BranchGuardTests(unittest.TestCase):
             drift = deploy.branch_drift()
         self.assertIn("on legacy/efs-sqlite", drift)
         self.assertIn("deploys only from main", drift)
-        self.assertIn("make ecs-deploy", drift, "points the legacy operator at the legacy path")
+        self.assertIn("make deploy REF=", drift, "points at the way to redeploy an older release")
         self.assertEqual(len(git.call_args_list), 1)
 
     def test_names_a_detached_head(self):
@@ -382,12 +382,10 @@ class DispatchTests(unittest.TestCase):
 
 
 class LegacyTargetTests(unittest.TestCase):
-    def test_ecs_deploy_cannot_run_from_main(self):
+    def test_legacy_targets_are_gone(self):
+        makefile = (REPO / "Makefile").read_text()
         for target in ["ecs-deploy", "ecs-status", "ecs-rollback"]:
-            with self.subTest(target=target):
-                result = subprocess.run(["make", "-s", target], cwd=REPO, capture_output=True, text=True)
-                self.assertNotEqual(result.returncode, 0)
-                self.assertIn("legacy/efs-sqlite", result.stderr)
+            self.assertNotIn(target + ":", makefile, "the retired stack's targets stay out of main's Makefile")
 
     def test_no_coordinator_client_remains(self):
         source = Path(deploy.__file__).read_text()
