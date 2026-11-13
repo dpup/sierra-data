@@ -65,15 +65,6 @@ $(SERVER_BINARY): proto
 mesh-relay:
 	$(GOBUILD) -o $(MESH_RELAY_BINARY) ./$(CMD_DIR)/mesh-relay
 
-# gridctl: the SQLite -> PostgreSQL importer (snapshot, import, verify; usage in
-# `bin/gridctl --help` and the cmd/gridctl package doc). Its own binary so the server never links SQLite or the AWS
-# SDK. The version (git describe) lands in the snapshot manifest and import_log.
-GRIDCTL_BINARY=$(BUILD_DIR)/gridctl
-GRIDCTL_VERSION?=$(shell git describe --always --dirty 2>/dev/null || echo dev)
-.PHONY: gridctl
-gridctl:
-	$(GOBUILD) -ldflags "-X main.version=$(GRIDCTL_VERSION)" -o $(GRIDCTL_BINARY) ./$(CMD_DIR)/gridctl
-
 # Run the relay in the foreground (prefab.yaml meshRelay: port 8090, db
 # ./data/relay.db). Add yourself to meshRelay.admins (see relay-token) to use
 # the admin API.
@@ -628,7 +619,6 @@ help:
 	@echo "  tools       - Build CLI testing tools only"
 	@echo "  proto       - Generate protobuf code (and the OpenAPI spec)"
 	@echo "  openapi     - Rebuild api/grid/v1/openapi.json from the swagger + overlay"
-	@echo "  gridctl     - Build the SQLite -> PostgreSQL importer (bin/gridctl; bin/gridctl --help)"
 	@echo "  clean       - Clean build artifacts"
 	@echo ""
 	@echo "Operations targets:"

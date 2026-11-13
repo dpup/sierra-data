@@ -36,7 +36,6 @@ Last updated: 2026-07-06
 ├── cmd/                       # CLI applications
 │   ├── server/                # Main API server (main.go, site.go, gridadapter.go; landing/ = the / page)
 │   ├── mesh-relay/            # SIERRA Mesh Relay — a SEPARATE service (see below)
-│   ├── gridctl/               # SQLite -> PostgreSQL importer: snapshot, import, verify (gridctl --help)
 │   ├── test-google/           # Google Routes API testing tool
 │   ├── test-caltrans/         # Caltrans data testing tool
 │   ├── test-weather/          # Weather API testing tool
@@ -50,7 +49,6 @@ Last updated: 2026-07-06
 │   ├── hazards/               # /api/v1 unified GeoJSON hazard layers
 │   ├── store/                 # PostgreSQL grid event store (events, revisions, places, sources)
 │   ├── storetest/             # Per-test PostgreSQL databases (TEST_DATABASE_URL)
-│   ├── sqliteimport/          # The legacy SQLite store -> PostgreSQL (gridctl's library; the only SQLite in the Grid)
 │   ├── ingest/                # Poller scheduler + per-source normalizers → the store
 │   ├── pushingest/            # Authenticated push ingest (POST /api/v1/ingest/{stream})
 │   ├── gridapi/               # /api/v1 GridService impl (gRPC) + hand-built GeoJSON
@@ -242,15 +240,10 @@ lines parted, `legacy-efs-archived` its last commit (its coordinator deploy
 client, `make ecs-deploy`, lived only there). The branch is gone; nothing
 deploys from the tags, and a change belongs on `main`.
 
-**`gridctl`** (`make gridctl`; `/app/gridctl` in the image) is the tool that
-moved the data: `snapshot` takes a consistent read-only copy of a legacy
-`grid.db` (to a path or `s3://`), `import` loads it into a PostgreSQL
-database in one verified transaction, `verify` re-checks it read-only. It
-stays, with `internal/sqliteimport` and its production-scale legacy fixture
-(`legacyfixture`, which the store's scale tests use), until the old
-account's EFS and backups are gone; it is the only Grid code that links
-SQLite, and `cmd/server` must never import it
-(`TestServerDoesNotLinkTheImporter`). `make apidiff LEGACY=<url> NEW=<url>`
+The importer that moved the data (`gridctl` with `internal/sqliteimport` and
+its legacy fixture) was removed on 2026-11-13 once the move was accepted; it
+lives in git history up to the commit that removed it. The Grid links no
+SQLite. `make apidiff LEGACY=<url> NEW=<url>`
 (`scripts/apidiff.py`, stdlib Python) compares two servers endpoint by
 endpoint, which is how the two stacks were proved equal before the cutover.
 
