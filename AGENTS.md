@@ -20,7 +20,7 @@ Last updated: 2026-07-06
 
 **Language/Version**: Go 1.27.3 (`go.mod` and the Docker builder use Go 1.27.3)
 **Primary Dependencies**: gRPC, gRPC Gateway, Prefab framework (github.com/dpup/prefab), Protocol Buffers  
-**Storage**: PostgreSQL 18 (pgx v5, pure Go) is the grid event store's system of record — events, revision history, the place directory, and source health — at `grid.database.url` (`PF__GRID__DATABASE__URL`). Locally it runs in Docker (`make db-up`; `make test`/`make run` use it). The mesh relay keeps its own SQLite file (`meshRelay.dbPath`). The SQLite-on-EFS Grid store is frozen on the `legacy/efs-sqlite` branch. In-memory TTL caches remain on the read path for the roads/weather/hazards services.  
+**Storage**: PostgreSQL 18 (pgx v5, pure Go) is the grid event store's system of record — events, revision history, the place directory, and source health — at `grid.database.url` (`PF__GRID__DATABASE__URL`). Locally it runs in Docker (`make db-up`; `make test`/`make run` use it). The mesh relay keeps its own store: a SQLite file (`meshRelay.dbPath`, the default) or a DynamoDB table (`meshRelay.store: dynamodb`, the hosted relay). The SQLite-on-EFS Grid store is frozen on the `legacy/efs-sqlite` branch. In-memory TTL caches remain on the read path for the roads/weather/hazards services.  
 **Testing**: Go testing framework with testify, contract tests for gRPC services  
 **Target Platform**: Linux/macOS server, containerizable
 
@@ -781,8 +781,17 @@ wire protocol and the bridge). It is the meeting point for MeshCore gateway
 bridges at volunteers' houses (they dial OUT over WSS) and the authenticated
 clients that use a node through them, at `/mesh/relay/*`. **It is not part of
 the Grid server process and must stay that way**: its own binary, its own image
-target (`docker build --target relay`), its own SQLite file (`meshRelay.dbPath`, never `grid.db`), and
+target (`docker build --target relay`), its own store (`meshRelay.store`:
+`sqlite`, the file at `meshRelay.dbPath`, never `grid.db`; or `dynamodb`, the
+table at `meshRelay.dynamodb.table`, which the hosted relay in the Grid
+account runs on with no file system at all; `cmd/mesh-relay/store.go`), and
 `cmd/server` never imports it — a relay crash must not touch the hazard feeds.
+One relay owns the store at a time: the SQLite file lock, or the DynamoDB
+instance lease (heartbeat 10 s, taken over after 45 s without one); a starting
+relay waits `meshRelay.lockTimeout` for the previous one, and a relay whose
+lease is lost exits (`OnLost` -> the controller's `Fail`). Store tests on
+DynamoDB Local are opt-in through `MESHRELAY_TEST_DYNAMO_ENDPOINT`
+(sierra-meshrelay's `make dynamo-up`).
 **It is still a prefab app**: prefab owns its HTTP server, config (the
 `meshRelay:` section of the shared `prefab.yaml`, `PF__MESH_RELAY__*`, checked
 by `ValidateEnvOverrides`), logging, errors, and lifecycle — the `Relay` is a

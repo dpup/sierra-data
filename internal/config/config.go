@@ -79,9 +79,15 @@ type MeshRelayConfig struct {
 	// port must differ from the Grid's whenever the two processes share a
 	// network namespace.
 	Control ControlConfig `koanf:"control"`
+	// Store selects the relay's store: "sqlite" (DBPath; the default, for
+	// local and self-hosted relays) or "dynamodb" (DynamoDB.Table; the
+	// hosted relay in the Grid account). PF__MESH_RELAY__STORE.
+	Store string `koanf:"store"`
 	// DBPath is the relay's OWN SQLite file — never grid.db.
 	DBPath      string        `koanf:"dbPath"`
 	LockTimeout time.Duration `koanf:"lockTimeout"`
+	// DynamoDB configures the dynamodb store.
+	DynamoDB MeshRelayDynamoDBConfig `koanf:"dynamodb"`
 	// ClientIPHeader names the header carrying the real client IP behind the
 	// reverse proxy (X-Forwarded-For uses its rightmost entry). Empty uses the
 	// socket address, which behind a proxy makes every client look the same to
@@ -113,6 +119,24 @@ type MeshRelayConfig struct {
 	AuthFailLimit    int           `koanf:"authFailLimit"`
 	AuthFailWindow   time.Duration `koanf:"authFailWindow"`
 	AuthLockout      time.Duration `koanf:"authLockout"`
+}
+
+// MeshRelayDynamoDBConfig is meshRelay.dynamodb: the table the relay's
+// DynamoDB store (sierra-meshrelay relay/dynamostore) runs on. The AWS
+// region and credentials come from the environment (on ECS: the task's
+// region and task role). Zero durations take the store's defaults
+// (heartbeat 10 s, stale after 45 s).
+type MeshRelayDynamoDBConfig struct {
+	// Table is the relay table's name. PF__MESH_RELAY__DYNAMODB__TABLE.
+	Table string `koanf:"table"`
+	// Heartbeat is how often this relay renews its instance lease;
+	// StaleAfter is how long a lease without a heartbeat is honoured before
+	// another relay takes it (at least twice Heartbeat).
+	Heartbeat  time.Duration `koanf:"heartbeat"`
+	StaleAfter time.Duration `koanf:"staleAfter"`
+	// Endpoint overrides the DynamoDB endpoint (DynamoDB Local in tests and
+	// development). Empty in production.
+	Endpoint string `koanf:"endpoint"`
 }
 
 // MeshRelayTelemetryConfig is meshRelay.telemetry. The poller runs only when

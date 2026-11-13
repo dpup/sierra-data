@@ -5,6 +5,7 @@ go 1.27.3
 require (
 	github.com/aws/aws-sdk-go-v2 v1.48.0
 	github.com/aws/aws-sdk-go-v2/config v1.33.18
+	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.74.0
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.114.10
 	github.com/dpup/prefab v0.6.1
 	github.com/eclipse/paho.mqtt.golang v1.5.1
@@ -13,7 +14,7 @@ require (
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.33.0
 	github.com/jackc/pgx/v5 v5.13.0
 	github.com/sashabaranov/go-openai v1.43.0
-	github.com/sierragridteam/sierra-meshrelay v0.10.0
+	github.com/sierragridteam/sierra-meshrelay v0.14.0
 	github.com/stretchr/testify v1.12.1
 	github.com/twpayne/go-polyline v1.1.2
 	github.com/yuin/goldmark v1.8.7
@@ -38,6 +39,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/internal/v4a v1.5.12 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.25 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/checksum v1.11.13 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/endpoint-discovery v1.13.12 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.14.12 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.20.12 // indirect
 	github.com/aws/aws-sdk-go-v2/service/signin v1.13.1 // indirect
