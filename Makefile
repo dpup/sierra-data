@@ -580,12 +580,12 @@ deploy-status:
 test-deploy-client:
 	python3 -m unittest discover -s scripts -p 'test_deploy.py' -v
 
-# The legacy stack's commands (the coordinator in the old account). They exist
-# only on legacy/efs-sqlite; here they refuse, so muscle memory cannot ship the
-# PostgreSQL build to the SQLite stack.
+# The archived legacy stack's commands (the coordinator in the old account,
+# retired 2026-11-13). They exist only on legacy/efs-sqlite; here they refuse,
+# so muscle memory cannot ship the PostgreSQL build to the old stack.
 ecs-deploy ecs-status ecs-rollback:
-	@echo "make $@ is the legacy stack's (SQLite on EFS, old account) and runs only from a checkout of" >&2
-	@echo "legacy/efs-sqlite (repos/sierra-data). main deploys to the Grid account with make deploy." >&2
+	@echo "make $@ belonged to the legacy stack (SQLite on EFS, old account, retired 2026-11-13) and exists" >&2
+	@echo "only on the archived legacy/efs-sqlite branch. main deploys to the Grid account with make deploy." >&2
 	@exit 2
 
 # API diff gate (migration plan section 8, gate 2): the legacy SQLite server
@@ -683,7 +683,7 @@ help:
 	@echo "  deploy [REF=tag|commit] - Run the Deploy workflow for HEAD (main, pushed, clean, CI green) or REF, and watch it"
 	@echo "  deploy-status - Recent Deploy workflow runs"
 	@echo "  test-deploy-client - Test scripts/deploy.py"
-	@echo "  (ecs-deploy/ecs-status/ecs-rollback are the legacy stack's; they run only on legacy/efs-sqlite)"
+	@echo "  (ecs-deploy/ecs-status/ecs-rollback belonged to the archived legacy stack and refuse here)"
 	@echo "  apidiff LEGACY=url NEW=url - Diff the API of the legacy and new servers (migration gate 2)"
 	@echo "  docker      - Alias for docker-build"
 	@echo "  install     - Install CLI tools to system PATH"

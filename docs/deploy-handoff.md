@@ -150,7 +150,8 @@ yield.
 This replaces the standby/quiesce/activate handoff the legacy stack needed
 because only the database owner could serve. That handoff still exists (the
 Grid remaps it onto the roles, below) so a coordinator could drive the Grid;
-the native ECS path needs none of it. The mesh relay
+the native ECS path needs none of it, and since the 2026-11-13 cutover
+nothing uses it: it is a candidate for removal once the old account is gone. The mesh relay
 (`cmd/mesh-relay`) keeps the old handoff unchanged: it stays one process on
 its own store, the SQLite file or, in the Grid account, a DynamoDB table
 whose instance lease the next task takes over when the previous one stops
@@ -350,7 +351,7 @@ campaign instead); a new process takes the lease; the old processes keep
 serving reads. A release with a migration does not need it: the new tasks
 migrate at boot and are ready without the writer role.
 
-## The coordinator remap (route B)
+## The coordinator remap (route B, unused since the cutover)
 
 `internal/handoff`'s states are unchanged; the Grid maps them onto the roles:
 
