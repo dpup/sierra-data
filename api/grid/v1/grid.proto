@@ -2069,6 +2069,9 @@ message SummaryDomainHeadline {
   // (`road:{segment}`, `cc:{checkpoint}`, `fw:region`): it is NOT an event and
   // `GET /api/v1/events/{id}` returns 404. Find it as `properties.id` in the
   // place's `{layer}.geojson` map layer (the layer slug is `layer` lowercased).
+  // A seasonal closure past a road segment's end has the id
+  // `road:{segment}#beyond-{n}`: the part before `#` is the segment feature's
+  // id and `n` is the index into its `road.beyond`.
   string id = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {example: "\"road:hwy4-arnold-bearvalley\""}];
   // The item's severity.
   string severity = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {

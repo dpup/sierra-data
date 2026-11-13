@@ -198,12 +198,12 @@ func TestMatchConditionToSegment(t *testing.T) {
 			expected:         true,
 		},
 		{
-			name: "Matches location keyword - Tamarack",
+			name: "Matches location keyword - Lake Alpine",
 			condition: RoadCondition{
-				Description: "Is closed from 0.6 mi east of Tamarack to 7.2 mi west of the Jct of SR 89",
+				Description: "Is closed from 0.6 mi east of Lake Alpine to 7.2 mi west of the Jct of SR 89",
 			},
 			sectionName:      "Arnold to Bear Valley",
-			locationKeywords: []string{"Camp Connell", "Tamarack"},
+			locationKeywords: []string{"Camp Connell", "Lake Alpine", "Ebbetts"},
 			expected:         true,
 		},
 		{
@@ -263,56 +263,93 @@ func realPage(t *testing.T, file, highway string) []RoadCondition {
 	return conditions
 }
 
-func TestRelateConditionToSegment_RealClosures(t *testing.T) {
+var ebbettsWinterClosure = SeasonalClosure{
+	Name:                 "Ebbetts Pass winter closure",
+	Start:                []string{"Jct of SR 207", "Mt Reba Turnoff"},
+	End:                  []string{"Jct of SR 89", "Ebbetts Pass"},
+	StartOffsetDirection: "east",
+	MaxStartOffsetMiles:  2,
+}
+
+func TestMatchSeasonalClosure_RealPages(t *testing.T) {
 	sr4 := realPage(t, "road_conditions_sr4_20261113.html", "4")
 	require.Len(t, sr4, 2)
 	ebbetts := sr4[0]
 	assert.Equal(t, CONDITION_CLOSURE, ebbetts.Type)
 	assert.Equal(t, "snow", ebbetts.Reason)
 	assert.Equal(t, "Is closed from 0.5 mi east of the Jct of SR 207 /Mt Reba Turnoff/ to the Jct of SR 89 /Ebbetts Pass/ (Alpine Co) - Due to snow- Motorists are advised to use an alternate route", ebbetts.Description)
+	assert.True(t, MatchSeasonalClosure(ebbetts, ebbettsWinterClosure))
+	assert.False(t, MatchSeasonalClosure(sr4[1], ebbettsWinterClosure), "construction at the Delta")
 
-	arnoldBearValley := SectionPlaces("Arnold to Bear Valley",
-		[]string{"Camp Connell", "Dorrington", "White Pines", "Big Trees", "Ganns", "Tamarack"}, nil,
-		[]string{"Mt Reba", "Lake Alpine", "Ebbetts"})
-	assert.Equal(t, SegmentPastEnd, RelateConditionToSegment(ebbetts, arnoldBearValley),
-		"the closure starts east of the Mt Reba turnoff, where the section ends")
-	assert.Equal(t, SegmentUnrelated, RelateConditionToSegment(sr4[1], arnoldBearValley), "construction at the Delta")
-
-	// With the places past the end listed as places ON the section, as they
-	// were until 2026-11-13, the same text closed Arnold to Bear Valley.
-	assert.True(t, MatchConditionToSegment(ebbetts, "Arnold to Bear Valley", []string{"Camp Connell", "Lake Alpine", "Mt Reba", "Ebbetts"}))
-
-	// Sonora Pass: a section ending at Strawberry would not be closed by it.
+	// The Sonora Pass closure on the SR 108 page is another closure.
 	sr108 := realPage(t, "road_conditions_sr108_20261113.html", "108")
 	require.NotEmpty(t, sr108)
-	sonora := sr108[0]
-	assert.Equal(t, CONDITION_CLOSURE, sonora.Type)
-	toStrawberry := SectionPlaces("Sonora to Strawberry", []string{"Twain Harte", "Mi-Wuk", "Long Barn", "Pinecrest"}, nil,
-		[]string{"Kennedy Meadows", "Sonora Pass", "US 395"})
-	// "Sonora Pass" is past the end; the origin "Sonora" inside it is not a
-	// mention of the town.
-	assert.Equal(t, SegmentPastEnd, RelateConditionToSegment(sonora, toStrawberry))
+	assert.Equal(t, CONDITION_CLOSURE, sr108[0].Type)
+	assert.False(t, MatchSeasonalClosure(sr108[0], ebbettsWinterClosure))
 }
 
-func TestRelateConditionToSegment_Rule(t *testing.T) {
-	places := SegmentPlaces{Origin: "Arnold", Destination: "Bear Valley",
-		On: []string{"Dorrington"}, BeforeStart: []string{"Murphys"}, PastEnd: []string{"Lake Alpine", "Ebbetts"}}
-	for text, want := range map[string]SegmentRelation{
-		"Is closed at Dorrington":                        SegmentOn,
-		"Is closed from Dorrington to Ebbetts Pass":      SegmentOn,
-		"Is closed from Murphys to Lake Alpine":          SegmentOn,
-		"Is closed from Arnold to Bear Valley":           SegmentOn,
-		"Is closed from Arnold to Lake Alpine":           SegmentOn,
-		"Is closed from Murphys to Bear Valley":          SegmentOn,
-		"Is closed at Arnold":                            SegmentOn,
-		"Is closed at Bear Valley":                       SegmentOn,
-		"Is closed from Lake Alpine to Ebbetts Pass":     SegmentPastEnd,
-		"Is closed from Bear Valley to Ebbetts Pass":     SegmentPastEnd,
-		"Is closed from Angels Camp to Murphys":          SegmentBeforeStart,
-		"Is closed from Murphys to Arnold":               SegmentBeforeStart,
-		"Is closed at the Contra Costa/San Joaquin line": SegmentUnrelated,
+// Only the exact span is the seasonal closure. Everything else is left to
+// the ordinary matching, which puts it on the segment.
+func TestMatchSeasonalClosure_Rule(t *testing.T) {
+	for _, tt := range []struct {
+		text string
+		typ  RoadConditionType
+		want bool
+	}{
+		{"Is closed from 0.5 mi east of the Jct of SR 207 /Mt Reba Turnoff/ to the Jct of SR 89 /Ebbetts Pass/ (Alpine Co) - Due to snow- Motorists are advised to use an alternate route", CONDITION_CLOSURE, true},
+		{"Is closed from the Jct of SR 207 /Mt Reba Turnoff/ to the Jct of SR 89 /Ebbetts Pass/ (Alpine Co) - For the winter", CONDITION_CLOSURE, true},
+		{"Is closed from 2 miles east of the Mt Reba Turnoff to Ebbetts Pass", CONDITION_CLOSURE, true},
+		{"IS CLOSED FROM 0.5 MI EAST OF THE JCT OF SR 207 /MT REBA TURNOFF/ TO THE JCT OF SR 89 /EBBETTS PASS/", CONDITION_CLOSURE, true},
+
+		// A different end.
+		{"Is closed from 0.5 mi east of the Jct of SR 207 /Mt Reba Turnoff/ to Lake Alpine (Alpine Co) - Due to snow", CONDITION_CLOSURE, false},
+		{"Is closed from 0.5 mi east of the Jct of SR 207 /Mt Reba Turnoff/ to 7.2 mi west of the Jct of SR 89 /Ebbetts Pass/", CONDITION_CLOSURE, false},
+		{"Is closed from 0.5 mi east of the Jct of SR 207 /Mt Reba Turnoff/ to the Jct of SR 89 /Ebbetts Pass/ to the Nevada State Line", CONDITION_CLOSURE, false},
+		// A different start.
+		{"Is closed from Cottage Springs to the Jct of SR 89 /Ebbetts Pass/ - Due to snow", CONDITION_CLOSURE, false},
+		{"Is closed from 0.6 mi east of Lake Alpine to the Jct of SR 89 /Ebbetts Pass/", CONDITION_CLOSURE, false},
+		{"Is closed from Dorrington /Mt Reba Turnoff/ to the Jct of SR 89 /Ebbetts Pass/", CONDITION_CLOSURE, false},
+		// An offset back towards the segment, or too long, or unreadable.
+		{"Is closed from 10 mi west of the Jct of SR 207 /Mt Reba Turnoff/ to the Jct of SR 89 /Ebbetts Pass/", CONDITION_CLOSURE, false},
+		{"Is closed from 0.5 mi west of the Jct of SR 207 /Mt Reba Turnoff/ to the Jct of SR 89 /Ebbetts Pass/", CONDITION_CLOSURE, false},
+		{"Is closed from 2.1 mi east of the Jct of SR 207 /Mt Reba Turnoff/ to the Jct of SR 89 /Ebbetts Pass/", CONDITION_CLOSURE, false},
+		{"Is closed from just east of the Jct of SR 207 /Mt Reba Turnoff/ to the Jct of SR 89 /Ebbetts Pass/", CONDITION_CLOSURE, false},
+		// No span.
+		{"Is closed at the Jct of SR 207 /Mt Reba Turnoff/", CONDITION_CLOSURE, false},
+		{"Is closed 0.5 mi east of the Jct of SR 207 /Mt Reba Turnoff/", CONDITION_CLOSURE, false},
+		// Not a closure.
+		{"Chains are required on all vehicles except 4-wheel-drive vehicles with snow tires on all 4 wheels from 0.5 mi east of the Jct of SR 207 /Mt Reba Turnoff/ to the Jct of SR 89 /Ebbetts Pass/", CONDITION_CHAIN, false},
+		{"1-way controlled traffic from the Jct of SR 207 /Mt Reba Turnoff/ to the Jct of SR 89 /Ebbetts Pass/", CONDITION_RESTRICTION, false},
 	} {
-		assert.Equal(t, want, RelateConditionToSegment(RoadCondition{Description: text}, places), text)
+		assert.Equal(t, tt.want, MatchSeasonalClosure(RoadCondition{Type: tt.typ, Description: tt.text}, ebbettsWinterClosure), tt.text)
+	}
+
+	// With no direction configured, no offset is accepted.
+	bare := ebbettsWinterClosure
+	bare.StartOffsetDirection = ""
+	assert.False(t, MatchSeasonalClosure(RoadCondition{Type: CONDITION_CLOSURE,
+		Description: "Is closed from 0.5 mi east of the Jct of SR 207 /Mt Reba Turnoff/ to the Jct of SR 89 /Ebbetts Pass/"}, bare))
+	assert.True(t, MatchSeasonalClosure(RoadCondition{Type: CONDITION_CLOSURE,
+		Description: "Is closed from the Jct of SR 207 /Mt Reba Turnoff/ to the Jct of SR 89 /Ebbetts Pass/"}, bare))
+	// A closure with no names matches nothing.
+	assert.False(t, MatchSeasonalClosure(RoadCondition{Type: CONDITION_CLOSURE, Description: "Is closed from the to the"}, SeasonalClosure{Name: "x"}))
+}
+
+// R1 is worded "Chains or snow tires are required": it is a chain
+// requirement like R2 and R3.
+func TestClassifyCondition_ChainLevels(t *testing.T) {
+	for text, want := range map[string]RoadConditionType{
+		"Chains or snow tires are required from 3.5 mi east of Arnold to the Jct of SR 207 /Mt Reba Turnoff/ (Calaveras, Alpine Co)":                               CONDITION_CHAIN,
+		"Chains are required on all vehicles except 4-wheel-drive vehicles with snow tires on all 4 wheels from Dorrington to the Jct of SR 207 /Mt Reba Turnoff/": CONDITION_CHAIN,
+		"Chains are required on all vehicles from Dorrington to Bear Valley":                                                                                       CONDITION_CHAIN,
+		"Chains or traction devices are required on all vehicles except four wheel/ all wheel drive vehicles with snow-tread tires on all four wheels.":            CONDITION_CHAIN,
+		"Snow tires are required from Arnold to Dorrington":                                                                                                        CONDITION_CHAIN,
+		"Chains required from Arnold to Dorrington":                                                                                                                CONDITION_CHAIN,
+		"Is closed from Arnold to Dorrington - Chains or snow tires are required west of the closure":                                                              CONDITION_CLOSURE,
+		"1-way controlled traffic at various locations - Due to construction":                                                                                      CONDITION_RESTRICTION,
+		"For Yosemite Nat'l Park road information call 209-372-0200":                                                                                               CONDITION_INFO,
+	} {
+		assert.Equal(t, want, classifyCondition(text), text)
 	}
 }
 
@@ -327,6 +364,10 @@ func TestConditionSpan(t *testing.T) {
 			"26.4 mi east of Strawberry", "5.6 mi west of the Jct of US 395 /Sonora Pass/"},
 		{CONDITION_CLOSURE, "Is closed from the Jct of US 395 (Mono Co) to the Jct of SR 4 /Monitor Pass/ (Alpine Co) - Due to snow - Motorists are advised to use an alternate route",
 			"the Jct of US 395", "the Jct of SR 4 /Monitor Pass/"},
+		{CONDITION_CLOSURE, "Is closed from 5 mi east of Ham's Station (Amador Co) /Peddler Hill/ to the Carson Spur (Alpine Co) - Due to snow",
+			"5 mi east of Ham's Station /Peddler Hill/", "the Carson Spur"},
+		{CONDITION_CHAIN, "Chains or snow tires are required from 3.5 mi east of Arnold (Calaveras Co) /at Big Trees/ to the Jct of SR 207 /Mt Reba Turnoff/ (Alpine Co)",
+			"3.5 mi east of Arnold /at Big Trees/", "the Jct of SR 207 /Mt Reba Turnoff/"},
 		{CONDITION_CLOSURE, "Is closed 5.1 mi east of the Jct of US 395 to 7.5 mi west of west of the Jct of US 6 (Mono Co) - Due to snow - Motorists are advised to use an alternate route",
 			"5.1 mi east of the Jct of US 395", "7.5 mi west of west of the Jct of US 6"},
 		{CONDITION_CLOSURE, "Is closed 1 mi east of Camp Connell (Calaveras Co) - Due to snow - Motorists are advised to use an alternate route",

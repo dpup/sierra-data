@@ -591,7 +591,7 @@
             "type": "object",
             "$ref": "#/definitions/v1RoadBeyond"
           },
-          "description": "Closures and restrictions on the same highway that start at or past one\nof this road's ends (the Ebbetts Pass winter closure past Bear Valley).\nThey never change `status`: this road is as open as `status` says."
+          "description": "Named seasonal closures past one of this road's ends that are in effect\n(the Ebbetts Pass winter closure past Bear Valley). They never change\n`status`: this road is as open as `status` says."
         }
       },
       "title": "Data models"
@@ -677,7 +677,7 @@
       "properties": {
         "status": {
           "$ref": "#/definitions/v1RoadStatus",
-          "title": "what it is there: CLOSED or RESTRICTED"
+          "title": "what the highway is there: CLOSED"
         },
         "side": {
           "type": "string",
@@ -693,7 +693,7 @@
         },
         "reason": {
           "type": "string",
-          "title": "snow, winter_closure, construction ...; empty when the text gives none"
+          "title": "snow, winter_closure ...; empty when the text gives none"
         },
         "from": {
           "type": "string",
@@ -701,10 +701,14 @@
         },
         "to": {
           "type": "string",
-          "title": "where it ends, in the source's words; empty for a single place"
+          "title": "where it ends, in the source's words"
+        },
+        "name": {
+          "type": "string",
+          "title": "the closure's configured name (\"Ebbetts Pass winter closure\")"
         }
       },
-      "description": "RoadBeyond is a closure or restriction on the same highway that starts at\nor past one of a road's ends, so it does not affect the road itself."
+      "description": "RoadBeyond is a named seasonal closure past one of a road's ends, in\neffect now, so it does not affect the road itself."
     },
     "v1RoadStatus": {
       "type": "string",

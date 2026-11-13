@@ -992,18 +992,11 @@ func (s *RoadsService) fetchRoadConditions(ctx context.Context) map[string][]cal
 }
 
 // applyRoadConditions processes road conditions from roads.dot.ca.gov and
-// updates road status. It returns the closures and restrictions that start at
-// or past one of the road's ends: those leave the status alone.
+// updates road status. It returns the conditions that are one of the road's
+// named seasonal closures (config seasonalClosures): those lie past the
+// road's end and leave its status alone. Every other condition naming a
+// place of this road sets its status, as it always has.
 func (s *RoadsService) applyRoadConditions(ctx context.Context, monitoredRoad config.MonitoredRoad, conditions []caltrans.RoadCondition, roadStatus *api.RoadStatus, chainControl *api.ChainControlStatus, statusExplanation *string, alerts *[]*api.RoadAlert, causes *[]*api.RoadStatusCause) []*api.RoadBeyond {
-	if len(conditions) == 0 {
-		return nil
-	}
-	var all []config.MonitoredRoad
-	if s.config != nil {
-		all = s.config.Roads.MonitoredRoads
-	}
-	places := placesFor(monitoredRoad, all)
-
 	var beyond []*api.RoadBeyond
 	for _, condition := range conditions {
 		// Road conditions from roads.dot.ca.gov are route-wide text advisories with
@@ -1012,23 +1005,17 @@ func (s *RoadsService) applyRoadConditions(ctx context.Context, monitoredRoad co
 		// section/keywords; otherwise the same SR-X condition (e.g. a closure at the
 		// Delta) is duplicated onto every monitored segment of that highway. The
 		// geolocated KML incident feed still provides spatially-accurate alerts.
-		relation := caltrans.RelateConditionToSegment(condition, places.SegmentPlaces)
-		switch relation {
-		case caltrans.SegmentUnrelated:
+		if !caltrans.MatchConditionToSegment(condition, monitoredRoad.Section, monitoredRoad.LocationKeywords) {
 			continue
-		case caltrans.SegmentPastEnd, caltrans.SegmentBeforeStart:
-			// It starts where this road ends, or further on (the Ebbetts Pass
-			// winter closure past Bear Valley): the road itself is unaffected.
-			// The road at the end of the chain reports it beside its status.
-			if b := conditionBeyond(condition, relation); b != nil &&
-				((relation == caltrans.SegmentPastEnd && places.lastInChain) || (relation == caltrans.SegmentBeforeStart && places.firstInChain)) {
-				beyond = append(beyond, b)
-				*alerts = append(*alerts, s.buildRoadConditionAlert(condition, api.AlertClassification_NEARBY))
-				logging.Infow(ctx, "Road condition past the road's end",
-					"road_id", monitoredRoad.ID,
-					"side", b.GetSide(),
-					"description", condition.Description)
-			}
+		}
+
+		if b := seasonalClosureBeyond(condition, monitoredRoad); b != nil {
+			beyond = append(beyond, b)
+			*alerts = append(*alerts, s.buildRoadConditionAlert(condition, api.AlertClassification_NEARBY))
+			logging.Infow(ctx, "Road condition is a seasonal closure past the road's end",
+				"road_id", monitoredRoad.ID,
+				"closure", b.GetName(),
+				"description", condition.Description)
 			continue
 		}
 
@@ -1071,24 +1058,34 @@ func (s *RoadsService) applyRoadConditions(ctx context.Context, monitoredRoad co
 	return beyond
 }
 
-// conditionBeyond describes a closure or restriction lying past one of a
-// road's ends. Chain requirements and notices there are not reported: the
-// chain_control layer carries the checkpoints.
-func conditionBeyond(c caltrans.RoadCondition, relation caltrans.SegmentRelation) *api.RoadBeyond {
-	b := &api.RoadBeyond{Source: "road_condition", Description: c.Description, Reason: c.Reason, Side: "END"}
-	switch c.Type {
-	case caltrans.CONDITION_CLOSURE:
-		b.Status = api.RoadStatus_CLOSED
-	case caltrans.CONDITION_RESTRICTION:
-		b.Status = api.RoadStatus_RESTRICTED
-	default:
-		return nil
+// seasonalClosureBeyond returns the Road.beyond entry for a condition that is
+// one of the road's named seasonal closures, nil for any other condition.
+func seasonalClosureBeyond(c caltrans.RoadCondition, road config.MonitoredRoad) *api.RoadBeyond {
+	for _, sc := range road.SeasonalClosures {
+		if strings.TrimSpace(sc.Name) == "" || !caltrans.MatchSeasonalClosure(c, caltrans.SeasonalClosure{
+			Name: sc.Name, Start: sc.Start, End: sc.End,
+			StartOffsetDirection: sc.StartOffsetDirection, MaxStartOffsetMiles: sc.MaxStartOffsetMiles,
+		}) {
+			continue
+		}
+		b := &api.RoadBeyond{
+			Name: sc.Name, Status: api.RoadStatus_CLOSED, Side: "END",
+			Source: "road_condition", Description: c.Description, Reason: c.Reason,
+		}
+		if strings.EqualFold(strings.TrimSpace(sc.Side), "start") {
+			b.Side = "START"
+		}
+		b.From, b.To = caltrans.ConditionSpan(c)
+		// The span is the closure. If the rest of the text names a place of
+		// this road as well, it says more than the closure: on the road.
+		rest := c
+		rest.Description = strings.Replace(strings.Replace(c.Description, b.From, " ", 1), b.To, " ", 1)
+		if caltrans.MatchConditionToSegment(rest, road.Section, road.LocationKeywords) {
+			return nil
+		}
+		return b
 	}
-	if relation == caltrans.SegmentBeforeStart {
-		b.Side = "START"
-	}
-	b.From, b.To = caltrans.ConditionSpan(c)
-	return b
+	return nil
 }
 
 // buildRoadConditionAlert creates a RoadAlert from a road condition

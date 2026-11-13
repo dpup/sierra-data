@@ -203,8 +203,14 @@ func (p *FeedParser) parseChainControlDetails(incidents []CaltransIncident) []Ch
 
 		// Parse name: "Eastbound US 50 Chain Control level R-2"
 		control.Direction, control.Highway, control.Level = parseChainControlName(incident.Name)
+		// A closure is marked three ways in the 2026 layout (style, "Road
+		// Closed" header, "Closed to traffic." body) and by its title in the
+		// old one. Any one of them is enough: a closure read as a chain
+		// control would reach the map as a control with no level.
 		control.Closed = strings.EqualFold(strings.TrimSpace(incident.StyleUrl), "#full-closure") ||
-			roadClosedPattern.MatchString(incident.Name)
+			roadClosedPattern.MatchString(incident.Name) ||
+			iwClosedHeaderPattern.MatchString(incident.DescriptionHtml) ||
+			iwClosedBodyPattern.MatchString(incident.DescriptionHtml)
 
 		// Parse description HTML for location, effective time, and requirements
 		control.LocationName, control.EffectiveTime, control.Description, control.LastUpdated, control.District, control.MessageID = parseChainControlDescription(incident.DescriptionHtml)
@@ -270,7 +276,10 @@ var (
 	bareHighwayPattern = regexp.MustCompile(`(?i)^(?:Highway|Interstate|US|SR|I-)\s*\d+[A-Z]?$`)
 	iwLevelPattern     = regexp.MustCompile(`(?i)Chain\s+Control\s+level\s+R-?([123])\b`)
 	iwLocationPattern  = regexp.MustCompile(`(?is)<strong>\s*Location:\s*</strong>(.*?)</p>`)
-	iwTextPattern      = regexp.MustCompile(`(?is)<p[^>]*class="iw-text"[^>]*>(.*?)</p>`)
+	// The header div holds an icon and the kind: "Road Closed" or "Chain Control".
+	iwClosedHeaderPattern = regexp.MustCompile(`(?is)class="iw-header-left"[^>]*>(?:\s|<img[^>]*>)*Road\s+Closed\b`)
+	iwClosedBodyPattern   = regexp.MustCompile(`(?is)<p[^>]*class="iw-text"[^>]*>\s*Closed\s+to\s+traffic\b`)
+	iwTextPattern         = regexp.MustCompile(`(?is)<p[^>]*class="iw-text"[^>]*>(.*?)</p>`)
 )
 
 // parseChainControlDescription extracts details from the HTML description

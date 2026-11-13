@@ -115,8 +115,9 @@ not"). Road closures (`Closed`) render as `"<highway> road closed"`, category
 `closed`, severity `MINOR` — one notch above a clear checkpoint, below R-1,
 because the seasonal gates hold it all winter (and `/summary`'s roads domain
 counts it as active). Feature ids are `cc:<checkpoint index>` for CWWP2 (e.g.
-`cc:10-ALP-4-0.65-W-14W`, Bear Valley WB), `cc:<message id>` for cc.kml, with a
-coordinate fallback; `source.attribution` names the host.
+`cc:10-ALP-4-0.65-W-14W`, Bear Valley WB), `cc:<district>-<message id>` for
+cc.kml (`cc:10-2515`; message ids repeat across districts), and `cc:<lat>,<lng>`
+when either part is missing (`chainControlID`); `source.attribution` names the host.
 
 ## `message_sign` — context, never a hazard
 

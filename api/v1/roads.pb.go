@@ -1058,9 +1058,9 @@ type Road struct {
 	// What set `status` when it is not OPEN: each on-route item, in the order
 	// applied. Empty when OPEN.
 	StatusCauses []*RoadStatusCause `protobuf:"bytes,14,rep,name=status_causes,json=statusCauses,proto3" json:"status_causes,omitempty"`
-	// Closures and restrictions on the same highway that start at or past one
-	// of this road's ends (the Ebbetts Pass winter closure past Bear Valley).
-	// They never change `status`: this road is as open as `status` says.
+	// Named seasonal closures past one of this road's ends that are in effect
+	// (the Ebbetts Pass winter closure past Bear Valley). They never change
+	// `status`: this road is as open as `status` says.
 	Beyond        []*RoadBeyond `protobuf:"bytes,15,rep,name=beyond,proto3" json:"beyond,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1387,17 +1387,18 @@ func (x *RoadStatusCause) GetEnd() *Coordinates {
 	return nil
 }
 
-// RoadBeyond is a closure or restriction on the same highway that starts at
-// or past one of a road's ends, so it does not affect the road itself.
+// RoadBeyond is a named seasonal closure past one of a road's ends, in
+// effect now, so it does not affect the road itself.
 type RoadBeyond struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Status        RoadStatus             `protobuf:"varint,1,opt,name=status,proto3,enum=api.v1.RoadStatus" json:"status,omitempty"` // what it is there: CLOSED or RESTRICTED
+	Status        RoadStatus             `protobuf:"varint,1,opt,name=status,proto3,enum=api.v1.RoadStatus" json:"status,omitempty"` // what the highway is there: CLOSED
 	Side          string                 `protobuf:"bytes,2,opt,name=side,proto3" json:"side,omitempty"`                             // "END" - past the road's destination | "START" - before its origin
 	Source        string                 `protobuf:"bytes,3,opt,name=source,proto3" json:"source,omitempty"`                         // "road_condition"
 	Description   string                 `protobuf:"bytes,4,opt,name=description,proto3" json:"description,omitempty"`               // the condition text, as published
-	Reason        string                 `protobuf:"bytes,5,opt,name=reason,proto3" json:"reason,omitempty"`                         // snow, winter_closure, construction ...; empty when the text gives none
+	Reason        string                 `protobuf:"bytes,5,opt,name=reason,proto3" json:"reason,omitempty"`                         // snow, winter_closure ...; empty when the text gives none
 	From          string                 `protobuf:"bytes,6,opt,name=from,proto3" json:"from,omitempty"`                             // where it starts, in the source's words
-	To            string                 `protobuf:"bytes,7,opt,name=to,proto3" json:"to,omitempty"`                                 // where it ends, in the source's words; empty for a single place
+	To            string                 `protobuf:"bytes,7,opt,name=to,proto3" json:"to,omitempty"`                                 // where it ends, in the source's words
+	Name          string                 `protobuf:"bytes,8,opt,name=name,proto3" json:"name,omitempty"`                             // the closure's configured name ("Ebbetts Pass winter closure")
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1477,6 +1478,13 @@ func (x *RoadBeyond) GetFrom() string {
 func (x *RoadBeyond) GetTo() string {
 	if x != nil {
 		return x.To
+	}
+	return ""
+}
+
+func (x *RoadBeyond) GetName() string {
+	if x != nil {
+		return x.Name
 	}
 	return ""
 }
@@ -1813,7 +1821,7 @@ const file_roads_proto_rawDesc = "" +
 	"\x05title\x18\x04 \x01(\tR\x05title\x12 \n" +
 	"\vdescription\x18\x05 \x01(\tR\vdescription\x12)\n" +
 	"\x05begin\x18\x06 \x01(\v2\x13.api.v1.CoordinatesR\x05begin\x12%\n" +
-	"\x03end\x18\a \x01(\v2\x13.api.v1.CoordinatesR\x03end\"\xc2\x01\n" +
+	"\x03end\x18\a \x01(\v2\x13.api.v1.CoordinatesR\x03end\"\xd6\x01\n" +
 	"\n" +
 	"RoadBeyond\x12*\n" +
 	"\x06status\x18\x01 \x01(\x0e2\x12.api.v1.RoadStatusR\x06status\x12\x12\n" +
@@ -1822,7 +1830,8 @@ const file_roads_proto_rawDesc = "" +
 	"\vdescription\x18\x04 \x01(\tR\vdescription\x12\x16\n" +
 	"\x06reason\x18\x05 \x01(\tR\x06reason\x12\x12\n" +
 	"\x04from\x18\x06 \x01(\tR\x04from\x12\x0e\n" +
-	"\x02to\x18\a \x01(\tR\x02to\"\x88\a\n" +
+	"\x02to\x18\a \x01(\tR\x02to\x12\x12\n" +
+	"\x04name\x18\b \x01(\tR\x04name\"\x88\a\n" +
 	"\tRoadAlert\x12%\n" +
 	"\x04type\x18\x01 \x01(\x0e2\x11.api.v1.AlertTypeR\x04type\x121\n" +
 	"\bseverity\x18\x02 \x01(\x0e2\x15.api.v1.AlertSeverityR\bseverity\x12C\n" +

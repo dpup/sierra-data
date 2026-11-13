@@ -966,23 +966,36 @@ type CaltransFeedConfig struct {
 
 // MonitoredRoad represents a road to monitor
 type MonitoredRoad struct {
-	Name        string      `koanf:"name"`
-	Section     string      `koanf:"section"`
-	ID          string      `koanf:"id"`
-	Origin      Coordinates `koanf:"origin"`
-	Destination Coordinates `koanf:"destination"`
-	// LocationKeywords are places ON the segment, between its ends. A
-	// roads.dot.ca.gov condition naming one is on the segment and sets its
-	// status, so a place past either end does not belong here.
-	LocationKeywords []string `koanf:"locationKeywords"`
-	// BeforeStartKeywords and PastEndKeywords are places on the same highway
-	// past the segment's origin and destination: the Ebbetts Pass winter gate
-	// is past Bear Valley. A condition naming only such places starts at or
-	// past that end; it is reported beside the segment (Road.beyond) and never
-	// changes its status. Places on the highway's other monitored segments are
-	// derived from the chain and need not be repeated here.
-	BeforeStartKeywords []string `koanf:"beforeStartKeywords"`
-	PastEndKeywords     []string `koanf:"pastEndKeywords"`
+	Name             string      `koanf:"name"`
+	Section          string      `koanf:"section"`
+	ID               string      `koanf:"id"`
+	Origin           Coordinates `koanf:"origin"`
+	Destination      Coordinates `koanf:"destination"`
+	LocationKeywords []string    `koanf:"locationKeywords"`
+	// SeasonalClosures are named closures past this segment's end that recur
+	// at the same place every year. A roads.dot.ca.gov closure matching one
+	// exactly leaves the segment's status alone and is reported beside it
+	// (Road.beyond); every other condition is matched as usual.
+	SeasonalClosures []SeasonalClosure `koanf:"seasonalClosures"`
+}
+
+// SeasonalClosure is one named closure past a monitored segment's end: the
+// Ebbetts Pass winter closure past Bear Valley.
+type SeasonalClosure struct {
+	Name string `koanf:"name"`
+	// Side is the end of the segment it lies past: "end" (the destination,
+	// the default) or "start" (the origin).
+	Side string `koanf:"side"`
+	// Start and End are the names Caltrans gives the closure's two ends. A
+	// condition is this closure only when its span runs from Start to End.
+	Start []string `koanf:"start"`
+	End   []string `koanf:"end"`
+	// Caltrans may put the start a short way on ("0.5 mi east of ..."): an
+	// offset is accepted only in StartOffsetDirection (north, south, east or
+	// west: the direction away from the segment) and up to
+	// MaxStartOffsetMiles. Without a direction no offset is accepted.
+	StartOffsetDirection string  `koanf:"startOffsetDirection"`
+	MaxStartOffsetMiles  float64 `koanf:"maxStartOffsetMiles"`
 }
 
 // WeatherConfig holds weather monitoring configuration

@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	api "github.com/sierragridteam/sierra-data/api/v1"
 	"github.com/sierragridteam/sierra-data/internal/cache"
 	"github.com/sierragridteam/sierra-data/internal/clients/caltrans"
 	"github.com/sierragridteam/sierra-data/internal/clients/cwwp2"
@@ -150,7 +151,7 @@ func TestChainControlLayer_RoadClosedEntry(t *testing.T) {
 	assert.Equal(t, "closed", p.Category)
 	assert.Equal(t, SevMinor, p.Severity, "one notch above INFO")
 	assert.Equal(t, 1, p.SeverityRank)
-	assert.Equal(t, "cc:9001", p.ID)
+	assert.Equal(t, "cc:10-9001", p.ID)
 	assert.Equal(t, caltrans.SourceQuickMap, p.Source.Attribution)
 }
 
@@ -162,7 +163,7 @@ func TestChainControlLayer_PassGates2026(t *testing.T) {
 	features, _, _, _, _, _ := chainService(kmlDoer{200, string(b)}, loadCheckpoints(t, "cc_d10_20260930.json")).BuildLayer(testCtx(), ebbettsArea, LayerChainControl)
 	var gate *Properties
 	for i := range features {
-		if features[i].Properties.ID == "cc:2515" {
+		if features[i].Properties.ID == "cc:10-2515" {
 			gate = &features[i].Properties
 		}
 	}
@@ -174,4 +175,28 @@ func TestChainControlLayer_PassGates2026(t *testing.T) {
 	assert.Equal(t, "2026-11-12T12:08:00-08:00", gate.Effective)
 	assert.Equal(t, "Highway 4", gate.ChainControl.Highway)
 	assert.Equal(t, "Eastbound", gate.ChainControl.Direction)
+}
+
+// Caltrans numbers cc.kml messages per district: the same message id in two
+// districts is two features, not one id twice.
+func TestChainControlID(t *testing.T) {
+	at := &api.Coordinates{Latitude: 38.48042, Longitude: -120.01496}
+	d10 := caltrans.ChainControlData{District: "10", MessageID: "77", Coordinates: at}
+	d3 := caltrans.ChainControlData{District: "3", MessageID: "77", Coordinates: at}
+	assert.Equal(t, "cc:10-77", chainControlID(d10))
+	assert.Equal(t, "cc:3-77", chainControlID(d3))
+	// Either part missing: the position.
+	assert.Equal(t, "cc:38.48042,-120.01496", chainControlID(caltrans.ChainControlData{MessageID: "77", Coordinates: at}))
+	assert.Equal(t, "cc:38.48042,-120.01496", chainControlID(caltrans.ChainControlData{District: "10", LocationName: "Dorrington", Coordinates: at}))
+	// A CWWP2 checkpoint index already carries its district.
+	assert.Equal(t, "cc:10-17", chainControlID(caltrans.ChainControlData{District: "10", MessageID: "10-17", Source: caltrans.SourceCWWP2, Coordinates: at}))
+	assert.Equal(t, "cc:10-17", chainControlID(caltrans.ChainControlData{District: "10", MessageID: "17", Source: caltrans.SourceCWWP2, Coordinates: at}))
+
+	const kml = `<?xml version="1.0" encoding="UTF-8"?><kml xmlns="http://www.opengis.net/kml/2.2"><Document>
+<Placemark><name>Eastbound Highway 4 Road Closed</name><styleUrl>#full-closure</styleUrl><description><![CDATA[<p align="left">MOUNT REBA ROAD - EBBETTS PASS</p><p align="left">Closed to traffic.</p>District:10 Message ID:77]]></description><Point><coordinates>-120.01496,38.48042</coordinates></Point></Placemark>
+<Placemark><name>Eastbound Highway 88 Road Closed</name><styleUrl>#full-closure</styleUrl><description><![CDATA[<p align="left">CARSON SPUR</p><p align="left">Closed to traffic.</p>District:3 Message ID:77]]></description><Point><coordinates>-120.02,38.49</coordinates></Point></Placemark>
+</Document></kml>`
+	features, _, _, _, _, _ := chainService(kmlDoer{200, kml}, loadCheckpoints(t, "cc_d10_20260930.json")).BuildLayer(testCtx(), ebbettsArea, LayerChainControl)
+	require.Len(t, features, 2)
+	assert.ElementsMatch(t, []string{"cc:10-77", "cc:3-77"}, []string{features[0].Properties.ID, features[1].Properties.ID})
 }

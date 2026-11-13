@@ -192,16 +192,41 @@ not point), so it lives on the response (`ListWeatherResponse` /
 `GetLocationWeatherResponse`) computed once from the configured `weather.nws.zones`
 — not duplicated on every location.
 
-## Road conditions and segment ends
+## Road conditions and seasonal closures
 
 roads.dot.ca.gov conditions are text with no geometry. `applyRoadConditions`
-places each one relative to a monitored road by the places it names
-(`caltrans.RelateConditionToSegment`): a place on the road
-(`locationKeywords`) or places on both sides of it set the road's status; a
-condition naming only places past one end (`pastEndKeywords`,
-`beforeStartKeywords`, and everything on the highway's other monitored roads,
-derived by `placesFor`) leaves the status alone and is reported as
-`Road.beyond` on the first or last road of the chain. The Ebbetts Pass winter
-closure starts past Bear Valley: it must never close Arnold to Bear Valley.
-When adding a monitored road, put a town in `locationKeywords` only if it is
-between the road's ends.
+attaches one to a monitored road when its text names one of the road's ends or
+`locationKeywords` (`caltrans.MatchConditionToSegment`), and it then sets the
+road's status or chain control. That is deliberately crude and errs towards
+closed: "Lake Alpine", "Mt Reba" and "Ebbetts" are keywords of Arnold to Bear
+Valley although they are past Bear Valley.
+
+The one exception is a **named seasonal closure** (`seasonalClosures` on the
+monitored road in prefab.yaml; a list). The Ebbetts Pass winter closure is at
+the same place every year and starts where Arnold to Bear Valley ends, so it
+is named rather than inferred. `caltrans.MatchSeasonalClosure` accepts a
+condition only when all of this holds:
+
+- it is a closure (not a chain requirement, restriction or notice);
+- its span (`caltrans.ConditionSpan`) has two ends;
+- the start is made of the configured `start` names and nothing else, bare or
+  offset by at most `maxStartOffsetMiles` in `startOffsetDirection` (the
+  direction away from the road: "0.5 mi east of ...");
+- the end is made of the configured `end` names and nothing else, no offset;
+- the rest of the text names no place of the road (`seasonalClosureBeyond`).
+
+Then the road keeps its own status, and the closure is reported as
+`Road.beyond` (with the configured name) and as a NEARBY alert. Anything else,
+including every near miss, is an ordinary condition on the road. Do not loosen
+this into a general "past the end" rule: one was built and reviewed on
+2026-11-13 and produced false all-clears (an unknown place, or an offset
+pointing back onto the road, read as "past the end"). A false all-clear is the
+one outcome this code must not produce; a false closure is the fallback.
+
+`internal/hazards` gives each `beyond` entry a severity and a headline
+("Hwy 4: Ebbetts Pass winter closure (past Bear Valley) — snow"), and
+`internal/gridapi/summary.go` (`beyondItems`) adds it to the roads domain of
+the place summary, since the segment itself stays INFO.
+
+"Chains or snow tires are required" (R1) is a chain requirement like the R2
+and R3 wordings (`classifyCondition`); all three set `ChainControlStatus_REQUIRED`.

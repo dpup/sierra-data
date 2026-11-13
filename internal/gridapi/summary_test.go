@@ -848,3 +848,62 @@ func TestSummary_DomainHeadlinesSayWhetherTheyAreEvents(t *testing.T) {
 		}
 	}
 }
+
+// While Ebbetts Pass is closed for the winter, the last Hwy 4 segment is OPEN
+// and INFO: the closure is past its end (road.beyond). A place that includes
+// that segment still gets the closure as a SEVERE roads headline, worded as
+// the closure and not as the segment.
+func TestSummary_SeasonalClosurePastASegmentIsARoadsHeadline(t *testing.T) {
+	s := newTestService(t)
+	allSourcesOK(t, s.Store)
+	segment := condFeature("road:hwy4-arnold-bearvalley", hazards.LayerRoadSegment, "INFO", "Hwy 4 — Arnold to Bear Valley", nil)
+	segment.Properties.Status = "OPEN"
+	segment.Properties.Road = &hazards.RoadProps{RoadID: "hwy4-arnold-bearvalley", Beyond: []hazards.RoadBeyondProps{{
+		Name: "Ebbetts Pass winter closure", Status: "CLOSED", Side: "END", Severity: "SEVERE", SeverityRank: 3,
+		Headline: "Hwy 4: Ebbetts Pass winter closure (past Bear Valley) — snow", Source: "road_condition",
+	}}}
+	open := condFeature("road:hwy4-murphys-arnold", hazards.LayerRoadSegment, "INFO", "Hwy 4 — Murphys to Arnold", nil)
+	open.Properties.Road = &hazards.RoadProps{RoadID: "hwy4-murphys-arnold"}
+	hb := &fakeCondBuilder{byLayer: map[string]condFake{
+		hazards.LayerChainControl: {status: "OK", features: []hazards.Feature{
+			condFeature("cc:10-2515", hazards.LayerChainControl, "MINOR", "Highway 4 road closed", nil),
+		}},
+		hazards.LayerRoadSegment: {status: "OK", features: []hazards.Feature{open, segment}},
+		hazards.LayerFireWeather: {status: "OK"},
+	}}
+	body := getSummaryWith(t, s, hb, "calaveras").Body.Bytes()
+	var wire struct {
+		Domains []struct {
+			Domain          string `json:"domain"`
+			HighestSeverity string `json:"highestSeverity"`
+			ActiveCount     int    `json:"activeCount"`
+			Headlines       []struct {
+				ID       string `json:"id"`
+				Kind     string `json:"kind"`
+				Layer    string `json:"layer"`
+				Severity string `json:"severity"`
+				Headline string `json:"headline"`
+			} `json:"headlines"`
+		} `json:"domains"`
+	}
+	require.NoError(t, json.Unmarshal(body, &wire))
+	found := false
+	for _, d := range wire.Domains {
+		if d.Domain != "roads" {
+			continue
+		}
+		found = true
+		assert.Equal(t, "SEVERE", d.HighestSeverity)
+		assert.Equal(t, 2, d.ActiveCount, "the closure and the gate; the open segments are baseline")
+		require.Len(t, d.Headlines, 2)
+		top := d.Headlines[0]
+		assert.Equal(t, "road:hwy4-arnold-bearvalley#beyond-0", top.ID)
+		assert.Equal(t, "CONDITION", top.Kind)
+		assert.Equal(t, "ROAD_SEGMENT", top.Layer)
+		assert.Equal(t, "SEVERE", top.Severity)
+		assert.Equal(t, "Hwy 4: Ebbetts Pass winter closure (past Bear Valley) — snow", top.Headline)
+		assert.NotContains(t, top.Headline, "Arnold", "it does not read as the segment being closed")
+		assert.Equal(t, "cc:10-2515", d.Headlines[1].ID)
+	}
+	assert.True(t, found, "roads domain")
+}

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -139,6 +140,12 @@ func ParseRoadConditionsHTML(html string, highwayNumber string) ([]RoadCondition
 	return conditions, nil
 }
 
+// chainRequirement reads every level's wording: R1 "Chains or snow tires are
+// required", R2 "Chains are required on all vehicles except 4-wheel-drive
+// vehicles with snow tires", R3 "Chains are required on all vehicles", and
+// "Chains or traction devices are required".
+var chainRequirement = regexp.MustCompile(`\b(?:chains|snow tires|traction devices)\b[^.]{0,40}?\brequired\b`)
+
 // classifyCondition determines the type of road condition from its text
 func classifyCondition(text string) RoadConditionType {
 	lower := strings.ToLower(text)
@@ -150,8 +157,7 @@ func classifyCondition(text string) RoadConditionType {
 	}
 
 	// Check for chain control
-	if strings.Contains(lower, "chains are required") || strings.Contains(lower, "chains required") ||
-		strings.Contains(lower, "chain control") {
+	if chainRequirement.MatchString(lower) || strings.Contains(lower, "chain control") {
 		return CONDITION_CHAIN
 	}
 
@@ -224,117 +230,110 @@ func extractLastUpdated(html string) string {
 	return dateStr + " " + timeStr
 }
 
-// SegmentRelation says where a road condition sits relative to a monitored
-// segment of the same highway.
-type SegmentRelation int
-
-const (
-	// SegmentUnrelated: the text names no place known for this segment.
-	SegmentUnrelated SegmentRelation = iota
-	// SegmentOn: the condition is on the segment (or cannot be shown to lie
-	// off it). It sets the segment's status.
-	SegmentOn
-	// SegmentPastEnd: every place the text names lies at or past the
-	// segment's destination, so it starts where the segment ends or further
-	// on. It does not set the segment's status.
-	SegmentPastEnd
-	// SegmentBeforeStart: the same, at or before the segment's origin.
-	SegmentBeforeStart
-)
-
-// SegmentPlaces are the place names that locate a text-only condition
-// relative to a monitored segment. roads.dot.ca.gov conditions have no
-// geometry, so the names are all there is.
-type SegmentPlaces struct {
-	// Origin and Destination are the segment's two ends ("Arnold", "Bear
-	// Valley"). An end is a boundary: on its own it does not say which side a
-	// condition is on.
-	Origin, Destination string
-	// On are places along the segment, strictly between its ends.
-	On []string
-	// BeforeStart are places past the origin, off the segment.
-	BeforeStart []string
-	// PastEnd are places past the destination, off the segment.
-	PastEnd []string
-}
-
-// SectionPlaces builds SegmentPlaces from a section name ("Arnold to Bear
-// Valley") and its keyword lists.
-func SectionPlaces(section string, on, beforeStart, pastEnd []string) SegmentPlaces {
-	p := SegmentPlaces{On: on, BeforeStart: beforeStart, PastEnd: pastEnd}
-	if ends := extractSectionLocations(section); len(ends) > 0 {
-		p.Origin = ends[0]
-		if len(ends) > 1 {
-			p.Destination = ends[len(ends)-1]
-		}
-	}
-	return p
-}
-
-// RelateConditionToSegment places a condition relative to a segment from the
-// places its text names.
-//
-// The rule errs towards SegmentOn: a condition is put past an end only when
-// the text names a place known to be past that end and nothing on the segment
-// or on its other side. So the Ebbetts Pass winter closure ("closed from 0.5
-// mi east of ... /Mt Reba Turnoff/ to ... /Ebbetts Pass/", both past Bear
-// Valley) is SegmentPastEnd for Arnold to Bear Valley, while "closed from
-// Arnold to the Mt Reba turnoff" runs the length of it and is SegmentOn.
-func RelateConditionToSegment(condition RoadCondition, places SegmentPlaces) SegmentRelation {
-	// Longest names first, each match blanked out, so "Sonora" is not found
-	// inside "Sonora Pass" nor "Arnold" inside a longer place that contains it.
-	type known struct {
-		name string
-		kind *bool
-	}
-	var on, origin, destination, before, past bool
-	var all []known
-	add := func(kind *bool, list ...string) {
-		for _, name := range list {
-			if name = strings.ToLower(strings.TrimSpace(name)); name != "" {
-				all = append(all, known{name, kind})
-			}
-		}
-	}
-	add(&on, places.On...)
-	add(&origin, places.Origin)
-	add(&destination, places.Destination)
-	add(&before, places.BeforeStart...)
-	add(&past, places.PastEnd...)
-	sort.SliceStable(all, func(i, j int) bool { return len(all[i].name) > len(all[j].name) })
-	text := strings.ToLower(condition.Description)
-	for _, k := range all {
-		if strings.Contains(text, k.name) {
-			*k.kind = true
-			text = strings.ReplaceAll(text, k.name, " ")
-		}
-	}
-
-	switch {
-	case on:
-		return SegmentOn
-	case (before || origin) && (past || destination):
-		return SegmentOn // names both sides: it runs through the segment
-	case past:
-		return SegmentPastEnd
-	case before:
-		return SegmentBeforeStart
-	case origin || destination:
-		return SegmentOn // at one end, extent unknown
-	}
-	return SegmentUnrelated
-}
-
 // MatchConditionToSegment checks if a road condition applies to a specific
 // road segment based on text matching against section names and location keywords.
 // Returns true if the condition should be considered ON_ROUTE for this segment.
 func MatchConditionToSegment(condition RoadCondition, sectionName string, locationKeywords []string) bool {
-	return RelateConditionToSegment(condition, SectionPlaces(sectionName, locationKeywords, nil, nil)) == SegmentOn
+	condLower := strings.ToLower(condition.Description)
+
+	// Check section endpoint names (e.g., "Arnold to Bear Valley" → "arnold", "bear valley")
+	sectionTokens := extractSectionLocations(sectionName)
+	for _, token := range sectionTokens {
+		if strings.Contains(condLower, strings.ToLower(token)) {
+			return true
+		}
+	}
+
+	// Check configured location keywords
+	for _, keyword := range locationKeywords {
+		if strings.Contains(condLower, strings.ToLower(keyword)) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// SeasonalClosure names one closure that recurs at the same place every year
+// and lies past the end of a monitored segment: the Ebbetts Pass winter
+// closure on SR 4, from the Mt Reba turnoff to the SR 89 junction.
+type SeasonalClosure struct {
+	Name string
+	// Start and End are the names Caltrans uses for the two ends. An end of
+	// the condition's span matches when it is made of these names and nothing
+	// else ("the Jct of SR 207 /Mt Reba Turnoff/").
+	Start, End []string
+	// The start may carry an offset ("0.5 mi east of ..."), only in
+	// StartOffsetDirection (the direction away from the segment) and only up
+	// to MaxStartOffsetMiles. With no direction set, no offset is accepted.
+	StartOffsetDirection string
+	MaxStartOffsetMiles  float64
+}
+
+var conditionOffset = regexp.MustCompile(`(?i)^(\d+(?:\.\d+)?)\s*(?:mi|mile|miles)\.?\s+(north|south|east|west)\s+of\s+`)
+
+// MatchSeasonalClosure reports whether a condition is exactly the named
+// seasonal closure: a closure whose span starts at the configured start (bare,
+// or offset a short way in the configured direction) and ends at the
+// configured end. Anything else is not it: a chain requirement over the same
+// span, a different end, an offset the other way or a longer one, a closure
+// "at" the start with no span, or any wording this cannot read. The caller
+// then treats the condition as any other, on the segment, so a miss here
+// errs towards closed.
+func MatchSeasonalClosure(condition RoadCondition, closure SeasonalClosure) bool {
+	if condition.Type != CONDITION_CLOSURE {
+		return false
+	}
+	from, to := ConditionSpan(condition)
+	if from == "" || to == "" {
+		return false
+	}
+	if m := conditionOffset.FindStringSubmatch(from); m != nil {
+		miles, err := strconv.ParseFloat(m[1], 64)
+		if err != nil || closure.StartOffsetDirection == "" ||
+			!strings.EqualFold(m[2], strings.TrimSpace(closure.StartOffsetDirection)) ||
+			miles > closure.MaxStartOffsetMiles {
+			return false
+		}
+		from = from[len(m[0]):]
+	}
+	return onlyNames(from, closure.Start) && onlyNames(to, closure.End)
+}
+
+// onlyNames reports whether text is one or more of names and nothing else
+// but "the" and punctuation.
+func onlyNames(text string, names []string) bool {
+	text = strings.ToLower(text)
+	sorted := make([]string, 0, len(names))
+	for _, n := range names {
+		if n = strings.ToLower(strings.TrimSpace(n)); n != "" {
+			sorted = append(sorted, n)
+		}
+	}
+	sort.SliceStable(sorted, func(i, j int) bool { return len(sorted[i]) > len(sorted[j]) })
+	found := false
+	for _, n := range sorted {
+		if strings.Contains(text, n) {
+			found = true
+			text = strings.ReplaceAll(text, n, " ")
+		}
+	}
+	if !found {
+		return false
+	}
+	for _, word := range strings.FieldsFunc(text, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z') && !(r >= '0' && r <= '9')
+	}) {
+		if word != "the" {
+			return false
+		}
+	}
+	return true
 }
 
 var (
 	conditionClauseEnd = regexp.MustCompile(`\s+-\s+|-\s+(?:due|for)\b`)
-	conditionCounty    = regexp.MustCompile(`\s*\([^)]*\bCo\)\s*$`)
+	conditionCounty    = regexp.MustCompile(`\s*\([^)]*\bCo\)`)
 	conditionClosedAt  = regexp.MustCompile(`(?i)^(?:is|are)?\s*closed\s+(?:from\s+|at\s+)?`)
 	conditionFromTo    = regexp.MustCompile(`(?i)\bfrom\s+(.+?)\s+to\s+(.+)$`)
 	conditionTo        = regexp.MustCompile(`(?i)\s+to\s+`)
