@@ -29,23 +29,18 @@ import (
 
 // The Grid's lifecycle (docs/deploy-handoff.md): prepare (no database), open
 // the store as a reader and serve every GET, then, through internal/handoff,
-// activate the writer role: at boot by default (a background campaign for
-// the writer lease), or under a deployment coordinator with --standby (a
-// reader that campaigns only on POST /activate). SIGTERM in any state
-// releases the lease, then drains and exits.
+// activate the writer role at boot (a background campaign for the writer
+// lease). SIGTERM in any state releases the lease, then drains and exits.
 //
 //	sierra-server             # serve reads; campaign for the writer lease at boot
-//	sierra-server --standby   # serve reads; campaign only on POST /activate
 func main() {
-	standby := flag.Bool("standby", false,
-		"serve reads but do not campaign for the writer lease until POST /activate on the control port")
 	flag.Parse()
 
 	// Initialize structured logging
 	logger := logging.NewProdLogger()
 	ctx := logging.With(context.Background(), logger)
 
-	logging.Infow(ctx, "Starting The Grid (S.I.E.R.R.A data service)", "standby", *standby)
+	logging.Info(ctx, "Starting The Grid (S.I.E.R.R.A data service)")
 
 	// Load configuration using Prefab's config system
 	appConfig := config.LoadConfig()
@@ -61,9 +56,7 @@ func main() {
 		logging.Errorw(ctx, "Grid preparation failed", "error", err)
 		log.Fatalf("Grid preparation failed: %v", err)
 	}
-	app.strictActivate = *standby
-
-	ctrl, err := handoff.New(ctx, app, gridControlOptions(app, appConfig, *standby))
+	ctrl, err := handoff.New(ctx, app, gridControlOptions(app, appConfig))
 	if err != nil {
 		logging.Errorw(ctx, "Invalid deployment control configuration", "error", err)
 		log.Fatalf("Invalid deployment control configuration: %v", err)
@@ -77,11 +70,11 @@ func main() {
 	os.Exit(ctrl.Run(ctx))
 }
 
-// gridControlOptions configures the Grid's handoff controller: the control
-// listener when a token hash is set, and the writer commands it adds to
-// /activate and /quiesce.
-func gridControlOptions(app *gridApp, cfg *config.Config, standby bool) handoff.Options {
-	opts := handoff.Options{Service: "grid", Standby: standby, Commands: map[string]handoff.Command{
+// gridControlOptions configures the Grid's handoff controller: activation at
+// boot, the control listener when a token hash is set, and the writer
+// commands (yield, campaign) it adds beside /quiesce.
+func gridControlOptions(app *gridApp, cfg *config.Config) handoff.Options {
+	opts := handoff.Options{Service: "grid", Commands: map[string]handoff.Command{
 		"yield":    app.yield,
 		"campaign": app.campaign,
 	}}

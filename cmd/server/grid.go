@@ -71,12 +71,6 @@ type gridApp struct {
 	// instanceID names this process in writer_lease.holder (the handoff
 	// controller's id; main sets it).
 	instanceID string
-	// strictActivate is the coordinator mode (--standby): Activate waits for
-	// the lease up to grid.database.lockTimeout and fails back to STANDBY
-	// without it, as a coordinator expects. Otherwise Activate starts a
-	// background campaign and returns at once.
-	strictActivate bool
-
 	// Reader: set by Serve, torn down by Exit.
 	mu         sync.Mutex
 	store      *store.Store
@@ -99,7 +93,7 @@ type gridApp struct {
 
 // prepareGrid builds the database-free half of the Grid: config-derived
 // clients and the read-path services. Nothing here opens the database, and nothing
-// here starts upstream polling (that waits for activation, so a standby never
+// here starts upstream polling (that waits for activation, so a process never
 // spends API budget). Invalid configuration fails here, before any handoff.
 func prepareGrid(ctx context.Context, appConfig *config.Config) (*gridApp, error) {
 	start := time.Now()
@@ -110,7 +104,7 @@ func prepareGrid(ctx context.Context, appConfig *config.Config) (*gridApp, error
 		return nil, errors.New("OpenAI API key is required in configuration for incident enhancement")
 	}
 	// The push-ingest block is validated now rather than at activation: a bad
-	// reporter hash must stop a standby before it is offered as a replacement.
+	// reporter hash must stop the process before it serves anything.
 	if _, err := pushingest.NewRegistry(appConfig.Grid.Ingest); err != nil {
 		return nil, fmt.Errorf("invalid grid.ingest configuration: %w", err)
 	}

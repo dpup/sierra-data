@@ -36,7 +36,7 @@ func TestConditionalGetThroughTheGateway(t *testing.T) {
 			close(seeded)
 		}
 	}
-	ha := runGrid(t, a, false)
+	ha := runGrid(t, a)
 	select {
 	case <-seeded:
 	case <-time.After(20 * time.Second):
@@ -46,7 +46,7 @@ func TestConditionalGetThroughTheGateway(t *testing.T) {
 	b, portB := preparedGrid(t, dbURL)
 	off := false
 	b.cfg.Grid.Writer.Enabled = &off
-	hb := runGrid(t, b, false)
+	hb := runGrid(t, b)
 	require.Equal(t, http.StatusOK, httpCode(t, portB, "/readyz"))
 
 	guarded := []string{

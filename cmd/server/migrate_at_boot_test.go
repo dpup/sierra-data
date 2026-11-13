@@ -33,7 +33,7 @@ func TestReaderOnlyProcessMigratesAndIsReady(t *testing.T) {
 	app, port := preparedGrid(t, url)
 	off := false
 	app.cfg.Grid.Writer.Enabled = &off
-	h := runGrid(t, app, false)
+	h := runGrid(t, app)
 
 	assert.Equal(t, http.StatusOK, httpCode(t, port, "/readyz"), "ready without a writer")
 	assert.Equal(t, http.StatusOK, httpCode(t, port, "/api/v1/sources"))
@@ -67,7 +67,7 @@ func TestOlderBuildServesANewerSchema(t *testing.T) {
 	require.NoError(t, err)
 
 	app, port := preparedGrid(t, url)
-	h := runGrid(t, app, false)
+	h := runGrid(t, app)
 	assert.Equal(t, http.StatusOK, httpCode(t, port, "/readyz"))
 	require.Eventually(t, app.DatabaseHeld, 20*time.Second, 20*time.Millisecond,
 		"an older build still takes the writer role on a newer schema")

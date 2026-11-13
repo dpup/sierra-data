@@ -13,7 +13,7 @@ import (
 	"github.com/sierragridteam/sierra-data/internal/storetest"
 )
 
-// A standby is prepareGrid and nothing else, and it must not touch the
+// Preparation is prepareGrid and nothing else, and it must not touch the
 // database: not connect to it, not migrate or seed it. The old writer still
 // owns it.
 func TestPrepareGridDoesNotTouchTheDatabase(t *testing.T) {
@@ -48,7 +48,7 @@ func TestPrepareGridRejectsBadConfigBeforeAnyHandoff(t *testing.T) {
 	cfg.Grid.Database.URL = "postgres://unused.invalid/grid"
 	cfg.Grid.Ingest.Reporters = []config.Reporter{{ID: "alanpi", TokenSha256: "not-a-hash"}}
 	_, err = prepareGrid(testCtx(), cfg)
-	assert.ErrorContains(t, err, "grid.ingest", "a bad reporter hash must stop a standby, not its activation")
+	assert.ErrorContains(t, err, "grid.ingest", "a bad reporter hash must stop preparation, not its activation")
 }
 
 func testCtx() context.Context { return logging.EnsureLogger(context.Background()) }
