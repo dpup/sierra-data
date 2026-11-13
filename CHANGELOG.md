@@ -21,6 +21,20 @@ longer exist: `/api/v1` originally hosted a different hand-built REST surface,
 replaced by a snake_case `/v1` surface on 2026-07-05, which was folded back onto
 the proto-defined `/api/v1` gateway on 2026-07-09.
 
+## 2026-11-13
+
+### The Grid moved to a new AWS account (no API change)
+
+`data.sierragridteam.org` is now served from the Sierra Grid account on
+PostgreSQL (RDS) instead of SQLite on EFS in the previous account, with the
+mesh relay on DynamoDB. The hostname, the API surface and every response are
+unchanged, and the full event history was carried across. What a consumer may
+notice: the hostname's addresses changed (the record is now a CNAME to a new
+load balancer; do not pin IPs), responses are faster (a 200-event page in
+tens of milliseconds server-side instead of seconds), and the former name
+`info.ersn.net`, deprecated since 2026-07-06, no longer resolves at all: use
+`data.sierragridteam.org`.
+
 ## 2026-11-12 (later still)
 
 ### A retired weather alert names the alert that replaced it

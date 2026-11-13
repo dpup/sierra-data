@@ -1,7 +1,7 @@
 # The Grid — Development Guidelines
 
 The Grid is the S.I.E.R.R.A data service (primary domain `data.sierragridteam.org`;
-`info.ersn.net` is a legacy CNAME alias, ersn.net a consuming site). The Go module
+`info.ersn.net`, the former name, no longer resolves; ersn.net is a consuming site). The Go module
 path and GitHub repo are `github.com/sierragridteam/sierra-data` (renamed 2026-07-06 from
 `github.com/dpup/info.ersn.net/server`).
 
@@ -215,48 +215,44 @@ curl -s http://localhost:8181/api/v1/events?layer=road_incident | jq .
 - No authentication required
 - Cache-friendly with appropriate TTLs
 
-## Branches and the legacy stack
+## Deploys, and the archived legacy branch
 
-Since 2026-11-11 the repository has two lines. `legacy/efs-sqlite` is the
-frozen SQLite-on-EFS stack that runs in the old AWS account; `main` is the
-PostgreSQL stack for the new Grid account and cannot run on the legacy
-infrastructure. The tag `legacy-efs-final` marks where they parted.
+`main` is the only line. It runs on PostgreSQL in the Grid AWS account,
+where it has served `data.sierragridteam.org` since the 2026-11-13 cutover.
 
 **main deploys through GitHub Actions**, never from a laptop's AWS
 credentials: CI passing on a push to `main` starts the Deploy workflow
-(`.github/workflows/deploy.yml`), which waits for approval in the
-`production` environment, pushes the images to ECR through OIDC,
-registers task-definition revisions with only the image changed (the
-infrastructure code owns the rest) and updates the ECS
-services (native blue/green, bake, automatic rollback). `make deploy` runs
-it by hand for HEAD (the guards in `scripts/deploy.py`, `branch_drift`:
-on `main`, pushed and equal to origin, clean tree, CI green) or
-`REF=<tag or commit on main>` to redeploy an earlier release. Images are
-tagged with the full commit and the git tag, so what runs is always a
-commit anyone can find. Flow, variables and rollback:
-`docs/deploy-handoff.md`. Runbooks for Sierra's own hosting (the first deploy,
-what the infrastructure must set, the migration) live in the private
-workspace, not in this repository.
+(`.github/workflows/deploy.yml`), which runs in the GitHub Environment
+`production` (a required reviewer can be set on it; none is at the moment),
+pushes the Grid and relay images to ECR through OIDC, registers a
+task-definition revision per family with only the image changed (the
+infrastructure code owns the rest) and updates the ECS services (the Grid
+blue/green with a bake and automatic rollback; the relay rolling, old task
+first). `make deploy` runs it by hand for HEAD (the guards in
+`scripts/deploy.py`, `branch_drift`: on `main`, pushed and equal to origin,
+clean tree, CI green) or `REF=<tag or commit on main>` to redeploy an
+earlier release. Images are tagged with the full commit and the git tag, so
+what runs is always a commit anyone can find. Flow, variables and rollback:
+`docs/deploy-handoff.md`. Runbooks for Sierra's own hosting live in the
+private workspace, not in this repository.
 
-A production fix for the old stack is a **hotfix on the legacy branch**:
-branch from `legacy/efs-sqlite`, open the PR against `legacy/efs-sqlite`
-(CI runs on it), merge, then deploy from a checkout of that branch with
-`make ecs-deploy` (its own deploy client and the coordinator; on `main`
-that target refuses). Afterwards, forward-port the fix to `main`
-(cherry-pick, or a fresh change where the store code differs) so it is not
-lost at cutover. Nothing targets `release/*` branches any more.
+`legacy/efs-sqlite` is the **archived** SQLite-on-EFS stack that ran in the
+old AWS account until the cutover; the tag `legacy-efs-final` marks where
+the lines parted. Nothing deploys from it: `make ecs-deploy` and its
+coordinator belong to that branch and refuse on `main`. Do not hotfix it or
+forward-port from it; a change belongs on `main`.
 
-**The data crosses with `gridctl`** (`make gridctl`; `/app/gridctl` in the
-image): `snapshot` takes a consistent read-only copy of the legacy `grid.db`
-(to a path or `s3://`), `import` loads it into an empty PostgreSQL database
-in one verified transaction, `verify` re-checks an imported database
-read-only. Usage and guarantees: `gridctl --help` and the `cmd/gridctl`
-package doc; Sierra's own migration runbook and its import rehearsal live in
-the private workspace. The importer
-(`internal/sqliteimport`) is the only Grid code that links SQLite, and
-`cmd/server` must never import it (`TestServerDoesNotLinkTheImporter`). The
-API diff gate between the two stacks is `make apidiff LEGACY=<url> NEW=<url>`
-(`scripts/apidiff.py`, stdlib Python).
+**`gridctl`** (`make gridctl`; `/app/gridctl` in the image) is the tool that
+moved the data: `snapshot` takes a consistent read-only copy of a legacy
+`grid.db` (to a path or `s3://`), `import` loads it into a PostgreSQL
+database in one verified transaction, `verify` re-checks it read-only. It
+stays, with `internal/sqliteimport` and its production-scale legacy fixture
+(`legacyfixture`, which the store's scale tests use), until the old
+account's EFS and backups are gone; it is the only Grid code that links
+SQLite, and `cmd/server` must never import it
+(`TestServerDoesNotLinkTheImporter`). `make apidiff LEGACY=<url> NEW=<url>`
+(`scripts/apidiff.py`, stdlib Python) compares two servers endpoint by
+endpoint, which is how the two stacks were proved equal before the cutover.
 
 ## Development Workflow
 

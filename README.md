@@ -5,8 +5,8 @@ hazard, road, weather, power and mesh-network data for the central Sierra
 (Calaveras, Tuolumne and neighbouring counties, along the Hwy 4 / Hwy 49
 corridor).
 
-Live at **https://data.sierragridteam.org**. `info.ersn.net` remains a CNAME
-alias, and ersn.net is a consuming site.
+Live at **https://data.sierragridteam.org** (its former name, `info.ersn.net`,
+no longer resolves); ersn.net is a consuming site.
 
 ## What it does
 
@@ -123,9 +123,9 @@ make deploy-status        # recent Deploy runs
 rollback and what the Grid does during a deploy:
 [docs/deploy-handoff.md](docs/deploy-handoff.md).
 
-The legacy SQLite-on-EFS stack in the old account deploys only from a
-checkout of `legacy/efs-sqlite` with its own `make ecs-deploy`; on `main`
-that target refuses.
+`legacy/efs-sqlite` is the archived SQLite-on-EFS stack that ran in the old
+AWS account until 2026-11-13; nothing deploys from it, and its
+`make ecs-deploy` refuses on `main`.
 
 ## Development
 
