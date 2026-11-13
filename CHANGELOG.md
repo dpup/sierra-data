@@ -23,6 +23,47 @@ the proto-defined `/api/v1` gateway on 2026-07-09.
 
 ## 2026-11-13 (later)
 
+### BREAKING: a closure past a road segment's end no longer closes the segment (`road.beyond`)
+
+Since 2026-11-12 the `road_segment` "Hwy 4 — Arnold to Bear Valley" read
+`status: CLOSED`, although the road to Bear Valley was open. The closure was
+the Ebbetts Pass winter closure, which Caltrans words as "Is closed from 0.5
+mi east of the Jct of SR 207 /Mt Reba Turnoff/ to the Jct of SR 89 /Ebbetts
+Pass/": it starts where that segment ends. Caltrans highway-conditions text
+has no position, and the Grid matched it to the segment by the places it
+names, with places past the segment's end counted as places on it.
+
+A condition whose named places all lie at or past one end of a segment now
+leaves the segment's `status`, `severity`, `description` and
+`road.statusCauses` alone. It is reported on the first or last monitored
+segment of that highway as `road.beyond[]`:
+
+```json
+"status": "OPEN",
+"road": {
+  "roadId": "hwy4-arnold-bearvalley",
+  "beyond": [{
+    "status": "CLOSED", "side": "END", "source": "road_condition",
+    "reason": "snow",
+    "from": "0.5 mi east of the Jct of SR 207 /Mt Reba Turnoff/",
+    "to": "the Jct of SR 89 /Ebbetts Pass/",
+    "description": "Is closed from 0.5 mi east of ... - Due to snow- Motorists are advised to use an alternate route"
+  }]
+}
+```
+
+`side` is `END` (past the segment's destination) or `START` (before its
+origin); `status` is `CLOSED` or `RESTRICTED`; `from` and `to` are Caltrans's
+own words. A closure naming a place on the segment, or places on both sides
+of it, still closes the segment as before. The same rule applies to chain
+requirements: one that starts at a segment's end no longer marks that segment.
+
+**Migrate:** a client that read "the pass is closed" from the last segment's
+`status` should read `road.beyond` (and the `chain_control` closure point,
+below). A segment that is `OPEN` with a `beyond` entry is open to its end and
+closed past it. `GET /api/v1/roads/{road}/history` records the segment as OPEN
+from the deploy on; samples from 2026-11-12 to then say CLOSED.
+
 ### `chain_control` closure points name their highway and place again
 
 Caltrans changed the markup of its chain-control file, and the seasonal pass

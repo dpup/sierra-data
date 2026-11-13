@@ -584,6 +584,14 @@
             "$ref": "#/definitions/v1RoadStatusCause"
           },
           "description": "What set `status` when it is not OPEN: each on-route item, in the order\napplied. Empty when OPEN."
+        },
+        "beyond": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1RoadBeyond"
+          },
+          "description": "Closures and restrictions on the same highway that start at or past one\nof this road's ends (the Ebbetts Pass winter closure past Bear Valley).\nThey never change `status`: this road is as open as `status` says."
         }
       },
       "title": "Data models"
@@ -663,6 +671,40 @@
           "title": "Stable CHP log / closure id; matches Incident.id for the same event (empty if none)"
         }
       }
+    },
+    "v1RoadBeyond": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "$ref": "#/definitions/v1RoadStatus",
+          "title": "what it is there: CLOSED or RESTRICTED"
+        },
+        "side": {
+          "type": "string",
+          "title": "\"END\" - past the road's destination | \"START\" - before its origin"
+        },
+        "source": {
+          "type": "string",
+          "title": "\"road_condition\""
+        },
+        "description": {
+          "type": "string",
+          "title": "the condition text, as published"
+        },
+        "reason": {
+          "type": "string",
+          "title": "snow, winter_closure, construction ...; empty when the text gives none"
+        },
+        "from": {
+          "type": "string",
+          "title": "where it starts, in the source's words"
+        },
+        "to": {
+          "type": "string",
+          "title": "where it ends, in the source's words; empty for a single place"
+        }
+      },
+      "description": "RoadBeyond is a closure or restriction on the same highway that starts at\nor past one of a road's ends, so it does not affect the road itself."
     },
     "v1RoadStatus": {
       "type": "string",

@@ -1,12 +1,15 @@
 package hazards
 
 import (
+	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	api "github.com/sierragridteam/sierra-data/api/v1"
+	"github.com/sierragridteam/sierra-data/internal/config"
 )
 
 func TestRoadStatusCauses(t *testing.T) {
@@ -69,4 +72,51 @@ func TestRoadStatusCausesRunPastTheSegment(t *testing.T) {
 	require.Equal(t, "SPAN", west.Extent)
 	assert.Equal(t, 0.0, *west.FromKm, "from the segment's west end")
 	assert.InDelta(t, 4.4, *west.ToKm, 0.1)
+}
+
+// A closure past the segment's end rides beside an OPEN status.
+func TestRoadBeyond(t *testing.T) {
+	rd := &api.Road{Status: api.RoadStatus_OPEN, Beyond: []*api.RoadBeyond{{
+		Status: api.RoadStatus_CLOSED, Side: "END", Source: "road_condition", Reason: "snow",
+		Description: "Is closed from 0.5 mi east of the Jct of SR 207 /Mt Reba Turnoff/ to the Jct of SR 89 /Ebbetts Pass/ (Alpine Co) - Due to snow- Motorists are advised to use an alternate route",
+		From:        "0.5 mi east of the Jct of SR 207 /Mt Reba Turnoff/", To: "the Jct of SR 89 /Ebbetts Pass/",
+	}}}
+	got := roadBeyond(rd)
+	require.Len(t, got, 1)
+	assert.Equal(t, RoadBeyondProps{Status: "CLOSED", Side: "END", Source: "road_condition", Reason: "snow",
+		Description: rd.Beyond[0].Description, From: rd.Beyond[0].From, To: rd.Beyond[0].To}, got[0])
+	assert.Nil(t, roadStatusCauses(rd, nil), "an open segment has no causes")
+	assert.Nil(t, roadBeyond(&api.Road{Status: api.RoadStatus_OPEN}))
+}
+
+// The road_segment feature for Arnold to Bear Valley while Ebbetts Pass is
+// closed: open, INFO, no closure text of its own, and the closure past its end.
+func TestRoadSegments_ClosurePastTheEnd(t *testing.T) {
+	cfg := &config.Config{Roads: config.RoadsConfig{MonitoredRoads: []config.MonitoredRoad{{
+		ID: "hwy4-arnold-bearvalley", Name: "Hwy 4", Section: "Arnold to Bear Valley",
+		Origin:      config.Coordinates{Latitude: 38.265006, Longitude: -120.333654},
+		Destination: config.Coordinates{Latitude: 38.461045, Longitude: -120.042368},
+	}}}}
+	const text = "Is closed from 0.5 mi east of the Jct of SR 207 /Mt Reba Turnoff/ to the Jct of SR 89 /Ebbetts Pass/ (Alpine Co) - Due to snow- Motorists are advised to use an alternate route"
+	s := &Service{cfg: cfg, roads: fakeRoads{roads: []*api.Road{{
+		Id: "hwy4-arnold-bearvalley", Status: api.RoadStatus_OPEN, CongestionLevel: api.CongestionLevel_CLEAR, DurationMinutes: 28, DistanceKm: 38,
+		Beyond: []*api.RoadBeyond{{Status: api.RoadStatus_CLOSED, Side: "END", Source: "road_condition", Reason: "snow", Description: text,
+			From: "0.5 mi east of the Jct of SR 207 /Mt Reba Turnoff/", To: "the Jct of SR 89 /Ebbetts Pass/"}},
+	}}}}
+	feats, err := s.roadSegments(context.Background(), config.HazardArea{ID: "hwy4-arnold-bearvalley"})
+	require.NoError(t, err)
+	require.Len(t, feats, 1)
+	b, err := json.Marshal(feats[0].Properties)
+	require.NoError(t, err)
+	t.Log(string(b))
+	assert.JSONEq(t, `{
+		"id": "road:hwy4-arnold-bearvalley", "layer": "ROAD_SEGMENT", "kind": "Road segment",
+		"severity": "INFO", "severityRank": 0,
+		"headline": "Hwy 4 — Arnold to Bear Valley", "status": "OPEN", "areaLabel": "Arnold to Bear Valley",
+		"source": {"id": "google", "name": "Google Routes + Caltrans", "attribution": "Google · quickmap.dot.ca.gov"},
+		"road": {"roadId": "hwy4-arnold-bearvalley", "congestion": "CLEAR", "delayMinutes": 0, "durationMinutes": 28, "distanceKm": 38,
+			"beyond": [{"status": "CLOSED", "side": "END", "source": "road_condition", "reason": "snow",
+				"description": "`+text+`",
+				"from": "0.5 mi east of the Jct of SR 207 /Mt Reba Turnoff/", "to": "the Jct of SR 89 /Ebbetts Pass/"}]}
+	}`, string(b))
 }

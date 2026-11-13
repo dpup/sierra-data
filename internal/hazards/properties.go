@@ -135,6 +135,24 @@ type RoadProps struct {
 	// draw the part of the segment they cover instead of painting all of it.
 	// Omitted when OPEN.
 	StatusCauses []RoadStatusCauseProps `json:"statusCauses,omitempty"`
+	// Beyond are closures and restrictions on the same highway that start at
+	// or past one of the segment's ends (the Ebbetts Pass winter closure past
+	// Bear Valley). They do not change the segment's status. Omitted when
+	// there are none.
+	Beyond []RoadBeyondProps `json:"beyond,omitempty"`
+}
+
+// RoadBeyondProps is one closure or restriction past a segment's end.
+type RoadBeyondProps struct {
+	Status string `json:"status"` // CLOSED | RESTRICTED
+	// Side: END (past the segment's destination) or START (before its origin).
+	Side        string `json:"side"`
+	Source      string `json:"source"` // road_condition
+	Description string `json:"description,omitempty"`
+	Reason      string `json:"reason,omitempty"`
+	// From and To are where it applies, in the source's words.
+	From string `json:"from,omitempty"`
+	To   string `json:"to,omitempty"`
 }
 
 // RoadStatusCauseProps is one item that set a road segment's status.

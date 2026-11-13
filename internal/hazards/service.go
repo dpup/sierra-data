@@ -467,6 +467,7 @@ func (s *Service) roadSegments(ctx context.Context, area config.HazardArea) ([]F
 			}
 			s.addRoadHistory(ctx, p.Road, rd, time.Now())
 			p.Road.StatusCauses = roadStatusCauses(rd, pathOf(rd, mr))
+			p.Road.Beyond = roadBeyond(rd)
 		}
 		p.setSeverity(sev)
 		out = append(out, Feature{Type: "Feature", Geometry: geom, Properties: p})

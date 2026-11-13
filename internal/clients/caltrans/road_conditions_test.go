@@ -1,6 +1,8 @@
 package caltrans
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -196,12 +198,12 @@ func TestMatchConditionToSegment(t *testing.T) {
 			expected:         true,
 		},
 		{
-			name: "Matches location keyword - Lake Alpine",
+			name: "Matches location keyword - Tamarack",
 			condition: RoadCondition{
-				Description: "Is closed from 0.6 mi east of Lake Alpine to 7.2 mi west of the Jct of SR 89",
+				Description: "Is closed from 0.6 mi east of Tamarack to 7.2 mi west of the Jct of SR 89",
 			},
 			sectionName:      "Arnold to Bear Valley",
-			locationKeywords: []string{"Camp Connell", "Lake Alpine", "Ebbetts"},
+			locationKeywords: []string{"Camp Connell", "Tamarack"},
 			expected:         true,
 		},
 		{
@@ -248,5 +250,95 @@ func TestExtractSectionLocations(t *testing.T) {
 			result := extractSectionLocations(tt.section)
 			assert.Equal(t, tt.expected, result)
 		})
+	}
+}
+
+// The pages Caltrans published on 2026-11-13, the day the passes closed.
+func realPage(t *testing.T, file, highway string) []RoadCondition {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join("..", "..", "..", "tests", "testdata", "caltrans", file))
+	require.NoError(t, err)
+	conditions, err := ParseRoadConditionsHTML(string(b), highway)
+	require.NoError(t, err)
+	return conditions
+}
+
+func TestRelateConditionToSegment_RealClosures(t *testing.T) {
+	sr4 := realPage(t, "road_conditions_sr4_20261113.html", "4")
+	require.Len(t, sr4, 2)
+	ebbetts := sr4[0]
+	assert.Equal(t, CONDITION_CLOSURE, ebbetts.Type)
+	assert.Equal(t, "snow", ebbetts.Reason)
+	assert.Equal(t, "Is closed from 0.5 mi east of the Jct of SR 207 /Mt Reba Turnoff/ to the Jct of SR 89 /Ebbetts Pass/ (Alpine Co) - Due to snow- Motorists are advised to use an alternate route", ebbetts.Description)
+
+	arnoldBearValley := SectionPlaces("Arnold to Bear Valley",
+		[]string{"Camp Connell", "Dorrington", "White Pines", "Big Trees", "Ganns", "Tamarack"}, nil,
+		[]string{"Mt Reba", "Lake Alpine", "Ebbetts"})
+	assert.Equal(t, SegmentPastEnd, RelateConditionToSegment(ebbetts, arnoldBearValley),
+		"the closure starts east of the Mt Reba turnoff, where the section ends")
+	assert.Equal(t, SegmentUnrelated, RelateConditionToSegment(sr4[1], arnoldBearValley), "construction at the Delta")
+
+	// With the places past the end listed as places ON the section, as they
+	// were until 2026-11-13, the same text closed Arnold to Bear Valley.
+	assert.True(t, MatchConditionToSegment(ebbetts, "Arnold to Bear Valley", []string{"Camp Connell", "Lake Alpine", "Mt Reba", "Ebbetts"}))
+
+	// Sonora Pass: a section ending at Strawberry would not be closed by it.
+	sr108 := realPage(t, "road_conditions_sr108_20261113.html", "108")
+	require.NotEmpty(t, sr108)
+	sonora := sr108[0]
+	assert.Equal(t, CONDITION_CLOSURE, sonora.Type)
+	toStrawberry := SectionPlaces("Sonora to Strawberry", []string{"Twain Harte", "Mi-Wuk", "Long Barn", "Pinecrest"}, nil,
+		[]string{"Kennedy Meadows", "Sonora Pass", "US 395"})
+	// "Sonora Pass" is past the end; the origin "Sonora" inside it is not a
+	// mention of the town.
+	assert.Equal(t, SegmentPastEnd, RelateConditionToSegment(sonora, toStrawberry))
+}
+
+func TestRelateConditionToSegment_Rule(t *testing.T) {
+	places := SegmentPlaces{Origin: "Arnold", Destination: "Bear Valley",
+		On: []string{"Dorrington"}, BeforeStart: []string{"Murphys"}, PastEnd: []string{"Lake Alpine", "Ebbetts"}}
+	for text, want := range map[string]SegmentRelation{
+		"Is closed at Dorrington":                        SegmentOn,
+		"Is closed from Dorrington to Ebbetts Pass":      SegmentOn,
+		"Is closed from Murphys to Lake Alpine":          SegmentOn,
+		"Is closed from Arnold to Bear Valley":           SegmentOn,
+		"Is closed from Arnold to Lake Alpine":           SegmentOn,
+		"Is closed from Murphys to Bear Valley":          SegmentOn,
+		"Is closed at Arnold":                            SegmentOn,
+		"Is closed at Bear Valley":                       SegmentOn,
+		"Is closed from Lake Alpine to Ebbetts Pass":     SegmentPastEnd,
+		"Is closed from Bear Valley to Ebbetts Pass":     SegmentPastEnd,
+		"Is closed from Angels Camp to Murphys":          SegmentBeforeStart,
+		"Is closed from Murphys to Arnold":               SegmentBeforeStart,
+		"Is closed at the Contra Costa/San Joaquin line": SegmentUnrelated,
+	} {
+		assert.Equal(t, want, RelateConditionToSegment(RoadCondition{Description: text}, places), text)
+	}
+}
+
+func TestConditionSpan(t *testing.T) {
+	for _, tt := range []struct {
+		typ            RoadConditionType
+		text, from, to string
+	}{
+		{CONDITION_CLOSURE, "Is closed from 0.5 mi east of the Jct of SR 207 /Mt Reba Turnoff/ to the Jct of SR 89 /Ebbetts Pass/ (Alpine Co) - Due to snow- Motorists are advised to use an alternate route",
+			"0.5 mi east of the Jct of SR 207 /Mt Reba Turnoff/", "the Jct of SR 89 /Ebbetts Pass/"},
+		{CONDITION_CLOSURE, "Is closed from 26.4 mi east of Strawberry to 5.6 mi west of the Jct of US 395 /Sonora Pass/ (Tuolumne,Mono Co) - Due to snow- Motorists are advised to use an alternate route",
+			"26.4 mi east of Strawberry", "5.6 mi west of the Jct of US 395 /Sonora Pass/"},
+		{CONDITION_CLOSURE, "Is closed from the Jct of US 395 (Mono Co) to the Jct of SR 4 /Monitor Pass/ (Alpine Co) - Due to snow - Motorists are advised to use an alternate route",
+			"the Jct of US 395", "the Jct of SR 4 /Monitor Pass/"},
+		{CONDITION_CLOSURE, "Is closed 5.1 mi east of the Jct of US 395 to 7.5 mi west of west of the Jct of US 6 (Mono Co) - Due to snow - Motorists are advised to use an alternate route",
+			"5.1 mi east of the Jct of US 395", "7.5 mi west of west of the Jct of US 6"},
+		{CONDITION_CLOSURE, "Is closed 1 mi east of Camp Connell (Calaveras Co) - Due to snow - Motorists are advised to use an alternate route",
+			"1 mi east of Camp Connell", ""},
+		{CONDITION_CLOSURE, "Is closed from 0.6 mi east of Lake Alpine to 7.2 mi west of the Jct of SR 89 /Ebbetts Pass/ (Alpine Co) - For the winter - Motorists are advised to use an alternate route",
+			"0.6 mi east of Lake Alpine", "7.2 mi west of the Jct of SR 89 /Ebbetts Pass/"},
+		{CONDITION_RESTRICTION, "1-way controlled traffic at various locations from the Contra Costa/San Joaquin Co Line to 8.2 mi east of the Contra Costa/San Joaquin Co Line /at Trapper Rd/ from 2000 hrs each night to 0400 hrs each morning Thursday thru Sunday thru 11/15/26 - Due to construction",
+			"the Contra Costa/San Joaquin Co Line", "8.2 mi east of the Contra Costa/San Joaquin Co Line /at Trapper Rd/"},
+		{CONDITION_INFO, "For Yosemite Nat'l Park road information call 209-372-0200", "", ""},
+	} {
+		from, to := ConditionSpan(RoadCondition{Type: tt.typ, Description: tt.text})
+		assert.Equal(t, tt.from, from, tt.text)
+		assert.Equal(t, tt.to, to, tt.text)
 	}
 }

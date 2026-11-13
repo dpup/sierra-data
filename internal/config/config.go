@@ -966,12 +966,23 @@ type CaltransFeedConfig struct {
 
 // MonitoredRoad represents a road to monitor
 type MonitoredRoad struct {
-	Name             string      `koanf:"name"`
-	Section          string      `koanf:"section"`
-	ID               string      `koanf:"id"`
-	Origin           Coordinates `koanf:"origin"`
-	Destination      Coordinates `koanf:"destination"`
-	LocationKeywords []string    `koanf:"locationKeywords"`
+	Name        string      `koanf:"name"`
+	Section     string      `koanf:"section"`
+	ID          string      `koanf:"id"`
+	Origin      Coordinates `koanf:"origin"`
+	Destination Coordinates `koanf:"destination"`
+	// LocationKeywords are places ON the segment, between its ends. A
+	// roads.dot.ca.gov condition naming one is on the segment and sets its
+	// status, so a place past either end does not belong here.
+	LocationKeywords []string `koanf:"locationKeywords"`
+	// BeforeStartKeywords and PastEndKeywords are places on the same highway
+	// past the segment's origin and destination: the Ebbetts Pass winter gate
+	// is past Bear Valley. A condition naming only such places starts at or
+	// past that end; it is reported beside the segment (Road.beyond) and never
+	// changes its status. Places on the highway's other monitored segments are
+	// derived from the chain and need not be repeated here.
+	BeforeStartKeywords []string `koanf:"beforeStartKeywords"`
+	PastEndKeywords     []string `koanf:"pastEndKeywords"`
 }
 
 // WeatherConfig holds weather monitoring configuration

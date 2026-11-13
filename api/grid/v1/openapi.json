@@ -4357,6 +4357,62 @@
       "MapRoadProps": {
         "description": "road_segment block (Google Routes travel time over a configured route). The numbers are absent, not 0, until the route has been measured.",
         "properties": {
+          "beyond": {
+            "description": "Closures and restrictions on the same highway that start at or past one of the segment's ends, such as a seasonal pass closure past the last monitored section. They do not change the segment's `status`: the segment is as open as `status` says. Reported on the first or last monitored section of a highway only. Absent when there are none.",
+            "items": {
+              "properties": {
+                "description": {
+                  "description": "The source text, as published.",
+                  "type": "string"
+                },
+                "from": {
+                  "description": "Where it starts, in the source's words.",
+                  "example": "0.5 mi east of the Jct of SR 207 /Mt Reba Turnoff/",
+                  "type": "string"
+                },
+                "reason": {
+                  "description": "snow, ice, winter_closure, seasonal_closure, construction, rockslide, mudslide, fire, flooding, accident. Absent when the text gives none.",
+                  "example": "snow",
+                  "type": "string"
+                },
+                "side": {
+                  "description": "END - past the segment's destination (the last coordinate of its line); START - before its origin.",
+                  "enum": [
+                    "END",
+                    "START"
+                  ],
+                  "type": "string"
+                },
+                "source": {
+                  "description": "road_condition is Caltrans highway-conditions text.",
+                  "enum": [
+                    "road_condition"
+                  ],
+                  "type": "string"
+                },
+                "status": {
+                  "description": "What the road is past that end.",
+                  "enum": [
+                    "CLOSED",
+                    "RESTRICTED"
+                  ],
+                  "type": "string"
+                },
+                "to": {
+                  "description": "Where it ends, in the source's words. Absent for a single place.",
+                  "example": "the Jct of SR 89 /Ebbetts Pass/",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "status",
+                "side",
+                "source"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
           "congestion": {
             "enum": [
               "CLEAR",

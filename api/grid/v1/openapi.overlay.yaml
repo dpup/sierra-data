@@ -609,6 +609,20 @@ spec:
                 extent: {type: string, enum: [SPAN, POINT, UNKNOWN], description: "SPAN - fromKm..toKm along the segment (a closure running past the segment is cut at its end); POINT - one place (fromKm = toKm); UNKNOWN - no position on the segment (text-only condition, or too far off the line)."}
                 fromKm: {type: number, description: km along the segment from its configured origin.}
                 toKm: {type: number}
+          beyond:
+            type: array
+            description: "Closures and restrictions on the same highway that start at or past one of the segment's ends, such as a seasonal pass closure past the last monitored section. They do not change the segment's `status`: the segment is as open as `status` says. Reported on the first or last monitored section of a highway only. Absent when there are none."
+            items:
+              type: object
+              required: [status, side, source]
+              properties:
+                status: {type: string, enum: [CLOSED, RESTRICTED], description: "What the road is past that end."}
+                side: {type: string, enum: [END, START], description: "END - past the segment's destination (the last coordinate of its line); START - before its origin."}
+                source: {type: string, enum: [road_condition], description: "road_condition is Caltrans highway-conditions text."}
+                description: {type: string, description: "The source text, as published."}
+                reason: {type: string, example: snow, description: "snow, ice, winter_closure, seasonal_closure, construction, rockslide, mudslide, fire, flooding, accident. Absent when the text gives none."}
+                from: {type: string, example: "0.5 mi east of the Jct of SR 207 /Mt Reba Turnoff/", description: "Where it starts, in the source's words."}
+                to: {type: string, example: "the Jct of SR 89 /Ebbetts Pass/", description: "Where it ends, in the source's words. Absent for a single place."}
       MapChainControlProps:
         type: object
         description: chain_control block. Severity follows the level (R1 MINOR, R2 MODERATE, R3 SEVERE); a seasonal pass closure (`category` closed) is MINOR.

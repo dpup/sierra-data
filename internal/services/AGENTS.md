@@ -191,3 +191,17 @@ conditions only (`/data/2.5/weather`, one call per location per refresh).
 not point), so it lives on the response (`ListWeatherResponse` /
 `GetLocationWeatherResponse`) computed once from the configured `weather.nws.zones`
 — not duplicated on every location.
+
+## Road conditions and segment ends
+
+roads.dot.ca.gov conditions are text with no geometry. `applyRoadConditions`
+places each one relative to a monitored road by the places it names
+(`caltrans.RelateConditionToSegment`): a place on the road
+(`locationKeywords`) or places on both sides of it set the road's status; a
+condition naming only places past one end (`pastEndKeywords`,
+`beforeStartKeywords`, and everything on the highway's other monitored roads,
+derived by `placesFor`) leaves the status alone and is reported as
+`Road.beyond` on the first or last road of the chain. The Ebbetts Pass winter
+closure starts past Bear Valley: it must never close Arnold to Bear Valley.
+When adding a monitored road, put a town in `locationKeywords` only if it is
+between the road's ends.

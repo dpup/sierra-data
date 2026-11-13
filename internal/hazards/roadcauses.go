@@ -66,6 +66,23 @@ func roadStatusCauses(rd *api.Road, path []LatLng) []RoadStatusCauseProps {
 	return out
 }
 
+// roadBeyond projects the closures and restrictions past the segment's ends.
+func roadBeyond(rd *api.Road) []RoadBeyondProps {
+	var out []RoadBeyondProps
+	for _, b := range rd.GetBeyond() {
+		out = append(out, RoadBeyondProps{
+			Status:      strings.TrimPrefix(b.GetStatus().String(), "ROAD_STATUS_"),
+			Side:        b.GetSide(),
+			Source:      b.GetSource(),
+			Description: b.GetDescription(),
+			Reason:      b.GetReason(),
+			From:        b.GetFrom(),
+			To:          b.GetTo(),
+		})
+	}
+	return out
+}
+
 // nearerEndKm is the km position (0 or the path's length) of whichever end
 // of path is nearer (lat, lng); nil for a path too short to have two.
 func nearerEndKm(path []LatLng, lat, lng float64) *float64 {

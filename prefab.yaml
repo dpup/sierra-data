@@ -170,7 +170,14 @@ roads:
       destination:
         latitude: 38.139117
         longitude: -120.456111
-      locationKeywords: ["Vallecito", "Douglas Flat", "Copperopolis"]
+      # locationKeywords: places ON the segment (a Caltrans road condition
+      # naming one sets the segment's status). beforeStartKeywords and
+      # pastEndKeywords: places on the highway past its origin / destination;
+      # a condition naming only those is reported beside the segment
+      # (road.beyond) and never closes it. Places on the other monitored
+      # segments of the same highway are derived, not listed.
+      locationKeywords: ["Vallecito", "Douglas Flat"]
+      beforeStartKeywords: ["Copperopolis"]
     - name: "Hwy 4"
       section: "Murphys to Arnold"
       id: "hwy4-murphys-arnold"
@@ -190,7 +197,13 @@ roads:
       destination:
         latitude: 38.461045
         longitude: -120.042368
-      locationKeywords: ["Camp Connell", "Dorrington", "White Pines", "Big Trees", "Ganns", "Tamarack", "Lake Alpine", "Mt Reba", "Ebbetts"]
+      # The Mt Reba turnoff (SR 207) is where this segment ends at Bear Valley;
+      # Lake Alpine and Ebbetts Pass are past it. The winter closure ("closed
+      # from 0.5 mi east of the Jct of SR 207 /Mt Reba Turnoff/ to the Jct of
+      # SR 89 /Ebbetts Pass/") starts past the end: Arnold to Bear Valley stays
+      # open and the closure is reported as road.beyond.
+      locationKeywords: ["Camp Connell", "Dorrington", "White Pines", "Big Trees", "Ganns", "Tamarack"]
+      pastEndKeywords: ["Mt Reba", "Lake Alpine", "Ebbetts"]
     # Hwy 49 / Tuolumne corridor (issue #6). Angels Camp <-> Sonora links the
     # Calaveras and Tuolumne service areas. Note: the upper Hwy 4 segment past
     # Arnold (Dorrington) is already covered by "Arnold to Bear Valley" above,

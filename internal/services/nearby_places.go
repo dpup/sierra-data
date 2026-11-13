@@ -1,6 +1,7 @@
 package services
 
 import (
+	"slices"
 	"sort"
 	"strings"
 
@@ -98,10 +99,10 @@ func (s *RoadsService) nearbyPlaceNames(lat, lng float64) []string {
 		if name := strings.TrimSpace(road.Name); name != "" {
 			found = append(found, candidate{name: name, tier: tierMeasured, dist: d})
 		}
-		// The keywords are the communities the corridor passes through. They
-		// have no coordinates of their own, so they inherit the corridor's
-		// distance and sort just behind it.
-		for _, kw := range road.LocationKeywords {
+		// The keywords are the communities the corridor passes through, and
+		// those just past its ends. They have no coordinates of their own, so
+		// they inherit the corridor's distance and sort just behind it.
+		for _, kw := range slices.Concat(road.LocationKeywords, road.BeforeStartKeywords, road.PastEndKeywords) {
 			if kw = strings.TrimSpace(kw); kw != "" {
 				found = append(found, candidate{name: kw, tier: tierKeyword, dist: d})
 			}
