@@ -21,6 +21,22 @@ longer exist: `/api/v1` originally hosted a different hand-built REST surface,
 replaced by a snake_case `/v1` surface on 2026-07-05, which was folded back onto
 the proto-defined `/api/v1` gateway on 2026-07-09.
 
+## 2026-11-13 (later)
+
+### `chain_control` closure points name their highway and place again
+
+Caltrans changed the markup of its chain-control file, and the seasonal pass
+gates reached the `chain_control` layer as a bare `headline: "road closed"`
+with no highway, place or time. They are read again: `headline` "Highway 4
+road closed", `areaLabel` "EAST END OF LAKE ALPINE - EBBETTS PASS",
+`description`, `effective`, and `chainControl.highway`. Chain controls that
+come from the same file (outside Caltrans District 10) get their level,
+highway and place back the same way.
+
+**Changed value:** the `id` of these features is `cc:<Caltrans message id>`
+again (`cc:2515`), as it was under the old markup, instead of
+`cc:<lat>,<lng>`.
+
 ## 2026-11-13
 
 ### The Grid moved to a new AWS account (no API change)

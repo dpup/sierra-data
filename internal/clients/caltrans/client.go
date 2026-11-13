@@ -209,6 +209,14 @@ func (p *FeedParser) parseChainControlDetails(incidents []CaltransIncident) []Ch
 		// Parse description HTML for location, effective time, and requirements
 		control.LocationName, control.EffectiveTime, control.Description, control.LastUpdated, control.District, control.MessageID = parseChainControlDescription(incident.DescriptionHtml)
 
+		// The 2026 layout keeps the level in the body ("Chain Control level
+		// R-2"), not in the title the name is derived from.
+		if control.Level == "" && !control.Closed {
+			if m := iwLevelPattern.FindStringSubmatch(incident.DescriptionHtml); len(m) > 1 {
+				control.Level = "R" + m[1]
+			}
+		}
+
 		controls = append(controls, control)
 	}
 
@@ -239,13 +247,37 @@ func parseChainControlName(name string) (direction, highway, level string) {
 	highwayPattern := regexp.MustCompile(`(?i)^(.+?)\s+(?:Chain\s+Control|Road\s+Closed)`)
 	if match := highwayPattern.FindStringSubmatch(name); len(match) > 1 {
 		highway = strings.TrimSpace(match[1])
+	} else if bareHighwayPattern.MatchString(strings.TrimSpace(name)) {
+		// The 2026 layout's title is just "Eastbound Highway 4": the kind
+		// ("Road Closed", "Chain Control") moved to the info-window header.
+		highway = strings.TrimSpace(name)
 	}
 
 	return direction, highway, level
 }
 
+// Patterns for cc.kml's 2026 info-window (iw-*) layout, captured 2026-11-13
+// (tests/testdata/caltrans/chain_controls_20261113_133700.kml):
+//
+//	<h2 class="iw-title">Eastbound Highway 4</h2>
+//	<p class="iw-text"><strong>Chain Control level R-2</strong></p>   (controls only)
+//	<p class="iw-text"><strong>Location: </strong>EAST END OF LAKE ALPINE - EBBETTS PASS</p>
+//	<p class="iw-text">Closed to traffic.</p>
+//	<p class="iw-text"><strong>Effective from: </strong>11/12/2026 12:08</p>
+//	<div font-size:xx-small;'>District: 10 Message ID: 2515</div>
+//	<span class="iw-timestamp">Last updated: <strong>11/13/2026</strong> 1:37pm</span>
+var (
+	bareHighwayPattern = regexp.MustCompile(`(?i)^(?:Highway|Interstate|US|SR|I-)\s*\d+[A-Z]?$`)
+	iwLevelPattern     = regexp.MustCompile(`(?i)Chain\s+Control\s+level\s+R-?([123])\b`)
+	iwLocationPattern  = regexp.MustCompile(`(?is)<strong>\s*Location:\s*</strong>(.*?)</p>`)
+	iwTextPattern      = regexp.MustCompile(`(?is)<p[^>]*class="iw-text"[^>]*>(.*?)</p>`)
+)
+
 // parseChainControlDescription extracts details from the HTML description
 func parseChainControlDescription(html string) (locationName, effectiveTime, description, lastUpdated, district, messageID string) {
+	if strings.Contains(html, `class="iw-`) {
+		return parseChainControlInfoWindow(html)
+	}
 	// Extract location name (first <p> tag content after the image)
 	// Pattern: <p align="left">Twin Bridges</p>
 	locationPattern := regexp.MustCompile(`<p[^>]*align="left"[^>]*>([^<]+)</p>`)
@@ -283,6 +315,37 @@ func parseChainControlDescription(html string) (locationName, effectiveTime, des
 		messageID = match[2]
 	}
 
+	return locationName, effectiveTime, description, lastUpdated, district, messageID
+}
+
+// parseChainControlInfoWindow reads the 2026 info-window layout. Labels sit in
+// <strong> inside the same <p> as their value, so the fields are read from
+// the text with the tags removed.
+func parseChainControlInfoWindow(html string) (locationName, effectiveTime, description, lastUpdated, district, messageID string) {
+	if m := iwLocationPattern.FindStringSubmatch(html); len(m) > 1 {
+		locationName = extractTextFromHTML(m[1])
+	}
+	// The requirement (or "Closed to traffic.") is the iw-text paragraph
+	// that carries no <strong> label.
+	for _, m := range iwTextPattern.FindAllStringSubmatch(html, -1) {
+		if strings.Contains(strings.ToLower(m[1]), "<strong") {
+			continue
+		}
+		if text := extractTextFromHTML(m[1]); text != "" {
+			description = text
+			break
+		}
+	}
+	text := extractTextFromHTML(html)
+	if m := regexp.MustCompile(`(?i)effective from:\s*(\d{1,2}/\d{1,2}/\d{4}\s+\d{1,2}:\d{2})`).FindStringSubmatch(text); len(m) > 1 {
+		effectiveTime = parseChainControlTime(m[1])
+	}
+	if m := regexp.MustCompile(`(?i)Last updated:\s*(\d{1,2}/\d{1,2}/\d{4}\s+\d{1,2}:\d{2}[ap]m)`).FindStringSubmatch(text); len(m) > 1 {
+		lastUpdated = parseChainControlTime(m[1])
+	}
+	if m := regexp.MustCompile(`District:\s*(\d+)\s+Message ID:\s*(\d+)`).FindStringSubmatch(text); len(m) > 2 {
+		district, messageID = m[1], m[2]
+	}
 	return locationName, effectiveTime, description, lastUpdated, district, messageID
 }
 

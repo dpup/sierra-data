@@ -359,3 +359,55 @@ func TestChainControlDetails_RoadClosed(t *testing.T) {
 	require.NotNil(t, r2)
 	assert.False(t, r2.Closed)
 }
+
+// The real 2026 cc.kml (captured 2026-11-13, the first storm of the season):
+// blank <name>s, the highway in the info-window title, and the location,
+// time and message id behind <strong> labels. Until this layout was parsed,
+// the Ebbetts Pass gate reached the map as a bare "road closed" with no
+// highway, place or time.
+func TestChainControlDetails_InfoWindowLayout2026(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("..", "..", "..", "tests", "testdata", "caltrans", "chain_controls_20261113_133700.kml"))
+	require.NoError(t, err)
+	p := &FeedParser{HTTPClient: fixedDoer{200, b}}
+	controls, err := p.ParseChainControlsDetailed(context.Background())
+	require.NoError(t, err)
+	require.Len(t, controls, 30)
+
+	gate := findKML(t, controls, "Highway 4", "Eastbound", "EAST END OF LAKE ALPINE - EBBETTS PASS")
+	require.NotNil(t, gate, "the eastbound Ebbetts Pass gate")
+	assert.True(t, gate.Closed)
+	assert.Empty(t, gate.Level)
+	assert.Equal(t, "Closed to traffic.", gate.Description)
+	assert.Equal(t, "2026-11-12T12:08:00-08:00", gate.EffectiveTime)
+	assert.Equal(t, "2026-11-13T13:37:00-08:00", gate.LastUpdated)
+	assert.Equal(t, "10", gate.District)
+	assert.Equal(t, "2515", gate.MessageID)
+	assert.InDelta(t, 38.48135, gate.Coordinates.Latitude, 1e-6)
+
+	// The other passes, closed the same day.
+	for _, want := range []struct{ highway, direction, location string }{
+		{"Highway 4", "Westbound", "RAYMOND MEADOWS - EBBETTS PASS"},
+		{"Highway 108", "Eastbound", "KENNEDY MEADOWS - SONORA PASS"},
+		{"Highway 89", "Eastbound", "MONITOR PASS"},
+		{"Highway 120", "Eastbound", "CRANE FLAT RD"},
+	} {
+		c := findKML(t, controls, want.highway, want.direction, want.location)
+		if assert.NotNil(t, c, "%s %s", want.highway, want.location) {
+			assert.True(t, c.Closed)
+		}
+	}
+
+	// A chain control keeps its level, read from the body.
+	var r2 *ChainControlData
+	for i := range controls {
+		if c := &controls[i]; c.Highway == "Highway 88" && c.Level == "R2" {
+			r2 = c
+			break
+		}
+	}
+	require.NotNil(t, r2, "an R-2 control on Highway 88")
+	assert.False(t, r2.Closed)
+	assert.NotEmpty(t, r2.LocationName)
+	assert.Contains(t, r2.Description, "Chains")
+	assert.NotEmpty(t, r2.MessageID)
+}

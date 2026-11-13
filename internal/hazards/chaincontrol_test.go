@@ -153,3 +153,25 @@ func TestChainControlLayer_RoadClosedEntry(t *testing.T) {
 	assert.Equal(t, "cc:9001", p.ID)
 	assert.Equal(t, caltrans.SourceQuickMap, p.Source.Attribution)
 }
+
+// The real 2026 cc.kml: the Ebbetts Pass gate carries its highway, place and
+// time, so a client can say which road is closed and where.
+func TestChainControlLayer_PassGates2026(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("..", "..", "tests", "testdata", "caltrans", "chain_controls_20261113_133700.kml"))
+	require.NoError(t, err)
+	features, _, _, _, _, _ := chainService(kmlDoer{200, string(b)}, loadCheckpoints(t, "cc_d10_20260930.json")).BuildLayer(testCtx(), ebbettsArea, LayerChainControl)
+	var gate *Properties
+	for i := range features {
+		if features[i].Properties.ID == "cc:2515" {
+			gate = &features[i].Properties
+		}
+	}
+	require.NotNil(t, gate, "the eastbound Highway 4 gate")
+	assert.Equal(t, "Highway 4 road closed", gate.Headline)
+	assert.Equal(t, "closed", gate.Category)
+	assert.Equal(t, "EAST END OF LAKE ALPINE - EBBETTS PASS", gate.AreaLabel)
+	assert.Equal(t, "Closed to traffic.", gate.Description)
+	assert.Equal(t, "2026-11-12T12:08:00-08:00", gate.Effective)
+	assert.Equal(t, "Highway 4", gate.ChainControl.Highway)
+	assert.Equal(t, "Eastbound", gate.ChainControl.Direction)
+}
