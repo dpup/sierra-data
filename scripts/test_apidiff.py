@@ -110,8 +110,58 @@ class RunTests(unittest.TestCase):
         code, out = self.run_diff(legacy, new, events=0)
         self.assertEqual(code, 1)
         self.assertIn("== DIFF events all statuses", out)
-        self.assertIn('-   "severity": "MINOR"', out)
-        self.assertIn('+   "severity": "SEVERE"', out)
+        self.assertIn("--- legacy chp:1", out)
+        self.assertIn('- "severity": "MINOR"', out)
+        self.assertIn('+ "severity": "SEVERE"', out)
+
+    def test_items_are_compared_by_key(self):
+        legacy = FakeServer(paged([{"id": "chp:1", "severity": "MINOR"}, {"id": "chp:2", "severity": "MINOR"},
+                                   {"id": "chp:3", "severity": "MINOR"}], 2), default={})
+        new = FakeServer(paged([{"id": "chp:2", "severity": "MINOR"}, {"id": "chp:3", "severity": "SEVERE"},
+                                {"id": "chp:4", "severity": "MINOR"}], 1), default={})
+        code, out = self.run_diff(legacy, new, events=0)
+        self.assertEqual(code, 1)
+        self.assertIn("== DIFF events all statuses", out)
+        self.assertIn("items: legacy 3, new 3; only legacy 1, only new 1, differing 1", out)
+        self.assertIn("only legacy: chp:1", out)
+        self.assertIn("only new: chp:4", out)
+        self.assertIn("--- legacy chp:3", out)
+        self.assertIn('- "severity": "MINOR"', out)
+        self.assertIn('+ "severity": "SEVERE"', out)
+        self.assertNotIn("chp:2", out.split("items:")[1].split("---")[0], "an unchanged item is not listed")
+
+    def test_page_boundaries_do_not_matter(self):
+        items = [{"id": "chp:%d" % i, "headline": "h%d" % i} for i in range(7)]
+        legacy = FakeServer(paged(items, 3), default={})
+        new = FakeServer(paged(items, 2), default={})
+        code, out = self.run_diff(legacy, new, events=0)
+        self.assertEqual(code, 0, out)
+
+    def test_ignored_keys_are_dropped(self):
+        legacy = FakeServer(paged([{"id": "chp:1", "severity": "MINOR"}], 1), default={})
+        new = FakeServer(paged([{"id": "chp:1", "severity": "MINOR", "replacedByEventId": ""}], 1), default={})
+        code, out = self.run_diff(legacy, new, events=0)
+        self.assertEqual(code, 1, "the extra key is a difference by default")
+        code, out = self.run_diff(legacy, new, events=0, ignore=["replacedByEventId"])
+        self.assertEqual(code, 0, out)
+
+    def test_revisions_are_keyed_by_event_and_revision(self):
+        self.assertEqual(apidiff.item_key({"event": {"id": "chp:1"}, "revision": 3}), "chp:1@3")
+        self.assertEqual(apidiff.item_key({"type": "Feature", "properties": {"id": "f1"}}), "f1")
+        self.assertIsNone(apidiff.item_key({"headline": "no id"}))
+        a = {"revisions": [{"event": {"id": "chp:1"}, "revision": 1, "x": 1},
+                           {"event": {"id": "chp:1"}, "revision": 2, "x": 1}]}
+        b = {"revisions": [{"event": {"id": "chp:1"}, "revision": 1, "x": 1},
+                           {"event": {"id": "chp:1"}, "revision": 2, "x": 2}]}
+        lines = apidiff.compare("history", "/history", a, b, 60)
+        self.assertIn("revisions: legacy 2, new 2; only legacy 0, only new 0, differing 1", lines)
+        self.assertIn("--- legacy chp:1@2", lines)
+
+    def test_duplicate_keys_fall_back_to_the_text_diff(self):
+        a = {"events": [{"id": "x", "v": 1}, {"id": "x", "v": 2}]}
+        b = {"events": [{"id": "x", "v": 1}, {"id": "x", "v": 3}]}
+        lines = apidiff.compare("e", "/events", a, b, 60)
+        self.assertTrue(any(l.startswith("--- legacy /events") for l in lines), lines)
 
     def test_status_codes_are_compared(self):
         legacy = FakeServer({}, default={"x": 1})

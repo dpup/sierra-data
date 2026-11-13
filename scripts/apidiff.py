@@ -9,10 +9,15 @@ the same snapshot (the new one loaded through `gridctl import`), then:
 
 Every endpoint in ENDPOINTS is fetched from both, paged lists are walked to
 the end (or --max-pages) and compared as one list, volatile fields are
-dropped (VOLATILE_KEYS, VOLATILE_BY_PATH), lists the API does not promise an
-order for are sorted (UNORDERED), and each difference is printed as a unified
-diff. Event ids found on the legacy side add per-event endpoints (detail,
-history, related, timeline) for a sample of --events ids.
+dropped (VOLATILE_KEYS, VOLATILE_BY_PATH, and --ignore-key for a field one
+build has and the other lacks), lists the API does not promise an order for
+are sorted (UNORDERED). A list of keyed items (events, revisions, places,
+sources, GeoJSON features) is compared item by item: items only one side
+has are listed by key, and a unified diff is printed per item whose
+normalised JSON differs, so a finding names the event rather than a line in
+a 50-page text. Anything else is one unified diff. Event ids found on the
+legacy side add per-event endpoints (detail, history, related, timeline) for
+a sample of --events ids.
 
 Exit status: 0 no differences, 1 differences, 2 a server was unreachable.
 Any difference is a finding to explain, not to wave through: both servers
@@ -138,9 +143,9 @@ def get(fetcher, base, path, items_key, max_pages):
     return {"status": 200, "items": items, "pages": pages, "truncated": bool(token)}
 
 
-def normalize(value, path):
-    """Drops volatile keys and sorts unordered lists, recursively."""
-    drop = set(VOLATILE_KEYS)
+def normalize(value, path, ignore=()):
+    """Drops volatile keys (and `ignore`) and sorts unordered lists, recursively."""
+    drop = set(VOLATILE_KEYS) | set(ignore)
     for fragment, keys in VOLATILE_BY_PATH.items():
         if fragment in path:
             drop |= keys
@@ -166,15 +171,93 @@ def render(value):
     return json.dumps(value, indent=1, sort_keys=True, ensure_ascii=False).splitlines()
 
 
-def compare(name, path, legacy, new, max_lines):
+# Lists compared item by item: where the list sits in a result, and the key of
+# an item. A paged result's items are under "items" (events or revisions); a
+# one-shot body's under one of these keys.
+ITEM_LISTS = ("items", "events", "revisions", "features", "places", "sources")
+
+
+def item_key(item):
+    """The identity of a list item: an event's id, a revision's (event id,
+    revision), a GeoJSON feature's id (top level or in properties), a place's
+    or source's id. None when the item has no key (compared as text)."""
+    if not isinstance(item, dict):
+        return None
+    if isinstance(item.get("event"), dict) and "revision" in item:
+        return "%s@%s" % (item["event"].get("id"), item["revision"])
+    if item.get("id") is not None:
+        return str(item["id"])
+    props = item.get("properties")
+    if isinstance(props, dict) and props.get("id") is not None:
+        return str(props["id"])
+    return None
+
+
+def keyed_items(result):
+    """(list key, {item key: item}) when the result holds a list of keyed
+    items, else None. A paged result keeps its items under "items"."""
+    for key in ITEM_LISTS:
+        items = result.get(key)
+        if isinstance(items, list) and items and all(item_key(x) is not None for x in items):
+            keyed = {}
+            for x in items:
+                k = item_key(x)
+                if k in keyed:
+                    return None  # duplicate keys: fall back to the text diff
+                keyed[k] = x
+            return key, keyed
+    return None
+
+
+def truncate(lines, max_lines):
+    if len(lines) > max_lines:
+        return lines[:max_lines] + ["... (%d more diff lines)" % (len(lines) - max_lines)]
+    return lines
+
+
+def compare(name, path, legacy, new, max_lines, ignore=()):
     """Returns the diff lines for one endpoint ([] when equal)."""
-    a, b = render(normalize(legacy, path)), render(normalize(new, path))
+    a, b = normalize(legacy, path, ignore), normalize(new, path, ignore)
     if a == b:
         return []
-    diff = list(difflib.unified_diff(a, b, "legacy " + path, "new " + path, n=2, lineterm=""))
-    if len(diff) > max_lines:
-        diff = diff[:max_lines] + ["... (%d more diff lines)" % (len(diff) - max_lines)]
-    return ["== DIFF %s: %s" % (name, path)] + diff
+    header = ["== DIFF %s: %s" % (name, path)]
+    ka, kb = keyed_items(a) if isinstance(a, dict) else None, keyed_items(b) if isinstance(b, dict) else None
+    if ka and kb and ka[0] == kb[0]:
+        lines = compare_items(path, a, b, ka[0], ka[1], kb[1], max_lines)
+        return header + lines if lines else []
+    diff = list(difflib.unified_diff(render(a), render(b), "legacy " + path, "new " + path, n=2, lineterm=""))
+    return header + truncate(diff, max_lines)
+
+
+def compare_items(path, a, b, list_key, items_a, items_b, max_lines):
+    """Item-by-item comparison: the rest of the body first (status, page
+    count), then items one side lacks, then a diff per changed item."""
+    lines = []
+    # Page count and truncation are how the list was fetched, not data (the
+    # byte budget cuts pages differently on each build); the run notes a
+    # truncated walk separately.
+    rest_a = {k: v for k, v in a.items() if k not in (list_key, "pages", "truncated")}
+    rest_b = {k: v for k, v in b.items() if k not in (list_key, "pages", "truncated")}
+    if rest_a != rest_b:
+        lines += difflib.unified_diff(render(rest_a), render(rest_b), "legacy " + path + " (without %s)" % list_key,
+                                      "new " + path + " (without %s)" % list_key, n=1, lineterm="")
+    only_a = [k for k in items_a if k not in items_b]
+    only_b = [k for k in items_b if k not in items_a]
+    changed = [k for k in items_a if k in items_b and items_a[k] != items_b[k]]
+    if not (lines or only_a or only_b or changed):
+        return []  # only the page layout differed
+    lines.append("%s: legacy %d, new %d; only legacy %d, only new %d, differing %d"
+                 % (list_key, len(items_a), len(items_b), len(only_a), len(only_b), len(changed)))
+    for label, keys in (("only legacy", only_a), ("only new", only_b)):
+        if keys:
+            shown = ", ".join(keys[:10]) + (" ... (%d more)" % (len(keys) - 10) if len(keys) > 10 else "")
+            lines.append("%s: %s" % (label, shown))
+    for k in changed:
+        lines += difflib.unified_diff(render(items_a[k]), render(items_b[k]), "legacy " + k, "new " + k,
+                                      n=1, lineterm="")
+        if len(lines) > max_lines:
+            break
+    return truncate(lines, max_lines)
 
 
 def sample_event_ids(result, limit):
@@ -186,7 +269,7 @@ def sample_event_ids(result, limit):
     return [ids[int(i * step)] for i in range(limit)]
 
 
-def run(legacy_base, new_base, events=25, max_pages=50, max_lines=60, fetcher=fetch, out=sys.stdout):
+def run(legacy_base, new_base, events=25, max_pages=50, max_lines=60, fetcher=fetch, out=sys.stdout, ignore=()):
     endpoints = list(ENDPOINTS)
     differing, compared, unreachable = 0, 0, []
 
@@ -199,7 +282,7 @@ def run(legacy_base, new_base, events=25, max_pages=50, max_lines=60, fetcher=fe
             unreachable.append("%s: %s" % (path, err))
             return None
         compared += 1
-        lines = compare(name, path, a, b, max_lines)
+        lines = compare(name, path, a, b, max_lines, ignore)
         if lines:
             differing += 1
             print("\n".join(lines), file=out)
@@ -236,8 +319,11 @@ def main(argv=None):
                         help="event ids to sample for per-event endpoints (-1 = every event, 0 = none)")
     parser.add_argument("--max-pages", type=int, default=50, help="page limit per paged endpoint")
     parser.add_argument("--max-lines", type=int, default=60, help="diff lines printed per endpoint")
+    parser.add_argument("--ignore-key", action="append", default=[], metavar="NAME",
+                        help="drop this JSON key wherever it appears (repeatable): a field one build has and the "
+                             "other lacks, so the rest of the item still compares")
     args = parser.parse_args(argv)
-    return run(args.legacy, args.new, args.events, args.max_pages, args.max_lines)
+    return run(args.legacy, args.new, args.events, args.max_pages, args.max_lines, ignore=args.ignore_key)
 
 
 if __name__ == "__main__":
