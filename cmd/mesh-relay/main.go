@@ -291,10 +291,25 @@ func (a *relayApp) startTelemetry(relay *meshrelay.Relay, st relaytelemetry.Gate
 // Quiesce releases relay.db: stop admitting, close every session (leases end
 // with relay_shutdown, bridges get 1001) and flush the audit queue, drain the
 // admin API, then close the store.
-func (a *relayApp) Quiesce(_ context.Context) error {
+func (a *relayApp) Quiesce(_ context.Context) (err error) {
 	start := time.Now()
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	// A worker that will not stop must not keep the store's single-writer
+	// lock: ECS kills the task at its stop timeout regardless, and a lease
+	// left behind makes the next relay (or the import tool) wait for it to
+	// go stale (the 2026-11-13 cutover). Closing the store first makes every
+	// later call from the straggler fail instead of write, so the release
+	// is safe even then; the error still reports the failed stop.
+	defer func() {
+		if err != nil && a.store != nil && !a.quiesced.store {
+			if cerr := a.closeStore(); cerr != nil {
+				err = fmt.Errorf("%w (and releasing the store failed: %w)", err, cerr)
+			} else {
+				logging.Warnw(a.ctx, "Quiesce: store released despite the failure", "error", err)
+			}
+		}
+	}()
 	// The poller holds leases and reads relay.db: stop it before either goes.
 	if a.pollStop != nil && !a.quiesced.poller {
 		a.pollStop()
@@ -336,15 +351,25 @@ func (a *relayApp) Quiesce(_ context.Context) error {
 	a.quiesced.drained = true
 
 	if a.store != nil && !a.quiesced.store {
-		t := time.Now()
-		if err := a.store.Close(); err != nil {
-			logging.Errorw(a.ctx, "Quiesce: relay store close failed", "error", err)
-			return fmt.Errorf("close relay store: %w", err)
+		if err := a.closeStore(); err != nil {
+			return err
 		}
-		logging.Infow(a.ctx, "Quiesce: relay store closed and lock released", "duration", time.Since(t))
 	}
 	a.quiesced.store = true
 	logging.Infow(a.ctx, "Quiesce: relay store ownership released", "store", a.storeKind, "duration", time.Since(start))
+	return nil
+}
+
+// closeStore releases the store's single-writer lock (the SQLite file lock,
+// or the DynamoDB instance lease). Caller holds a.mu.
+func (a *relayApp) closeStore() error {
+	t := time.Now()
+	if err := a.store.Close(); err != nil {
+		logging.Errorw(a.ctx, "Quiesce: relay store close failed", "error", err)
+		return fmt.Errorf("close relay store: %w", err)
+	}
+	a.quiesced.store = true
+	logging.Infow(a.ctx, "Quiesce: relay store closed and lock released", "duration", time.Since(t))
 	return nil
 }
 

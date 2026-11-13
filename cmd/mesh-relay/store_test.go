@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -62,6 +63,28 @@ func TestPrepareRelayRefusesABadStore(t *testing.T) {
 	_, err := prepareRelay(testCtx(), &config.MeshRelayConfig{Store: "dynamodb"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "PF__MESH_RELAY__DYNAMODB__TABLE")
+}
+
+// A telemetry poller that will not stop must not leave the store locked:
+// quiescence reports the failure AND releases the store, so the next relay
+// takes the lock at once instead of waiting for a stale lease.
+func TestQuiesceReleasesTheStoreWhenAWorkerHangs(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "relay.db")
+	st, err := meshrelay.OpenStore(testCtx(), dbPath, time.Second)
+	require.NoError(t, err)
+	a := &relayApp{ctx: testCtx(), storeKind: storeSQLite, dbPath: dbPath, store: st,
+		control:  config.ControlConfig{WorkerStopTimeout: 100 * time.Millisecond},
+		pollStop: func() {}, pollDone: make(chan struct{})} // never closes: the poller hangs
+	err = a.Quiesce(testCtx())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "telemetry poller did not stop")
+	assert.True(t, a.quiesced.store, "the store was released on the failure path")
+	next, err := meshrelay.OpenStore(testCtx(), dbPath, 100*time.Millisecond)
+	require.NoError(t, err, "the lock is free for the next relay")
+	require.NoError(t, next.Close())
+	err = a.Quiesce(testCtx())
+	require.Error(t, err, "the poller is still hung")
+	assert.NotContains(t, err.Error(), "store", "the store is not closed twice")
 }
 
 // The lost lease reaches the controller as a fatal error, like a stopped
