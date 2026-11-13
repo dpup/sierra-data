@@ -35,55 +35,13 @@ import (
 
 const integrationToken = "integration-deploy-token"
 
-// The coordinator remap (route B): STANDBY is a reader that does not
-// campaign, /activate takes the lease, /quiesce releases it while reads
-// continue, SIGTERM exits.
-func TestGridHandoffLifecycleWithMeshEnabled(t *testing.T) {
-	blockOutbound(t)
-	dbURL := seededGridDB(t)
-	app, port := preparedGrid(t, dbURL)
-	h := runGrid(t, app, true)
-
-	// STANDBY: serving reads, holding nothing; the next owner could take the
-	// lease right now.
-	assert.Equal(t, handoff.StateStandby, h.state())
-	assert.Equal(t, http.StatusOK, httpCode(t, port, "/api/v1/sources"), "a standby serves reads")
-	assert.Equal(t, http.StatusOK, httpCode(t, port, "/readyz"))
-	st := h.status()
-	assert.True(t, st.Ready)
-	assert.False(t, st.DatabaseHeld)
-	assertLockFree(t, dbURL)
-
-	h.command("/activate", "it-activate")
-	st = h.waitSettled()
-	require.Equal(t, handoff.StateActive, st.State, "activation failed: %+v", st.Operation)
-	assert.True(t, st.DatabaseHeld, "ACTIVE under a coordinator means the lease is held")
-	assert.Equal(t, http.StatusOK, httpCode(t, port, "/api/v1/sources"))
-	assert.Equal(t, http.StatusOK, httpCode(t, port, "/api/v1/mesh/links"),
-		"a gated hand-mounted route")
-	assertLockHeld(t, dbURL)
-
-	h.command("/quiesce", "it-release")
-	st = h.waitSettled()
-	require.Equal(t, handoff.StateQuiesced, st.State, "quiescence failed: %+v", st.Operation)
-	assert.False(t, st.DatabaseHeld)
-	assert.Equal(t, http.StatusOK, httpCode(t, port, "/api/v1/sources"),
-		"released: the lease is gone but reads continue until SIGTERM")
-	assert.Equal(t, http.StatusOK, httpCode(t, port, "/api/v1/mesh/links"))
-	assertLockFree(t, dbURL)
-
-	assert.Equal(t, 0, h.terminate(), "SIGTERM after release exits cleanly")
-	assert.Equal(t, http.StatusServiceUnavailable, httpCode(t, port, "/api/v1/sources"),
-		"after exit the admission gate refuses (503, not the 499 a cancelled gateway gives)")
-}
-
-// The native path: no --standby, so the process campaigns at boot and holds
+// The process campaigns at boot and holds
 // the lease once it is free; SIGTERM releases it.
 func TestGridBootActivationWithMeshEnabled(t *testing.T) {
 	blockOutbound(t)
 	dbURL := seededGridDB(t)
 	app, port := preparedGrid(t, dbURL)
-	h := runGrid(t, app, false)
+	h := runGrid(t, app)
 
 	require.Eventually(t, func() bool { return h.state() == handoff.StateActive && app.DatabaseHeld() },
 		20*time.Second, 20*time.Millisecond, "boot activation never took the lease (state %s)", h.state())
@@ -101,7 +59,7 @@ func TestGridCampaignsWhileAnotherHolds(t *testing.T) {
 	holder, err := store.Open(dbURL)
 	require.NoError(t, err)
 	app, port := preparedGrid(t, dbURL)
-	h := runGrid(t, app, false)
+	h := runGrid(t, app)
 
 	require.Eventually(t, func() bool { return h.state() == handoff.StateActive }, 20*time.Second, 10*time.Millisecond)
 	assert.False(t, app.DatabaseHeld())
@@ -121,7 +79,7 @@ func TestGridYieldAndCampaign(t *testing.T) {
 	blockOutbound(t)
 	dbURL := seededGridDB(t)
 	app, port := preparedGrid(t, dbURL)
-	h := runGrid(t, app, false)
+	h := runGrid(t, app)
 	require.Eventually(t, app.DatabaseHeld, 20*time.Second, 20*time.Millisecond)
 
 	assert.Equal(t, http.StatusOK, h.post("/yield"))
@@ -148,7 +106,7 @@ func TestGridLeaseLossDropsToReaderAndRecampaigns(t *testing.T) {
 	blockOutbound(t)
 	dbURL := seededGridDB(t)
 	app, port := preparedGrid(t, dbURL)
-	h := runGrid(t, app, false)
+	h := runGrid(t, app)
 	require.Eventually(t, app.DatabaseHeld, 20*time.Second, 20*time.Millisecond)
 	_ = h
 
@@ -240,10 +198,9 @@ func preparedGrid(t *testing.T, dbURL string) (*gridApp, int) {
 
 // runGrid starts app the way main does: the controller with the Grid's
 // options, then Serve (reads), then Run.
-func runGrid(t *testing.T, app *gridApp, standby bool) *ctrlHarness {
+func runGrid(t *testing.T, app *gridApp) *ctrlHarness {
 	t.Helper()
-	app.strictActivate = standby
-	h := runControllerWith(t, app, gridControlOptions(app, app.cfg, standby), func(c *handoff.Controller) {
+	h := runControllerWith(t, app, gridControlOptions(app, app.cfg), func(c *handoff.Controller) {
 		app.onFatal = c.Fail
 		app.instanceID = c.InstanceID()
 		require.NoError(t, app.Serve(testCtx()))
@@ -404,51 +361,4 @@ func TestGridServeRefusesABoundPort(t *testing.T) {
 	assert.ErrorContains(t, err, "already in use")
 	assert.Nil(t, app.store, "a failed Serve closes what it opened")
 	assertLockFree(t, dbURL)
-}
-
-// SIGTERM during the lock wait ends it at once (WithLockContext), instead of
-// holding shutdown for lockTimeout, past ECS's stop timeout.
-func TestGridTerminateDuringLockWaitIsPrompt(t *testing.T) {
-	blockOutbound(t)
-	dbURL := seededGridDB(t)
-	app, _ := preparedGrid(t, dbURL)
-	app.cfg.Grid.Database.LockTimeout = time.Minute
-	holder, err := store.Open(dbURL)
-	require.NoError(t, err)
-	defer holder.Close()
-
-	h := runGrid(t, app, true)
-	h.command("/activate", "it-activate")
-	require.Eventually(t, func() bool { return h.state() == handoff.StateActivating }, 5*time.Second, 5*time.Millisecond)
-	time.Sleep(300 * time.Millisecond) // inside the lock wait
-	start := time.Now()
-	assert.Equal(t, 0, h.terminate())
-	assert.Less(t, time.Since(start), 5*time.Second, "shutdown must not wait out the minute-long lock timeout")
-}
-
-// A panic mid-activation (coordinator mode) releases what was opened (the
-// deferred cleanup runs) and returns to STANDBY; a retry then succeeds.
-func TestGridPanicDuringActivationReleasesAndRetries(t *testing.T) {
-	blockOutbound(t)
-	dbURL := seededGridDB(t)
-	app, port := preparedGrid(t, dbURL)
-	panicked := false
-	app.activateHook = func(stage string) {
-		if stage == "lease-acquired" && !panicked {
-			panicked = true
-			panic("injected")
-		}
-	}
-	h := runGrid(t, app, true)
-	h.command("/activate", "it-activate-1")
-	st := h.waitSettled()
-	assert.Equal(t, handoff.StateStandby, st.State, "cleanup ran, so the database is free: %+v", st.Operation)
-	assert.False(t, st.DatabaseHeld)
-	assert.Contains(t, st.Operation.Error, "panic during activation: injected")
-	assertLockFree(t, dbURL)
-
-	h.command("/activate", "it-activate-2")
-	st = h.waitSettled()
-	require.Equal(t, handoff.StateActive, st.State, "%+v", st.Operation)
-	assert.Equal(t, http.StatusOK, httpCode(t, port, "/api/v1/sources"))
 }

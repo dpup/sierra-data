@@ -51,13 +51,13 @@ func TestPushIngestIsForwardedToTheWriter(t *testing.T) {
 	dbURL := seededGridDB(t)
 	a, portA := preparedGrid(t, dbURL)
 	withReporter(a)
-	ha := runGrid(t, a, false)
+	ha := runGrid(t, a)
 	require.Eventually(t, func() bool { return push(t, portA, reporterToken).StatusCode == http.StatusNoContent },
 		20*time.Second, 20*time.Millisecond, "a's writer term serves pushes")
 
 	b, portB := preparedGrid(t, dbURL)
 	withReporter(b)
-	hb := runGrid(t, b, false)
+	hb := runGrid(t, b)
 	require.Eventually(t, func() bool { return hb.state() == "ACTIVE" }, 5*time.Second, 10*time.Millisecond)
 	require.False(t, b.DatabaseHeld(), "a holds the lease; b campaigns")
 

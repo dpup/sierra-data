@@ -148,10 +148,11 @@ writer role moves when the old writer goes away (SIGTERM) or is told to
 yield.
 
 This replaces the standby/quiesce/activate handoff the legacy stack needed
-because only the database owner could serve. That handoff still exists (the
-Grid remaps it onto the roles, below) so a coordinator could drive the Grid;
-the native ECS path needs none of it, and since the 2026-11-13 cutover
-nothing uses it: it is a candidate for removal once the old account is gone. The mesh relay
+because only the database owner could serve. What remains of it in the Grid is
+the controller's SIGTERM path and the control API's `yield` / `campaign` /
+`quiesce` commands; the coordinator's standby mode (`--standby`,
+`POST /activate` taking the lease) was removed on 2026-11-13 after the
+cutover, when nothing used it any more. The mesh relay
 (`cmd/mesh-relay`) keeps the old handoff unchanged: it stays one process on
 its own store, the SQLite file or, in the Grid account, a DynamoDB table
 whose instance lease the next task takes over when the previous one stops
@@ -279,7 +280,7 @@ database return the same tag, and either honours the other's.
 | `grid.writer.enabled` | `PF__GRID__WRITER__ENABLED` | `true` | `false`: a reader-only process that never campaigns (a bake against a database another stack writes; extra read capacity) |
 | `grid.writer.advertiseAddr` | `PF__GRID__WRITER__ADVERTISE_ADDR` | `server.host` (the hostname when it is `0.0.0.0`) + the bound port | where other processes reach this one for forwarded pushes |
 | `grid.writer.forwardTimeout` | `PF__GRID__WRITER__FORWARD_TIMEOUT` | 10s | bound on one forwarded push |
-| `grid.database.lockTimeout` | `PF__GRID__DATABASE__LOCK_TIMEOUT` | 90s | how long `POST /activate` (coordinator mode) waits for the lease; a boot campaign has no deadline |
+| `grid.database.lockTimeout` | `PF__GRID__DATABASE__LOCK_TIMEOUT` | 90s | how long a tool's `Open` (the lease taken in one call) waits for the writer lease; the server's boot campaign never gives up |
 | `grid.control.port` | `PF__GRID__CONTROL__PORT` | 8081 | control listener |
 | `grid.control.tokenSha256` | `PF__GRID__CONTROL__TOKEN_SHA256` | empty (off) | hex SHA-256 of the control token |
 | `grid.control.drainTimeout` | | 10s | in-flight request grace at exit |
@@ -335,7 +336,6 @@ Never route it from the public load balancer.
 | `GET /livez`, `GET /readyz` | none | as above |
 | `POST /yield` | bearer | release the lease and stop campaigning until `/campaign`; keep serving reads. 200 when done |
 | `POST /campaign` | bearer | resume campaigning after a yield; only in `ACTIVE` (409 otherwise) |
-| `POST /activate` | bearer | coordinator mode, below |
 | `POST /quiesce` | bearer | release the lease for good (`QUIESCED`); keep serving reads until SIGTERM |
 
 Commands take `Authorization: Bearer <token>` and an optional body
@@ -350,26 +350,6 @@ Yield the old writer (and any other old process, or one of them may win the
 campaign instead); a new process takes the lease; the old processes keep
 serving reads. A release with a migration does not need it: the new tasks
 migrate at boot and are ready without the writer role.
-
-## The coordinator remap (route B, unused since the cutover)
-
-`internal/handoff`'s states are unchanged; the Grid maps them onto the roles:
-
-| state | meaning for the Grid |
-|---|---|
-| `STANDBY` (`--standby`) | a reader that does not campaign; serves reads |
-| `ACTIVATING` | `POST /activate`: waiting up to `lockTimeout` for the lease, then starting the term; on failure it releases and returns to `STANDBY` |
-| `ACTIVE` | holds the lease, or (after a lost lease or a yield) campaigns for it; `databaseHeld` says which |
-| `QUIESCING` / `QUIESCED` | `POST /quiesce` or SIGTERM: the lease released for good; still serving reads until exit |
-
-Without `--standby` the process activates at boot, which for the Grid means
-"campaign in the background": `ACTIVE` at once, holding the lease as soon as
-it is free. The coordinator's sequence (standby the new task, quiesce the old,
-activate the new, switch traffic, terminate the old) and its
-`expectedInstanceId` contract still work. What changed for it: a standby
-already serves reads (it can take traffic before activation), and quiesce no
-longer stops reads (the admission gate closes only at exit). The writer lock
-is the PostgreSQL lease, never a file lock.
 
 ## Rehearsal (migration gate 3)
 

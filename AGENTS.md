@@ -891,8 +891,7 @@ heartbeats every 2 s, and on a lost lease drops to reader and campaigns
 again. Schema migrations are not the writer's: every process runs
 them at boot in `OpenReader` under the migration advisory lock, which is
 safe only because migrations stay backwards compatible for the previous
-release's readers and writer (rules in `internal/store/AGENTS.md`). A process started without `--standby` campaigns at boot in the
-background; `grid.writer.enabled: false` makes a reader-only task. Push
+release's readers and writer (rules in `internal/store/AGENTS.md`). Every process campaigns at boot in the background; `grid.writer.enabled: false` makes a reader-only task. Push
 ingest that lands on a reader is forwarded to `writer_lease.address`, or
 answered 503 + `Retry-After` with no live writer. SIGTERM releases the lease,
 then drains and exits; `/livez` and `/readyz` (read-path readiness, never the
@@ -903,8 +902,7 @@ authenticated `yield`. In the Grid account that is ECS's native blue/green
 in the writer term (`startTerm`) and must be stopped and waited for in
 `stopTerm`; a new production route must go through the admission gate; a
 cache that is only valid while writing must be keyed to the lease term (the
-store's place-geometry cache is). `--standby` / `POST /activate` /
-`POST /quiesce` still work for a coordinator, remapped onto the roles. Deploy flow,
+store's place-geometry cache is). `POST /quiesce` (and SIGTERM) release the lease for good. Deploy flow,
 control API, the remap and the rehearsal (`make rehearse-bluegreen`):
 `docs/deploy-handoff.md`. The mesh relay keeps the original
 `internal/handoff` standby/quiesce lifecycle on its own store.

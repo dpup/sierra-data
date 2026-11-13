@@ -80,14 +80,11 @@ func (a *gridApp) DatabaseHeld() bool {
 	return a.w.term != nil
 }
 
-// Activate is the controller's activation: start campaigning for the writer
-// lease. At boot (no --standby) it returns at once and the campaign runs in
-// the background for as long as it takes. Under a coordinator
-// (strictActivate) it waits up to grid.database.lockTimeout for the lease and
-// starts the term before returning, so ACTIVE means "holds the lease", and a
-// failure leaves nothing running (back to STANDBY). With grid.writer.enabled
-// false there is nothing to do: the process serves reads only.
-func (a *gridApp) Activate(actx context.Context) (err error) {
+// Activate is the controller's activation at boot: start campaigning for
+// the writer lease. It returns at once and the campaign runs in the
+// background for as long as it takes. With grid.writer.enabled false there
+// is nothing to do: the process serves reads only.
+func (a *gridApp) Activate(actx context.Context) error {
 	ctx := a.ctx
 	// Everything below logs through actx too; carry the process logger on it
 	// whatever the caller passed (a logger-less context panics in prefab's
@@ -106,32 +103,7 @@ func (a *gridApp) Activate(actx context.Context) (err error) {
 		return nil // already campaigning or holding
 	}
 	a.w.mu.Unlock()
-
-	var first *writerTerm
-	if a.strictActivate {
-		defer func() {
-			// A panic is a failed activation like any other: release what was
-			// opened rather than leave it running behind a "held" status.
-			if r := recover(); r != nil {
-				err = fmt.Errorf("panic during activation: %v\n%s", r, debug.Stack())
-			}
-			if err == nil {
-				return
-			}
-			logging.Warnw(ctx, "Activation failed; releasing what it opened", "error", err)
-			if qerr := a.Quiesce(ctx); qerr != nil {
-				err = fmt.Errorf("%w (and releasing it failed: %w: %w)", err, handoff.ErrStillHeld, qerr)
-			}
-		}()
-		lease, err := a.acquire(actx, a.cfg.Grid.Database.LockTimeout)
-		if err != nil {
-			return err
-		}
-		if first, err = a.startTerm(actx, lease); err != nil {
-			return err
-		}
-	}
-	a.startCampaign(first)
+	a.startCampaign(nil)
 	return nil
 }
 
@@ -162,11 +134,10 @@ func (a *gridApp) yield(_ context.Context, st handoff.State) error {
 }
 
 // campaign is the control API's "campaign" command: resume campaigning after
-// a yield. Only in ACTIVE: a standby is activated with /activate, and a
-// quiesced process never writes again.
+// a yield. Only in ACTIVE: a quiesced process never writes again.
 func (a *gridApp) campaign(_ context.Context, st handoff.State) error {
 	if st != handoff.StateActive {
-		return fmt.Errorf("%w: campaign needs state ACTIVE (this process is %s; a standby takes POST /activate)",
+		return fmt.Errorf("%w: campaign needs state ACTIVE (this process is %s)",
 			handoff.ErrCommandRefused, st)
 	}
 	if !a.cfg.Grid.Writer.IsEnabled() {
