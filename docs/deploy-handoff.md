@@ -152,7 +152,9 @@ because only the database owner could serve. That handoff still exists (the
 Grid remaps it onto the roles, below) so a coordinator could drive the Grid;
 the native ECS path needs none of it. The mesh relay
 (`cmd/mesh-relay`) keeps the old handoff unchanged: it stays one process on
-its own SQLite file until it moves (migration plan R4).
+its own store, the SQLite file or, in the Grid account, a DynamoDB table
+whose instance lease the next task takes over when the previous one stops
+(`meshRelay.store`; a rolling deploy with minimum healthy 0%).
 
 Code: `internal/store/lease.go` (the lease and fencing),
 `cmd/server/grid.go` (the reader: `Serve`, `Exit`), `cmd/server/writer.go`

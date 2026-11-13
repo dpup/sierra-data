@@ -68,9 +68,12 @@ COPY --from=relay-builder /mesh-relay /app/mesh-relay
 # The relay runs on prefab like the Grid and reads the same prefab.yaml (its
 # meshRelay section: port, admins, timings). No secrets live in it.
 COPY --from=relay-builder /app/prefab.yaml /app/prefab.yaml
-# Gateways, client token hashes and the lease audit log. Its OWN file — never
-# point this at grid.db (both processes take an exclusive lock on their file).
-# Note the underscore: PF__MESH_RELAY__DB_PATH -> meshRelay.dbPath.
+# The SQLite store (meshRelay.store: sqlite, the default): gateways, client
+# token hashes and the lease audit log. Its OWN file — never point this at
+# grid.db (both processes take an exclusive lock on their file). Note the
+# underscore: PF__MESH_RELAY__DB_PATH -> meshRelay.dbPath. The hosted relay
+# runs on DynamoDB (PF__MESH_RELAY__STORE=dynamodb,
+# PF__MESH_RELAY__DYNAMODB__TABLE) and mounts nothing here.
 VOLUME ["/data"]
 ENV PF__MESH_RELAY__DB_PATH=/data/relay.db \
     PF__MESH_RELAY__CLIENT_IP_HEADER=X-Forwarded-For \

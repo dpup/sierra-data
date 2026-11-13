@@ -81,7 +81,9 @@ type relayApp struct {
 	ctx         context.Context
 	cfg         meshrelay.Config
 	control     config.ControlConfig
+	storeKind   string // "sqlite" or "dynamodb"
 	dbPath      string
+	dynamo      config.MeshRelayDynamoDBConfig
 	lockTimeout time.Duration
 	port        int
 	telemetry   config.MeshRelayTelemetryConfig
@@ -90,7 +92,7 @@ type relayApp struct {
 	onFatal func(error)
 
 	mu         sync.Mutex
-	store      *meshrelay.Store
+	store      meshrelay.Storage
 	relay      *meshrelay.Relay
 	gate       *handoff.Gate // the relay's admission gate (Config.Gate); Quiesce closes and drains it
 	serverDone chan struct{}
@@ -116,8 +118,13 @@ func prepareRelay(ctx context.Context, relayCfg *config.MeshRelayConfig) (*relay
 	if err := checkTelemetry(ctx, relayCfg.Telemetry); err != nil {
 		return nil, err
 	}
+	kind, err := storeKind(*relayCfg)
+	if err != nil {
+		return nil, err
+	}
 	a := &relayApp{ctx: ctx, cfg: cfg, control: relayCfg.Control, telemetry: relayCfg.Telemetry,
-		dbPath: relayCfg.DBPath, lockTimeout: relayCfg.LockTimeout, port: relayCfg.Port}
+		storeKind: kind, dbPath: relayCfg.DBPath, dynamo: relayCfg.DynamoDB,
+		lockTimeout: relayCfg.LockTimeout, port: relayCfg.Port}
 	if a.dbPath == "" {
 		a.dbPath = "./data/relay.db"
 	}
@@ -127,11 +134,12 @@ func prepareRelay(ctx context.Context, relayCfg *config.MeshRelayConfig) (*relay
 	if a.port == 0 {
 		a.port = defaultPort
 	}
-	logging.Infow(ctx, "Relay prepared (no database opened)", "path", a.dbPath, "port", a.port)
+	logging.Infow(ctx, "Relay prepared (no store opened)", "store", a.storeKind, "location", a.storeLocation(),
+		"port", a.port)
 	return a, nil
 }
 
-// Activate opens relay.db and starts serving. A failure releases what it
+// Activate opens the store and starts serving. A failure releases what it
 // opened (see gridApp.Activate for the same contract).
 func (a *relayApp) Activate(actx context.Context) (err error) {
 	// The lock wait logs through actx; see gridApp.Activate.
@@ -156,16 +164,19 @@ func (a *relayApp) Activate(actx context.Context) (err error) {
 		}
 	}()
 
-	// The listener only opens once the lock is held. The lock is a second
-	// line of defence: activation itself is the coordinator's decision.
-	st, err := meshrelay.OpenStore(actx, a.dbPath, a.lockTimeout)
+	// The listener only opens once the store's single-writer lock (the
+	// SQLite file lock, or the DynamoDB instance lease) is held. The lock is
+	// a second line of defence: activation itself is the coordinator's
+	// decision.
+	st, err := a.openStore(actx)
 	if err != nil {
-		return fmt.Errorf("open relay store %s: %w", a.dbPath, err)
+		return fmt.Errorf("open relay store (%s %s): %w", a.storeKind, a.storeLocation(), err)
 	}
 	a.mu.Lock()
 	a.store = st
 	a.mu.Unlock()
-	logging.Infow(a.ctx, "Relay store opened", "path", a.dbPath, "duration", time.Since(start))
+	logging.Infow(a.ctx, "Relay store opened", "store", a.storeKind, "location", a.storeLocation(),
+		"duration", time.Since(start))
 
 	gate := handoff.NewGate()
 	cfg := a.cfg
@@ -242,7 +253,7 @@ func checkTelemetry(ctx context.Context, t config.MeshRelayTelemetryConfig) erro
 }
 
 // startTelemetry starts the poller when it is configured.
-func (a *relayApp) startTelemetry(relay *meshrelay.Relay, st *meshrelay.Store) {
+func (a *relayApp) startTelemetry(relay *meshrelay.Relay, st relaytelemetry.Gateways) {
 	if !a.telemetry.Enabled() {
 		return
 	}
@@ -333,7 +344,7 @@ func (a *relayApp) Quiesce(_ context.Context) error {
 		logging.Infow(a.ctx, "Quiesce: relay store closed and lock released", "duration", time.Since(t))
 	}
 	a.quiesced.store = true
-	logging.Infow(a.ctx, "Quiesce: relay.db ownership released", "duration", time.Since(start))
+	logging.Infow(a.ctx, "Quiesce: relay store ownership released", "store", a.storeKind, "duration", time.Since(start))
 	return nil
 }
 

@@ -833,9 +833,23 @@ meshRelay:
   control:
     port: 8091
     tokenSha256: ""
+  # The relay's store. "sqlite" is the file at dbPath (local and self-hosted
+  # relays); "dynamodb" is the table below (the hosted relay in the Grid
+  # account: PF__MESH_RELAY__STORE=dynamodb and PF__MESH_RELAY__DYNAMODB__TABLE
+  # from the task definition; region and credentials from the task). Either
+  # way one relay owns the store at a time: SQLite through its file lock,
+  # DynamoDB through an instance lease that a successor takes over after
+  # staleAfter without a heartbeat. lockTimeout is how long a starting relay
+  # waits for the previous one to let go.
+  store: sqlite
   # The relay's OWN database, never grid.db. Production: PF__MESH_RELAY__DB_PATH.
   dbPath: "./data/relay.db"
   lockTimeout: "90s"
+  dynamodb:
+    table: ""
+    # heartbeat: "10s"
+    # staleAfter: "45s"
+    # endpoint: ""   # DynamoDB Local only (make dynamo-up in sierra-meshrelay)
   # Behind the ALB, X-Forwarded-For (PF__MESH_RELAY__CLIENT_IP_HEADER): the auth
   # lockout is per client IP, and without this every client is the proxy.
   clientIpHeader: ""
