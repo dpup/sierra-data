@@ -114,10 +114,58 @@ CWWP2 says R-0 are SHOWN and logged ("cc.kml reports chain controls CWWP2 does
 not"). Road closures (`Closed`) render as `"<highway> road closed"`, category
 `closed`, severity `MINOR` — one notch above a clear checkpoint, below R-1,
 because the seasonal gates hold it all winter (and `/summary`'s roads domain
-counts it as active). Feature ids are `cc:<checkpoint index>` for CWWP2 (e.g.
+counts it as active). Sign ids are `cc:<checkpoint index>` for CWWP2 (e.g.
 `cc:10-ALP-4-0.65-W-14W`, Bear Valley WB), `cc:<district>-<message id>` for
 cc.kml (`cc:10-2515`; message ids repeat across districts), and `cc:<lat>,<lng>`
 when either part is missing (`chainControlID`); `source.attribution` names the host.
+A sign id is the feature id only for closures and truck/hold levels.
+
+### One feature per stretch (since 2026-11-14)
+
+Caltrans reports chain control per sign: one row per checkpoint and
+direction. The layer used to emit a feature per row, so one stretch was seven
+features with one headline and `/summary` counted seven. It now emits **one
+feature per stretch**: a run of one highway under one level
+(`groupChainStretches` in `chainstretch.go`, pure and tested against the
+2026-11-13 storm captures; `chainStretchFeature` projects it). The rules, all
+of which have a test:
+
+- **Signed** (both signs have a CWWP2 milepost): a sign speaks for its
+  direction of travel from where it stands to the next sign facing the same
+  way, active or not; the last one covers to the end of the signed route.
+  Spans that overlap, or come within `chainTouchMiles` (1.5), are one
+  stretch. Order is by **milepost**, the portal's route-wide odometer, never
+  by postmile, which restarts at each county line.
+- **The R-0 sign facing the other way at the edge is the exit sign**, not a
+  gap (Poison Springs WB R-0 beside Poison Springs EB R-2). A gap is road no
+  direction's signs put under the requirement.
+- **Gates are not signs.** A pass-closure gate (`ChainControlData.Gate`) reads
+  R-0 or "ROAD CLOSED" a metre from a chain sign reading R-2. It is left out
+  of the walk, so it can neither end a span nor split a stretch.
+- **Levels are separate stretches**, even end to end (Hwy 88: R2, then R1 at
+  Pickett's Junction). Snow tires get a driver through one and not the other.
+- **Inferred** (either sign has no milepost: all of cc.kml, so Districts 3
+  and 9, and everything when CWWP2 is down): cc.kml lists active signs only,
+  so nothing reports where a stretch ends. Signs within `chainJoinMeters`
+  (15 km) are one stretch and the feature carries `chainControl.inferred`.
+  The number is a judgment; see its comment before changing it.
+- **Nothing is dropped.** Every sign handed in is in exactly one stretch
+  (`TestChainControlLayer_StormDropsNoSign`). One that can't be joined (no
+  highway, no neighbour) is a stretch of one.
+- **Truck and hold levels (MAX, MIN, TS, HT, TTA) and closures are not
+  stretch members.** They stay one Point each, as before. cc.kml gives the
+  truck levels no level we parse and no end, and a "hold all traffic" folded
+  into an R2 stretch would be buried.
+
+The feature: id `cc:<route>:<level>` (`cc:hwy4:r2`; a second stretch of the
+same route and level is `:2`, numbered from the west or south over
+everything Caltrans reported, so the id means the same stretch in every
+area), a **Point at the low end**, headline "Hwy 4 chains required, Poison
+Springs to Mount Reba Road (R2)", `effective` the earliest sign, and every
+sign in `chainControl.signs`. A stretch is on the map of every area it has a
+sign in, whole. Keep the geometry a Point: straight lines between
+checkpoints are not the road, and consumers that take only Points from this
+layer would show no chain controls at all for anything else.
 
 ## `message_sign` — context, never a hazard
 

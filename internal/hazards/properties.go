@@ -189,11 +189,48 @@ type RoadStatusCauseProps struct {
 	ToKm   *float64 `json:"toKm,omitempty"`
 }
 
-// ChainControlProps is the chain_control kind block.
+// ChainControlProps is the chain_control kind block. A chain requirement is
+// one feature per STRETCH of highway (From, To and Signs set); a road closure
+// or a cc.kml truck/hold level is one feature per reported point (they are
+// not).
 type ChainControlProps struct {
-	Level     string `json:"level,omitempty"` // R1 | R2 | R3
-	Highway   string `json:"highway,omitempty"`
+	Level   string `json:"level,omitempty"` // R1 | R2 | R3
+	Highway string `json:"highway,omitempty"`
+	// Direction is set on a stretch only when every sign in it faces the same
+	// way; a stretch signed in both directions has none.
 	Direction string `json:"direction,omitempty"`
+	// From and To are the stretch's two ends, low end first (west to east,
+	// south to north). Equal when the stretch is one place.
+	From *ChainPlace `json:"from,omitempty"`
+	To   *ChainPlace `json:"to,omitempty"`
+	// Inferred: the stretch was put together from signs lying near each
+	// other, because the source lists active signs only and nothing reports
+	// the road between them (every cc.kml-only district). Unset when Caltrans's
+	// own signs establish it.
+	Inferred bool `json:"inferred,omitempty"`
+	// Signs is every checkpoint Caltrans reported in the stretch, From to To.
+	Signs []ChainSign `json:"signs,omitempty"`
+}
+
+// ChainPlace is one end of a chain-control stretch.
+type ChainPlace struct {
+	Place       string    `json:"place"`
+	Coordinates []float64 `json:"coordinates,omitempty"` // [lng, lat]
+}
+
+// ChainSign is one Caltrans checkpoint inside a stretch, as reported.
+type ChainSign struct {
+	// ID is the id this sign had as a feature of its own before 2026-11-14:
+	// cc:<CWWP2 checkpoint index> or cc:<district>-<cc.kml message id>.
+	ID          string    `json:"id"`
+	Place       string    `json:"place"` // verbatim
+	Direction   string    `json:"direction,omitempty"`
+	Level       string    `json:"level"`
+	Since       string    `json:"since,omitempty"`       // RFC 3339
+	Coordinates []float64 `json:"coordinates,omitempty"` // [lng, lat]
+	Source      string    `json:"source"`                // the host that reported it
+	County      string    `json:"county,omitempty"`      // CWWP2 only
+	Postmile    string    `json:"postmile,omitempty"`    // CWWP2 only; restarts at each county line
 }
 
 // WeatherProps is the weather_alert kind block.

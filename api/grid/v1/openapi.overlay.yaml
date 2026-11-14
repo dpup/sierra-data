@@ -422,6 +422,8 @@ spec:
               (`wildfire`, `evacuation`, `weather_alert`, `earthquake`,
               `road_incident`, `power`, `mesh_node`). Condition layers use their
               own ids (`road:…`, `cc:…`, `cms:…`, `fw:…`, `mesh_link:…`, `d10-…`).
+              A chain-control stretch is `cc:{route}:{level}` (`cc:hwy4:r2`),
+              which holds while the stretch grows or shrinks by a checkpoint.
           layer:
             type: string
             description: |
@@ -447,7 +449,7 @@ spec:
             description: |
               Sub-type within the layer. Values by layer:
               road_incident `incident` (CHP) | `closure` (Caltrans planned lane closure);
-              chain_control `r1` | `r2` | `r3` | `closed`;
+              chain_control `r1` | `r2` | `r3` (a stretch) | `closed` (absent on a truck or hold level);
               message_sign `message` | `blank` | `unknown`;
               weather_alert the NWS event name (`Heat Advisory`, `Red Flag Warning`);
               fire_weather banner `normal` | `elevated` | `red-flag` (absent on forecast points);
@@ -629,11 +631,66 @@ spec:
                 to: {type: string, example: "the Jct of SR 89 /Ebbetts Pass/", description: "Where it ends, in the source's words."}
       MapChainControlProps:
         type: object
-        description: chain_control block. Severity follows the level (R1 MINOR, R2 MODERATE, R3 SEVERE); a seasonal pass closure (`category` closed) is MINOR.
+        description: |
+          chain_control block. Since 2026-11-14 a chain requirement is ONE
+          feature per stretch of highway at one level, not one per Caltrans
+          sign: `from`, `to` and `signs` are set, the feature id is
+          `cc:{route}:{level}` (`cc:hwy4:r2`; a second separate stretch of the
+          same route and level is `cc:hwy4:r2:2`, numbered from the west or
+          south), and the geometry is a Point at `from`, the stretch's low
+          end. It is not the extent: draw `signs[].coordinates` for the
+          checkpoints, and do not join them with straight lines (they are not
+          the road). Two levels on one highway are two features (Hwy 88: R2
+          to Red Lake Creek, then R1 at Pickett's Junction). Severity follows
+          the level (R1 MINOR, R2 MODERATE, R3 SEVERE).
+
+          Two kinds of feature are still one per reported point, with none of
+          `from`, `to`, `signs`: a seasonal pass closure (`category` closed,
+          MINOR) and a cc.kml truck or hold level (no `level`, no `category`,
+          INFO), which is not part of any stretch.
         properties:
-          level: {type: string, enum: [R1, R2, R3], description: "Absent on a closure."}
-          highway: {type: string}
-          direction: {type: string, example: Eastbound}
+          level: {type: string, enum: [R1, R2, R3], description: "Absent on a closure and on a truck or hold level."}
+          highway: {type: string, example: Highway 4}
+          direction: {type: string, example: Eastbound, description: "On a stretch, set only when every sign in it faces the same way; a stretch signed in both directions has none."}
+          from: {$ref: "#/components/schemas/MapChainPlace"}
+          to: {$ref: "#/components/schemas/MapChainPlace"}
+          inferred:
+            type: boolean
+            description: |
+              Present and true when the stretch was put together from signs
+              lying within 15 km of each other, because the source lists
+              active signs only and nothing reports the road between them:
+              every Caltrans district we read through cc.kml alone (3 and 9),
+              and everything while the CWWP2 portal is down. `from` and
+              `to` are then the outermost signs reported, not a confirmed
+              continuous extent. Absent when Caltrans's
+              own signs, including the ones reading R-0, establish the
+              stretch.
+          signs:
+            type: array
+            description: Every checkpoint Caltrans reported in the stretch, in order from `from` to `to`. Nothing Caltrans sent is dropped by the grouping.
+            items: {$ref: "#/components/schemas/MapChainSign"}
+      MapChainPlace:
+        type: object
+        description: One end of a chain-control stretch. `from` is the low end as California counts mileposts (west, or south); equal to `to` when the stretch is one place.
+        required: [place]
+        properties:
+          place: {type: string, example: Poison Springs, description: "The checkpoint's name, title-cased when Caltrans wrote it in capitals."}
+          coordinates: {type: array, items: {type: number}, minItems: 2, maxItems: 2, description: "`[lng, lat]` of the sign at this end."}
+      MapChainSign:
+        type: object
+        description: One Caltrans chain-control checkpoint (one sign, one direction) inside a stretch, as reported.
+        required: [id, place, level, source]
+        properties:
+          id: {type: string, example: "cc:10-ALP-4-0.65-W-14W", description: "The id this sign had as a feature of its own before 2026-11-14: `cc:{CWWP2 checkpoint index}` or `cc:{district}-{cc.kml message id}`."}
+          place: {type: string, example: BEAR VALLEY, description: Verbatim.}
+          direction: {type: string, example: Westbound}
+          level: {type: string, enum: [R1, R2, R3]}
+          since: {type: string, format: date-time, description: "When this sign entered its level."}
+          coordinates: {type: array, items: {type: number}, minItems: 2, maxItems: 2, description: "`[lng, lat]`."}
+          source: {type: string, example: cwwp2.dot.ca.gov, description: The host that reported it.}
+          county: {type: string, example: Alpine, description: CWWP2 signs only.}
+          postmile: {type: string, example: "0.65", description: "CWWP2 signs only. Restarts at each county line."}
       MapMessageSignProps:
         type: object
         description: message_sign block - what a Caltrans changeable message sign is showing, verbatim. Context, not a hazard.
@@ -989,7 +1046,7 @@ spec:
           | layer | features | backed by |
           |---|---|---|
           | `road_incident` | Points: CHP incidents (category `incident`) and Caltrans planned lane closures (`closure`, SCHEDULED until set up) | events |
-          | `chain_control` | Points: active R1/R2/R3 checkpoints and seasonal pass closures | live Caltrans |
+          | `chain_control` | Points: one per stretch of highway under R1/R2/R3 (at its low end, the signs listed in `chainControl.signs`), one per seasonal pass closure | live Caltrans |
           | `road_segment` | LineStrings: configured routes with travel time; `status` OPEN/CLOSED/RESTRICTED/MAINTENANCE | live Google Routes + Caltrans |
           | `message_sign` | Points: Caltrans message signs and their text; always INFO | live Caltrans |
           | `weather_alert` | null geometry: NWS zone watches/warnings/advisories | events |
@@ -1040,10 +1097,13 @@ spec:
                       {"type": "Feature", "geometry": {"type": "Point", "coordinates": [-120.38806, 37.98152]}, "properties": {"id": "caltrans:d10-C49SA-0001-2026-11-06-170100", "layer": "ROAD_INCIDENT", "kind": "Road incident", "category": "closure", "severity": "MODERATE", "severityRank": 2, "headline": "Hwy 49 lane closure (Drainage Work)", "description": "Closed: lane 1, lane 2, left shoulder, right shoulder (of 4 lanes).", "status": "ACTIVE", "effective": "2026-11-06T22:02:00Z", "updatedAt": "2026-11-06T22:03:03Z", "areaLabel": "Hwy 49 from Solinski Street (Left) to Washington Street, near Sonora", "source": {"id": "caltrans", "name": "Caltrans", "attribution": "cwwp2.dot.ca.gov"}, "incident": {"logNumber": "C49SA", "closure": {"windowId": "C49SA-0001-2026-11-06-17:01:00", "closureType": "Lane", "workType": "Drainage Work", "lanesClosed": "1, 2, LShoulder, RShoulder", "totalLanes": 4, "plannedStart": "2026-11-07T01:01:00Z", "plannedEnd": "2026-12-07T08:01:00Z", "setUpAt": "2026-11-06T22:02:00Z"}}}}],
                       "metadata": {"layer": "road_incident", "area": "ebbetts-pass", "generatedAt": "2026-11-07T04:03:21Z", "sourceStatus": "OK", "attribution": "quickmap.dot.ca.gov · cwwp2.dot.ca.gov", "schemaVersion": 1}}
                   chain_control:
-                    summary: chain_control - a seasonal pass closure
+                    summary: chain_control - one stretch under R2 (two of its seven signs shown) and a seasonal pass closure
                     value: {"type": "FeatureCollection", "features": [
-                      {"type": "Feature", "geometry": {"type": "Point", "coordinates": [-119.99421, 38.48135]}, "properties": {"id": "cc:38.48135,-119.99421", "layer": "CHAIN_CONTROL", "kind": "Chain control", "category": "closed", "severity": "MINOR", "severityRank": 1, "headline": "road closed", "source": {"id": "caltrans", "name": "Caltrans", "attribution": "quickmap.dot.ca.gov"}, "chainControl": {"direction": "Eastbound"}}}],
-                      "metadata": {"layer": "chain_control", "area": "ebbetts-pass", "generatedAt": "2026-11-07T04:03:22Z", "sourceStatus": "OK", "attribution": "cwwp2.dot.ca.gov · quickmap.dot.ca.gov", "schemaVersion": 1}}
+                      {"type": "Feature", "geometry": {"type": "Point", "coordinates": [-120.18315, 38.38902]}, "properties": {"id": "cc:hwy4:r2", "layer": "CHAIN_CONTROL", "kind": "Chain control", "category": "r2", "severity": "MODERATE", "severityRank": 2, "headline": "Hwy 4 chains required, Poison Springs to Mount Reba Road (R2)", "description": "Chains or traction devices are required on all vehicles except four wheel / all wheel drive vehicles with snow-tread tires on all four wheels.  Four wheel / all wheel drive vehicles must carry traction devices in chain control areas.", "effective": "2026-11-13T13:45:34-08:00", "areaLabel": "Poison Springs to Mount Reba Road", "source": {"id": "caltrans", "name": "Caltrans", "attribution": "cwwp2.dot.ca.gov"}, "chainControl": {"level": "R2", "highway": "Highway 4", "from": {"place": "Poison Springs", "coordinates": [-120.18315, 38.38902]}, "to": {"place": "Mount Reba Road", "coordinates": [-120.02152, 38.4816]}, "signs": [
+                        {"id": "cc:10-CAL-4-56.3-E-12E", "place": "POISON SPRINGS", "direction": "Eastbound", "level": "R2", "since": "2026-11-13T15:29:26-08:00", "coordinates": [-120.18315, 38.38902], "source": "cwwp2.dot.ca.gov", "county": "Calaveras", "postmile": "56.30"},
+                        {"id": "cc:10-ALP-4-2.77-W-15W", "place": "MOUNT REBA ROAD", "direction": "Westbound", "level": "R2", "since": "2026-11-13T13:45:34-08:00", "coordinates": [-120.02152, 38.4816], "source": "cwwp2.dot.ca.gov", "county": "Alpine", "postmile": "2.77"}]}}},
+                      {"type": "Feature", "geometry": {"type": "Point", "coordinates": [-119.99421, 38.48135]}, "properties": {"id": "cc:10-2515", "layer": "CHAIN_CONTROL", "kind": "Chain control", "category": "closed", "severity": "MINOR", "severityRank": 1, "headline": "Highway 4 road closed", "description": "Closed to traffic.", "effective": "2026-11-12T12:08:00-08:00", "areaLabel": "EAST END OF LAKE ALPINE - EBBETTS PASS", "source": {"id": "caltrans", "name": "Caltrans", "attribution": "quickmap.dot.ca.gov"}, "chainControl": {"highway": "Highway 4", "direction": "Eastbound"}}}],
+                      "metadata": {"layer": "chain_control", "area": "ebbetts-pass", "generatedAt": "2026-11-14T01:38:22Z", "sourceStatus": "OK", "attribution": "cwwp2.dot.ca.gov · quickmap.dot.ca.gov", "schemaVersion": 1}}
                   road_segment:
                     summary: road_segment - an OPEN route (coordinates trimmed)
                     value: {"type": "FeatureCollection", "features": [

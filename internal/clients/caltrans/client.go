@@ -87,6 +87,16 @@ type ChainControlData struct {
 	// still a control (the safe side); the flag exists so the disagreement is
 	// visible in logs while their agreement is unverified (#12).
 	Uncorroborated bool
+	// County, Postmile, Milepost and Gate are CWWP2's and absent on cc.kml
+	// entries. Milepost (valid when HasMilepost) is the route-wide odometer
+	// that orders one route's checkpoints across county lines, where the
+	// postmile restarts. Gate marks a pass-closure gate, whose R-0 says
+	// nothing about chains (cwwp2.ChainControl.IsGate).
+	County      string
+	Postmile    string
+	Milepost    float64
+	HasMilepost bool
+	Gate        bool
 }
 
 // KML XML structures for parsing
@@ -178,18 +188,28 @@ func (p *FeedParser) ParseChainControls(ctx context.Context) ([]CaltransIncident
 // configured (UseCWWP2ChainControls) levels come from CWWP2; otherwise from
 // cc.kml alone. A *PartialError return carries usable, incomplete data.
 func (p *FeedParser) ParseChainControlsDetailed(ctx context.Context) ([]ChainControlData, error) {
+	controls, _, err := p.ParseChainControlRegistry(ctx)
+	return controls, err
+}
+
+// ParseChainControlRegistry is ParseChainControlsDetailed plus the quiet
+// checkpoints: every CWWP2 checkpoint that reports R-0 (Level "R0"), gates
+// included. They are what makes "the controls stop here" a reported fact
+// when checkpoints are grouped into stretches. quiet is nil whenever CWWP2
+// did not answer or is not configured: cc.kml lists active controls only.
+func (p *FeedParser) ParseChainControlRegistry(ctx context.Context) (controls, quiet []ChainControlData, err error) {
 	if p.chainSource != nil && len(p.chainDistricts) > 0 {
 		return p.chainControlsCWWP2(ctx)
 	}
 	incidents, err := p.ParseChainControls(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	controls := p.parseChainControlDetails(incidents)
+	controls = p.parseChainControlDetails(incidents)
 	for i := range controls {
 		controls[i].Source = SourceQuickMap
 	}
-	return controls, nil
+	return controls, nil, nil
 }
 
 // parseChainControlDetails extracts detailed chain control info from incidents

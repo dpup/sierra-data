@@ -21,6 +21,121 @@ longer exist: `/api/v1` originally hosted a different hand-built REST surface,
 replaced by a snake_case `/v1` surface on 2026-07-05, which was folded back onto
 the proto-defined `/api/v1` gateway on 2026-07-09.
 
+## 2026-11-14
+
+### BREAKING: `chain_control` is one feature per stretch of highway, not one per Caltrans sign
+
+`GET /api/v1/places/{place}/map/chain_control.geojson` listed every Caltrans
+chain-control sign as its own feature: one per checkpoint and per direction.
+A single stretch of road under chains therefore arrived as many features with
+one headline ("Highway 4 chain control R2", seven times), and the place
+summary's `roads` domain counted and headlined each sign. In the 2026-11-13
+storm `ebbetts-pass` showed 15 features from this layer for four
+requirements.
+
+The layer now has **one feature per stretch**: a run of one highway under one
+level. In that storm the same place reads:
+
+| id | headline |
+|---|---|
+| `cc:hwy4:r2` | Hwy 4 chains required, Poison Springs to Mount Reba Road (R2) |
+| `cc:hwy88:r2` | Hwy 88 chains required, Lumber Yard to Red Lake Creek (R2) |
+| `cc:hwy108:r2` | Hwy 108 chains required, Cascade Creek to Kennedy Meadows (R2) |
+| `cc:hwy207:r2` | Hwy 207 chains required, Jct Hwy 4 to Mt. Reba Summit (R2) |
+| `cc:10-2515` | Highway 4 road closed (unchanged) |
+
+What changed on a chain-requirement feature:
+
+- **`id`** is `cc:{route}:{level}` (`cc:hwy4:r2`, `cc:us50:r1`, `cc:i80:r2`).
+  The per-sign ids (`cc:10-ALP-4-0.65-W-14W`, `cc:3-9110`) are no longer
+  feature ids; each is `chainControl.signs[].id`. The id holds while the
+  stretch grows or shrinks by a checkpoint. It changes with the level, and a
+  highway with two separate stretches at one level numbers them from the west
+  or south (`cc:hwy89:r2`, `cc:hwy89:r2:2`), so a split or a merge renumbers.
+- **`headline`** names the highway, the requirement, the two ends and the
+  level. **`areaLabel`** is the two ends ("Poison Springs to Mount Reba
+  Road"), or the one place.
+- **`geometry`** is still a `Point`, now at the stretch's low end (the west or
+  south end, `chainControl.from`). It marks where the requirement starts, not
+  its extent.
+- **`effective`** is the earliest of the signs' times.
+- **`chainControl.direction`** is present only when every sign in the stretch
+  faces one way.
+- New: **`chainControl.from`** and **`.to`** (`{place, coordinates}`),
+  **`chainControl.signs[]`** (every checkpoint as Caltrans reported it: `id`,
+  `place`, `direction`, `level`, `since`, `coordinates`, `source`, and for
+  CWWP2 signs `county` and `postmile`), and **`chainControl.inferred`**.
+
+```json
+{"type": "Feature", "geometry": {"type": "Point", "coordinates": [-120.18315, 38.38902]},
+ "properties": {
+  "id": "cc:hwy4:r2", "layer": "CHAIN_CONTROL", "kind": "Chain control", "category": "r2",
+  "severity": "MODERATE", "severityRank": 2,
+  "headline": "Hwy 4 chains required, Poison Springs to Mount Reba Road (R2)",
+  "description": "Chains or traction devices are required on all vehicles except ...",
+  "effective": "2026-11-13T13:45:34-08:00",
+  "areaLabel": "Poison Springs to Mount Reba Road",
+  "source": {"id": "caltrans", "name": "Caltrans", "attribution": "cwwp2.dot.ca.gov"},
+  "chainControl": {
+    "level": "R2", "highway": "Highway 4",
+    "from": {"place": "Poison Springs", "coordinates": [-120.18315, 38.38902]},
+    "to": {"place": "Mount Reba Road", "coordinates": [-120.02152, 38.4816]},
+    "signs": [
+      {"id": "cc:10-CAL-4-56.3-E-12E", "place": "POISON SPRINGS", "direction": "Eastbound", "level": "R2",
+       "since": "2026-11-13T15:29:26-08:00", "coordinates": [-120.18315, 38.38902],
+       "source": "cwwp2.dot.ca.gov", "county": "Calaveras", "postmile": "56.30"},
+      "... five more ...",
+      {"id": "cc:10-ALP-4-2.77-W-15W", "place": "MOUNT REBA ROAD", "direction": "Westbound", "level": "R2",
+       "since": "2026-11-13T13:45:34-08:00", "coordinates": [-120.02152, 38.4816],
+       "source": "cwwp2.dot.ca.gov", "county": "Alpine", "postmile": "2.77"}]}}}
+```
+
+How signs become a stretch:
+
+- Same highway, same level, and the road between them under that level.
+  Where Caltrans's CWWP2 portal covers the highway (District 10), that is
+  read off the signs themselves: each sign speaks for its direction of travel
+  until the next sign facing the same way, and the signs reading R-0 are part
+  of the picture. The R-0 sign facing the other way at the edge of a stretch
+  is its exit sign, not a gap, and the pass-closure gates (which read R-0 or
+  "ROAD CLOSED" beside a chain sign reading R-2) are ignored.
+- **Two levels are two stretches**, even end to end: Hwy 88 was R2 from
+  Lumber Yard to Red Lake Creek and R1 at Pickett's Junction, which is
+  `cc:hwy88:r2` and `cc:hwy88:r1`. A driver with snow tires and no chains may
+  take one and not the other.
+- Districts 3 and 9 reach us through cc.kml alone, which lists active signs
+  only. There, signs of one highway and level within 15 km of each other are
+  taken as one stretch, and the feature says so: **`chainControl.inferred:
+  true`**. Its ends are the outermost signs reported, not a confirmed
+  continuous extent.
+- No sign that requires chains is ever dropped. One that cannot be joined to
+  anything is a stretch of its own.
+- A stretch is the same feature in every place it has a sign in: the id, the
+  ends and the signs do not depend on the place asked for, so `signs[]` (and
+  `to`) can lie outside the place's bounds.
+
+Unchanged: seasonal pass closures (`category: closed`, `cc:{district}-{id}`,
+one Point each) and cc.kml's truck and hold levels (no `level`, INFO, one
+Point each; they are not part of any stretch). cc.kml sending one of those
+twice with only the message id differing (US 50 at Meyers, messages 9013 and
+9014) is now one feature. `metadata.schemaVersion` stays `1`: the envelope
+did not change.
+
+**`GET /api/v1/places/{place}/summary`**: the `roads` domain's `activeCount`
+counts one per stretch, and a `kind: CONDITION` headline for a chain
+requirement carries the stretch's id and headline. Counts for a place in a
+storm drop accordingly (15 to 5 in the example above).
+
+**Migration.** A client that showed one marker or one line per feature needs
+no change to stay correct: it shows one per stretch, at the low end, with the
+ends in `headline` and `areaLabel`. A client that grouped features by
+`areaLabel` or `chainControl.direction` to work out the stretch itself should
+stop, and read `chainControl.from`, `.to` and `.signs[]` (it will otherwise
+print the two ends as one place name). A client that stored or matched
+`cc:{checkpoint}` feature ids should match `chainControl.signs[].id`. To draw
+every checkpoint, plot `signs[].coordinates`; do not join them with straight
+lines, which are not the road.
+
 ## 2026-11-13 (later)
 
 ### BREAKING: the Ebbetts Pass winter closure no longer closes "Arnold to Bear Valley" (`road.beyond`)

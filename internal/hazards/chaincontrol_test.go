@@ -72,19 +72,25 @@ func TestChainControlLayer_CWWP2Storm(t *testing.T) {
 	s := chainService(kmlDoer{200, emptyCCKML}, loadCheckpoints(t, "cc_d10_synthetic_storm.json"))
 	features, status, _, _, _, _ := s.BuildLayer(testCtx(), ebbettsArea, LayerChainControl)
 	assert.Equal(t, "OK", status)
-	// All seven raised checkpoints (Hwy 4 Arnold..Cottage Springs, Hwy 108
-	// Pinecrest) fall inside the ebbetts-pass rectangle.
-	require.Len(t, features, 7)
+	// The seven raised checkpoints (Hwy 4 Arnold..Cottage Springs at R2,
+	// Hwy 108 Pinecrest at R1) are two stretches, not seven features.
+	require.Len(t, features, 2)
 
-	levels := map[string]int{}
-	for _, f := range features {
-		p := f.Properties
-		levels[p.ChainControl.Level]++
-		assert.True(t, strings.HasPrefix(p.ID, "cc:10-"), p.ID)
+	hwy4, hwy108 := features[0].Properties, features[1].Properties
+	assert.Equal(t, "cc:hwy4:r2", hwy4.ID)
+	assert.Equal(t, "Hwy 4 chains required, Arnold to Cottage Springs (R2)", hwy4.Headline)
+	assert.Len(t, hwy4.ChainControl.Signs, 6)
+	assert.Equal(t, "cc:hwy108:r1", hwy108.ID)
+	assert.Equal(t, "Hwy 108 chains or snow tires required at Pinecrest, eastbound (R1)", hwy108.Headline)
+	assert.Equal(t, "Eastbound", hwy108.ChainControl.Direction)
+	require.Len(t, hwy108.ChainControl.Signs, 1)
+	for _, p := range []Properties{hwy4, hwy108} {
 		assert.Equal(t, caltrans.SourceCWWP2, p.Source.Attribution)
-		assert.Contains(t, []string{"Highway 4", "Highway 108"}, p.ChainControl.Highway)
+		assert.False(t, p.ChainControl.Inferred, "CWWP2's own signs establish both")
+		for _, sign := range p.ChainControl.Signs {
+			assert.True(t, strings.HasPrefix(sign.ID, "cc:10-"), sign.ID)
+		}
 	}
-	assert.Equal(t, map[string]int{"R2": 6, "R1": 1}, levels)
 }
 
 // cc.kml down: the CWWP2 levels are still served, but the layer can't claim
@@ -93,7 +99,7 @@ func TestChainControlLayer_KMLSupplementDownIsStale(t *testing.T) {
 	s := chainService(kmlDoer{status: 503}, loadCheckpoints(t, "cc_d10_synthetic_storm.json"))
 	features, status, _, _, _, _ := s.BuildLayer(testCtx(), ebbettsArea, LayerChainControl)
 	assert.Equal(t, "STALE", status)
-	assert.Len(t, features, 7)
+	assert.Len(t, features, 2)
 }
 
 // An in-area checkpoint with an unreadable status is kept off the map and

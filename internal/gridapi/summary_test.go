@@ -8,10 +8,14 @@ package gridapi
 // the raw JSON. All offline.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -27,6 +31,8 @@ import (
 
 	gridv1 "github.com/sierragridteam/sierra-data/api/grid/v1"
 	"github.com/sierragridteam/sierra-data/internal/clients/caloes"
+	"github.com/sierragridteam/sierra-data/internal/clients/caltrans"
+	"github.com/sierragridteam/sierra-data/internal/clients/cwwp2"
 	"github.com/sierragridteam/sierra-data/internal/config"
 	"github.com/sierragridteam/sierra-data/internal/hazards"
 	"github.com/sierragridteam/sierra-data/internal/store"
@@ -906,4 +912,101 @@ func TestSummary_SeasonalClosurePastASegmentIsARoadsHeadline(t *testing.T) {
 		assert.Equal(t, "cc:10-2515", d.Headlines[1].ID)
 	}
 	assert.True(t, found, "roads domain")
+}
+
+// stormChainBuilder serves chain_control from the real hazards builder over
+// the 2026-11-13 storm captures (both Caltrans feeds), and every other
+// condition layer from the fake.
+type stormChainBuilder struct {
+	chain *hazards.Service
+	rest  *fakeCondBuilder
+}
+
+func (b stormChainBuilder) BuildLayer(ctx context.Context, area config.HazardArea, layer string) ([]hazards.Feature, string, time.Time, string, string, bool) {
+	if layer == hazards.LayerChainControl {
+		return b.chain.BuildLayer(ctx, area, layer)
+	}
+	return b.rest.BuildLayer(ctx, area, layer)
+}
+
+type stormCheckpoints struct{ checkpoints []cwwp2.ChainControl }
+
+func (s stormCheckpoints) ChainControls(context.Context, int) ([]cwwp2.ChainControl, error) {
+	return s.checkpoints, nil
+}
+
+type stormKML struct{ body []byte }
+
+func (k stormKML) Do(*http.Request) (*http.Response, error) {
+	return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(k.body))}, nil
+}
+
+// The roads domain counts and headlines a chain requirement once per stretch
+// of highway. In the 2026-11-13 storm the high-country box held 30 signs
+// requiring chains (District 10's 29 and District 3's Luther Pass): they used
+// to be 30 active items under five repeated headlines, and are six (Hwy 88
+// changes level at Pickett's Junction).
+func TestSummary_ChainControlCountsStretchesNotSigns(t *testing.T) {
+	testdata := filepath.Join("..", "..", "tests", "testdata")
+	kml, err := os.ReadFile(filepath.Join(testdata, "caltrans", "chain_controls_20261113_173800.kml"))
+	require.NoError(t, err)
+	raw, err := os.ReadFile(filepath.Join(testdata, "cwwp2", "cc_d10_20261113_storm.json"))
+	require.NoError(t, err)
+	checkpoints, err := cwwp2.ParseChainControls(raw)
+	require.NoError(t, err)
+	parser := &caltrans.FeedParser{HTTPClient: stormKML{kml}}
+	parser.UseCWWP2ChainControls(stormCheckpoints{checkpoints}, []int{10})
+
+	s := newTestService(t)
+	allSourcesOK(t, s.Store)
+	before := decodeSummary(t, getSummaryWith(t, s, condOKBuilder("normal"), "high-country"))
+	quiet := before.domain(t, "roads")
+
+	hb := stormChainBuilder{chain: hazards.NewServiceWithAPIs(s.Cfg, nil, nil, parser, nil), rest: condOKBuilder("normal")}
+	body := getSummaryWith(t, s, hb, "high-country").Body.Bytes()
+	var wire struct {
+		Domains []struct {
+			Domain          string `json:"domain"`
+			Status          string `json:"status"`
+			HighestSeverity string `json:"highestSeverity"`
+			ActiveCount     int    `json:"activeCount"`
+			Headlines       []struct {
+				ID       string `json:"id"`
+				Kind     string `json:"kind"`
+				Layer    string `json:"layer"`
+				Severity string `json:"severity"`
+				Headline string `json:"headline"`
+			} `json:"headlines"`
+		} `json:"domains"`
+	}
+	require.NoError(t, json.Unmarshal(body, &wire))
+	for _, d := range wire.Domains {
+		if d.Domain != "roads" {
+			continue
+		}
+		assert.Equal(t, "OK", d.Status)
+		// Six stretches (Hwy 4, 88 R2, 88 R1, 89, 108, 207) and the four
+		// pass gates inside the box, each still its own item.
+		assert.Equal(t, int(quiet.ActiveCount)+10, d.ActiveCount)
+		var chain []string
+		seen := map[string]bool{}
+		for _, h := range d.Headlines {
+			assert.False(t, seen[h.Headline], "a headline said twice: %s", h.Headline)
+			seen[h.Headline] = true
+			if h.Layer == "CHAIN_CONTROL" {
+				assert.Equal(t, "CONDITION", h.Kind)
+				chain = append(chain, h.ID+" | "+h.Headline)
+			}
+		}
+		assert.Subset(t, []string{
+			"cc:hwy4:r2 | Hwy 4 chains required, Poison Springs to Mount Reba Road (R2)",
+			"cc:hwy88:r2 | Hwy 88 chains required, Lumber Yard to Red Lake Creek (R2)",
+			"cc:hwy89:r2 | Hwy 89 chains required, Picketts Junction to Olympic Valley (R2)",
+			"cc:hwy108:r2 | Hwy 108 chains required, Cascade Creek to Kennedy Meadows (R2)",
+			"cc:hwy207:r2 | Hwy 207 chains required, Jct Hwy 4 to Mt. Reba Summit (R2)",
+		}, chain)
+		assert.NotEmpty(t, chain, "the storm reaches the headlines")
+		return
+	}
+	t.Fatal("no roads domain")
 }
