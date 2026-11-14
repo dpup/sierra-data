@@ -1624,7 +1624,7 @@
     },
     "/api/v1/places/{place}/map/{layer}.geojson": {
       "get": {
-        "description": "An RFC 7946 FeatureCollection of one layer's features within a place.\nCoordinates are `[longitude, latitude]`. Check `metadata.sourceStatus`\nbefore drawing: UNAVAILABLE means unknown (empty `features`), STALE\nmeans last-good data.\n\n| layer | features | backed by |\n|---|---|---|\n| `road_incident` | Points: CHP incidents (category `incident`) and Caltrans planned lane closures (`closure`, SCHEDULED until set up) | events |\n| `chain_control` | Points: active R1/R2/R3 checkpoints and seasonal pass closures | live Caltrans |\n| `road_segment` | LineStrings: configured routes with travel time; `status` OPEN/CLOSED/RESTRICTED/MAINTENANCE | live Google Routes + Caltrans |\n| `message_sign` | Points: Caltrans message signs and their text; always INFO | live Caltrans |\n| `weather_alert` | null geometry: NWS zone watches/warnings/advisories | events |\n| `fire_weather` | one null-geometry region banner (`fw:region`) plus forecast Points | live NWS |\n| `earthquake` | Points | events (USGS) |\n| `wildfire` | Points or (Multi)Polygon perimeters | events (CAL FIRE, FIRIS) |\n| `evacuation` | (Multi)Polygon zones; `status` is the level | events (Cal OES) |\n| `power` | Polygons/Points: PG&E outages (`unplanned`/`planned`) and PSPS (`psps`) | events |\n| `mesh_node` | Points: MeshCore nodes in the place; always INFO | events |\n| `mesh_link` | LineString relay links touching the place plus the MESH_NODE Points at both ends (neighbours outside the place have `mesh.inRegion: false`); honours `window` | derived |\n| `camera` | Points: Caltrans CCTV cameras near the place, nearest first; always INFO | live Caltrans |\n\nEvent-backed layers carry only ACTIVE and SCHEDULED features, and each\nfeature `id` is an event id usable with `/api/v1/events/{id}`. The\n`.geojson` suffix is optional (`/map/wildfire` is the same resource).\n\n**Caching.** `Cache-Control: public, max-age=60` and a weak `ETag`\n(`W/\"…\"`) over the layer's content, excluding `metadata.generatedAt`.\nRevalidate with `If-None-Match`: the answer is `304` until the\nfeatures, `sourceStatus`, `lastSourceUpdate` or `attribution` change,\nso polling a quiet layer costs no body.\n",
+        "description": "An RFC 7946 FeatureCollection of one layer's features within a place.\nCoordinates are `[longitude, latitude]`. Check `metadata.sourceStatus`\nbefore drawing: UNAVAILABLE means unknown (empty `features`), STALE\nmeans last-good data.\n\n| layer | features | backed by |\n|---|---|---|\n| `road_incident` | Points: CHP incidents (category `incident`) and Caltrans planned lane closures (`closure`, SCHEDULED until set up) | events |\n| `chain_control` | Points: one per stretch of highway under R1/R2/R3 (at its low end, the signs listed in `chainControl.signs`), one per seasonal pass closure | live Caltrans |\n| `road_segment` | LineStrings: configured routes with travel time; `status` OPEN/CLOSED/RESTRICTED/MAINTENANCE | live Google Routes + Caltrans |\n| `message_sign` | Points: Caltrans message signs and their text; always INFO | live Caltrans |\n| `weather_alert` | null geometry: NWS zone watches/warnings/advisories | events |\n| `fire_weather` | one null-geometry region banner (`fw:region`) plus forecast Points | live NWS |\n| `earthquake` | Points | events (USGS) |\n| `wildfire` | Points or (Multi)Polygon perimeters | events (CAL FIRE, FIRIS) |\n| `evacuation` | (Multi)Polygon zones; `status` is the level | events (Cal OES) |\n| `power` | Polygons/Points: PG&E outages (`unplanned`/`planned`) and PSPS (`psps`) | events |\n| `mesh_node` | Points: MeshCore nodes in the place; always INFO | events |\n| `mesh_link` | LineString relay links touching the place plus the MESH_NODE Points at both ends (neighbours outside the place have `mesh.inRegion: false`); honours `window` | derived |\n| `camera` | Points: Caltrans CCTV cameras near the place, nearest first; always INFO | live Caltrans |\n\nEvent-backed layers carry only ACTIVE and SCHEDULED features, and each\nfeature `id` is an event id usable with `/api/v1/events/{id}`. The\n`.geojson` suffix is optional (`/map/wildfire` is the same resource).\n\n**Caching.** `Cache-Control: public, max-age=60` and a weak `ETag`\n(`W/\"…\"`) over the layer's content, excluding `metadata.generatedAt`.\nRevalidate with `If-None-Match`: the answer is `304` until the\nfeatures, `sourceStatus`, `lastSourceUpdate` or `attribution` change,\nso polling a quiet layer costs no body.\n",
         "operationId": "GetMapLayer",
         "parameters": [
           {
@@ -1717,9 +1717,84 @@
                     }
                   },
                   "chain_control": {
-                    "summary": "chain_control - a seasonal pass closure",
+                    "summary": "chain_control - one stretch under R2 (two of its seven signs shown) and a seasonal pass closure",
                     "value": {
                       "features": [
+                        {
+                          "geometry": {
+                            "coordinates": [
+                              -120.18315,
+                              38.38902
+                            ],
+                            "type": "Point"
+                          },
+                          "properties": {
+                            "areaLabel": "Poison Springs to Mount Reba Road",
+                            "category": "r2",
+                            "chainControl": {
+                              "from": {
+                                "coordinates": [
+                                  -120.18315,
+                                  38.38902
+                                ],
+                                "place": "Poison Springs"
+                              },
+                              "highway": "Highway 4",
+                              "level": "R2",
+                              "signs": [
+                                {
+                                  "coordinates": [
+                                    -120.18315,
+                                    38.38902
+                                  ],
+                                  "county": "Calaveras",
+                                  "direction": "Eastbound",
+                                  "id": "cc:10-CAL-4-56.3-E-12E",
+                                  "level": "R2",
+                                  "place": "POISON SPRINGS",
+                                  "postmile": "56.30",
+                                  "since": "2026-11-13T15:29:26-08:00",
+                                  "source": "cwwp2.dot.ca.gov"
+                                },
+                                {
+                                  "coordinates": [
+                                    -120.02152,
+                                    38.4816
+                                  ],
+                                  "county": "Alpine",
+                                  "direction": "Westbound",
+                                  "id": "cc:10-ALP-4-2.77-W-15W",
+                                  "level": "R2",
+                                  "place": "MOUNT REBA ROAD",
+                                  "postmile": "2.77",
+                                  "since": "2026-11-13T13:45:34-08:00",
+                                  "source": "cwwp2.dot.ca.gov"
+                                }
+                              ],
+                              "to": {
+                                "coordinates": [
+                                  -120.02152,
+                                  38.4816
+                                ],
+                                "place": "Mount Reba Road"
+                              }
+                            },
+                            "description": "Chains or traction devices are required on all vehicles except four wheel / all wheel drive vehicles with snow-tread tires on all four wheels.  Four wheel / all wheel drive vehicles must carry traction devices in chain control areas.",
+                            "effective": "2026-11-13T13:45:34-08:00",
+                            "headline": "Hwy 4 chains required, Poison Springs to Mount Reba Road (R2)",
+                            "id": "cc:hwy4:r2",
+                            "kind": "Chain control",
+                            "layer": "CHAIN_CONTROL",
+                            "severity": "MODERATE",
+                            "severityRank": 2,
+                            "source": {
+                              "attribution": "cwwp2.dot.ca.gov",
+                              "id": "caltrans",
+                              "name": "Caltrans"
+                            }
+                          },
+                          "type": "Feature"
+                        },
                         {
                           "geometry": {
                             "coordinates": [
@@ -1729,12 +1804,16 @@
                             "type": "Point"
                           },
                           "properties": {
+                            "areaLabel": "EAST END OF LAKE ALPINE - EBBETTS PASS",
                             "category": "closed",
                             "chainControl": {
-                              "direction": "Eastbound"
+                              "direction": "Eastbound",
+                              "highway": "Highway 4"
                             },
-                            "headline": "road closed",
-                            "id": "cc:38.48135,-119.99421",
+                            "description": "Closed to traffic.",
+                            "effective": "2026-11-12T12:08:00-08:00",
+                            "headline": "Highway 4 road closed",
+                            "id": "cc:10-2515",
                             "kind": "Chain control",
                             "layer": "CHAIN_CONTROL",
                             "severity": "MINOR",
@@ -1751,7 +1830,7 @@
                       "metadata": {
                         "area": "ebbetts-pass",
                         "attribution": "cwwp2.dot.ca.gov · quickmap.dot.ca.gov",
-                        "generatedAt": "2026-11-07T04:03:22Z",
+                        "generatedAt": "2026-11-14T01:38:22Z",
                         "layer": "chain_control",
                         "schemaVersion": 1,
                         "sourceStatus": "OK"
@@ -3538,25 +3617,130 @@
         "type": "object"
       },
       "MapChainControlProps": {
-        "description": "chain_control block. Severity follows the level (R1 MINOR, R2 MODERATE, R3 SEVERE); a seasonal pass closure (`category` closed) is MINOR.",
+        "description": "chain_control block. Since 2026-11-14 a chain requirement is ONE\nfeature per stretch of highway at one level, not one per Caltrans\nsign: `from`, `to` and `signs` are set, the feature id is\n`cc:{route}:{level}` (`cc:hwy4:r2`; a second separate stretch of the\nsame route and level is `cc:hwy4:r2:2`, numbered from the west or\nsouth), and the geometry is a Point at `from`, the stretch's low\nend. It is not the extent: draw `signs[].coordinates` for the\ncheckpoints, and do not join them with straight lines (they are not\nthe road). Two levels on one highway are two features (Hwy 88: R2\nto Red Lake Creek, then R1 at Pickett's Junction). Severity follows\nthe level (R1 MINOR, R2 MODERATE, R3 SEVERE).\n\nTwo kinds of feature are still one per reported point, with none of\n`from`, `to`, `signs`: a seasonal pass closure (`category` closed,\nMINOR) and a cc.kml truck or hold level (no `level`, no `category`,\nINFO), which is not part of any stretch.\n",
         "properties": {
           "direction": {
+            "description": "On a stretch, set only when every sign in it faces the same way; a stretch signed in both directions has none.",
             "example": "Eastbound",
             "type": "string"
           },
+          "from": {
+            "$ref": "#/components/schemas/MapChainPlace"
+          },
           "highway": {
+            "example": "Highway 4",
             "type": "string"
           },
+          "inferred": {
+            "description": "Present and true when the stretch was put together from signs\nlying within 15 km of each other, because the source lists\nactive signs only and nothing reports the road between them:\nevery Caltrans district we read through cc.kml alone (3 and 9),\nand everything while the CWWP2 portal is down. `from` and\n`to` are then the outermost signs reported, not a confirmed\ncontinuous extent. Absent when Caltrans's\nown signs, including the ones reading R-0, establish the\nstretch.\n",
+            "type": "boolean"
+          },
           "level": {
-            "description": "Absent on a closure.",
+            "description": "Absent on a closure and on a truck or hold level.",
             "enum": [
               "R1",
               "R2",
               "R3"
             ],
             "type": "string"
+          },
+          "signs": {
+            "description": "Every checkpoint Caltrans reported in the stretch, in order from `from` to `to`. Nothing Caltrans sent is dropped by the grouping.",
+            "items": {
+              "$ref": "#/components/schemas/MapChainSign"
+            },
+            "type": "array"
+          },
+          "to": {
+            "$ref": "#/components/schemas/MapChainPlace"
           }
         },
+        "type": "object"
+      },
+      "MapChainPlace": {
+        "description": "One end of a chain-control stretch. `from` is the low end as California counts mileposts (west, or south); equal to `to` when the stretch is one place.",
+        "properties": {
+          "coordinates": {
+            "description": "`[lng, lat]` of the sign at this end.",
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "place": {
+            "description": "The checkpoint's name, title-cased when Caltrans wrote it in capitals.",
+            "example": "Poison Springs",
+            "type": "string"
+          }
+        },
+        "required": [
+          "place"
+        ],
+        "type": "object"
+      },
+      "MapChainSign": {
+        "description": "One Caltrans chain-control checkpoint (one sign, one direction) inside a stretch, as reported.",
+        "properties": {
+          "coordinates": {
+            "description": "`[lng, lat]`.",
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "county": {
+            "description": "CWWP2 signs only.",
+            "example": "Alpine",
+            "type": "string"
+          },
+          "direction": {
+            "example": "Westbound",
+            "type": "string"
+          },
+          "id": {
+            "description": "The id this sign had as a feature of its own before 2026-11-14: `cc:{CWWP2 checkpoint index}` or `cc:{district}-{cc.kml message id}`.",
+            "example": "cc:10-ALP-4-0.65-W-14W",
+            "type": "string"
+          },
+          "level": {
+            "enum": [
+              "R1",
+              "R2",
+              "R3"
+            ],
+            "type": "string"
+          },
+          "place": {
+            "description": "Verbatim.",
+            "example": "BEAR VALLEY",
+            "type": "string"
+          },
+          "postmile": {
+            "description": "CWWP2 signs only. Restarts at each county line.",
+            "example": "0.65",
+            "type": "string"
+          },
+          "since": {
+            "description": "When this sign entered its level.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "source": {
+            "description": "The host that reported it.",
+            "example": "cwwp2.dot.ca.gov",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "place",
+          "level",
+          "source"
+        ],
         "type": "object"
       },
       "MapClosureProps": {
@@ -3710,7 +3894,7 @@
             "$ref": "#/components/schemas/MapCameraProps"
           },
           "category": {
-            "description": "Sub-type within the layer. Values by layer:\nroad_incident `incident` (CHP) | `closure` (Caltrans planned lane closure);\nchain_control `r1` | `r2` | `r3` | `closed`;\nmessage_sign `message` | `blank` | `unknown`;\nweather_alert the NWS event name (`Heat Advisory`, `Red Flag Warning`);\nfire_weather banner `normal` | `elevated` | `red-flag` (absent on forecast points);\nwildfire `wildfire`; evacuation the lowercase level (`order`, `warning`, …);\npower `unplanned` | `planned` | `psps`;\nmesh_node the node type `repeater` | `companion` | `room_server` | `sensor`.\nAbsent on road_segment, camera and mesh_link edges.\n",
+            "description": "Sub-type within the layer. Values by layer:\nroad_incident `incident` (CHP) | `closure` (Caltrans planned lane closure);\nchain_control `r1` | `r2` | `r3` (a stretch) | `closed` (absent on a truck or hold level);\nmessage_sign `message` | `blank` | `unknown`;\nweather_alert the NWS event name (`Heat Advisory`, `Red Flag Warning`);\nfire_weather banner `normal` | `elevated` | `red-flag` (absent on forecast points);\nwildfire `wildfire`; evacuation the lowercase level (`order`, `warning`, …);\npower `unplanned` | `planned` | `psps`;\nmesh_node the node type `repeater` | `companion` | `room_server` | `sensor`.\nAbsent on road_segment, camera and mesh_link edges.\n",
             "type": "string"
           },
           "chainControl": {
@@ -3744,7 +3928,7 @@
             "type": "string"
           },
           "id": {
-            "description": "Stable feature id. On event-backed layers it IS the event id, so\n`GET /api/v1/events/{id}` returns the full record and its history\n(`wildfire`, `evacuation`, `weather_alert`, `earthquake`,\n`road_incident`, `power`, `mesh_node`). Condition layers use their\nown ids (`road:…`, `cc:…`, `cms:…`, `fw:…`, `mesh_link:…`, `d10-…`).\n",
+            "description": "Stable feature id. On event-backed layers it IS the event id, so\n`GET /api/v1/events/{id}` returns the full record and its history\n(`wildfire`, `evacuation`, `weather_alert`, `earthquake`,\n`road_incident`, `power`, `mesh_node`). Condition layers use their\nown ids (`road:…`, `cc:…`, `cms:…`, `fw:…`, `mesh_link:…`, `d10-…`).\nA chain-control stretch is `cc:{route}:{level}` (`cc:hwy4:r2`),\nwhich holds while the stretch grows or shrinks by a checkpoint.\n",
             "type": "string"
           },
           "incident": {
@@ -7679,7 +7863,7 @@
             "type": "string"
           },
           "id": {
-            "description": "The item's id. For `kind: EVENT` an event id, fetchable at\n`GET /api/v1/events/{id}`. For `kind: CONDITION` a map-feature id\n(`road:{segment}`, `cc:{checkpoint}`, `fw:region`): it is NOT an event and\n`GET /api/v1/events/{id}` returns 404. Find it as `properties.id` in the\nplace's `{layer}.geojson` map layer (the layer slug is `layer` lowercased).\nA seasonal closure past a road segment's end has the id\n`road:{segment}:beyond-{n}`: the part before `:beyond-` is the segment\nfeature's id and `n` is the index into its `road.beyond`. It is not a\nroad id: `GET /api/v1/roads/{road}/history` returns 404 for it.",
+            "description": "The item's id. For `kind: EVENT` an event id, fetchable at\n`GET /api/v1/events/{id}`. For `kind: CONDITION` a map-feature id\n(`road:{segment}`, `cc:{route}:{level}`, `fw:region`): it is NOT an event and\n`GET /api/v1/events/{id}` returns 404. Find it as `properties.id` in the\nplace's `{layer}.geojson` map layer (the layer slug is `layer` lowercased).\nA chain requirement is one headline per stretch of highway\n(`cc:hwy4:r2`, \"Hwy 4 chains required, Poison Springs to Mount Reba Road\n(R2)\"), not one per Caltrans sign; a pass closure gate keeps\n`cc:{district}-{message id}`.\nA seasonal closure past a road segment's end has the id\n`road:{segment}:beyond-{n}`: the part before `:beyond-` is the segment\nfeature's id and `n` is the index into its `road.beyond`. It is not a\nroad id: `GET /api/v1/roads/{road}/history` returns 404 for it.",
             "example": "road:hwy4-arnold-bearvalley",
             "type": "string"
           },

@@ -327,30 +327,64 @@ func (s *Service) BuildLayer(ctx context.Context, area config.HazardArea, layer 
 
 // --- layer builders (re-project existing feeds) ---
 func (s *Service) chainControls(ctx context.Context, area config.HazardArea) ([]Feature, error) {
-	controls, err := s.caltrans.ParseChainControlsDetailed(ctx)
+	controls, quiet, err := s.caltrans.ParseChainControlRegistry(ctx)
 	var partial *caltrans.PartialError
 	if err != nil && !errors.As(err, &partial) {
 		return nil, err
 	}
-	var out []Feature
+	inArea := func(c caltrans.ChainControlData) bool {
+		return c.Coordinates != nil && area.Bounds.Contains(c.Coordinates.Latitude, c.Coordinates.Longitude)
+	}
+
+	// Sort what Caltrans sent into chain requirements (grouped into stretches
+	// below) and everything else, which stays one point feature per entry:
+	// road closures, and cc.kml's truck and hold levels (MAX, MIN, TS, HT,
+	// TTA). Those are not stretch members on purpose. They are not car
+	// requirements, cc.kml gives no level we parse and no end for them, and
+	// folding a "hold all traffic" into an R2 stretch would bury it.
+	var active, points []caltrans.ChainControlData
 	var unrecognized, unplaced, uncorroborated []string
 	for _, c := range controls {
 		if c.Coordinates == nil {
 			// Can't be ruled in or out of the area, so the layer can't claim
-			// to be complete. (Only CWWP2 rows can lack a position.)
+			// to be complete. (Only CWWP2 rows can lack a position.) A
+			// requirement is still grouped: with a milepost it is listed
+			// inside its stretch, which the signs around it place.
 			unplaced = append(unplaced, strings.TrimSpace(c.Highway+" "+c.LocationName))
-			continue
 		}
-		if !area.Bounds.Contains(c.Coordinates.Latitude, c.Coordinates.Longitude) {
-			continue
-		}
-		if c.Uncorroborated {
+		if c.Uncorroborated && inArea(c) {
 			uncorroborated = append(uncorroborated, strings.TrimSpace(c.Highway+" "+c.Direction+" "+c.LocationName+" "+c.Level))
 		}
-		if c.Unrecognized {
+		switch {
+		case c.Unrecognized:
 			// Neither a requirement nor an all-clear: keep it off the map, but
 			// don't let the layer claim OK over a checkpoint we can't read.
-			unrecognized = append(unrecognized, fmt.Sprintf("%s %s (%q)", c.Highway, c.LocationName, c.RawStatus))
+			// It is still a sign: the requirement of the one before it in
+			// its direction ends there.
+			quiet = append(quiet, c)
+			if inArea(c) {
+				unrecognized = append(unrecognized, fmt.Sprintf("%s %s (%q)", c.Highway, c.LocationName, c.RawStatus))
+			}
+		case !c.Closed && isChainLevel(c.Level):
+			active = append(active, c)
+		case c.Coordinates != nil:
+			points = append(points, c)
+		}
+	}
+
+	var out []Feature
+	stretches := groupChainStretches(active, quiet)
+	for i, st := range stretches {
+		// A stretch is on the map of every area it has a sign in, whole: the
+		// same id, extent and signs wherever it is read.
+		if anySign(st.Signs, inArea) {
+			if f, ok := chainStretchFeature(st, chainStretchID(stretches, i)); ok {
+				out = append(out, f)
+			}
+		}
+	}
+	for _, c := range dedupeChainSigns(points) {
+		if !inArea(c) {
 			continue
 		}
 		attribution := c.Source
@@ -410,6 +444,8 @@ func (s *Service) chainControls(ctx context.Context, area config.HazardArea) ([]
 func chainControlID(c caltrans.ChainControlData) string {
 	district, id := strings.TrimSpace(c.District), strings.TrimSpace(c.MessageID)
 	switch {
+	case (district == "" || id == "") && c.Coordinates == nil:
+		return "cc:" + district + "-" + id
 	case district == "" || id == "":
 		return fmt.Sprintf("cc:%.5f,%.5f", c.Coordinates.Latitude, c.Coordinates.Longitude)
 	case c.Source == caltrans.SourceCWWP2 && strings.HasPrefix(id, district+"-"):

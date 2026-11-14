@@ -2066,9 +2066,13 @@ message SummaryDomain {
 message SummaryDomainHeadline {
   // The item's id. For `kind: EVENT` an event id, fetchable at
   // `GET /api/v1/events/{id}`. For `kind: CONDITION` a map-feature id
-  // (`road:{segment}`, `cc:{checkpoint}`, `fw:region`): it is NOT an event and
+  // (`road:{segment}`, `cc:{route}:{level}`, `fw:region`): it is NOT an event and
   // `GET /api/v1/events/{id}` returns 404. Find it as `properties.id` in the
   // place's `{layer}.geojson` map layer (the layer slug is `layer` lowercased).
+  // A chain requirement is one headline per stretch of highway
+  // (`cc:hwy4:r2`, "Hwy 4 chains required, Poison Springs to Mount Reba Road
+  // (R2)"), not one per Caltrans sign; a pass closure gate keeps
+  // `cc:{district}-{message id}`.
   // A seasonal closure past a road segment's end has the id
   // `road:{segment}:beyond-{n}`: the part before `:beyond-` is the segment
   // feature's id and `n` is the index into its `road.beyond`. It is not a
