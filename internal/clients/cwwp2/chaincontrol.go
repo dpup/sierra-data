@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -66,7 +67,24 @@ type ChainControl struct {
 	RawStatus   string    // verbatim status, kept so an Unknown level is diagnosable
 	Description string    // the requirement text, e.g. "No chain controls are in effect at this time."
 	StatusSince time.Time // when the checkpoint entered its current status
+	// Milepost is the portal's route-wide odometer in miles. Unlike the
+	// postmile, which restarts at every county line (Hwy 4 reads CAL 63.99
+	// then ALP 0.65), it runs on through them (157.02 then 157.37), so it
+	// orders the checkpoints of one route. HasMilepost is false when the
+	// field is blank or not a number: zero is not "the start of the route".
+	Milepost    float64
+	HasMilepost bool
 }
+
+var gateIndexRe = regexp.MustCompile(`-[NSEW]-\d+$`)
+
+// IsGate reports whether the checkpoint is a pass-closure gate and not a
+// chain sign. The portal keeps both in one file; a gate's index ends in a
+// bare number ("10-TUO-108-44.45-E-2", "EAGLE MEADOWS RD - SONORA PASS")
+// where a chain sign's ends in its sign number and direction
+// ("10-TUO-108-44.46-E-18E"). A gate reports R-0 or "ROAD CLOSED" whatever the
+// chain sign a metre away says, so its R-0 is not "no chains here".
+func (c ChainControl) IsGate() bool { return gateIndexRe.MatchString(c.ID) }
 
 type ccFile struct {
 	Data []struct {
@@ -88,6 +106,7 @@ type ccFile struct {
 				Route          string `json:"route"`
 				PostmilePrefix string `json:"postmilePrefix"`
 				Postmile       string `json:"postmile"`
+				Milepost       string `json:"milepost"`
 			} `json:"location"`
 			InService  string `json:"inService"`
 			StatusData struct {
@@ -116,7 +135,10 @@ func ParseChainControls(body []byte) ([]ChainControl, error) {
 	for _, row := range f.Data {
 		c := row.CC
 		l := c.Location
+		milepost, mpErr := strconv.ParseFloat(strings.TrimSpace(l.Milepost), 64)
 		out = append(out, ChainControl{
+			Milepost:    milepost,
+			HasMilepost: mpErr == nil,
 			ID:          strings.TrimSpace(c.Index),
 			RecordedAt:  parseLocal(c.RecordTimestamp.Date, c.RecordTimestamp.Time),
 			Location:    newLocation(l.District, l.LocationName, l.NearbyPlace, l.Latitude, l.Longitude, l.Elevation, l.Direction, l.County, l.Route, l.PostmilePrefix, l.Postmile, ""),

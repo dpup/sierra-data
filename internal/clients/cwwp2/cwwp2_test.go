@@ -406,3 +406,61 @@ func TestLaneClosurePhaseAt_OverrunGrace(t *testing.T) {
 	}
 	assert.Equal(t, 12*time.Hour, DefaultOverrunGrace)
 }
+
+// The first real storm capture (2026-11-13 17:38 PST): what an active
+// checkpoint looks like, what a pass gate reports, and the two fields the
+// chain_control layer groups signs into stretches by.
+func TestParseChainControls_Storm20261113(t *testing.T) {
+	controls, err := ParseChainControls(fixture(t, "cc_d10_20261113_storm.json"))
+	require.NoError(t, err)
+	require.Len(t, controls, 149)
+
+	byID := map[string]ChainControl{}
+	levels := map[Level]int{}
+	gates := 0
+	for _, c := range controls {
+		byID[c.ID] = c
+		levels[c.Level]++
+		require.True(t, c.HasMilepost, c.ID)
+		if c.IsGate() {
+			gates++
+			assert.False(t, c.Level.Active(), "%s: a gate carries no chain level", c.ID)
+		}
+	}
+	// 29 requirements; the five LevelUnknown read "ROAD CLOSED": four gates
+	// and Crane Flat (below).
+	assert.Equal(t, map[Level]int{LevelNone: 115, LevelR1: 1, LevelR2: 28, LevelUnknown: 5}, levels)
+	assert.Equal(t, 13, gates)
+
+	// A gate and a chain sign a hundredth of a mile apart, saying different
+	// things: Eagle Meadows Road on Hwy 108.
+	gate, chainSign := byID["10-TUO-108-44.45-E-2"], byID["10-TUO-108-44.46-E-18E"]
+	assert.True(t, gate.IsGate())
+	assert.Equal(t, LevelNone, gate.Level)
+	assert.Equal(t, "EAGLE MEADOWS RD - SONORA PASS", gate.Location.Name)
+	assert.False(t, chainSign.IsGate())
+	assert.Equal(t, LevelR2, chainSign.Level)
+	assert.Equal(t, "ROAD CLOSED", byID["10-ALP-4-4.5-E-2"].RawStatus)
+	// Not a gate by its index, whatever its name says: Caltrans gave Crane
+	// Flat a chain sign's number.
+	assert.False(t, byID["10-TUO-120-56.51-E-00E"].IsGate())
+
+	// The postmile restarts at the Calaveras/Alpine line; the milepost does not.
+	tamarack, bearValley := byID["10-CAL-4-63.99-E-14E"], byID["10-ALP-4-0.65-W-14W"]
+	assert.Equal(t, "63.99", tamarack.Location.Postmile)
+	assert.Equal(t, "0.65", bearValley.Location.Postmile)
+	assert.InDelta(t, 157.02, tamarack.Milepost, 1e-9)
+	assert.InDelta(t, 157.37, bearValley.Milepost, 1e-9)
+}
+
+// A blank or unreadable milepost is unknown, never mile zero.
+func TestParseChainControls_MilepostAbsent(t *testing.T) {
+	controls, err := ParseChainControls([]byte(`{"data":[
+		{"cc":{"index":"10-CAL-4-1-E-01E","location":{"milepost":""},"statusData":{"status":"R-2"}}},
+		{"cc":{"index":"10-CAL-4-2-E-02E","location":{"milepost":"n/a"},"statusData":{"status":"R-2"}}},
+		{"cc":{"index":"10-CAL-4-3-E-03E","location":{"milepost":"0"},"statusData":{"status":"R-2"}}}]}`))
+	require.NoError(t, err)
+	assert.False(t, controls[0].HasMilepost)
+	assert.False(t, controls[1].HasMilepost)
+	assert.True(t, controls[2].HasMilepost)
+}

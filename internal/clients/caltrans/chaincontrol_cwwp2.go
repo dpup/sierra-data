@@ -52,8 +52,8 @@ func (p *FeedParser) UseCWWP2ChainControls(src ChainControlSource, districts []i
 	p.chainDistricts = append([]int(nil), districts...)
 }
 
-// chainControlsCWWP2 is ParseChainControlsDetailed with a CWWP2 source.
-func (p *FeedParser) chainControlsCWWP2(ctx context.Context) ([]ChainControlData, error) {
+// chainControlsCWWP2 is ParseChainControlRegistry with a CWWP2 source.
+func (p *FeedParser) chainControlsCWWP2(ctx context.Context) (controls, quietCheckpoints []ChainControlData, err error) {
 	var cw, quiet []ChainControlData
 	var cwErr error
 	for _, d := range p.chainDistricts {
@@ -80,7 +80,7 @@ func (p *FeedParser) chainControlsCWWP2(ctx context.Context) ([]ChainControlData
 	incidents, kmlErr := p.ParseChainControls(ctx)
 	switch {
 	case cwErr != nil && kmlErr != nil:
-		return nil, errors.Join(cwErr, fmt.Errorf("cc.kml: %w", kmlErr))
+		return nil, nil, errors.Join(cwErr, fmt.Errorf("cc.kml: %w", kmlErr))
 	case cwErr != nil:
 		// CWWP2 down: cc.kml alone is what the service served before CWWP2,
 		// so serve it — degraded. But an EMPTY cc.kml is exactly the answer
@@ -88,16 +88,16 @@ func (p *FeedParser) chainControlsCWWP2(ctx context.Context) ([]ChainControlData
 		// stays an error: an error never becomes a 0.
 		kml := p.parseChainControlDetails(incidents)
 		if len(kml) == 0 {
-			return nil, cwErr
+			return nil, nil, cwErr
 		}
 		for i := range kml {
 			kml[i].Source = SourceQuickMap
 		}
-		return kml, &PartialError{Err: cwErr}
+		return kml, nil, &PartialError{Err: cwErr}
 	case kmlErr != nil:
-		return cw, &PartialError{Err: fmt.Errorf("cc.kml (road closures, truck levels, cross-check): %w", kmlErr)}
+		return cw, quiet, &PartialError{Err: fmt.Errorf("cc.kml (road closures, truck levels, cross-check): %w", kmlErr)}
 	}
-	return p.mergeKML(cw, quiet, incidents), nil
+	return p.mergeKML(cw, quiet, incidents), quiet, nil
 }
 
 // sameCheckpointMeters is how close a cc.kml point must be to a CWWP2
@@ -215,6 +215,11 @@ func chainControlFromCWWP2(cp cwwp2.ChainControl) ChainControlData {
 		District:     cp.Location.District,
 		Source:       SourceCWWP2,
 		RawStatus:    cp.RawStatus,
+		County:       cp.Location.County,
+		Postmile:     cp.Location.Postmile,
+		Milepost:     cp.Milepost,
+		HasMilepost:  cp.HasMilepost,
+		Gate:         cp.IsGate(),
 	}
 	if cp.Location.HasPosition {
 		c.Coordinates = &api.Coordinates{Latitude: cp.Location.Latitude, Longitude: cp.Location.Longitude}
@@ -225,9 +230,11 @@ func chainControlFromCWWP2(cp cwwp2.ChainControl) ChainControlData {
 	if !cp.RecordedAt.IsZero() {
 		c.LastUpdated = cp.RecordedAt.Format(rfc3339)
 	}
-	if cp.Level.Active() {
+	switch {
+	case cp.Level.Active(), cp.Level == cwwp2.LevelNone:
+		// "R0" is carried only by the quiet list (ParseChainControlRegistry).
 		c.Level = cp.Level.String()
-	} else {
+	default:
 		c.Unrecognized = true
 		c.Description = fmt.Sprintf("Caltrans reported an unrecognized chain-control status (%q)", cp.RawStatus)
 	}

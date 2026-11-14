@@ -504,3 +504,66 @@ func TestIsClosurePlacemark(t *testing.T) {
 	assert.False(t, controls[0].Closed)
 	assert.Equal(t, "R2", controls[0].Level)
 }
+
+// ParseChainControlRegistry hands back the quiet checkpoints too, with what
+// groups them into stretches: milepost, county, postmile and the gate flag.
+func TestParseChainControlRegistry_Storm20261113(t *testing.T) {
+	all, err := cwwp2.ParseChainControls(cwwp2Fixture(t, "cc_d10_20261113_storm.json"))
+	require.NoError(t, err)
+	kml, err := os.ReadFile(filepath.Join("..", "..", "..", "tests", "testdata", "caltrans", "chain_controls_20261113_173800.kml"))
+	require.NoError(t, err)
+	p := &FeedParser{HTTPClient: fixedDoer{200, kml}}
+	p.UseCWWP2ChainControls(stubSource(all), []int{10})
+
+	controls, quiet, err := p.ParseChainControlRegistry(context.Background())
+	require.NoError(t, err)
+	detailed, err := p.ParseChainControlsDetailed(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, detailed, controls, "the roads service's view is unchanged")
+
+	// The two feeds agree on District 10: all 29 of its active controls come
+	// from CWWP2, cc.kml's 29 copies are dropped as the same checkpoints, and
+	// nothing is left uncorroborated. That is the question
+	// tests/testdata/cwwp2/README.md could not answer before this storm.
+	cw := bySource(controls, SourceCWWP2)
+	require.Len(t, cw, 29)
+	for _, c := range controls {
+		assert.False(t, c.Uncorroborated, "%s %s", c.Highway, c.LocationName)
+		assert.False(t, c.Unrecognized, "the gates reading ROAD CLOSED are explained by cc.kml's closures: %s", c.LocationName)
+		if c.Source == SourceQuickMap && !c.Closed && c.Level != "" {
+			assert.NotEqual(t, "10", c.District, "a District 10 control only cc.kml reports: %s", c.LocationName)
+		}
+	}
+	for _, c := range cw {
+		assert.True(t, c.HasMilepost, c.MessageID)
+		assert.NotEmpty(t, c.County, c.MessageID)
+		assert.NotEmpty(t, c.Postmile, c.MessageID)
+		assert.False(t, c.Gate, c.MessageID)
+	}
+
+	require.Len(t, quiet, 115)
+	gates := 0
+	for _, c := range quiet {
+		assert.Equal(t, "R0", c.Level, c.MessageID)
+		assert.False(t, c.Unrecognized, c.MessageID)
+		assert.True(t, c.HasMilepost, c.MessageID)
+		if c.Gate {
+			gates++
+		}
+	}
+	assert.Equal(t, 9, gates, "the 13 gates less the four reading ROAD CLOSED")
+
+	// CWWP2 down: cc.kml alone, and no quiet checkpoints to bound a stretch.
+	p.UseCWWP2ChainControls(errSource{}, []int{10})
+	controls, quiet, err = p.ParseChainControlRegistry(context.Background())
+	var partial *PartialError
+	require.ErrorAs(t, err, &partial)
+	assert.NotEmpty(t, controls)
+	assert.Nil(t, quiet)
+}
+
+type errSource struct{}
+
+func (errSource) ChainControls(context.Context, int) ([]cwwp2.ChainControl, error) {
+	return nil, errors.New("portal down")
+}

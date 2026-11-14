@@ -96,6 +96,30 @@ Mariposa).
   reports R-0. `Closed` entries are never a chain requirement: the roads
   service skips them (the Ebbetts gate ~3 km past Bear Valley would otherwise
   mark Arnold–Bear Valley "chains required" all winter).
+
+  **The file holds two registries.** A gate's index ends
+  in a bare number (`10-TUO-108-44.45-E-2`, `cwwp2.ChainControl.IsGate`); a
+  chain sign's ends in its sign number and direction (`...-E-18E`). In the
+  2026-11-13 storm the gates read `R-0` or `ROAD CLOSED` beside chain signs
+  reading `R-2`, so a gate's R-0 is never "no chains here"
+  (`ChainControlData.Gate`). The index is the only tell: `CRANE FLAT RD
+  (closure gate in park, not chain sign)` is numbered `...-E-00E` like a sign.
+
+  **`milepost` orders a route; `postmile` does not.** The postmile restarts at
+  each county line (Hwy 4: `CAL 63.99`, then `ALP 0.65`); the milepost is a
+  route-wide odometer that runs on (157.02, then 157.37). It is carried as
+  `ChainControl.Milepost` / `ChainControlData.Milepost` with `HasMilepost`
+  (blank is unknown, never mile zero). cc.kml has neither.
+  `ParseChainControlRegistry` returns the controls plus the quiet (R-0)
+  checkpoints, which is what lets `internal/hazards` group signs into
+  stretches and know where one ends; `ParseChainControlsDetailed` is the same
+  call without them.
+
+  **The two sources did agree in a storm**, once: on 2026-11-13 all 29 of
+  District 10's active CWWP2 checkpoints had a cc.kml twin at the same spot
+  and level, and cc.kml reported nothing there that CWWP2 did not
+  (`TestParseChainControlRegistry_Storm20261113`). One storm is not a
+  contract; the merge rules above stay.
 - **Lane closures (`lcs`) — the `road_incident` layer's closures** (via
   `ingest.LaneClosureNormalizer`, `laneClosureDistricts: [3, 10]`) **and
   per-road segment status** (ACTIVE windows only, via
